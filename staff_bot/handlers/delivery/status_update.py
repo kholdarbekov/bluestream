@@ -34,7 +34,7 @@ class StatusUpdateHandler(BaseHandler):
     async def show_cash_hub(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show the cash sub-menu (Reconciliation / Collect COD)."""
         language = await self._get_language(update, context)
-        title = f"\U0001f4b0 <b>{i18n.get('staff.cash.hub_title', language)}</b>"
+        title = f"💰 <b>{i18n.get('staff.cash.hub_title', language)}</b>"
         keyboard = MenuKeyboards.cash_hub(language)
 
         try:
@@ -94,10 +94,10 @@ class StatusUpdateHandler(BaseHandler):
         declared_variance = format_currency(session.get('declared_variance'), language=language)
         session_age_days = session.get('session_age_days')
         lines = [
-            f"\U0001f9fe <b>{i18n.get('staff.menu.cash_reconciliation', language)}</b>",
+            f"🧾 <b>{i18n.get('staff.menu.cash_reconciliation', language)}</b>",
             f"{i18n.get('staff.delivery.current_status', language)}: {status}",
-            f"\U0001f4b0 {i18n.get('staff.delivery.expected_cash_label', language)}: {expected_cash}",
-            f"\U0001f45b {i18n.get('staff.delivery.expected_cash_on_hand_label', language)}: {expected_on_hand}",
+            f"💰 {i18n.get('staff.delivery.expected_cash_label', language)}: {expected_cash}",
+            f"👛 {i18n.get('staff.delivery.expected_cash_on_hand_label', language)}: {expected_on_hand}",
         ]
         if session_age_days is not None:
             lines.append(
@@ -111,25 +111,25 @@ class StatusUpdateHandler(BaseHandler):
             lines.append(i18n.get('staff.delivery.reconciliation_warning_due', language))
         if declared_cash is not None:
             lines.append(
-                f"\U0001f4b5 {i18n.get('staff.delivery.declared_cash_label', language)}: "
+                f"💵 {i18n.get('staff.delivery.declared_cash_label', language)}: "
                 f"{format_currency(declared_cash, language=language)}"
             )
             lines.append(
-                f"\u26a0\ufe0f {i18n.get('staff.delivery.cash_variance_label', language)}: {declared_variance}"
+                f"⚠️ {i18n.get('staff.delivery.cash_variance_label', language)}: {declared_variance}"
             )
         if status == 'partial':
             remaining = session.get('remaining_cash_to_submit') or 0
             lines.append(
-                f"\U0001f4cc {i18n.get('staff.delivery.remaining_to_submit', language)}: "
+                f"📌 {i18n.get('staff.delivery.remaining_to_submit', language)}: "
                 f"{format_currency(remaining, language=language)}"
             )
         notes = session.get('notes')
         if notes:
-            lines.append(f"\U0001f4ac {notes}")
+            lines.append(f"💬 {notes}")
         risk_flags = session.get('risk_flags') or []
         if risk_flags:
             lines.append(
-                f"\u26a0\ufe0f {i18n.get('staff.delivery.risk_flags', language)}: "
+                f"⚠️ {i18n.get('staff.delivery.risk_flags', language)}: "
                 f"{', '.join(str(flag) for flag in risk_flags)}"
             )
         return '\n'.join(lines)
@@ -153,7 +153,7 @@ class StatusUpdateHandler(BaseHandler):
         if notes:
             metadata['notes'] = notes
         elif cash_amount <= 0:
-            metadata['notes'] = 'No cash due after COD prepaid deduction'
+            metadata['notes'] = i18n.get('staff.delivery.no_cash_due_after_cod', language)
 
         # Include bottles_returned from the flow context
         flow = context.user_data.get('pending_delivery_cash_flow') or {}
@@ -175,11 +175,11 @@ class StatusUpdateHandler(BaseHandler):
             context.user_data['current_delivery']['status'] = 'delivered'
 
         message = (
-            f"\u2705 {i18n.get('staff.delivery.delivered_success', language)}\n"
-            f"\U0001f4b5 {i18n.get('staff.delivery.cash_recorded', language, amount=format_currency(cash_amount, language=language))}"
+            f"✅ {i18n.get('staff.delivery.delivered_success', language)}\n"
+            f"💵 {i18n.get('staff.delivery.cash_recorded', language, amount=format_currency(cash_amount, language=language))}"
         )
         if notes:
-            message += f"\n\U0001f4ac {notes}"
+            message += f"\n💬 {notes}"
 
         if update.callback_query:
             await update.callback_query.edit_message_text(
@@ -243,7 +243,7 @@ class StatusUpdateHandler(BaseHandler):
                     )
                     if reserved_prepayment > 0:
                         message_text += (
-                            f"\n\U0001f4b3 COD prepaid deduction: "
+                            f"\n💳 {i18n.get('staff.delivery.cod_prepaid_deduction', language)}: "
                             f"{format_currency(reserved_prepayment, language=language)}"
                         )
                     await query.edit_message_text(
@@ -339,7 +339,7 @@ class StatusUpdateHandler(BaseHandler):
                 )
 
             await query.edit_message_text(
-                f"\u2705 {success_msg}",
+                f"✅ {success_msg}",
                 reply_markup=keyboard,
                 parse_mode='HTML'
             )
@@ -378,7 +378,7 @@ class StatusUpdateHandler(BaseHandler):
 
             reason_text = i18n.get(f'staff.delivery.reason.{reason}', language)
             await query.edit_message_text(
-                f"\u274c {i18n.get('staff.delivery.marked_failed', language)}\n"
+                f"❌ {i18n.get('staff.delivery.marked_failed', language)}\n"
                 f"{i18n.get('staff.delivery.fail_reason_label', language)}: {reason_text}",
                 reply_markup=CommonKeyboards.back_button(language, "staff_active_deliveries"),
                 parse_mode='HTML'
@@ -646,7 +646,7 @@ class StatusUpdateHandler(BaseHandler):
                 else 'staff.delivery.reconciliation_submitted'
             )
             message = (
-                f"\u2705 {i18n.get(title_key, language)}"
+                f"✅ {i18n.get(title_key, language)}"
                 f"\n\n{self._format_session_summary(session, language)}"
             )
             await query.edit_message_text(
@@ -698,7 +698,7 @@ class StatusUpdateHandler(BaseHandler):
                 else 'staff.delivery.reconciliation_submitted'
             )
             success_title = i18n.get(title_key, language)
-            message = f"\u2705 {success_title}\n\n{self._format_session_summary(session, language)}"
+            message = f"✅ {success_title}\n\n{self._format_session_summary(session, language)}"
             await update.message.reply_text(
                 message,
                 reply_markup=CommonKeyboards.back_button(language, "staff_back_to_main"),
@@ -734,7 +734,7 @@ class StatusUpdateHandler(BaseHandler):
                 return
 
             await query.edit_message_text(
-                f"\u2705 {i18n.get('staff.delivery.marked_preparing', language)}",
+                f"✅ {i18n.get('staff.delivery.marked_preparing', language)}",
                 reply_markup=CommonKeyboards.back_button(language),
                 parse_mode='HTML'
             )

@@ -305,7 +305,7 @@ class BaseHandler:
         error_code: Optional[str] = None,
     ):
         """Handle API error."""
-        error_msg = f"\u274c {self._resolve_api_error_message(language, error, status_code, error_code)}"
+        error_msg = f"❌ {self._resolve_api_error_message(language, error, status_code, error_code)}"
         await self._notify_user(update, error_msg, show_alert=True)
 
     async def _handle_api_response_error(self, update: Update, response, language: str):

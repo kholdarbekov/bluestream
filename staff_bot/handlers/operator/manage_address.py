@@ -53,25 +53,25 @@ class ManageAddressHandler(BaseHandler):
                 text = i18n.get('staff.operator.no_addresses', language)
                 keyboard = InlineKeyboardMarkup([
                     [InlineKeyboardButton(
-                        f"\u2795 {i18n.get('staff.operator.add_address', language)}",
+                        f"➕ {i18n.get('staff.operator.add_address', language)}",
                         callback_data=f"staff_op_add_addr_{user_id}"
                     )],
                     [InlineKeyboardButton(
-                        f"\u2b05\ufe0f {i18n.get('staff.back', language)}",
+                        f"⬅️ {i18n.get('staff.back', language)}",
                         callback_data="staff_back_to_main"
                     )]
                 ])
                 await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
                 return
 
-            lines = [f"\U0001f4cd <b>{i18n.get('staff.operator.addresses_title', language)}</b>\n"]
+            lines = [f"📍 <b>{i18n.get('staff.operator.addresses_title', language)}</b>\n"]
 
             for addr in addresses:
                 label = escape_html(addr.get('title', ''))
                 address_line = escape_html(addr.get('full_address', ''))
                 district = escape_html(addr.get('district', ''))
 
-                lines.append(f"\U0001f4cd <b>{label}</b>")
+                lines.append(f"📍 <b>{label}</b>")
                 if district:
                     lines.append(f"    {district}")
                 if address_line:
@@ -82,11 +82,11 @@ class ManageAddressHandler(BaseHandler):
 
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton(
-                    f"\u2795 {i18n.get('staff.operator.add_address', language)}",
+                    f"➕ {i18n.get('staff.operator.add_address', language)}",
                     callback_data=f"staff_op_add_addr_{user_id}"
                 )],
                 [InlineKeyboardButton(
-                    f"\u2b05\ufe0f {i18n.get('staff.back', language)}",
+                    f"⬅️ {i18n.get('staff.back', language)}",
                     callback_data="staff_back_to_main"
                 )]
             ])
@@ -196,14 +196,14 @@ class ManageAddressHandler(BaseHandler):
         # Show confirmation
         addr = context.user_data['new_address']
         lines = [
-            f"\U0001f4cd <b>{i18n.get('staff.operator.confirm_address', language)}</b>\n",
-            f"\U0001f3f7 {escape_html(addr.get('title', ''))}",
-            f"\U0001f4cd {escape_html(addr.get('full_address', ''))}",
+            f"📍 <b>{i18n.get('staff.operator.confirm_address', language)}</b>\n",
+            f"🏷 {escape_html(addr.get('title', ''))}",
+            f"📍 {escape_html(addr.get('full_address', ''))}",
         ]
         if addr.get('district'):
-            lines.append(f"\U0001f3d8 {escape_html(addr['district'])}")
+            lines.append(f"🏘 {escape_html(addr['district'])}")
         if addr.get('delivery_notes'):
-            lines.append(f"\U0001f4ac {escape_html(addr['delivery_notes'])}")
+            lines.append(f"💬 {escape_html(addr['delivery_notes'])}")
 
         text = '\n'.join(lines)
         keyboard = CommonKeyboards.confirm_cancel(
@@ -259,13 +259,13 @@ class ManageAddressHandler(BaseHandler):
                     )
                 else:
                     await query.edit_message_text(
-                        f"\u2705 {i18n.get('staff.operator.address_saved', language)}",
+                        f"✅ {i18n.get('staff.operator.address_saved', language)}",
                         reply_markup=CommonKeyboards.back_button(language),
                         parse_mode='HTML'
                     )
             else:
                 await query.edit_message_text(
-                    f"\u2705 {i18n.get('staff.operator.address_saved', language)}",
+                    f"✅ {i18n.get('staff.operator.address_saved', language)}",
                     reply_markup=CommonKeyboards.back_button(language),
                     parse_mode='HTML'
                 )

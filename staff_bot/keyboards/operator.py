@@ -16,19 +16,19 @@ class OperatorKeyboards:
         return InlineKeyboardMarkup([
             [
                 InlineKeyboardButton(
-                    f"\U0001f4e6 {i18n.get('staff.operator.create_order_for', language)}",
+                    f"📦 {i18n.get('staff.operator.create_order_for', language)}",
                     callback_data=f"staff_op_order_{user_id}"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    f"\U0001f4cd {i18n.get('staff.operator.manage_addresses', language)}",
+                    f"📍 {i18n.get('staff.operator.manage_addresses', language)}",
                     callback_data=f"staff_op_addresses_{user_id}"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    f"\u2b05\ufe0f {i18n.get('staff.back', language)}",
+                    f"⬅️ {i18n.get('staff.back', language)}",
                     callback_data="staff_back_to_main"
                 )
             ]
@@ -39,15 +39,15 @@ class OperatorKeyboards:
         """Options when user is not found"""
         return InlineKeyboardMarkup([
             [InlineKeyboardButton(
-                f"\U0001f464 {i18n.get('staff.operator.create_user', language)}",
+                f"👤 {i18n.get('staff.operator.create_user', language)}",
                 callback_data="staff_op_create_user"
             )],
             [InlineKeyboardButton(
-                f"\U0001f50d {i18n.get('staff.operator.search_again', language)}",
+                f"🔍 {i18n.get('staff.operator.search_again', language)}",
                 callback_data="staff_search_client"
             )],
             [InlineKeyboardButton(
-                f"\u2b05\ufe0f {i18n.get('staff.back', language)}",
+                f"⬅️ {i18n.get('staff.back', language)}",
                 callback_data="staff_back_to_main"
             )]
         ])
@@ -65,11 +65,11 @@ class OperatorKeyboards:
             )])
 
         keyboard.append([InlineKeyboardButton(
-            f"\u2705 {i18n.get('staff.operator.done_selecting', language)}",
+            f"✅ {i18n.get('staff.operator.done_selecting', language)}",
             callback_data="staff_op_products_done"
         )])
         keyboard.append([InlineKeyboardButton(
-            f"\u274c {i18n.get('staff.cancel', language)}",
+            f"❌ {i18n.get('staff.cancel', language)}",
             callback_data="staff_back_to_main"
         )])
 
@@ -102,16 +102,16 @@ class OperatorKeyboards:
         for addr in addresses:
             title = addr.get('title') or addr.get('full_address') or i18n.get('staff.operator.address', language)
             keyboard.append([InlineKeyboardButton(
-                f"\U0001f4cd {title}",
+                f"📍 {title}",
                 callback_data=f"staff_op_addr_{addr['id']}"
             )])
 
         keyboard.append([InlineKeyboardButton(
-            f"\u2795 {i18n.get('staff.operator.add_address', language)}",
+            f"➕ {i18n.get('staff.operator.add_address', language)}",
             callback_data=f"staff_op_add_addr_{user_id}"
         )])
         keyboard.append([InlineKeyboardButton(
-            f"\u2b05\ufe0f {i18n.get('staff.back', language)}",
+            f"⬅️ {i18n.get('staff.back', language)}",
             callback_data="staff_back_to_main"
         )])
 
@@ -121,12 +121,12 @@ class OperatorKeyboards:
     def payment_methods(language: str, methods: List[Dict]) -> InlineKeyboardMarkup:
         """Payment method selection."""
         emoji_map = {
-            'cash': '\U0001f4b5',
-            'payme': '\U0001f4b3',
-            'click': '\U0001f4b3',
-            'business_account': '\U0001f3e6',
+            'cash': '💵',
+            'payme': '💳',
+            'click': '💳',
+            'business_account': '🏦',
         }
-        default_emoji = '\U0001f4b3'
+        default_emoji = '💳'
         keyboard = []
         for method in methods:
             method_code = method.get('method')
@@ -142,7 +142,7 @@ class OperatorKeyboards:
             ])
 
         keyboard.append([InlineKeyboardButton(
-            f"\u274c {i18n.get('staff.cancel', language)}",
+            f"❌ {i18n.get('staff.cancel', language)}",
             callback_data="staff_back_to_main"
         )])
         return InlineKeyboardMarkup(keyboard)
@@ -152,11 +152,11 @@ class OperatorKeyboards:
         """Order confirmation"""
         return InlineKeyboardMarkup([
             [InlineKeyboardButton(
-                f"\u2705 {i18n.get('staff.operator.confirm_order', language)}",
+                f"✅ {i18n.get('staff.operator.confirm_order', language)}",
                 callback_data="staff_op_confirm_order"
             )],
             [InlineKeyboardButton(
-                f"\u274c {i18n.get('staff.cancel', language)}",
+                f"❌ {i18n.get('staff.cancel', language)}",
                 callback_data="staff_back_to_main"
             )]
         ])

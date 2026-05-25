@@ -5,7 +5,7 @@ This file contains Pydantic models for admin-related data serialization
 
 import logging
 from datetime import datetime, date, UTC
-from typing import Dict, Any, Optional, List, Union
+from typing import Dict, Any, Optional, List, Union, Literal
 from enum import Enum
 from decimal import Decimal
 
@@ -534,6 +534,25 @@ class AdminResponseSchema(BaseModel):
     errors: Optional[List[str]] = None
 
 
+class InactiveCustomersQuerySchema(BaseModel):
+    """Query params for GET /admin/analytics/inactive-customers"""
+
+    model_config = ConfigDict(extra="ignore")
+
+    days_since: int = Field(default=30, ge=0, le=3650)
+    customer_type: Literal["all", "individual", "workplace", "grocery"] = "all"
+    include_never_ordered: bool = True
+    page: int = Field(default=1, ge=1)
+    per_page: int = Field(default=50, ge=1, le=100)
+
+    @field_validator("include_never_ordered", mode="before")
+    @classmethod
+    def _parse_bool(cls, v):
+        if isinstance(v, str):
+            return v.lower() in ("1", "true", "yes", "on")
+        return v
+
+
 # Export all schemas for easy importing
 __all__ = [
     "UserAdminSchema",
@@ -558,6 +577,7 @@ __all__ = [
     "StockAdjustmentRequest",
     "SystemMaintenanceRequest",
     "AdminResponseSchema",
+    "InactiveCustomersQuerySchema",
     "UserRole",
     "UserStatus",
     "OrderStatus",

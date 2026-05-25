@@ -53,7 +53,7 @@ class HistoryHandler(BaseHandler):
             pagination = data.get('pagination', {})
 
             if not deliveries:
-                text = f"\U0001f4cb {i18n.get('staff.delivery.no_history', language)}"
+                text = f"📋 {i18n.get('staff.delivery.no_history', language)}"
                 keyboard = CommonKeyboards.back_button(language)
 
                 if update.callback_query:
@@ -68,7 +68,7 @@ class HistoryHandler(BaseHandler):
 
             # Build history list
             lines = [
-                f"\U0001f4cb <b>{i18n.get('staff.delivery.history_title', language)}</b>\n"
+                f"📋 <b>{i18n.get('staff.delivery.history_title', language)}</b>\n"
             ]
 
             for delivery in deliveries:
@@ -85,11 +85,11 @@ class HistoryHandler(BaseHandler):
                     f"{status_text} <b>#{order_num}</b>"
                 )
                 if district:
-                    lines.append(f"  \U0001f4cd {district} | {total}")
+                    lines.append(f"  📍 {district} | {total}")
                 else:
-                    lines.append(f"  \U0001f4b0 {total}")
+                    lines.append(f"  💰 {total}")
                 if date:
-                    lines.append(f"  \U0001f4c5 {date}")
+                    lines.append(f"  📅 {date}")
                 lines.append("")
 
             text = '\n'.join(lines)
@@ -104,7 +104,7 @@ class HistoryHandler(BaseHandler):
                 keyboard_rows.append(page_buttons)
 
             keyboard_rows.append([InlineKeyboardButton(
-                f"\u2b05\ufe0f {i18n.get('staff.back', language)}",
+                f"⬅️ {i18n.get('staff.back', language)}",
                 callback_data="staff_back_to_main"
             )])
 
@@ -179,7 +179,7 @@ class HistoryHandler(BaseHandler):
                     ),
                 ],
                 [InlineKeyboardButton(
-                    f"\u2b05\ufe0f {i18n.get('staff.back', language)}",
+                    f"⬅️ {i18n.get('staff.back', language)}",
                     callback_data="staff_back_to_main"
                 )]
             ])
@@ -241,7 +241,7 @@ class HistoryHandler(BaseHandler):
                     ),
                 ],
                 [InlineKeyboardButton(
-                    f"\u2b05\ufe0f {i18n.get('staff.back', language)}",
+                    f"⬅️ {i18n.get('staff.back', language)}",
                     callback_data="staff_back_to_main"
                 )]
             ])

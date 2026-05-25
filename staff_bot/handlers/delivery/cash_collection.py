@@ -46,9 +46,9 @@ class CashCollectionHandler(BaseHandler):
     def _format_statement(statement: dict, language: str) -> str:
         items = statement.get('items') or []
         lines = [
-            f"\U0001f4dc <b>{i18n.get('staff.delivery.cod_statement_title', language)}</b>",
-            f"\U0001f4b3 {i18n.get('staff.delivery.active_cod_debts', language)}: {statement.get('active_cod_debt_count', 0)}",
-            f"\U0001f4b0 {i18n.get('staff.delivery.total_outstanding', language)}: {format_currency(statement.get('total_outstanding_amount', 0), language=language)}",
+            f"📜 <b>{i18n.get('staff.delivery.cod_statement_title', language)}</b>",
+            f"💳 {i18n.get('staff.delivery.active_cod_debts', language)}: {statement.get('active_cod_debt_count', 0)}",
+            f"💰 {i18n.get('staff.delivery.total_outstanding', language)}: {format_currency(statement.get('total_outstanding_amount', 0), language=language)}",
         ]
 
         if not items:
@@ -60,7 +60,7 @@ class CashCollectionHandler(BaseHandler):
             if float(item.get('outstanding_amount') or 0) <= 0:
                 continue
             lines.append(
-                f"\u2022 {escape_html(item.get('order_number') or i18n.get('staff.order.unknown', language))}: "
+                f"• {escape_html(item.get('order_number') or i18n.get('staff.order.unknown', language))}: "
                 f"{format_currency(item.get('outstanding_amount') or 0, language=language)}"
             )
         return '\n'.join(lines)
@@ -124,8 +124,8 @@ class CashCollectionHandler(BaseHandler):
             for customer in customers[:10]:
                 card = format_user_card(customer, language)
                 card += (
-                    f"\n\U0001f4b3 {i18n.get('staff.delivery.active_cod_debts', language)}: {customer.get('active_cod_debt_count', 0)}"
-                    f"\n\U0001f4b0 {i18n.get('staff.delivery.total_outstanding', language)}: "
+                    f"\n💳 {i18n.get('staff.delivery.active_cod_debts', language)}: {customer.get('active_cod_debt_count', 0)}"
+                    f"\n💰 {i18n.get('staff.delivery.total_outstanding', language)}: "
                     f"{format_currency(customer.get('total_outstanding_amount') or 0, language=language)}"
                 )
                 await update.message.reply_text(

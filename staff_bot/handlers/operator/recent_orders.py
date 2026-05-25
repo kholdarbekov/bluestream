@@ -43,7 +43,7 @@ class RecentOrdersHandler(BaseHandler):
             orders = response.data if isinstance(response.data, list) else response.data.get('items', [])
 
             if not orders:
-                text = f"\U0001f4cb {i18n.get('staff.operator.no_recent_orders', language)}"
+                text = f"📋 {i18n.get('staff.operator.no_recent_orders', language)}"
                 keyboard = CommonKeyboards.back_button(language)
 
                 if update.callback_query:
@@ -57,7 +57,7 @@ class RecentOrdersHandler(BaseHandler):
                 return
 
             # Header
-            header = f"\U0001f4cb <b>{i18n.get('staff.operator.recent_orders_title', language)}</b>\n"
+            header = f"📋 <b>{i18n.get('staff.operator.recent_orders_title', language)}</b>\n"
 
             if update.callback_query:
                 await update.callback_query.edit_message_text(header, parse_mode='HTML')
@@ -76,13 +76,13 @@ class RecentOrdersHandler(BaseHandler):
                     created = created[:16].replace('T', ' ')
 
                 lines = [
-                    f"\U0001f4e6 <b>#{order_num}</b> \u2014 {escape_html(status_label or status)}",
+                    f"📦 <b>#{order_num}</b> — {escape_html(status_label or status)}",
                 ]
                 if customer_name:
-                    lines.append(f"\U0001f464 {customer_name}")
-                lines.append(f"\U0001f4b0 {total}")
+                    lines.append(f"👤 {customer_name}")
+                lines.append(f"💰 {total}")
                 if created:
-                    lines.append(f"\U0001f4c5 {created}")
+                    lines.append(f"📅 {created}")
 
                 text = '\n'.join(lines)
                 target = update.callback_query.message if update.callback_query else update.message

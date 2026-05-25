@@ -53,7 +53,7 @@ class BottleSessionMembershipHandler(BaseHandler):
                     status_code=getattr(response, 'status_code', None),
                     error_code=getattr(response, 'error_code', None),
                 )
-                text = f"\u274c {error_msg}"
+                text = f"❌ {error_msg}"
                 keyboard = CommonKeyboards.back_button(language, "staff_back_to_main")
                 if query:
                     await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
@@ -78,7 +78,7 @@ class BottleSessionMembershipHandler(BaseHandler):
                 owner_name = s.get('owner_name') or 'Driver'
                 inventory = s.get('current_inventory', 0)
                 loaded = s.get('bottles_loaded', 0)
-                label = f"\U0001f4e6 {owner_name} — {inventory}/{loaded}"
+                label = f"📦 {owner_name} — {inventory}/{loaded}"
                 buttons.append([
                     InlineKeyboardButton(label, callback_data=f"bottles_join_confirm_{s['session_id']}")
                 ])
@@ -139,14 +139,14 @@ class BottleSessionMembershipHandler(BaseHandler):
             loaded = session_info.get('bottles_loaded', 0)
 
             text = (
-                f"\U0001f91d <b>{i18n.get('staff.bottles.join_session_confirm_title', language)}</b>\n\n"
-                f"\U0001f464 {i18n.get('staff.bottles.session_owner', language)}: <b>{owner_name}</b>\n"
-                f"\U0001f4e6 {i18n.get('staff.bottles.bottles_on_truck', language)}: <b>{inventory}</b> / {loaded}\n\n"
+                f"🤝 <b>{i18n.get('staff.bottles.join_session_confirm_title', language)}</b>\n\n"
+                f"👤 {i18n.get('staff.bottles.session_owner', language)}: <b>{owner_name}</b>\n"
+                f"📦 {i18n.get('staff.bottles.bottles_on_truck', language)}: <b>{inventory}</b> / {loaded}\n\n"
                 f"{i18n.get('staff.bottles.join_session_confirm_note', language)}"
             )
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton(
-                    f"\u2705 {i18n.get('staff.bottles.confirm_join', language)}",
+                    f"✅ {i18n.get('staff.bottles.confirm_join', language)}",
                     callback_data=f"bottles_join_execute_{session_id}",
                 )],
                 [InlineKeyboardButton(
@@ -187,7 +187,7 @@ class BottleSessionMembershipHandler(BaseHandler):
                     error_code=getattr(response, 'error_code', None),
                 )
                 await query.edit_message_text(
-                    f"\u274c {error_msg}",
+                    f"❌ {error_msg}",
                     reply_markup=CommonKeyboards.back_button(language, 'bottles_join_session'),
                     parse_mode='HTML',
                 )
@@ -197,7 +197,7 @@ class BottleSessionMembershipHandler(BaseHandler):
             owner_name = membership.get('owner_name') or 'Driver'
 
             text = (
-                f"\u2705 <b>"
+                f"✅ <b>"
                 f"{i18n.get('staff.bottles.joined_session', language).format(name=owner_name)}"
                 f"</b>\n\n"
                 f"{i18n.get('staff.bottles.joined_session_info', language)}"
@@ -236,14 +236,14 @@ class BottleSessionMembershipHandler(BaseHandler):
                     error_code=getattr(response, 'error_code', None),
                 )
                 await query.edit_message_text(
-                    f"\u274c {error_msg}",
+                    f"❌ {error_msg}",
                     reply_markup=CommonKeyboards.back_button(language, 'staff_back_to_main'),
                     parse_mode='HTML',
                 )
                 return
 
             await query.edit_message_text(
-                f"\u2705 {i18n.get('staff.bottles.left_session', language)}",
+                f"✅ {i18n.get('staff.bottles.left_session', language)}",
                 reply_markup=CommonKeyboards.back_button(language, 'staff_back_to_main'),
             )
 
@@ -290,14 +290,14 @@ class BottleSessionMembershipHandler(BaseHandler):
             inventory = m.get('current_inventory', 0)
 
             text = (
-                f"\U0001f91d <b>{i18n.get('staff.bottles.current_membership_title', language)}</b>\n\n"
+                f"🤝 <b>{i18n.get('staff.bottles.current_membership_title', language)}</b>\n\n"
                 + i18n.get('staff.bottles.current_membership', language).format(
                     name=owner_name, qty=inventory
                 )
             )
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton(
-                    f"\U0001f6aa {i18n.get('staff.bottles.leave_session', language)}",
+                    f"🚪 {i18n.get('staff.bottles.leave_session', language)}",
                     callback_data='bottles_leave_session',
                 )],
                 [InlineKeyboardButton(
@@ -343,7 +343,7 @@ class BottleSessionMembershipHandler(BaseHandler):
                     status_code=getattr(response, 'status_code', None),
                     error_code=getattr(response, 'error_code', None),
                 )
-                text = f"\u274c {error_msg}"
+                text = f"❌ {error_msg}"
                 keyboard = CommonKeyboards.back_button(language, 'staff_back_to_main')
                 if query:
                     await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
@@ -366,7 +366,7 @@ class BottleSessionMembershipHandler(BaseHandler):
                 name = d.get('name') or f"Driver #{d['user_id']}"
                 buttons.append([
                     InlineKeyboardButton(
-                        f"\U0001f464 {name}",
+                        f"👤 {name}",
                         callback_data=f"bottles_invite_confirm_{d['user_id']}",
                     )
                 ])
@@ -412,13 +412,13 @@ class BottleSessionMembershipHandler(BaseHandler):
             name = driver_info.get('name') if driver_info else f"Driver #{driver_id}"
 
             text = (
-                f"\U0001f91d <b>{i18n.get('staff.bottles.invite_codriver_confirm', language)}</b>\n\n"
-                f"\U0001f464 <b>{name}</b>\n\n"
+                f"🤝 <b>{i18n.get('staff.bottles.invite_codriver_confirm', language)}</b>\n\n"
+                f"👤 <b>{name}</b>\n\n"
                 f"{i18n.get('staff.bottles.invite_codriver_confirm_note', language)}"
             )
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton(
-                    f"\u2705 {i18n.get('staff.bottles.confirm_invite', language)}",
+                    f"✅ {i18n.get('staff.bottles.confirm_invite', language)}",
                     callback_data=f"bottles_invite_execute_{driver_id}",
                 )],
                 [InlineKeyboardButton(
@@ -458,7 +458,7 @@ class BottleSessionMembershipHandler(BaseHandler):
                     error_code=getattr(response, 'error_code', None),
                 )
                 await query.edit_message_text(
-                    f"\u274c {error_msg}",
+                    f"❌ {error_msg}",
                     reply_markup=CommonKeyboards.back_button(language, 'staff_back_to_main'),
                     parse_mode='HTML',
                 )
@@ -468,7 +468,7 @@ class BottleSessionMembershipHandler(BaseHandler):
             member_name = membership.get('member_name') or f"Driver #{driver_id}"
 
             text = (
-                f"\u2705 <b>"
+                f"✅ <b>"
                 f"{i18n.get('staff.bottles.codriver_invited', language).format(name=member_name)}"
                 f"</b>"
             )

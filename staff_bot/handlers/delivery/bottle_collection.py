@@ -59,12 +59,12 @@ class BottleCollectionHandler(BaseHandler):
         fine_amount = summary.get('total_fine_amount', 0)
 
         lines = [
-            f"\U0001f4ca <b>{i18n.get('staff.delivery.bottle_statement_title', language)}</b>",
-            f"\U0001f4e6 {i18n.get('staff.delivery.total_bottles', language)}: {int(total)}",
+            f"📊 <b>{i18n.get('staff.delivery.bottle_statement_title', language)}</b>",
+            f"📦 {i18n.get('staff.delivery.total_bottles', language)}: {int(total)}",
         ]
         if fines > 0:
             lines.append(
-                f"\u26a0\ufe0f {i18n.get('staff.delivery.active_fines', language)}: {fines} "
+                f"⚠️ {i18n.get('staff.delivery.active_fines', language)}: {fines} "
                 f"({format_currency(fine_amount, language=language)})"
             )
 
@@ -78,7 +78,7 @@ class BottleCollectionHandler(BaseHandler):
             if balance <= 0:
                 continue
             title = addr.get('address_title') or addr.get('full_address', '')[:30]
-            lines.append(f"\u2022 {escape_html(title)}: {int(balance)}")
+            lines.append(f"• {escape_html(title)}: {int(balance)}")
 
         return '\n'.join(lines)
 
@@ -639,28 +639,28 @@ class BottleCollectionHandler(BaseHandler):
         discrepancy_label = i18n.get('staff.delivery.discrepancy_label', language)
 
         lines = [
-            f"\U0001f69a <b>{session_label} #{escape_html(ref)}</b>  [{escape_html(status.upper())}]",
-            f"\u23f1 {started_label}: {escape_html(started_at)}",
+            f"🚚 <b>{session_label} #{escape_html(ref)}</b>  [{escape_html(status.upper())}]",
+            f"⏱ {started_label}: {escape_html(started_at)}",
             "",
-            f"\U0001f4e6 {loaded_label}:               <b>{loaded}</b>",
-            f"\U0001f69a {delivered_label}:            <b>{delivered}</b>",
-            f"\u267b\ufe0f {collected_label}:            <b>{collected}</b>",
+            f"📦 {loaded_label}:               <b>{loaded}</b>",
+            f"🚚 {delivered_label}:            <b>{delivered}</b>",
+            f"♻️ {collected_label}:            <b>{collected}</b>",
         ]
         if transferred_out or transferred_in:
             lines += [
-                f"\U0001f4e4 {transferred_out_label}:      <b>{transferred_out}</b>",
-                f"\U0001f4e5 {transferred_in_label}:       <b>{transferred_in}</b>",
+                f"📤 {transferred_out_label}:      <b>{transferred_out}</b>",
+                f"📥 {transferred_in_label}:       <b>{transferred_in}</b>",
             ]
-        lines.append("\u2500" * 30)
-        lines.append(f"\U0001f69a {on_truck_label}:         <b>{current}</b>")
+        lines.append("─" * 30)
+        lines.append(f"🚚 {on_truck_label}:         <b>{current}</b>")
         if returned is not None:
-            lines.append(f"\U0001f3e2 {returned_wh_label}:       <b>{returned}</b>")
+            lines.append(f"🏢 {returned_wh_label}:       <b>{returned}</b>")
         if discrepancy is not None:
             if discrepancy == 0:
                 lines.append(i18n.get('staff.delivery.discrepancy_zero', language))
             else:
                 lines.append(
-                    f"\u26a0\ufe0f {discrepancy_label}:          <b>{discrepancy}</b>"
+                    f"⚠️ {discrepancy_label}:          <b>{discrepancy}</b>"
                 )
         return "\n".join(lines)
 

@@ -607,14 +607,14 @@ class StaffWebhookServer:
             from telegram import InlineKeyboardButton, InlineKeyboardMarkup
             keyboard = InlineKeyboardMarkup([[
                 InlineKeyboardButton(
-                    f"\U0001f69a {i18n.get('staff.menu.active_deliveries', language)}",
+                    f"🚚 {i18n.get('staff.menu.active_deliveries', language)}",
                     callback_data='staff_active_deliveries',
                 )
             ]])
             try:
                 await self.bot_app.bot.send_message(
                     chat_id=int(telegram_id),
-                    text=f"\U0001f504 {i18n.get('staff.delivery.route_updated_toast', language)}",
+                    text=f"🔄 {i18n.get('staff.delivery.route_updated_toast', language)}",
                     reply_markup=keyboard,
                 )
             except Exception as e:
@@ -737,12 +737,12 @@ class StaffWebhookServer:
             amount_text = f"{amount_text} {i18n.get('staff.currency.uzs', language)}"
 
         return (
-            f"\U0001f195 {i18n.get('staff.notification.new_order', language)}\n\n"
-            f"\U0001f4e6 #{number}\n"
-            f"\U0001f4cd {district}\n"
-            f"\U0001f550 {time_slot}\n"
-            f"\U0001f4b0 {amount_text}\n"
-            f"\U0001f4dd {item_count} {i18n.get('staff.items', language)}"
+            f"🆕 {i18n.get('staff.notification.new_order', language)}\n\n"
+            f"📦 #{number}\n"
+            f"📍 {district}\n"
+            f"🕐 {time_slot}\n"
+            f"💰 {amount_text}\n"
+            f"📝 {item_count} {i18n.get('staff.items', language)}"
         )
 
     async def start(self):

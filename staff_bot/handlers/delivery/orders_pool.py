@@ -46,7 +46,7 @@ class OrdersPoolHandler(BaseHandler):
             pagination = response.data.get('pagination', {})
 
             if not orders:
-                text = f"\U0001f4e6 {i18n.get('staff.delivery.pool_empty', language)}"
+                text = f"📦 {i18n.get('staff.delivery.pool_empty', language)}"
                 keyboard = CommonKeyboards.back_button(language)
 
                 if update.callback_query:
@@ -60,7 +60,7 @@ class OrdersPoolHandler(BaseHandler):
                 return
 
             # Build pool message
-            header = f"\U0001f4e6 <b>{i18n.get('staff.delivery.pool_title', language)}</b>"
+            header = f"📦 <b>{i18n.get('staff.delivery.pool_title', language)}</b>"
             header += f"\n{i18n.get('staff.delivery.pool_count', language, count=pagination.get('total', len(orders)))}\n"
 
             if update.callback_query:
@@ -145,7 +145,7 @@ class OrdersPoolHandler(BaseHandler):
 
             # Build detailed view
             order_number = escape_html(order.get('order_number') or i18n.get('staff.common.not_available', language))
-            lines = [f"\U0001f4e6 <b>#{order_number}</b>\n"]
+            lines = [f"📦 <b>#{order_number}</b>\n"]
 
             # Items
             items = order.get('items', [])
@@ -158,14 +158,14 @@ class OrdersPoolHandler(BaseHandler):
                         item.get('total_price', item.get('price', 0)),
                         language=language,
                     )
-                    lines.append(f"  \u2022 {name} x{qty} \u2014 {price}")
+                    lines.append(f"  • {name} x{qty} — {price}")
                 lines.append("")
 
             # Customer info
             customer_name = escape_html(order.get('customer_name', ''))
             customer_phone = escape_html(order.get('customer_phone', ''))
             if customer_name or customer_phone:
-                contact = f"\U0001f464 {customer_name}"
+                contact = f"👤 {customer_name}"
                 if customer_phone:
                     contact += f" | {customer_phone}"
                 lines.append(contact)
@@ -174,22 +174,22 @@ class OrdersPoolHandler(BaseHandler):
             district = escape_html(order.get('district', ''))
             address = escape_html(order.get('address', ''))
             if district:
-                lines.append(f"\U0001f4cd {district}")
+                lines.append(f"📍 {district}")
             if address:
                 lines.append(f"    {address}")
             delivery_instructions = escape_html(order.get('delivery_instructions', ''))
             if delivery_instructions:
-                lines.append(f"    \U0001f4dd {delivery_instructions}")
+                lines.append(f"    📝 {delivery_instructions}")
 
             # Delivery time
             time_slot = escape_html(order.get('time_slot', ''))
             if time_slot:
-                lines.append(f"\U0001f550 {time_slot}")
+                lines.append(f"🕐 {time_slot}")
 
             # Payment
             total = format_currency(order.get('total_amount'), language=language)
             payment = order.get('payment_method', '')
-            payment_info = f"\U0001f4b0 {total}"
+            payment_info = f"💰 {total}"
             if payment:
                 payment_label = i18n.get(f'staff.delivery.payment.{payment}', language)
                 payment_info += f" ({payment_label})"
@@ -197,28 +197,28 @@ class OrdersPoolHandler(BaseHandler):
             if payment == 'cash':
                 cod_projection = get_cod_cash_projection(order)
                 lines.append(
-                    f"\U0001f4b8 {i18n.get('staff.delivery.cash_outstanding_label', language)}: "
+                    f"💸 {i18n.get('staff.delivery.cash_outstanding_label', language)}: "
                     f"{format_currency(order.get('outstanding_amount'), language=language)}"
                 )
                 if cod_projection['cod_reserved_prepayment_amount'] > 0:
                     lines.append(
-                        f"\U0001f4b3 COD prepaid reserved: "
+                        f"💳 {i18n.get('staff.delivery.cod_prepaid_reserved', language)}: "
                         f"{format_currency(cod_projection['cod_reserved_prepayment_amount'], language=language)}"
                     )
                 lines.append(
-                    f"\U0001f4b5 Cash to collect now: "
+                    f"💵 {i18n.get('staff.delivery.cash_to_collect_now', language)}: "
                     f"{format_currency(cod_projection['expected_cash_to_collect'], language=language)}"
                 )
                 payment_status = str(order.get('payment_status') or '').lower()
                 if payment_status == 'completed' or cod_projection['expected_cash_to_collect'] <= 0:
-                    lines.append(f"\u2705 {i18n.get('staff.delivery.cash_already_collected', language)}")
+                    lines.append(f"✅ {i18n.get('staff.delivery.cash_already_collected', language)}")
                 elif payment_status == 'partially_paid':
-                    lines.append(f"\u2139\ufe0f {i18n.get('staff.delivery.cash_partially_collected', language)}")
+                    lines.append(f"ℹ️ {i18n.get('staff.delivery.cash_partially_collected', language)}")
 
             # Delivery notes
             notes = order.get('delivery_notes', '')
             if notes:
-                lines.append(f"\U0001f4ac {escape_html(notes)}")
+                lines.append(f"💬 {escape_html(notes)}")
 
             text = '\n'.join(lines)
             order_id = order.get('order_id')
@@ -284,7 +284,7 @@ class OrdersPoolHandler(BaseHandler):
                 if response.status_code == 409:
                     # Already taken by another driver
                     await query.edit_message_text(
-                        f"\u274c {i18n.get('staff.delivery.already_taken', language)}",
+                        f"❌ {i18n.get('staff.delivery.already_taken', language)}",
                         reply_markup=CommonKeyboards.back_button(language, "staff_new_orders")
                     )
                     return
@@ -306,7 +306,7 @@ class OrdersPoolHandler(BaseHandler):
                         )],
                     ])
                     await query.edit_message_text(
-                        f"\u26a0\ufe0f {i18n.get('staff.bottles.session_required_to_accept', language)}",
+                        f"⚠️ {i18n.get('staff.bottles.session_required_to_accept', language)}",
                         reply_markup=keyboard,
                         parse_mode='HTML',
                     )
@@ -322,7 +322,7 @@ class OrdersPoolHandler(BaseHandler):
                     error_code=error_code,
                 )
                 await query.edit_message_text(
-                    f"\u274c {error_msg}",
+                    f"❌ {error_msg}",
                     reply_markup=CommonKeyboards.back_button(language, "staff_new_orders"),
                     parse_mode='HTML',
                 )
@@ -330,14 +330,14 @@ class OrdersPoolHandler(BaseHandler):
 
             # Success
             await query.edit_message_text(
-                f"\u2705 {i18n.get('staff.delivery.accepted_success', language)}",
+                f"✅ {i18n.get('staff.delivery.accepted_success', language)}",
                 reply_markup=CommonKeyboards.back_button(language, "staff_active_deliveries"),
                 parse_mode='HTML'
             )
 
             # Driver location is the single trigger for re-optimization. We
-            # always prompt for a fresh share after an accept \u2014 even when
-            # the previous share was "fresh" \u2014 because the driver has likely
+            # always prompt for a fresh share after an accept — even when
+            # the previous share was "fresh" — because the driver has likely
             # moved since then and we want the new route based on their
             # current position, not their position N minutes ago. Once the
             # location update arrives, the backend's POST /me/location

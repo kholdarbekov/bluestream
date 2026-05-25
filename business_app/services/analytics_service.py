@@ -20,7 +20,7 @@ from business_app.models.delivery import Delivery
 from business_app.models.product import Product
 from business_app.models.analytics import UserBehavior
 from business_app.models.order import OrderItem
-from shared.enums import OrderStatus, DeliveryStatus, UserStatus
+from shared.enums import OrderStatus, DeliveryStatus, UserStatus, UserType, EntitySubtype
 from business_app import db
 
 
@@ -123,6 +123,91 @@ class AnalyticsService:
             "churn": churn_data,
             "behavior_patterns": behavior_data,
         }
+
+    def get_inactive_customers(
+        self,
+        *,
+        days_since: int = 30,
+        customer_type: str = "all",
+        include_never_ordered: bool = True,
+        page: int = 1,
+        per_page: int = 50,
+    ) -> Dict[str, Any]:
+        """List customers whose last DELIVERED order is older than `days_since` days.
+
+        Never-ordered customers are included by default (their reference point is
+        User.created_at). Results are sorted most-inactive-first.
+        """
+        now = datetime.now(UTC)
+        threshold = now - timedelta(days=days_since)
+
+        delivered_stats = (
+            db.session.query(
+                Order.user_id.label("user_id"),
+                func.max(Order.created_at).label("last_order_date"),
+                func.count(Order.id).label("total_orders"),
+                func.coalesce(func.sum(Order.total_amount), 0).label("total_spent"),
+            )
+            .filter(Order.status == OrderStatus.DELIVERED)
+            .group_by(Order.user_id)
+            .subquery()
+        )
+
+        effective_activity = func.coalesce(delivered_stats.c.last_order_date, User.created_at)
+
+        query = (
+            db.session.query(
+                User,
+                delivered_stats.c.last_order_date,
+                delivered_stats.c.total_orders,
+                delivered_stats.c.total_spent,
+                effective_activity.label("effective_activity"),
+            )
+            .outerjoin(delivered_stats, delivered_stats.c.user_id == User.id)
+            .filter(User.status == UserStatus.ACTIVE.value)
+            .filter(User.user_type != UserType.STAFF)
+            .filter(effective_activity <= threshold)
+        )
+
+        if customer_type == "individual":
+            query = query.filter(User.user_type == UserType.INDIVIDUAL)
+        elif customer_type == "workplace":
+            query = query.filter(
+                User.user_type == UserType.ENTITY,
+                User.entity_subtype == EntitySubtype.WORKPLACE,
+            )
+        elif customer_type == "grocery":
+            query = query.filter(
+                User.user_type == UserType.ENTITY,
+                User.entity_subtype == EntitySubtype.GROCERY_STORE,
+            )
+
+        if not include_never_ordered:
+            query = query.filter(delivered_stats.c.last_order_date.isnot(None))
+
+        query = query.order_by(effective_activity.asc())
+
+        total = query.count()
+        rows = query.offset((page - 1) * per_page).limit(per_page).all()
+
+        items = []
+        for user, last_order_date, total_orders, total_spent, effective in rows:
+            items.append(
+                {
+                    "user_id": user.id,
+                    "full_name": user.full_name,
+                    "phone": user.phone,
+                    "customer_type": user.user_type.value if user.user_type else None,
+                    "entity_subtype": user.entity_subtype.value if user.entity_subtype else None,
+                    "total_orders": int(total_orders or 0),
+                    "total_spent": float(total_spent or 0),
+                    "last_order_date": last_order_date.isoformat() if last_order_date else None,
+                    "days_since_last_order": (now - effective).days if effective else None,
+                    "never_ordered": last_order_date is None,
+                }
+            )
+
+        return {"items": items, "total": total, "threshold_days": days_since}
 
     def get_delivery_analytics(self, start_date: datetime = None, end_date: datetime = None) -> Dict[str, Any]:
         """Get delivery performance analytics"""

@@ -51,7 +51,10 @@ from business_app.serializers.admin_serializers import (
     serialize_product_admin,
     serialize_delivery_person_admin,
     serialize_category_admin,
+    InactiveCustomersQuerySchema,
 )
+from business_app.utils.service_factory import get_analytics_service
+from pydantic import ValidationError as PydanticValidationError
 
 # from business_app.services.file_storage_service import FileStorageService
 from business_app.utils.decorators import (
@@ -3933,6 +3936,30 @@ def get_delivery_routes_analytics():
     except Exception as e:
         current_app.logger.error(f"Get delivery routes analytics error: {e}")
         return internal_error_response("Failed to get delivery routes analytics")
+
+
+@admin_bp.route("/analytics/inactive-customers", methods=["GET"])
+@jwt_required()
+@validate_admin_action(["view_users"])
+def get_inactive_customers():
+    """List customers inactive for at least N days, sorted most-inactive-first."""
+    try:
+        params = InactiveCustomersQuerySchema.model_validate(request.args.to_dict())
+    except PydanticValidationError as e:
+        return validation_error_response(str(e))
+
+    try:
+        result = get_analytics_service().get_inactive_customers(**params.model_dump())
+    except Exception as e:
+        current_app.logger.error(f"Get inactive customers error: {e}")
+        return internal_error_response("Failed to get inactive customers")
+
+    return paginated_response(
+        items=result["items"],
+        page=params.page,
+        per_page=params.per_page,
+        total=result["total"],
+    )
 
 
 # ============================================================================
@@ -11405,8 +11432,6 @@ def generate_staff_invite_link():
 # =====================================================================
 # Marking-code utilisation task: schedule, config, runs, pool status
 # =====================================================================
-
-from pydantic import ValidationError as PydanticValidationError  # noqa: E402
 
 from business_app.models.marking_code_task_run import (  # noqa: E402
     MarkingCodeRunStatus,

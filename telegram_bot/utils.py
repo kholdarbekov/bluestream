@@ -695,7 +695,7 @@ async def maybe_remove_stale_reply_keyboard(
 
         cleanup_message = await context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text="\u2060",
+            text="⁠",
             reply_markup=ReplyKeyboardRemove(),
         )
         user_data["reply_keyboard_cleanup_at_ts"] = now_ts

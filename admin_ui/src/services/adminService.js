@@ -825,6 +825,15 @@ class AdminService {
     return normalizeRevenueForecast(response.data);
   }
 
+  async getInactiveCustomers(params = {}) {
+    const response = await api.get('/admin/analytics/inactive-customers', { params });
+    const payload = response.data?.data || {};
+    return {
+      items: payload.items || [],
+      meta: response.data?.meta || { page: 1, per_page: 50, total: 0 }
+    };
+  }
+
   // Export functionality
   async exportData(type, params = {}) {
     const response = await api.get(`/admin/export/${type}`, {

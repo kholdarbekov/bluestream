@@ -59,11 +59,11 @@ class BottleBalanceHandler(BaseHandler):
 
             if not balances:
                 text = (
-                    f"\U0001f4e6 <b>{i18n.get('telegram.bottles.title', language)}</b>\n\n"
+                    f"📦 <b>{i18n.get('telegram.bottles.title', language)}</b>\n\n"
                     f"{i18n.get('telegram.bottles.no_balance', language)}"
                 )
             else:
-                lines = [f"\U0001f4e6 <b>{i18n.get('telegram.bottles.title', language)}</b>\n"]
+                lines = [f"📦 <b>{i18n.get('telegram.bottles.title', language)}</b>\n"]
                 total = 0
                 for b in balances:
                     balance = int(float(b.get('balance', 0)))
@@ -71,11 +71,11 @@ class BottleBalanceHandler(BaseHandler):
                         continue
                     total += balance
                     title = b.get('address_title') or b.get('address_label') or f"Address #{b.get('address_id')}"
-                    lines.append(f"\u2022 {title}: <b>{balance}</b>")
+                    lines.append(f"• {title}: <b>{balance}</b>")
 
                 if total == 0:
                     text = (
-                        f"\U0001f4e6 <b>{i18n.get('telegram.bottles.title', language)}</b>\n\n"
+                        f"📦 <b>{i18n.get('telegram.bottles.title', language)}</b>\n\n"
                         f"{i18n.get('telegram.bottles.no_balance', language)}"
                     )
                 else:

@@ -40,11 +40,11 @@ class ProfileHandler(BaseHandler):
                 role_labels.append(i18n.get(f'staff.role.{role}', language))
 
             lines = [
-                f"\U0001f464 <b>{i18n.get('staff.profile.title', language)}</b>\n",
-                f"\U0001f464 {i18n.get('staff.profile.name', language)}: {full_name}",
-                f"\U0001f4de {i18n.get('staff.profile.phone', language)}: {phone}",
-                f"\U0001f3f7 {i18n.get('staff.profile.roles', language)}: {', '.join(role_labels)}",
-                f"\U0001f310 {i18n.get('staff.profile.language', language)}: {language.upper()}",
+                f"👤 <b>{i18n.get('staff.profile.title', language)}</b>\n",
+                f"👤 {i18n.get('staff.profile.name', language)}: {full_name}",
+                f"📞 {i18n.get('staff.profile.phone', language)}: {phone}",
+                f"🏷 {i18n.get('staff.profile.roles', language)}: {', '.join(role_labels)}",
+                f"🌐 {i18n.get('staff.profile.language', language)}: {language.upper()}",
             ]
 
             text = '\n'.join(lines)

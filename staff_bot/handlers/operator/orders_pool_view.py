@@ -47,7 +47,7 @@ class OperatorOrdersPoolViewHandler(BaseHandler):
             total = pagination.get('total', len(orders))
 
             if not orders:
-                text = f"\U0001f4e6 {i18n.get('staff.delivery.pool_empty', language)}"
+                text = f"📦 {i18n.get('staff.delivery.pool_empty', language)}"
                 keyboard = CommonKeyboards.back_button(language)
                 if update.callback_query:
                     await update.callback_query.edit_message_text(
@@ -59,7 +59,7 @@ class OperatorOrdersPoolViewHandler(BaseHandler):
                     )
                 return
 
-            header = f"\U0001f4e6 <b>{i18n.get('staff.operator.pool_title', language)}</b>"
+            header = f"📦 <b>{i18n.get('staff.operator.pool_title', language)}</b>"
             header += f"\n{i18n.get('staff.delivery.pool_count', language, count=total)}\n"
 
             if update.callback_query:
@@ -75,7 +75,7 @@ class OperatorOrdersPoolViewHandler(BaseHandler):
                 card = format_order_card(order, language)
                 keyboard = InlineKeyboardMarkup([[
                     InlineKeyboardButton(
-                        f"\U0001f440 {i18n.get('staff.delivery.view_details', language)}",
+                        f"👀 {i18n.get('staff.delivery.view_details', language)}",
                         callback_data=f"staff_op_view_order_{order_id}"
                     )
                 ]])
@@ -138,14 +138,14 @@ class OperatorOrdersPoolViewHandler(BaseHandler):
             delivery_person_name = order.get('delivery_person_name', '')
 
             order_number = escape_html(order.get('order_number') or i18n.get('staff.common.not_available', language))
-            lines = [f"\U0001f4e6 <b>#{order_number}</b>"]
+            lines = [f"📦 <b>#{order_number}</b>"]
             if status_label:
                 lines.append(
                     f"{i18n.get('staff.delivery.current_status', language)}: {escape_html(status_label)}"
                 )
             if delivery_person_name:
                 lines.append(
-                    f"\U0001f464 {i18n.get('staff.operator.assigned_to', language)}: {escape_html(delivery_person_name)}"
+                    f"👤 {i18n.get('staff.operator.assigned_to', language)}: {escape_html(delivery_person_name)}"
                 )
             lines.append("")
 
@@ -156,13 +156,13 @@ class OperatorOrdersPoolViewHandler(BaseHandler):
                     name = item.get('product_name', '')
                     qty = item.get('quantity', 1)
                     price = format_currency(item.get('total_price', 0), language=language)
-                    lines.append(f"  \u2022 {escape_html(name)} x{qty} - {price}")
+                    lines.append(f"  • {escape_html(name)} x{qty} - {price}")
                 lines.append("")
 
             customer_name = escape_html(order.get('customer_name', ''))
             customer_phone = escape_html(order.get('customer_phone', ''))
             if customer_name or customer_phone:
-                contact = f"\U0001f464 {customer_name}"
+                contact = f"👤 {customer_name}"
                 if customer_phone:
                     contact += f" | {customer_phone}"
                 lines.append(contact)
@@ -170,16 +170,16 @@ class OperatorOrdersPoolViewHandler(BaseHandler):
             district = escape_html(order.get('district', ''))
             address = escape_html(order.get('address', ''))
             if district:
-                lines.append(f"\U0001f4cd {district}")
+                lines.append(f"📍 {district}")
             if address:
                 lines.append(f"    {address}")
             delivery_instructions = escape_html(order.get('delivery_instructions', ''))
             if delivery_instructions:
-                lines.append(f"    \U0001f4dd {delivery_instructions}")
+                lines.append(f"    📝 {delivery_instructions}")
 
             total = format_currency(order.get('total_amount'), language=language)
             payment = order.get('payment_method', '')
-            payment_text = f"\U0001f4b0 {total}"
+            payment_text = f"💰 {total}"
             if payment:
                 payment_label = i18n.get(f'staff.delivery.payment.{payment}', language)
                 payment_text += f" ({payment_label})"
@@ -187,16 +187,16 @@ class OperatorOrdersPoolViewHandler(BaseHandler):
 
             notes = order.get('delivery_notes', '')
             if notes:
-                lines.append(f"\U0001f4ac {escape_html(notes)}")
+                lines.append(f"💬 {escape_html(notes)}")
 
             keyboard_rows = []
             if status == 'confirmed':
                 keyboard_rows.append([InlineKeyboardButton(
-                    f"\U0001f6e0\ufe0f {i18n.get('staff.delivery.mark_preparing', language)}",
+                    f"🛠️ {i18n.get('staff.delivery.mark_preparing', language)}",
                     callback_data=f"staff_op_mark_preparing_{order_id}"
                 )])
             keyboard_rows.append([InlineKeyboardButton(
-                f"\u2b05\ufe0f {i18n.get('staff.back', language)}",
+                f"⬅️ {i18n.get('staff.back', language)}",
                 callback_data="staff_op_new_orders"
             )])
 
@@ -231,7 +231,7 @@ class OperatorOrdersPoolViewHandler(BaseHandler):
                 return
 
             await query.edit_message_text(
-                f"\u2705 {i18n.get('staff.delivery.marked_preparing', language)}",
+                f"✅ {i18n.get('staff.delivery.marked_preparing', language)}",
                 reply_markup=CommonKeyboards.back_button(language, "staff_op_new_orders"),
                 parse_mode='HTML'
             )

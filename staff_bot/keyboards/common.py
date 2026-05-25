@@ -15,7 +15,7 @@ class CommonKeyboards:
         """Single back button"""
         return InlineKeyboardMarkup([[
             InlineKeyboardButton(
-                f"\u2b05\ufe0f {i18n.get('staff.back', language)}",
+                f"⬅️ {i18n.get('staff.back', language)}",
                 callback_data=callback_data
             )
         ]])
@@ -27,7 +27,7 @@ class CommonKeyboards:
         The bot's catch-all text router (`_handle_text_message`) eats every
         text update while any of `pending_delivery_cash_flow`,
         `pending_reconciliation_flow`, `pending_cod_collection_flow`,
-        `pending_bottle_collection_flow`, or `tryout_pickup_task_id` is set \u2014
+        `pending_bottle_collection_flow`, or `tryout_pickup_task_id` is set —
         even reply-keyboard taps, because those send text. Without an inline
         Cancel the user has no way back except typing a value the parser
         accepts. Pair this button with the `staff_flow_cancel` global handler
@@ -36,7 +36,7 @@ class CommonKeyboards:
         """
         return InlineKeyboardMarkup([[
             InlineKeyboardButton(
-                f"\u274c {i18n.get('staff.cancel', language)}",
+                f"❌ {i18n.get('staff.cancel', language)}",
                 callback_data="staff_flow_cancel",
             )
         ]])
@@ -50,11 +50,11 @@ class CommonKeyboards:
         """Confirm / Cancel buttons"""
         return InlineKeyboardMarkup([[
             InlineKeyboardButton(
-                f"\u2705 {i18n.get('staff.confirm', language)}",
+                f"✅ {i18n.get('staff.confirm', language)}",
                 callback_data=confirm_data
             ),
             InlineKeyboardButton(
-                f"\u274c {i18n.get('staff.cancel', language)}",
+                f"❌ {i18n.get('staff.cancel', language)}",
                 callback_data=cancel_data
             )
         ]])
@@ -82,7 +82,7 @@ class CommonKeyboards:
         buttons = []
         if current_page > 1:
             buttons.append(InlineKeyboardButton(
-                "\u25c0\ufe0f",
+                "◀️",
                 callback_data=f"{callback_prefix}_page_{current_page - 1}"
             ))
 
@@ -93,7 +93,7 @@ class CommonKeyboards:
 
         if current_page < total_pages:
             buttons.append(InlineKeyboardButton(
-                "\u25b6\ufe0f",
+                "▶️",
                 callback_data=f"{callback_prefix}_page_{current_page + 1}"
             ))
 

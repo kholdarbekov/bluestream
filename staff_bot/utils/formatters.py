@@ -85,49 +85,49 @@ def format_order_card(order: Dict[str, Any], language: str) -> str:
     delivery_notes = _escape(order.get('delivery_notes', ''))
 
     lines = [
-        f"\U0001f4e6 <b>#{number}</b>",
+        f"📦 <b>#{number}</b>",
     ]
 
     if customer_name:
-        lines.append(f"\U0001f464 {customer_name}")
+        lines.append(f"👤 {customer_name}")
     if customer_phone:
-        lines.append(f"\U0001f4de {customer_phone}")
+        lines.append(f"📞 {customer_phone}")
     if district:
-        lines.append(f"\U0001f4cd {district}")
+        lines.append(f"📍 {district}")
     if address:
         lines.append(f"    {address}")
     if time_slot:
-        lines.append(f"\U0001f550 {time_slot}")
+        lines.append(f"🕐 {time_slot}")
 
     payment_label = i18n.get(f'staff.delivery.payment.{payment}', language) if payment else ''
     if payment_label:
-        lines.append(f"\U0001f4b0 {total} ({payment_label})")
+        lines.append(f"💰 {total} ({payment_label})")
     else:
-        lines.append(f"\U0001f4b0 {total}")
+        lines.append(f"💰 {total}")
     if payment == 'cash':
         cod_projection = get_cod_cash_projection(order)
         lines.append(
-            f"\U0001f4b8 {i18n.get('staff.delivery.cash_outstanding_label', language)}: "
+            f"💸 {i18n.get('staff.delivery.cash_outstanding_label', language)}: "
             f"{format_currency(order.get('outstanding_amount'), language=language)}"
         )
         if cod_projection['cod_reserved_prepayment_amount'] > 0:
             lines.append(
-                f"\U0001f4b3 COD prepaid reserved: "
+                f"💳 {i18n.get('staff.delivery.cod_prepaid_reserved', language)}: "
                 f"{format_currency(cod_projection['cod_reserved_prepayment_amount'], language=language)}"
             )
         lines.append(
-            f"\U0001f4b5 Cash to collect now: "
+            f"💵 {i18n.get('staff.delivery.cash_to_collect_now', language)}: "
             f"{format_currency(cod_projection['expected_cash_to_collect'], language=language)}"
         )
         payment_status = str(order.get('payment_status') or '').lower()
         if payment_status == 'completed' or cod_projection['expected_cash_to_collect'] <= 0:
-            lines.append(f"\u2705 {i18n.get('staff.delivery.cash_already_collected', language)}")
+            lines.append(f"✅ {i18n.get('staff.delivery.cash_already_collected', language)}")
         elif payment_status == 'partially_paid':
-            lines.append(f"\u2139\ufe0f {i18n.get('staff.delivery.cash_partially_collected', language)}")
-    lines.append(f"\U0001f4dd {item_count} {i18n.get('staff.items', language)}")
+            lines.append(f"ℹ️ {i18n.get('staff.delivery.cash_partially_collected', language)}")
+    lines.append(f"📝 {item_count} {i18n.get('staff.items', language)}")
 
     if delivery_notes:
-        lines.append(f"\U0001f4ac {delivery_notes}")
+        lines.append(f"💬 {delivery_notes}")
 
     return '\n'.join(lines)
 
@@ -135,15 +135,15 @@ def format_order_card(order: Dict[str, Any], language: str) -> str:
 def format_delivery_status(status: str, language: str) -> str:
     """Format delivery status with emoji"""
     status_map = {
-        'assigned': ('\U0001f4cb', 'staff.delivery.status.assigned'),
-        'picked_up': ('\U0001f4e6', 'staff.delivery.status.picked_up'),
-        'in_transit': ('\U0001f69a', 'staff.delivery.status.in_transit'),
-        'arrived': ('\U0001f4cd', 'staff.delivery.status.arrived'),
-        'delivered': ('\u2705', 'staff.delivery.status.delivered'),
-        'failed': ('\u274c', 'staff.delivery.status.failed'),
+        'assigned': ('📋', 'staff.delivery.status.assigned'),
+        'picked_up': ('📦', 'staff.delivery.status.picked_up'),
+        'in_transit': ('🚚', 'staff.delivery.status.in_transit'),
+        'arrived': ('📍', 'staff.delivery.status.arrived'),
+        'delivered': ('✅', 'staff.delivery.status.delivered'),
+        'failed': ('❌', 'staff.delivery.status.failed'),
     }
 
-    emoji, key = status_map.get(status, ('\u2753', f'staff.delivery.status.{status}'))
+    emoji, key = status_map.get(status, ('❓', f'staff.delivery.status.{status}'))
     return f"{emoji} {i18n.get(key, language)}"
 
 
@@ -166,18 +166,18 @@ def format_delivery_stats(stats: Dict[str, Any], language: str) -> str:
     cash_collected = format_currency(stats.get('total_cash_collected', 0), language=language)
 
     lines = [
-        f"\U0001f4ca <b>{i18n.get('staff.stats.title', language)}</b>",
+        f"📊 <b>{i18n.get('staff.stats.title', language)}</b>",
         "",
-        f"\U0001f4e6 {i18n.get('staff.stats.total', language)}: {total}",
-        f"\u2705 {i18n.get('staff.stats.completed', language)}: {completed}",
-        f"\u274c {i18n.get('staff.stats.failed', language)}: {failed}",
-        f"\u23f1 {i18n.get('staff.stats.avg_time', language)}: {avg_time:.0f} {i18n.get('staff.unit.minutes', language)}",
+        f"📦 {i18n.get('staff.stats.total', language)}: {total}",
+        f"✅ {i18n.get('staff.stats.completed', language)}: {completed}",
+        f"❌ {i18n.get('staff.stats.failed', language)}: {failed}",
+        f"⏱ {i18n.get('staff.stats.avg_time', language)}: {avg_time:.0f} {i18n.get('staff.unit.minutes', language)}",
     ]
 
     if rating > 0:
-        lines.append(f"\u2b50 {i18n.get('staff.stats.rating', language)}: {rating:.1f}/5")
+        lines.append(f"⭐ {i18n.get('staff.stats.rating', language)}: {rating:.1f}/5")
 
-    lines.append(f"\U0001f4b5 {i18n.get('staff.stats.cash', language)}: {cash_collected}")
+    lines.append(f"💵 {i18n.get('staff.stats.cash', language)}: {cash_collected}")
 
     return '\n'.join(lines)
 
@@ -192,10 +192,10 @@ def format_user_card(user: Dict[str, Any], language: str) -> str:
     order_count = user.get('order_count', 0)
 
     lines = [
-        f"\U0001f464 <b>{name}</b>",
-        f"\U0001f4de {phone}",
-        f"\U0001f4cd {address_count} {i18n.get('staff.addresses', language)}",
-        f"\U0001f4e6 {order_count} {i18n.get('staff.orders', language)}",
+        f"👤 <b>{name}</b>",
+        f"📞 {phone}",
+        f"📍 {address_count} {i18n.get('staff.addresses', language)}",
+        f"📦 {order_count} {i18n.get('staff.orders', language)}",
     ]
 
     return '\n'.join(lines)

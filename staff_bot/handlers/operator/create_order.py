@@ -76,11 +76,11 @@ class CreateOrderHandler(BaseHandler):
                 text = i18n.get('staff.operator.no_addresses', language)
                 keyboard = InlineKeyboardMarkup([
                     [InlineKeyboardButton(
-                        f"\u2795 {i18n.get('staff.operator.add_address', language)}",
+                        f"➕ {i18n.get('staff.operator.add_address', language)}",
                         callback_data=f"staff_op_add_addr_{client_id}"
                     )],
                     [InlineKeyboardButton(
-                        f"\u2b05\ufe0f {i18n.get('staff.back', language)}",
+                        f"⬅️ {i18n.get('staff.back', language)}",
                         callback_data="staff_back_to_main"
                     )]
                 ])
@@ -222,8 +222,8 @@ class CreateOrderHandler(BaseHandler):
             context.user_data['selecting_product_id'] = product_id
 
             text = (
-                f"\U0001f4e6 <b>{escape_html(product.get('name', ''))}</b>\n"
-                f"\U0001f4b0 {format_currency(product.get('price', 0), language=language)}\n\n"
+                f"📦 <b>{escape_html(product.get('name', ''))}</b>\n"
+                f"💰 {format_currency(product.get('price', 0), language=language)}\n\n"
                 f"{i18n.get('staff.operator.select_quantity', language)}"
             )
 
@@ -321,7 +321,7 @@ class CreateOrderHandler(BaseHandler):
         text = self._format_cart_summary(context, language)
         if restrictions.get('cod_restricted'):
             text += (
-                f"\n\n\u26a0\ufe0f "
+                f"\n\n⚠️ "
                 f"{i18n.get('staff.operator.cod_restricted', language)}"
             )
         text += f"\n\n{i18n.get('staff.operator.select_payment', language)}"
@@ -409,15 +409,15 @@ class CreateOrderHandler(BaseHandler):
 
         payment = order_data.get('payment_method', 'cash')
         payment_label = i18n.get(f'staff.operator.payment_{payment}', language)
-        text += f"\n\U0001f4b3 {payment_label}"
+        text += f"\n💳 {payment_label}"
 
         restrictions = order_data.get('payment_restrictions') or {}
         if restrictions.get('cod_restricted'):
-            text += f"\n\u26a0\ufe0f {i18n.get('staff.operator.cod_restricted', language)}"
+            text += f"\n⚠️ {i18n.get('staff.operator.cod_restricted', language)}"
 
         notes = order_data.get('delivery_notes')
         if notes:
-            text += f"\n\U0001f4ac {escape_html(notes)}"
+            text += f"\n💬 {escape_html(notes)}"
 
         text += f"\n\n{i18n.get('staff.operator.confirm_order_prompt', language)}"
 
@@ -472,7 +472,7 @@ class CreateOrderHandler(BaseHandler):
             order_number = result.get('order_number') or i18n.get('staff.common.not_available', language)
 
             await query.edit_message_text(
-                f"\u2705 {i18n.get('staff.operator.order_created', language, order_number=order_number)}",
+                f"✅ {i18n.get('staff.operator.order_created', language, order_number=order_number)}",
                 reply_markup=CommonKeyboards.back_button(language),
                 parse_mode='HTML'
             )
@@ -492,9 +492,9 @@ class CreateOrderHandler(BaseHandler):
         items = order_data.get('items', [])
 
         if not items:
-            return f"\U0001f6d2 {i18n.get('staff.operator.cart_empty', language)}"
+            return f"🛒 {i18n.get('staff.operator.cart_empty', language)}"
 
-        lines = [f"\U0001f6d2 <b>{i18n.get('staff.operator.cart', language)}</b>\n"]
+        lines = [f"🛒 <b>{i18n.get('staff.operator.cart', language)}</b>\n"]
         subtotal = 0
 
         for item in items:
@@ -503,10 +503,10 @@ class CreateOrderHandler(BaseHandler):
             price = item.get('price', 0)
             item_total = price * qty
             subtotal += item_total
-            lines.append(f"  \u2022 {name} x{qty} \u2014 {format_currency(item_total, language=language)}")
+            lines.append(f"  • {name} x{qty} — {format_currency(item_total, language=language)}")
 
         lines.append(
-            f"\n\U0001f4b0 {i18n.get('staff.operator.subtotal', language)}: "
+            f"\n💰 {i18n.get('staff.operator.subtotal', language)}: "
             f"{format_currency(subtotal, language=language)}"
         )
 

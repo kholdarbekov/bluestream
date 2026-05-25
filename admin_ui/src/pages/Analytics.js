@@ -14,6 +14,8 @@ import {
   Tag,
   List,
   Avatar,
+  InputNumber,
+  Switch,
   message
 } from 'antd';
 import {
@@ -60,7 +62,7 @@ const getTimeframeDateRange = (timeframe) => {
   return [start.subtract(30, 'day'), end];
 };
 
-const buildExportRows = (activeTab, overviewData, salesTrends, churnData, deliveryHeatmap, revenueForecast, loyaltyAnalytics) => {
+const buildExportRows = (activeTab, overviewData, salesTrends, churnData, deliveryHeatmap, revenueForecast, loyaltyAnalytics, inactiveData) => {
   if (activeTab === 'sales') {
     return (salesTrends?.labels || []).map((label, index) => ({
       Period: label,
@@ -107,6 +109,18 @@ const buildExportRows = (activeTab, overviewData, salesTrends, churnData, delive
     ];
   }
 
+  if (activeTab === 'inactive') {
+    return (inactiveData?.items || []).map((c) => ({
+      Name: c.full_name,
+      Phone: c.phone,
+      'Customer Type': c.entity_subtype || c.customer_type,
+      'Total Orders': c.total_orders,
+      'Total Spent': c.total_spent,
+      'Last Order': c.never_ordered ? 'Never' : c.last_order_date,
+      'Days Since Last Order': c.days_since_last_order
+    }));
+  }
+
   return [
     {
       Metric: 'Total Revenue',
@@ -132,6 +146,11 @@ const Analytics = () => {
   const [activeTab, setActiveTab] = useState('overview');
   const [timeframe, setTimeframe] = useState('30d');
   const [dateRange, setDateRange] = useState(getTimeframeDateRange('30d'));
+  const [inactiveDays, setInactiveDays] = useState(30);
+  const [inactiveCustomerType, setInactiveCustomerType] = useState('all');
+  const [includeNeverOrdered, setIncludeNeverOrdered] = useState(true);
+  const [inactivePage, setInactivePage] = useState(1);
+  const [inactivePerPage, setInactivePerPage] = useState(50);
 
   const startDate = dateRange?.[0]?.format('YYYY-MM-DD');
   const endDate = dateRange?.[1]?.format('YYYY-MM-DD');
@@ -185,6 +204,26 @@ const Analytics = () => {
 
     placeholderData: keepPreviousData,
     enabled: activeTab === 'loyalty',
+  });
+
+  const { data: inactiveData, isLoading: inactiveLoading } = useQuery({
+    queryKey: [
+      'inactive-customers',
+      inactiveDays,
+      inactiveCustomerType,
+      includeNeverOrdered,
+      inactivePage,
+      inactivePerPage
+    ],
+    queryFn: () => adminService.getInactiveCustomers({
+      days_since: inactiveDays,
+      customer_type: inactiveCustomerType,
+      include_never_ordered: includeNeverOrdered,
+      page: inactivePage,
+      per_page: inactivePerPage
+    }),
+    placeholderData: keepPreviousData,
+    enabled: activeTab === 'inactive',
   });
 
   const overviewTrendChartData = {
@@ -317,7 +356,8 @@ const Analytics = () => {
       churnData,
       deliveryHeatmap,
       revenueForecast,
-      loyaltyAnalytics
+      loyaltyAnalytics,
+      inactiveData
     );
 
     const exportResult = exportUtils.exportToExcel(
@@ -383,6 +423,63 @@ const Analytics = () => {
       key: 'total_spent',
       width: 120,
       render: (amount) => `${amount?.toFixed(2) || '0.00'} UZS`
+    }
+  ];
+
+  const inactiveColumns = [
+    {
+      title: t('ui.analytics.name', { defaultValue: 'Name' }),
+      dataIndex: 'full_name',
+      key: 'full_name'
+    },
+    {
+      title: t('ui.analytics.phone', { defaultValue: 'Phone' }),
+      dataIndex: 'phone',
+      key: 'phone',
+      width: 160
+    },
+    {
+      title: t('ui.analytics.customer_type', { defaultValue: 'Customer Type' }),
+      key: 'customer_type',
+      width: 140,
+      render: (_, r) => {
+        if (r.customer_type === 'individual') {
+          return <Tag color="blue">{t('ui.analytics.type_individual', { defaultValue: 'Individual' })}</Tag>;
+        }
+        if (r.entity_subtype === 'workplace') {
+          return <Tag color="purple">{t('ui.analytics.type_workplace', { defaultValue: 'Workplace' })}</Tag>;
+        }
+        if (r.entity_subtype === 'grocery_store') {
+          return <Tag color="gold">{t('ui.analytics.type_grocery', { defaultValue: 'Grocery' })}</Tag>;
+        }
+        return <Tag>{r.customer_type}</Tag>;
+      }
+    },
+    {
+      title: t('ui.analytics.total_orders', { defaultValue: 'Total Orders' }),
+      dataIndex: 'total_orders',
+      key: 'total_orders',
+      width: 120
+    },
+    {
+      title: t('ui.analytics.total_spent'),
+      dataIndex: 'total_spent',
+      key: 'total_spent',
+      width: 140,
+      render: (v) => `${Number(v || 0).toFixed(2)} UZS`
+    },
+    {
+      title: t('ui.analytics.last_order'),
+      dataIndex: 'last_order_date',
+      key: 'last_order_date',
+      width: 140,
+      render: (d, r) => (r.never_ordered ? <Tag>{t('ui.analytics.never')}</Tag> : formatDate(d))
+    },
+    {
+      title: t('ui.analytics.days_since_last_order', { defaultValue: 'Days Since Last Order' }),
+      dataIndex: 'days_since_last_order',
+      key: 'days_since_last_order',
+      width: 160
     }
   ];
 
@@ -863,6 +960,69 @@ const Analytics = () => {
               </Card>
             </Col>
           </Row>
+        </div>
+      )
+    },
+    {
+      key: 'inactive',
+      label: t('ui.analytics.inactive_customers', { defaultValue: 'Inactive Customers' }),
+      children: (
+        <div>
+          <Card style={{ marginBottom: 16 }}>
+            <Space wrap>
+              <span>{t('ui.analytics.days_threshold', { defaultValue: 'Days Threshold' })}:</span>
+              <InputNumber
+                min={0}
+                max={3650}
+                value={inactiveDays}
+                onChange={(v) => { setInactiveDays(v ?? 0); setInactivePage(1); }}
+              />
+              <Select
+                value={inactiveCustomerType}
+                onChange={(v) => { setInactiveCustomerType(v); setInactivePage(1); }}
+                style={{ width: 180 }}
+                options={[
+                  { value: 'all', label: t('ui.analytics.type_all', { defaultValue: 'All' }) },
+                  { value: 'individual', label: t('ui.analytics.type_individual', { defaultValue: 'Individual' }) },
+                  { value: 'workplace', label: t('ui.analytics.type_workplace', { defaultValue: 'Workplace' }) },
+                  { value: 'grocery', label: t('ui.analytics.type_grocery', { defaultValue: 'Grocery' }) }
+                ]}
+              />
+              <Switch
+                checked={includeNeverOrdered}
+                onChange={(v) => { setIncludeNeverOrdered(v); setInactivePage(1); }}
+              />
+              <span>{t('ui.analytics.include_never_ordered', { defaultValue: 'Include never-ordered' })}</span>
+            </Space>
+          </Card>
+
+          <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+            <Col xs={24} sm={12}>
+              <Card>
+                <Statistic
+                  title={t('ui.analytics.inactive_total', { defaultValue: 'Total Inactive' })}
+                  value={inactiveData?.meta?.total || 0}
+                  prefix={<UserOutlined />}
+                />
+              </Card>
+            </Col>
+          </Row>
+
+          <Card title={t('ui.analytics.inactive_customers_list', { defaultValue: 'Inactive Customers List' })}>
+            <Table
+              loading={inactiveLoading}
+              columns={inactiveColumns}
+              dataSource={inactiveData?.items || []}
+              rowKey="user_id"
+              pagination={{
+                current: inactivePage,
+                pageSize: inactivePerPage,
+                total: inactiveData?.meta?.total || 0,
+                showSizeChanger: true,
+                onChange: (p, ps) => { setInactivePage(p); setInactivePerPage(ps); }
+              }}
+            />
+          </Card>
         </div>
       )
     }

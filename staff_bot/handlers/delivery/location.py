@@ -98,7 +98,7 @@ class LocationHandler(BaseHandler):
                 )
                 view_button = InlineKeyboardMarkup([[
                     InlineKeyboardButton(
-                        f"\U0001f69a {i18n.get('staff.menu.active_deliveries', language)}",
+                        f"🚚 {i18n.get('staff.menu.active_deliveries', language)}",
                         callback_data="staff_active_deliveries",
                     )
                 ]])
@@ -111,7 +111,7 @@ class LocationHandler(BaseHandler):
                         parse_mode='HTML',
                     )
                     await msg.reply_text(
-                        f"\U0001f50d {i18n.get('staff.delivery.tap_to_see_optimized', language)}",
+                        f"🔍 {i18n.get('staff.delivery.tap_to_see_optimized', language)}",
                         reply_markup=view_button,
                     )
                 if is_live_edit:

@@ -26,7 +26,7 @@ class LanguageHandler(BaseHandler):
         for lang_code in ['en', 'uz', 'ru']:
             flag = i18n.get_language_flag(lang_code)
             name = i18n.get_language_name(lang_code, language)
-            current = " \u2713" if lang_code == language else ""
+            current = " ✓" if lang_code == language else ""
             keyboard.append([
                 InlineKeyboardButton(
                     f"{flag} {name}{current}",

@@ -80,14 +80,14 @@ class DeliveryKeyboards:
         """
         keyboard = [[
             InlineKeyboardButton(
-                f"\U0001f504 {i18n.get('staff.delivery.optimize_routes_button', language)}",
+                f"🔄 {i18n.get('staff.delivery.optimize_routes_button', language)}",
                 callback_data="staff_optimize_routes",
             )
         ]]
         if show_share_location:
             keyboard.append([
                 InlineKeyboardButton(
-                    f"\U0001f4cd {i18n.get('staff.delivery.share_location_button', language)}",
+                    f"📍 {i18n.get('staff.delivery.share_location_button', language)}",
                     callback_data="staff_share_location_prompt",
                 )
             ])
@@ -110,14 +110,14 @@ class DeliveryKeyboards:
         allowed_next = DELIVERY_STATUS_TRANSITIONS.get(current_status, [])
         for next_status in allowed_next:
             if next_status == 'failed':
-                emoji = "\u274c"
+                emoji = "❌"
             else:
                 emoji = {
-                    'picked_up': '\U0001f4e6',
-                    'in_transit': '\U0001f69a',
-                    'arrived': '\U0001f4cd',
-                    'delivered': '\u2705',
-                }.get(next_status, '\u27a1\ufe0f')
+                    'picked_up': '📦',
+                    'in_transit': '🚚',
+                    'arrived': '📍',
+                    'delivered': '✅',
+                }.get(next_status, '➡️')
 
             keyboard.append([InlineKeyboardButton(
                 f"{emoji} {i18n.get(f'staff.delivery.status.{next_status}', language)}",
@@ -471,11 +471,11 @@ class DeliveryKeyboards:
             sender = (t.get('sender_name') or 'Driver')[:15]
             keyboard.append([
                 InlineKeyboardButton(
-                    f"✅ Confirm {qty} from {sender}",
+                    f"✅ {i18n.get('staff.delivery.transfer_confirm_button', language, qty=qty, sender=sender)}",
                     callback_data=f"staff_transfer_confirm_{transfer_id}_{qty}"
                 ),
                 InlineKeyboardButton(
-                    "✏️ Different count",
+                    f"✏️ {i18n.get('staff.delivery.transfer_custom_count_button', language)}",
                     callback_data=f"staff_transfer_custom_{transfer_id}"
                 ),
             ])

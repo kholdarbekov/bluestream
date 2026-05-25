@@ -83,11 +83,11 @@ class StartHandler(BaseHandler):
 
         # Parse language from button text
         language = 'en'
-        if 'O\'zbekcha' in text or '\U0001f1fa\U0001f1ff' in text:
+        if 'O\'zbekcha' in text or '🇺🇿' in text:
             language = 'uz'
-        elif '\u0420\u0443\u0441\u0441\u043a\u0438\u0439' in text or '\U0001f1f7\U0001f1fa' in text:
+        elif 'Русский' in text or '🇷🇺' in text:
             language = 'ru'
-        elif 'English' in text or '\U0001f1fa\U0001f1f8' in text:
+        elif 'English' in text or '🇺🇸' in text:
             language = 'en'
 
         context.user_data['language'] = i18n.normalize_language(language)

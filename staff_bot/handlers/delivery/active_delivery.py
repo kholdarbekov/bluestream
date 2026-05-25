@@ -234,7 +234,7 @@ class ActiveDeliveryHandler(BaseHandler):
             await self._delete_previous_card_messages(context)
 
             if not deliveries:
-                text = f"\U0001f69a {i18n.get('staff.delivery.no_active', language)}"
+                text = f"🚚 {i18n.get('staff.delivery.no_active', language)}"
                 # Show share-location prompt even when empty if location is missing.
                 keyboard = DeliveryKeyboards.active_list_top_actions(
                     language, show_share_location=(location_status != 'fresh')
@@ -245,25 +245,25 @@ class ActiveDeliveryHandler(BaseHandler):
 
             # Header
             header_lines = [
-                f"\U0001f69a <b>{i18n.get('staff.delivery.active_title', language)}</b>",
+                f"🚚 <b>{i18n.get('staff.delivery.active_title', language)}</b>",
                 i18n.get('staff.delivery.active_count', language, count=len(deliveries)),
             ]
             if location_status == 'missing':
-                # Hard precondition not met \u2014 optimization is OFF until the
+                # Hard precondition not met — optimization is OFF until the
                 # driver shares location. The list below is unsorted (just
                 # in claim order) and there's no ETA. Be explicit so the
                 # driver knows what to do.
                 header_lines.append("")
                 header_lines.append(
-                    f"\u26a0\ufe0f <b>{i18n.get('staff.delivery.location_required_notice', language)}</b>"
+                    f"⚠️ <b>{i18n.get('staff.delivery.location_required_notice', language)}</b>"
                 )
             elif location_status == 'stale':
                 # We have a location but it's older than the freshness
-                # threshold \u2014 the sequence is computed from the last
+                # threshold — the sequence is computed from the last
                 # known position. Suggest a re-share for accuracy.
                 header_lines.append("")
                 header_lines.append(
-                    f"\u2139\ufe0f {i18n.get('staff.delivery.location_stale_notice', language)}"
+                    f"ℹ️ {i18n.get('staff.delivery.location_stale_notice', language)}"
                 )
             header = '\n'.join(header_lines) + '\n'
 
@@ -282,40 +282,40 @@ class ActiveDeliveryHandler(BaseHandler):
                 order_num = escape_html(delivery.get('order_number') or i18n.get('staff.common.not_available', language))
 
                 lines = []
-                # Only show the "Next stop \u00b7 ETA \u00b7 km" badge when we have a
+                # Only show the "Next stop · ETA · km" badge when we have a
                 # real driver location to compute it from. When location is
                 # missing/stale, the ETA would be measured from the depot /
-                # city centre \u2014 confusing rather than useful, so we suppress it.
+                # city centre — confusing rather than useful, so we suppress it.
                 if delivery.get('is_next') and location_status == 'fresh':
                     eta = delivery.get('eta_minutes_from_current_location')
                     km = delivery.get('distance_km_to_next')
                     next_parts = [
-                        f"\U0001f4cd <b>{i18n.get('staff.delivery.next_stop', language)}</b>"
+                        f"📍 <b>{i18n.get('staff.delivery.next_stop', language)}</b>"
                     ]
                     if eta is not None:
                         next_parts.append(
-                            f"\u23f1 {i18n.get('staff.delivery.eta_minutes', language, minutes=int(eta))}"
+                            f"⏱ {i18n.get('staff.delivery.eta_minutes', language, minutes=int(eta))}"
                         )
                     if km is not None:
                         next_parts.append(
-                            f"\U0001f4cf {i18n.get('staff.delivery.distance_km', language, km=km)}"
+                            f"📏 {i18n.get('staff.delivery.distance_km', language, km=km)}"
                         )
-                    lines.append(' \u00b7 '.join(next_parts))
+                    lines.append(' · '.join(next_parts))
 
                 position = delivery.get('route_position')
                 position_prefix = f"{position + 1}. " if isinstance(position, int) else ""
                 lines.append(
-                    f"\U0001f69a <b>{position_prefix}#{order_num}</b> \u2014 {status_text}"
+                    f"🚚 <b>{position_prefix}#{order_num}</b> — {status_text}"
                 )
 
                 customer_name = escape_html(delivery.get('customer_name', ''))
                 if customer_name:
-                    lines.append(f"\U0001f464 {customer_name}")
+                    lines.append(f"👤 {customer_name}")
 
                 address = escape_html(delivery.get('address', ''))
                 district = escape_html(delivery.get('district', ''))
                 if district:
-                    lines.append(f"\U0001f4cd {district}")
+                    lines.append(f"📍 {district}")
                 if address:
                     lines.append(f"    {address}")
 
@@ -323,33 +323,33 @@ class ActiveDeliveryHandler(BaseHandler):
                 payment = delivery.get('payment_method', '')
                 payment_label = i18n.get(f'staff.delivery.payment.{payment}', language) if payment else ''
                 if payment_label:
-                    lines.append(f"\U0001f4b0 {total} ({payment_label})")
+                    lines.append(f"💰 {total} ({payment_label})")
                 else:
-                    lines.append(f"\U0001f4b0 {total}")
+                    lines.append(f"💰 {total}")
                 if payment == 'cash':
                     cod_projection = get_cod_cash_projection(delivery)
                     lines.append(
-                        f"\U0001f9fe {i18n.get('staff.delivery.cash_collected_label', language)}: "
+                        f"🧾 {i18n.get('staff.delivery.cash_collected_label', language)}: "
                         f"{format_currency(delivery.get('amount_collected'), language=language)}"
                     )
                     lines.append(
-                        f"\U0001f4b8 {i18n.get('staff.delivery.cash_outstanding_label', language)}: "
+                        f"💸 {i18n.get('staff.delivery.cash_outstanding_label', language)}: "
                         f"{format_currency(delivery.get('outstanding_amount'), language=language)}"
                     )
                     if cod_projection['cod_reserved_prepayment_amount'] > 0:
                         lines.append(
-                            f"\U0001f4b3 COD prepaid reserved: "
+                            f"💳 {i18n.get('staff.delivery.cod_prepaid_reserved', language)}: "
                             f"{format_currency(cod_projection['cod_reserved_prepayment_amount'], language=language)}"
                         )
                     lines.append(
-                        f"\U0001f4b5 Cash to collect now: "
+                        f"💵 {i18n.get('staff.delivery.cash_to_collect_now', language)}: "
                         f"{format_currency(cod_projection['expected_cash_to_collect'], language=language)}"
                     )
                     payment_status = str(delivery.get('payment_status') or '').lower()
                     if payment_status == 'completed' or cod_projection['expected_cash_to_collect'] <= 0:
-                        lines.append(f"\u2705 {i18n.get('staff.delivery.cash_already_collected', language)}")
+                        lines.append(f"✅ {i18n.get('staff.delivery.cash_already_collected', language)}")
                     elif payment_status == 'partially_paid':
-                        lines.append(f"\u2139\ufe0f {i18n.get('staff.delivery.cash_partially_collected', language)}")
+                        lines.append(f"ℹ️ {i18n.get('staff.delivery.cash_partially_collected', language)}")
 
                 text = '\n'.join(lines)
                 delivery_id = delivery.get('delivery_id') or delivery.get('id')
@@ -357,7 +357,7 @@ class ActiveDeliveryHandler(BaseHandler):
                 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
                 keyboard = InlineKeyboardMarkup([[
                     InlineKeyboardButton(
-                        f"\U0001f4cb {i18n.get('staff.delivery.manage', language)}",
+                        f"📋 {i18n.get('staff.delivery.manage', language)}",
                         callback_data=f"staff_view_active_{delivery_id}"
                     )
                 ]])
@@ -419,7 +419,7 @@ class ActiveDeliveryHandler(BaseHandler):
             order_num = escape_html(delivery.get('order_number') or i18n.get('staff.common.not_available', language))
 
             lines = [
-                f"\U0001f69a <b>#{order_num}</b>",
+                f"🚚 <b>#{order_num}</b>",
                 f"{i18n.get('staff.delivery.current_status', language)}: {status_text}",
                 "",
             ]
@@ -431,32 +431,32 @@ class ActiveDeliveryHandler(BaseHandler):
                 for item in items:
                     name = escape_html(item.get('product_name', item.get('name', '')))
                     qty = item.get('quantity', 1)
-                    lines.append(f"  \u2022 {name} x{qty}")
+                    lines.append(f"  • {name} x{qty}")
                 lines.append("")
 
             # Customer
             customer_name = escape_html(delivery.get('customer_name', ''))
             customer_phone = escape_html(delivery.get('customer_phone', ''))
             if customer_name:
-                lines.append(f"\U0001f464 {customer_name}")
+                lines.append(f"👤 {customer_name}")
             if customer_phone:
-                lines.append(f"\U0001f4de {customer_phone}")
+                lines.append(f"📞 {customer_phone}")
 
             # Address
             address = escape_html(delivery.get('address', ''))
             district = escape_html(delivery.get('district', ''))
             if district:
-                lines.append(f"\U0001f4cd {district}")
+                lines.append(f"📍 {district}")
             if address:
                 lines.append(f"    {address}")
             delivery_instructions = escape_html(delivery.get('delivery_instructions', ''))
             if delivery_instructions:
-                lines.append(f"    \U0001f4dd {delivery_instructions}")
+                lines.append(f"    📝 {delivery_instructions}")
 
             # Payment
             total = format_currency(delivery.get('total_amount'), language=language)
             payment = delivery.get('payment_method', '')
-            payment_info = f"\U0001f4b0 {total}"
+            payment_info = f"💰 {total}"
             if payment:
                 payment_label = i18n.get(f'staff.delivery.payment.{payment}', language)
                 payment_info += f" ({payment_label})"
@@ -464,32 +464,32 @@ class ActiveDeliveryHandler(BaseHandler):
             if payment == 'cash':
                 cod_projection = get_cod_cash_projection(delivery)
                 lines.append(
-                    f"\U0001f9fe {i18n.get('staff.delivery.cash_collected_label', language)}: "
+                    f"🧾 {i18n.get('staff.delivery.cash_collected_label', language)}: "
                     f"{format_currency(delivery.get('amount_collected'), language=language)}"
                 )
                 lines.append(
-                    f"\U0001f4b8 {i18n.get('staff.delivery.cash_outstanding_label', language)}: "
+                    f"💸 {i18n.get('staff.delivery.cash_outstanding_label', language)}: "
                     f"{format_currency(delivery.get('outstanding_amount'), language=language)}"
                 )
                 if cod_projection['cod_reserved_prepayment_amount'] > 0:
                     lines.append(
-                        f"\U0001f4b3 COD prepaid reserved: "
+                        f"💳 {i18n.get('staff.delivery.cod_prepaid_reserved', language)}: "
                         f"{format_currency(cod_projection['cod_reserved_prepayment_amount'], language=language)}"
                     )
                 lines.append(
-                    f"\U0001f4b5 Cash to collect now: "
+                    f"💵 {i18n.get('staff.delivery.cash_to_collect_now', language)}: "
                     f"{format_currency(cod_projection['expected_cash_to_collect'], language=language)}"
                 )
                 payment_status = str(delivery.get('payment_status') or '').lower()
                 if payment_status == 'completed' or cod_projection['expected_cash_to_collect'] <= 0:
-                    lines.append(f"\u2705 {i18n.get('staff.delivery.cash_already_collected', language)}")
+                    lines.append(f"✅ {i18n.get('staff.delivery.cash_already_collected', language)}")
                 elif payment_status == 'partially_paid':
-                    lines.append(f"\u2139\ufe0f {i18n.get('staff.delivery.cash_partially_collected', language)}")
+                    lines.append(f"ℹ️ {i18n.get('staff.delivery.cash_partially_collected', language)}")
 
             # Delivery notes
             notes = delivery.get('delivery_notes', '')
             if notes:
-                lines.append(f"\U0001f4ac {escape_html(notes)}")
+                lines.append(f"💬 {escape_html(notes)}")
 
             # Store delivery info in context for status updates/navigation
             context.user_data['current_delivery'] = {
@@ -649,18 +649,18 @@ class ActiveDeliveryHandler(BaseHandler):
             from telegram import InlineKeyboardButton, InlineKeyboardMarkup
             keyboard = InlineKeyboardMarkup([[
                 InlineKeyboardButton(
-                    f"\U0001f5fa {i18n.get('staff.delivery.open_maps', language)}",
+                    f"🗺 {i18n.get('staff.delivery.open_maps', language)}",
                     url=maps_url
                 )
             ], [
                 InlineKeyboardButton(
-                    f"\u2b05\ufe0f {i18n.get('staff.back', language)}",
+                    f"⬅️ {i18n.get('staff.back', language)}",
                     callback_data=f"staff_view_active_{delivery_info.get('delivery_id', 0)}"
                 )
             ]])
 
             await query.edit_message_text(
-                f"\U0001f4cd {i18n.get('staff.delivery.navigate_text', language)}\n"
+                f"📍 {i18n.get('staff.delivery.navigate_text', language)}\n"
                 f"{address}\n"
                 f"({destination_lat}, {destination_lng})",
                 reply_markup=keyboard,

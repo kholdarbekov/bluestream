@@ -174,13 +174,13 @@ class CreateUserHandler(BaseHandler):
         lang_name = i18n.get_language_name(client_lang, language)
 
         text = (
-            f"\U0001f464 <b>{i18n.get('staff.operator.confirm_create_user', language)}</b>\n\n"
-            f"\U0001f4de {escape_html(client_data['phone'])}\n"
-            f"\U0001f464 {escape_html(client_data['first_name'])}"
+            f"👤 <b>{i18n.get('staff.operator.confirm_create_user', language)}</b>\n\n"
+            f"📞 {escape_html(client_data['phone'])}\n"
+            f"👤 {escape_html(client_data['first_name'])}"
         )
         if client_data.get('last_name'):
             text += f" {escape_html(client_data['last_name'])}"
-        text += f"\n\U0001f310 {lang_name}"
+        text += f"\n🌐 {lang_name}"
 
         keyboard = CommonKeyboards.confirm_cancel(
             language,
@@ -212,7 +212,7 @@ class CreateUserHandler(BaseHandler):
             if not response.success:
                 if response.status_code == 409:
                     await query.edit_message_text(
-                        f"\u274c {i18n.get('staff.operator.user_already_exists', language)}",
+                        f"❌ {i18n.get('staff.operator.user_already_exists', language)}",
                         reply_markup=CommonKeyboards.back_button(language),
                         parse_mode='HTML'
                     )
@@ -224,9 +224,9 @@ class CreateUserHandler(BaseHandler):
             user_name = f"{client_data.get('first_name', '')} {client_data.get('last_name', '')}".strip()
 
             text = (
-                f"\u2705 {i18n.get('staff.operator.user_created', language)}\n\n"
-                f"\U0001f464 {escape_html(user_name)}\n"
-                f"\U0001f4de {escape_html(client_data.get('phone', ''))}"
+                f"✅ {i18n.get('staff.operator.user_created', language)}\n\n"
+                f"👤 {escape_html(user_name)}\n"
+                f"📞 {escape_html(client_data.get('phone', ''))}"
             )
 
             # Offer to create order for the new user

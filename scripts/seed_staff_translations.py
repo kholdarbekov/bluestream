@@ -1285,6 +1285,41 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "❌ Hamkorni taklif qilish uchun ochiq sessiyangiz bo'lishi kerak.",
         "ru": "❌ Для приглашения напарника необходимо иметь открытую сессию.",
     },
+    "staff.delivery.cod_prepaid_reserved": {
+        "en": "COD prepaid reserved",
+        "uz": "Naqd to'lov uchun band qilingan oldindan to'lov",
+        "ru": "Зарезервированная предоплата за наложенный платёж",
+    },
+    "staff.delivery.cash_to_collect_now": {
+        "en": "Cash to collect now",
+        "uz": "Hozir yig'iladigan naqd pul",
+        "ru": "Сумма к получению сейчас",
+    },
+    "staff.delivery.cod_prepaid_deduction": {
+        "en": "COD prepaid deduction",
+        "uz": "Naqd to'lovdan oldindan to'lov ushlanmasi",
+        "ru": "Вычет предоплаты из наложенного платежа",
+    },
+    "staff.delivery.no_cash_due_after_cod": {
+        "en": "No cash due after COD prepaid deduction",
+        "uz": "Oldindan to'lov ushlangandan keyin naqd pul talab qilinmaydi",
+        "ru": "Наличные не требуются после вычета предоплаты",
+    },
+    "staff.delivery.transfer_confirm_button": {
+        "en": "Confirm {qty} from {sender}",
+        "uz": "{sender} dan {qty} ni tasdiqlash",
+        "ru": "Подтвердить {qty} от {sender}",
+    },
+    "staff.delivery.transfer_custom_count_button": {
+        "en": "Different count",
+        "uz": "Boshqa miqdor",
+        "ru": "Другое количество",
+    },
+    "staff.tryout.pickup_all_label": {
+        "en": "All ({label})",
+        "uz": "Hammasi ({label})",
+        "ru": "Все ({label})",
+    },
 }
 
 

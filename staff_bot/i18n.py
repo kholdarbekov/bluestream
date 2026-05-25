@@ -210,17 +210,17 @@ class Translation:
     def get_language_flag(self, language_code: str) -> str:
         """Get flag emoji for language"""
         language_code = self.normalize_language(language_code)
-        flags = {'en': '\U0001f1fa\U0001f1f8', 'uz': '\U0001f1fa\U0001f1ff', 'ru': '\U0001f1f7\U0001f1fa'}
-        return flags.get(language_code, '\U0001f310')
+        flags = {'en': '🇺🇸', 'uz': '🇺🇿', 'ru': '🇷🇺'}
+        return flags.get(language_code, '🌐')
 
     def get_language_name(self, language_code: str, display_language: str = None) -> str:
         """Get language name in specified display language"""
         language_code = self.normalize_language(language_code)
         display_language = self.normalize_language(display_language or language_code)
         names = {
-            'en': {'en': 'English', 'uz': 'Inglizcha', 'ru': '\u0410\u043d\u0433\u043b\u0438\u0439\u0441\u043a\u0438\u0439'},
-            'uz': {'en': 'Uzbek', 'uz': "O'zbekcha", 'ru': '\u0423\u0437\u0431\u0435\u043a\u0441\u043a\u0438\u0439'},
-            'ru': {'en': 'Russian', 'uz': 'Ruscha', 'ru': '\u0420\u0443\u0441\u0441\u043a\u0438\u0439'}
+            'en': {'en': 'English', 'uz': 'Inglizcha', 'ru': 'Английский'},
+            'uz': {'en': 'Uzbek', 'uz': "O'zbekcha", 'ru': 'Узбекский'},
+            'ru': {'en': 'Russian', 'uz': 'Ruscha', 'ru': 'Русский'}
         }
         return names.get(language_code, {}).get(display_language, language_code)
 

@@ -32,7 +32,7 @@ class TryoutHandler(BaseHandler):
     async def show_hub(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show the try-outs sub-menu (Create / Tasks / Active)."""
         language = await self._get_language(update, context)
-        title = f"\U0001f9ea <b>{i18n.get('staff.tryouts.hub_title', language)}</b>"
+        title = f"🧪 <b>{i18n.get('staff.tryouts.hub_title', language)}</b>"
         keyboard = MenuKeyboards.tryouts_hub(language)
 
         try:

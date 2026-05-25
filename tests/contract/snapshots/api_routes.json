@@ -70,6 +70,13 @@
     "rule": "/api/v1/addresses/reverse-geocode"
   },
   {
+    "endpoint": "admin.get_inactive_customers",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/analytics/inactive-customers"
+  },
+  {
     "endpoint": "admin.get_audit_logs",
     "methods": [
       "GET"

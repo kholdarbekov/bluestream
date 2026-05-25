@@ -243,7 +243,7 @@ class TryoutKeyboards:
         for candidate in unique_candidates:
             label = format_quantity(candidate)
             if candidate == outstanding:
-                label = f"All ({label})"
+                label = i18n.get('staff.tryout.pickup_all_label', language, label=label)
             current_row.append(
                 InlineKeyboardButton(
                     label,

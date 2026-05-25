@@ -99,9 +99,9 @@ class BaseHandler:
             # BotValidationError carries the user-presentable reason in `message`
             # and should surface it verbatim when the i18n key is generic.
             if isinstance(exc, BotValidationError) and exc.message:
-                text = f"\u274c {exc.message}"
+                text = f"❌ {exc.message}"
             elif isinstance(exc, BotAPIError) and exc.message and i18n_key == BotAPIError.default_i18n_key:
-                text = f"\u274c {exc.message}"
+                text = f"❌ {exc.message}"
             else:
                 text = localized
         else:
@@ -132,7 +132,7 @@ class BaseHandler:
 
     async def _handle_api_error(self, update: Update, error: str, language: str):
         """Back-compat shim: prefer raising `BotAPIError(error)` and letting `_handle_error` dispatch."""
-        error_msg = f"\u274c {error}"
+        error_msg = f"❌ {error}"
 
         if update.callback_query:
             await update.callback_query.answer(error_msg)
@@ -152,9 +152,9 @@ class BaseHandler:
             if update.callback_query:
                 await self._edit_or_replace_callback_message(
                     update.callback_query,
-                    f"\u274c {message}",
+                    f"❌ {message}",
                 )
             elif update.message:
-                await update.message.reply_text(f"\u274c {message}")
+                await update.message.reply_text(f"❌ {message}")
         except Exception as e:
             logger.error(f"Error sending error message: {e}")

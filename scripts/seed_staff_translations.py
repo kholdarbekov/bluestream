@@ -31,7 +31,7 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "staff.menu.title": {
         "en": "Staff Bot - Main Menu",
         "uz": "Xodimlar boti - Asosiy menyu",
-        "ru": "Бот сотрудников BlueStream - Главное меню",
+        "ru": "Бот сотрудников Aqua Element - Главное меню",
     },
     "staff.menu.new_orders": {
         "en": "New Orders",
@@ -251,9 +251,9 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "ru": "Язык обновлен.",
     },
     "staff.welcome_intro": {
-        "en": "Welcome to BlueStream Staff Bot!\n\nPlease select your language:",
-        "uz": "BlueStream xodimlar botiga xush kelibsiz!\n\nIltimos, tilni tanlang:",
-        "ru": "Добро пожаловать в бот сотрудников BlueStream!\n\nПожалуйста, выберите язык:",
+        "en": "Welcome to Aqua Element Staff Bot!\n\nPlease select your language:",
+        "uz": "Aqua Element xodimlar botiga xush kelibsiz!\n\nIltimos, tilni tanlang:",
+        "ru": "Добро пожаловать в бот сотрудников Aqua Element!\n\nПожалуйста, выберите язык:",
     },
     "staff.notification.new_order": {
         "en": "New order available!",
@@ -434,6 +434,11 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "Expected cash",
         "uz": "Kutilgan naqd pul",
         "ru": "Ожидаемые наличные",
+    },
+    "staff.delivery.expected_cash_on_hand_label": {
+        "en": "Expected cash on hand",
+        "uz": "Qo'lda bo'lishi kerak bo'lgan naqd pul",
+        "ru": "Ожидаемая сумма на руках",
     },
     "staff.delivery.declared_cash_label": {
         "en": "Declared cash",
@@ -1319,6 +1324,106 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "All ({label})",
         "uz": "Hammasi ({label})",
         "ru": "Все ({label})",
+    },
+    "staff.delivery.active_cod_debts": {
+        "en": "Active COD (Cash on Delivery) debts",
+        "uz": "Faol naqd to'lov qarzlari",
+        "ru": "Активные долги по наложенным платежам",
+    },
+    "staff.delivery.bottles_return_prompt": {
+        "en": "How many bottles (18.9 L) did the customer return? Expected: {expected}",
+        "uz": "Mijoz nechta idish (18.9 L) qaytardi? Kutilgan: {expected}",
+        "ru": "Сколько бутылок (18.9 L) вернул клиент? Ожидалось: {expected}",
+    },
+    "staff.delivery.cash_already_collected": {
+        "en": "Cash already collected in full",
+        "uz": "Naqd pul to'liq yig'ib olingan",
+        "ru": "Наличные уже получены полностью",
+    },
+    "staff.delivery.cash_partially_collected": {
+        "en": "Cash partially collected",
+        "uz": "Naqd pul qisman yig'ib olingan",
+        "ru": "Наличные получены частично",
+    },
+    "staff.delivery.cod_collection_amount_exceeds_outstanding": {
+        "en": "Amount exceeds outstanding ({amount}). Please enter a smaller value.",
+        "uz": "Summa qoldiqdan ({amount}) ortiq. Iltimos, kichikroq qiymat kiriting.",
+        "ru": "Сумма превышает остаток ({amount}). Введите меньшее значение.",
+    },
+    "staff.delivery.cod_collection_amount_prompt": {
+        "en": "Enter the amount you collected (UZS):",
+        "uz": "Yig'ib olgan summani kiriting (UZS):",
+        "ru": "Введите полученную сумму (UZS):",
+    },
+    "staff.delivery.cod_collection_note_prompt": {
+        "en": "Add a note for this collection of {amount} (or send /skip to record without a note):",
+        "uz": "Ushbu {amount} yig'imi uchun izoh qo'shing (izohsiz qayd qilish uchun /skip yuboring):",
+        "ru": "Добавьте примечание для сбора {amount} (или отправьте /skip, чтобы записать без примечания):",
+    },
+    "staff.delivery.cod_collection_recorded": {
+        "en": "Collection recorded successfully.",
+        "uz": "Yig'im muvaffaqiyatli qayd qilindi.",
+        "ru": "Сбор успешно записан.",
+    },
+    "staff.delivery.cod_collection_search_prompt": {
+        "en": "Search by customer name, phone or order number:",
+        "uz": "Mijoz ismi, telefon raqami yoki buyurtma raqami bo'yicha qidiring:",
+        "ru": "Поиск по имени клиента, телефону или номеру заказа:",
+    },
+    "staff.delivery.cod_statement_title": {
+        "en": "COD (Cash on Delivery) statement",
+        "uz": "Naqd to'lovlar hisoboti",
+        "ru": "Отчёт по наложенным платежам",
+    },
+    "staff.delivery.collect_custom_cod": {
+        "en": "Collect custom amount",
+        "uz": "Boshqa summa yig'ish",
+        "ru": "Получить другую сумму",
+    },
+    "staff.delivery.collect_full_cod": {
+        "en": "Collect full COD (Cash on Delivery)",
+        "uz": "To'liq naqd to'lov qarzini yig'ish",
+        "ru": "Получить долг полностью",
+    },
+    "staff.delivery.collection_notes_required": {
+        "en": "A note is required for this collection. Please send the note text.",
+        "uz": "Ushbu yig'im uchun izoh talab qilinadi. Iltimos, izoh matnini yuboring.",
+        "ru": "Для этого сбора требуется примечание. Отправьте текст примечания.",
+    },
+    "staff.delivery.invalid_cash_amount": {
+        "en": "Invalid cash amount. Please enter a positive number.",
+        "uz": "Noto'g'ri naqd summa. Iltimos, musbat son kiriting.",
+        "ru": "Некорректная сумма. Введите положительное число.",
+    },
+    "staff.delivery.no_cod_debt": {
+        "en": "No outstanding COD (Cash on Delivery) debt.",
+        "uz": "To'lanmagan naqd to'lov qarzi yo'q.",
+        "ru": "Нет непогашенного долга по наложенным платежам.",
+    },
+    "staff.delivery.no_customer_cod_results": {
+        "en": "No customers with outstanding COD (Cash on Delivery) found for \"{query}\".",
+        "uz": "\"{query}\" bo'yicha to'lanmagan naqd to'lov bo'lgan mijozlar topilmadi.",
+        "ru": "По запросу \"{query}\" клиенты с непогашенным наложенным платежом не найдены.",
+    },
+    "staff.delivery.risk_flags": {
+        "en": "Risk flags",
+        "uz": "Xavf belgilari",
+        "ru": "Признаки риска",
+    },
+    "staff.delivery.total_outstanding": {
+        "en": "Total outstanding",
+        "uz": "Jami qoldiq",
+        "ru": "Общий остаток",
+    },
+    "staff.delivery.view_cod_statement": {
+        "en": "View COD (Cash on Delivery) statement",
+        "uz": "Naqd to'lov hisobotini ko'rish",
+        "ru": "Посмотреть отчёт по наложенным платежам",
+    },
+    "staff.order.unknown": {
+        "en": "Unknown order",
+        "uz": "Noma'lum buyurtma",
+        "ru": "Неизвестный заказ",
     },
 }
 

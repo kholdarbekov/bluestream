@@ -461,6 +461,8 @@ class StaffBot:
             CallbackQueryHandler(cash_collection_handler.show_customer_statement, pattern=r"^staff_cod_customer_\d+$"),
             CallbackQueryHandler(cash_collection_handler.start_full_collection, pattern=r"^staff_cod_collect_full_\d+$"),
             CallbackQueryHandler(cash_collection_handler.start_custom_collection, pattern=r"^staff_cod_collect_custom_\d+$"),
+            CallbackQueryHandler(cash_collection_handler.confirm_overpayment_collection, pattern=r"^staff_cod_confirm_overpay_yes$"),
+            CallbackQueryHandler(cash_collection_handler.cancel_overpayment_collection, pattern=r"^staff_cod_confirm_overpay_no$"),
             CallbackQueryHandler(status_update_handler.mark_preparing, pattern=r"^staff_mark_preparing_\d+$"),
 
             # Bottle return during delivery completion
@@ -956,7 +958,9 @@ class StaffBot:
         if cod_collection_flow:
             cash_collection_handler = self._delivery_handlers.get('cash_collection')
             if cash_collection_handler:
-                if cod_collection_flow.get('amount') is None:
+                if cod_collection_flow.get('awaiting_search_input'):
+                    await cash_collection_handler.receive_collection_search(update, context)
+                elif cod_collection_flow.get('amount') is None:
                     await cash_collection_handler.receive_collection_amount(update, context)
                 else:
                     await cash_collection_handler.receive_collection_note(update, context)

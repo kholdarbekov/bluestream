@@ -25,3 +25,9 @@ def detect_search_type(query_text: str) -> str:
     if compact.isdigit() and len(compact) >= MIN_PHONE_DIGITS:
         return 'phone'
     return 'name'
+
+
+def normalize_phone_query(query_text: str) -> str:
+    """Strip everything except digits so a typed phone with spaces/dashes
+    matches against canonical ``+998901234567``-style values via ILIKE."""
+    return ''.join(ch for ch in query_text if ch.isdigit())

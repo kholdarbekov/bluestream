@@ -785,6 +785,11 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Naqd pul yarashtiruvi hal qilinmaguncha siz yangi naqd tolovli buyurtmalarni qabul qila olmaysiz. Iltimos, avval Naqd pul yarashtiruvini bajaring.",
         "ru": "Вы не можете принимать новые заказы с оплатой наличными, пока не завершите сверку наличных. Пожалуйста, сначала выполните Сверку наличных.",
     },
+    "staff.error.api.cod_debt_limit_reached": {
+        "en": "This customer has reached the maximum number of unpaid cash-on-delivery debts and cannot take on more until earlier debts are settled.",
+        "uz": "Bu mijoz to'lanmagan naqd to'lov qarzlarining maksimal soniga yetdi va eski qarzlar to'lanmagunicha yangi qarz olishi mumkin emas.",
+        "ru": "Этот клиент достиг максимального количества непогашенных задолженностей по наложенному платежу — новые долги невозможны, пока не погашены прежние.",
+    },
     "staff.error.api.invalid_invite": {
         "en": "Invite link is invalid or expired.",
         "uz": "Taklif havolasi yaroqsiz yoki muddati tugagan.",
@@ -1359,6 +1364,11 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "Add a note for this collection of {amount} (or send /skip to record without a note):",
         "uz": "Ushbu {amount} yig'imi uchun izoh qo'shing (izohsiz qayd qilish uchun /skip yuboring):",
         "ru": "Добавьте примечание для сбора {amount} (или отправьте /skip, чтобы записать без примечания):",
+    },
+    "staff.delivery.cod_collection_overpayment_confirm": {
+        "en": "You entered {amount}, but the customer's outstanding COD debt is only {outstanding}. The surplus {overpayment} will be recorded as customer prepayment and auto-applied to future COD orders. Confirm?",
+        "uz": "Siz {amount} kiritdingiz, ammo mijozning naqd to'lov qarzi atigi {outstanding}. Ortiqcha {overpayment} mijozning oldindan to'lovi sifatida qayd qilinadi va keyingi naqd to'lov buyurtmalariga avtomatik qo'llaniladi. Tasdiqlaysizmi?",
+        "ru": "Вы ввели {amount}, но задолженность клиента по наложенному платежу — всего {outstanding}. Излишек {overpayment} будет записан как предоплата клиента и автоматически применён к будущим заказам с наложенным платежом. Подтверждаете?",
     },
     "staff.delivery.cod_collection_recorded": {
         "en": "Collection recorded successfully.",

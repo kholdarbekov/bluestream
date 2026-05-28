@@ -15,7 +15,8 @@ import {
   Row,
   Col,
   Checkbox,
-  Divider
+  Divider,
+  Tooltip
 } from 'antd';
 import {
   SearchOutlined,
@@ -1112,31 +1113,53 @@ const Users = () => {
                 ) : userCodStatement ? (
                   <>
                     <Row gutter={[16, 12]} style={{ marginBottom: 12 }}>
-                      <Col xs={24} sm={12} md={6}>
+                      <Col xs={24} sm={12}>
                         <strong>{t('ui.users.active_cod_debt_count', 'Active COD debts')}:</strong>{' '}
                         {userCodStatement.active_cod_debt_count || 0}
                       </Col>
-                      <Col xs={24} sm={12} md={6}>
-                        <strong>{t('ui.users.total_outstanding_amount', 'Total outstanding')}:</strong>{' '}
-                        {(userCodStatement.total_outstanding_amount || 0).toLocaleString()} UZS
-                      </Col>
-                      <Col xs={24} sm={12} md={6}>
+                      <Col xs={24} sm={12}>
                         <strong>{t('ui.users.cod_restricted', 'COD restricted')}:</strong>{' '}
                         <Tag color={userCodStatement.cod_restricted ? 'red' : 'green'}>
                           {userCodStatement.cod_restricted ? t('ui.common.yes', 'Yes') : t('ui.common.no', 'No')}
                         </Tag>
                       </Col>
-                      <Col xs={24} sm={12} md={6}>
-                        <strong>{t('ui.users.prepayment_balance', 'Prepayment balance')}:</strong>{' '}
-                        {(userCodStatement.available_prepayment_balance || 0) > 0 ? (
-                          <Tag color="green">
-                            {(userCodStatement.available_prepayment_balance || 0).toLocaleString()} UZS
-                          </Tag>
-                        ) : (
-                          <span>{(userCodStatement.available_prepayment_balance || 0).toLocaleString()} UZS</span>
-                        )}
-                      </Col>
                     </Row>
+
+                    {(userCodStatement.items && userCodStatement.items.length > 0) && (
+                      <Row gutter={[16, 12]} style={{ marginBottom: 12 }}>
+                        <Col xs={24} sm={12} md={6}>
+                          <strong>{t('ui.users.gross_outstanding', 'Gross outstanding')}:</strong>{' '}
+                          {(
+                            userCodStatement.gross_outstanding_amount
+                            ?? userCodStatement.total_outstanding_amount
+                            ?? 0
+                          ).toLocaleString()} UZS
+                        </Col>
+                        <Col xs={24} sm={12} md={6}>
+                          <strong>{t('ui.users.reserved_from_prepayment', 'Reserved from prepayment')}:</strong>{' '}
+                          {(userCodStatement.reserved_prepayment_total ?? 0).toLocaleString()} UZS
+                        </Col>
+                        <Col xs={24} sm={12} md={6}>
+                          <strong>{t('ui.users.net_outstanding', 'Net outstanding')}:</strong>{' '}
+                          <strong style={{ color: '#cf1322' }}>
+                            {(userCodStatement.net_outstanding_amount ?? 0).toLocaleString()} UZS
+                          </strong>
+                        </Col>
+                        <Col xs={24} sm={12} md={6}>
+                          <strong>{t('ui.users.unreserved_prepayment_balance', 'Prepayment balance (unreserved)')}:</strong>{' '}
+                          {(() => {
+                            const unreserved = userCodStatement.unreserved_prepayment_balance
+                              ?? userCodStatement.available_prepayment_balance
+                              ?? 0;
+                            return unreserved > 0 ? (
+                              <Tag color="green">{unreserved.toLocaleString()} UZS</Tag>
+                            ) : (
+                              <span>{unreserved.toLocaleString()} UZS</span>
+                            );
+                          })()}
+                        </Col>
+                      </Row>
+                    )}
 
                     <Table
                       dataSource={userCodStatement.items || []}
@@ -1168,10 +1191,38 @@ const Users = () => {
                           render: (value) => `${(value || 0).toLocaleString()} UZS`,
                         },
                         {
-                          title: t('ui.users.outstanding_amount', 'Outstanding'),
-                          dataIndex: 'outstanding_amount',
-                          key: 'outstanding_amount',
+                          title: t('ui.users.reserved_prepayment', 'Reserved'),
+                          dataIndex: 'reserved_prepayment_amount',
+                          key: 'reserved_prepayment_amount',
                           render: (value) => `${(value || 0).toLocaleString()} UZS`,
+                        },
+                        {
+                          title: t('ui.users.net_outstanding', 'Net outstanding'),
+                          dataIndex: 'net_outstanding_amount',
+                          key: 'net_outstanding_amount',
+                          render: (value, record) => {
+                            const net = value ?? record.outstanding_amount ?? 0;
+                            const formatted = `${net.toLocaleString()} UZS`;
+                            const gross = record.outstanding_amount ?? 0;
+                            if (gross > net) {
+                              const reserved = record.reserved_prepayment_amount ?? 0;
+                              return (
+                                <Tooltip
+                                  title={t(
+                                    'ui.users.net_outstanding_tooltip',
+                                    'Gross: {{gross}} UZS, reserved from prepayment: {{reserved}} UZS',
+                                    {
+                                      gross: gross.toLocaleString(),
+                                      reserved: reserved.toLocaleString(),
+                                    },
+                                  )}
+                                >
+                                  <span style={{ fontWeight: 600 }}>{formatted}</span>
+                                </Tooltip>
+                              );
+                            }
+                            return <span style={{ fontWeight: 600 }}>{formatted}</span>;
+                          },
                         },
                       ]}
                     />

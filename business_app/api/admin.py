@@ -17,7 +17,12 @@ from shared.redis_keyspace import RedisKeyspace
 from business_app.models.user import User, UserAddress
 from business_app.models.order import Order, OrderItem, OrderItemMarkingCodeAllocation
 from business_app.models.product import Product, ProductCategory, ProductSizeEnum
-from business_app.models.payment import Payment, PaymentTransaction, PaymentFiscalization
+from business_app.models.payment import (
+    CashCollectionEvent,
+    Payment,
+    PaymentFiscalization,
+    PaymentTransaction,
+)
 from business_app.models.delivery import (
     Delivery,
     DeliveryPerson,
@@ -11246,6 +11251,52 @@ def verify_cash_reconciliation_session(session_id):
     except Exception as e:
         current_app.logger.error(f"Verify cash reconciliation session error: {e}")
         return internal_error_response("Failed to verify reconciliation session")
+
+
+@admin_bp.route("/staff/cash-reconciliation/events/<int:event_id>/adjust", methods=["POST"])
+@jwt_required()
+@super_admin_required
+def adjust_cash_collection_event(event_id):
+    """Adjust the amount of a recorded cash collection event."""
+    try:
+        actor_user_id = int(get_jwt_identity())
+        data = request.get_json() or {}
+        if data.get("new_amount") is None:
+            return validation_error_response("new_amount is required")
+        reason = (data.get("reason") or "").strip()
+        if len(reason) < 5:
+            return validation_error_response("reason must be at least 5 characters")
+
+        from business_app.services.cash_collection_service import CashCollectionService
+        from business_app.services.driver_reconciliation_service import DriverReconciliationService
+
+        replacement = CashCollectionService().adjust_event_amount(
+            event_id,
+            new_amount=data.get("new_amount"),
+            adjusted_by_user_id=actor_user_id,
+            reason=reason,
+        )
+
+        session_payload = None
+        if replacement.driver_cash_session_id:
+            session_payload = DriverReconciliationService().get_session_detail(replacement.driver_cash_session_id)
+
+        original_event = CashCollectionEvent.query.get(event_id)
+        return success_response(
+            data={
+                "cash_collection_event": replacement.to_dict(),
+                "replaced_event": original_event.to_dict() if original_event else None,
+                "driver_cash_session": session_payload,
+            },
+            status_code=200,
+        )
+    except NotFoundError as e:
+        return not_found_response(str(e))
+    except ValidationError as e:
+        return validation_error_response(e.message)
+    except Exception as e:
+        current_app.logger.error(f"Adjust cash collection event error: {e}")
+        return internal_error_response("Failed to adjust cash collection event")
 
 
 @admin_bp.route("/staff/cash-reconciliation/sessions/<int:session_id>/resolve", methods=["POST"])

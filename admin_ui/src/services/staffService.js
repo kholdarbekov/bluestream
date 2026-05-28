@@ -152,6 +152,18 @@ class StaffServiceClass {
     return api.post(`/admin/staff/cash-reconciliation/sessions/${sessionId}/resolve`, payload);
   }
 
+  /**
+   * Admin correction for a recorded cash collection event amount.
+   * Super-admin only. Voids the original event and creates a replacement
+   * with the corrected amount; surplus auto-routes to customer prepayment,
+   * shortfalls reverse any downstream prepayment auto-applications.
+   * @param {number} eventId
+   * @param {{ new_amount: number, reason: string }} payload
+   */
+  adjustCashCollectionEvent(eventId, payload) {
+    return api.post(`/admin/staff/cash-reconciliation/events/${eventId}/adjust`, payload);
+  }
+
   getCustomerCodStatement(customerId) {
     return api.get(`/admin/staff/cash-reconciliation/customers/${customerId}/statement`);
   }

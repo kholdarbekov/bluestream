@@ -34,6 +34,9 @@ import {
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import staffService from '../services/staffService';
+import { usePermissions } from '../components/common/PermissionGuard';
+
+const ADJUSTABLE_SESSION_STATUSES = new Set(['submitted', 'partial', 'mismatch', 'overdue']);
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -75,6 +78,8 @@ const RESOLVE_REASON_OPTIONS = [
 const DeliveryReports = () => {
   const { t } = useTranslation(['staff', 'common']);
   const queryClient = useQueryClient();
+  const { getUserRole } = usePermissions();
+  const isSuperAdmin = getUserRole() === 'super_admin';
   const [period, setPeriod] = useState('day');
   const [statusFilter, setStatusFilter] = useState('all');
   const [blockedOnly, setBlockedOnly] = useState(false);
@@ -88,9 +93,11 @@ const DeliveryReports = () => {
   const [orderTimelineId, setOrderTimelineId] = useState(null);
   const [recordCollectionOpen, setRecordCollectionOpen] = useState(false);
   const [recordCollectionCustomerId, setRecordCollectionCustomerId] = useState(null);
+  const [adjustEvent, setAdjustEvent] = useState(null);
   const [verifyForm] = Form.useForm();
   const [resolveForm] = Form.useForm();
   const [recordCollectionForm] = Form.useForm();
+  const [adjustForm] = Form.useForm();
   const collectionSource = Form.useWatch('source', recordCollectionForm) || 'standalone_meeting';
   const isPersonalCardTransfer = collectionSource === 'personal_card_transfer';
   const isBackfillCollection = collectionSource === 'backfill';
@@ -221,6 +228,29 @@ const DeliveryReports = () => {
     },
   });
 
+  const adjustMutation = useMutation({
+    mutationFn: ({ eventId, payload }) => staffService.adjustCashCollectionEvent(eventId, payload),
+
+    onSuccess: (response) => {
+      const replacement = response?.data?.data?.cash_collection_event;
+      message.success(
+        t(
+          'staff:cash_collection_event_adjusted',
+          'Event adjusted. Replacement event #{{id}} created.',
+          { id: replacement?.id ?? '' }
+        )
+      );
+      setAdjustEvent(null);
+      adjustForm.resetFields();
+      refreshReportQueries();
+    },
+
+    onError: (error) => {
+      const backendMessage = error?.response?.data?.message;
+      message.error(backendMessage || t('common:error_occurred'));
+    },
+  });
+
   const payload = data?.data?.data || {};
   const summary = payload.summary || {};
   const report = payload.report || [];
@@ -239,6 +269,28 @@ const DeliveryReports = () => {
 
   const canReviewSession = (session) => session.status === 'submitted';
   const canResolveSession = (session) => session.status === 'mismatch' || session.blocked_from_cod;
+
+  const openAdjustModal = (event) => {
+    setAdjustEvent(event);
+    adjustForm.setFieldsValue({
+      new_amount: Number(event.amount || 0),
+      reason: '',
+    });
+  };
+
+  const canAdjustEvent = (event) => {
+    if (!isSuperAdmin) {
+      return false;
+    }
+    if (!event || event.voided_at) {
+      return false;
+    }
+    const sessionStatus = selectedSession?.status;
+    if (!sessionStatus) {
+      return false;
+    }
+    return ADJUSTABLE_SESSION_STATUSES.has(sessionStatus);
+  };
 
   const openSessionDetail = (sessionId) => {
     setSelectedSessionId(sessionId);
@@ -420,9 +472,34 @@ const DeliveryReports = () => {
     },
     {
       title: t('staff:amount', 'Amount'),
-      dataIndex: 'amount',
       key: 'amount',
-      render: money,
+      render: (_, record) => {
+        const amount = money(record.amount);
+        if (record.voided_at) {
+          const replacementId = record.entry_metadata?.adjusted_replacement_event_id;
+          return (
+            <Space direction="vertical" size={0}>
+              <Text delete>{amount}</Text>
+              <Tag color="default">
+                {replacementId
+                  ? t('staff:event_replaced_by', 'Replaced by #{{id}}', { id: replacementId })
+                  : t('staff:event_voided', 'Voided')}
+              </Tag>
+            </Space>
+          );
+        }
+        const originalId = record.entry_metadata?.original_event_id;
+        return (
+          <Space direction="vertical" size={0}>
+            <Text>{amount}</Text>
+            {originalId ? (
+              <Tag color="blue">
+                {t('staff:event_adjusted_from', 'Adjusted from #{{id}}', { id: originalId })}
+              </Tag>
+            ) : null}
+          </Space>
+        );
+      },
     },
     {
       title: t('staff:notes', 'Notes'),
@@ -451,6 +528,15 @@ const DeliveryReports = () => {
               onClick={() => setOrderTimelineId(record.order_id)}
             >
               {t('staff:payment_timeline', 'Payment Timeline')}
+            </Button>
+          ) : null}
+          {canAdjustEvent(record) ? (
+            <Button
+              size="small"
+              icon={<ToolOutlined />}
+              onClick={() => openAdjustModal(record)}
+            >
+              {t('staff:adjust_event_amount', 'Adjust amount')}
             </Button>
           ) : null}
         </Space>
@@ -1181,6 +1267,81 @@ const DeliveryReports = () => {
             <Input.TextArea rows={4} />
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title={t('staff:adjust_event_modal_title', 'Adjust cash collection event')}
+        open={Boolean(adjustEvent)}
+        onCancel={() => {
+          setAdjustEvent(null);
+          adjustForm.resetFields();
+        }}
+        onOk={() => adjustForm.submit()}
+        confirmLoading={adjustMutation.isPending}
+      >
+        {adjustEvent ? (
+          <>
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginBottom: 16 }}
+              message={t(
+                'staff:adjust_event_help',
+                'Adjusting voids the original event and creates a replacement with the corrected amount. Any prepayment auto-applied from the surplus will be reversed and re-applied based on the new amount.'
+              )}
+            />
+            <Descriptions size="small" column={1} bordered style={{ marginBottom: 16 }}>
+              <Descriptions.Item label={t('staff:current_amount', 'Current amount')}>
+                {money(adjustEvent.amount)}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('staff:applied_to_payments', 'Applied to payments')}>
+                {money(Number(adjustEvent.amount || 0) - Number(adjustEvent.unapplied_amount || 0))}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('staff:customer_prepayment', 'Customer prepayment (unapplied)')}>
+                {money(adjustEvent.unapplied_amount)}
+              </Descriptions.Item>
+            </Descriptions>
+            <Form
+              form={adjustForm}
+              layout="vertical"
+              onFinish={(values) => {
+                adjustMutation.mutate({
+                  eventId: adjustEvent.id,
+                  payload: {
+                    new_amount: Number(values.new_amount),
+                    reason: values.reason,
+                  },
+                });
+              }}
+            >
+              <Form.Item
+                name="new_amount"
+                label={t('staff:adjust_event_new_amount', 'Corrected amount')}
+                rules={[
+                  { required: true, message: t('staff:adjust_event_new_amount_required', 'Corrected amount is required') },
+                  {
+                    validator: (_, value) =>
+                      value && Number(value) > 0
+                        ? Promise.resolve()
+                        : Promise.reject(new Error(t('staff:adjust_event_amount_positive', 'Amount must be positive'))),
+                  },
+                ]}
+              >
+                <InputNumber min={1} style={{ width: '100%' }} />
+              </Form.Item>
+              <Form.Item
+                name="reason"
+                label={t('staff:adjust_event_reason', 'Reason (min 5 characters)')}
+                rules={[
+                  { required: true, message: t('staff:adjust_event_reason_required', 'Reason is required') },
+                  { min: 5, message: t('staff:adjust_event_reason_min', 'Reason must be at least 5 characters') },
+                ]}
+              >
+                <Input.TextArea rows={3} />
+              </Form.Item>
+            </Form>
+          </>
+        ) : null}
       </Modal>
     </div>
   );

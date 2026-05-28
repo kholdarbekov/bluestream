@@ -1211,6 +1211,13 @@
     "rule": "/api/v1/admin/staff/cash-reconciliation/customers/with-prepayment-balance"
   },
   {
+    "endpoint": "admin.adjust_cash_collection_event",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/staff/cash-reconciliation/events/<int:event_id>/adjust"
+  },
+  {
     "endpoint": "admin.get_order_payment_timeline_admin",
     "methods": [
       "GET"

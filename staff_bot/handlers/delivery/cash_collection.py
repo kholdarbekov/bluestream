@@ -13,13 +13,14 @@ from staff_bot.keyboards.delivery import DeliveryKeyboards
 from staff_bot.permissions import require_auth, require_delivery_driver
 from staff_bot.utils import flow_state
 from staff_bot.utils.formatters import escape_html, format_currency, format_user_card
-from staff_bot.utils.search import detect_search_type
+from staff_bot.utils.search import detect_search_type, normalize_phone_query as _digits_only
 
 logger = logging.getLogger(__name__)
 
 COLLECTION_SEARCH_INPUT = 103
 COLLECTION_AMOUNT_INPUT = 104
 COLLECTION_NOTE_INPUT = 105
+COLLECTION_OVERPAYMENT_CONFIRM = 106
 
 
 class CashCollectionHandler(BaseHandler):
@@ -71,6 +72,10 @@ class CashCollectionHandler(BaseHandler):
         """Prompt the driver to search for a customer with open COD debt."""
         language = await self._get_language(update, context)
         await self._clear_flow(context, update)
+        context.user_data['pending_cod_collection_flow'] = {'awaiting_search_input': True}
+        await flow_state.mark_active(
+            update.effective_user.id, 'pending_cod_collection_flow'
+        )
 
         text = i18n.get('staff.delivery.cod_collection_search_prompt', language)
         if update.callback_query:
@@ -100,10 +105,15 @@ class CashCollectionHandler(BaseHandler):
 
         try:
             search_type = detect_search_type(query_text)
+            # When the input looks like a phone number, strip formatting so a
+            # query like "+998 90 123-45" matches stored "+998901234567".
+            backend_query = query_text
+            if search_type == 'phone':
+                backend_query = _digits_only(query_text)
             async with api_client as client:
                 response = await client.search_customers(
                     token,
-                    query_text,
+                    backend_query,
                     search_type=search_type,
                     only_with_open_cod=True,
                 )
@@ -119,6 +129,7 @@ class CashCollectionHandler(BaseHandler):
                     reply_markup=CommonKeyboards.back_button(language),
                     parse_mode='HTML',
                 )
+                await self._clear_flow(context, update)
                 return ConversationHandler.END
 
             for customer in customers[:10]:
@@ -134,6 +145,7 @@ class CashCollectionHandler(BaseHandler):
                     parse_mode='HTML',
                 )
 
+            await self._clear_flow(context, update)
             return ConversationHandler.END
         except Exception as exc:
             logger.error("Error searching customers for COD collection: %s", exc, exc_info=True)
@@ -278,18 +290,30 @@ class CashCollectionHandler(BaseHandler):
         if response.success:
             statement = response.data or {}
             total_outstanding = float(statement.get('total_outstanding_amount') or 0)
+            flow['total_outstanding_amount'] = total_outstanding
             if total_outstanding > 0 and amount > total_outstanding:
+                overpayment = amount - total_outstanding
+                flow['pending_overpayment_amount'] = amount
+                flow.pop('amount', None)
+                context.user_data['pending_cod_collection_flow'] = flow
                 await update.message.reply_text(
                     i18n.get(
-                        'staff.delivery.cod_collection_amount_exceeds_outstanding',
+                        'staff.delivery.cod_collection_overpayment_confirm',
                         language,
-                        amount=format_currency(total_outstanding, language=language),
+                        amount=format_currency(amount, language=language),
+                        outstanding=format_currency(total_outstanding, language=language),
+                        overpayment=format_currency(overpayment, language=language),
+                    ),
+                    reply_markup=CommonKeyboards.yes_no(
+                        language,
+                        'staff_cod_confirm_overpay_yes',
+                        'staff_cod_confirm_overpay_no',
                     ),
                     parse_mode='HTML',
                 )
-                return COLLECTION_AMOUNT_INPUT
-            flow['total_outstanding_amount'] = total_outstanding
+                return COLLECTION_OVERPAYMENT_CONFIRM
 
+        flow.pop('pending_overpayment_amount', None)
         flow['amount'] = amount
         context.user_data['pending_cod_collection_flow'] = flow
         await update.message.reply_text(
@@ -302,6 +326,53 @@ class CashCollectionHandler(BaseHandler):
             parse_mode='HTML',
         )
         return COLLECTION_NOTE_INPUT
+
+    @require_auth
+    @require_delivery_driver
+    async def confirm_overpayment_collection(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Driver confirmed they really mean to overpay; surplus → customer prepayment."""
+        query = update.callback_query
+        await query.answer()
+        language = await self._get_language(update, context)
+
+        flow = context.user_data.get('pending_cod_collection_flow') or {}
+        pending_amount = flow.get('pending_overpayment_amount')
+        if not flow.get('customer_id') or pending_amount is None:
+            await query.edit_message_text(i18n.get('staff.error_occurred', language))
+            return ConversationHandler.END
+
+        flow['amount'] = pending_amount
+        flow.pop('pending_overpayment_amount', None)
+        context.user_data['pending_cod_collection_flow'] = flow
+
+        await query.edit_message_text(
+            i18n.get(
+                'staff.delivery.cod_collection_note_prompt',
+                language,
+                amount=format_currency(pending_amount, language=language),
+            ),
+            parse_mode='HTML',
+        )
+        return COLLECTION_NOTE_INPUT
+
+    @require_auth
+    @require_delivery_driver
+    async def cancel_overpayment_collection(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Driver said no to overpayment confirmation; reset amount and re-prompt."""
+        query = update.callback_query
+        await query.answer()
+        language = await self._get_language(update, context)
+
+        flow = context.user_data.get('pending_cod_collection_flow') or {}
+        flow.pop('pending_overpayment_amount', None)
+        flow.pop('amount', None)
+        context.user_data['pending_cod_collection_flow'] = flow
+
+        await query.edit_message_text(
+            i18n.get('staff.delivery.cod_collection_amount_prompt', language),
+            parse_mode='HTML',
+        )
+        return COLLECTION_AMOUNT_INPUT
 
     @require_auth
     @require_delivery_driver

@@ -95,6 +95,8 @@ def test_staff_cod_callback_and_reconciliation_wiring_present():
         'CallbackQueryHandler(cash_collection_handler.show_customer_statement, pattern=r"^staff_cod_customer_\\d+$")',
         'CallbackQueryHandler(cash_collection_handler.start_full_collection, pattern=r"^staff_cod_collect_full_\\d+$")',
         'CallbackQueryHandler(cash_collection_handler.start_custom_collection, pattern=r"^staff_cod_collect_custom_\\d+$")',
+        'CallbackQueryHandler(cash_collection_handler.confirm_overpayment_collection, pattern=r"^staff_cod_confirm_overpay_yes$")',
+        'CallbackQueryHandler(cash_collection_handler.cancel_overpayment_collection, pattern=r"^staff_cod_confirm_overpay_no$")',
         'CallbackQueryHandler(status_update_handler.show_cash_hub, pattern="^staff_cash_hub$")',
         "i18n.get('staff.menu.cash', language): 'staff_cash_hub'",
         "if cod_collection_flow:",

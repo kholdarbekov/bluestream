@@ -367,6 +367,77 @@ class CashCollectionService:
         self._sync_reserved_prepayment_projection(payment)
         return self._to_decimal(released_total)
 
+    RESERVABLE_ORDER_STATUSES = frozenset(
+        {
+            OrderStatus.PENDING,
+            OrderStatus.CONFIRMED,
+            OrderStatus.PREPARING,
+            OrderStatus.OUT_FOR_DELIVERY,
+        }
+    )
+
+    def auto_reserve_against_pending_payments(
+        self,
+        customer_id: int,
+        *,
+        actor_user_id: Optional[int] = None,
+    ) -> Decimal:
+        """Reserve any unapplied customer prepayment against the customer's
+        non-delivered CASH payments (oldest-first). Idempotent. Best-effort:
+        skips locked rows (Postgres only) so concurrent order creation doesn't
+        block the sweep; the new order's own creation path retriggers reservation.
+        """
+        if self.get_customer_prepaid_balance(customer_id) <= Decimal("0.00"):
+            return Decimal("0.00")
+
+        query = (
+            Payment.query.join(Order, Payment.order_id == Order.id)
+            .options(contains_eager(Payment.order))
+            .filter(
+                Payment.user_id == customer_id,
+                Payment.payment_method == PaymentMethod.CASH,
+                Payment.outstanding_amount > Decimal("0.00"),
+                Order.status.in_(self.RESERVABLE_ORDER_STATUSES),
+            )
+            .order_by(Order.created_at.asc(), Payment.id.asc())
+        )
+
+        # Lock payment rows so concurrent reservation/collection workflows
+        # don't race against this sweep. Postgres supports skip_locked; SQLite
+        # (used in unit tests) silently ignores the locking clause, so we only
+        # apply it when the dialect actually understands it.
+        if db.engine.dialect.name == "postgresql":
+            # Count first (without lock) so we can detect rows silently
+            # dropped by skip_locked when a concurrent transaction holds them.
+            expected_count = query.with_entities(func.count(Payment.id)).scalar() or 0
+            query = query.with_for_update(of=Payment, skip_locked=True)
+            payments = query.all()
+            actual_count = len(payments)
+            if actual_count != expected_count:
+                logger.warning(
+                    "auto_reserve_against_pending_payments: skip_locked dropped "
+                    "rows for customer_id=%s expected_count=%s actual_count=%s; "
+                    "rows skipped due to concurrent locks; next post_collection "
+                    "or order creation will retry reservation",
+                    customer_id,
+                    expected_count,
+                    actual_count,
+                )
+        else:
+            payments = query.all()
+
+        total_reserved = Decimal("0.00")
+        for payment in payments:
+            if self.get_customer_prepaid_balance(customer_id) <= Decimal("0.00"):
+                break
+            reserved = self.reserve_customer_prepaid_credit_for_payment(
+                payment,
+                actor_user_id=actor_user_id,
+            )
+            total_reserved += self._to_decimal(reserved)
+
+        return self._to_decimal(total_reserved)
+
     def list_users_with_open_cod_debts(self, *, limit: int = 200) -> List[Dict[str, Any]]:
         """Return users that currently have at least one open delivered COD debt."""
         safe_limit = max(1, min(int(limit or 200), 1000))
@@ -452,9 +523,17 @@ class CashCollectionService:
 
         items = []
         total_outstanding = Decimal("0.00")
+        total_reserved = Decimal("0.00")
+        total_net_outstanding = Decimal("0.00")
         for payment in payments:
             outstanding_amount = self._to_decimal(payment.outstanding_amount)
             total_outstanding += outstanding_amount
+            reserved_amount = self._to_decimal(
+                (payment.provider_data or {}).get("cod_prepayment_reserved_amount", 0) or 0
+            )
+            net_outstanding = max(Decimal("0.00"), outstanding_amount - reserved_amount)
+            total_reserved += reserved_amount
+            total_net_outstanding += net_outstanding
             items.append(
                 {
                     "payment_id": payment.id,
@@ -468,6 +547,8 @@ class CashCollectionService:
                     "amount": float(payment.amount or 0),
                     "amount_collected": float(payment.amount_collected or 0),
                     "outstanding_amount": float(outstanding_amount),
+                    "reserved_prepayment_amount": float(reserved_amount),
+                    "net_outstanding_amount": float(net_outstanding),
                     "status": payment.status.value if hasattr(payment.status, "value") else payment.status,
                     "created_at": payment.created_at.isoformat() if payment.created_at else None,
                     "paid_at": payment.paid_at.isoformat() if payment.paid_at else None,
@@ -502,6 +583,11 @@ class CashCollectionService:
                 # lookup hit an edge case. Log via audit if needed.
                 grocery_debt = None
 
+        # Compute once and reuse: available_prepayment_balance and
+        # unreserved_prepayment_balance are aliases of the same value, so we
+        # must avoid issuing two identical SUM queries here.
+        unreserved_balance = float(self.get_customer_prepaid_balance(customer_id))
+
         return {
             "customer_id": customer_id,
             "entity_subtype": (
@@ -512,7 +598,16 @@ class CashCollectionService:
             "active_cod_debt_count": self.get_active_cod_debt_count(customer_id),
             "cod_restricted": self.is_customer_cod_restricted(customer_id),
             "total_outstanding_amount": float(total_outstanding),
-            "available_prepayment_balance": float(self.get_customer_prepaid_balance(customer_id)),
+            # Alias of total_outstanding_amount; named for UI clarity so the
+            # admin modal can show gross vs. net side by side.
+            "gross_outstanding_amount": float(total_outstanding),
+            "reserved_prepayment_total": float(total_reserved),
+            "net_outstanding_amount": float(total_net_outstanding),
+            "available_prepayment_balance": unreserved_balance,
+            # get_customer_prepaid_balance already returns unreserved balance
+            # (reservations decrement the event's unapplied_amount). Exposed
+            # under a clearer name for the UI.
+            "unreserved_prepayment_balance": unreserved_balance,
             "grocery_debt": grocery_debt,
             "items": items,
         }
@@ -840,6 +935,7 @@ class CashCollectionService:
         allocation_mode: str = "auto",
         idempotency_key: Optional[str] = None,
         commit: bool = True,
+        bypass_driver_block_check: bool = False,
     ) -> CashCollectionEvent:
         customer = User.query.get(customer_id)
         if not customer:
@@ -872,6 +968,7 @@ class CashCollectionService:
             driver_cash_session_id=driver_cash_session_id,
             notes=notes,
             manual_allocations=manual_allocations,
+            bypass_driver_block_check=bypass_driver_block_check,
         )
         if source_enum == CashCollectionSource.PERSONAL_CARD_TRANSFER:
             target_payment = self._resolve_target_payment_for_personal_card_transfer(
@@ -956,6 +1053,15 @@ class CashCollectionService:
             delivery_id=event.delivery_id,
             collector_user_id=event.collector_user_id,
         )
+
+        # Sweep any leftover unapplied prepayment onto the customer's
+        # non-delivered CASH payments so the next driver/admin sees the right
+        # cash-to-collect figure and the customer modal shows the net debt.
+        if self._to_decimal(event.unapplied_amount) > Decimal("0.00"):
+            self.auto_reserve_against_pending_payments(
+                customer_id,
+                actor_user_id=recorded_by_user_id or collector_user_id,
+            )
 
         # Mirror collected money onto the grocery-store contract debt ledger.
         # One COLLECT entry per cash event covers the full amount: outstanding_amount
@@ -1045,6 +1151,7 @@ class CashCollectionService:
         driver_cash_session_id: Optional[int],
         notes: Optional[str],
         manual_allocations: Optional[Iterable[Dict[str, Any]]],
+        bypass_driver_block_check: bool = False,
     ) -> None:
         if source == CashCollectionSource.PERSONAL_CARD_TRANSFER:
             if order_id is None:
@@ -1097,7 +1204,9 @@ class CashCollectionService:
 
             from business_app.services.driver_reconciliation_service import DriverReconciliationService
 
-            if DriverReconciliationService().is_driver_blocked_from_cod(collector_user_id):
+            if not bypass_driver_block_check and DriverReconciliationService().is_driver_blocked_from_cod(
+                collector_user_id
+            ):
                 raise ValidationError(
                     "Driver is blocked from new cash on delivery collections until reconciliation issues are resolved",
                     error_code="COD_DRIVER_BLOCKED",
@@ -1234,6 +1343,7 @@ class CashCollectionService:
         *,
         reversed_by_user_id: int,
         reason: str,
+        commit: bool = True,
     ) -> CashCollectionEvent:
         event = CashCollectionEvent.query.options(
             joinedload(CashCollectionEvent.allocations).joinedload(CashCollectionAllocation.payment),
@@ -1291,8 +1401,129 @@ class CashCollectionService:
             },
         )
 
-        db.session.commit()
+        if commit:
+            db.session.commit()
+        else:
+            db.session.flush()
         return event
+
+    ADJUSTABLE_SESSION_STATUSES = frozenset({"submitted", "partial", "mismatch", "overdue"})
+
+    def adjust_event_amount(
+        self,
+        event_id: int,
+        *,
+        new_amount: Any,
+        adjusted_by_user_id: int,
+        reason: str,
+    ) -> CashCollectionEvent:
+        """Admin correction for a recorded cash collection.
+
+        Voids the original event (reversing any allocations including
+        downstream prepayment auto-application) and creates a replacement
+        carrying the same context with the corrected amount. Cross-linked
+        via entry_metadata so the audit trail survives.
+        """
+        normalized_amount = self._to_decimal(new_amount)
+        if normalized_amount <= Decimal("0.00"):
+            raise ValidationError("Adjusted amount must be positive")
+        reason = (reason or "").strip()
+        if not reason:
+            raise ValidationError("An adjustment reason is required")
+
+        event = CashCollectionEvent.query.with_for_update(of=CashCollectionEvent).get(event_id)
+        if not event:
+            raise NotFoundError("Cash collection event not found")
+        if event.voided_at:
+            raise ValidationError("Cannot adjust a voided cash collection event")
+
+        if event.driver_cash_session_id:
+            session = DriverCashSession.query.get(event.driver_cash_session_id)
+            if session:
+                status_value = getattr(session.status, "value", session.status)
+                if status_value not in self.ADJUSTABLE_SESSION_STATUSES:
+                    raise ValidationError(f"Cannot adjust event on session with status '{status_value}'")
+
+        original_amount = self._to_decimal(event.amount)
+        original_context = {
+            "customer_id": event.customer_id,
+            "collector_user_id": event.collector_user_id,
+            "recorded_by_user_id": event.recorded_by_user_id,
+            "order_id": event.order_id,
+            "delivery_id": event.delivery_id,
+            "driver_cash_session_id": event.driver_cash_session_id,
+            "source": event.source,
+            "occurred_at": event.occurred_at,
+            "notes": event.notes,
+            "proof_data": dict(event.proof_data or {}),
+        }
+
+        self.reverse_collection_event(
+            event.id,
+            reversed_by_user_id=adjusted_by_user_id,
+            reason=f"Amount adjustment: {reason}",
+            commit=False,
+        )
+
+        existing_metadata = dict(event.entry_metadata or {})
+        replacement_proof = dict(original_context["proof_data"])
+        replacement_proof["adjustment_source"] = "admin_correction"
+        replacement_proof["original_event_id"] = event.id
+
+        replacement = self.post_collection(
+            customer_id=original_context["customer_id"],
+            amount=normalized_amount,
+            source=original_context["source"],
+            collector_user_id=original_context["collector_user_id"],
+            recorded_by_user_id=adjusted_by_user_id,
+            order_id=original_context["order_id"],
+            delivery_id=original_context["delivery_id"],
+            driver_cash_session_id=original_context["driver_cash_session_id"],
+            notes=original_context["notes"],
+            proof_data=replacement_proof,
+            occurred_at=original_context["occurred_at"],
+            commit=False,
+            bypass_driver_block_check=True,
+        )
+
+        replacement_metadata = dict(replacement.entry_metadata or {})
+        replacement_metadata.update(
+            {
+                "adjustment_source": "admin_correction",
+                "original_event_id": event.id,
+                "adjusted_by_user_id": adjusted_by_user_id,
+                "adjustment_reason": reason,
+                "original_amount": float(original_amount),
+            }
+        )
+        replacement.entry_metadata = replacement_metadata
+
+        existing_metadata.update(
+            {
+                "adjusted_replacement_event_id": replacement.id,
+                "adjustment_reason": reason,
+            }
+        )
+        event.entry_metadata = existing_metadata
+
+        audit_logger.log_event(
+            event_type=AuditEventType.PAYMENT_PROCESSED,
+            action="cash_collection_amount_adjusted",
+            severity=AuditSeverity.HIGH,
+            resource_type="cash_collection_event",
+            resource_id=str(event.id),
+            additional_data={
+                "adjusted_by_user_id": adjusted_by_user_id,
+                "original_amount": float(original_amount),
+                "new_amount": float(normalized_amount),
+                "replacement_event_id": replacement.id,
+                "reason": reason,
+                "driver_cash_session_id": event.driver_cash_session_id,
+            },
+        )
+
+        db.session.commit()
+        return replacement
 
     def _allocate_oldest_first(
         self,

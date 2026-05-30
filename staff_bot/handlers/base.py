@@ -69,6 +69,8 @@ class BaseHandler:
         'STAFF_ORDER_STATUS_INVALID_FOR_PREPARING': 'staff.error.api.invalid_input',
         'STAFF_PHONE_FIRST_NAME_REQUIRED': 'staff.error.api.validation',
         'STAFF_ORDER_ITEMS_REQUIRED': 'staff.error.api.validation',
+        'BOTTLE_SESSION_REQUIRED': 'staff.error.api.bottle_session_required',
+        'BOTTLE_SESSION_CAPACITY_EXCEEDED': 'staff.error.api.bottle_session_capacity_exceeded',
     }
     API_ERROR_MESSAGE_KEY_MAP = {
         'telegram_id is required': 'staff.error.api.validation',

@@ -510,6 +510,16 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Noto'gri malumot kiritildi. Iltimos, tuzatib qayta urinib koring.",
         "ru": "Некорректный ввод. Исправьте и повторите.",
     },
+    "staff.error.api.bottle_session_required": {
+        "en": "You have no open bottle session. Open a new session to continue delivering this order.",
+        "uz": "Sizda ochiq idish sessiyasi yoq. Bu buyurtmani davom ettirish uchun yangi sessiya oching.",
+        "ru": "У вас нет открытой сессии по таре. Откройте новую сессию, чтобы продолжить доставку этого заказа.",
+    },
+    "staff.error.api.bottle_session_capacity_exceeded": {
+        "en": "Your current bottle session does not have enough bottles for this order. Load more bottles, then try again.",
+        "uz": "Joriy sessiyangizda bu buyurtma uchun yetarli idish yoq. Avval idish yuklang, keyin qayta urinib koring.",
+        "ru": "В вашей текущей сессии недостаточно тары для этого заказа. Загрузите больше тары и повторите.",
+    },
     "staff.tryout.tasks_title": {
         "en": "Try-out Task Pool",
         "uz": "Sinov vazifalari",

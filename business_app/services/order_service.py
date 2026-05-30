@@ -1565,12 +1565,14 @@ class OrderService:
                         )
                         logger.info(f"[BOTTLE] order={order.id} record_bottles_returned OK", order.id)
 
-                    # Credit the session the order was bound to at accept time
-                    # (session continuity), NOT the driver's current effective
-                    # session. The two can differ when a session was closed
-                    # and a new one opened between accept and deliver —
-                    # crediting the new session would desync the truck-side
-                    # ledger from the actual load the bottles came from.
+                    # Credit the session the order is bound to. The progress
+                    # guard (assert_driver_can_progress_delivery) migrates the
+                    # binding onto the driver's current open session at pickup,
+                    # so by delivery time binding.session_id is the session that
+                    # physically carried these bottles — even when the order was
+                    # accepted under an earlier, now-closed session (carry-over).
+                    # Closed sessions keep their sealed counters; the carry-over
+                    # tallies here, against the delivering session.
                     from business_app.models.bottle import DriverBottleSession, DriverBottleSessionOrder
 
                     binding = DriverBottleSessionOrder.query.filter_by(order_id=order.id).first()

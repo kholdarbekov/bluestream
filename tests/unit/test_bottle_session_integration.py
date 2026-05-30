@@ -728,10 +728,11 @@ def test_assert_progress_legacy_does_not_raise_when_no_binding(db, app, sample_u
 
 
 @pytest.mark.unit
-def test_assert_progress_strict_raises_when_bound_session_closed(
+def test_assert_progress_strict_raises_when_session_closed_and_no_open_session(
     db, app, sample_user, sample_product
 ):
-    """Strict mode: bound session has been closed → BOTTLE_SESSION_CLOSED."""
+    """Strict mode: bound session is closed and the driver has NO open session
+    to carry the order onto → BOTTLE_SESSION_REQUIRED (open a new one)."""
     driver = _make_driver(db, "+998901000103", "Strict2")
     session = _open_session(db, driver)
     order = _make_order_with_bottles(db, sample_user, sample_product, quantity=2)
@@ -740,7 +741,7 @@ def test_assert_progress_strict_raises_when_bound_session_closed(
     svc = BottleTrackingService()
     svc.bind_order_to_session(session.id, order.id, accepted_by_driver_id=driver.id)
 
-    # Close the session out from under the bound order.
+    # Close the driver's only session out from under the bound order.
     session.status = DriverBottleSessionStatus.CLOSED
     db.session.flush()
 
@@ -749,19 +750,18 @@ def test_assert_progress_strict_raises_when_bound_session_closed(
         try:
             with pytest.raises(ValidationError) as exc:
                 svc.assert_driver_can_progress_delivery(delivery)
-            assert exc.value.error_code == "BOTTLE_SESSION_CLOSED"
+            assert exc.value.error_code == "BOTTLE_SESSION_REQUIRED"
         finally:
             app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False
 
 
 @pytest.mark.unit
-def test_assert_progress_strict_raises_when_session_mismatch(
+def test_assert_progress_migrates_to_drivers_own_open_session(
     db, app, sample_user, sample_product
 ):
-    """Strict mode: driver's current effective session differs from bound session.
-
-    Simulates a co-driver scenario where the order was bound under another
-    driver's session while the delivery driver has their own separate session.
+    """Carry-over: when the order is bound to a session other than the delivery
+    driver's current open session, the binding migrates onto the driver's own
+    open session (capacity permitting) instead of raising a mismatch.
     """
     driver_a = _make_driver(db, "+998901000104", "DriverA")
     driver_b = _make_driver(db, "+998901000114", "DriverB")
@@ -772,21 +772,24 @@ def test_assert_progress_strict_raises_when_session_mismatch(
     delivery = _make_delivery(db, order, driver_a)
 
     svc = BottleTrackingService()
-    # Order is bound to driver B's session even though delivery is assigned
-    # to driver A — this is the mismatch we want to catch.
+    # Order is bound to driver B's session even though delivery is assigned to
+    # driver A. Driver A has their own open session, so progressing the delivery
+    # migrates the binding onto A's session.
     svc.bind_order_to_session(session_b.id, order.id, accepted_by_driver_id=driver_b.id)
     db.session.flush()
 
     with app.test_request_context():
         app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = True
         try:
-            with pytest.raises(ValidationError) as exc:
-                svc.assert_driver_can_progress_delivery(delivery)
-            assert exc.value.error_code == "BOTTLE_SESSION_MISMATCH"
+            got = svc.assert_driver_can_progress_delivery(delivery)
         finally:
             app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False
-    # session_a is referenced for symmetry / clarity above; mark used for linters.
-    assert session_a is not None
+
+    assert got is not None
+    assert got.id == session_a.id
+    binding = DriverBottleSessionOrder.query.filter_by(order_id=order.id).first()
+    assert binding.session_id == session_a.id
+    assert binding.accepted_by_driver_id == driver_a.id
 
 
 @pytest.mark.unit
@@ -810,6 +813,202 @@ def test_assert_progress_happy_path_returns_bound_session(
             app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False
     assert got is not None
     assert got.id == session.id
+
+
+# ---------------------------------------------------------------------------
+# Carry-over: orders live across sessions (incident TG_000132_26)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.unit
+def test_assert_progress_carry_over_migrates_to_new_open_session(
+    db, app, sample_user, sample_product
+):
+    """Incident shape: order accepted under session A, A is force-closed, driver
+    opens session B, then progresses the delivery → binding migrates A→B and the
+    guard returns B."""
+    driver = _make_driver(db, "+998901000106", "CarryOver")
+    session_a = _open_session(db, driver)
+    order = _make_order_with_bottles(db, sample_user, sample_product, quantity=2)
+    delivery = _make_delivery(db, order, driver)
+
+    svc = BottleTrackingService()
+    svc.bind_order_to_session(session_a.id, order.id, accepted_by_driver_id=driver.id)
+
+    # Session A is force-closed; the driver loads a fresh session B.
+    session_a.status = DriverBottleSessionStatus.FORCE_CLOSED
+    db.session.flush()
+    session_b = _open_session(db, driver)
+
+    with app.test_request_context():
+        app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = True
+        try:
+            got = svc.assert_driver_can_progress_delivery(delivery)
+        finally:
+            app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False
+
+    assert got is not None
+    assert got.id == session_b.id
+    binding = DriverBottleSessionOrder.query.filter_by(order_id=order.id).first()
+    assert binding.session_id == session_b.id
+
+
+@pytest.mark.unit
+def test_assert_progress_carry_over_blocks_when_new_session_over_capacity(
+    db, app, sample_user, sample_product
+):
+    """Carry-over is refused (BOTTLE_SESSION_CAPACITY_EXCEEDED) when the new
+    session cannot cover the carried order, and the binding stays on A."""
+    driver = _make_driver(db, "+998901000107", "OverCap")
+    session_a = _open_session(db, driver)
+    order = _make_order_with_bottles(db, sample_user, sample_product, quantity=5)
+    delivery = _make_delivery(db, order, driver)
+
+    svc = BottleTrackingService()
+    svc.bind_order_to_session(session_a.id, order.id, accepted_by_driver_id=driver.id)
+
+    session_a.status = DriverBottleSessionStatus.FORCE_CLOSED
+    db.session.flush()
+    # New session loaded with fewer bottles (3) than the order needs (5).
+    session_b = _open_session(db, driver)
+    session_b.bottles_loaded = 3
+    db.session.flush()
+
+    with app.test_request_context():
+        app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = True
+        try:
+            with pytest.raises(ValidationError) as exc:
+                svc.assert_driver_can_progress_delivery(delivery)
+            assert exc.value.error_code == "BOTTLE_SESSION_CAPACITY_EXCEEDED"
+        finally:
+            app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False
+
+    # Binding untouched — still on the old session.
+    binding = DriverBottleSessionOrder.query.filter_by(order_id=order.id).first()
+    assert binding.session_id == session_a.id
+
+
+@pytest.mark.unit
+def test_rebind_order_to_session_moves_binding_in_place(db, sample_user, sample_product):
+    """rebind_order_to_session updates the existing row, is idempotent, and
+    creates a binding when none exists."""
+    driver = _make_driver(db, "+998901000108", "Rebind")
+    driver2 = _make_driver(db, "+998901000118", "Rebind2")
+    session_a = _open_session(db, driver)
+    session_b = _open_session(db, driver2)
+    order = _make_order_with_bottles(db, sample_user, sample_product, quantity=2)
+
+    svc = BottleTrackingService()
+    # No binding yet → creates one.
+    created = svc.rebind_order_to_session(order.id, session_a.id, accepted_by_driver_id=driver.id)
+    assert created.session_id == session_a.id
+    binding_id = created.id
+
+    # Move it → same row, new session, new accepting driver.
+    moved = svc.rebind_order_to_session(order.id, session_b.id, accepted_by_driver_id=driver2.id)
+    assert moved.id == binding_id
+    assert moved.session_id == session_b.id
+    assert moved.accepted_by_driver_id == driver2.id
+
+    # Idempotent when already on the target session.
+    again = svc.rebind_order_to_session(order.id, session_b.id)
+    assert again.id == binding_id
+    assert again.session_id == session_b.id
+    assert DriverBottleSessionOrder.query.filter_by(order_id=order.id).count() == 1
+
+
+@pytest.mark.unit
+def test_new_session_close_blocked_until_carried_order_terminal(
+    db, app, sample_user, sample_product
+):
+    """After a carried order migrates onto session B, B cannot be closed until
+    that order reaches a terminal status (it now counts as B's open binding)."""
+    driver = _make_driver(db, "+998901000109", "CarryClose")
+    session_a = _open_session(db, driver)
+    order = _make_order_with_bottles(db, sample_user, sample_product, quantity=2)
+    delivery = _make_delivery(db, order, driver)
+
+    svc = BottleTrackingService()
+    svc.bind_order_to_session(session_a.id, order.id, accepted_by_driver_id=driver.id)
+    session_a.status = DriverBottleSessionStatus.FORCE_CLOSED
+    db.session.flush()
+    session_b = _open_session(db, driver)
+    db.session.commit()
+
+    with app.test_request_context():
+        app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = True
+        try:
+            svc.assert_driver_can_progress_delivery(delivery)  # migrates A→B
+        finally:
+            app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False
+    db.session.commit()
+
+    # Order is still non-terminal (OUT_FOR_DELIVERY) → B's close is blocked.
+    with pytest.raises(ValidationError) as exc:
+        svc.close_bottle_session(driver.id, bottles_returned_to_warehouse=session_b.bottles_loaded)
+    assert exc.value.error_code == "BOTTLE_SESSION_HAS_OPEN_ORDERS"
+
+
+@pytest.mark.unit
+def test_carry_over_end_to_end_tally_credits_new_session(
+    db, app, sample_user, sample_product, monkeypatch
+):
+    """Full carry-over: delivering under the new session lands the bottle tally
+    on the new session and leaves the old (closed) session untouched."""
+    from shared.enums import DeliveryStatus
+    from business_app.services.staff_service import StaffService
+
+    driver = _make_driver(db, "+998901000110", "CarryE2E")
+    session_a = _open_session(db, driver)
+    session_a.bottles_loaded = 10
+    db.session.flush()
+
+    order = _make_order_with_bottles(db, sample_user, sample_product, quantity=2)
+    delivery = _make_delivery(db, order, driver)
+    delivery.status = DeliveryStatus.ARRIVED  # valid pre-condition for 'delivered'
+    db.session.flush()
+
+    svc = BottleTrackingService()
+    svc.bind_order_to_session(session_a.id, order.id, accepted_by_driver_id=driver.id)
+
+    # Force-close A, load a fresh session B.
+    session_a.status = DriverBottleSessionStatus.FORCE_CLOSED
+    db.session.flush()
+    session_b = _open_session(db, driver)
+    session_b.bottles_loaded = 10
+    db.session.commit()
+
+    # Keep the customer-ledger side effects out of scope.
+    def _noop_delivered(self, order_id, user_id, address_id, quantity, actor_user_id):
+        return None
+
+    def _noop_returned(self, **_kwargs):
+        return None
+
+    monkeypatch.setattr(BottleTrackingService, "record_bottles_delivered", _noop_delivered)
+    monkeypatch.setattr(BottleTrackingService, "record_bottles_returned", _noop_returned)
+
+    with app.test_request_context():
+        app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = True
+        try:
+            StaffService.update_delivery_status(
+                delivery.id,
+                new_status="delivered",
+                staff_user_id=driver.id,
+                metadata={"bottles_returned": 1},
+            )
+        finally:
+            app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False
+
+    db.session.refresh(session_a)
+    db.session.refresh(session_b)
+    binding = DriverBottleSessionOrder.query.filter_by(order_id=order.id).first()
+    # Binding migrated, and the delivering session got the tally.
+    assert binding.session_id == session_b.id
+    assert session_b.bottles_delivered == 2
+    assert session_b.bottles_collected_from_customers == 1
+    # Old closed session untouched.
+    assert (session_a.bottles_delivered or 0) == 0
+    assert (session_a.bottles_collected_from_customers or 0) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -909,7 +1108,10 @@ def test_regression_AD_000205_26_picked_up_blocked_after_session_close(
     1. Driver opens session S.
     2. Driver accepts order (binding S↔order created at accept).
     3. Session S is closed before the driver starts transit.
-    4. Driver attempts to mark picked_up. Strict mode must raise.
+    4. Driver attempts to mark picked_up while having NO open session. Strict
+       mode must raise BOTTLE_SESSION_REQUIRED — i.e. the driver is told to open
+       a new session; the order is not lost. (Opening one then lets carry-over
+       proceed — see test_carry_over_end_to_end_tally_credits_new_session.)
     """
     from business_app.services.staff_service import StaffService
 
@@ -934,8 +1136,9 @@ def test_regression_AD_000205_26_picked_up_blocked_after_session_close(
     db.session.flush()
     db.session.commit()
 
-    # Step 4: attempting picked_up must now fail under strict mode. Pre-fix,
-    # this transition went through silently and the bottles tally was lost.
+    # Step 4: with no open session to carry the order onto, picked_up must fail
+    # under strict mode. Pre-fix, this transition went through silently and the
+    # bottles tally was lost.
     with app.test_request_context():
         app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = True
         try:
@@ -945,6 +1148,6 @@ def test_regression_AD_000205_26_picked_up_blocked_after_session_close(
                     new_status="picked_up",
                     staff_user_id=driver.id,
                 )
-            assert exc.value.error_code == "BOTTLE_SESSION_CLOSED"
+            assert exc.value.error_code == "BOTTLE_SESSION_REQUIRED"
         finally:
             app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False

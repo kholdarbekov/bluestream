@@ -1211,6 +1211,46 @@ class BottleTrackingService:
         logger.info(f"[BOTTLE] bind_order_to_session OK binding_id={binding.id}")
         return binding
 
+    def rebind_order_to_session(
+        self,
+        order_id: int,
+        new_session_id: int,
+        *,
+        accepted_by_driver_id: int = None,
+    ) -> DriverBottleSessionOrder:
+        """Move an existing order binding to a different session (carry-over).
+
+        Used when an order accepted under a now-closed session is carried
+        forward and delivered under the driver's new open session. Updates the
+        existing ``DriverBottleSessionOrder`` row in place so the UNIQUE
+        ``order_id`` invariant holds; falls back to creating a binding if none
+        exists yet. Idempotent when the order is already on ``new_session_id``.
+
+        Unlike :meth:`bind_order_to_session` (which refuses to move a binding),
+        this is the deliberate cross-session migration path: the bottle tally
+        follows the open session the driver is actually operating under.
+        """
+        binding = DriverBottleSessionOrder.query.filter_by(order_id=order_id).first()
+        if binding is None:
+            return self.bind_order_to_session(
+                new_session_id, order_id, accepted_by_driver_id=accepted_by_driver_id
+            )
+        if binding.session_id == new_session_id:
+            return binding
+        old_session_id = binding.session_id
+        binding.session_id = new_session_id
+        if accepted_by_driver_id is not None:
+            binding.accepted_by_driver_id = accepted_by_driver_id
+        db.session.flush()
+        logger.info(
+            "[BOTTLE] rebind_order_to_session order=%s session %s→%s accepted_by=%s",
+            order_id,
+            old_session_id,
+            new_session_id,
+            accepted_by_driver_id,
+        )
+        return binding
+
     @staticmethod
     def assert_delivery_within_session_capacity(session: DriverBottleSession, bottles_to_deliver: int) -> None:
         """Raise ValidationError if the session cannot cover this delivery."""
@@ -1233,14 +1273,24 @@ class BottleTrackingService:
     def assert_driver_can_progress_delivery(self, delivery: "Delivery") -> Optional[DriverBottleSession]:
         """Guard called before any post-assignment delivery transition.
 
-        Returns the bound session if everything is consistent, raises
-        ``ValidationError`` when strict enforcement is on, or logs and returns
-        ``None`` when it is off. Returns ``None`` (and never raises) for orders
-        with no returnable bottles — those orders don't need a session.
+        Ensures the order is delivered under an OPEN bottle session whose
+        binding follows the session the driver is currently operating under, so
+        bottle counts tally against the load the order is physically on. Orders
+        with no returnable bottles need no session and return ``None``.
 
-        Strict mode is controlled by ``BOTTLE_SESSION_ENFORCEMENT_STRICT``
-        (Flask config). PR 1 ships with the flag off so we measure the
-        at-risk population before flipping enforcement on in PR 2.
+        Carry-over: when an order was accepted under a session that has since
+        been closed (or that differs from the driver's current open session),
+        the binding is migrated onto the driver's current open session —
+        provided that session has capacity, otherwise
+        ``BOTTLE_SESSION_CAPACITY_EXCEEDED`` is raised. This lets an order live
+        across sessions (driver reloads at the warehouse and delivers it on a
+        later trip).
+
+        Only when the driver has *no* open session at all is this a hard error:
+        under strict enforcement (``BOTTLE_SESSION_ENFORCEMENT_STRICT``) it
+        raises ``BOTTLE_SESSION_REQUIRED``; in legacy mode it logs and returns
+        ``None`` so the legacy flow is unaffected. Returns the session the order
+        is (now) bound to, or ``None`` when no enforcement applies.
         """
         order = getattr(delivery, "order", None)
         if not order:
@@ -1270,14 +1320,6 @@ class BottleTrackingService:
             )
             return None
 
-        session = DriverBottleSession.query.get(binding.session_id)
-        if not session or session.status != DriverBottleSessionStatus.OPEN:
-            _violation(
-                f"Bound session {binding.session_id} for order {order.id} " "is not OPEN.",
-                "BOTTLE_SESSION_CLOSED",
-            )
-            return None
-
         if delivery.delivery_person_id is None:
             _violation(
                 f"Delivery {delivery.id} has no driver assigned; " "cannot validate bottle session.",
@@ -1285,17 +1327,49 @@ class BottleTrackingService:
             )
             return None
 
+        bound = DriverBottleSession.query.get(binding.session_id)
         effective = self.get_effective_session(delivery.delivery_person_id)
-        if not effective or effective.id != session.id:
-            _violation(
-                f"Driver {delivery.delivery_person_id}'s current session "
-                f"(id={effective.id if effective else None}) does not match "
-                f"order {order.id}'s bound session (id={session.id}).",
-                "BOTTLE_SESSION_MISMATCH",
-            )
-            return None
 
-        return session
+        # Happy path: the order is already on the driver's current open session.
+        if (
+            bound is not None
+            and bound.status == DriverBottleSessionStatus.OPEN
+            and effective is not None
+            and effective.id == bound.id
+        ):
+            return bound
+
+        # Carry-over: the order was accepted under a different / now-closed
+        # session, but the driver currently has an open session. Migrate the
+        # binding onto it so the order can be delivered and the bottles tallied
+        # against the load they are physically on. Capacity is enforced here
+        # (same rule as accept time): refuse if the new session can't cover it.
+        if effective is not None:
+            self.assert_delivery_within_session_capacity(effective, int(bottles_needed))
+            previous_session_id = binding.session_id
+            self.rebind_order_to_session(
+                order.id,
+                effective.id,
+                accepted_by_driver_id=delivery.delivery_person_id,
+            )
+            logger.info(
+                "[BOTTLE] carry-over order=%s delivery=%s session=%s→%s",
+                order.id,
+                delivery.id,
+                previous_session_id,
+                effective.id,
+            )
+            return effective
+
+        # The driver has no open session at all — they must open a new one
+        # before they can progress (and thereby take ownership of) this order.
+        _violation(
+            f"Order {order.id}'s bound session {binding.session_id} is not open and "
+            f"driver {delivery.delivery_person_id} has no open bottle session; open a "
+            "new session to continue delivering this order.",
+            "BOTTLE_SESSION_REQUIRED",
+        )
+        return None
 
     @staticmethod
     def _open_bindings_count_for_session(session_id: int) -> int:

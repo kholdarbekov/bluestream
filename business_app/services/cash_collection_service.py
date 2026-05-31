@@ -409,7 +409,7 @@ class CashCollectionService:
         if db.engine.dialect.name == "postgresql":
             # Count first (without lock) so we can detect rows silently
             # dropped by skip_locked when a concurrent transaction holds them.
-            expected_count = query.with_entities(func.count(Payment.id)).scalar() or 0
+            expected_count = query.order_by(None).with_entities(func.count(Payment.id)).scalar() or 0
             query = query.with_for_update(of=Payment, skip_locked=True)
             payments = query.all()
             actual_count = len(payments)

@@ -112,15 +112,15 @@ class SecuritySensitiveFilter(logging.Filter):
 
     def filter(self, record):
         """Filter sensitive information from log records"""
-        if hasattr(record, "args") and record.args:
-            # Handle string formatting args
-            if isinstance(record.args, (tuple, list)):
-                record.args = tuple(self._sanitize_value(arg) for arg in record.args)
-            elif isinstance(record.args, dict):
-                record.args = {k: self._sanitize_value(v) for k, v in record.args.items()}
-
-        # Sanitize message
-        record.msg = self._sanitize_message(str(record.msg))
+        # Format the message fully before sanitizing so that format specifiers
+        # removed by pattern-matching (e.g. "cookie: %s" → "cookie: ***REDACTED***")
+        # don't leave stale args that cause TypeError in getMessage().
+        try:
+            full_message = record.getMessage()
+        except (TypeError, ValueError):
+            full_message = str(record.msg)
+        record.msg = self._sanitize_message(full_message)
+        record.args = None
 
         return True
 

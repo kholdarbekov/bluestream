@@ -913,8 +913,11 @@ class OrderEditService:
                 logger.exception("Bottle adjust failed for order edit")
                 raise ValidationError(f"Bottle adjust failed for product {change.product_id}: {exc}") from exc
 
-            # Re-tally session if bound.
-            if affected_session_id is not None:
+            # Re-tally session only when the order is already delivered.
+            # For undelivered orders the delivery flow will credit the full
+            # quantity when it actually runs; bumping the tally here would
+            # cause the delta to be counted twice (once now, once at delivery).
+            if affected_session_id is not None and order.status == OrderStatus.DELIVERED:
                 session = DriverBottleSession.query.get(affected_session_id)
                 if session is not None:
                     # bottle_delta > 0  → more bottles delivered to customer

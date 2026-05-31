@@ -482,7 +482,7 @@ class NotificationService:
 
         template_data = {
             "order_number": payment.order.order_number if payment.order else "N/A",
-            "payment_amount": payment.amount,
+            "payment_amount": float(payment.amount) if payment.amount is not None else 0.0,
             "payment_method": payment.payment_method.value if payment.payment_method else "unknown",
             "payment_reference": payment.payment_id,  # Use payment_id as reference
             "payment_follow_up_message": self._get_payment_follow_up_message(payment, language),
@@ -3357,14 +3357,38 @@ class NotificationService:
         results: Dict[str, Any],
         campaign_id: Optional[int] = None,
     ):
-        """Create notification record in database"""
+        """Persist notification audit rows using a dedicated session.
+
+        A separate session is used so this write is committed independently
+        of the caller's transaction. This prevents the notification audit
+        commit from inadvertently committing (or rolling back) the main
+        request session when send_notification is called mid-transaction
+        (e.g. during delivery processing).
+        """
         try:
+            from decimal import Decimal as _Decimal
+            from sqlalchemy.orm import Session as _Session
+
             user = User.query.get(user_id)
             payload = template_data or {}
+
+            # Ensure extra_data is JSON-serializable: coerce Decimal → float.
+            def _jsonify(v):
+                if isinstance(v, _Decimal):
+                    return float(v)
+                if isinstance(v, dict):
+                    return {k: _jsonify(val) for k, val in v.items()}
+                if isinstance(v, list):
+                    return [_jsonify(i) for i in v]
+                return v
+
+            safe_payload = _jsonify(payload)
+
             notification_type_value = (
                 notification_type.value if hasattr(notification_type, "value") else str(notification_type)
             )
 
+            records = []
             # Create a notification record for each channel
             for channel in channels:
                 channel_value = channel.value if hasattr(channel, "value") else str(channel)
@@ -3383,7 +3407,7 @@ class NotificationService:
                 message = payload.get("message", payload.get("otp_code", "Notification sent"))
                 title = payload.get("title", notification_type_value.replace("_", " ").title())
 
-                notification = Notification(
+                records.append(Notification(
                     user_id=user_id,
                     notification_type=notification_type_value,
                     channel=channel_value,
@@ -3405,18 +3429,17 @@ class NotificationService:
                         else None
                     ),
                     campaign_id=campaign_id,
-                    order_id=payload.get("order_id"),
-                    delivery_id=payload.get("delivery_id"),
-                    extra_data=payload,
-                )
+                    order_id=safe_payload.get("order_id"),
+                    delivery_id=safe_payload.get("delivery_id"),
+                    extra_data=safe_payload,
+                ))
 
-                db.session.add(notification)
-
-            db.session.commit()
+            with _Session(db.engine) as notif_session:
+                notif_session.add_all(records)
+                notif_session.commit()
 
         except Exception:
             logger.exception("Failed to create notification record")
-            db.session.rollback()
 
 
 # Default notification templates

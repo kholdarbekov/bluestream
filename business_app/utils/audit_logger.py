@@ -185,8 +185,18 @@ class AuditLogger:
         current_app.logger.debug(f"AUDIT DETAILS [{audit_entry['event_id']}]: {json.dumps(audit_entry, default=str)}")
 
     def _log_to_database(self, audit_entry: Dict):
-        """Log audit entry to database."""
+        """Log audit entry to database using a separate session.
+
+        A dedicated session is used so that audit writes are committed
+        independently of the caller's transaction. This prevents audit
+        log_event calls from inadvertently committing the main request
+        session mid-flight (which would break multi-step transactions
+        such as delivery processing that writes inventory, bottle
+        tracking, and cash collection in one atomic unit).
+        """
         try:
+            from sqlalchemy.orm import Session as _Session
+
             audit_log = AuditLog(
                 event_id=audit_entry["event_id"],
                 event_type=audit_entry["event_type"],
@@ -210,8 +220,9 @@ class AuditLogger:
                 additional_data=audit_entry.get("additional_data"),
             )
 
-            db.session.add(audit_log)
-            db.session.commit()
+            with _Session(db.engine) as audit_session:
+                audit_session.add(audit_log)
+                audit_session.commit()
 
         except Exception as e:
             current_app.logger.error(f"Failed to log audit entry to database: {e}")

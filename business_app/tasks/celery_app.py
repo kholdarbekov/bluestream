@@ -43,6 +43,8 @@ def make_celery(app=None):
             "business_app.tasks.tryout_tasks",
             "business_app.tasks.backup_tasks",
             "business_app.tasks.marking_code_tasks",
+            "business_app.tasks.staff_tasks",
+            "business_app.tasks.inventory_tasks",
         ],
     )
 

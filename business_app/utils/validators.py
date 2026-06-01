@@ -8,7 +8,8 @@ from typing import Any, Dict, List, Optional, Union
 import phonenumbers
 from phonenumbers import NumberParseException
 
-from business_app.utils.constants import PATTERNS, BUSINESS_RULES
+from business_app.utils.constants import PATTERNS
+from shared import business_config
 
 
 class Validator:
@@ -121,7 +122,7 @@ class PasswordValidator(Validator):
     def validate(self, min_length: int = None):
         """Validate password strength"""
         if min_length is None:
-            min_length = BUSINESS_RULES.get("PASSWORD_MIN_LENGTH", 8)
+            min_length = business_config.PASSWORD_MIN_LENGTH
 
         if self.value:
             password = str(self.value)
@@ -319,7 +320,7 @@ class OrderValidator:
                             quantity = int(item["quantity"])
                             if quantity <= 0:
                                 errors.append(f"Item {i+1} quantity must be positive")
-                            if quantity > BUSINESS_RULES["MAX_ORDER_ITEMS"]:
+                            if quantity > business_config.MAX_ORDER_ITEMS:
                                 errors.append(f"Item {i+1} quantity exceeds maximum allowed")
                         except (ValueError, TypeError):
                             errors.append(f"Item {i+1} quantity must be a valid number")
@@ -354,7 +355,7 @@ class PaymentValidator:
         if "amount" not in data:
             errors.append("amount is required")
         else:
-            NumericValidator(data["amount"], "amount").positive().min_value(BUSINESS_RULES["MIN_ORDER_AMOUNT"])
+            NumericValidator(data["amount"], "amount").positive().min_value(business_config.MIN_ORDER_AMOUNT)
 
         if "payment_method" not in data:
             errors.append("payment_method is required")

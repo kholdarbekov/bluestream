@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { DEFAULT_PAGE_SIZE } from '../utils/constants';
 import {
   Badge,
   Button,
@@ -135,8 +136,8 @@ const renderChannelTag = (channel, channels) => {
 const Notifications = () => {
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState('campaigns');
-  const [campaignPagination, setCampaignPagination] = useState({ page: 1, per_page: 20 });
-  const [templatePagination, setTemplatePagination] = useState({ page: 1, per_page: 20 });
+  const [campaignPagination, setCampaignPagination] = useState({ page: 1, per_page: DEFAULT_PAGE_SIZE });
+  const [templatePagination, setTemplatePagination] = useState({ page: 1, per_page: DEFAULT_PAGE_SIZE });
   const [campaignFilters, setCampaignFilters] = useState({
     search: '',
     status: undefined,

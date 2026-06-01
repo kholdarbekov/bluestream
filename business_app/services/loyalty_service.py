@@ -36,8 +36,10 @@ class LoyaltyService:
     # TODO: Note for mylself: correct loyalty points for user_id in (8,9,1, 12,7,13,10,31,22);
 
     def __init__(self):
-        self.points_ratio = current_app.config.get("LOYALTY_POINTS_RATIO", 100)  # 1 point per 100 UZS
-        self.redemption_ratio = current_app.config.get("LOYALTY_REDEMPTION_RATIO", 1)  # 1 point = 1 UZS
+        self.points_ratio = current_app.config[
+            "LOYALTY_POINTS_RATIO"
+        ]  # UZS per earned point (legacy fallback; earning is DB-driven)
+        # No redemption_ratio: points are spent only on rewards, not converted to UZS.
         self.referral_bonus = current_app.config.get("REFERRAL_BONUS_POINTS", 500)
         self.points_expiry_days = current_app.config.get("LOYALTY_POINTS_EXPIRY_DAYS", 365)
 

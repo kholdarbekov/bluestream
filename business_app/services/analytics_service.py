@@ -21,6 +21,7 @@ from business_app.models.product import Product
 from business_app.models.analytics import UserBehavior
 from business_app.models.order import OrderItem
 from shared.enums import OrderStatus, DeliveryStatus, UserStatus, UserType, EntitySubtype
+from shared import business_config
 from business_app import db
 
 
@@ -961,9 +962,9 @@ class AnalyticsService:
 
         for customer in customer_data:
             total_spent = customer.total_spent
-            if total_spent >= 100000:
+            if total_spent >= business_config.CUSTOMER_SEGMENT_HIGH_VALUE_UZS:
                 segments["high_value"] += 1
-            elif total_spent >= 25000:
+            elif total_spent >= business_config.CUSTOMER_SEGMENT_MEDIUM_VALUE_UZS:
                 segments["medium_value"] += 1
             else:
                 segments["low_value"] += 1

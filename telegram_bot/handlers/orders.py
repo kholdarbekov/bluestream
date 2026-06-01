@@ -15,6 +15,7 @@ from api_client import api_client
 from database import db_manager, BotUserRepository
 from utils import user_middleware, format_price, MessageBuilder, get_auth_token
 from shared.constants import ORDER_STATUS_ICONS, DEFAULT_STATUS_ICON, DISPLAY_TIMEZONE
+from shared.business_config import MIN_ORDER_AMOUNT
 from handlers.base import BaseHandler
 
 logger = logging.getLogger('handlers')
@@ -1071,9 +1072,8 @@ class OrderHandlers(BaseHandler):
                 )
 
         # Block confirm if per-product or order-level minimum isn't met.
-        # Mirror products.py / cart_service / order_service rules so the bot
-        # surfaces backend validation up-front instead of after submit.
-        MIN_ORDER_AMOUNT = 20000  # TODO: source from API config endpoint
+        # MIN_ORDER_AMOUNT comes from shared.business_config (same env-driven SSOT
+        # the backend reads) so the bot mirrors backend validation up-front.
         amount_met = cart_total_amount >= MIN_ORDER_AMOUNT
         qty_met = not min_qty_violations
         meets_minimum = amount_met and qty_met

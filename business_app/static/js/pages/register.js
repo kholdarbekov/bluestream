@@ -107,7 +107,7 @@
                 document.getElementById('maskedPhone').textContent =
                     result.data.phone_masked || registrationData.phone;
 
-                startOtpTimer(result.data.expires_in || 180, result.data.resend_available_in || 60);
+                startOtpTimer(result.data.expires_in, result.data.resend_available_in);
 
                 document.querySelector('.otp-digit[data-index="0"]').focus();
 
@@ -173,7 +173,7 @@
 
             if (response.ok) {
                 showNotification(PAGE_DATA.i18n.new_code_sent, 'success');
-                startOtpTimer(result.data.expires_in || 180, result.data.resend_available_in || 60);
+                startOtpTimer(result.data.expires_in, result.data.resend_available_in);
 
                 document.querySelectorAll('.otp-digit').forEach(function (input) { input.value = ''; });
                 document.getElementById('otpCode').value = '';

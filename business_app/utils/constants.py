@@ -270,18 +270,18 @@ API_MESSAGES = {
 }
 
 # Business Rules Constants
+# NOTE: env-driven / money / auth values (MIN_ORDER_AMOUNT, MAX_ORDER_ITEMS,
+# MAX_LOGIN_ATTEMPTS, OTP expiry, ...) live in shared/business_config.py (the
+# single source of truth) — do NOT re-add them here. The values below are
+# non-env operational reference defaults.
 BUSINESS_RULES = {
-    "MIN_ORDER_AMOUNT": 20000,  # UZS - ensures 200+ pts for free delivery
-    "MAX_ORDER_ITEMS": 50,
     "MAX_DELIVERY_DISTANCE": 20,  # km
     "DEFAULT_DELIVERY_TIME": 60,  # minutes
     "MAX_DELIVERY_TIME": 240,  # minutes
     "LOYALTY_POINTS_EXPIRY_DAYS": 365,
     "MAX_REFERRALS_PER_DAY": 5,
-    "OTP_EXPIRY_MINUTES": 5,
     "SESSION_TIMEOUT_MINUTES": 30,
     "PASSWORD_RESET_EXPIRY_HOURS": 24,
-    "MAX_LOGIN_ATTEMPTS": 5,
     "ACCOUNT_LOCKOUT_MINUTES": 30,
     "PAYME_TIMEOUT_HOURS": 12,  # Payme transaction timeout
 }
@@ -384,9 +384,9 @@ DEFAULTS = {
     "LANGUAGE": "en",
     "CURRENCY": "UZS",
     "TIMEZONE": DISPLAY_TIMEZONE,
-    "PAGE_SIZE": 20,
-    "DELIVERY_FEE": 5000,
-    "LOYALTY_POINTS_RATIO": 100,
+    "PAGE_SIZE": DEFAULT_PAGE_SIZE,
+    # DELIVERY_FEE and LOYALTY_POINTS_RATIO removed — both live in
+    # shared/business_config.py (single source of truth).
     "SESSION_DURATION": 3600,
 }
 

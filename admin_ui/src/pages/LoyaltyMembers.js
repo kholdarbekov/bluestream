@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { DEFAULT_PAGE_SIZE } from '../utils/constants';
 import {
   Button,
   Card,
@@ -38,7 +39,7 @@ const LoyaltyMembers = () => {
   const { t } = useTranslation('loyalty');
   const [searchText, setSearchText] = useState('');
   const [programId, setProgramId] = useState();
-  const [pagination, setPagination] = useState({ page: 1, per_page: 20 });
+  const [pagination, setPagination] = useState({ page: 1, per_page: DEFAULT_PAGE_SIZE });
   const [selectedMemberId, setSelectedMemberId] = useState(null);
 
   const membersQuery = useQuery({

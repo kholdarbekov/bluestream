@@ -204,7 +204,6 @@ class FeatureConfig:
     # Payment features
     enable_cash_on_delivery: bool = True
     enable_online_payments: bool = True
-    enable_loyalty_payments: bool = True
     enable_business_accounts: bool = True
 
     # Delivery features

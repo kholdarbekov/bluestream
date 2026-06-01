@@ -122,10 +122,9 @@ class TestHelpersI18nAndTime:
 
         with app.app_context():
             app.config["LOYALTY_POINTS_RATIO"] = 1000
-            app.config["LOYALTY_REDEMPTION_RATIO"] = 10
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
                 points = helpers.calculate_loyalty_points(5500)
             assert points == 5
             assert any(issubclass(w.category, DeprecationWarning) for w in caught)
-            assert helpers.calculate_discount_from_points(7) == 70
+            # calculate_discount_from_points removed — points redeem only via rewards.

@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator, ConfigDict
 from pydantic.alias_generators import to_camel
 
 from business_app.utils.validators import validate_uzbekistan_phone
+from shared import business_config
 
 
 class PhoneRegistrationInitRequest(BaseModel):
@@ -43,8 +44,10 @@ class PhoneRegistrationInitResponse(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     phone_masked: str = Field(..., description="Masked phone number for display")
-    expires_in: int = Field(default=180, description="OTP expiry time in seconds")
-    resend_available_in: int = Field(default=60, description="Seconds until resend is available")
+    expires_in: int = Field(default=business_config.PHONE_OTP_EXPIRY, description="OTP expiry time in seconds")
+    resend_available_in: int = Field(
+        default=business_config.PHONE_OTP_RESEND_COOLDOWN, description="Seconds until resend is available"
+    )
 
 
 class PhoneRegistrationVerifyRequest(BaseModel):
@@ -53,10 +56,15 @@ class PhoneRegistrationVerifyRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     phone: str = Field(..., description="Uzbekistan phone number (+998 XX XXX XX XX)")
-    otp_code: str = Field(..., min_length=6, max_length=6, description="6-digit OTP code")
+    otp_code: str = Field(
+        ...,
+        min_length=business_config.OTP_CODE_LENGTH,
+        max_length=business_config.OTP_CODE_LENGTH,
+        description="OTP code",
+    )
     first_name: str = Field(..., min_length=1, max_length=100, description="User first name")
     last_name: Optional[str] = Field(default=None, max_length=100, description="User last name")
-    password: str = Field(..., min_length=8, description="User password (min 8 chars)")
+    password: str = Field(..., min_length=business_config.PASSWORD_MIN_LENGTH, description="User password")
     referral_code: Optional[str] = Field(default=None, description="Optional referral code")
 
     @field_validator("phone")
@@ -74,8 +82,8 @@ class PhoneRegistrationVerifyRequest(BaseModel):
         """Validate OTP code format"""
         if not v.isdigit():
             raise ValueError("OTP must contain only digits")
-        if len(v) != 6:
-            raise ValueError("OTP must be exactly 6 digits")
+        if len(v) != business_config.OTP_CODE_LENGTH:
+            raise ValueError(f"OTP must be exactly {business_config.OTP_CODE_LENGTH} digits")
         return v
 
     @field_validator("first_name")

@@ -133,7 +133,7 @@ describe('ExportUtils', () => {
 
       const result = await exportUtils.exportUsers({}, 'excel');
 
-      expect(adminService.getUsers).toHaveBeenCalledWith({ per_page: 10000 });
+      expect(adminService.getUsers).toHaveBeenCalledWith({ page: 1, per_page: 100 });
       expect(exportToExcelSpy).toHaveBeenCalled();
       expect(result.success).toBe(true);
 
@@ -175,7 +175,7 @@ describe('ExportUtils', () => {
 
       const result = await exportUtils.exportOrders({}, 'excel');
 
-      expect(adminService.getOrders).toHaveBeenCalledWith({ per_page: 10000 });
+      expect(adminService.getOrders).toHaveBeenCalledWith({ page: 1, per_page: 100 });
       expect(exportToExcelSpy).toHaveBeenCalled();
       expect(result.success).toBe(true);
 
@@ -234,7 +234,7 @@ describe('ExportUtils', () => {
 
       const result = await exportUtils.exportProducts({}, 'excel');
 
-      expect(adminService.getProducts).toHaveBeenCalledWith({ per_page: 10000 });
+      expect(adminService.getProducts).toHaveBeenCalledWith({ page: 1, per_page: 100 });
       expect(exportToExcelSpy).toHaveBeenCalled();
       expect(result.success).toBe(true);
 

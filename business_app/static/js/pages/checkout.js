@@ -1,6 +1,6 @@
 (function () {
     var PAGE_DATA = getPageData();
-    var MIN_ORDER_AMOUNT = PAGE_DATA.min_order_amount || 20000;
+    var MIN_ORDER_AMOUNT = PAGE_DATA.min_order_amount;
 
     var cartItems = [];
     var selectedAddress = null;

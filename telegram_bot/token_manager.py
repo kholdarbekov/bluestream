@@ -11,6 +11,7 @@ from typing import Optional, Dict, Any
 
 from shared.redis_keyspace import RedisKeyspace
 from shared.redis_failure import report_redis_failure
+from shared import business_config
 
 logger = logging.getLogger(__name__)
 
@@ -25,11 +26,10 @@ class TokenManager:
     - Falls back to full re-authentication only when necessary
     """
 
-    # Token refresh buffer - refresh 5 minutes before expiry
-    REFRESH_BUFFER_SECONDS = 300
-
-    # Default TTL for cached tokens (30 days to match refresh token lifetime)
-    REFRESH_TOKEN_LIFETIME_DAYS = 30
+    # Token lifecycle constants — single source of truth in shared.business_config
+    # (shared by telegram_bot + staff_bot). Refresh this long before expiry.
+    REFRESH_BUFFER_SECONDS = business_config.TOKEN_REFRESH_BUFFER_SECONDS
+    REFRESH_TOKEN_LIFETIME_DAYS = business_config.REFRESH_TOKEN_LIFETIME_DAYS
     DEFAULT_TTL_SECONDS = REFRESH_TOKEN_LIFETIME_DAYS * 24 * 3600
 
     def __init__(self, redis_url: str):

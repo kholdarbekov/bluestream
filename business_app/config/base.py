@@ -6,6 +6,7 @@ import os
 from datetime import timedelta
 
 from shared.constants import DISPLAY_TIMEZONE as _DISPLAY_TIMEZONE
+from shared import business_config
 
 # Import secrets manager for secure secret retrieval
 # Temporarily use fallback for development/testing
@@ -389,26 +390,47 @@ class BaseConfig:
     MARKING_CODE_REPLENISH_DEDUP_TTL = int(os.environ.get("MARKING_CODE_REPLENISH_DEDUP_TTL", 300) or 300)
 
     # Delivery Configuration
-    DEFAULT_DELIVERY_FEE = int(os.environ.get("DEFAULT_DELIVERY_FEE", 5000))  # UZS
-    FREE_DELIVERY_THRESHOLD = int(os.environ.get("FREE_DELIVERY_THRESHOLD", 50000))  # UZS
+    # Business/money tunables derive from shared.business_config (single source of
+    # truth, env-driven). Delivery is currently always free (DEFAULT_DELIVERY_FEE=0);
+    # there is no amount-based free-delivery threshold.
+    DEFAULT_DELIVERY_FEE = business_config.DEFAULT_DELIVERY_FEE  # UZS (0 = free)
+    EMERGENCY_DELIVERY_FEE = business_config.EMERGENCY_DELIVERY_FEE  # UZS
     DELIVERY_RADIUS_KM = int(os.environ.get("DELIVERY_RADIUS_KM", 50))
     MAX_DELIVERY_TIME_HOURS = int(os.environ.get("MAX_DELIVERY_TIME_HOURS", 24))
-    MIN_ORDER_AMOUNT = int(os.environ.get("MIN_ORDER_AMOUNT", 20000))  # UZS - ensures 200+ pts for free delivery
+    MIN_ORDER_AMOUNT = business_config.MIN_ORDER_AMOUNT  # UZS
+    MAX_ORDER_ITEMS = business_config.MAX_ORDER_ITEMS
+    MAX_CART_ITEMS = business_config.MAX_CART_ITEMS
+    MAX_QUANTITY_PER_ITEM = business_config.MAX_QUANTITY_PER_ITEM
+    LARGE_ORDER_THRESHOLD_UZS = business_config.LARGE_ORDER_THRESHOLD_UZS
 
     # Loyalty Program Configuration
-    LOYALTY_POINTS_RATIO = int(os.environ.get("LOYALTY_POINTS_RATIO", 100))  # 1 point per 100 UZS
-    LOYALTY_REDEMPTION_RATIO = int(os.environ.get("LOYALTY_REDEMPTION_RATIO", 1))  # 1 point = 1 UZS
+    # Earning is DB-driven (LoyaltyProgram.uzs_per_point); this is the legacy
+    # fallback ratio. Points redeem only via rewards — no points→UZS conversion.
+    LOYALTY_POINTS_RATIO = business_config.LOYALTY_POINTS_RATIO  # UZS per earned point
     REFERRAL_BONUS_POINTS = int(os.environ.get("REFERRAL_BONUS_POINTS", 500))
 
     # Subscription Configuration
     SUBSCRIPTION_TRIAL_DAYS = int(os.environ.get("SUBSCRIPTION_TRIAL_DAYS", 7))
     SUBSCRIPTION_BILLING_DAY = int(os.environ.get("SUBSCRIPTION_BILLING_DAY", 1))
     MAX_SUBSCRIPTION_ITEMS = int(os.environ.get("MAX_SUBSCRIPTION_ITEMS", 10))
+    SUBSCRIPTION_FAILED_PAYMENT_MAX_ATTEMPTS = business_config.SUBSCRIPTION_FAILED_PAYMENT_MAX_ATTEMPTS
+
+    # Customer segmentation thresholds (monthly UZS spend)
+    CUSTOMER_SEGMENT_HIGH_VALUE_UZS = business_config.CUSTOMER_SEGMENT_HIGH_VALUE_UZS
+    CUSTOMER_SEGMENT_MEDIUM_VALUE_UZS = business_config.CUSTOMER_SEGMENT_MEDIUM_VALUE_UZS
 
     # Security Configuration
-    PASSWORD_MIN_LENGTH = int(os.environ.get("PASSWORD_MIN_LENGTH", 8))
-    MAX_LOGIN_ATTEMPTS = int(os.environ.get("MAX_LOGIN_ATTEMPTS", 5))
+    PASSWORD_MIN_LENGTH = business_config.PASSWORD_MIN_LENGTH
+    MAX_LOGIN_ATTEMPTS = business_config.MAX_LOGIN_ATTEMPTS
     LOCKOUT_DURATION = int(os.environ.get("LOCKOUT_DURATION", 1800))  # 30 minutes
+
+    # Phone/OTP policy (single source of truth in shared.business_config)
+    OTP_EXPIRY_SECONDS = business_config.OTP_EXPIRY_SECONDS
+    PHONE_OTP_EXPIRY = business_config.PHONE_OTP_EXPIRY
+    PHONE_OTP_RESEND_COOLDOWN = business_config.PHONE_OTP_RESEND_COOLDOWN
+    PHONE_OTP_MAX_ATTEMPTS = business_config.PHONE_OTP_MAX_ATTEMPTS
+    PHONE_OTP_LOCKOUT_DURATION = business_config.PHONE_OTP_LOCKOUT_DURATION
+    OTP_CODE_LENGTH = business_config.OTP_CODE_LENGTH
 
     # CSRF Protection Configuration
     WTF_CSRF_ENABLED = True
@@ -528,8 +550,8 @@ For complete documentation, examples, and SDKs visit: [API Documentation](/docs/
     ISO_DATETIME_FORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
 
     # COD reconciliation and custody controls
-    COD_CASH_WARNING_THRESHOLD_UZS = int(os.environ.get("COD_CASH_WARNING_THRESHOLD_UZS", 200000))
-    COD_CASH_ESCALATION_THRESHOLD_UZS = int(os.environ.get("COD_CASH_ESCALATION_THRESHOLD_UZS", 400000))
+    COD_CASH_WARNING_THRESHOLD_UZS = business_config.COD_CASH_WARNING_THRESHOLD_UZS
+    COD_CASH_ESCALATION_THRESHOLD_UZS = business_config.COD_CASH_ESCALATION_THRESHOLD_UZS
     COD_RECONCILIATION_CUTOFF_LOCAL = os.environ.get("COD_RECONCILIATION_CUTOFF_LOCAL", "23:00")
     COD_REMINDER_INTERVAL_MINUTES = int(os.environ.get("COD_REMINDER_INTERVAL_MINUTES", 60))
     COD_RECONCILIATION_WARNING_DAYS = int(os.environ.get("COD_RECONCILIATION_WARNING_DAYS", 7))

@@ -40,8 +40,8 @@ class OrderService:
     """Service for managing orders"""
 
     def __init__(self, inventory_service=None, delivery_service=None):
-        self.min_order_amount = current_app.config.get("MIN_ORDER_AMOUNT", 10000)
-        self.max_order_items = current_app.config.get("MAX_ORDER_ITEMS", 50)
+        self.min_order_amount = current_app.config["MIN_ORDER_AMOUNT"]
+        self.max_order_items = current_app.config["MAX_ORDER_ITEMS"]
         self._inventory_service = inventory_service
         self._delivery_service = delivery_service
 
@@ -127,12 +127,13 @@ class OrderService:
         if payment_method_str:
             from shared.enums import PaymentMethod
 
+            # Loyalty points are spent only on rewards, never as a payment method —
+            # 'loyalty_points'/'points' is intentionally not mapped (rejected upstream).
             payment_method_map = {
                 "cash": PaymentMethod.CASH,
                 "payme": PaymentMethod.PAYME,
                 "click": PaymentMethod.CLICK,
                 "card": PaymentMethod.CLICK,
-                "loyalty_points": PaymentMethod.LOYALTY_POINTS,
                 "business_account": PaymentMethod.BUSINESS_ACCOUNT,
             }
             payment_method = payment_method_map.get(payment_method_str)
@@ -168,7 +169,8 @@ class OrderService:
             delivery_time_slot=order_data.get("delivery_time_slot"),
             delivery_notes=order_data.get("delivery_notes"),
             is_urgent=bool(order_data.get("is_urgent", False)),
-            loyalty_points_used=int(order_data.get("loyalty_points_used") or 0),
+            # Points redeem only via rewards; orders never consume points directly.
+            loyalty_points_used=0,
             order_source=order_source,
             created_by_staff_id=created_by_staff_id,
         )
@@ -1288,8 +1290,9 @@ class OrderService:
             if quantity <= 0:
                 raise ValidationError("Quantity must be positive")
 
-            if quantity > 100:  # Reasonable limit to prevent abuse
-                raise ValidationError(f"Maximum quantity per item is 100")  # noqa: F541
+            max_quantity = current_app.config["MAX_QUANTITY_PER_ITEM"]
+            if quantity > max_quantity:  # Reasonable limit to prevent abuse
+                raise ValidationError(f"Maximum quantity per item is {max_quantity}")
 
         # Perform comprehensive inventory availability check
         availability_results = self.inventory_service.check_multiple_products_availability(

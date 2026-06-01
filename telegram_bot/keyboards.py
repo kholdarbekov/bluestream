@@ -7,6 +7,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton,
 from i18n import i18n
 from config import config
 from shared.constants import ORDER_STATUS_ICONS, SUBSCRIPTION_STATUS_ICONS, DEFAULT_STATUS_ICON
+from shared.business_config import MAX_QUANTITY_PER_ITEM
 
 
 MAX_DISPLAYED_ADDRESSES = 5
@@ -342,7 +343,8 @@ class ProductKeyboards:
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     QUANTITY_PRESET_OFFSETS = (3, 6, 10, 13, 18)
-    MAX_QUANTITY = 99
+    # Mirror the backend order-item cap (SSOT: shared.business_config).
+    MAX_QUANTITY = MAX_QUANTITY_PER_ITEM
 
     @staticmethod
     def _build_quantity_presets(min_order_qty: int,
@@ -500,7 +502,6 @@ class OrderKeyboards:
             'card': '💳',
             'click': '💳',
             'payme': '💳',
-            'loyalty_points': '🏆',
             'business_account': '🏢'
         }
 

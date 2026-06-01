@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { DEFAULT_PAGE_SIZE } from '../utils/constants';
 import {
   Table,
   Card,
@@ -57,7 +58,7 @@ const Delivery = () => {
   const [isTrackingModalVisible, setIsTrackingModalVisible] = useState(false);
   const [isUpdateModalVisible, setIsUpdateModalVisible] = useState(false);
   const [assignmentTarget, setAssignmentTarget] = useState(null);
-  const [pagination, setPagination] = useState({ page: 1, per_page: 20 });
+  const [pagination, setPagination] = useState({ page: 1, per_page: DEFAULT_PAGE_SIZE });
   const [form] = Form.useForm();
   const selectedStatus = Form.useWatch('status', form);
 

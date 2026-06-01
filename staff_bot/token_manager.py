@@ -13,6 +13,7 @@ from typing import Optional, Dict, Any
 
 from shared.redis_failure import report_redis_failure
 from shared.redis_keyspace import RedisKeyspace
+from shared import business_config
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +28,10 @@ class TokenManager:
     - Falls back to full re-authentication only when necessary
     """
 
-    REFRESH_BUFFER_SECONDS = 300
-    REFRESH_TOKEN_LIFETIME_DAYS = 30
+    # Token lifecycle constants — single source of truth in shared.business_config
+    # (shared by telegram_bot + staff_bot).
+    REFRESH_BUFFER_SECONDS = business_config.TOKEN_REFRESH_BUFFER_SECONDS
+    REFRESH_TOKEN_LIFETIME_DAYS = business_config.REFRESH_TOKEN_LIFETIME_DAYS
     DEFAULT_TTL_SECONDS = REFRESH_TOKEN_LIFETIME_DAYS * 24 * 3600
     # Redis TTL for the per-user refresh lock. The previous 10s was too tight
     # for a slow backend round-trip — when refresh exceeded the TTL the lock

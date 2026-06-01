@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { DEFAULT_PAGE_SIZE } from '../utils/constants';
 import {
   Table,
   Card,
@@ -59,7 +60,7 @@ const Blog = () => {
   const [isDetailModalVisible, setIsDetailModalVisible] = useState(false);
   const [isCreateModalVisible, setIsCreateModalVisible] = useState(false);
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
-  const [pagination, setPagination] = useState({ page: 1, per_page: 20 });
+  const [pagination, setPagination] = useState({ page: 1, per_page: DEFAULT_PAGE_SIZE });
   const [createForm] = Form.useForm();
   const [editForm] = Form.useForm();
   const [featuredImageUrl, setFeaturedImageUrl] = useState('');

@@ -32,8 +32,7 @@ class DeliveryService:
     """Service for managing deliveries"""
 
     def __init__(self):
-        self.default_delivery_fee = current_app.config.get("DEFAULT_DELIVERY_FEE", 5000)
-        self.free_delivery_threshold = current_app.config.get("FREE_DELIVERY_THRESHOLD", 50000)
+        self.default_delivery_fee = current_app.config["DEFAULT_DELIVERY_FEE"]
         self.max_delivery_distance = current_app.config.get("DELIVERY_RADIUS_KM", 50)
         self.store_latitude = TASHKENT_COORDINATES["latitude"]
         self.store_longitude = TASHKENT_COORDINATES["longitude"]
@@ -407,23 +406,14 @@ class DeliveryService:
         return delivery
 
     def calculate_delivery_fee(self, latitude: float, longitude: float, order_total: int) -> int:
-        """Calculate delivery fee based on location and order total"""
-        if order_total >= self.free_delivery_threshold:
-            return 0
+        """Calculate the delivery fee for an order.
 
-        # distance = calculate_distance(
-        #     self.store_latitude, self.store_longitude,
-        #     latitude, longitude
-        # )
-
-        # # Get zone-based fee
-        # zone = self._get_delivery_zone(distance)
-        # zone_info = DELIVERY_ZONES.get(zone, DELIVERY_ZONES['OUTER'])
-
-        # return zone_info['fee']
-
-        # We are offering free delivery for all orders for now
-        return 0
+        Delivery is currently a single env-driven flat fee (DEFAULT_DELIVERY_FEE,
+        0 = free). There is no amount-based free-delivery threshold. A future
+        zone-based model can switch on the (latitude, longitude) using the
+        existing DELIVERY_ZONES / _get_delivery_zone infrastructure.
+        """
+        return self.default_delivery_fee
 
     def get_available_time_slots(
         self, date: datetime = None, delivery_type: DeliveryType = DeliveryType.STANDARD

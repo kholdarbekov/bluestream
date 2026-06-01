@@ -18,6 +18,7 @@ from business_app.utils.validators import EmailValidator, PhoneValidator, Passwo
 from business_app.utils.helpers import generate_otp, format_phone_number, generate_random_string
 from business_app.utils.password_security import hash_password, verify_password, needs_password_rehash
 from shared.enums import UserRole, UserStatus, UserType
+from shared import business_config
 from business_app.utils.user_types import infer_non_staff_user_type, normalize_entity_subtype
 from shared.enums import EntitySubtype
 from business_app.utils.translations import get_translation
@@ -41,9 +42,9 @@ class AuthService:
             redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
         self.redis_client = redis.from_url(redis_url)
-        self.otp_expiry = 300  # 5 minutes
-        self.max_login_attempts = current_app.config.get("MAX_LOGIN_ATTEMPTS", 5)
-        self.lockout_duration = current_app.config.get("LOCKOUT_DURATION", 1800)  # 30 minutes
+        self.otp_expiry = current_app.config["OTP_EXPIRY_SECONDS"]  # generic OTP (5 min)
+        self.max_login_attempts = current_app.config["MAX_LOGIN_ATTEMPTS"]
+        self.lockout_duration = current_app.config["LOCKOUT_DURATION"]  # 30 minutes
 
     def register_user(
         self, email: str, password: str, phone: str = None, first_name: str = None, last_name: str = None, **kwargs
@@ -521,14 +522,12 @@ class AuthService:
     # Phone Registration Methods (Uzbekistan +998 only)
     # =============================================================================
 
-    # OTP expiry time in seconds (3 minutes as per plan)
-    PHONE_OTP_EXPIRY = 180
-    # Cooldown between OTP resends in seconds
-    PHONE_OTP_RESEND_COOLDOWN = 60
-    # Max OTP verification attempts
-    PHONE_OTP_MAX_ATTEMPTS = 5
-    # Lockout duration after max attempts (10 minutes)
-    PHONE_OTP_LOCKOUT_DURATION = 600
+    # Phone-OTP policy — single source of truth in shared.business_config
+    # (env-driven). Distinct from the generic self.otp_expiry above.
+    PHONE_OTP_EXPIRY = business_config.PHONE_OTP_EXPIRY  # seconds (3 min)
+    PHONE_OTP_RESEND_COOLDOWN = business_config.PHONE_OTP_RESEND_COOLDOWN  # seconds
+    PHONE_OTP_MAX_ATTEMPTS = business_config.PHONE_OTP_MAX_ATTEMPTS
+    PHONE_OTP_LOCKOUT_DURATION = business_config.PHONE_OTP_LOCKOUT_DURATION  # seconds (10 min)
 
     def initiate_phone_registration(self, phone: str, language: str = "uz") -> Dict[str, Any]:
         """

@@ -286,11 +286,10 @@ def get_delivery_zones():
             {
                 "delivery_zones": zones,
                 "coverage_info": {
-                    "base_delivery_fee": 3000,  # Base fee in UZS
-                    "free_delivery_threshold": 50000,  # Free delivery above this amount
-                    "max_delivery_distance": 25,  # km
+                    "base_delivery_fee": current_app.config["DEFAULT_DELIVERY_FEE"],  # UZS (0 = free)
+                    "max_delivery_distance": current_app.config["DELIVERY_RADIUS_KM"],  # km
                     "emergency_delivery_available": True,
-                    "emergency_delivery_fee": 10000,
+                    "emergency_delivery_fee": current_app.config["EMERGENCY_DELIVERY_FEE"],
                 },
             }
         )

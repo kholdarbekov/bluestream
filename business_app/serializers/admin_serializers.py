@@ -14,6 +14,7 @@ from pydantic.alias_generators import to_camel
 from business_app.models.product import Product, ProductCategory
 from business_app.models.order import Order
 from business_app.utils.user_types import normalize_user_type
+from business_app.utils.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 
 
 class UserRole(str, Enum):
@@ -543,7 +544,7 @@ class InactiveCustomersQuerySchema(BaseModel):
     customer_type: Literal["all", "individual", "workplace", "grocery"] = "all"
     include_never_ordered: bool = True
     page: int = Field(default=1, ge=1)
-    per_page: int = Field(default=50, ge=1, le=100)
+    per_page: int = Field(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE)
 
     @field_validator("include_never_ordered", mode="before")
     @classmethod

@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from 'react';
+import { DEFAULT_PAGE_SIZE } from '../utils/constants';
 import {
   Table,
   Card,
@@ -103,7 +104,7 @@ const Users = () => {
   const [notificationReason, setNotificationReason] = useState('');
   const [districts, setDistricts] = useState([]);
   const [addressCoordinates, setAddressCoordinates] = useState(null);
-  const [pagination, setPagination] = useState({ page: 1, per_page: 20 });
+  const [pagination, setPagination] = useState({ page: 1, per_page: DEFAULT_PAGE_SIZE });
   const responsive = useResponsive();
   const [createForm] = Form.useForm();
   const [addressForm] = Form.useForm();

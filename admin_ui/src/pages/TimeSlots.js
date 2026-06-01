@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { DEFAULT_PAGE_SIZE } from '../utils/constants';
 import {
   Card,
   Table,
@@ -35,7 +36,7 @@ const TimeSlots = () => {
   const [isCreateModalVisible, setIsCreateModalVisible] = useState(false);
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState(null);
-  const [pagination, setPagination] = useState({ page: 1, per_page: 20 });
+  const [pagination, setPagination] = useState({ page: 1, per_page: DEFAULT_PAGE_SIZE });
   const [createForm] = Form.useForm();
   const [editForm] = Form.useForm();
 

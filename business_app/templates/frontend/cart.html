@@ -638,7 +638,7 @@
 {{ render_page_data({
     'product_detail_url_template': url_for('frontend.product_detail', product_id=0) | replace('/0', '/{id}'),
     'product_detail_url_slug_template': url_for('frontend.product_detail_slug', slug='__SLUG__'),
-    'min_order_amount': config.get('MIN_ORDER_AMOUNT', 20000),
+    'min_order_amount': config['MIN_ORDER_AMOUNT'],
     'current_language': current_language,
     'default_image': url_for('static', filename='images/resource/shop/shop-1.jpg'),
     'i18n': {

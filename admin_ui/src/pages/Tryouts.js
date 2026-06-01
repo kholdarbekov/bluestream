@@ -32,6 +32,8 @@ import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tansta
 import dayjs from 'dayjs';
 
 import adminService from '../services/adminService';
+import { fetchAllPages } from '../utils/pagination';
+import { BULK_LOAD_PAGE_SIZE, DEFAULT_PAGE_SIZE } from '../utils/constants';
 import AddressMapPicker from '../components/AddressMapPicker';
 import tryoutService from '../services/tryoutService';
 import { formatDate, formatDateTimeShort } from '../utils/dateUtils';
@@ -144,7 +146,7 @@ const Tryouts = () => {
   const [driverId, setDriverId] = useState();
   const [dateRange, setDateRange] = useState();
   const [dueDateRange, setDueDateRange] = useState();
-  const [pagination, setPagination] = useState({ page: 1, per_page: 20 });
+  const [pagination, setPagination] = useState({ page: 1, per_page: DEFAULT_PAGE_SIZE });
   const [selectedTryout, setSelectedTryout] = useState(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [tryoutModalMode, setTryoutModalMode] = useState(null);
@@ -185,18 +187,26 @@ const Tryouts = () => {
 
   const { data: productsData } = useQuery({
     queryKey: ['tryout-products'],
-    queryFn: () => adminService.getProducts({ per_page: 200, status: 'active' }),
+    queryFn: () => fetchAllPages(
+      (page) => adminService.getProducts({ page, per_page: BULK_LOAD_PAGE_SIZE, status: 'active' }),
+      (resp) => resp?.data?.items || [],
+      BULK_LOAD_PAGE_SIZE,
+    ),
     staleTime: 60_000,
   });
 
   const { data: driversData } = useQuery({
     queryKey: ['tryout-drivers'],
-    queryFn: () => adminService.getDeliveryPersonnel({ per_page: 100 }),
+    queryFn: () => fetchAllPages(
+      (page) => adminService.getDeliveryPersonnel({ page, per_page: BULK_LOAD_PAGE_SIZE }),
+      (resp) => resp?.data?.items || [],
+      BULK_LOAD_PAGE_SIZE,
+    ),
     staleTime: 60_000,
   });
 
-  const products = (productsData?.data?.items || []).filter((product) => product.is_tryout_eligible !== false);
-  const drivers = driversData?.data?.items || [];
+  const products = (productsData || []).filter((product) => product.is_tryout_eligible !== false);
+  const drivers = driversData || [];
   const tryouts = data?.items || [];
   const summary = data?.summary || {};
 

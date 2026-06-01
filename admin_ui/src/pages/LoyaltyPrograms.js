@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { DEFAULT_PAGE_SIZE } from '../utils/constants';
 import {
   Button,
   Card,
@@ -44,7 +45,7 @@ const LoyaltyPrograms = () => {
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState();
   const [selectedProgramId, setSelectedProgramId] = useState();
-  const [pagination, setPagination] = useState({ page: 1, per_page: 20 });
+  const [pagination, setPagination] = useState({ page: 1, per_page: DEFAULT_PAGE_SIZE });
   const [programModal, setProgramModal] = useState({ open: false, program: null });
   const [tierModal, setTierModal] = useState({ open: false, tier: null });
   const [programForm] = Form.useForm();

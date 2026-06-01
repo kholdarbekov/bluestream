@@ -4,6 +4,8 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import adminService from '../services/adminService';
 import { formatLocalDate, formatLocaleDateTime, nowTashkent } from './dateUtils';
+import { EXPORT_PAGE_SIZE } from './constants';
+import { fetchAllPages } from './pagination';
 
 const EXCEL_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
@@ -17,6 +19,18 @@ const escapeCsvCell = (value) => {
 };
 
 class ExportUtils {
+  /**
+   * Fetch ALL rows across pages for an export. The backend caps per_page at
+   * MAX_PAGE_SIZE (100), so a single large request is silently truncated — we
+   * loop instead, requesting EXPORT_PAGE_SIZE per page until exhausted.
+   *
+   * @param {(page:number)=>Promise<any>} fetchPage - fetches one page (1-based)
+   * @param {(response:any)=>any[]} extractItems - pulls the rows array out of a response
+   */
+  async fetchAllPages(fetchPage, extractItems) {
+    return fetchAllPages(fetchPage, extractItems, EXPORT_PAGE_SIZE);
+  }
+
   async exportToExcel(data, filename, sheetName = 'Data') {
     try {
       const workbook = new ExcelJS.Workbook();
@@ -130,8 +144,11 @@ class ExportUtils {
         const blob = new Blob([response], { type: EXCEL_MIME });
         saveAs(blob, `${filename}.xlsx`);
       } else {
-        const userData = await adminService.getUsers({ ...filters, per_page: 10000 });
-        const exportData = (userData.data?.items || []).map(user => ({
+        const rows = await this.fetchAllPages(
+          (page) => adminService.getUsers({ ...filters, page, per_page: EXPORT_PAGE_SIZE }),
+          (resp) => resp.data?.items || []
+        );
+        const exportData = rows.map(user => ({
           'ID': user.id,
           'Name': user.name,
           'Email': user.email,
@@ -155,8 +172,11 @@ class ExportUtils {
     try {
       const filename = `orders_export_${new Date().toISOString().split('T')[0]}`;
 
-      const ordersData = await adminService.getOrders({ ...filters, per_page: 10000 });
-      const exportData = (ordersData.data?.items || []).map(order => ({
+      const rows = await this.fetchAllPages(
+        (page) => adminService.getOrders({ ...filters, page, per_page: EXPORT_PAGE_SIZE }),
+        (resp) => resp.data?.items || []
+      );
+      const exportData = rows.map(order => ({
         'Order Number': order.order_number,
         'Customer': order.customer_name,
         'Email': order.customer_email,
@@ -185,8 +205,11 @@ class ExportUtils {
     try {
       const filename = `products_export_${new Date().toISOString().split('T')[0]}`;
 
-      const productsData = await adminService.getProducts({ ...filters, per_page: 10000 });
-      const exportData = (productsData.data?.items || []).map(product => ({
+      const rows = await this.fetchAllPages(
+        (page) => adminService.getProducts({ ...filters, page, per_page: EXPORT_PAGE_SIZE }),
+        (resp) => resp.data?.items || []
+      );
+      const exportData = rows.map(product => ({
         'SKU': product.sku,
         'Product Name': product.name,
         'Category': product.category,
@@ -215,8 +238,11 @@ class ExportUtils {
     try {
       const filename = `deliveries_export_${new Date().toISOString().split('T')[0]}`;
 
-      const deliveriesData = await adminService.getDeliveries({ ...filters, per_page: 10000 });
-      const exportData = (deliveriesData.data?.items || []).map(delivery => ({
+      const rows = await this.fetchAllPages(
+        (page) => adminService.getDeliveries({ ...filters, page, per_page: EXPORT_PAGE_SIZE }),
+        (resp) => resp.data?.items || []
+      );
+      const exportData = rows.map(delivery => ({
         'Delivery ID': delivery.delivery_id,
         'Order Number': delivery.order_number,
         'Customer': delivery.customer_name,
@@ -246,8 +272,11 @@ class ExportUtils {
     try {
       const filename = `loyalty_programs_export_${new Date().toISOString().split('T')[0]}`;
 
-      const programsData = await adminService.getLoyaltyPrograms({ ...filters, per_page: 10000 });
-      const exportData = (programsData.items || []).map(program => ({
+      const rows = await this.fetchAllPages(
+        (page) => adminService.getLoyaltyPrograms({ ...filters, page, per_page: EXPORT_PAGE_SIZE }),
+        (resp) => resp.items || []
+      );
+      const exportData = rows.map(program => ({
         'Program Name': program.name,
         'Status': program.is_active ? 'Active' : 'Inactive',
         'Default Program': program.is_default ? 'Yes' : 'No',
@@ -272,8 +301,11 @@ class ExportUtils {
     try {
       const filename = `loyalty_members_export_${new Date().toISOString().split('T')[0]}`;
 
-      const membersData = await adminService.getLoyaltyMembers({ ...filters, per_page: 10000 });
-      const exportData = (membersData.items || []).map(member => ({
+      const rows = await this.fetchAllPages(
+        (page) => adminService.getLoyaltyMembers({ ...filters, page, per_page: EXPORT_PAGE_SIZE }),
+        (resp) => resp.items || []
+      );
+      const exportData = rows.map(member => ({
         'Customer': member.customer_name,
         'Email': member.customer_email || '',
         'Phone': member.customer_phone || '',
@@ -297,8 +329,11 @@ class ExportUtils {
     try {
       const filename = `loyalty_rewards_export_${new Date().toISOString().split('T')[0]}`;
 
-      const rewardsData = await adminService.getLoyaltyRewards({ ...filters, per_page: 10000 });
-      const exportData = (rewardsData.items || []).map(reward => ({
+      const rows = await this.fetchAllPages(
+        (page) => adminService.getLoyaltyRewards({ ...filters, page, per_page: EXPORT_PAGE_SIZE }),
+        (resp) => resp.items || []
+      );
+      const exportData = rows.map(reward => ({
         'Reward Name': reward.name,
         'Program': reward.program_name || '',
         'Type': reward.reward_type,
@@ -322,8 +357,11 @@ class ExportUtils {
     try {
       const filename = `notification_campaigns_export_${new Date().toISOString().split('T')[0]}`;
 
-      const campaignsData = await adminService.getNotificationCampaigns({ ...filters, per_page: 10000 });
-      const exportData = (campaignsData.campaigns || []).map(campaign => ({
+      const rows = await this.fetchAllPages(
+        (page) => adminService.getNotificationCampaigns({ ...filters, page, per_page: EXPORT_PAGE_SIZE }),
+        (resp) => resp.campaigns || resp.data?.campaigns || []
+      );
+      const exportData = rows.map(campaign => ({
         'Campaign Name': campaign.name,
         'Channel': campaign.channel,
         'Subject': campaign.subject,

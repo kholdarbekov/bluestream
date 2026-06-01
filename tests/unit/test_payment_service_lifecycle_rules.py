@@ -117,56 +117,9 @@ class TestPaymentLifecycleRules:
         assert sample_order.paid_at is not None
         handle_success.assert_called_once()
 
-    def test_process_loyalty_points_payment_rejects_when_points_insufficient(
-        self,
-        payment_service,
-        loyalty_payment,
-    ):
-        with patch("business_app.services.loyalty_service.LoyaltyService") as loyalty_cls:
-            loyalty = loyalty_cls.return_value
-            loyalty.get_user_points.return_value = 10
-
-            with pytest.raises(ValidationError):
-                payment_service.process_loyalty_points_payment(loyalty_payment.id, points_used=100)
-
-    def test_process_loyalty_points_payment_rejects_when_points_value_under_amount(
-        self,
-        payment_service,
-        loyalty_payment,
-    ):
-        with patch("business_app.services.loyalty_service.LoyaltyService") as loyalty_cls, patch(
-            "business_app.utils.helpers.calculate_discount_from_points", return_value=Decimal("1000.00")
-        ):
-            loyalty = loyalty_cls.return_value
-            loyalty.get_user_points.return_value = 10000
-
-            with pytest.raises(ValidationError):
-                payment_service.process_loyalty_points_payment(loyalty_payment.id, points_used=5000)
-
-    def test_process_loyalty_points_payment_success_updates_status_and_provider_data(
-        self,
-        payment_service,
-        loyalty_payment,
-        db,
-    ):
-        with patch("business_app.services.loyalty_service.LoyaltyService") as loyalty_cls, patch(
-            "business_app.utils.helpers.calculate_discount_from_points",
-            return_value=Decimal(loyalty_payment.amount),
-        ), patch.object(payment_service, "_create_transaction") as create_tx, patch.object(
-            payment_service, "_handle_successful_payment"
-        ) as handle_success:
-            loyalty = loyalty_cls.return_value
-            loyalty.get_user_points.return_value = 999999
-
-            updated = payment_service.process_loyalty_points_payment(loyalty_payment.id, points_used=18000)
-
-        db.session.refresh(loyalty_payment)
-        assert updated.status == PaymentStatus.COMPLETED
-        assert loyalty_payment.status == PaymentStatus.COMPLETED
-        assert loyalty_payment.provider_data["points_used"] == 18000
-        create_tx.assert_called_once()
-        handle_success.assert_called_once()
-        loyalty.deduct_points.assert_called_once()
+    # NOTE: tests for process_loyalty_points_payment removed — loyalty points are
+    # spent only on rewards, never as a direct payment method. The historical
+    # points-refund path (_process_points_refund) is retained and tested below.
 
     def test_process_refund_rejects_amount_exceeding_payment(self, payment_service, loyalty_payment, db):
         loyalty_payment.status = PaymentStatus.COMPLETED

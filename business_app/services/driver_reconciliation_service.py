@@ -143,8 +143,8 @@ class DriverReconciliationService:
 
     def _build_risk_flags(self, session: DriverCashSession) -> List[str]:
         flags: List[str] = []
-        warning_threshold = self._to_decimal(current_app.config.get("COD_CASH_WARNING_THRESHOLD_UZS", 200000))
-        escalation_threshold = self._to_decimal(current_app.config.get("COD_CASH_ESCALATION_THRESHOLD_UZS", 400000))
+        warning_threshold = self._to_decimal(current_app.config["COD_CASH_WARNING_THRESHOLD_UZS"])
+        escalation_threshold = self._to_decimal(current_app.config["COD_CASH_ESCALATION_THRESHOLD_UZS"])
 
         on_hand = self._to_decimal(session.expected_cash_on_hand)
         if on_hand >= escalation_threshold:

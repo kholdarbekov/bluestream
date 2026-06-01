@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { DEFAULT_PAGE_SIZE } from '../utils/constants';
 import {
   Table,
   Card,
@@ -120,7 +121,7 @@ const Products = () => {
   const [isCreateCodesModalVisible, setIsCreateCodesModalVisible] = useState(false);
   const [isEditCodeModalVisible, setIsEditCodeModalVisible] = useState(false);
   const [selectedMarkingCode, setSelectedMarkingCode] = useState(null);
-  const [pagination, setPagination] = useState({ page: 1, per_page: 20 });
+  const [pagination, setPagination] = useState({ page: 1, per_page: DEFAULT_PAGE_SIZE });
   const [markingCodesPagination, setMarkingCodesPagination] = useState({ page: 1, per_page: 25 });
   const [markingCodeSearch, setMarkingCodeSearch] = useState('');
   const [markingCodeStatusFilter, setMarkingCodeStatusFilter] = useState('');

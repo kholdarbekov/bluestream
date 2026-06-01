@@ -15,6 +15,7 @@ from business_app.models.delivery import Delivery
 from business_app.services.analytics_service import AnalyticsService
 from business_app.services.notification_service import NotificationService
 from shared.enums import UserRole, UserStatus
+from shared import business_config
 from business_app import db
 
 logger = get_task_logger(__name__)
@@ -250,10 +251,10 @@ def update_customer_segments():
                 if row.last_order_date:
                     days_since_last_order = (now - row.last_order_date).days
 
-                # Determine segment
-                if total_spent >= 100000:  # High value: >100k UZS
+                # Determine segment (thresholds: SSOT in shared.business_config)
+                if total_spent >= business_config.CUSTOMER_SEGMENT_HIGH_VALUE_UZS:
                     segment = "high_value"
-                elif total_spent >= 25000:  # Medium value: 25k-100k UZS
+                elif total_spent >= business_config.CUSTOMER_SEGMENT_MEDIUM_VALUE_UZS:
                     segment = "medium_value"
                 elif order_count > 0:
                     if days_since_last_order > 30:  # At risk: no order in 30 days

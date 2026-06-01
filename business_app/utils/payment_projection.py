@@ -9,6 +9,9 @@ PREPAID_METHOD_VALUES = {
     PaymentMethod.CARD.value,
     PaymentMethod.PAYME.value,
     PaymentMethod.CLICK.value,
+    # Retained for HISTORICAL orders only — points are no longer accepted as a
+    # payment method, but pre-existing points-paid orders must still project as
+    # settled prepayments.
     PaymentMethod.LOYALTY_POINTS.value,
     PaymentMethod.BUSINESS_ACCOUNT.value,
 }

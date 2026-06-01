@@ -487,28 +487,8 @@ def send_cod_reconciliation_reminders(self):
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=2, time_limit=300, soft_time_limit=270)
-def process_loyalty_points_payment(self, payment_id: int, points_to_use: int):
-    """Process payment using loyalty points"""
-    try:
-        logger.info(f"Processing loyalty points payment {payment_id} with {points_to_use} points")
-
-        payment_service = PaymentService()
-        result = payment_service.process_loyalty_points_payment(payment_id, points_to_use)
-
-        if result.status == PaymentStatus.COMPLETED:
-            # Trigger order confirmation
-            process_payment_confirmation.delay(payment_id)
-
-            logger.info(f"Loyalty points payment processed successfully for payment {payment_id}")
-            return {"success": True, "points_used": points_to_use}
-        else:
-            logger.error(f"Loyalty points payment failed for payment {payment_id}")
-            return {"success": False, "error": "Insufficient points or processing error"}
-
-    except Exception as exc:
-        logger.error(f"Loyalty points payment processing failed: {exc}")
-        raise self.retry(exc=exc)
+# NOTE: process_loyalty_points_payment task removed — loyalty points are spent
+# only on rewards (LoyaltyReward.points_cost), never as a direct payment method.
 
 
 @shared_task(time_limit=300, soft_time_limit=270)

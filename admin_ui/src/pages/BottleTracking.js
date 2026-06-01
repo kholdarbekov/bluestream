@@ -1,4 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
+import { DEFAULT_PAGE_SIZE } from '../utils/constants';
 import {
   Button,
   Card,
@@ -131,7 +132,7 @@ const CustomerAddressFields = ({ form, userFieldName = 'user_id', addressFieldNa
 
   const { data: usersData, isFetching: usersFetching } = useQuery({
     queryKey: ['bottle-customer-search', searchTerm],
-    queryFn: () => adminService.getUsers({ search: searchTerm, per_page: 20 }),
+    queryFn: () => adminService.getUsers({ search: searchTerm, per_page: DEFAULT_PAGE_SIZE }),
     enabled: searchTerm.length >= 2,
     placeholderData: keepPreviousData,
   });
@@ -205,18 +206,18 @@ const BottleTracking = () => {
   // Balances state
   const [balanceSearch, setBalanceSearch] = useState('');
   const [balanceMinBalance, setBalanceMinBalance] = useState();
-  const [balancePagination, setBalancePagination] = useState({ page: 1, per_page: 20 });
+  const [balancePagination, setBalancePagination] = useState({ page: 1, per_page: DEFAULT_PAGE_SIZE });
 
   // Ledger state
   const [ledgerEventType, setLedgerEventType] = useState();
-  const [ledgerPagination, setLedgerPagination] = useState({ page: 1, per_page: 20 });
+  const [ledgerPagination, setLedgerPagination] = useState({ page: 1, per_page: DEFAULT_PAGE_SIZE });
 
   // Fines state
   const [fineStatus, setFineStatus] = useState();
-  const [finePagination, setFinePagination] = useState({ page: 1, per_page: 20 });
+  const [finePagination, setFinePagination] = useState({ page: 1, per_page: DEFAULT_PAGE_SIZE });
 
   // Sessions state
-  const [sessionPagination, setSessionPagination] = useState({ page: 1, per_page: 20 });
+  const [sessionPagination, setSessionPagination] = useState({ page: 1, per_page: DEFAULT_PAGE_SIZE });
   const [sessionStatusFilter, setSessionStatusFilter] = useState();
   const [sessionOnlyDiscrepancies, setSessionOnlyDiscrepancies] = useState(false);
   const [sessionDetailOpen, setSessionDetailOpen] = useState(false);
@@ -226,7 +227,7 @@ const BottleTracking = () => {
   const [forceCloseForm] = Form.useForm();
 
   // Transfers state
-  const [transferPagination, setTransferPagination] = useState({ page: 1, per_page: 20 });
+  const [transferPagination, setTransferPagination] = useState({ page: 1, per_page: DEFAULT_PAGE_SIZE });
   const [transferStatusFilter, setTransferStatusFilter] = useState();
   const [resolveOpen, setResolveOpen] = useState(false);
   const [resolveTarget, setResolveTarget] = useState(null);

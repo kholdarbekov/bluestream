@@ -317,12 +317,6 @@ def calculate_loyalty_points(amount: int) -> int:
     return amount // points_ratio
 
 
-def calculate_discount_from_points(points: int) -> int:
-    """Calculate discount amount from loyalty points"""
-    redemption_ratio = current_app.config["LOYALTY_REDEMPTION_RATIO"]
-    return points * redemption_ratio
-
-
 def mask_phone_number(phone: str) -> str:
     """Mask phone number for privacy"""
     if len(phone) < 4:

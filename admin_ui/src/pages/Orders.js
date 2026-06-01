@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { DEFAULT_PAGE_SIZE } from '../utils/constants';
 import {
   Table,
   Card,
@@ -127,7 +128,7 @@ const Orders = () => {
   const [userPaymentMethods, setUserPaymentMethods] = useState([]);
   const [paymentRestrictions, setPaymentRestrictions] = useState(null);
   const [paymentMethodsLoading, setPaymentMethodsLoading] = useState(false);
-  const [pagination, setPagination] = useState({ page: 1, per_page: 20 });
+  const [pagination, setPagination] = useState({ page: 1, per_page: DEFAULT_PAGE_SIZE });
   const [orderDetailsLoading, setOrderDetailsLoading] = useState(false);
   const [createOrderErrors, setCreateOrderErrors] = useState([]);
   const [isPersonalCardModalVisible, setIsPersonalCardModalVisible] = useState(false);
@@ -176,7 +177,7 @@ const Orders = () => {
 
   const { data: usersData, isFetching: isUsersFetching } = useQuery({
     queryKey: ['users-for-order', userSearchTerm],
-    queryFn: () => adminService.getUsers({ search: userSearchTerm, per_page: 20 }),
+    queryFn: () => adminService.getUsers({ search: userSearchTerm, per_page: DEFAULT_PAGE_SIZE }),
     enabled: isCreateModalVisible && userSearchTerm.length >= 2,
     placeholderData: keepPreviousData,
   });

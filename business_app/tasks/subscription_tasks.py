@@ -213,11 +213,14 @@ def handle_failed_subscription_payments():
 
         notification_service = NotificationService()
         retry_count = 0
+        # Single threshold governs both the retry and pause boundaries so they
+        # can never drift apart (SSOT: Config.SUBSCRIPTION_FAILED_PAYMENT_MAX_ATTEMPTS).
+        max_failed_attempts = current_app.config["SUBSCRIPTION_FAILED_PAYMENT_MAX_ATTEMPTS"]
 
         for subscription in failed_subscriptions:
             try:
-                # Retry payment for subscriptions with 1-2 failed attempts
-                if subscription.failed_payment_count <= 2:
+                # Retry payment while still under the max failed-attempt budget
+                if subscription.failed_payment_count < max_failed_attempts:
                     # Retry billing
                     subscription_service = SubscriptionService()
                     billing_result = subscription_service.process_subscription_billing(subscription.id)
@@ -240,8 +243,8 @@ def handle_failed_subscription_payments():
                         # Increment failed payment count
                         subscription.failed_payment_count += 1
 
-                        # Pause subscription after 3 failed attempts
-                        if subscription.failed_payment_count >= 3:
+                        # Pause subscription once the max failed-attempt budget is reached
+                        if subscription.failed_payment_count >= max_failed_attempts:
                             subscription_service = SubscriptionService()
                             subscription_service.pause_subscription(
                                 subscription.id, reason="Multiple failed payment attempts"

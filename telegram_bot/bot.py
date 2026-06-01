@@ -285,7 +285,7 @@ class WaterBusinessBot:
             CallbackQueryHandler(order_handlers.order_details, pattern="^order_"),
             CallbackQueryHandler(order_handlers.checkout_handler, pattern="^checkout"),
             CallbackQueryHandler(order_handlers.address_handler, pattern="^address_"),
-            CallbackQueryHandler(order_handlers.payment_handler, pattern="^payment_(cash|card|payme|click|uzcard|humo|loyalty_points|business_account)$"),
+            CallbackQueryHandler(order_handlers.payment_handler, pattern="^payment_(cash|card|payme|click|uzcard|humo|business_account)$"),
             CallbackQueryHandler(order_handlers.confirm_order, pattern="^confirm_order"),
             CallbackQueryHandler(order_handlers.select_payment_cash, pattern="^select_payment_cash$"),
             CallbackQueryHandler(order_handlers.cancel_checkout, pattern="^cancel_order$"),

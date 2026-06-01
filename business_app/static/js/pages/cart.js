@@ -2,7 +2,7 @@
     var PAGE_DATA = getPageData();
     var PRODUCT_DETAIL_URL_TEMPLATE = PAGE_DATA.product_detail_url_template;
     var PRODUCT_DETAIL_URL_SLUG_TEMPLATE = PAGE_DATA.product_detail_url_slug_template;
-    var MIN_ORDER_AMOUNT = PAGE_DATA.min_order_amount || 20000;
+    var MIN_ORDER_AMOUNT = PAGE_DATA.min_order_amount;
 
     var cartItems = [];
     var isAuthenticated = typeof CURRENT_USER !== 'undefined' && CURRENT_USER !== null;

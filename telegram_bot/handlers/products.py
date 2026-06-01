@@ -19,6 +19,7 @@ from api_client import api_client
 from database import db_manager, BotUserRepository
 from utils import user_middleware, format_price, get_auth_token
 from handlers.base import BaseHandler
+from shared.business_config import MIN_ORDER_AMOUNT
 from handlers.quick_order import quick_order_handlers
 from config import config
 
@@ -851,8 +852,6 @@ class ProductHandlers(BaseHandler):
         user_id = update.effective_user.id
         language = await i18n.get_user_language(user_id)
 
-        # Minimum order amount (should match backend config)
-        MIN_ORDER_AMOUNT = 30000  # TODO: Consider getting from env var
 
         async with api_client as client:
             user_token = await get_auth_token(update, context, client)

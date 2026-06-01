@@ -31,6 +31,8 @@ import { useTranslation } from 'react-i18next';
 
 import adminService from '../services/adminService';
 import { formatDateTimeShort } from '../utils/dateUtils';
+import { fetchAllPages } from '../utils/pagination';
+import { BULK_LOAD_PAGE_SIZE, DEFAULT_PAGE_SIZE } from '../utils/constants';
 
 const { Search, TextArea } = Input;
 const { Option } = Select;
@@ -72,7 +74,7 @@ const CorporateContracts = () => {
   const queryClient = useQueryClient();
 
   const [searchText, setSearchText] = useState('');
-  const [pagination, setPagination] = useState({ page: 1, per_page: 20 });
+  const [pagination, setPagination] = useState({ page: 1, per_page: DEFAULT_PAGE_SIZE });
   const [selectedContractId, setSelectedContractId] = useState(null);
   const [isContractModalOpen, setIsContractModalOpen] = useState(false);
   const [isTopupModalOpen, setIsTopupModalOpen] = useState(false);
@@ -98,13 +100,21 @@ const CorporateContracts = () => {
 
   const usersQuery = useQuery({
     queryKey: ['corporate-contract-users'],
-    queryFn: () => adminService.getUsers({ per_page: 200 }),
+    queryFn: () => fetchAllPages(
+      (page) => adminService.getUsers({ page, per_page: BULK_LOAD_PAGE_SIZE }),
+      (resp) => resp?.data?.items || [],
+      BULK_LOAD_PAGE_SIZE,
+    ),
     enabled: isContractModalOpen,
   });
 
   const productsQuery = useQuery({
     queryKey: ['corporate-contract-products'],
-    queryFn: () => adminService.getProducts({ per_page: 200, is_active: true }),
+    queryFn: () => fetchAllPages(
+      (page) => adminService.getProducts({ page, per_page: BULK_LOAD_PAGE_SIZE, is_active: true }),
+      (resp) => resp?.data?.items || [],
+      BULK_LOAD_PAGE_SIZE,
+    ),
     enabled: isPricesDrawerOpen,
   });
 
@@ -132,8 +142,8 @@ const contractBalanceQuery = useQuery({
   const balanceProducts = selectedBalance?.products || [];
   const balanceSummary = selectedBalance?.summary || {};
   const ledgerItems = contractLedgerQuery.data?.data?.items || [];
-  const availableUsers = usersQuery.data?.data?.items || [];
-  const availableProducts = productsQuery.data?.data?.items || [];
+  const availableUsers = usersQuery.data || [];
+  const availableProducts = productsQuery.data || [];
   const corporateUsers = useMemo(
     () => availableUsers.filter((user) => isEntityUser(user)),
     [availableUsers]

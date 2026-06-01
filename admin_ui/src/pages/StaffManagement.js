@@ -11,6 +11,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import staffService from '../services/staffService';
+import { fetchAllPages } from '../utils/pagination';
+import { BULK_LOAD_PAGE_SIZE } from '../utils/constants';
 
 const { Title, Text } = Typography;
 const { TabPane } = Tabs;
@@ -43,12 +45,20 @@ const StaffManagement = () => {
 
     const { data: deliveryPersonsData } = useQuery({
         queryKey: ['staffInviteDeliveryPersons'],
-        queryFn: () => staffService.getDeliveryPersons({ page: 1, per_page: 200 }),
+        queryFn: () => fetchAllPages(
+            (page) => staffService.getDeliveryPersons({ page, per_page: BULK_LOAD_PAGE_SIZE }),
+            (resp) => resp?.data?.data?.items || [],
+            BULK_LOAD_PAGE_SIZE,
+        ),
     });
 
     const { data: operatorsData } = useQuery({
         queryKey: ['staffInviteOperators'],
-        queryFn: () => staffService.getOperators({ page: 1, per_page: 200 }),
+        queryFn: () => fetchAllPages(
+            (page) => staffService.getOperators({ page, per_page: BULK_LOAD_PAGE_SIZE }),
+            (resp) => resp?.data?.data?.items || [],
+            BULK_LOAD_PAGE_SIZE,
+        ),
     });
 
     // Mutations
@@ -96,8 +106,8 @@ const StaffManagement = () => {
     const cashSessions = cashData?.data?.data?.sessions || [];
     const cashSummary = cashData?.data?.data?.summary || {};
     const cashGrandTotal = cashData?.data?.data?.grand_total_cash || 0;
-    const deliveryPersons = deliveryPersonsData?.data?.data?.items || [];
-    const operators = operatorsData?.data?.data?.items || [];
+    const deliveryPersons = deliveryPersonsData || [];
+    const operators = operatorsData || [];
 
     const inviteCandidates = useMemo(() => {
         const byUserId = new Map();

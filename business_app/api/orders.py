@@ -163,8 +163,9 @@ def create_emergency_order():
                 status_code=400,
             )
 
-        # Emergency orders have additional fee
-        emergency_fee = 10000  # 10,000 UZS emergency fee
+        # Emergency orders may carry an additional fee (env-driven; 0 by default
+        # since delivery is currently free).
+        emergency_fee = current_app.config["EMERGENCY_DELIVERY_FEE"]
 
         # Create order with emergency flag.
         order_data = {

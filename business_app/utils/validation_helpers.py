@@ -8,6 +8,7 @@ from flask import request
 from flask_jwt_extended import get_jwt_identity
 
 from business_app.utils.exceptions import ValidationError
+from business_app.utils.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 
 
 class PaginationValidator:
@@ -15,7 +16,7 @@ class PaginationValidator:
 
     @staticmethod
     def validate_pagination_params(
-        default_page: int = 1, default_per_page: int = 20, max_per_page: int = 50
+        default_page: int = 1, default_per_page: int = DEFAULT_PAGE_SIZE, max_per_page: int = MAX_PAGE_SIZE
     ) -> Tuple[int, int]:
         """
         Validate and extract pagination parameters from request
@@ -367,8 +368,8 @@ class PaginationHelper:
 
 # Convenience functions for common validation scenarios
 def validate_list_request_params(
-    default_per_page: int = 20,
-    max_per_page: int = 50,
+    default_per_page: int = DEFAULT_PAGE_SIZE,
+    max_per_page: int = MAX_PAGE_SIZE,
     allow_status_filter: bool = True,
     status_enum=None,
     allow_date_filter: bool = True,

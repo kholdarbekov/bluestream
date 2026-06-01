@@ -10,6 +10,7 @@ import secrets
 import string
 
 from business_app.utils.user_types import VALID_USER_TYPE_VALUES
+from shared import business_config
 
 
 class SecurityValidator:
@@ -74,8 +75,8 @@ class SecurityValidator:
         if not password:
             return False, "Password is required"
 
-        if len(password) < 8:
-            return False, "Password must be at least 8 characters long"
+        if len(password) < business_config.PASSWORD_MIN_LENGTH:
+            return False, f"Password must be at least {business_config.PASSWORD_MIN_LENGTH} characters long"
 
         if len(password) > 128:
             return False, "Password must be less than 128 characters"

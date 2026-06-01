@@ -38,10 +38,10 @@ class CartService:
     """
 
     def __init__(self, inventory_service=None):
-        self.min_order_amount = current_app.config.get("MIN_ORDER_AMOUNT", 10000)
-        self.max_cart_items = current_app.config.get("MAX_CART_ITEMS", 50)
-        self.free_delivery_threshold = current_app.config.get("FREE_DELIVERY_THRESHOLD", 100000)
-        self.standard_delivery_fee = current_app.config.get("STANDARD_DELIVERY_FEE", 10000)
+        self.min_order_amount = current_app.config["MIN_ORDER_AMOUNT"]
+        self.max_cart_items = current_app.config["MAX_CART_ITEMS"]
+        # Single flat delivery fee (env-driven; 0 = free). No free-delivery threshold.
+        self.standard_delivery_fee = current_app.config["DEFAULT_DELIVERY_FEE"]
         self._inventory_service = inventory_service
 
     @property
@@ -193,8 +193,9 @@ class CartService:
         if promo_code:
             promo_discount, promo_details = self._apply_promo_code(promo_code, items_subtotal, user_id)
 
-        # Calculate loyalty points discount
-        loyalty_discount = self._calculate_loyalty_discount(loyalty_points_used, user, items_subtotal)
+        # Loyalty points are redeemed ONLY via rewards (LoyaltyReward.points_cost),
+        # never converted directly to a UZS discount. No cart-level points discount.
+        loyalty_discount = 0.0
 
         # Calculate totals
         total_discount = promo_discount + loyalty_discount
@@ -239,8 +240,6 @@ class CartService:
             "delivery": {
                 "fee": delivery_fee,
                 "is_free": delivery_fee == 0,
-                "free_delivery_threshold": self.free_delivery_threshold,
-                "amount_for_free_delivery": max(0, self.free_delivery_threshold - items_subtotal),
             },
             "validation": {
                 "meets_minimum": items_subtotal >= self.min_order_amount,
@@ -682,8 +681,6 @@ class CartService:
             "subtotal": subtotal,
             "estimated_delivery_fee": delivery_fee,
             "estimated_total": estimated_total,
-            "free_delivery_threshold": self.free_delivery_threshold,
-            "amount_for_free_delivery": max(0, self.free_delivery_threshold - subtotal),
         }
 
     # Private helper methods
@@ -825,23 +822,6 @@ class CartService:
             discount = min(discount, float(campaign.max_discount_amount))
 
         return discount
-
-    def _calculate_loyalty_discount(self, points_used: int, user: User, cart_total: float) -> float:
-        """Calculate discount from loyalty points"""
-        if points_used <= 0:
-            return 0.0
-
-        # Get user's available points
-        available_points = getattr(user, "loyalty_points", 0)
-        if points_used > available_points:
-            raise ValidationError(f"Insufficient loyalty points. Available: {available_points}")
-
-        # Calculate discount (e.g., 1 point = 100 UZS)
-        points_to_currency = 100  # Configure as needed
-        discount = points_used * points_to_currency
-
-        # Don't allow discount greater than cart total
-        return min(discount, cart_total)
 
     def _calculate_loyalty_points_earned(self, final_total: float, user: User) -> int:
         """

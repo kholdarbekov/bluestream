@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { DEFAULT_PAGE_SIZE } from '../utils/constants';
 import {
   Button,
   Card,
@@ -54,7 +55,7 @@ const LoyaltyRewards = () => {
   const [programId, setProgramId] = useState();
   const [rewardType, setRewardType] = useState();
   const [statusFilter, setStatusFilter] = useState();
-  const [pagination, setPagination] = useState({ page: 1, per_page: 20 });
+  const [pagination, setPagination] = useState({ page: 1, per_page: DEFAULT_PAGE_SIZE });
   const [drawerRewardId, setDrawerRewardId] = useState(null);
   const [rewardModal, setRewardModal] = useState({ open: false, reward: null });
   const [rewardForm] = Form.useForm();

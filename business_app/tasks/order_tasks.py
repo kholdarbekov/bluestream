@@ -731,8 +731,9 @@ def monitor_order_anomalies():
                 )
 
         # Check for unusually large orders
+        large_order_threshold = current_app.config["LARGE_ORDER_THRESHOLD_UZS"]
         for order in recent_orders:
-            if order.total_amount > 500000:  # More than 500k UZS
+            if order.total_amount > large_order_threshold:
                 anomalies.append(
                     {
                         "type": "large_order",

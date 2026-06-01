@@ -372,52 +372,11 @@ class PaymentService:
 
         return payment
 
-    def process_loyalty_points_payment(self, payment_id: int, points_used: int) -> Payment:
-        """Process payment using loyalty points"""
-        payment = Payment.query.get(payment_id)
-        if not payment:
-            raise NotFoundError(get_translation("error.not_found"))
-
-        if payment.payment_method != PaymentMethod.LOYALTY_POINTS:
-            raise ValidationError(get_translation("error.payment.invalid_method"))
-
-        # Check user points balance
-        from .loyalty_service import LoyaltyService
-
-        loyalty_service = LoyaltyService()
-
-        user_points = loyalty_service.get_user_points(payment.user_id)
-        if user_points < points_used:
-            raise ValidationError(get_translation("api.loyalty.insufficient_points"))
-
-        # Calculate payment amount from points
-        from ..utils.helpers import calculate_discount_from_points
-
-        payment_amount = calculate_discount_from_points(points_used)
-
-        if payment_amount < payment.amount:
-            raise ValidationError(get_translation("api.loyalty.insufficient_points"))
-
-        # Deduct points
-        loyalty_service.deduct_points(payment.user_id, points_used, f"Payment for order #{payment.order.order_number}")
-
-        # Update payment
-        payment.status = PaymentStatus.COMPLETED
-        payment.paid_at = datetime.now(timezone.utc)
-        # Reassign provider_data to ensure JSON updates are persisted.
-        provider_data = dict(payment.provider_data or {})
-        provider_data["points_used"] = points_used
-        payment.provider_data = provider_data
-
-        self._create_transaction(
-            payment, "payment_completed", {"points_used": points_used, "points_value": payment_amount}
-        )
-
-        db.session.commit()
-
-        self._handle_successful_payment(payment)
-
-        return payment
+    # NOTE: process_loyalty_points_payment() removed — loyalty points are spent
+    # only on rewards (LoyaltyReward.points_cost), never as a direct payment method.
+    # The PaymentMethod.LOYALTY_POINTS enum value and the historical refund path
+    # (_process_points_refund) are retained so existing points-paid orders still
+    # deserialize and can be refunded.
 
     def _payme_request(self, method: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """Delegate to PaymeProvider. Kept for card-token helpers that still call it.

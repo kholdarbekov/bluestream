@@ -1,11 +1,15 @@
 # Aqua Element — robots.txt
-# Last updated: 2026-05-06
+# Last updated: 2026-06-03
 
 # Default policy: allow all well-behaved crawlers.
 User-agent: *
 Allow: /
 
 # Private/authenticated areas (apply to all crawlers, including AI bots below).
+# The /api/ surface is private EXCEPT /api/public/ — the public, machine-readable
+# product feed advertised to AI agents (longest-match Allow wins, so the feed
+# stays crawlable while the rest of /api/ stays disallowed).
+Allow: /api/public/
 Disallow: /api/
 Disallow: /metrics
 Disallow: /health
@@ -33,6 +37,7 @@ Disallow: /account-security
 # OpenAI — GPTBot crawls for training data.
 User-agent: GPTBot
 Allow: /
+Allow: /api/public/
 Disallow: /api/
 Disallow: /metrics
 Disallow: /health
@@ -51,6 +56,7 @@ Disallow: /account-security
 # OpenAI — OAI-SearchBot indexes content for SearchGPT / ChatGPT browse.
 User-agent: OAI-SearchBot
 Allow: /
+Allow: /api/public/
 Disallow: /api/
 Disallow: /login
 Disallow: /register
@@ -66,6 +72,7 @@ Disallow: /account-security
 # OpenAI — ChatGPT-User: per-user fetch when ChatGPT browses on demand.
 User-agent: ChatGPT-User
 Allow: /
+Allow: /api/public/
 Disallow: /api/
 Disallow: /login
 Disallow: /register
@@ -81,6 +88,7 @@ Disallow: /account-security
 # Anthropic — Claude.
 User-agent: ClaudeBot
 Allow: /
+Allow: /api/public/
 Disallow: /api/
 Disallow: /login
 Disallow: /register
@@ -95,6 +103,7 @@ Disallow: /account-security
 
 User-agent: Claude-Web
 Allow: /
+Allow: /api/public/
 Disallow: /api/
 Disallow: /login
 Disallow: /register
@@ -109,6 +118,7 @@ Disallow: /account-security
 
 User-agent: anthropic-ai
 Allow: /
+Allow: /api/public/
 Disallow: /api/
 Disallow: /login
 Disallow: /register
@@ -124,6 +134,7 @@ Disallow: /account-security
 # Perplexity.
 User-agent: PerplexityBot
 Allow: /
+Allow: /api/public/
 Disallow: /api/
 Disallow: /login
 Disallow: /register
@@ -138,6 +149,7 @@ Disallow: /account-security
 
 User-agent: Perplexity-User
 Allow: /
+Allow: /api/public/
 Disallow: /api/
 Disallow: /login
 Disallow: /register
@@ -153,6 +165,7 @@ Disallow: /account-security
 # Google — Gemini / AI Overview / Vertex AI training.
 User-agent: Google-Extended
 Allow: /
+Allow: /api/public/
 Disallow: /api/
 Disallow: /login
 Disallow: /register
@@ -168,6 +181,7 @@ Disallow: /account-security
 # Apple — Siri / Apple Intelligence.
 User-agent: Applebot
 Allow: /
+Allow: /api/public/
 Disallow: /api/
 Disallow: /login
 Disallow: /register
@@ -182,6 +196,7 @@ Disallow: /account-security
 
 User-agent: Applebot-Extended
 Allow: /
+Allow: /api/public/
 Disallow: /api/
 Disallow: /login
 Disallow: /register
@@ -197,6 +212,7 @@ Disallow: /account-security
 # Microsoft — Bing / Copilot. Bing's index feeds ChatGPT's web search.
 User-agent: Bingbot
 Allow: /
+Allow: /api/public/
 Disallow: /api/
 Disallow: /login
 Disallow: /register
@@ -212,6 +228,7 @@ Disallow: /account-security
 # Yandex — Алиса / Yandex GPT (critical for Russian-speaking market).
 User-agent: YandexBot
 Allow: /
+Allow: /api/public/
 Disallow: /api/
 Disallow: /login
 Disallow: /register
@@ -227,6 +244,7 @@ Disallow: /account-security
 # Common Crawl — feeds many open LLMs.
 User-agent: CCBot
 Allow: /
+Allow: /api/public/
 Disallow: /api/
 Disallow: /login
 Disallow: /register

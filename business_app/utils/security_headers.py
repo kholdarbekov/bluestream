@@ -246,8 +246,12 @@ class SecurityHeadersMiddleware:
                 else:
                     response.headers["Content-Security-Policy"] = csp_policy
 
-            # Additional headers for API endpoints
-            if request.path.startswith("/api/"):
+            # Additional headers for API endpoints. The /api/public/ namespace is
+            # a deliberately public, crawlable surface (e.g. the Schema.org product
+            # feed advertised to AI agents via the RFC 9727 api-catalog), so it
+            # keeps its own cacheable/indexable headers instead of these
+            # private-API no-store + noindex defaults.
+            if request.path.startswith("/api/") and not request.path.startswith("/api/public/"):
                 response.headers["X-Robots-Tag"] = "noindex, nofollow"
                 response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, proxy-revalidate"
                 response.headers["Pragma"] = "no-cache"

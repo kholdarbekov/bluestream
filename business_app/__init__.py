@@ -336,6 +336,12 @@ def setup_request_handlers(app):
             from flask_jwt_extended import get_jwt, get_jwt_identity, create_access_token, set_access_cookies
             from datetime import timedelta, timezone
 
+            # Never attach a refreshed per-user auth cookie to a publicly
+            # cacheable response (e.g. the anonymous /.well-known/api-catalog):
+            # a shared/CDN cache could otherwise cross-serve one user's token.
+            if "public" in response.headers.get("Cache-Control", ""):
+                return response
+
             exp_timestamp = get_jwt()["exp"]
             now = datetime.now(timezone.utc)
             target_timestamp = datetime.timestamp(now + timedelta(minutes=30))

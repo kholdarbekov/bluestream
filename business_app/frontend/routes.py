@@ -1,5 +1,6 @@
 """Frontend routes for Blue Stream Water Business Platform."""
 
+import json
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit, urlunsplit, parse_qsl
 from xml.sax.saxutils import escape
@@ -17,6 +18,7 @@ from business_app.models.loyalty import LoyaltyReward
 from business_app.models.blog import BlogPost, BlogStatus
 from business_app.services.loyalty_service import LoyaltyService
 from business_app.services.subscription_service import SubscriptionService
+from business_app.utils.agent_discovery import build_api_catalog_linkset, build_link_header
 from business_app.utils.helpers import get_current_language
 from business_app import db
 from datetime import datetime, UTC
@@ -1181,6 +1183,49 @@ def llms_txt():
     static_dir = Path(current_app.static_folder)
     response = send_from_directory(str(static_dir), "llms.txt", mimetype="text/markdown; charset=utf-8")
     response.headers["Cache-Control"] = "public, max-age=3600"
+    return response
+
+
+@frontend_bp.route("/.well-known/api-catalog")
+def api_catalog():
+    """RFC 9727 API catalog for agent discovery.
+
+    Returns an RFC 9264 linkset (``application/linkset+json``) pointing AI
+    agents at the public, machine-readable surface — the Schema.org product
+    feed (``service-desc``) and the ``llms.txt`` index (``service-doc``). The
+    full OpenAPI spec (``/apispec_1.json``) and Swagger UI (``/docs``) are
+    intentionally omitted because they document privileged admin endpoints.
+    """
+    linkset = build_api_catalog_linkset(_absolute_public_url)
+    response = current_app.response_class(
+        response=json.dumps(linkset, ensure_ascii=False, indent=2),
+        status=200,
+        mimetype="application/linkset+json",
+    )
+    response.headers["Cache-Control"] = "public, max-age=3600"
+    response.headers["Access-Control-Allow-Origin"] = "*"  # AI agents fetch cross-origin
+    return response
+
+
+@frontend_bp.after_request
+def add_agent_discovery_link_header(response):
+    """Advertise the public API catalog on the public storefront's HTML pages (RFC 8288).
+
+    Scoped to ``200 text/html`` responses on the public storefront host. The
+    authenticated ``cabinet.``/``admin.`` subdomains are served by this same
+    blueprint, so they are skipped explicitly — those pages are ``noindex`` and
+    are not part of the public surface we advertise. The discovery endpoints
+    themselves (product feed, sitemaps, ``llms.txt``, the catalog) and
+    redirects/errors are excluded by the status/mimetype gate. Appends to any
+    pre-existing ``Link`` header rather than clobbering it.
+    """
+    host = (request.host or "").lower()
+    if host.startswith("cabinet.") or host.startswith("admin."):
+        return response
+    if response.status_code == 200 and response.mimetype == "text/html":
+        link_value = build_link_header()
+        existing = response.headers.get("Link")
+        response.headers["Link"] = f"{existing}, {link_value}" if existing else link_value
     return response
 
 

@@ -15,20 +15,27 @@ const mockWriteBuffer = vi.fn();
 const mockAddRows = vi.fn();
 const mockAddWorksheet = vi.fn();
 
+// `new ExcelJS.Workbook()` / `new jsPDF()` instantiate these mocks, so the
+// implementations must be regular functions — vitest 4 calls a mock's
+// implementation as a constructor and arrow functions cannot be constructors.
 vi.mock('exceljs', () => {
-  const Workbook = vi.fn().mockImplementation(() => ({
-    addWorksheet: mockAddWorksheet,
-    xlsx: { writeBuffer: mockWriteBuffer },
-  }));
+  const Workbook = vi.fn().mockImplementation(function () {
+    return {
+      addWorksheet: mockAddWorksheet,
+      xlsx: { writeBuffer: mockWriteBuffer },
+    };
+  });
   return { default: { Workbook } };
 });
 
 vi.mock('jspdf', () => ({
-  default: vi.fn().mockImplementation(() => ({
-    setFontSize: vi.fn(),
-    text: vi.fn(),
-    save: vi.fn(),
-  })),
+  default: vi.fn().mockImplementation(function () {
+    return {
+      setFontSize: vi.fn(),
+      text: vi.fn(),
+      save: vi.fn(),
+    };
+  }),
 }));
 
 vi.mock('jspdf-autotable', () => ({

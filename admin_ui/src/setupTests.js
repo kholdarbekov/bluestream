@@ -28,25 +28,35 @@ HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
   clip: vi.fn()
 }));
 
-global.ResizeObserver = vi.fn().mockImplementation(() => ({
-  observe: vi.fn(),
-  unobserve: vi.fn(),
-  disconnect: vi.fn()
-}));
+// NOTE: these globals are instantiated with `new` by the code under test
+// (e.g. antd's rc-resize-observer calls `new ResizeObserver(...)`). Vitest 4
+// invokes a mock's implementation as a constructor, and arrow functions cannot
+// be constructors — so the implementations must be regular functions.
+global.ResizeObserver = vi.fn().mockImplementation(function () {
+  return {
+    observe: vi.fn(),
+    unobserve: vi.fn(),
+    disconnect: vi.fn()
+  };
+});
 
-global.IntersectionObserver = vi.fn().mockImplementation(() => ({
-  observe: vi.fn(),
-  unobserve: vi.fn(),
-  disconnect: vi.fn()
-}));
+global.IntersectionObserver = vi.fn().mockImplementation(function () {
+  return {
+    observe: vi.fn(),
+    unobserve: vi.fn(),
+    disconnect: vi.fn()
+  };
+});
 
-global.WebSocket = vi.fn().mockImplementation(() => ({
-  close: vi.fn(),
-  send: vi.fn(),
-  readyState: WebSocket.OPEN,
-  addEventListener: vi.fn(),
-  removeEventListener: vi.fn()
-}));
+global.WebSocket = vi.fn().mockImplementation(function () {
+  return {
+    close: vi.fn(),
+    send: vi.fn(),
+    readyState: WebSocket.OPEN,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn()
+  };
+});
 
 const localStorageMock = {
   getItem: vi.fn(),

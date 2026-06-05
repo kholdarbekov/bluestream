@@ -19,6 +19,13 @@ from business_app.models.blog import BlogPost, BlogStatus
 from business_app.services.loyalty_service import LoyaltyService
 from business_app.services.subscription_service import SubscriptionService
 from business_app.utils.agent_discovery import build_api_catalog_linkset, build_link_header
+from business_app.utils.markdown_negotiation import (
+    MARKDOWN_MAX_HTML_BYTES,
+    MARKDOWN_NEGOTIATION_ENDPOINTS,
+    estimate_tokens,
+    html_to_markdown,
+    wants_markdown,
+)
 from business_app.utils.helpers import get_current_language
 from business_app import db
 from datetime import datetime, UTC
@@ -1222,10 +1229,71 @@ def add_agent_discovery_link_header(response):
     host = (request.host or "").lower()
     if host.startswith("cabinet.") or host.startswith("admin."):
         return response
-    if response.status_code == 200 and response.mimetype == "text/html":
+    # ``convert_to_markdown_if_requested`` is registered AFTER this hook, so it
+    # runs FIRST in Flask's LIFO after_request order — by the time this hook
+    # runs, a negotiated response is already ``text/markdown``. The ``text/markdown``
+    # branch below keeps the discovery ``Link`` header on those responses; don't
+    # narrow it back to ``text/html`` only.
+    if response.status_code == 200 and response.mimetype in ("text/html", "text/markdown"):
         link_value = build_link_header()
         existing = response.headers.get("Link")
         response.headers["Link"] = f"{existing}, {link_value}" if existing else link_value
+    return response
+
+
+@frontend_bp.after_request
+def convert_to_markdown_if_requested(response):
+    """Serve Markdown to agents that send ``Accept: text/markdown`` (content negotiation).
+
+    Scoped to ``200 text/html`` responses from public *content* endpoints on the
+    public storefront host (``cabinet.``/``admin.`` are skipped). Browsers never
+    send ``text/markdown`` so they keep HTML — HTML stays the default. On any
+    conversion error the original HTML is returned unchanged; a conversion must
+    never break the page.
+    """
+    try:
+        if not wants_markdown(request.headers.get("Accept")):
+            return response
+        host = (request.host or "").lower()
+        if host.startswith("cabinet.") or host.startswith("admin."):
+            return response
+        if response.status_code != 200 or response.mimetype != "text/html":
+            return response
+        if request.endpoint not in MARKDOWN_NEGOTIATION_ENDPOINTS:
+            return response
+        # Never convert a personalized response: some allowlisted pages (e.g. the
+        # homepage loyalty widget) inject per-user data when a JWT is present.
+        # Anonymous agents/crawlers — the intended audience — have no identity and
+        # still get Markdown; authenticated requests fall through to HTML.
+        try:
+            verify_jwt_in_request(optional=True)
+            if get_jwt_identity():
+                return response
+        except Exception:
+            pass
+        if response.direct_passthrough:
+            return response
+
+        html = response.get_data(as_text=True)
+        if len(html.encode("utf-8")) > MARKDOWN_MAX_HTML_BYTES:
+            current_app.logger.warning(
+                "Markdown negotiation skipped: %s exceeds %d bytes", request.path, MARKDOWN_MAX_HTML_BYTES
+            )
+            return response
+
+        markdown = html_to_markdown(html)
+        response.set_data(markdown)
+        response.headers["Content-Type"] = "text/markdown; charset=utf-8"
+        response.headers["x-markdown-tokens"] = str(estimate_tokens(markdown))
+
+        # Union (do not overwrite) so Accept survives the app-level Vary hook
+        # regardless of after_request execution order, and caches never cross-serve
+        # Markdown to a browser or HTML to an agent.
+        vary_parts = {p.strip() for p in response.headers.get("Vary", "").split(",") if p.strip()}
+        vary_parts.add("Accept")
+        response.headers["Vary"] = ", ".join(sorted(vary_parts))
+    except Exception as exc:  # never break the page over a conversion failure
+        current_app.logger.warning("Markdown negotiation failed for %s: %s", request.path, exc, exc_info=True)
     return response
 
 

@@ -4674,6 +4674,61 @@ BACKEND_TRANSLATIONS = {
         'uz': '📍 Joylashuv qabul qilindi!',
         'ru': '📍 Местоположение получено!'
     },
+    'telegram.address.outside_delivery_area': {
+        'en': '⚠️ This location is outside our delivery area (Tashkent). Please share a location within the service area.',
+        'uz': '⚠️ Bu joylashuv yetkazib berish hududimizdan (Toshkent) tashqarida. Iltimos, xizmat ko\'rsatish hududidagi joylashuvni yuboring.',
+        'ru': '⚠️ Это местоположение находится вне нашей зоны доставки (Ташкент). Пожалуйста, отправьте местоположение в пределах зоны обслуживания.'
+    },
+    # ─── Public delivery-coverage page (/coverage) ───────────────────────
+    'landing.nav.coverage': {
+        'en': 'Coverage', 'uz': 'Hududlar', 'ru': 'Зона доставки'
+    },
+    'landing.coverage.title': {
+        'en': 'Where we deliver', 'uz': 'Biz qayerga yetkazib beramiz', 'ru': 'Куда мы доставляем'
+    },
+    'landing.coverage.checker_title': {
+        'en': 'Check your address', 'uz': 'Manzilingizni tekshiring', 'ru': 'Проверьте свой адрес'
+    },
+    'landing.coverage.checker_hint': {
+        'en': 'Type your address or drop a pin on the map to confirm we deliver to you.',
+        'uz': "Yetkazib berishni tasdiqlash uchun manzilingizni kiriting yoki xaritada belgilang.",
+        'ru': 'Введите адрес или поставьте метку на карте, чтобы подтвердить доставку.'
+    },
+    'landing.coverage.districts_label': {
+        'en': 'Districts we cover', 'uz': 'Biz qamrab olgan tumanlar', 'ru': 'Районы, которые мы обслуживаем'
+    },
+    'landing.coverage.address_placeholder': {
+        'en': "e.g. Amir Temur ko'chasi 12, Tashkent",
+        'uz': "masalan, Amir Temur ko'chasi 12, Toshkent",
+        'ru': 'напр. улица Амира Темура 12, Ташкент'
+    },
+    'landing.coverage.check_btn': {
+        'en': 'Check', 'uz': 'Tekshirish', 'ru': 'Проверить'
+    },
+    'landing.coverage.use_location': {
+        'en': 'Use my location', 'uz': 'Joylashuvimdan foydalanish', 'ru': 'Использовать моё местоположение'
+    },
+    'landing.coverage.result_ok': {
+        'en': 'Good news — we deliver to this location.',
+        'uz': 'Xush xabar — biz bu joyga yetkazib beramiz.',
+        'ru': 'Хорошая новость — мы доставляем по этому адресу.'
+    },
+    'landing.coverage.result_no': {
+        'en': "Sorry — that's outside our delivery area.",
+        'uz': "Kechirasiz — bu bizning yetkazib berish hududimizdan tashqarida.",
+        'ru': 'К сожалению, это вне нашей зоны доставки.'
+    },
+    'landing.coverage.home_title': {
+        'en': 'Delivering across Tashkent', 'uz': 'Toshkent bo\'ylab yetkazib beramiz', 'ru': 'Доставляем по Ташкенту'
+    },
+    'landing.coverage.home_text': {
+        'en': 'All of Tashkent city plus neighbouring areas of the Tashkent Region.',
+        'uz': "Butun Toshkent shahri va Toshkent viloyatining qo'shni hududlari.",
+        'ru': 'Весь город Ташкент и прилегающие районы Ташкентской области.'
+    },
+    'landing.coverage.home_cta': {
+        'en': 'Check your address', 'uz': 'Manzilingizni tekshiring', 'ru': 'Проверьте свой адрес'
+    },
     'telegram.address.detected_location_prefix': {
         'en': '📍 *Detected location:*\n{address}\n\n',
         'uz': '📍 *Aniqlangan joylashuv:*\n{address}\n\n',

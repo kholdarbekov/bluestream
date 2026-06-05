@@ -907,6 +907,15 @@ TRANSLATIONS: Dict[str, TranslationRecord] = {
             "ru": "Геолокация получена: {address}",
         },
     },
+    "staff.tryout.outside_delivery_area": {
+        "category": "staff_bot",
+        "description": "Shared try-out location is outside the delivery coverage area",
+        "translations": {
+            "en": "⚠️ This location is outside the delivery area (Tashkent). Please share a location within the service area or type the address.",
+            "uz": "⚠️ Bu joylashuv yetkazib berish hududidan (Toshkent) tashqarida. Iltimos, xizmat hududidagi joylashuvni yuboring yoki manzilni yozing.",
+            "ru": "⚠️ Это местоположение вне зоны доставки (Ташкент). Отправьте местоположение в пределах зоны обслуживания или введите адрес.",
+        },
+    },
     "staff.tryout.location_geocode_failed": {
         "category": "staff_bot",
         "description": "Location reverse geocode failed",

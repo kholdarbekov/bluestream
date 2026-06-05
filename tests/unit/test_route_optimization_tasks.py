@@ -232,9 +232,11 @@ class TestEvaluatePoolInsertionSuggestionsTask:
         self, app, db, driver, driver_with_location, customer, monkeypatch
     ):
         with app.app_context():
-            # Driver has one stop close by; pool delivery is 50 km away.
+            # Driver has one stop close by (near lng 69.25); the pool delivery is
+            # across town (lng 69.33, ~6-7 km east) — still inside the delivery
+            # zone (TASHKENT_POLYGON), but far enough to blow the tight detour budget.
             _add_assigned_delivery(db, customer.id, driver.id, 41.301, 69.251, "ORD-close")
-            far_delivery = _add_pool_delivery(db, customer.id, 42.000, 70.000, "ORD-far")
+            far_delivery = _add_pool_delivery(db, customer.id, 41.300, 69.330, "ORD-far")
 
             monkeypatch.setattr(
                 "business_app.services.maps_service.MapsService.get_distance_matrix",

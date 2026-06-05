@@ -234,6 +234,18 @@
         </section>
         <!-- shop-section end -->
 
+        <!-- coverage-teaser -->
+        <section class="coverage-teaser light centred pt-60 pb-60">
+            <div class="auto-container">
+                <div class="sec-title centred">
+                    <h2>{{ 'landing.coverage.home_title'|t }}</h2>
+                    <p>{{ 'landing.coverage.home_text'|t }}</p>
+                </div>
+                <a href="{{ external_url_for_lang('frontend.coverage') }}" class="theme-btn btn-one">{{ 'landing.coverage.home_cta'|t }}</a>
+            </div>
+        </section>
+        <!-- coverage-teaser end -->
+
         <!-- subscription-section -->
         {% if subscription_plans %}
         <section class="pricing-section">

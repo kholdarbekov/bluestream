@@ -31,6 +31,7 @@ MARKDOWN_NEGOTIATION_ENDPOINTS = frozenset(
         "frontend.product_detail_slug",
         "frontend.subscriptions",
         "frontend.services",
+        "frontend.coverage",
         "frontend.about",
         "frontend.about_sources",
         "frontend.process_filtration",

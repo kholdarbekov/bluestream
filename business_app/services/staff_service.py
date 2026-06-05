@@ -18,6 +18,7 @@ from business_app.models.order import Order, OrderItem
 from business_app.models.delivery import Delivery, DeliveryPerson, DeliveryStatusHistory
 from business_app.models.staff import StaffActivityLog
 from business_app.utils.exceptions import ValidationError, NotFoundError, ForbiddenError, ConflictError
+from business_app.utils.geo_validation import ensure_within_delivery_zone
 from business_app.utils.state_validators import (
     assert_delivery_person_for_status,
     assert_order_address_for_status,
@@ -1810,6 +1811,9 @@ class StaffService:
         user = User.query.get(user_id)
         if not user:
             raise NotFoundError("User not found", error_code="STAFF_USER_NOT_FOUND")
+
+        # Enforce the delivery-zone SSOT before persisting any coordinate.
+        ensure_within_delivery_zone(address_data.get("latitude"), address_data.get("longitude"))
 
         address = UserAddress(
             user_id=user_id,

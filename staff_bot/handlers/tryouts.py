@@ -7,6 +7,7 @@ from typing import Dict, Optional
 from telegram import ReplyKeyboardRemove, Update
 from telegram.ext import ContextTypes, ConversationHandler
 
+from shared.constants import is_within_tashkent
 from staff_bot.api_client import api_client
 from staff_bot.handlers.base import BaseHandler
 from staff_bot.i18n import i18n
@@ -128,6 +129,14 @@ class TryoutHandler(BaseHandler):
         location = update.message.location if update.message else None
         if not location:
             await update.message.reply_text(i18n.get('staff.tryout.invalid_address', language))
+            return ENTER_TRYOUT_ADDRESS
+
+        # Enforce the delivery-zone SSOT (TASHKENT_POLYGON) before accepting.
+        # The backend re-validates authoritatively; this gives instant, localized UX.
+        if not is_within_tashkent(location.latitude, location.longitude):
+            await update.message.reply_text(
+                i18n.get('staff.tryout.outside_delivery_area', language),
+            )
             return ENTER_TRYOUT_ADDRESS
 
         context.user_data['new_tryout']['latitude'] = location.latitude

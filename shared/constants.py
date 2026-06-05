@@ -36,20 +36,10 @@ DEFAULT_STATUS_ICON = "📋"
 # ─── Geographic Constants ───────────────────────────────────────────────
 TASHKENT_COORDINATES = {"latitude": 41.2995, "longitude": 69.2401}
 
-# Tashkent City Boundary (approximate bounding box for validation)
-# Used to validate that delivery addresses are within the service area
-# Note: This is now a fallback for bounding box checks, primary validation
-# uses TASHKENT_POLYGON
-TASHKENT_BOUNDS = {
-    "min_lat": 41.15,
-    "max_lat": 41.45,
-    "min_lng": 69.05,
-    "max_lng": 69.45,
-}
-
-# Tashkent City Polygon Boundary
+# Tashkent City Polygon Boundary — SINGLE SOURCE OF TRUTH for the delivery
+# coverage zone. Every address entry point (backend, bots, admin UI, web
+# wizard) validates coordinates against this polygon via is_within_tashkent().
 # Define the precise delivery area polygon (lat, lng pairs)
-# Currently set to a rough bounding box, but can be updated with precise shape
 TASHKENT_POLYGON = [
     [41.29572219157228, 69.06029803371433],
     [41.29431778348942, 69.04603475906137],
@@ -297,10 +287,60 @@ def is_within_tashkent(latitude: float, longitude: float) -> bool:
 
 
 def get_geo_config(language: str = "en") -> dict:
-    """Get all geographic configuration for frontend/bot use"""
+    """Get all geographic configuration for frontend/bot use.
+
+    ``polygon`` is the single source of truth for the delivery coverage area;
+    ``center`` is only a map-centering hint.
+    """
     return {
         "center": TASHKENT_COORDINATES,
-        "bounds": TASHKENT_BOUNDS,
         "polygon": TASHKENT_POLYGON,
         "districts": get_all_districts(language),
     }
+
+
+# Short, multilingual coverage copy — SSOT for non-DB callers (the public
+# check-delivery endpoint, the product feed, llms.txt). The /coverage page may
+# use richer DB-backed marketing copy on top of this.
+DELIVERY_COVERAGE_SUMMARY = {
+    "en": "All of Tashkent city plus neighbouring areas of the Tashkent Region.",
+    "uz": "Butun Toshkent shahri va Toshkent viloyatining qo'shni hududlari.",
+    "ru": "Весь город Ташкент и прилегающие районы Ташкентской области.",
+}
+DELIVERY_COVERAGE_REGION_NOTE = {
+    "en": "neighbouring areas of the Tashkent Region",
+    "uz": "Toshkent viloyatining qo'shni hududlari",
+    "ru": "прилегающие районы Ташкентской области",
+}
+
+
+def get_delivery_coverage(language: str = "en") -> dict:
+    """Single source of truth for the *published* delivery coverage zone.
+
+    Reuses TASHKENT_POLYGON (the enforced boundary) and TASHKENT_DISTRICTS, and
+    adds short multilingual summary/region-note copy so non-DB callers stay
+    accurate. Flask-free and bot-importable.
+    """
+    lang = language if language in ("en", "uz", "ru") else "en"
+    return {
+        "city": "Tashkent",
+        "summary": DELIVERY_COVERAGE_SUMMARY[lang],
+        "region_note": DELIVERY_COVERAGE_REGION_NOTE[lang],
+        # districts carry their center here (scoped to the coverage map's pins);
+        # the shared get_all_districts() stays {key, name} for the public APIs.
+        "districts": [
+            {"key": key, "name": data.get(lang, data.get("en", key)), "center": list(data["center"])}
+            for key, data in TASHKENT_DISTRICTS.items()
+        ],
+        "center": TASHKENT_COORDINATES,
+        "polygon": TASHKENT_POLYGON,
+    }
+
+
+def get_geoshape_polygon() -> str:
+    """TASHKENT_POLYGON as a schema.org GeoShape ``polygon`` value.
+
+    schema.org GeoShape.polygon is a single string of space-separated
+    ``lat,lng`` pairs.
+    """
+    return " ".join(f"{lat},{lng}" for lat, lng in TASHKENT_POLYGON)

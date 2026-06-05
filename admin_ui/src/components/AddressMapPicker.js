@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { MapContainer, TileLayer, Marker, useMapEvents, Rectangle, Polygon, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, useMapEvents, Polygon, useMap } from 'react-leaflet';
 import { Button, Input, Space, Spin, message, Typography } from 'antd';
 import { AimOutlined, SearchOutlined, EnvironmentOutlined } from '@ant-design/icons';
 import L from 'leaflet';
@@ -40,26 +40,13 @@ const isPointInPolygon = (lat, lng, polygon) => {
 };
 
 // Component to handle map click events
-const MapClickHandler = ({ onLocationSelect, bounds, polygon }) => {
+const MapClickHandler = ({ onLocationSelect, polygon }) => {
   useMapEvents({
     click: (e) => {
       const { lat, lng } = e.latlng;
 
-      // Check if within bounds/polygon
-      let isValid = true;
-
-      if (polygon && polygon.length > 0) {
-        if (!isPointInPolygon(lat, lng, polygon)) {
-          isValid = false;
-        }
-      } else if (bounds) {
-        if (lat < bounds.min_lat || lat > bounds.max_lat ||
-          lng < bounds.min_lng || lng > bounds.max_lng) {
-          isValid = false;
-        }
-      }
-
-      if (!isValid) {
+      // Validate against the delivery coverage polygon (SSOT)
+      if (polygon && polygon.length > 0 && !isPointInPolygon(lat, lng, polygon)) {
         message.warning('Selected location is outside the delivery area');
         return;
       }
@@ -202,22 +189,9 @@ const AddressMapPicker = ({
       (pos) => {
         const { latitude, longitude } = pos.coords;
 
-        // Check bounds/polygon
-        let isValid = true;
-
-        if (geoConfig?.polygon && geoConfig.polygon.length > 0) {
-          if (!isPointInPolygon(latitude, longitude, geoConfig.polygon)) {
-            isValid = false;
-          }
-        } else if (geoConfig?.bounds) {
-          const bounds = geoConfig.bounds;
-          if (latitude < bounds.min_lat || latitude > bounds.max_lat ||
-            longitude < bounds.min_lng || longitude > bounds.max_lng) {
-            isValid = false;
-          }
-        }
-
-        if (!isValid) {
+        // Validate against the delivery coverage polygon (SSOT)
+        if (geoConfig?.polygon?.length > 0 &&
+          !isPointInPolygon(latitude, longitude, geoConfig.polygon)) {
           message.warning('Your location is outside the delivery area');
           setLocationLoading(false);
           return;
@@ -258,22 +232,9 @@ const AddressMapPicker = ({
       if (result?.success && result?.data?.latitude && result?.data?.longitude) {
         const { latitude, longitude } = result.data;
 
-        // Check bounds/polygon
-        let isValid = true;
-
-        if (geoConfig?.polygon && geoConfig.polygon.length > 0) {
-          if (!isPointInPolygon(latitude, longitude, geoConfig.polygon)) {
-            isValid = false;
-          }
-        } else if (geoConfig?.bounds) {
-          const bounds = geoConfig.bounds;
-          if (latitude < bounds.min_lat || latitude > bounds.max_lat ||
-            longitude < bounds.min_lng || longitude > bounds.max_lng) {
-            isValid = false;
-          }
-        }
-
-        if (!isValid) {
+        // Validate against the delivery coverage polygon (SSOT)
+        if (geoConfig?.polygon?.length > 0 &&
+          !isPointInPolygon(latitude, longitude, geoConfig.polygon)) {
           message.warning('Address is outside the delivery area');
           setSearchLoading(false);
           return;
@@ -331,11 +292,6 @@ const AddressMapPicker = ({
   }
 
   const center = position || [geoConfig.center.latitude, geoConfig.center.longitude];
-  const bounds = geoConfig.bounds;
-  const boundaryCoords = bounds ? [
-    [bounds.min_lat, bounds.min_lng],
-    [bounds.max_lat, bounds.max_lng]
-  ] : null;
 
   return (
     <div style={style}>
@@ -383,21 +339,10 @@ const AddressMapPicker = ({
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
-          {/* Show delivery area boundary */}
-          {geoConfig.polygon && geoConfig.polygon.length > 0 ? (
+          {/* Show delivery area boundary (polygon, SSOT) */}
+          {geoConfig.polygon && geoConfig.polygon.length > 0 && (
             <Polygon
               positions={geoConfig.polygon}
-              pathOptions={{
-                color: '#1890ff',
-                weight: 2,
-                opacity: 0.5,
-                fillOpacity: 0.05,
-                dashArray: '5, 10'
-              }}
-            />
-          ) : boundaryCoords && (
-            <Rectangle
-              bounds={boundaryCoords}
               pathOptions={{
                 color: '#1890ff',
                 weight: 2,
@@ -418,21 +363,9 @@ const AddressMapPicker = ({
                   const marker = e.target;
                   const pos = marker.getLatLng();
 
-                  // Check bounds/polygon
-                  let isValid = true;
-
-                  if (geoConfig?.polygon && geoConfig.polygon.length > 0) {
-                    if (!isPointInPolygon(pos.lat, pos.lng, geoConfig.polygon)) {
-                      isValid = false;
-                    }
-                  } else if (bounds) {
-                    if (pos.lat < bounds.min_lat || pos.lat > bounds.max_lat ||
-                      pos.lng < bounds.min_lng || pos.lng > bounds.max_lng) {
-                      isValid = false;
-                    }
-                  }
-
-                  if (!isValid) {
+                  // Validate against the delivery coverage polygon (SSOT)
+                  if (geoConfig?.polygon?.length > 0 &&
+                    !isPointInPolygon(pos.lat, pos.lng, geoConfig.polygon)) {
                     // Reset to previous position
                     marker.setLatLng(position);
                     message.warning('Cannot move marker outside the delivery area');
@@ -448,7 +381,6 @@ const AddressMapPicker = ({
           {/* Handle map clicks */}
           <MapClickHandler
             onLocationSelect={handleLocationSelect}
-            bounds={bounds}
             polygon={geoConfig.polygon}
           />
 

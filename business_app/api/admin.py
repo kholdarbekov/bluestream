@@ -11,7 +11,7 @@ from sqlalchemy import and_, or_, desc, func, text, cast, String
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime, UTC, timedelta
 from decimal import Decimal
-from shared.constants import DISPLAY_TIMEZONE
+from shared.constants import DISPLAY_TIMEZONE, is_within_tashkent
 from shared.redis_keyspace import RedisKeyspace
 
 from business_app.models.user import User, UserAddress
@@ -1528,6 +1528,11 @@ def create_user_address(user_id):
         if not full_address:
             return validation_error_response("Full address is required")
 
+        # Enforce the delivery-zone SSOT before persisting any coordinate.
+        latitude, longitude = data.get("latitude"), data.get("longitude")
+        if latitude is not None and longitude is not None and not is_within_tashkent(latitude, longitude):
+            return validation_error_response(get_translation("api.addresses.error.coordinates_outside_supported_area"))
+
         # Check if this should be default
         is_default = data.get("is_default", False)
 
@@ -1590,6 +1595,15 @@ def update_user_address(user_id, address_id):
             return not_found_response(resource_type="Address")
 
         data = request.get_json()
+
+        # Enforce the delivery-zone SSOT when coordinates are being changed.
+        if "latitude" in data or "longitude" in data:
+            new_lat = data["latitude"] if "latitude" in data else address.latitude
+            new_lng = data["longitude"] if "longitude" in data else address.longitude
+            if new_lat is not None and new_lng is not None and not is_within_tashkent(new_lat, new_lng):
+                return validation_error_response(
+                    get_translation("api.addresses.error.coordinates_outside_supported_area")
+                )
 
         # Update fields if provided
         if "title" in data:

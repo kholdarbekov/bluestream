@@ -1,0 +1,259 @@
+{% extends "frontend/base.html" %}
+
+{% block title %}{{ 'landing.coverage.title'|t }} - {{ company_name }}{% endblock %}
+
+{% block extra_meta %}
+{% if current_language == 'uz' %}
+  {% set meta_description = "Aqua Element butun Toshkent shahri va Toshkent viloyatining qo'shni hududlariga suv yetkazib beradi. Manzilingizni tekshiring." %}
+{% elif current_language == 'ru' %}
+  {% set meta_description = "Aqua Element доставляет воду по всему Ташкенту и прилегающим районам Ташкентской области. Проверьте свой адрес." %}
+{% else %}
+  {% set meta_description = "Aqua Element delivers water across all of Tashkent city and neighbouring areas of the Tashkent Region. Check your address." %}
+{% endif %}
+<meta name="description" content="{{ meta_description }}">
+
+{# Inline coverage data: one source for the map JS, the checker, and the JSON-LD #}
+<script type="application/json" id="coverage-data">
+{{ {
+  "center": coverage.center,
+  "polygon": coverage.polygon,
+  "districts": coverage.districts,
+  "checkUrl": "/api/public/check-delivery"
+} | tojson }}
+</script>
+
+{# Machine-readable coverage: precise GeoShape areaServed + FAQ for LLMs/SEO #}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Service",
+  "name": "Bottled water delivery",
+  "serviceType": "Drinking water delivery",
+  "provider": { "@id": "{{ company_website }}#organization" },
+  "areaServed": {
+    "@type": "GeoShape",
+    "name": "Aqua Element delivery coverage (Tashkent city + neighbouring Tashkent Region)",
+    "polygon": "{{ geoshape_polygon }}"
+  },
+  "url": "{{ company_website }}/coverage"
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Do you deliver to my address?",
+      "acceptedAnswer": { "@type": "Answer", "text": "We deliver to all of Tashkent city and neighbouring areas of the Tashkent Region. Enter your address or drop a pin on the coverage map to confirm your exact location." }
+    },
+    {
+      "@type": "Question",
+      "name": "Do you deliver to the wider Tashkent Region?",
+      "acceptedAnswer": { "@type": "Answer", "text": "We cover neighbouring parts of the Tashkent Region that border the city, shown precisely by the boundary on our coverage map. Areas further out are not covered yet." }
+    }
+  ]
+}
+</script>
+{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css') }}">
+<style>
+  /* ---- Page-title banner: same idiom as services/about so the transparent,
+        absolutely-positioned .header-style-two clears the content below it. ---- */
+  .page-title {
+    position: relative;
+    padding: 180px 0 130px 0 !important;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    overflow: hidden;
+  }
+  .page-title .shape {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    height: 200px;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    z-index: 1;
+  }
+  .page-title .auto-container { position: relative; z-index: 2; }
+  .page-title h1 {
+    font-size: 48px;
+    line-height: 1.1;
+    font-weight: 700;
+    color: #002c8f;
+    margin-bottom: 14px;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.06);
+  }
+  .page-title .lead {
+    max-width: 640px;
+    margin: 0 auto 18px;
+    color: #44556b;
+    font-size: 17px;
+  }
+
+  /* ---- Coverage section ---- */
+  .coverage-section { padding: 70px 0 100px; }
+  .coverage-grid {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap: 30px;
+    align-items: stretch;
+  }
+  #coverage-map {
+    height: 100%;
+    min-height: 480px;
+    width: 100%;
+    border-radius: 16px;
+    border: 1px solid #d9e7f1;
+    box-shadow: 0 24px 50px rgba(0, 44, 143, 0.10);
+    z-index: 1;
+  }
+
+  /* Checker card */
+  .coverage-checker {
+    background: #fff;
+    border: 1px solid #e2edf5;
+    border-radius: 16px;
+    padding: 30px 28px;
+    box-shadow: 0 24px 50px rgba(0, 44, 143, 0.08);
+  }
+  .coverage-checker h3 {
+    font-size: 23px;
+    font-weight: 700;
+    color: #002c8f;
+    margin-bottom: 6px;
+  }
+  .coverage-checker .checker-hint { color: #6b7b8d; font-size: 14px; margin-bottom: 20px; }
+  .coverage-checker input#coverage-address {
+    width: 100%;
+    padding: 14px 16px;
+    border: 1px solid #d6e3ec;
+    border-radius: 10px;
+    font-size: 15px;
+    color: #1f3149;
+    transition: border-color .2s ease, box-shadow .2s ease;
+  }
+  .coverage-checker input#coverage-address:focus {
+    outline: none;
+    border-color: #00d1f9;
+    box-shadow: 0 0 0 3px rgba(0, 209, 249, 0.18);
+  }
+  .coverage-checker input#coverage-address::placeholder { color: #9aabbb; }
+
+  .coverage-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
+  .coverage-actions .theme-btn { cursor: pointer; }
+  .coverage-actions .btn-locate {
+    background: transparent;
+    color: #0b6aa2;
+    border: 1px solid #b9d9ec;
+  }
+  .coverage-actions .btn-locate:before { background: #eef7fc; }
+  .coverage-actions .btn-locate:hover { color: #002c8f; }
+  .coverage-actions .btn-locate i { margin-right: 7px; }
+
+  .coverage-result {
+    margin-top: 18px;
+    padding: 14px 16px;
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 600;
+    display: none;
+  }
+  .coverage-result.ok { display: block; background: #e7f7ee; border: 1px solid #b6e6c9; color: #136c3c; }
+  .coverage-result.no { display: block; background: #fdeceb; border: 1px solid #f3c4bf; color: #9c2c23; }
+
+  .coverage-districts { margin-top: 26px; padding-top: 22px; border-top: 1px solid #eef3f7; }
+  .coverage-districts .districts-label {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: .02em;
+    text-transform: uppercase;
+    color: #5a6b7e;
+    margin-bottom: 12px;
+  }
+  .coverage-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .coverage-chips .chip {
+    background: #eaf8fe;
+    border: 1px solid #cfeefb;
+    color: #0b6aa2;
+    border-radius: 999px;
+    padding: 5px 13px;
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  @media (max-width: 991px) {
+    .coverage-grid { grid-template-columns: 1fr; }
+    #coverage-map { min-height: 380px; }
+    .page-title { padding: 150px 0 110px 0 !important; }
+    .page-title h1 { font-size: 38px; }
+  }
+  @media (max-width: 575px) {
+    .coverage-section { padding: 50px 0 70px; }
+    .coverage-checker { padding: 24px 20px; }
+    .coverage-actions .theme-btn { width: 100%; text-align: center; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- page-title -->
+<section class="page-title centred" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});">
+    <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
+    <div class="auto-container">
+        <div class="content-box">
+            <h1>{{ 'landing.coverage.title'|t }}</h1>
+            <p class="lead">{{ coverage.summary }}</p>
+            <ul class="bread-crumb clearfix">
+                <li><a href="{{ external_url_for_lang('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
+                <li>{{ 'landing.nav.coverage'|t }}</li>
+            </ul>
+        </div>
+    </div>
+</section>
+<!-- page-title end -->
+
+<!-- coverage-section -->
+<section class="coverage-section">
+    <div class="auto-container">
+        <div class="coverage-grid">
+            <div><div id="coverage-map"></div></div>
+
+            <div class="coverage-checker">
+                <h3>{{ 'landing.coverage.checker_title'|t }}</h3>
+                <p class="checker-hint">{{ 'landing.coverage.checker_hint'|t }}</p>
+
+                <input id="coverage-address" type="text" placeholder="{{ 'landing.coverage.address_placeholder'|t }}">
+
+                <div class="coverage-actions">
+                    <button id="coverage-check-btn" class="theme-btn btn-one btn-sm" type="button">{{ 'landing.coverage.check_btn'|t }}</button>
+                    <button id="coverage-locate-btn" class="theme-btn btn-locate btn-sm" type="button"><i class="fas fa-location-arrow"></i>{{ 'landing.coverage.use_location'|t }}</button>
+                </div>
+
+                <div id="coverage-result-ok" class="coverage-result">{{ 'landing.coverage.result_ok'|t }}</div>
+                <div id="coverage-result-no" class="coverage-result">{{ 'landing.coverage.result_no'|t }}</div>
+
+                <div class="coverage-districts">
+                    <div class="districts-label">{{ 'landing.coverage.districts_label'|t }}</div>
+                    <div class="coverage-chips">
+                        {% for d in coverage.districts %}<span class="chip">{{ d.name }}</span>{% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+<!-- coverage-section end -->
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>
+<script src="{{ url_for('static', filename='js/coverage-map.js') }}"></script>
+{% endblock %}

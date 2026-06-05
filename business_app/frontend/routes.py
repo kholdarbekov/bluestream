@@ -28,6 +28,8 @@ from business_app.utils.markdown_negotiation import (
 )
 from business_app.utils.helpers import get_current_language
 from business_app import db
+from business_app import limiter
+from shared.constants import get_delivery_coverage, get_geoshape_polygon
 from datetime import datetime, UTC
 
 
@@ -712,6 +714,20 @@ def about():
     return render_template("frontend/about.html")
 
 
+@frontend_bp.route("/coverage")
+def coverage():
+    """Public delivery-coverage page: interactive map + address checker + the
+    precise GeoShape/FAQ JSON-LD that LLMs read. Renders from the coverage SSOT."""
+    language = get_current_language()
+    cov = get_delivery_coverage(language)
+    return render_template(
+        "frontend/coverage.html",
+        coverage=cov,
+        geoshape_polygon=get_geoshape_polygon(),
+        company_website=current_app.config.get("COMPANY_WEBSITE", "https://aqua-element.uz"),
+    )
+
+
 @frontend_bp.route("/contact")
 def contact():
     """Contact page"""
@@ -1334,6 +1350,7 @@ def sitemap_static():
         "/shop",
         "/subscriptions",
         "/services",
+        "/coverage",
         "/about",
         "/contact",
         "/gallery",
@@ -1496,6 +1513,111 @@ def google_products_feed():
     return Response("\n".join(lines), mimetype="application/xml")
 
 
+def _check_delivery_response(payload, status=200):
+    """JSON response for the public check-delivery endpoint (CORS + short cache)."""
+    resp = current_app.response_class(
+        response=json.dumps(payload, ensure_ascii=False),
+        status=status,
+        mimetype="application/json; charset=utf-8",
+    )
+    resp.headers["Access-Control-Allow-Origin"] = "*"  # AI bots / cross-origin checker
+    if status == 200:
+        resp.headers["Cache-Control"] = "public, max-age=300"
+    return resp
+
+
+@frontend_bp.route("/api/public/check-delivery")
+@limiter.limit("60/hour")
+def public_check_delivery():
+    """Public 'do you deliver to X?' check — powers the /coverage checker AND
+    gives AI agents an authoritative address->deliverable answer.
+
+    Query params (one form):
+      - ``address=<text>``        : geocoded server-side via MapsService, then zone-checked.
+      - ``lat=<float>&lng=<float>`` : checked directly.
+
+    Always returns 200 for resolvable input and a graceful 200 (is_deliverable
+    null + reason) when geocoding finds nothing or fails — never a 500 to agents.
+    Missing input -> 200 with is_deliverable null (agent-friendly discovery).
+    Invalid coordinates -> 400 with is_deliverable null.
+    """
+    from shared.constants import is_within_tashkent  # get_delivery_coverage is imported at module top
+
+    language = get_current_language()
+    coverage = get_delivery_coverage(language)
+    coverage_block = {
+        "summary": coverage["summary"],
+        "city": coverage["city"],
+        "regionNote": coverage["region_note"],
+        "coverageUrl": "/coverage",
+    }
+
+    address = (request.args.get("address") or "").strip()[:256]  # cap length on a public endpoint
+    lat_raw = request.args.get("lat")
+    lng_raw = request.args.get("lng")
+
+    latitude = longitude = None
+    formatted_address = None
+    reason = None
+
+    if lat_raw is not None and lng_raw is not None:
+        try:
+            latitude, longitude = float(lat_raw), float(lng_raw)
+        except (TypeError, ValueError):
+            return _check_delivery_response(
+                {
+                    "query": {"lat": lat_raw, "lng": lng_raw},
+                    "latitude": None,
+                    "longitude": None,
+                    "is_deliverable": None,
+                    "reason": "invalid_coordinates",
+                    "coverage": coverage_block,
+                },
+                status=400,
+            )
+    elif address:
+        from business_app.services.maps_service import MapsService
+
+        try:
+            result = MapsService().geocode_address(address, city="Tashkent")
+        except Exception as exc:  # geocoder/provider failure must not 500
+            current_app.logger.warning("check-delivery geocode failed for %r: %s", address, exc)
+            result = None
+        if result and result.get("latitude") is not None and result.get("longitude") is not None:
+            latitude, longitude = float(result["latitude"]), float(result["longitude"])
+            formatted_address = result.get("formatted_address")
+        else:
+            reason = "not_geocoded"
+    else:
+        return _check_delivery_response(
+            {
+                "query": {},
+                "latitude": None,
+                "longitude": None,
+                "is_deliverable": None,
+                "reason": "missing_input",
+                "coverage": coverage_block,
+            },
+            status=200,
+        )
+
+    is_deliverable = None
+    if latitude is not None and longitude is not None:
+        is_deliverable = bool(is_within_tashkent(latitude, longitude))
+
+    payload = {
+        "query": {"address": address or None, "lat": latitude, "lng": longitude},
+        "latitude": latitude,
+        "longitude": longitude,
+        "is_deliverable": is_deliverable,
+        "formatted_address": formatted_address,
+        "coverage": coverage_block,
+    }
+    if reason:
+        payload["reason"] = reason
+    return _check_delivery_response(payload, status=200)
+
+
 @frontend_bp.route("/api/public/products.json")
 def public_products_feed():
     """Public, machine-readable product feed (Schema.org-flavoured JSON).
@@ -1633,6 +1755,7 @@ def public_products_feed():
             }
         )
 
+    coverage_en = get_delivery_coverage("en")
     feed = {
         "@context": "https://schema.org",
         "@type": "ItemList",
@@ -1668,7 +1791,10 @@ def public_products_feed():
         "mineralProfile": mineral_profile,
         "serviceArea": {
             "country": "UZ",
-            "regions": ["Tashkent", "Tashkent Region"],
+            "city": "Tashkent",
+            "regionNote": coverage_en["region_note"],
+            "districts": [d["name"] for d in coverage_en["districts"]],
+            "coverageUrl": "/coverage",
         },
         "orderChannels": {
             "web": company_website,

@@ -27,6 +27,12 @@ PUBLIC_DISCOVERY_LINKS = (
         "application/json",
         "Public product catalog feed (Schema.org ItemList)",
     ),
+    (
+        "service-desc",
+        "/api/public/check-delivery",
+        "application/json",
+        "Delivery coverage check (address or lat/lng -> deliverable)",
+    ),
     ("service-doc", "/llms.txt", "text/markdown", "LLM-friendly index of public pages"),
 )
 

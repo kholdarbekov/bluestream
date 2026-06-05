@@ -14,10 +14,10 @@ const AddressWizard = {
     editingAddressId: null,
     selectedLocation: null,
 
-    // Geographic config (loaded from API)
+    // Geographic config (loaded from API — single source of truth)
     geoConfig: {
-        center: { latitude: 41.2995, longitude: 69.2401 },  // Default fallback
-        bounds: { min_lat: 41.15, max_lat: 41.45, min_lng: 69.05, max_lng: 69.45 },
+        center: { latitude: 41.2995, longitude: 69.2401 },  // Default fallback center (map hint only)
+        polygon: [],  // Delivery coverage polygon, [lat, lng] pairs (SSOT, loaded from /addresses/geo-config)
         districts: []
     },
     configLoaded: false,
@@ -221,7 +221,6 @@ const AddressWizard = {
         });
 
         const center = this.geoConfig.center;
-        const bounds = this.geoConfig.bounds;
 
         // Create map centered on Tashkent
         // Disable fadeAnimation to prevent conflicts with global CSS transitions
@@ -376,21 +375,17 @@ const AddressWizard = {
         // Use MutationObserver to catch dynamically added tiles
         this.setupTileObserver(mapContainer);
 
-        // Draw Tashkent boundary (visual indicator)
-        const boundaryCoords = [
-            [bounds.min_lat, bounds.min_lng],
-            [bounds.min_lat, bounds.max_lng],
-            [bounds.max_lat, bounds.max_lng],
-            [bounds.max_lat, bounds.min_lng],
-            [bounds.min_lat, bounds.min_lng]
-        ];
-
-        this.boundaryLayer = L.polyline(boundaryCoords, {
-            color: '#1890ff',
-            weight: 2,
-            opacity: 0.5,
-            dashArray: '5, 10'
-        }).addTo(this.map);
+        // Draw the delivery coverage polygon (visual indicator, SSOT)
+        const polygon = this.geoConfig.polygon;
+        if (polygon && polygon.length > 0) {
+            this.boundaryLayer = L.polygon(polygon, {
+                color: '#1890ff',
+                weight: 2,
+                opacity: 0.5,
+                fillOpacity: 0.05,
+                dashArray: '5, 10'
+            }).addTo(this.map);
+        }
 
         // Map click handler - place marker
         this.map.on('click', (e) => this.onMapClick(e));
@@ -406,7 +401,7 @@ const AddressWizard = {
         const { lat, lng } = e.latlng;
 
         // Validate within Tashkent bounds
-        if (!this.isWithinBounds(lat, lng)) {
+        if (!this.isWithinServiceArea(lat, lng)) {
             this.showError(this.getTranslation('location_outside_tashkent'));
             return;
         }
@@ -414,13 +409,23 @@ const AddressWizard = {
         this.setMarkerPosition(lat, lng);
     },
 
-    // Check if coordinates are within service area
-    isWithinBounds: function (lat, lng) {
-        const bounds = this.geoConfig.bounds;
-        return lat >= bounds.min_lat &&
-            lat <= bounds.max_lat &&
-            lng >= bounds.min_lng &&
-            lng <= bounds.max_lng;
+    // Check if coordinates are within the delivery coverage polygon (SSOT).
+    // Ray-casting point-in-polygon; mirrors shared.constants.point_in_polygon.
+    isWithinServiceArea: function (lat, lng) {
+        const polygon = this.geoConfig.polygon;
+        // If the polygon hasn't loaded yet, don't block the user — the backend
+        // re-validates authoritatively against TASHKENT_POLYGON on save.
+        if (!polygon || polygon.length === 0) return true;
+
+        let inside = false;
+        for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+            const xi = polygon[i][0], yi = polygon[i][1];
+            const xj = polygon[j][0], yj = polygon[j][1];
+            const intersect = ((yi > lng) !== (yj > lng)) &&
+                (lat < (xj - xi) * (lng - yi) / (yj - yi) + xi);
+            if (intersect) inside = !inside;
+        }
+        return inside;
     },
 
     // Set marker position and reverse geocode
@@ -438,7 +443,7 @@ const AddressWizard = {
                 const pos = e.target.getLatLng();
 
                 // Validate new position
-                if (!this.isWithinBounds(pos.lat, pos.lng)) {
+                if (!this.isWithinServiceArea(pos.lat, pos.lng)) {
                     // Reset to previous valid position
                     if (this.selectedLocation) {
                         this.marker.setLatLng([this.selectedLocation.lat, this.selectedLocation.lng]);
@@ -551,7 +556,7 @@ const AddressWizard = {
                 const { latitude, longitude } = position.coords;
 
                 // Validate within bounds
-                if (!this.isWithinBounds(latitude, longitude)) {
+                if (!this.isWithinServiceArea(latitude, longitude)) {
                     this.showError(this.getTranslation('location_outside_tashkent'));
                     this.resetLocationButton();
                     return;
@@ -611,7 +616,7 @@ const AddressWizard = {
                 const { latitude, longitude, formatted_address } = result.data;
 
                 // Validate within bounds
-                if (!this.isWithinBounds(latitude, longitude)) {
+                if (!this.isWithinServiceArea(latitude, longitude)) {
                     this.showError(this.getTranslation('location_outside_tashkent'));
                     return;
                 }

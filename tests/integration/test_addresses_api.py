@@ -124,3 +124,53 @@ class TestAddressesAPI:
 
         delete_missing = client.delete("/api/v1/addresses/999999", headers=auth_headers)
         assert delete_missing.status_code == 404
+
+
+# (41.31, 69.28) is central Tashkent; (39.6270, 66.9750) is Samarkand — outside coverage.
+IN_ZONE = {"latitude": 41.31, "longitude": 69.28}
+OUT_OF_ZONE = {"latitude": 39.6270, "longitude": 66.9750}
+
+
+@pytest.mark.integration
+@pytest.mark.api
+class TestDeliveryZoneEnforcement:
+    """The delivery-zone SSOT (TASHKENT_POLYGON) must gate every address write path."""
+
+    def test_create_accepts_in_zone_coordinates(self, client, auth_headers, db):
+        response = _create_address(client, auth_headers, **IN_ZONE)
+        assert response.status_code == 201
+
+    def test_create_rejects_out_of_zone_coordinates(self, client, auth_headers, db):
+        response = _create_address(client, auth_headers, **OUT_OF_ZONE)
+        assert response.status_code == 400
+        assert response.get_json()["success"] is False
+
+    def test_update_rejects_out_of_zone_coordinates(self, client, auth_headers, db):
+        created = _create_address(client, auth_headers, **IN_ZONE).get_json()["data"]["address"]
+        response = client.put(
+            f"/api/v1/addresses/{created['id']}",
+            json=OUT_OF_ZONE,
+            headers=auth_headers,
+        )
+        assert response.status_code == 400
+        assert response.get_json()["success"] is False
+
+    def test_auth_addresses_endpoint_rejects_out_of_zone(self, client, auth_headers, db):
+        """Regression: the telegram-bot path (POST /auth/addresses) must reject out-of-zone."""
+        response = client.post(
+            "/api/v1/auth/addresses",
+            json={"title": "Home", **OUT_OF_ZONE},
+            headers=auth_headers,
+        )
+        assert response.status_code == 400
+        # This endpoint raises ValidationError -> global error-handler shape
+        # ({"error", "message", ...}), so just assert it is not a success body.
+        assert response.get_json().get("success") is not True
+
+    def test_auth_addresses_endpoint_accepts_in_zone(self, client, auth_headers, db):
+        response = client.post(
+            "/api/v1/auth/addresses",
+            json={"title": "Home", "full_address": "Amir Temur 1", **IN_ZONE},
+            headers=auth_headers,
+        )
+        assert response.status_code == 201

@@ -12,7 +12,13 @@ from telegram.error import BadRequest
 
 from i18n import i18n
 from keyboards import ProfileKeyboards, MenuKeyboards, LanguageKeyboards, KeyboardBuilder
-from shared.constants import TASHKENT_DISTRICTS, get_district_name, get_district_center, get_all_districts
+from shared.constants import (
+    TASHKENT_DISTRICTS,
+    get_district_name,
+    get_district_center,
+    get_all_districts,
+    is_within_tashkent,
+)
 from handlers.menu import main_menu_handler
 from api_client import api_client
 from database import db_manager, BotUserRepository
@@ -1578,6 +1584,19 @@ class ProfileHandlers(BaseHandler):
             location = update.message.location
             logger.info(f"Location received: lat={location.latitude}, lng={location.longitude}")
 
+            # Enforce the delivery-zone SSOT (TASHKENT_POLYGON) before accepting.
+            # The backend re-validates authoritatively; this gives instant, localized UX.
+            if not is_within_tashkent(location.latitude, location.longitude):
+                logger.info(
+                    f"User {user_id} shared out-of-zone location: "
+                    f"{location.latitude}, {location.longitude}"
+                )
+                await update.message.reply_text(
+                    i18n.get('telegram.address.outside_delivery_area', language),
+                    reply_markup=ProfileKeyboards.location_request_with_skip(language)
+                )
+                return ADDRESS_LOCATION
+
             # Store location in temp address data
             if 'temp_address_data' not in context.user_data:
                 context.user_data['temp_address_data'] = {}
@@ -2203,6 +2222,19 @@ class ProfileHandlers(BaseHandler):
                 addr_data['full_address'] = address_string
 
             context.user_data['temp_address_data'] = addr_data
+
+            # Enforce the delivery-zone SSOT (TASHKENT_POLYGON). The district-center
+            # fallback is always in-zone; this guards against a geocoder returning a
+            # point outside the coverage area. The backend re-validates authoritatively.
+            final_lat = addr_data.get('latitude')
+            final_lng = addr_data.get('longitude')
+            if final_lat is not None and final_lng is not None and not is_within_tashkent(final_lat, final_lng):
+                logger.info(f"User {user_id} geocoded to out-of-zone point: {final_lat}, {final_lng}")
+                await update.message.reply_text(
+                    i18n.get('telegram.address.outside_delivery_area', language),
+                    reply_markup=ProfileKeyboards.location_request_with_skip(language)
+                )
+                return ADDRESS_LOCATION
 
             # Send location pin for confirmation
             await update.message.reply_location(

@@ -89,6 +89,13 @@ def create_address():
             errors={"address": get_translation("api.addresses.error.full_address_or_coordinates_required")}
         )
 
+    # Enforce the delivery-zone SSOT before persisting (see business_app/utils/geo_validation.py)
+    latitude, longitude = data.get("latitude"), data.get("longitude")
+    if latitude is not None and longitude is not None and not is_within_tashkent(latitude, longitude):
+        return validation_error_response(
+            errors={"coordinates": get_translation("api.addresses.error.coordinates_outside_supported_area")}
+        )
+
     # Check if this should be default
     is_default = data.get("is_default", False)
 
@@ -143,6 +150,15 @@ def update_address(address_id):
 
     if not address:
         return not_found_response(message=get_translation("api.addresses.error.not_found"))
+
+    # Enforce the delivery-zone SSOT when coordinates are being changed
+    if "latitude" in data or "longitude" in data:
+        new_lat = data["latitude"] if "latitude" in data else address.latitude
+        new_lng = data["longitude"] if "longitude" in data else address.longitude
+        if new_lat is not None and new_lng is not None and not is_within_tashkent(new_lat, new_lng):
+            return validation_error_response(
+                errors={"coordinates": get_translation("api.addresses.error.coordinates_outside_supported_area")}
+            )
 
     # Update fields with correct mapping
     if "title" in data:
@@ -424,8 +440,8 @@ def get_geo_configuration():
     - lang: Language code (en, uz, ru) - default: en
 
     Returns:
-    - center: Tashkent city center coordinates {latitude, longitude}
-    - bounds: Service area boundary {min_lat, max_lat, min_lng, max_lng}
+    - center: Tashkent city center coordinates {latitude, longitude} (map-centering hint)
+    - polygon: Delivery coverage area as [lat, lng] pairs (single source of truth)
     - districts: List of districts with keys and localized names
     """
     language = request.args.get("lang", "en")
@@ -439,7 +455,6 @@ def get_geo_configuration():
     return success_response(
         data={
             "center": config["center"],
-            "bounds": config["bounds"],
             "polygon": config.get("polygon"),
             "districts": config["districts"],
             "region": "tashkent_city",

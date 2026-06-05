@@ -22,6 +22,7 @@ from shared import business_config
 from business_app.utils.user_types import infer_non_staff_user_type, normalize_entity_subtype
 from shared.enums import EntitySubtype
 from business_app.utils.translations import get_translation
+from business_app.utils.geo_validation import ensure_within_delivery_zone
 from business_app.tasks.notification_tasks import send_verification_sms_task
 from business_app import db
 
@@ -1373,6 +1374,9 @@ class AuthService:
 
     def add_user_address(self, user_id: int, data: Dict[str, Any]) -> UserAddress:
         """Create address for a user."""
+        # Enforce the delivery-zone SSOT before persisting any coordinate.
+        ensure_within_delivery_zone(data.get("latitude"), data.get("longitude"))
+
         if data.get("is_default", False):
             UserAddress.query.filter_by(user_id=user_id, is_default=True).update({"is_default": False})
 
@@ -1403,6 +1407,12 @@ class AuthService:
         address = UserAddress.query.filter_by(id=address_id, user_id=user_id).first()
         if not address:
             raise NotFoundError(get_translation("api.auth.address_not_found"))
+
+        # Enforce the delivery-zone SSOT when coordinates are being changed.
+        if "latitude" in data or "longitude" in data:
+            new_lat = data["latitude"] if "latitude" in data else address.latitude
+            new_lng = data["longitude"] if "longitude" in data else address.longitude
+            ensure_within_delivery_zone(new_lat, new_lng)
 
         updatable_fields = (
             "title",

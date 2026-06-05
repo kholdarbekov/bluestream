@@ -145,6 +145,11 @@ class ManageAddressHandler(BaseHandler):
     @require_operator
     async def receive_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Receive full address text"""
+        # NOTE (delivery-zone SSOT): this operator flow collects a free-text address
+        # with no GPS coordinates, so it cannot be polygon-validated here. Coordinate-
+        # bearing paths are enforced via shared.constants.is_within_tashkent + the
+        # backend UserAddress backstop. Enforcing zone on text addresses requires
+        # server-side geocoding and is tracked as a follow-up (see docs).
         language = await self._get_language(update, context)
         address = update.message.text.strip()
 

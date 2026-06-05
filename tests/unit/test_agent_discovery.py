@@ -23,6 +23,7 @@ FORBIDDEN_TOKENS = ("/apispec_1.json", "/docs", "/api/admin", "swagger", "X-Admi
 EXPECTED_PUBLIC_SURFACE = {
     ("api-catalog", "/.well-known/api-catalog"),
     ("service-desc", "/api/public/products.json"),
+    ("service-desc", "/api/public/check-delivery"),
     ("service-doc", "/llms.txt"),
 }
 
@@ -64,9 +65,10 @@ class TestBuildApiCatalogLinkset:
         # relation is omitted from the body (this *is* it), nothing extra leaks.
         assert set(context.keys()) == {"anchor", "service-desc", "service-doc"}
         assert context["anchor"] == "https://aqua-element.uz/"
-        assert len(context["service-desc"]) == 1
-        assert context["service-desc"][0]["href"] == "https://aqua-element.uz/api/public/products.json"
-        assert context["service-desc"][0]["type"] == "application/json"
+        assert len(context["service-desc"]) == 2
+        desc_hrefs = {d["href"] for d in context["service-desc"]}
+        assert "https://aqua-element.uz/api/public/products.json" in desc_hrefs
+        assert "https://aqua-element.uz/api/public/check-delivery" in desc_hrefs
         assert len(context["service-doc"]) == 1
         assert context["service-doc"][0]["href"] == "https://aqua-element.uz/llms.txt"
 

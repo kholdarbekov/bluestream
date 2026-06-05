@@ -160,25 +160,6 @@ class MapsService:
         except Exception as e:
             raise ExternalServiceError(f"Nearby search failed: {e}")
 
-    def validate_coordinates(self, latitude: float, longitude: float) -> bool:
-        """
-        Validate if coordinates are within Tashkent delivery area
-
-        Args:
-            latitude: Latitude coordinate
-            longitude: Longitude coordinate
-
-        Returns:
-            True if coordinates are valid for delivery
-        """
-        # Tashkent approximate bounds
-        tashkent_bounds = {"north": 41.4, "south": 41.1, "east": 69.4, "west": 69.1}
-
-        return (
-            tashkent_bounds["south"] <= latitude <= tashkent_bounds["north"]
-            and tashkent_bounds["west"] <= longitude <= tashkent_bounds["east"]
-        )
-
     def get_delivery_zones(self, center_lat: float, center_lon: float) -> List[Dict[str, Any]]:
         """
         Get delivery zones around a center point

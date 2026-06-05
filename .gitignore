@@ -1,5 +1,8 @@
 .venv/
 
+# Superpowers brainstorming visual-companion scratch dir
+.superpowers/
+
 *.pyc
 __pycache__/
 

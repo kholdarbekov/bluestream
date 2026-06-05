@@ -17,6 +17,7 @@ from staff_bot.config import config
 from staff_bot.database import db_manager
 from staff_bot.i18n import i18n
 from staff_bot.utils import flow_state
+from staff_bot.utils.formatters import escape_html
 from shared.redis_failure import report_redis_failure
 from shared.redis_keyspace import RedisKeyspace
 
@@ -722,28 +723,50 @@ class StaffWebhookServer:
             return web.json_response({'success': False, 'message': 'Internal server error'}, status=500)
 
     def _format_new_order_message(self, order_info: dict, language: str) -> str:
-        """Format new order notification message"""
-        number = order_info.get('order_number') or i18n.get('staff.common.not_available', language)
-        district = order_info.get('district', '')
-        time_slot = order_info.get('time_slot', '')
+        """Format new order notification message.
+
+        Fields carrying customer-provided free text (name, address, product
+        names) are HTML-escaped because the message is sent with
+        parse_mode='HTML'.
+        """
+        number = escape_html(order_info.get('order_number') or i18n.get('staff.common.not_available', language))
+        customer_name = escape_html(order_info.get('customer_name', ''))
+        address = escape_html(order_info.get('address') or order_info.get('district', ''))
+        time_slot = escape_html(order_info.get('time_slot', ''))
         amount = order_info.get('total_amount', 0)
         payment = order_info.get('payment_method', '')
         payment_label = i18n.get(f'staff.delivery.payment.{payment}', language) if payment else ''
-        item_count = order_info.get('item_count', 0)
         amount_text = format(amount, ',.0f')
         if payment_label:
             amount_text = f"{amount_text} {i18n.get('staff.currency.uzs', language)} ({payment_label})"
         else:
             amount_text = f"{amount_text} {i18n.get('staff.currency.uzs', language)}"
 
-        return (
-            f"🆕 {i18n.get('staff.notification.new_order', language)}\n\n"
-            f"📦 #{number}\n"
-            f"📍 {district}\n"
-            f"🕐 {time_slot}\n"
-            f"💰 {amount_text}\n"
-            f"📝 {item_count} {i18n.get('staff.items', language)}"
-        )
+        lines = [
+            f"🆕 {i18n.get('staff.notification.new_order', language)}",
+            "",
+            f"📦 #{number}",
+        ]
+        if customer_name:
+            lines.append(f"👤 {customer_name}")
+        if address:
+            lines.append(f"📍 {address}")
+        if time_slot:
+            lines.append(f"🕐 {time_slot}")
+        lines.append(f"💰 {amount_text}")
+
+        items = order_info.get('items') or []
+        if items:
+            for item in items:
+                name = escape_html(item.get('product_name') or i18n.get('staff.common.not_available', language))
+                quantity = item.get('quantity', 0)
+                lines.append(f"📝 {name} × {quantity}")
+        else:
+            # Fall back to the bare count if the payload predates item details.
+            item_count = order_info.get('item_count', 0)
+            lines.append(f"📝 {item_count} {i18n.get('staff.items', language)}")
+
+        return '\n'.join(lines)
 
     async def start(self):
         """Start the webhook server"""

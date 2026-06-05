@@ -108,6 +108,7 @@ def notify_staff_new_order(self, order_id: int, order_info: dict = None):
             if not order_info:
                 from business_app.models.order import Order
                 from business_app.models.delivery import Delivery
+                from business_app.utils.address_helpers import get_address_line
 
                 order = Order.query.get(order_id)
                 if not order:
@@ -117,15 +118,26 @@ def notify_staff_new_order(self, order_id: int, order_info: dict = None):
                 delivery = Delivery.query.filter_by(order_id=order_id).first()
                 addr = order.delivery_address
 
+                customer_name = f"{order.user.first_name} {order.user.last_name or ''}".strip() if order.user else ""
+                items = [
+                    {
+                        "product_name": oi.product.name if oi.product else "",
+                        "quantity": oi.quantity,
+                    }
+                    for oi in (order.order_items or [])
+                ]
+
                 order_info = {
                     "order_id": order_id,
                     "delivery_id": delivery.id if delivery else None,
                     "order_number": order.order_number,
+                    "customer_name": customer_name,
                     "total_amount": float(order.total_amount) if order.total_amount else 0,
                     "payment_method": order.payment_method.value if order.payment_method else "cash",
                     "item_count": len(order.order_items) if order.order_items else 0,
+                    "items": items,
                     "district": addr.district if addr else "",
-                    "address": addr.full_address if addr else "",
+                    "address": get_address_line(addr),
                     "time_slot": order.delivery_time_slot or "",
                 }
 

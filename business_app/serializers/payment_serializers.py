@@ -6,12 +6,12 @@ This file contains Pydantic models for payment-related data serialization
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 from enum import Enum
-from decimal import Decimal
 
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 from pydantic.alias_generators import to_camel
 
 from shared.enums import PaymentStatus, PaymentMethod
+from business_app.serializers.types import MoneyFloat
 
 
 class RefundStatus(str, Enum):
@@ -27,12 +27,7 @@ class OrderInfoSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     order_number: str
-    total_amount: Decimal
-
-    @field_validator("total_amount")
-    @classmethod
-    def validate_total_amount(cls, v):
-        return float(v)
+    total_amount: MoneyFloat
 
 
 class SubscriptionInfoSchema(BaseModel):
@@ -50,15 +45,10 @@ class PaymentRefundSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    amount: Decimal
+    amount: MoneyFloat
     status: RefundStatus
     reason: Optional[str] = None
     created_at: datetime
-
-    @field_validator("amount")
-    @classmethod
-    def validate_amount(cls, v):
-        return float(v)
 
 
 class PaymentSchema(BaseModel):
@@ -71,7 +61,7 @@ class PaymentSchema(BaseModel):
     order_id: Optional[int] = None
     subscription_id: Optional[int] = None
     user_id: int
-    amount: Decimal = Field(..., description="Payment amount")
+    amount: MoneyFloat = Field(..., description="Payment amount")
     currency: str = Field(default="UZS")
     status: PaymentStatus
     payment_method: PaymentMethod
@@ -89,8 +79,8 @@ class PaymentSchema(BaseModel):
     updated_at: Optional[datetime] = None
     processed_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
-    amount_collected: Decimal = Field(default=0)
-    outstanding_amount: Decimal = Field(default=0)
+    amount_collected: MoneyFloat = Field(default=0)
+    outstanding_amount: MoneyFloat = Field(default=0)
     last_collected_at: Optional[datetime] = None
     collection_events_count: int = Field(default=0)
 
@@ -98,11 +88,6 @@ class PaymentSchema(BaseModel):
     order: Optional[OrderInfoSchema] = None
     subscription: Optional[SubscriptionInfoSchema] = None
     refunds: Optional[List[PaymentRefundSchema]] = None
-
-    @field_validator("amount", "amount_collected", "outstanding_amount")
-    @classmethod
-    def validate_amount(cls, v):
-        return float(v)
 
 
 class PaymentListSchema(BaseModel):
@@ -150,7 +135,7 @@ class PaymentRefundFullSchema(BaseModel):
 
     id: int
     payment_id: int
-    amount: Decimal
+    amount: MoneyFloat
     currency: str = Field(default="UZS")
     status: RefundStatus
     reason: Optional[str] = None
@@ -163,11 +148,6 @@ class PaymentRefundFullSchema(BaseModel):
     # Payment information
     payment: Optional[Dict[str, Any]] = None
 
-    @field_validator("amount")
-    @classmethod
-    def validate_amount(cls, v):
-        return float(v)
-
 
 class PaymentMethodInfoSchema(BaseModel):
     """Payment method information"""
@@ -179,16 +159,11 @@ class PaymentMethodInfoSchema(BaseModel):
     description: str
     is_active: bool
     supported_currencies: List[str]
-    min_amount: Decimal
-    max_amount: Decimal
-    processing_fee: Decimal
+    min_amount: MoneyFloat
+    max_amount: MoneyFloat
+    processing_fee: MoneyFloat
     supports_recurring: bool
     supports_refunds: bool
-
-    @field_validator("min_amount", "max_amount", "processing_fee")
-    @classmethod
-    def validate_amounts(cls, v):
-        return float(v)
 
 
 class PaymentStatisticsSchema(BaseModel):
@@ -200,26 +175,14 @@ class PaymentStatisticsSchema(BaseModel):
     failed_payments: int
     pending_payments: int
     success_rate: float
-    total_amount: Decimal
-    average_payment: Decimal
+    total_amount: MoneyFloat
+    average_payment: MoneyFloat
     refund_rate: float
     payment_methods: Dict[str, int]
     monthly_trend: Dict[str, Any]
-    currency_breakdown: Dict[str, Decimal]
+    currency_breakdown: Dict[str, MoneyFloat]
     top_countries: List[Dict[str, Any]]
     processing_times: Dict[str, float]
-
-    @field_validator("total_amount", "average_payment")
-    @classmethod
-    def validate_amounts(cls, v):
-        return float(v)
-
-    @field_validator("currency_breakdown")
-    @classmethod
-    def validate_currency_breakdown(cls, v):
-        if isinstance(v, dict):
-            return {k: float(val) for k, val in v.items()}
-        return v
 
 
 class PaymentWebhookSchema(BaseModel):
@@ -229,7 +192,7 @@ class PaymentWebhookSchema(BaseModel):
     event_type: str
     payment_id: str
     status: str
-    amount: Optional[Decimal] = None
+    amount: Optional[MoneyFloat] = None
     currency: Optional[str] = None
     provider_transaction_id: Optional[str] = None
     timestamp: datetime
@@ -237,13 +200,6 @@ class PaymentWebhookSchema(BaseModel):
     raw_data: Optional[Dict[str, Any]] = None
     processed: bool = Field(default=False)
     error_message: Optional[str] = None
-
-    @field_validator("amount")
-    @classmethod
-    def validate_amount(cls, v):
-        if v is not None:
-            return float(v)
-        return v
 
 
 class PaymentLinkSchema(BaseModel):
@@ -263,17 +219,12 @@ class CreatePaymentRequest(BaseModel):
 
     order_id: Optional[int] = None
     subscription_id: Optional[int] = None
-    amount: Decimal = Field(..., gt=0, description="Payment amount must be positive")
+    amount: MoneyFloat = Field(..., gt=0, description="Payment amount must be positive")
     currency: str = Field(default="UZS")
     payment_method: PaymentMethod
     description: Optional[str] = None
     return_url: Optional[str] = None
     cancel_url: Optional[str] = None
-
-    @field_validator("amount")
-    @classmethod
-    def validate_amount(cls, v):
-        return float(v)
 
 
 class ProcessPaymentRequest(BaseModel):
@@ -287,7 +238,7 @@ class RefundPaymentRequest(BaseModel):
     """Refund payment request schema"""
 
     payment_id: int
-    amount: Optional[Decimal] = None  # If None, refund full amount
+    amount: Optional[MoneyFloat] = None  # If None, refund full amount
     reason: str = Field(..., min_length=5, max_length=255)
 
     @field_validator("amount")
@@ -295,7 +246,7 @@ class RefundPaymentRequest(BaseModel):
     def validate_amount(cls, v):
         if v is not None and v <= 0:
             raise ValueError("Refund amount must be positive")
-        return float(v) if v is not None else v
+        return v
 
 
 class PaymentResponseSchema(BaseModel):

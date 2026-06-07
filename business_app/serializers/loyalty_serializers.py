@@ -6,13 +6,13 @@ This file contains Pydantic models for loyalty-related data serialization
 from datetime import datetime, date
 from typing import Dict, Any, Optional, List
 from enum import Enum
-from decimal import Decimal
 
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 from pydantic.alias_generators import to_camel
 
 # Import centralized tier configuration
 from business_app.models.loyalty import LoyaltyTierConfig
+from business_app.serializers.types import MoneyFloat
 
 
 class LoyaltyTier(str, Enum):
@@ -93,9 +93,9 @@ class LoyaltyRewardSchema(BaseModel):
     reward_type: RewardType
     points_required: int = Field(ge=0)
     discount_percentage: Optional[float] = Field(None, ge=0.0, le=100.0)
-    discount_amount: Optional[Decimal] = None
+    discount_amount: Optional[MoneyFloat] = None
     free_product_id: Optional[int] = None
-    gift_card_amount: Optional[Decimal] = None
+    gift_card_amount: Optional[MoneyFloat] = None
     is_active: bool = Field(default=True)
     is_featured: bool = Field(default=False)
     tier_requirement: Optional[LoyaltyTier] = None
@@ -107,13 +107,6 @@ class LoyaltyRewardSchema(BaseModel):
     terms_conditions: Optional[str] = None
     image_url: Optional[str] = None
     category: Optional[str] = None
-
-    @field_validator("discount_amount", "gift_card_amount")
-    @classmethod
-    def validate_amounts(cls, v):
-        if v is not None:
-            return float(v)
-        return v
 
 
 class UserRewardSchema(BaseModel):
@@ -171,14 +164,9 @@ class LoyaltyProgramSchema(BaseModel):
     birthday_bonus_points: int = Field(default=100, ge=0)
     review_points: int = Field(default=10, ge=0)
     social_share_points: int = Field(default=5, ge=0)
-    min_order_for_points: Decimal = Field(default=0, ge=0)
+    min_order_for_points: MoneyFloat = Field(default=0, ge=0)
     created_at: datetime
     updated_at: Optional[datetime] = None
-
-    @field_validator("min_order_for_points")
-    @classmethod
-    def validate_min_order(cls, v):
-        return float(v)
 
 
 class ChallengeSchema(BaseModel):
@@ -230,7 +218,7 @@ class LoyaltyStatisticsSchema(BaseModel):
     total_points_earned: int = Field(default=0, ge=0)
     total_points_redeemed: int = Field(default=0, ge=0)
     total_points_expired: int = Field(default=0, ge=0)
-    lifetime_value: Decimal = Field(default=0, ge=0)
+    lifetime_value: MoneyFloat = Field(default=0, ge=0)
     total_orders: int = Field(default=0, ge=0)
     total_referrals: int = Field(default=0, ge=0)
     successful_referrals: int = Field(default=0, ge=0)
@@ -241,12 +229,7 @@ class LoyaltyStatisticsSchema(BaseModel):
     member_since: Optional[datetime] = None
     last_activity: Optional[datetime] = None
     days_since_last_order: Optional[int] = None
-    average_order_value: Decimal = Field(default=0, ge=0)
-
-    @field_validator("lifetime_value", "average_order_value")
-    @classmethod
-    def validate_amounts(cls, v):
-        return float(v)
+    average_order_value: MoneyFloat = Field(default=0, ge=0)
 
 
 class UserLoyaltySchema(BaseModel):

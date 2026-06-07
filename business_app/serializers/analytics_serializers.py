@@ -11,6 +11,8 @@ from decimal import Decimal
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 from pydantic.alias_generators import to_camel
 
+from business_app.serializers.types import MoneyFloat
+
 
 class MetricType(str, Enum):
     REVENUE = "revenue"
@@ -106,9 +108,9 @@ class SalesAnalyticsSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True, alias_generator=to_camel)
 
     period: str
-    total_revenue: Decimal
+    total_revenue: MoneyFloat
     total_orders: int
-    average_order_value: Decimal
+    average_order_value: MoneyFloat
     new_customers: int
     returning_customers: int
     conversion_rate: float
@@ -127,11 +129,6 @@ class SalesAnalyticsSchema(BaseModel):
     revenue_trend: List[ChartDataPointSchema] = Field(default_factory=list)
     orders_trend: List[ChartDataPointSchema] = Field(default_factory=list)
 
-    @field_validator("total_revenue", "average_order_value")
-    @classmethod
-    def validate_amounts(cls, v):
-        return float(v)
-
 
 class CustomerAnalyticsSchema(BaseModel):
     """Customer analytics schema"""
@@ -143,7 +140,7 @@ class CustomerAnalyticsSchema(BaseModel):
     new_customers: int
     active_customers: int
     customer_retention_rate: float
-    customer_lifetime_value: Decimal
+    customer_lifetime_value: MoneyFloat
     churn_rate: float
 
     # Customer segments
@@ -159,11 +156,6 @@ class CustomerAnalyticsSchema(BaseModel):
 
     # Cohort analysis
     cohort_data: List[Dict[str, Any]] = Field(default_factory=list)
-
-    @field_validator("customer_lifetime_value")
-    @classmethod
-    def validate_clv(cls, v):
-        return float(v)
 
 
 class ProductAnalyticsSchema(BaseModel):
@@ -231,11 +223,11 @@ class RevenueAnalyticsSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True, alias_generator=to_camel)
 
     period: str
-    total_revenue: Decimal
-    recurring_revenue: Decimal
-    one_time_revenue: Decimal
-    refunds: Decimal
-    net_revenue: Decimal
+    total_revenue: MoneyFloat
+    recurring_revenue: MoneyFloat
+    one_time_revenue: MoneyFloat
+    refunds: MoneyFloat
+    net_revenue: MoneyFloat
 
     # Growth metrics
     revenue_growth_rate: float
@@ -252,11 +244,6 @@ class RevenueAnalyticsSchema(BaseModel):
     # Financial ratios
     gross_margin: float
     profit_margin: float
-
-    @field_validator("total_revenue", "recurring_revenue", "one_time_revenue", "refunds", "net_revenue")
-    @classmethod
-    def validate_amounts(cls, v):
-        return float(v)
 
 
 class ConversionFunnelSchema(BaseModel):
@@ -304,7 +291,7 @@ class RealTimeMetricsSchema(BaseModel):
     current_visitors: int
     active_sessions: int
     orders_today: int
-    revenue_today: Decimal
+    revenue_today: MoneyFloat
     conversion_rate_today: float
 
     # Live activity
@@ -317,11 +304,6 @@ class RealTimeMetricsSchema(BaseModel):
 
     # Timestamp
     last_updated: datetime
-
-    @field_validator("revenue_today")
-    @classmethod
-    def validate_revenue(cls, v):
-        return float(v)
 
 
 class PredictiveAnalyticsSchema(BaseModel):

@@ -5,12 +5,12 @@ This file contains Pydantic models for subscription-related data serialization
 
 from datetime import datetime, date
 from typing import Dict, Any, Optional, List
-from decimal import Decimal
 
-from pydantic import BaseModel, Field, field_validator, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict
 from pydantic.alias_generators import to_camel
 
 from business_app.models.subscription import SubscriptionItem
+from business_app.serializers.types import MoneyFloat
 
 
 class SubscriptionItemSchema(BaseModel):
@@ -24,8 +24,8 @@ class SubscriptionItemSchema(BaseModel):
     product_name: str
     product_sku: Optional[str] = None
     quantity: int
-    unit_price: Decimal
-    total_price: Decimal
+    unit_price: MoneyFloat
+    total_price: MoneyFloat
 
     # Product details
     product_image_url: Optional[str] = None
@@ -36,11 +36,6 @@ class SubscriptionItemSchema(BaseModel):
     # Item configuration
     delivery_schedule: Optional[str] = None
     special_instructions: Optional[str] = None
-
-    @field_validator("unit_price", "total_price")
-    @classmethod
-    def validate_prices(cls, v):
-        return float(v)
 
 
 class SubscriptionAddressSchema(BaseModel):
@@ -72,7 +67,7 @@ class SubscriptionSchema(BaseModel):
 
     # Billing configuration
     billing_cycle: str
-    billing_amount: Decimal
+    billing_amount: MoneyFloat
     discount_percentage: float = Field(default=0.0)
 
     # Delivery configuration
@@ -88,7 +83,7 @@ class SubscriptionSchema(BaseModel):
     auto_renew: bool = Field(default=True)
 
     # Billing tracking
-    total_amount_billed: Decimal = Field(default=0)
+    total_amount_billed: MoneyFloat = Field(default=0)
     failed_billing_attempts: int = Field(default=0)
     last_billing_date: Optional[datetime] = None
     next_billing_date: Optional[datetime] = None
@@ -110,11 +105,6 @@ class SubscriptionSchema(BaseModel):
     # Relationships (optional, loaded when needed)
     subscription_items: List[SubscriptionItemSchema] = Field(default_factory=list)
     delivery_address: Optional[SubscriptionAddressSchema] = None
-
-    @field_validator("billing_amount", "total_amount_billed")
-    @classmethod
-    def validate_amounts(cls, v):
-        return float(v)
 
 
 class CreateSubscriptionRequest(BaseModel):
@@ -194,33 +184,21 @@ class SubscriptionPreviewResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True, alias_generator=to_camel)
 
-    items_total: Decimal
-    discount_amount: Decimal
-    billing_amount: Decimal
+    items_total: MoneyFloat
+    discount_amount: MoneyFloat
+    billing_amount: MoneyFloat
 
     # Delivery estimates
     deliveries_per_month: int
-    monthly_cost_estimate: Decimal
+    monthly_cost_estimate: MoneyFloat
 
     # Savings calculation
-    regular_price_total: Decimal
-    total_savings: Decimal
+    regular_price_total: MoneyFloat
+    total_savings: MoneyFloat
     savings_percentage: float
 
     # Item breakdown
     items_breakdown: List[Dict[str, Any]]
-
-    @field_validator(
-        "items_total",
-        "discount_amount",
-        "billing_amount",
-        "monthly_cost_estimate",
-        "regular_price_total",
-        "total_savings",
-    )
-    @classmethod
-    def validate_amounts(cls, v):
-        return float(v)
 
 
 class SubscriptionBillingInfo(BaseModel):
@@ -229,21 +207,16 @@ class SubscriptionBillingInfo(BaseModel):
     model_config = ConfigDict(from_attributes=True, alias_generator=to_camel)
 
     next_billing_date: Optional[datetime] = None
-    billing_amount: Decimal
+    billing_amount: MoneyFloat
     payment_method: str
     auto_payment_enabled: bool
     failed_attempts: int = Field(default=0)
     last_successful_payment: Optional[datetime] = None
-    total_amount_billed: Decimal = Field(default=0)
+    total_amount_billed: MoneyFloat = Field(default=0)
 
     # Payment history summary
     successful_payments: int = Field(default=0)
     failed_payments: int = Field(default=0)
-
-    @field_validator("billing_amount", "total_amount_billed")
-    @classmethod
-    def validate_amounts(cls, v):
-        return float(v)
 
 
 class SubscriptionStatistics(BaseModel):
@@ -257,26 +230,16 @@ class SubscriptionStatistics(BaseModel):
     cancelled_subscriptions: int
 
     # Financial metrics
-    total_spent: Decimal
-    total_savings: Decimal
-    average_monthly_spending: Decimal
+    total_spent: MoneyFloat
+    total_savings: MoneyFloat
+    average_monthly_spending: MoneyFloat
 
     # Delivery metrics
     upcoming_deliveries: int
     total_deliveries_completed: int
 
     # Trend data
-    monthly_spending_trend: Dict[str, Decimal]
-
-    @field_validator("total_spent", "total_savings", "average_monthly_spending")
-    @classmethod
-    def validate_amounts(cls, v):
-        return float(v)
-
-    @field_validator("monthly_spending_trend")
-    @classmethod
-    def validate_monthly_spending(cls, v):
-        return {k: float(amount) for k, amount in v.items()}
+    monthly_spending_trend: Dict[str, MoneyFloat]
 
 
 class SubscriptionLogSchema(BaseModel):
@@ -305,12 +268,7 @@ class SubscriptionTemplate(BaseModel):
     delivery_frequency: str
     discount_percentage: float
     suggested_items: List[Dict[str, Any]]
-    estimated_monthly_cost: Decimal
-
-    @field_validator("estimated_monthly_cost")
-    @classmethod
-    def validate_cost(cls, v):
-        return float(v)
+    estimated_monthly_cost: MoneyFloat
 
 
 class ChangePaymentMethodRequest(BaseModel):

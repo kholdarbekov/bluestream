@@ -5,13 +5,13 @@ This file contains Pydantic models for order-related data serialization
 
 from datetime import datetime, date
 from typing import Dict, Any, Optional, List
-from decimal import Decimal
 
-from pydantic import BaseModel, Field, field_validator, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict
 from pydantic.alias_generators import to_camel
 
 from business_app.utils.payment_projection import get_payment_projection
 from business_app.models.order import Order, OrderItem
+from business_app.serializers.types import MoneyFloat
 
 
 class OrderItemSchema(BaseModel):
@@ -24,19 +24,14 @@ class OrderItemSchema(BaseModel):
     product_name: str
     product_sku: str
     quantity: int
-    unit_price: Decimal
-    total_price: Decimal
+    unit_price: MoneyFloat
+    total_price: MoneyFloat
     special_instructions: Optional[str] = None
 
     # Product details
     product_image_url: Optional[str] = None
     product_weight: Optional[float] = None
     product_volume: Optional[float] = None
-
-    @field_validator("unit_price", "total_price")
-    @classmethod
-    def validate_prices(cls, v):
-        return float(v)
 
 
 class OrderDeliverySchema(BaseModel):
@@ -89,20 +84,15 @@ class OrderPaymentSchema(BaseModel):
     id: int
     payment_method: str
     payment_status: str
-    amount: Decimal
+    amount: MoneyFloat
     currency: str = Field(default="UZS")
     transaction_id: Optional[str] = None
     payment_provider: Optional[str] = None
     paid_at: Optional[datetime] = None
-    amount_collected: Decimal = Field(default=0)
-    outstanding_amount: Decimal = Field(default=0)
+    amount_collected: MoneyFloat = Field(default=0)
+    outstanding_amount: MoneyFloat = Field(default=0)
     last_collected_at: Optional[datetime] = None
     collection_events_count: int = Field(default=0)
-
-    @field_validator("amount", "amount_collected", "outstanding_amount")
-    @classmethod
-    def validate_amount(cls, v):
-        return float(v)
 
 
 class OrderSchema(BaseModel):
@@ -116,12 +106,12 @@ class OrderSchema(BaseModel):
     status: str
 
     # Amounts
-    subtotal_amount: Decimal
-    tax_amount: Decimal = Field(default=0)
-    delivery_fee: Decimal = Field(default=0)
-    discount_amount: Decimal = Field(default=0)
-    loyalty_discount: Decimal = Field(default=0)
-    total_amount: Decimal
+    subtotal_amount: MoneyFloat
+    tax_amount: MoneyFloat = Field(default=0)
+    delivery_fee: MoneyFloat = Field(default=0)
+    discount_amount: MoneyFloat = Field(default=0)
+    loyalty_discount: MoneyFloat = Field(default=0)
+    total_amount: MoneyFloat
 
     # Order details
     is_urgent: bool = Field(default=False)
@@ -148,13 +138,6 @@ class OrderSchema(BaseModel):
     delivery_info: Optional[OrderDeliverySchema] = None
     delivery_address: Optional[OrderAddressSchema] = None
     payment_info: Optional[OrderPaymentSchema] = None
-
-    @field_validator(
-        "subtotal_amount", "tax_amount", "delivery_fee", "discount_amount", "loyalty_discount", "total_amount"
-    )
-    @classmethod
-    def validate_amounts(cls, v):
-        return float(v)
 
 
 class CreateOrderRequest(BaseModel):
@@ -198,21 +181,11 @@ class OrderStatisticsSchema(BaseModel):
 
     period: str
     total_orders: int
-    total_spent: Decimal
-    average_order_value: Decimal
+    total_spent: MoneyFloat
+    average_order_value: MoneyFloat
     orders_by_status: Dict[str, int]
     top_products: List[Dict[str, Any]]
-    monthly_spending_trend: Dict[str, Decimal]
-
-    @field_validator("total_spent", "average_order_value")
-    @classmethod
-    def validate_amounts(cls, v):
-        return float(v)
-
-    @field_validator("monthly_spending_trend")
-    @classmethod
-    def validate_monthly_spending(cls, v):
-        return {k: float(amount) for k, amount in v.items()}
+    monthly_spending_trend: Dict[str, MoneyFloat]
 
 
 class CartEstimateRequest(BaseModel):
@@ -231,36 +204,21 @@ class CartEstimateResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True, alias_generator=to_camel)
 
-    subtotal: Decimal
-    tax_amount: Decimal = Field(default=0)
-    delivery_fee: Decimal = Field(default=0)
-    discount_amount: Decimal = Field(default=0)
-    loyalty_discount: Decimal = Field(default=0)
-    total: Decimal
+    subtotal: MoneyFloat
+    tax_amount: MoneyFloat = Field(default=0)
+    delivery_fee: MoneyFloat = Field(default=0)
+    discount_amount: MoneyFloat = Field(default=0)
+    loyalty_discount: MoneyFloat = Field(default=0)
+    total: MoneyFloat
 
     # Breakdown details
-    items_total: Decimal
-    promo_discount: Decimal = Field(default=0)
-    loyalty_points_discount: Decimal = Field(default=0)
+    items_total: MoneyFloat
+    promo_discount: MoneyFloat = Field(default=0)
+    loyalty_points_discount: MoneyFloat = Field(default=0)
 
     # Applied promotions
     applied_promo_code: Optional[str] = None
     loyalty_points_used: int = Field(default=0)
-
-    @field_validator(
-        "subtotal",
-        "tax_amount",
-        "delivery_fee",
-        "discount_amount",
-        "loyalty_discount",
-        "total",
-        "items_total",
-        "promo_discount",
-        "loyalty_points_discount",
-    )
-    @classmethod
-    def validate_amounts(cls, v):
-        return float(v)
 
 
 class DeliverySlotSchema(BaseModel):
@@ -271,16 +229,11 @@ class DeliverySlotSchema(BaseModel):
     id: int
     name: str
     time_range: str
-    delivery_fee: Decimal
-    premium_fee: Decimal = Field(default=0)
+    delivery_fee: MoneyFloat
+    premium_fee: MoneyFloat = Field(default=0)
     is_premium: bool = Field(default=False)
     available_capacity: int
     is_available: bool = Field(default=True)
-
-    @field_validator("delivery_fee", "premium_fee")
-    @classmethod
-    def validate_fees(cls, v):
-        return float(v)
 
 
 class PromoCodeValidationResponse(BaseModel):
@@ -292,16 +245,11 @@ class PromoCodeValidationResponse(BaseModel):
     campaign_name: Optional[str] = None
     campaign_description: Optional[str] = None
     discount_type: Optional[str] = None
-    discount_value: Optional[Decimal] = None
-    discount_amount: Decimal = Field(default=0)
-    max_discount: Optional[Decimal] = None
-    min_order_value: Optional[Decimal] = None
+    discount_value: Optional[MoneyFloat] = None
+    discount_amount: MoneyFloat = Field(default=0)
+    max_discount: Optional[MoneyFloat] = None
+    min_order_value: Optional[MoneyFloat] = None
     error_message: Optional[str] = None
-
-    @field_validator("discount_value", "discount_amount", "max_discount", "min_order_value")
-    @classmethod
-    def validate_amounts(cls, v):
-        return float(v) if v is not None else None
 
 
 class OrderTimelineEvent(BaseModel):

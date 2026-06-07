@@ -15,6 +15,7 @@ from business_app.models.product import Product, ProductCategory
 from business_app.models.order import Order
 from business_app.utils.user_types import normalize_user_type
 from business_app.utils.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
+from business_app.serializers.types import MoneyFloat
 
 
 class UserRole(str, Enum):
@@ -93,16 +94,11 @@ class UserAdminSchema(BaseModel):
 
     # Statistics
     total_orders: int = Field(default=0)
-    total_spent: Decimal = Field(default=0)
-    average_order_value: Decimal = Field(default=0)
-    lifetime_value: Decimal = Field(default=0)
+    total_spent: MoneyFloat = Field(default=0)
+    average_order_value: MoneyFloat = Field(default=0)
+    lifetime_value: MoneyFloat = Field(default=0)
     loyalty_points: int = Field(default=0)
     referral_count: int = Field(default=0)
-
-    @field_validator("total_spent", "average_order_value", "lifetime_value")
-    @classmethod
-    def validate_amounts(cls, v):
-        return float(v)
 
 
 class UserListAdminSchema(BaseModel):
@@ -128,10 +124,10 @@ class OrderAdminSchema(BaseModel):
     customer_email: Optional[str] = None
     customer_phone: Optional[str] = None
     status: OrderStatus
-    total_amount: Decimal
-    tax_amount: Decimal = Field(default=0)
-    discount_amount: Decimal = Field(default=0)
-    delivery_fee: Decimal = Field(default=0)
+    total_amount: MoneyFloat
+    tax_amount: MoneyFloat = Field(default=0)
+    discount_amount: MoneyFloat = Field(default=0)
+    delivery_fee: MoneyFloat = Field(default=0)
     payment_method: Optional[str] = None
     payment_status: Optional[str] = None
     delivery_date: Optional[datetime] = None
@@ -152,11 +148,6 @@ class OrderAdminSchema(BaseModel):
     admin_notes: Optional[str] = None
     priority_level: str = Field(default="normal")
 
-    @field_validator("total_amount", "tax_amount", "discount_amount", "delivery_fee")
-    @classmethod
-    def validate_amounts(cls, v):
-        return float(v)
-
 
 class OrderListAdminSchema(BaseModel):
     """Order list admin schema"""
@@ -166,13 +157,8 @@ class OrderListAdminSchema(BaseModel):
     page: int
     per_page: int
     pages: int
-    total_revenue: Decimal = Field(default=0)
+    total_revenue: MoneyFloat = Field(default=0)
     filters_applied: Dict[str, Any] = Field(default_factory=dict)
-
-    @field_validator("total_revenue")
-    @classmethod
-    def validate_total_revenue(cls, v):
-        return float(v)
 
 
 class ProductAdminSchema(BaseModel):
@@ -185,8 +171,8 @@ class ProductAdminSchema(BaseModel):
     sku: str
     barcode: Optional[str] = None
     category_name: Optional[str] = None
-    base_price: Decimal
-    current_price: Decimal
+    base_price: MoneyFloat
+    current_price: MoneyFloat
     stock_quantity: Optional[int] = None
     min_stock_level: Optional[int] = None
     is_active: bool = Field(default=True)
@@ -198,7 +184,7 @@ class ProductAdminSchema(BaseModel):
 
     # Performance metrics
     total_sold: int = Field(default=0)
-    total_revenue: Decimal = Field(default=0)
+    total_revenue: MoneyFloat = Field(default=0)
     view_count: int = Field(default=0)
     average_rating: float = Field(default=0.0)
     review_count: int = Field(default=0)
@@ -211,13 +197,6 @@ class ProductAdminSchema(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     last_sold_at: Optional[datetime] = None
-
-    @field_validator("base_price", "current_price", "total_revenue")
-    @classmethod
-    def validate_amounts(cls, v):
-        if v is not None:
-            return float(v)
-        return v
 
 
 class ProductListAdminSchema(BaseModel):
@@ -269,16 +248,11 @@ class DeliveryPersonAdminSchema(BaseModel):
     hire_date: Optional[date] = None
     employee_id: Optional[str] = None
     emergency_contact: Optional[str] = None
-    monthly_earnings: Decimal = Field(default=0)
+    monthly_earnings: MoneyFloat = Field(default=0)
 
     # Status
     verification_status: str = Field(default="verified")
     background_check_status: str = Field(default="passed")
-
-    @field_validator("monthly_earnings")
-    @classmethod
-    def validate_earnings(cls, v):
-        return float(v)
 
 
 class SystemSettingSchema(BaseModel):

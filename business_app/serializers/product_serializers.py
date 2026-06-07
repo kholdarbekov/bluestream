@@ -11,6 +11,7 @@ from decimal import Decimal
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 from pydantic.alias_generators import to_camel
 from business_app.models.product import Product
+from business_app.serializers.types import MoneyFloat
 
 logger = logging.getLogger(__name__)
 
@@ -43,19 +44,14 @@ class ProductSpecificationsSchema(BaseModel):
 class ProductPricingSchema(BaseModel):
     """Product pricing information"""
 
-    base_price: Decimal
-    current_price: Decimal
-    discount_amount: Decimal
+    base_price: MoneyFloat
+    current_price: MoneyFloat
+    discount_amount: MoneyFloat
     discount_percentage: float
     quantity: int = Field(default=1)
-    total_price: Decimal
+    total_price: MoneyFloat
     currency: str = Field(default="UZS")
     is_discounted: bool
-
-    @field_validator("base_price", "current_price", "discount_amount", "total_price")
-    @classmethod
-    def validate_prices(cls, v):
-        return float(v)
 
 
 class ProductMediaSchema(BaseModel):
@@ -141,14 +137,9 @@ class ProductDiscountSchema(BaseModel):
     type: str
     name: str
     description: Optional[str] = None
-    discount_value: Decimal
+    discount_value: MoneyFloat
     discount_type: str
     conditions: Optional[str] = None
-
-    @field_validator("discount_value")
-    @classmethod
-    def validate_discount_value(cls, v):
-        return float(v)
 
 
 class ProductSchema(BaseModel):
@@ -253,7 +244,7 @@ class CreateProductRequest(BaseModel):
     sku: str = Field(..., min_length=3, max_length=50)
     barcode: Optional[str] = Field(None, max_length=50)
     category_id: Optional[int] = None
-    base_price: Decimal = Field(..., gt=0)
+    base_price: MoneyFloat = Field(..., gt=0)
     volume: Optional[float] = Field(None, gt=0)
     volume_unit: Optional[str] = None
     weight: Optional[float] = Field(None, gt=0)
@@ -272,11 +263,6 @@ class CreateProductRequest(BaseModel):
     expire_days: Optional[int] = Field(None, ge=1)
     min_order_quantity: int = Field(default=1, ge=1)
 
-    @field_validator("base_price")
-    @classmethod
-    def validate_base_price(cls, v):
-        return float(v)
-
 
 class UpdateProductRequest(BaseModel):
     """Update product request schema"""
@@ -284,7 +270,7 @@ class UpdateProductRequest(BaseModel):
     name: Optional[str] = Field(None, min_length=3, max_length=255)
     description: Optional[str] = Field(None, max_length=2000)
     short_description: Optional[str] = Field(None, max_length=500)
-    base_price: Optional[Decimal] = Field(None, gt=0)
+    base_price: Optional[MoneyFloat] = Field(None, gt=0)
     category_id: Optional[int] = None
     volume: Optional[float] = Field(None, gt=0)
     volume_unit: Optional[str] = None
@@ -303,13 +289,6 @@ class UpdateProductRequest(BaseModel):
     returnable_bottles_per_unit: Optional[Decimal] = Field(None, ge=0)
     expire_days: Optional[int] = Field(None, ge=1)
     min_order_quantity: Optional[int] = Field(None, ge=1)
-
-    @field_validator("base_price")
-    @classmethod
-    def validate_base_price(cls, v):
-        if v is not None:
-            return float(v)
-        return v
 
 
 class ProductResponseSchema(BaseModel):

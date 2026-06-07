@@ -6,12 +6,12 @@ This file contains Pydantic models for delivery-related data serialization
 from datetime import datetime, timedelta, UTC
 from typing import Dict, Any, Optional, List
 from enum import Enum
-from decimal import Decimal
 
-from pydantic import BaseModel, Field, field_validator, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict
 from pydantic.alias_generators import to_camel
 
 from business_app.models.user import UserAddress
+from business_app.serializers.types import MoneyFloat
 
 
 class DeliveryStatus(str, Enum):
@@ -69,13 +69,8 @@ class OrderInfoSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True, alias_generator=to_camel)
 
     order_number: str
-    total_amount: Decimal
+    total_amount: MoneyFloat
     item_count: int
-
-    @field_validator("total_amount")
-    @classmethod
-    def validate_total_amount(cls, v):
-        return float(v)
 
 
 class CurrentLocationSchema(BaseModel):
@@ -107,18 +102,13 @@ class CustomerFeedbackSchema(BaseModel):
 class AdminFieldsSchema(BaseModel):
     """Admin-specific delivery fields"""
 
-    delivery_cost: Decimal = Field(default=0)
-    driver_commission: Decimal = Field(default=0)
+    delivery_cost: MoneyFloat = Field(default=0)
+    driver_commission: MoneyFloat = Field(default=0)
     route_optimization_score: Optional[float] = None
     estimated_distance: Optional[float] = None
     actual_distance: Optional[float] = None
     failed_delivery_reason: Optional[str] = None
     internal_notes: Optional[str] = None
-
-    @field_validator("delivery_cost", "driver_commission")
-    @classmethod
-    def validate_amounts(cls, v):
-        return float(v)
 
 
 class TimeSlotSchema(BaseModel):
@@ -130,8 +120,8 @@ class TimeSlotSchema(BaseModel):
     name: str
     start_time: Optional[str] = None
     end_time: Optional[str] = None
-    delivery_fee: Decimal = Field(default=0)
-    premium_fee: Decimal = Field(default=0)
+    delivery_fee: MoneyFloat = Field(default=0)
+    premium_fee: MoneyFloat = Field(default=0)
     is_premium: bool = Field(default=False)
     is_express: bool = Field(default=False)
     is_active: bool = Field(default=True)
@@ -139,11 +129,6 @@ class TimeSlotSchema(BaseModel):
     description: Optional[str] = None
     is_available: bool = Field(default=True)
     capacity: Optional[Dict[str, Any]] = None
-
-    @field_validator("delivery_fee", "premium_fee")
-    @classmethod
-    def validate_fees(cls, v):
-        return float(v)
 
 
 class DeliverySchema(BaseModel):
@@ -160,7 +145,7 @@ class DeliverySchema(BaseModel):
     estimated_delivery_time: Optional[datetime] = None
     actual_delivery_time: Optional[datetime] = None
     delivery_attempts: int = Field(default=0)
-    delivery_fee: Decimal = Field(default=0)
+    delivery_fee: MoneyFloat = Field(default=0)
     special_instructions: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -174,11 +159,6 @@ class DeliverySchema(BaseModel):
     estimated_arrival: Optional[datetime] = None
     customer_feedback: Optional[CustomerFeedbackSchema] = None
     admin_fields: Optional[AdminFieldsSchema] = None
-
-    @field_validator("delivery_fee")
-    @classmethod
-    def validate_delivery_fee(cls, v):
-        return float(v)
 
 
 class DeliveryListSchema(BaseModel):

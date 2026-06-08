@@ -303,7 +303,7 @@ class StatusUpdateHandler(BaseHandler):
                     )
                     message = i18n.get(
                         'staff.delivery.bottles_return_prompt', language,
-                        count=int(expected_bottles),
+                        expected=int(expected_bottles),
                     )
                     await query.edit_message_text(
                         message, reply_markup=keyboard, parse_mode='HTML'
@@ -779,7 +779,7 @@ class StatusUpdateHandler(BaseHandler):
             )
             message = i18n.get(
                 'staff.delivery.bottles_return_prompt', language,
-                count=int(expected_bottles),
+                expected=int(expected_bottles),
             )
             if update.callback_query:
                 await update.callback_query.edit_message_text(

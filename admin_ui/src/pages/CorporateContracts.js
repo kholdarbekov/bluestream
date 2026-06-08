@@ -74,6 +74,7 @@ const CorporateContracts = () => {
   const queryClient = useQueryClient();
 
   const [searchText, setSearchText] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
   const [pagination, setPagination] = useState({ page: 1, per_page: DEFAULT_PAGE_SIZE });
   const [selectedContractId, setSelectedContractId] = useState(null);
   const [isContractModalOpen, setIsContractModalOpen] = useState(false);
@@ -87,12 +88,26 @@ const CorporateContracts = () => {
   const [topupForm] = Form.useForm();
   const [pricesForm] = Form.useForm();
 
+  // Debounce the raw search box into the term we actually send to the server,
+  // so we issue one request after typing settles rather than one per keystroke.
+  useEffect(() => {
+    const handle = setTimeout(() => setAppliedSearch(searchText.trim()), 400);
+    return () => clearTimeout(handle);
+  }, [searchText]);
+
+  // A new search term must start from the first page; otherwise we could land on
+  // an out-of-range page for the narrowed result set.
+  useEffect(() => {
+    setPagination((current) => (current.page === 1 ? current : { ...current, page: 1 }));
+  }, [appliedSearch]);
+
   const contractsQuery = useQuery({
-    queryKey: ['corporate-contracts', pagination],
+    queryKey: ['corporate-contracts', pagination, appliedSearch],
 
     queryFn: () => adminService.getCorporateContracts({
       page: pagination.page,
-      per_page: pagination.per_page
+      per_page: pagination.per_page,
+      search: appliedSearch || undefined
     }),
 
     placeholderData: keepPreviousData,
@@ -137,6 +152,9 @@ const contractBalanceQuery = useQuery({
   });
 
   const contracts = contractsQuery.data?.data?.items || [];
+  const contractsMeta = contractsQuery.data?.meta || {};
+  const contractsTotal = Number(contractsMeta.total || 0);
+  const contractsSummary = contractsMeta.summary || {};
   const selectedContract = contractDetailQuery.data?.data?.contract || null;
   const selectedBalance = contractBalanceQuery.data?.data?.balance || null;
   const balanceProducts = selectedBalance?.products || [];
@@ -148,24 +166,6 @@ const contractBalanceQuery = useQuery({
     () => availableUsers.filter((user) => isEntityUser(user)),
     [availableUsers]
   );
-
-  const visibleContracts = useMemo(() => {
-    const normalizedSearch = searchText.trim().toLowerCase();
-    if (!normalizedSearch) {
-      return contracts;
-    }
-
-    return contracts.filter((contract) => {
-      const customerName = `${contract.user?.first_name || ''} ${contract.user?.last_name || ''}`.trim();
-      return [
-        contract.contract_number,
-        contract.name,
-        customerName,
-        contract.user?.phone,
-        contract.user?.email
-      ].some((value) => String(value || '').toLowerCase().includes(normalizedSearch));
-    });
-  }, [contracts, searchText]);
 
   useEffect(() => {
     if (!selectedContractId && contracts.length > 0) {
@@ -525,6 +525,21 @@ const contractBalanceQuery = useQuery({
       title: t('ui.corporate.prepayment_scope', 'Prepayment Scope'),
       key: 'prepayment_scope',
       render: (_, record) => {
+        // Money-mode (grocery) contracts track a running money balance rather
+        // than per-product units, so surface the outstanding debt the detail
+        // view already shows instead of a misleading "0 tracked / 0 debt".
+        if (record.tracking_mode === 'amount') {
+          const outstanding = Number(record.prepayment_account?.outstanding_amount || 0);
+          const color = outstanding > 0 ? '#cf1322' : outstanding < 0 ? '#3f8600' : undefined;
+          const label = outstanding < 0
+            ? t('ui.corporate.credit', 'credit')
+            : t('ui.corporate.debt', 'debt');
+          return (
+            <span style={{ color }}>
+              {`${formatAmount(Math.abs(outstanding))} ${record.currency || 'UZS'} ${label}`}
+            </span>
+          );
+        }
         const tracked = Number(record.prepayment_account?.tracked_products_count || 0);
         const debt = Number(record.prepayment_account?.debt_products_count || 0);
         return `${tracked} tracked / ${debt} debt`;
@@ -542,7 +557,24 @@ const contractBalanceQuery = useQuery({
     {
       title: t('ui.corporate.product', 'Product'),
       key: 'product',
-      render: (_, record) => record.product_name || `#${record.product_id || '-'}`,
+      render: (_, record) => {
+        if (record.product_name) {
+          return record.product_name;
+        }
+        // Money-mode charges cover a whole delivered order rather than one
+        // product; show the order's product names the backend resolved for us.
+        const orderProductNames = record.order_product_names || [];
+        if (orderProductNames.length) {
+          return orderProductNames.join(', ');
+        }
+        if (record.product_id) {
+          return `#${record.product_id}`;
+        }
+        if (record.order_id) {
+          return t('ui.corporate.order_ref', 'Order #{{id}}', { id: record.order_id });
+        }
+        return '-';
+      },
       ellipsis: true
     },
     {
@@ -583,11 +615,11 @@ const contractBalanceQuery = useQuery({
     }
   ];
 
-  const totalContracts = contracts.length;
-  const activeContracts = contracts.filter((contract) => contract.status === 'active' && contract.is_active).length;
-  const contractsWithDebt = contracts.filter(
-    (contract) => Number(contract.prepayment_account?.debt_products_count || 0) > 0
-  ).length;
+  // KPIs come from backend aggregates (meta.summary) so they reflect every
+  // matching contract, not just the rows on the current page.
+  const totalContracts = contractsTotal;
+  const activeContracts = Number(contractsSummary.active || 0);
+  const contractsWithDebt = Number(contractsSummary.with_debt || 0);
   const topupEligibleProducts = (selectedContract?.prices || []).filter(
     (price) => price.is_active !== false && price.is_prepayment_eligible !== false
   );
@@ -649,8 +681,16 @@ const contractBalanceQuery = useQuery({
               rowKey="id"
               loading={contractsQuery.isLoading}
               columns={contractColumns}
-              dataSource={visibleContracts}
-              pagination={false}
+              dataSource={contracts}
+              pagination={{
+                current: pagination.page,
+                pageSize: pagination.per_page,
+                total: contractsTotal,
+                showSizeChanger: true,
+                pageSizeOptions: ['10', '20', '50', '100'],
+                showTotal: (total, range) => `${range[0]}-${range[1]} / ${total}`,
+                onChange: (page, pageSize) => setPagination({ page, per_page: pageSize })
+              }}
               onRow={(record) => ({
                 onClick: () => setSelectedContractId(record.id),
                 style: {

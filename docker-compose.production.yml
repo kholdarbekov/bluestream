@@ -389,6 +389,11 @@ services:
       - /sys:/sys:ro
       - /var/lib/docker/:/var/lib/docker:ro
       - /dev/disk/:/dev/disk:ro
+      # cAdvisor reads /etc/machine-id to derive the host's system UUID. The
+      # image has none and without this mount it logs an E-level error every
+      # housekeeping cycle ("Failed to get system UUID: open /etc/machine-id").
+      # Mounting the host's machine-id read-only resolves it at the source.
+      - /etc/machine-id:/etc/machine-id:ro
     devices:
       - /dev/kmsg
     cap_add:

@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import or_
+from sqlalchemy import and_, exists, func, or_
 from sqlalchemy.orm import joinedload
 
 from business_app import db
@@ -667,25 +667,66 @@ class CorporateContractService:
 
         return pricing_map
 
+    @staticmethod
+    def _normalize_status(status: Optional[str]) -> Optional[CorporateContractStatus]:
+        if not status:
+            return None
+        try:
+            return CorporateContractStatus(status)
+        except ValueError as exc:
+            raise ValidationError("Invalid contract status") from exc
+
+    def _apply_contract_list_filters(
+        self,
+        query,
+        *,
+        user_id: Optional[int] = None,
+        status: Optional[str] = None,
+        search: Optional[str] = None,
+    ):
+        """Apply the user/status/search filters shared by listing and summary.
+
+        The search term matches the contract number/name and the related
+        customer's name, phone, and email so admins can find a contract the
+        same way they recognise it in the list.
+        """
+        if user_id:
+            query = query.filter(CorporateContract.user_id == user_id)
+
+        status_enum = self._normalize_status(status)
+        if status_enum:
+            query = query.filter(CorporateContract.status == status_enum)
+
+        normalized_search = (search or "").strip()
+        if normalized_search:
+            term = f"%{normalized_search}%"
+            query = query.join(User, CorporateContract.user_id == User.id).filter(
+                or_(
+                    CorporateContract.contract_number.ilike(term),
+                    CorporateContract.name.ilike(term),
+                    User.first_name.ilike(term),
+                    User.last_name.ilike(term),
+                    func.concat(User.first_name, " ", User.last_name).ilike(term),
+                    User.phone.ilike(term),
+                    User.email.ilike(term),
+                    User.company_name.ilike(term),
+                )
+            )
+        return query
+
     def list_contracts(
         self,
         user_id: Optional[int] = None,
         status: Optional[str] = None,
         page: int = 1,
         per_page: int = 20,
+        search: Optional[str] = None,
     ) -> Dict[str, Any]:
         query = CorporateContract.query.options(
             joinedload(CorporateContract.user),
             joinedload(CorporateContract.prepayment_account).joinedload(CorporatePrepaymentAccount.product_balances),
         )
-        if user_id:
-            query = query.filter(CorporateContract.user_id == user_id)
-        if status:
-            try:
-                status_enum = CorporateContractStatus(status)
-            except ValueError as exc:
-                raise ValidationError("Invalid contract status") from exc
-            query = query.filter(CorporateContract.status == status_enum)
+        query = self._apply_contract_list_filters(query, user_id=user_id, status=status, search=search)
 
         pagination = query.order_by(CorporateContract.created_at.desc()).paginate(
             page=page,
@@ -697,6 +738,63 @@ class CorporateContractService:
             "total": pagination.total,
             "page": page,
             "per_page": per_page,
+        }
+
+    def get_contracts_summary(
+        self,
+        user_id: Optional[int] = None,
+        status: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> Dict[str, int]:
+        """Aggregate counts for the contract list KPIs across the whole filter.
+
+        Returned independently of pagination so the dashboard cards reflect every
+        matching contract, not just the current page. ``with_debt`` spans both
+        tracking modes: AMOUNT-mode contracts with a positive ``outstanding_amount``
+        and UNITS-mode contracts with any product balance whose available units
+        (prepaid - reserved - consumed) are negative.
+        """
+        base = self._apply_contract_list_filters(
+            CorporateContract.query,
+            user_id=user_id,
+            status=status,
+            search=search,
+        )
+
+        total = base.count()
+        active = base.filter(
+            CorporateContract.is_active.is_(True),
+            CorporateContract.status == CorporateContractStatus.ACTIVE,
+        ).count()
+
+        money_debt = and_(
+            CorporateContract.tracking_mode == CorporateContractTrackingMode.AMOUNT,
+            CorporatePrepaymentAccount.outstanding_amount > 0,
+        )
+        units_debt = exists().where(
+            and_(
+                CorporatePrepaymentBalance.account_id == CorporatePrepaymentAccount.id,
+                (
+                    CorporatePrepaymentBalance.prepaid_units
+                    - CorporatePrepaymentBalance.reserved_units
+                    - CorporatePrepaymentBalance.consumed_units
+                )
+                < 0,
+            )
+        )
+        with_debt = (
+            base.join(
+                CorporatePrepaymentAccount,
+                CorporatePrepaymentAccount.contract_id == CorporateContract.id,
+            )
+            .filter(or_(money_debt, units_debt))
+            .count()
+        )
+
+        return {
+            "total": total,
+            "active": active,
+            "with_debt": with_debt,
         }
 
     def create_contract(self, payload: Dict[str, Any], actor_user_id: Optional[int] = None) -> CorporateContract:
@@ -1497,11 +1595,7 @@ class CorporateContractService:
             if units <= 0:
                 continue
 
-            balance = (
-                CorporatePrepaymentBalance.query.filter_by(id=consume_entry.balance_id)
-                .with_for_update()
-                .first()
-            )
+            balance = CorporatePrepaymentBalance.query.filter_by(id=consume_entry.balance_id).with_for_update().first()
             if not balance:
                 raise NotFoundError("Corporate prepayment balance not found")
 
@@ -1829,12 +1923,56 @@ class CorporateContractService:
             per_page=min(per_page, 200),
             error_out=False,
         )
+
+        order_product_names = self._resolve_order_product_names(pagination.items)
+        items = []
+        for entry in pagination.items:
+            payload = entry.to_dict()
+            # Money-mode rows (CHARGE/COLLECT) carry no product_id because the
+            # charge is posted against the whole delivered order. Surface the
+            # order's product names so the ledger stays meaningful instead of
+            # showing a bare "#-".
+            if not entry.product_id and entry.order_id:
+                payload["order_product_names"] = order_product_names.get(entry.order_id, [])
+            else:
+                payload["order_product_names"] = []
+            items.append(payload)
+
         return {
-            "items": pagination.items,
+            "items": items,
             "total": pagination.total,
             "page": page,
             "per_page": min(per_page, 200),
         }
+
+    @staticmethod
+    def _resolve_order_product_names(ledger_entries: List[CorporatePrepaymentLedger]) -> Dict[int, List[str]]:
+        """Map order_id -> ordered, de-duplicated product names for product-less rows.
+
+        Only product-less, order-linked ledger rows (money-mode charges) need
+        this; their amount covers an entire order rather than a single product.
+        Resolved in one batched query to avoid an N+1 over the ledger page.
+        """
+        order_ids = {entry.order_id for entry in ledger_entries if entry.order_id and not entry.product_id}
+        if not order_ids:
+            return {}
+
+        rows = (
+            db.session.query(OrderItem.order_id, Product.name)
+            .join(Product, Product.id == OrderItem.product_id)
+            .filter(OrderItem.order_id.in_(order_ids))
+            .order_by(OrderItem.order_id, OrderItem.id)
+            .all()
+        )
+
+        names_by_order: Dict[int, List[str]] = {}
+        for order_id, product_name in rows:
+            if not product_name:
+                continue
+            names = names_by_order.setdefault(order_id, [])
+            if product_name not in names:
+                names.append(product_name)
+        return names_by_order
 
 
 _corporate_contract_service = None

@@ -16,9 +16,11 @@ from business_app.models.corporate import (
 )
 from business_app.models.order import Order, OrderItem
 from business_app.models.product import Product, ProductCategory
+from business_app.models.user import User
 from business_app.services.corporate_contract_service import CorporateContractService
-from shared.enums import EntitySubtype, OrderStatus
+from shared.enums import CorporateContractTrackingMode, EntitySubtype, OrderStatus, UserRole, UserType
 from business_app.utils.exceptions import ValidationError
+from business_app.utils.password_security import hash_password
 
 
 def _create_contract_and_account(
@@ -1036,3 +1038,149 @@ def test_topup_from_cash_collection_rejects_amount_mode_contract(db, sample_user
 
     with pytest.raises(ValidationError):
         service.topup_from_cash_collection(contract=contract, order_id=1, cash_event_id=1)
+
+
+def _create_corporate_user(
+    first_name: str,
+    last_name: str,
+    phone: str,
+    *,
+    company_name: str | None = None,
+) -> User:
+    user = User(
+        email=f"{uuid4().hex[:8]}@example.com",
+        phone=phone,
+        password_hash=hash_password("TestPassword123!"),
+        first_name=first_name,
+        last_name=last_name,
+        company_name=company_name,
+        user_type=UserType.ENTITY,
+        role=UserRole.CUSTOMER,
+        is_verified=True,
+    )
+    db.session.add(user)
+    db.session.commit()
+    return user
+
+
+def test_list_contracts_filters_by_search_term(db):
+    service = CorporateContractService()
+    alice = _create_corporate_user("Толеген", "Магазин", "+998900000001")
+    bob = _create_corporate_user("Bob", "Builder", "+998900000002")
+    contract_alice, _ = _create_contract_and_account(alice.id)
+    contract_bob, _ = _create_contract_and_account(bob.id)
+
+    by_name = service.list_contracts(search="Толеген")
+    assert by_name["total"] == 1
+    assert {item.id for item in by_name["items"]} == {contract_alice.id}
+
+    by_number = service.list_contracts(search=contract_bob.contract_number)
+    assert {item.id for item in by_number["items"]} == {contract_bob.id}
+
+    by_phone = service.list_contracts(search="900000002")
+    assert {item.id for item in by_phone["items"]} == {contract_bob.id}
+
+    by_missing = service.list_contracts(search="no-such-contract")
+    assert by_missing["total"] == 0
+    assert by_missing["items"] == []
+
+
+def test_get_contracts_summary_counts_active_and_debt_across_modes(db):
+    service = CorporateContractService()
+    money_user = _create_corporate_user("Money", "Debtor", "+998900000011")
+    units_user = _create_corporate_user("Units", "Debtor", "+998900000012")
+    clean_user = _create_corporate_user("Clean", "Account", "+998900000013")
+
+    # AMOUNT-mode (grocery) contract carrying money debt.
+    money_contract, money_account = _create_contract_and_account(money_user.id)
+    money_contract.tracking_mode = CorporateContractTrackingMode.AMOUNT
+    money_account.outstanding_amount = Decimal("36000.00")
+    db.session.commit()
+
+    # UNITS-mode contract whose product balance is over-consumed (available < 0).
+    units_contract, units_account = _create_contract_and_account(units_user.id)
+    over_consumed_product = _create_product("Summary Water", Decimal("12000.00"))
+    db.session.add(
+        CorporatePrepaymentBalance(
+            account_id=units_account.id,
+            product_id=over_consumed_product.id,
+            prepaid_units=Decimal("1.00"),
+            reserved_units=Decimal("0.00"),
+            consumed_units=Decimal("3.00"),
+            is_active=True,
+        )
+    )
+    db.session.commit()
+
+    # Active contract with no debt at all.
+    _create_contract_and_account(clean_user.id)
+
+    summary = service.get_contracts_summary()
+    assert summary["total"] == 3
+    assert summary["active"] == 3
+    assert summary["with_debt"] == 2
+
+    # Search narrows the aggregates the same way it narrows the list.
+    scoped = service.get_contracts_summary(search="Money")
+    assert scoped == {"total": 1, "active": 1, "with_debt": 1}
+
+
+def test_get_ledger_enriches_money_mode_entries_with_order_product_names(db, sample_user):
+    service = CorporateContractService()
+    contract, account = _create_contract_and_account(sample_user.id)
+    contract.tracking_mode = CorporateContractTrackingMode.AMOUNT
+    db.session.commit()
+
+    water = _create_product("Ledger Aqua 10L", Decimal("9000.00"))
+    cups = _create_product("Ledger Cups", Decimal("3000.00"))
+    order = Order(
+        order_number=f"ORD-{uuid4().hex[:8]}",
+        user_id=sample_user.id,
+        status=OrderStatus.DELIVERED,
+        subtotal=Decimal("36000.00"),
+        delivery_fee=Decimal("0.00"),
+        total_amount=Decimal("36000.00"),
+        order_source="admin",
+    )
+    db.session.add(order)
+    db.session.flush()
+    db.session.add_all(
+        [
+            OrderItem(
+                order_id=order.id,
+                product_id=water.id,
+                quantity=4,
+                unit_price=Decimal("9000.00"),
+                total_price=Decimal("36000.00"),
+            ),
+            OrderItem(
+                order_id=order.id,
+                product_id=cups.id,
+                quantity=1,
+                unit_price=Decimal("0.00"),
+                total_price=Decimal("0.00"),
+            ),
+        ]
+    )
+
+    charge = CorporatePrepaymentLedger(
+        contract_id=contract.id,
+        account_id=account.id,
+        balance_id=None,
+        product_id=None,
+        order_id=order.id,
+        event_type=CorporatePrepaymentEventType.CHARGE,
+        units=None,
+        amount=Decimal("36000.00"),
+        currency="UZS",
+        notes="Order delivered (grocery store charge)",
+        idempotency_key=f"charge:order:{order.id}",
+    )
+    db.session.add(charge)
+    db.session.commit()
+
+    result = service.get_ledger(contract.id)
+    entry = next(item for item in result["items"] if item["event_type"] == "charge")
+    assert entry["product_id"] is None
+    assert entry["product_name"] is None
+    assert entry["order_product_names"] == ["Ledger Aqua 10L", "Ledger Cups"]

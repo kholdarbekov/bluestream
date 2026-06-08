@@ -84,10 +84,11 @@ def test_admin_corporate_contract_list_route_delegates_to_service(
         "page": 1,
         "per_page": 20,
     }
+    service.get_contracts_summary.return_value = {"total": 1, "active": 1, "with_debt": 0}
     monkeypatch.setattr("business_app.api.admin.get_corporate_contract_service", lambda: service)
 
     response = client.get(
-        "/api/v1/admin/corporate/contracts",
+        "/api/v1/admin/corporate/contracts?search=Toleген&page=1&per_page=20",
         headers=_admin_headers(app, admin_user.id),
     )
 
@@ -97,7 +98,14 @@ def test_admin_corporate_contract_list_route_delegates_to_service(
     assert payload["data"]["items"][0]["contract_number"] == "CTR-0011"
     assert payload["data"]["items"][0]["is_loyalty_points_eligible"] is False
     assert payload["data"]["items"][0]["allows_debt"] is True
+    # Pagination meta now exposes navigability + KPI summary across the whole filter.
+    assert payload["meta"]["total"] == 1
+    assert payload["meta"]["has_next"] is False
+    assert payload["meta"]["summary"] == {"total": 1, "active": 1, "with_debt": 0}
     service.list_contracts.assert_called_once()
+    # search term is forwarded to the service, not just filtered client-side.
+    assert service.list_contracts.call_args.kwargs.get("search") == "Toleген"
+    service.get_contracts_summary.assert_called_once()
 
 
 def test_admin_create_corporate_contract_route_forwards_loyalty_eligibility(

@@ -168,6 +168,7 @@ def list_corporate_contracts():
         service = get_corporate_contract_service()
         user_id = request.args.get("user_id", type=int)
         status = request.args.get("status")
+        search = request.args.get("search")
         page = request.args.get("page", 1, type=int)
         per_page = request.args.get("per_page", 20, type=int)
 
@@ -176,16 +177,15 @@ def list_corporate_contracts():
             status=status,
             page=page,
             per_page=per_page,
+            search=search,
         )
-        return success_response(
-            data={
-                "items": [_serialize_corporate_contract(item) for item in result["items"]],
-            },
-            meta={
-                "page": result["page"],
-                "per_page": result["per_page"],
-                "total": result["total"],
-            },
+        summary = service.get_contracts_summary(user_id=user_id, status=status, search=search)
+        return paginated_response(
+            items=[_serialize_corporate_contract(item) for item in result["items"]],
+            page=result["page"],
+            per_page=result["per_page"],
+            total=result["total"],
+            additional_meta={"summary": summary},
         )
     except ValidationError as e:
         return validation_error_response(str(e))
@@ -477,7 +477,7 @@ def get_corporate_contract_ledger(contract_id):
             end_date=end_date,
         )
         return success_response(
-            data={"items": [item.to_dict() for item in result["items"]]},
+            data={"items": result["items"]},
             meta={
                 "page": result["page"],
                 "per_page": result["per_page"],

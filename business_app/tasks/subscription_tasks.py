@@ -425,7 +425,10 @@ def process_subscription_upgrades_downgrades():
                 # Recalculate subscription total based on new plan
                 subscription_service = SubscriptionService()
                 new_total = subscription_service._calculate_subscription_total(
-                    [{"product_id": item.product_id, "quantity": item.quantity} for item in subscription.items],
+                    [
+                        {"product_id": item.product_id, "quantity": item.quantity}
+                        for item in subscription.subscription_items
+                    ],
                     new_plan,
                 )
                 subscription.total_amount = new_total

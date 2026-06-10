@@ -73,6 +73,7 @@ class WebhookSignatureVerifier:
                     event_type=AuditEventType.SUSPICIOUS_ACTIVITY,
                     action="webhook_signature_validation_failed",
                     severity=AuditSeverity.HIGH,
+                    success=False,
                     resource_type="payment_webhook",
                     description=f"Invalid webhook signature from {provider}",
                     additional_data={

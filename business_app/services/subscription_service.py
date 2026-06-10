@@ -396,7 +396,9 @@ class SubscriptionService:
         order_service = OrderService()
 
         order_data = {
-            "items": [{"product_id": item.product_id, "quantity": item.quantity} for item in subscription.items],
+            "items": [
+                {"product_id": item.product_id, "quantity": item.quantity} for item in subscription.subscription_items
+            ],
             "delivery_address": {
                 "street": subscription.delivery_address_street,
                 "city": subscription.delivery_address_city,
@@ -1530,7 +1532,7 @@ class SubscriptionService:
                 total_spent += subscription.total_amount * estimated_deliveries
 
             # Count products
-            for item in subscription.items:
+            for item in subscription.subscription_items:
                 product_name = item.product.name if item.product else "Unknown"
                 product_counts[product_name] = product_counts.get(product_name, 0) + item.quantity
 

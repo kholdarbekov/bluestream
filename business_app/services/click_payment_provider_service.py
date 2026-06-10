@@ -732,9 +732,12 @@ class ClickPaymentProviderService:
                 source=source,
             )
             return click_payment_id
+        # A pending payment with no Click transaction id is an expected,
+        # recurring state (user opened the link and never paid); reconciliation
+        # re-checks every 15 min, so error level here floods the logs.
         self._log_flow_step(
             "resolve_click_payment_id_failed",
-            level="error",
+            level="warning",
             payment=payment,
             checked_sources=[source for source, _ in candidates],
         )

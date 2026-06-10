@@ -801,6 +801,7 @@ def handle_payment_webhook(self, webhook_metadata: Dict[str, Any], webhook_sourc
             event_type=AuditEventType.SUSPICIOUS_ACTIVITY,
             action="webhook_processing_failed",
             severity=AuditSeverity.HIGH,
+            success=False,
             resource_type="payment_webhook",
             description=f"Webhook processing failed for {webhook_source}: {str(exc)}",
             additional_data={

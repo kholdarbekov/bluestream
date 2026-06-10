@@ -1,0 +1,46 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Order Update - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Order Update</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Hello{% if user_name %}, {{ user_name }}{% endif %}!</h2>
+
+<div class="info-box">
+    <p>There is an update on your order <strong>#{{ order_number }}</strong>.</p>
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Order Number</th>
+        <td>#{{ order_number }}</td>
+    </tr>
+    {% if status %}
+    <tr>
+        <th>Status</th>
+        <td>{{ status }}</td>
+    </tr>
+    {% endif %}
+    {% if estimated_delivery %}
+    <tr>
+        <th>Estimated Delivery</th>
+        <td>{{ estimated_delivery }}</td>
+    </tr>
+    {% endif %}
+    {% if cancellation_reason %}
+    <tr>
+        <th>Cancellation Reason</th>
+        <td>{{ cancellation_reason }}</td>
+    </tr>
+    {% endif %}
+</table>
+
+<hr class="divider">
+
+<div class="info-box">
+    <p>If you have any questions about your order, please contact us at <a href="tel:{{ company_phone }}">{{ company_phone }}</a>.</p>
+</div>
+{% endblock %}

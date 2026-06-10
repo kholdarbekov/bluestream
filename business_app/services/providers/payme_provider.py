@@ -328,6 +328,7 @@ class PaymeProvider:
                 event_type=AuditEventType.PAYMENT_FAILED,
                 action="payme_payment_failed",
                 severity=AuditSeverity.HIGH,
+                success=False,
                 resource_type="payment",
                 resource_id=str(payment.id),
                 description=f"Payme payment failed for order {order_id}: {str(e)}",

@@ -352,6 +352,7 @@ def audit_security_event(event_description: str, severity: AuditSeverity = Audit
                     event_type=AuditEventType.SUSPICIOUS_ACTIVITY,
                     description=f"Failed security operation: {event_description}",
                     severity=AuditSeverity.CRITICAL,
+                    success=False,
                     additional_data={
                         "function": f.__name__,
                         "duration_ms": duration_ms,
@@ -543,6 +544,7 @@ def audit_permission_check(original_decorator):
                         event_type=AuditEventType.SUSPICIOUS_ACTIVITY,
                         description=f"Unexpected error in permission check: {str(e)}",
                         severity=AuditSeverity.HIGH,
+                        success=False,
                     )
                     raise
 

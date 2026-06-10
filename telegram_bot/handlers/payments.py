@@ -183,6 +183,15 @@ class PaymentHandlers(BaseHandler):
                 except Exception as redis_err:
                     logger.warning(f"Failed to store payment message_id in Redis: {redis_err}")
 
+            # Ack the tap: the dedup middleware no longer pre-answers, so the
+            # happy path must dismiss the spinner itself. Guarded so an
+            # answer failure can't trigger the error path after success.
+            if update.callback_query:
+                try:
+                    await update.callback_query.answer()
+                except Exception as ack_err:
+                    logger.debug(f"send_payment_link: query.answer() failed: {ack_err}")
+
             logger.info(f"{payment_method} link sent for order {order_id}")
             return True
 

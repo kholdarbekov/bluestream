@@ -253,6 +253,7 @@ def backup_database_task(self):
             severity=AuditSeverity.HIGH,
             resource_type="backup",
             description=f"Database backup failed: {exc}",
+            success=False,
             additional_data={"error": str(exc)},
         )
         # Re-raise so Celery retries (default_retry_delay=600 → 10 min, twice)
@@ -324,6 +325,7 @@ def backup_uploads_task(self):
             severity=AuditSeverity.HIGH,
             resource_type="backup",
             description=f"Uploads backup failed: {exc}",
+            success=False,
             additional_data={"error": str(exc)},
         )
         raise self.retry(exc=exc)

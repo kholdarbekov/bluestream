@@ -223,9 +223,11 @@ class WaterBusinessBot:
             self.application.add_handler(TypeHandler(Update, log_all_updates), group=-10)
             logger.info("Update logging middleware installed!")
 
-            # Callback-dedup middleware: acks every callback_query immediately
-            # (so the inline-button loading spinner dismisses) and raises
-            # ApplicationHandlerStop on duplicates within a short TTL. Sits
+            # Callback-dedup middleware: raises ApplicationHandlerStop on
+            # duplicates within a short TTL, answering ONLY the dropped
+            # duplicate (handlers own the ack for taps they process — a
+            # middleware pre-answer would consume Telegram's single
+            # answerCallbackQuery slot and hide handler error toasts). Sits
             # between the debug logger (group=-10, sees everything including
             # duplicates) and the conversation/main handlers (group ≥ -2,
             # never see duplicates). Root-cause fix for the production

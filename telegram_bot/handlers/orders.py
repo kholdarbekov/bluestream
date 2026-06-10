@@ -743,6 +743,7 @@ class OrderHandlers(BaseHandler):
                         error_text = i18n.get('telegram.orders.asl_belgisi_error_message', language)
                         keyboard = OrderKeyboards.asl_belgisi_error(language)
                         await query.edit_message_text(text=error_text, reply_markup=keyboard)
+                        await query.answer()
                         return
                     await self._handle_api_error(update, response.error, language)
                     return

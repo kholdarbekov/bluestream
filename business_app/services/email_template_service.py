@@ -59,6 +59,16 @@ class EmailTemplateService:
             "en": "Order #{order_number} Confirmed - {company_name}",
             "ru": "Заказ #{order_number} подтвержден - {company_name}",
         },
+        "order_update": {
+            "uz": "Buyurtma #{order_number} yangilanishi - {company_name}",
+            "en": "Order #{order_number} Update - {company_name}",
+            "ru": "Обновление заказа #{order_number} - {company_name}",
+        },
+        "delivery_reminder": {
+            "uz": "Yetkazib berish eslatmasi: buyurtma #{order_number} - {company_name}",
+            "en": "Delivery Reminder: Order #{order_number} - {company_name}",
+            "ru": "Напоминание о доставке: заказ #{order_number} - {company_name}",
+        },
         "payment_confirmation": {
             "uz": "To'lov qabul qilindi - {company_name}",
             "en": "Payment Confirmed - {company_name}",

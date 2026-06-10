@@ -11,9 +11,11 @@ These tests don't spin up the full PTB Application — they import
 ``callback_dedup`` directly with stubbed module dependencies so we can
 assert: (1) the dedup predicates hold for the exact callback shape that
 caused the production warnings; (2) ``ApplicationHandlerStop`` is raised on
-the duplicate; (3) ``query.answer()`` is called on every tap including
-duplicates so the spinner dismisses; (4) the in-memory fallback behaves
-correctly when Redis is unavailable.
+the duplicate; (3) ``query.answer()`` is called ONLY on duplicates — first
+taps must NOT be answered by the middleware, because Telegram honours only
+the first ``answerCallbackQuery`` per tap and pre-answering would make every
+handler's ``query.answer(text)`` error toast invisible; (4) the in-memory
+fallback behaves correctly when Redis is unavailable.
 """
 
 from __future__ import annotations
@@ -141,16 +143,17 @@ def test_in_memory_lock_expires(dedup_mod, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_first_tap_is_acked_and_passes_through(dedup_mod):
-    """First tap of a button: ack, claim lock, let the handler run (i.e.
-    middleware returns normally without raising ApplicationHandlerStop)."""
+def test_first_tap_is_not_answered_and_passes_through(dedup_mod):
+    """First tap of a button: claim the lock and let the handler run WITHOUT
+    answering — Telegram honours only the first answerCallbackQuery per tap,
+    so a middleware pre-answer would hide handler error toasts."""
     update = _make_update()
     context = _make_context()
 
     # No exception ⇒ dispatch continues to real handlers.
     asyncio.run(dedup_mod.callback_dedup_middleware(update, context))
 
-    update.callback_query.answer.assert_awaited_once_with()
+    update.callback_query.answer.assert_not_awaited()
     assert any(
         "callback_dedup" in k for k in dedup_mod._in_memory_locks.keys()
     ), "First tap must have claimed an in-memory lock"
@@ -285,16 +288,22 @@ def test_redis_failure_falls_back_to_in_memory(dedup_mod, caplog):
         asyncio.run(dedup_mod.callback_dedup_middleware(_make_update(), context))
 
 
-def test_query_answer_failure_does_not_break_dispatch(dedup_mod, caplog):
-    """If query.answer() raises (e.g. 'Query is too old'), the middleware
-    must continue with dedup rather than failing the dispatch — Telegram's
+def test_query_answer_failure_does_not_break_duplicate_drop(dedup_mod, caplog):
+    """If answering the DROPPED duplicate raises (e.g. 'Query is too old'),
+    the middleware must still stop dispatch of the duplicate — Telegram's
     error here is purely cosmetic."""
+    from telegram.ext import ApplicationHandlerStop
+
     update = _make_update()
-    update.callback_query.answer = AsyncMock(side_effect=Exception("Query is too old"))
     context = _make_context()
+    asyncio.run(dedup_mod.callback_dedup_middleware(update, context))  # tap 1 claims
+
+    update2 = _make_update()
+    update2.callback_query.answer = AsyncMock(side_effect=Exception("Query is too old"))
 
     with caplog.at_level(logging.DEBUG, logger=dedup_mod.logger.name):
-        asyncio.run(dedup_mod.callback_dedup_middleware(update, context))
+        with pytest.raises(ApplicationHandlerStop):
+            asyncio.run(dedup_mod.callback_dedup_middleware(update2, context))
 
-    # Lock was still claimed despite the answer failure.
+    # Lock from tap 1 still held despite the answer failure on tap 2.
     assert len(dedup_mod._in_memory_locks) == 1

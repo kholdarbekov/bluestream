@@ -4,6 +4,7 @@ This file should be placed in business_app/tasks/delivery_tasks.py
 """
 
 from celery import shared_task
+from celery.exceptions import MaxRetriesExceededError, Retry
 from celery.utils.log import get_task_logger
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any
@@ -77,11 +78,28 @@ def auto_assign_delivery_task(self, delivery_id: int):
         else:
             logger.warning(f"No available drivers found for delivery {delivery_id}")
             # Retry after 15 minutes
-            raise self.retry(countdown=900)
+            try:
+                raise self.retry(countdown=900)
+            except MaxRetriesExceededError:
+                logger.warning(
+                    f"No available drivers for delivery {delivery_id}: "
+                    "giving up after max retries, periodic re-enqueue will retry later"
+                )
+                return {"success": False, "error": "no_available_drivers_max_retries"}
 
+    except Retry:
+        # Retry scheduling is control flow, not a failure — let Celery handle it.
+        raise
     except Exception as exc:
         logger.error(f"Auto-assignment failed for delivery {delivery_id}: {exc}")
-        raise self.retry(exc=exc)
+        try:
+            raise self.retry(exc=exc)
+        except MaxRetriesExceededError:
+            logger.error(
+                f"Auto-assignment for delivery {delivery_id} exhausted retries; " "failing with the original error"
+            )
+            # Surface the real cause instead of a MaxRetriesExceededError wrapper.
+            raise exc
 
 
 @shared_task(time_limit=600, soft_time_limit=540)

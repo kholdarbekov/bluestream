@@ -71,6 +71,7 @@ class CSRFProtectionManager:
                 event_type=AuditEventType.SUSPICIOUS_ACTIVITY,
                 action="csrf_validation_failed",
                 severity=AuditSeverity.HIGH,
+                success=False,
                 resource_type="csrf_protection",
                 description=f"CSRF validation failed: {e.description}",
                 additional_data={

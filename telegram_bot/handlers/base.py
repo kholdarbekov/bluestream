@@ -167,6 +167,9 @@ class BaseHandler:
                     update.callback_query,
                     f"❌ {message}",
                 )
+                # Dismiss the spinner: the dedup middleware no longer
+                # pre-answers, so whoever ends the interaction must answer.
+                await update.callback_query.answer()
             elif update.message:
                 await update.message.reply_text(f"❌ {message}")
         except Exception as e:

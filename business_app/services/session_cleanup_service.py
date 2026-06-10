@@ -57,7 +57,7 @@ class SessionCleanupService:
                 UserSession.query.filter(
                     and_(UserSession.expires_at < expiry_cutoff, UserSession.is_active == False)  # noqa: E712
                 )  # noqa: E501,E712
-                .options(load_only("id", "session_token"))
+                .options(load_only(UserSession.id, UserSession.session_token))
                 .limit(batch_size)
                 .all()
             )
@@ -124,7 +124,7 @@ class SessionCleanupService:
                         User.created_at < inactive_cutoff,  # Don't mark recently created users
                     )
                 )
-                .options(load_only("id", "status"))
+                .options(load_only(User.id, User.status))
                 .limit(batch_size)
                 .all()
             )

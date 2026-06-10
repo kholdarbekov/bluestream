@@ -1,0 +1,62 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Yetkazib berish eslatmasi - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Yetkazib berish eslatmasi</h1>
+{% endblock %}
+
+{% block content %}
+{% if customer_name %}
+<h2>Yetkazib berish kutilmoqda: {{ customer_name }}</h2>
+{% else %}
+<h2>Assalomu alaykum{% if user_name %}, {{ user_name }}{% endif %}!</h2>
+{% endif %}
+
+<div class="info-box">
+    <p>Buyurtmangiz tez orada yetkazib beriladi: <strong>#{{ order_number }}</strong>.</p>
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Buyurtma raqami</th>
+        <td>#{{ order_number }}</td>
+    </tr>
+    {% if tracking_number %}
+    <tr>
+        <th>Kuzatuv raqami</th>
+        <td>{{ tracking_number }}</td>
+    </tr>
+    {% endif %}
+    {% if estimated_delivery_time %}
+    <tr>
+        <th>Taxminiy vaqt</th>
+        <td>{{ estimated_delivery_time }}</td>
+    </tr>
+    {% endif %}
+    {% if estimated_time %}
+    <tr>
+        <th>Taxminiy vaqt</th>
+        <td>{{ estimated_time }}</td>
+    </tr>
+    {% endif %}
+    {% if delivery_address %}
+    <tr>
+        <th>Yetkazib berish manzili</th>
+        <td>{{ delivery_address }}</td>
+    </tr>
+    {% endif %}
+    {% if driver_name %}
+    <tr>
+        <th>Haydovchi</th>
+        <td>{{ driver_name }}{% if driver_phone %} — <a href="tel:{{ driver_phone }}">{{ driver_phone }}</a>{% endif %}</td>
+    </tr>
+    {% endif %}
+</table>
+
+<hr class="divider">
+
+<div class="info-box">
+    <p>Savollaringiz bo'lsa, biz bilan bog'laning <a href="tel:{{ company_phone }}">{{ company_phone }}</a>.</p>
+</div>
+{% endblock %}

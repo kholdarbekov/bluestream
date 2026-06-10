@@ -172,11 +172,18 @@ class AuditLogger:
             f"{'SUCCESS' if audit_entry['success'] else 'FAILED'}"
         )
 
-        if audit_entry["severity"] == AuditSeverity.CRITICAL:
-            current_app.logger.critical(log_message)
-        elif audit_entry["severity"] == AuditSeverity.HIGH:
-            current_app.logger.error(log_message)
-        elif audit_entry["severity"] == AuditSeverity.MEDIUM:
+        # Severity drives escalation only for failures; successful events are
+        # routine and must not pollute error-level logs (Grafana noise).
+        if not audit_entry["success"]:
+            if audit_entry["severity"] == AuditSeverity.CRITICAL:
+                current_app.logger.critical(log_message)
+            elif audit_entry["severity"] == AuditSeverity.HIGH:
+                current_app.logger.error(log_message)
+            elif audit_entry["severity"] == AuditSeverity.MEDIUM:
+                current_app.logger.warning(log_message)
+            else:
+                current_app.logger.info(log_message)
+        elif audit_entry["severity"] == AuditSeverity.CRITICAL:
             current_app.logger.warning(log_message)
         else:
             current_app.logger.info(log_message)
@@ -268,8 +275,13 @@ class AuditLogger:
         description: str,
         severity: AuditSeverity = AuditSeverity.HIGH,
         additional_data: Dict = None,
+        success: bool = True,
     ):
-        """Log security-related events."""
+        """Log security-related events.
+
+        Pass ``success=False`` for alerts/failures so they keep the
+        severity-driven log level (successes are demoted to info/warning).
+        """
         return self.log_event(
             event_type=event_type,
             action=event_type.value,
@@ -277,6 +289,7 @@ class AuditLogger:
             resource_type="security",
             description=description,
             additional_data=additional_data,
+            success=success,
         )
 
     def log_system_event(
@@ -476,12 +489,13 @@ def audit_permission_denied(resource_type: str = None, required_permission: str 
 
 
 def audit_suspicious_activity(description: str, additional_data: Dict = None):
-    """Log suspicious activity."""
+    """Log suspicious activity. Always an alert — never a routine success."""
     return audit_logger.log_security_event(
         AuditEventType.SUSPICIOUS_ACTIVITY,
         description=description,
         severity=AuditSeverity.HIGH,
         additional_data=additional_data,
+        success=False,
     )
 
 

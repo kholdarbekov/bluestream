@@ -38,10 +38,10 @@ def generate_daily_analytics_report():
         # Store report in database
         report = AnalyticsReport(
             report_type="daily",
-            period_start=start_date,
-            period_end=end_date,
-            data=report_data,
-            generated_at=datetime.now(timezone.utc),
+            title=f"Daily Analytics Report {start_date.date().isoformat()}",
+            start_date=start_date,
+            end_date=end_date,
+            report_data=report_data,
         )
 
         db.session.add(report)
@@ -91,10 +91,10 @@ def generate_weekly_business_report():
         # Store report
         report = AnalyticsReport(
             report_type="weekly",
-            period_start=start_date,
-            period_end=end_date,
-            data=report_data,
-            generated_at=datetime.now(timezone.utc),
+            title=f"Weekly Business Report — week ending {end_date.date().isoformat()}",
+            start_date=start_date,
+            end_date=end_date,
+            report_data=report_data,
         )
 
         db.session.add(report)
@@ -310,10 +310,10 @@ def generate_churn_prediction_report():
 
         report = AnalyticsReport(
             report_type="churn_prediction",
-            period_start=datetime.now(timezone.utc) - timedelta(days=30),
-            period_end=datetime.now(timezone.utc),
-            data=report_data,
-            generated_at=datetime.now(timezone.utc),
+            title=f"Churn Prediction Report {datetime.now(timezone.utc).date().isoformat()}",
+            start_date=datetime.now(timezone.utc) - timedelta(days=30),
+            end_date=datetime.now(timezone.utc),
+            report_data=report_data,
         )
 
         db.session.add(report)
@@ -375,10 +375,10 @@ def generate_demand_forecast():
 
         report = AnalyticsReport(
             report_type="demand_forecast",
-            period_start=datetime.now(timezone.utc),
-            period_end=datetime.now(timezone.utc) + timedelta(days=30),
-            data=report_data,
-            generated_at=datetime.now(timezone.utc),
+            title=f"Demand Forecast {datetime.now(timezone.utc).date().isoformat()}",
+            start_date=datetime.now(timezone.utc),
+            end_date=datetime.now(timezone.utc) + timedelta(days=30),
+            report_data=report_data,
         )
 
         db.session.add(report)
@@ -426,7 +426,7 @@ def cleanup_old_analytics_data():
 
         # Delete old analytics reports (keep for 2 years)
         report_cutoff = datetime.now(timezone.utc) - timedelta(days=730)
-        deleted_reports = AnalyticsReport.query.filter(AnalyticsReport.generated_at < report_cutoff).delete()
+        deleted_reports = AnalyticsReport.query.filter(AnalyticsReport.created_at < report_cutoff).delete()
 
         # Archive old sales metrics (keep for 3 years)
         metrics_cutoff = datetime.now(timezone.utc) - timedelta(days=1095)
@@ -688,10 +688,10 @@ def generate_product_performance_analysis():
         # Store analysis
         report = AnalyticsReport(
             report_type="product_performance",
-            period_start=start_date,
-            period_end=end_date,
-            data=analysis,
-            generated_at=datetime.now(timezone.utc),
+            title=f"Product Performance Analysis {start_date.date().isoformat()} – {end_date.date().isoformat()}",
+            start_date=start_date,
+            end_date=end_date,
+            report_data=analysis,
         )
 
         db.session.add(report)
@@ -774,10 +774,10 @@ def update_geographic_analytics():
 
         report = AnalyticsReport(
             report_type="geographic_analytics",
-            period_start=start_date,
-            period_end=end_date,
-            data=report_data,
-            generated_at=datetime.now(timezone.utc),
+            title=f"Geographic Analytics {start_date.date().isoformat()} – {end_date.date().isoformat()}",
+            start_date=start_date,
+            end_date=end_date,
+            report_data=report_data,
         )
 
         db.session.add(report)

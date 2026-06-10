@@ -2876,8 +2876,20 @@ class NotificationService:
         )
 
         if not template:
-            logger.error(f"_send_sms_notification error SMS template not found")  # noqa: F541
-            return {"success": False, "error": get_translation("error.template_not_found")}
+            # Missing SMS template for a notification type is an expected
+            # configuration gap (DEFAULT_TEMPLATES covers few types), not a
+            # code error — skip the channel instead of recording a failure.
+            logger.warning(
+                "SMS template not found for notification_type=%s language=%s — skipping SMS channel",
+                notification_type,
+                language,
+            )
+            return {
+                "success": False,
+                "skipped": True,
+                "reason": "sms_template_not_found",
+                "error": get_translation("error.template_not_found"),
+            }
 
         # Get translated content (or fallback to default)
         template_content = (
@@ -2898,12 +2910,18 @@ class NotificationService:
             # Check if SMS was sent successfully
             # Eskiz returns Response object with status field
             if response and hasattr(response, "status"):
-                if response.status == "success":
-                    logger.info(f"SMS sent successfully to {phone}. Message ID: {getattr(response, 'id', 'N/A')}")
+                # Eskiz "waiting"/"pending" mean the SMS was accepted and queued
+                # by the provider — only genuine error statuses are failures.
+                if response.status in ("success", "waiting", "pending"):
+                    logger.info(
+                        f"SMS accepted by provider (status={response.status}) for {phone}. "
+                        f"Message ID: {getattr(response, 'id', 'N/A')}"
+                    )
                     return {
                         "success": True,
                         "message_id": getattr(response, "id", None),
                         "phone": phone,
+                        "provider_status": response.status,
                         "response": response,
                     }
                 else:
@@ -3009,11 +3027,18 @@ class NotificationService:
 
             # Check if SMS was sent successfully
             if response and hasattr(response, "status"):
-                if response.status == "success":
+                # Eskiz "waiting"/"pending" mean accepted and queued by the
+                # provider — only genuine error statuses are failures.
+                if response.status in ("success", "waiting", "pending"):
                     logger.info(
-                        f"SMS sent successfully to {clean_phone[:3]}***{clean_phone[-4:]}. Message ID: {getattr(response, 'id', 'N/A')}"  # noqa: E501
+                        f"SMS accepted by provider (status={response.status}) for {clean_phone[:3]}***{clean_phone[-4:]}. Message ID: {getattr(response, 'id', 'N/A')}"  # noqa: E501
                     )
-                    return {"success": True, "message_id": getattr(response, "id", None), "phone": clean_phone}
+                    return {
+                        "success": True,
+                        "message_id": getattr(response, "id", None),
+                        "phone": clean_phone,
+                        "provider_status": response.status,
+                    }
                 else:
                     error_msg = getattr(response, "message", "Unknown error from SMS provider")
                     logger.error(f"Eskiz SMS failed: status={response.status}, message={error_msg}")
@@ -3366,23 +3391,14 @@ class NotificationService:
         (e.g. during delivery processing).
         """
         try:
-            from decimal import Decimal as _Decimal
             from sqlalchemy.orm import Session as _Session
 
             user = User.query.get(user_id)
             payload = template_data or {}
 
-            # Ensure extra_data is JSON-serializable: coerce Decimal → float.
-            def _jsonify(v):
-                if isinstance(v, _Decimal):
-                    return float(v)
-                if isinstance(v, dict):
-                    return {k: _jsonify(val) for k, val in v.items()}
-                if isinstance(v, list):
-                    return [_jsonify(i) for i in v]
-                return v
-
-            safe_payload = _jsonify(payload)
+            # Ensure extra_data is JSON-serializable (ORM objects, datetimes,
+            # Decimals can arrive in template payloads).
+            safe_payload = _json_safe(payload)
 
             notification_type_value = (
                 notification_type.value if hasattr(notification_type, "value") else str(notification_type)
@@ -3407,32 +3423,34 @@ class NotificationService:
                 message = payload.get("message", payload.get("otp_code", "Notification sent"))
                 title = payload.get("title", notification_type_value.replace("_", " ").title())
 
-                records.append(Notification(
-                    user_id=user_id,
-                    notification_type=notification_type_value,
-                    channel=channel_value,
-                    title=title,
-                    message=str(message),
-                    is_sent=result.get("success", False),
-                    sent_at=datetime.now(timezone.utc) if result.get("success") else None,
-                    delivery_status="sent" if result.get("success") else "failed",
-                    failure_reason=result.get("error") if not result.get("success") else None,
-                    recipient_phone=(
-                        getattr(user, "phone", None) if channel_value == NotificationChannel.SMS.value else None
-                    ),
-                    recipient_email=(
-                        getattr(user, "email", None) if channel_value == NotificationChannel.EMAIL.value else None
-                    ),
-                    recipient_telegram_id=(
-                        getattr(user, "telegram_id", None)
-                        if channel_value == NotificationChannel.TELEGRAM.value
-                        else None
-                    ),
-                    campaign_id=campaign_id,
-                    order_id=safe_payload.get("order_id"),
-                    delivery_id=safe_payload.get("delivery_id"),
-                    extra_data=safe_payload,
-                ))
+                records.append(
+                    Notification(
+                        user_id=user_id,
+                        notification_type=notification_type_value,
+                        channel=channel_value,
+                        title=title,
+                        message=str(message),
+                        is_sent=result.get("success", False),
+                        sent_at=datetime.now(timezone.utc) if result.get("success") else None,
+                        delivery_status="sent" if result.get("success") else "failed",
+                        failure_reason=result.get("error") if not result.get("success") else None,
+                        recipient_phone=(
+                            getattr(user, "phone", None) if channel_value == NotificationChannel.SMS.value else None
+                        ),
+                        recipient_email=(
+                            getattr(user, "email", None) if channel_value == NotificationChannel.EMAIL.value else None
+                        ),
+                        recipient_telegram_id=(
+                            getattr(user, "telegram_id", None)
+                            if channel_value == NotificationChannel.TELEGRAM.value
+                            else None
+                        ),
+                        campaign_id=campaign_id,
+                        order_id=safe_payload.get("order_id"),
+                        delivery_id=safe_payload.get("delivery_id"),
+                        extra_data=safe_payload,
+                    )
+                )
 
             with _Session(db.engine) as notif_session:
                 notif_session.add_all(records)
@@ -3440,6 +3458,40 @@ class NotificationService:
 
         except Exception:
             logger.exception("Failed to create notification record")
+
+
+def _json_safe(value, _seen=None):
+    """Recursively convert a template payload into JSON-serializable types.
+
+    Payloads can carry ORM objects (e.g. UserAddress), datetimes and Decimals;
+    the notifications.extra_data column is JSON, so anything non-primitive must
+    be converted before INSERT. Cycles degrade to str() instead of recursing.
+    """
+    from decimal import Decimal
+
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, Decimal):
+        return float(value)
+    if _seen is None:
+        _seen = set()
+    if id(value) in _seen:
+        return str(value)
+    if isinstance(value, dict):
+        _seen.add(id(value))
+        return {str(k): _json_safe(v, _seen) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        _seen.add(id(value))
+        return [_json_safe(v, _seen) for v in value]
+    if hasattr(value, "isoformat"):  # datetime / date / time
+        return value.isoformat()
+    if hasattr(value, "to_dict"):
+        _seen.add(id(value))
+        try:
+            return _json_safe(value.to_dict(), _seen)
+        except Exception:
+            return str(value)
+    return str(value)
 
 
 # Default notification templates

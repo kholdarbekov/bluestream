@@ -1,0 +1,62 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Delivery Reminder - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Delivery Reminder</h1>
+{% endblock %}
+
+{% block content %}
+{% if customer_name %}
+<h2>Upcoming delivery for {{ customer_name }}</h2>
+{% else %}
+<h2>Hello{% if user_name %}, {{ user_name }}{% endif %}!</h2>
+{% endif %}
+
+<div class="info-box">
+    <p>Your order will be delivered soon: <strong>#{{ order_number }}</strong>.</p>
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Order Number</th>
+        <td>#{{ order_number }}</td>
+    </tr>
+    {% if tracking_number %}
+    <tr>
+        <th>Tracking Number</th>
+        <td>{{ tracking_number }}</td>
+    </tr>
+    {% endif %}
+    {% if estimated_delivery_time %}
+    <tr>
+        <th>Estimated Time</th>
+        <td>{{ estimated_delivery_time }}</td>
+    </tr>
+    {% endif %}
+    {% if estimated_time %}
+    <tr>
+        <th>Estimated Time</th>
+        <td>{{ estimated_time }}</td>
+    </tr>
+    {% endif %}
+    {% if delivery_address %}
+    <tr>
+        <th>Delivery Address</th>
+        <td>{{ delivery_address }}</td>
+    </tr>
+    {% endif %}
+    {% if driver_name %}
+    <tr>
+        <th>Driver</th>
+        <td>{{ driver_name }}{% if driver_phone %} — <a href="tel:{{ driver_phone }}">{{ driver_phone }}</a>{% endif %}</td>
+    </tr>
+    {% endif %}
+</table>
+
+<hr class="divider">
+
+<div class="info-box">
+    <p>If you have any questions, please contact us at <a href="tel:{{ company_phone }}">{{ company_phone }}</a>.</p>
+</div>
+{% endblock %}

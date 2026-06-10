@@ -84,6 +84,17 @@ CMD ["python", "bot.py"]
 # Celery Worker Stage
 FROM base AS celery_worker
 
+# pg_dump for backup.database (backup_tasks.py); client major must be >= the
+# postgres:17 server, but bookworm stock postgresql-client is v15 — use PGDG.
+RUN install -d /usr/share/postgresql-common/pgdg \
+    && curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+        https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo "$VERSION_CODENAME")-pgdg main" \
+        > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
+    postgresql-client-17 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 # Copy business app code (needed for tasks)
 COPY business_app/ ./business_app/
 

@@ -113,9 +113,15 @@ def _claim_in_memory(key: str) -> bool:
 async def callback_dedup_middleware(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
-    """Dispatcher-level guard: ack the callback, dedup, raise
+    """Dispatcher-level guard: dedup callbacks and raise
     ``ApplicationHandlerStop`` on duplicates so they never reach the
     registered ``CallbackQueryHandler``s.
+
+    Only DROPPED duplicates are answered here (to dismiss their spinner).
+    First taps are deliberately NOT answered by the middleware: Telegram
+    honours only the first ``answerCallbackQuery`` per tap, so pre-answering
+    would make every handler's ``query.answer(text)`` error toast invisible
+    to the user. Handlers own the ack for taps they process.
 
     Registered as a ``TypeHandler(Update, ...)`` at a group strictly *after*
     the debug ``log_all_updates`` (so ops still sees every received update,
@@ -135,16 +141,6 @@ async def callback_dedup_middleware(
     user_id = user.id
     data_digest = _hash_callback_data(query.data)
     key = RedisKeyspace.bot_callback_dedup(user_id, data_digest)
-
-    # Acknowledge BEFORE the dedup check so the loading spinner dismisses
-    # whether or not we're going to process this tap. Doing it after dedup
-    # would leave the spinner stuck on the duplicate tap. Tolerate "Query
-    # is too old" — Telegram drops callbacks older than 60s and we'd rather
-    # not fail the whole dispatch on that.
-    try:
-        await query.answer()
-    except Exception as ack_err:
-        logger.debug("callback_dedup: query.answer() failed: %s", ack_err)
 
     token_manager = context.bot_data.get("token_manager") if context.bot_data else None
     duplicate = False
@@ -174,6 +170,13 @@ async def callback_dedup_middleware(
         duplicate = not _claim_in_memory(key)
 
     if duplicate:
+        # Answer the DROPPED tap so its spinner dismisses — no handler will
+        # ever ack it. Tolerate "Query is too old": Telegram drops callbacks
+        # older than 60s and we'd rather not fail the dispatch stop on that.
+        try:
+            await query.answer()
+        except Exception as ack_err:
+            logger.debug("callback_dedup: query.answer() failed: %s", ack_err)
         logger.info(
             "Dropped duplicate callback (user=%s data=%r within %ds): root-cause "
             "fix for the 'Message to edit/delete not found' warning pair.",

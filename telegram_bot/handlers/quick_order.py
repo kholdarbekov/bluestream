@@ -127,8 +127,7 @@ class QuickOrderHandlers(BaseHandler):
             await self._proceed_to_checkout(update, context)
 
         except Exception as e:
-            logger.exception(f"Error in handle_repeat_last: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="handle_repeat_last")
 
     async def handle_usual(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -173,8 +172,7 @@ class QuickOrderHandlers(BaseHandler):
             await self._proceed_to_checkout(update, context)
 
         except Exception as e:
-            logger.exception(f"Error in handle_usual: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="handle_usual")
 
     async def handle_reorder_from_history(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -231,8 +229,7 @@ class QuickOrderHandlers(BaseHandler):
             await self._proceed_to_checkout(update, context)
 
         except Exception as e:
-            logger.exception(f"Error in handle_reorder_from_history: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="handle_reorder_from_history")
 
     @staticmethod
     def _mark_quick_order_flow(

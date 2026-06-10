@@ -226,7 +226,11 @@ class TestProductHandlerDeepFlows:
         monkeypatch.setattr(products_module.i18n, "get_user_language", AsyncMock(return_value="en"))
 
         await handler.product_details(update, context)
-        handler._handle_error.assert_awaited_once_with(update)
+        handler._handle_error.assert_awaited_once()
+        assert handler._handle_error.await_args.args == (update,)
+        kwargs = handler._handle_error.await_args.kwargs
+        assert isinstance(kwargs.get("exc"), ValueError)
+        assert kwargs.get("operation") == "product_details"
 
 
 @pytest.mark.unit

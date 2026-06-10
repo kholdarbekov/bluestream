@@ -1,7 +1,6 @@
 """
 Loyalty program handlers
 """
-import logging
 from telegram import Update
 from telegram.ext import ContextTypes
 
@@ -11,7 +10,6 @@ from api_client import api_client
 from utils import user_middleware, format_price, get_auth_token
 from handlers.base import BaseHandler
 
-logger = logging.getLogger('handlers')
 
 
 class LoyaltyHandlers(BaseHandler):
@@ -106,8 +104,7 @@ class LoyaltyHandlers(BaseHandler):
                 await update.message.reply_text(text=loyalty_text, reply_markup=keyboard)
 
         except Exception as e:
-            logger.error(f"Error in loyalty menu: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="loyalty_menu")
 
     async def loyalty_history(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show loyalty points history"""
@@ -165,8 +162,7 @@ class LoyaltyHandlers(BaseHandler):
             await query.answer()
 
         except Exception as e:
-            logger.error(f"Error in loyalty history: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="loyalty_history")
 
     async def redeem_reward(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle reward redemption"""
@@ -194,8 +190,7 @@ class LoyaltyHandlers(BaseHandler):
                     await self._handle_api_error(update, response.error, language)
 
         except Exception as e:
-            logger.error(f"Error redeeming reward: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="redeem_reward")
 
 
 

@@ -223,8 +223,7 @@ class ProductHandlers(BaseHandler):
                 await update.message.reply_text(text=menu_text, reply_markup=keyboard)
 
         except Exception as e:
-            logger.error(f"Error in products menu: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="products_menu")
 
     async def _render_products_in_category(
         self,
@@ -361,8 +360,7 @@ class ProductHandlers(BaseHandler):
                 quick_suggestions=None,
             )
         except Exception as e:
-            logger.error(f"Error in category handler: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="category_handler")
 
     async def product_details(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show product details"""
@@ -482,8 +480,7 @@ class ProductHandlers(BaseHandler):
             logger.info(f"Product {product_id} details shown to user {user_id}")
 
         except Exception as e:
-            logger.error(f"Error in product details: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="product_details")
 
     def _format_quantity_step_text(
         self, product: Dict[str, Any], quantity: int, language: str,
@@ -654,13 +651,18 @@ class ProductHandlers(BaseHandler):
             await query.answer()
 
         except Exception as e:
-            logger.error(f"Error in add to cart: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="add_to_cart")
 
     async def quantity_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle quantity adjustments: +1/-1 fine-tune and preset jumps."""
         try:
             query = update.callback_query
+            # The quantity display button ('qty_current') also routes here via
+            # the broad '^qty_' pattern and is a deliberate no-op.
+            if query.data == 'qty_current':
+                await query.answer()
+                return
+
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
@@ -668,14 +670,17 @@ class ProductHandlers(BaseHandler):
             #   qty_inc_{product_id}_{current_qty}
             #   qty_dec_{product_id}_{current_qty}
             #   qty_set_{product_id}_{target_qty}
-            parts = query.data.split('_')
-            action = parts[1]
-            product_id = int(parts[2])
-            payload_qty = int(parts[3])
-
-            # Validate the action up-front so a malformed callback short-circuits
+            # Validate shape up-front so a malformed callback short-circuits
             # before we hit the API.
-            if action not in ('inc', 'dec', 'set'):
+            parts = query.data.split('_')
+            if len(parts) != 4 or parts[1] not in ('inc', 'dec', 'set'):
+                await query.answer(i18n.get('telegram.products.invalid_action', language))
+                return
+            action = parts[1]
+            try:
+                product_id = int(parts[2])
+                payload_qty = int(parts[3])
+            except ValueError:
                 await query.answer(i18n.get('telegram.products.invalid_action', language))
                 return
 
@@ -714,8 +719,7 @@ class ProductHandlers(BaseHandler):
             await query.answer()
 
         except Exception as e:
-            logger.error(f"Error in quantity handler: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="quantity_handler")
 
     async def cart_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle cart actions"""
@@ -740,8 +744,7 @@ class ProductHandlers(BaseHandler):
                 await order_handlers.checkout_handler(update, context)
 
         except Exception as e:
-            logger.error(f"Error in cart handler: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="cart_handler")
 
     async def search_products(self, update: Update, context: ContextTypes.DEFAULT_TYPE, search_term: str):
         """Handle product search"""
@@ -811,7 +814,7 @@ class ProductHandlers(BaseHandler):
 
             formatted_lines.append(
                 f"{stock_indicator} *{escape_markdown(product['name'], version=2)}*\n"
-                f"   💰 {price_str} UZS \| 📦 {escape_markdown(str(product['specifications'].get('volume', 'N/A')), version=2)}{escape_markdown(product['specifications'].get('volume_unit', ''), version=2)}"
+                f"   💰 {price_str} UZS \\| 📦 {escape_markdown(str(product['specifications'].get('volume', 'N/A')), version=2)}{escape_markdown(product['specifications'].get('volume_unit', ''), version=2)}"
             )
 
         return "\n\n".join(formatted_lines)

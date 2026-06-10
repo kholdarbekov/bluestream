@@ -2,7 +2,6 @@
 Customer-facing bottle balance handler.
 Shows the customer their returnable bottle balance per address.
 """
-import logging
 
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -13,7 +12,6 @@ from i18n import i18n
 from keyboards import MenuKeyboards
 from utils import user_middleware, get_auth_token
 
-logger = logging.getLogger('handlers')
 
 
 class BottleBalanceHandler(BaseHandler):
@@ -93,5 +91,4 @@ class BottleBalanceHandler(BaseHandler):
                 )
 
         except Exception as exc:
-            logger.error("Error showing bottle balance: %s", exc, exc_info=True)
-            await self._handle_error(update, context)
+            await self._handle_error(update, context, exc=exc, operation="show_bottle_balance")

@@ -1,7 +1,6 @@
 """
 Subscription management handlers with complete implementation
 """
-import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 
@@ -12,7 +11,6 @@ from utils import user_middleware, get_auth_token
 from shared.constants import SUBSCRIPTION_STATUS_ICONS
 from handlers.base import BaseHandler
 
-logger = logging.getLogger('handlers')
 
 # Conversation states for subscription creation
 (SELECT_PRODUCTS, SELECT_QUANTITY, SELECT_FREQUENCY, SELECT_ADDRESS,
@@ -68,8 +66,7 @@ class SubscriptionHandlers(BaseHandler):
                 await update.message.reply_text(text=subs_text, reply_markup=keyboard)
 
         except Exception as e:
-            logger.error(f"Error in subscriptions menu: {e}", exc_info=True)
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="subscriptions_menu")
 
     async def subscription_details(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show subscription details with real API data"""
@@ -134,8 +131,7 @@ class SubscriptionHandlers(BaseHandler):
             await query.answer()
 
         except Exception as e:
-            logger.error(f"Error in subscription details: {e}", exc_info=True)
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="subscription_details")
 
     # ========== SUBSCRIPTION CREATION FLOW ==========
 
@@ -175,8 +171,7 @@ class SubscriptionHandlers(BaseHandler):
             return await self.select_products(update, context)
 
         except Exception as e:
-            logger.error(f"Error starting subscription creation: {e}", exc_info=True)
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="create_subscription_start")
             return ConversationHandler.END
 
     async def select_products(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -193,8 +188,7 @@ class SubscriptionHandlers(BaseHandler):
             return SELECT_QUANTITY
 
         except Exception as e:
-            logger.error(f"Error selecting products: {e}", exc_info=True)
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="select_products")
             return ConversationHandler.END
 
     async def select_quantity(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -208,8 +202,7 @@ class SubscriptionHandlers(BaseHandler):
             return SELECT_FREQUENCY
 
         except Exception as e:
-            logger.error(f"Error selecting quantity: {e}", exc_info=True)
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="select_quantity")
             return ConversationHandler.END
 
     async def add_item_with_quantity(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -231,7 +224,7 @@ class SubscriptionHandlers(BaseHandler):
             # Show confirmation and options to add more or continue
             items_count = len(context.user_data['subscription_creation']['items'])
             text = f"✅ {i18n.get('telegram.subscription.item_added', language)}\n\n"
-            text += f"{i18n.get('total_items', language)}: {items_count}\n\n"
+            text += f"{i18n.get('telegram.subscription.total_items', language)}: {items_count}\n\n"
             text += i18n.get('telegram.subscription.add_more_or_continue', language)
 
             keyboard = InlineKeyboardMarkup([
@@ -255,8 +248,7 @@ class SubscriptionHandlers(BaseHandler):
             return SELECT_FREQUENCY  # Reusing this state for the intermediate step
 
         except Exception as e:
-            logger.error(f"Error adding item with quantity: {e}", exc_info=True)
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="add_item_with_quantity")
             return ConversationHandler.END
 
     async def select_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -307,8 +299,7 @@ class SubscriptionHandlers(BaseHandler):
             return SELECT_PAYMENT
 
         except Exception as e:
-            logger.error(f"Error selecting address: {e}", exc_info=True)
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="select_address")
             return ConversationHandler.END
 
     async def select_payment(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -331,8 +322,7 @@ class SubscriptionHandlers(BaseHandler):
             return CONFIRM_SUBSCRIPTION
 
         except Exception as e:
-            logger.error(f"Error selecting payment: {e}", exc_info=True)
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="select_payment")
             return ConversationHandler.END
 
     async def confirm_subscription(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -400,8 +390,7 @@ class SubscriptionHandlers(BaseHandler):
             return CONFIRM_SUBSCRIPTION
 
         except Exception as e:
-            logger.error(f"Error confirming subscription: {e}", exc_info=True)
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="confirm_subscription")
             return ConversationHandler.END
 
     async def create_subscription_confirmed(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -476,8 +465,7 @@ class SubscriptionHandlers(BaseHandler):
             return ConversationHandler.END
 
         except Exception as e:
-            logger.error(f"Error creating subscription: {e}", exc_info=True)
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="create_subscription_confirmed")
             return ConversationHandler.END
 
     async def add_more_items(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -491,8 +479,7 @@ class SubscriptionHandlers(BaseHandler):
             return await self.select_products(update, context)
 
         except Exception as e:
-            logger.error(f"Error adding more items: {e}", exc_info=True)
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="add_more_items")
             return ConversationHandler.END
 
     async def items_selection_done(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -518,8 +505,7 @@ class SubscriptionHandlers(BaseHandler):
             return SELECT_ADDRESS
 
         except Exception as e:
-            logger.error(f"Error finishing item selection: {e}", exc_info=True)
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="items_selection_done")
             return ConversationHandler.END
 
     async def cancel_subscription_creation(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -542,8 +528,7 @@ class SubscriptionHandlers(BaseHandler):
             return ConversationHandler.END
 
         except Exception as e:
-            logger.error(f"Error cancelling subscription creation: {e}", exc_info=True)
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="cancel_subscription_creation")
             return ConversationHandler.END
 
     # ========== SUBSCRIPTION ACTIONS ==========
@@ -593,8 +578,7 @@ class SubscriptionHandlers(BaseHandler):
             await self.subscriptions_menu(update, context)
 
         except Exception as e:
-            logger.error(f"Error in subscription actions: {e}", exc_info=True)
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="subscription_actions")
 
     async def skip_delivery(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Skip next delivery"""
@@ -624,8 +608,7 @@ class SubscriptionHandlers(BaseHandler):
             await self.subscription_details(update, context)
 
         except Exception as e:
-            logger.error(f"Error skipping delivery: {e}", exc_info=True)
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="skip_delivery")
 
     async def view_billing_history(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """View subscription billing history"""
@@ -671,8 +654,7 @@ class SubscriptionHandlers(BaseHandler):
             await query.answer()
 
         except Exception as e:
-            logger.error(f"Error viewing billing history: {e}", exc_info=True)
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="view_billing_history")
 
     # ========== ITEM MANAGEMENT ==========
 
@@ -717,8 +699,7 @@ class SubscriptionHandlers(BaseHandler):
             await query.answer()
 
         except Exception as e:
-            logger.error(f"Error managing subscription items: {e}", exc_info=True)
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="manage_subscription_items")
 
     async def add_item_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start adding item to subscription"""
@@ -738,8 +719,7 @@ class SubscriptionHandlers(BaseHandler):
             return ITEM_SELECT_PRODUCT
 
         except Exception as e:
-            logger.error(f"Error starting add item: {e}", exc_info=True)
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="add_item_start")
             return ConversationHandler.END
 
     async def add_item_select_quantity(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -753,8 +733,7 @@ class SubscriptionHandlers(BaseHandler):
             return ITEM_SELECT_QUANTITY
 
         except Exception as e:
-            logger.error(f"Error selecting item quantity: {e}", exc_info=True)
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="add_item_select_quantity")
             return ConversationHandler.END
 
     async def add_item_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -804,8 +783,7 @@ class SubscriptionHandlers(BaseHandler):
             return ConversationHandler.END
 
         except Exception as e:
-            logger.error(f"Error confirming add item: {e}", exc_info=True)
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="add_item_confirm")
             return ConversationHandler.END
 
     async def update_item_quantity(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -825,8 +803,7 @@ class SubscriptionHandlers(BaseHandler):
             return ITEM_SELECT_QUANTITY
 
         except Exception as e:
-            logger.error(f"Error updating item quantity: {e}", exc_info=True)
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="update_item_quantity")
             return ConversationHandler.END
 
     async def update_item_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -873,8 +850,7 @@ class SubscriptionHandlers(BaseHandler):
             return ConversationHandler.END
 
         except Exception as e:
-            logger.error(f"Error confirming item update: {e}", exc_info=True)
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="update_item_confirm")
             return ConversationHandler.END
 
     async def remove_item_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -908,8 +884,7 @@ class SubscriptionHandlers(BaseHandler):
             await self.manage_subscription_items(update, context)
 
         except Exception as e:
-            logger.error(f"Error removing item: {e}", exc_info=True)
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="remove_item_confirm")
 
     # ========== SUBSCRIPTION EDITING ==========
 
@@ -929,8 +904,7 @@ class SubscriptionHandlers(BaseHandler):
             await query.answer()
 
         except Exception as e:
-            logger.error(f"Error showing edit menu: {e}", exc_info=True)
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="edit_subscription_menu")
 
     async def change_frequency(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Change subscription frequency"""
@@ -949,8 +923,7 @@ class SubscriptionHandlers(BaseHandler):
             await query.answer()
 
         except Exception as e:
-            logger.error(f"Error changing frequency: {e}", exc_info=True)
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="change_frequency")
 
     async def update_frequency_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Confirm frequency update"""
@@ -991,8 +964,7 @@ class SubscriptionHandlers(BaseHandler):
                 del context.user_data['editing_subscription_id']
 
         except Exception as e:
-            logger.error(f"Error confirming frequency update: {e}", exc_info=True)
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="update_frequency_confirm")
 
     async def change_payment_method_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show payment method selection"""
@@ -1011,8 +983,7 @@ class SubscriptionHandlers(BaseHandler):
             await query.answer()
 
         except Exception as e:
-            logger.error(f"Error showing payment methods: {e}", exc_info=True)
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="change_payment_method_menu")
 
     async def change_payment_method_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Confirm payment method change"""
@@ -1053,8 +1024,7 @@ class SubscriptionHandlers(BaseHandler):
                 del context.user_data['editing_subscription_id']
 
         except Exception as e:
-            logger.error(f"Error confirming payment method change: {e}", exc_info=True)
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="change_payment_method_confirm")
 
     # ========== STATISTICS AND LOGS ==========
 
@@ -1098,8 +1068,7 @@ class SubscriptionHandlers(BaseHandler):
             await query.answer()
 
         except Exception as e:
-            logger.error(f"Error viewing statistics: {e}", exc_info=True)
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="view_subscription_statistics")
 
     async def view_subscription_logs(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """View subscription activity logs"""
@@ -1153,8 +1122,7 @@ class SubscriptionHandlers(BaseHandler):
             await query.answer()
 
         except Exception as e:
-            logger.error(f"Error viewing logs: {e}", exc_info=True)
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="view_subscription_logs")
 
     async def retry_failed_billing(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Retry failed billing for subscription"""
@@ -1183,8 +1151,7 @@ class SubscriptionHandlers(BaseHandler):
             await self.subscription_details(update, context)
 
         except Exception as e:
-            logger.error(f"Error retrying billing: {e}", exc_info=True)
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="retry_failed_billing")
 
     # ========== HELPER METHODS ==========
 

@@ -5752,10 +5752,35 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Select new payment method',
         'ru': 'Select new payment method'
     },
+    'telegram.subscription.select_new_quantity': {
+        'en': 'Select new quantity:',
+        'uz': 'Yangi miqdorni tanlang:',
+        'ru': 'Выберите новое количество:'
+    },
     'telegram.subscription.select_payment': {
         'en': 'Select payment',
         'uz': 'Select payment',
         'ru': 'Select payment'
+    },
+    'telegram.subscription.select_product_to_add': {
+        'en': 'Select a product to add:',
+        'uz': 'Qo\'shish uchun mahsulotni tanlang:',
+        'ru': 'Выберите товар для добавления:'
+    },
+    'telegram.subscription.select_products': {
+        'en': 'Select products for your subscription:',
+        'uz': 'Obunangiz uchun mahsulotlarni tanlang:',
+        'ru': 'Выберите товары для подписки:'
+    },
+    'telegram.subscription.select_quantity': {
+        'en': 'Select quantity:',
+        'uz': 'Miqdorni tanlang:',
+        'ru': 'Выберите количество:'
+    },
+    'telegram.subscription.select_quantity_for_item': {
+        'en': 'Select quantity for this item:',
+        'uz': 'Ushbu mahsulot uchun miqdorni tanlang:',
+        'ru': 'Выберите количество для этого товара:'
     },
     'telegram.subscription.skip_success': {
         'en': 'Skip success',
@@ -5776,6 +5801,11 @@ BACKEND_TRANSLATIONS = {
         'en': 'Total',
         'uz': 'Total',
         'ru': 'Total'
+    },
+    'telegram.subscription.total_items': {
+        'en': 'Total items',
+        'uz': 'Jami mahsulotlar',
+        'ru': 'Всего товаров'
     },
     'telegram.subscription.trial': {
         'en': 'Trial',
@@ -5801,11 +5831,6 @@ BACKEND_TRANSLATIONS = {
         'en': '👋 Welcome to Aqua Element! Your registration is complete. Use the menu below to start ordering.',
         'uz': '👋 Aqua Elementga xush kelibsiz! Ro\'yxatdan o\'tish yakunlandi. Buyurtma berishni boshlash uchun quyidagi menyudan foydalaning.',
         'ru': '👋 Добро пожаловать в Aqua Element! Регистрация завершена. Используйте меню ниже, чтобы оформить заказ.'
-    },
-    'total_items': {
-        'en': 'Total items',
-        'uz': 'Total items',
-        'ru': 'Total items'
     },
 
 }

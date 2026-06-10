@@ -269,8 +269,7 @@ class PaymentHandlers(BaseHandler):
             logger.info(f"Payment retry initiated for order {order_id} by user {user_id}")
 
         except Exception as e:
-            logger.error(f"Error in payment retry: {e}", exc_info=True)
-            await self._handle_error(update, context)
+            await self._handle_error(update, context, exc=e, operation="retry_payment")
 
     async def switch_payment_method(
         self,
@@ -315,8 +314,7 @@ class PaymentHandlers(BaseHandler):
             logger.info(f"Payment method switch initiated for order {order_id} by user {user_id}")
 
         except Exception as e:
-            logger.error(f"Error in switch payment method: {e}", exc_info=True)
-            await self._handle_error(update, context)
+            await self._handle_error(update, context, exc=e, operation="switch_payment_method")
 
     async def cancel_payment(
         self,
@@ -350,8 +348,7 @@ class PaymentHandlers(BaseHandler):
             logger.info(f"Payment cancelled for order {order_id} by user {user_id}")
 
         except Exception as e:
-            logger.error(f"Error in cancel payment: {e}", exc_info=True)
-            await self._handle_error(update, context)
+            await self._handle_error(update, context, exc=e, operation="cancel_payment")
 
 
 

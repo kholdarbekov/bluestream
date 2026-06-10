@@ -155,8 +155,7 @@ class OrderHandlers(BaseHandler):
             logger.info(f"Orders menu shown to user {user_id}")
 
         except Exception as e:
-            logger.error(f"Error in orders menu: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="orders_menu")
 
     async def order_details(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show order details"""
@@ -200,7 +199,7 @@ class OrderHandlers(BaseHandler):
             # Add delivery info if available
             if order.get('delivery_address'):
                 # Make order delivery address title bold.
-                details_text += f"\n{i18n.get('telegram.orders.delivery_info', language)}:\n*{escape_markdown(order['delivery_address'].get('title', unknown_text), version=2)}* \- {escape_markdown(order['delivery_address'].get('full_address', ''), version=2)}"
+                details_text += f"\n{i18n.get('telegram.orders.delivery_info', language)}:\n*{escape_markdown(order['delivery_address'].get('title', unknown_text), version=2)}* \\- {escape_markdown(order['delivery_address'].get('full_address', ''), version=2)}"
 
             keyboard = OrderKeyboards.order_details(order_id, order.get('status', ''), language)
 
@@ -215,8 +214,7 @@ class OrderHandlers(BaseHandler):
             logger.info(f"Order {order_id} details shown to user {user_id}")
 
         except Exception as e:
-            logger.error(f"Error in order details: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="order_details")
 
     async def cancel_order(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle order cancellation"""
@@ -248,8 +246,7 @@ class OrderHandlers(BaseHandler):
                 return
 
         except Exception as e:
-            logger.error(f"Error in cancel_order: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="cancel_order")
 
     async def cancel_order_confirm_yes(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Process confirmed cancellation"""
@@ -283,8 +280,7 @@ class OrderHandlers(BaseHandler):
                     await self._handle_api_error(update, response.error, language)
 
         except Exception as e:
-            logger.error(f"Error processing cancellation: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="cancel_order_confirm_yes")
 
     async def cancel_order_confirm_no(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Process cancelled cancellation (User clicked No)"""
@@ -308,8 +304,7 @@ class OrderHandlers(BaseHandler):
             await self.order_details(update, context)
 
         except Exception as e:
-            logger.error(f"Error denying cancellation: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="cancel_order_confirm_no")
 
     async def track_order(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show order tracking information with visual timeline"""
@@ -425,10 +420,7 @@ class OrderHandlers(BaseHandler):
             logger.info(f"Order {order_id} tracking with timeline shown to user {user_id}")
 
         except Exception as e:
-            logger.error(f"Error in track_order: {e}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="track_order")
 
     async def checkout_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle checkout process"""
@@ -534,8 +526,7 @@ class OrderHandlers(BaseHandler):
                 )
 
         except Exception as e:
-            logger.error(f"Error in checkout handler: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="checkout_handler")
 
     async def address_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle address selection — extract id then defer to _show_payment_picker."""
@@ -544,8 +535,7 @@ class OrderHandlers(BaseHandler):
             address_id = int(query.data.split('_')[1])
             await self._show_payment_picker(update, context, address_id)
         except Exception as e:
-            logger.error(f"Error in address handler: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="address_handler")
 
     async def _show_address_confirmation(
         self,
@@ -664,8 +654,7 @@ class OrderHandlers(BaseHandler):
             await self._show_order_confirmation(update, context)
 
         except Exception as e:
-            logger.error(f"Error in payment handler: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="payment_handler")
 
     async def cancel_checkout(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Cancel checkout from order confirmation screen."""
@@ -691,8 +680,7 @@ class OrderHandlers(BaseHandler):
 
             logger.info(f"Checkout cancelled by user {user_id}")
         except Exception as e:
-            logger.error(f"Error cancelling checkout: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="cancel_checkout")
 
     async def confirm_order(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle order confirmation"""
@@ -901,8 +889,7 @@ class OrderHandlers(BaseHandler):
             logger.info(f"Order created successfully for user {user_id} with payment method: {payment_method}")
 
         except Exception as e:
-            logger.error(f"Error confirming order: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="confirm_order")
 
     async def select_payment_cash(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Rescue flow: clone the PSP-cancelled order as a fresh cash order.
@@ -965,8 +952,7 @@ class OrderHandlers(BaseHandler):
 
             logger.info(f"Order {order_id} rescued to cash for user {user_id}")
         except Exception as e:
-            logger.error(f"Error in select_payment_cash rescue: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="select_payment_cash")
 
     async def _show_order_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show order confirmation screen"""
@@ -1108,8 +1094,7 @@ class OrderHandlers(BaseHandler):
         try:
             await self._show_order_confirmation(update, context)
         except Exception as e:
-            logger.error(f"Error in back_to_order_confirm: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="back_to_order_confirm")
 
 
 # Global handler instance

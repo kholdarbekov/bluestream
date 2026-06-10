@@ -142,8 +142,7 @@ class ProfileHandlers(BaseHandler):
             logger.info(f"Profile menu shown to user {user_id}")
 
         except Exception as e:
-            logger.error(f"Error in profile menu: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="profile_menu")
 
     def _extract_delivery_telegram_status_updates_enabled(self, api_payload: Dict[str, Any]) -> bool:
         """Extract Telegram delivery-status toggle from notifications preferences payload."""
@@ -217,8 +216,7 @@ class ProfileHandlers(BaseHandler):
                 delivery_telegram_status_updates_enabled=enabled,
             )
         except Exception as e:
-            logger.error(f"Error in notification settings: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="notification_settings")
 
     async def toggle_delivery_telegram_status_notifications(
         self,
@@ -337,8 +335,7 @@ class ProfileHandlers(BaseHandler):
             logger.info(f"Phone verification menu shown to user {user_id}")
 
         except Exception as e:
-            logger.error(f"Error in phone verification menu: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="phone_verification_menu")
 
     async def add_phone_number(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start phone number addition/change flow - entry point for phone verification conversation"""
@@ -374,8 +371,7 @@ class ProfileHandlers(BaseHandler):
             return PHONE_VERIFY_PHONE
 
         except Exception as e:
-            logger.error(f"Error starting phone addition: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="add_phone_number")
             return ConversationHandler.END
 
     async def phone_verify_contact_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -656,8 +652,7 @@ class ProfileHandlers(BaseHandler):
                         )
 
         except Exception as e:
-            logger.error(f"Error in phone verification: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="verify_phone_number")
 
     async def start_registration_new(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start registration process"""
@@ -1442,8 +1437,7 @@ class ProfileHandlers(BaseHandler):
             await self.user_repo.update_user_state(user_id, {'awaiting_input': 'profile_edit'})
 
         except Exception as e:
-            logger.error(f"Error in edit profile: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="edit_profile")
 
     async def manage_addresses(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle address management"""
@@ -1491,8 +1485,7 @@ class ProfileHandlers(BaseHandler):
             await query.answer()
 
         except Exception as e:
-            logger.error(f"Error managing addresses: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="manage_addresses")
 
     async def add_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start address adding process - entry point for enhanced address flow"""
@@ -2618,8 +2611,7 @@ class ProfileHandlers(BaseHandler):
             await query.answer()
 
         except Exception as e:
-            logger.error(f"Error viewing address: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="view_address")
 
     async def select_edit_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show address selection for editing"""
@@ -2674,8 +2666,7 @@ class ProfileHandlers(BaseHandler):
             await query.answer()
 
         except Exception as e:
-            logger.error(f"Error in select edit address: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="select_edit_address")
 
     async def select_delete_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show address selection for deletion"""
@@ -2730,8 +2721,7 @@ class ProfileHandlers(BaseHandler):
             await query.answer()
 
         except Exception as e:
-            logger.error(f"Error in select delete address: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="select_delete_address")
 
     async def set_default_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Set address as default"""
@@ -2765,8 +2755,7 @@ class ProfileHandlers(BaseHandler):
                     logger.error(f"Failed to set address {address_id} as default: {response.error}")
 
         except Exception as e:
-            logger.error(f"Error setting default address: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="set_default_address")
 
     async def edit_address_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle editing specific address"""
@@ -2817,8 +2806,7 @@ class ProfileHandlers(BaseHandler):
             logger.info(f"Address editing options shown for address {address_id}")
 
         except Exception as e:
-            logger.error(f"Error in edit address handler: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="edit_address_handler")
 
     async def delete_address_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle address deletion confirmation"""
@@ -2870,8 +2858,7 @@ class ProfileHandlers(BaseHandler):
             await query.answer()
 
         except Exception as e:
-            logger.error(f"Error in delete address handler: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="delete_address_handler")
 
     async def confirm_delete_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Confirm and execute address deletion"""
@@ -2922,8 +2909,7 @@ class ProfileHandlers(BaseHandler):
                             raise edit_error
 
         except Exception as e:
-            logger.error(f"Error confirming delete address: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="confirm_delete_address")
 
     async def edit_title_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle editing address title"""
@@ -2977,8 +2963,7 @@ class ProfileHandlers(BaseHandler):
             await query.answer(i18n.get('telegram.address.not_found', language))
 
         except Exception as e:
-            logger.error(f"Error in edit title handler: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="edit_title_handler")
 
     async def edit_location_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle editing address location"""
@@ -2991,8 +2976,7 @@ class ProfileHandlers(BaseHandler):
             logger.info(f"Location edit requested for address {address_id} - redirecting to delete/add flow")
 
         except Exception as e:
-            logger.error(f"Error in edit location handler: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="edit_location_handler")
 
     async def edit_details_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle editing address details"""
@@ -3005,8 +2989,7 @@ class ProfileHandlers(BaseHandler):
             logger.info(f"Details edit requested for address {address_id} - not yet implemented")
 
         except Exception as e:
-            logger.error(f"Error in edit details handler: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="edit_details_handler")
 
     async def edit_instructions_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle editing delivery instructions"""
@@ -3060,8 +3043,7 @@ class ProfileHandlers(BaseHandler):
             await query.answer(i18n.get('telegram.address.not_found', language))
 
         except Exception as e:
-            logger.error(f"Error in edit instructions handler: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="edit_instructions_handler")
 
     async def handle_address_title_edit(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
                                       text: str, user_state: Dict):
@@ -3217,8 +3199,7 @@ class ProfileHandlers(BaseHandler):
             logger.info(f"Logout confirmation shown to user {user_id}")
 
         except Exception as e:
-            logger.error(f"Error in logout handler: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="logout_handler")
 
     async def confirm_logout(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Confirm and execute logout"""
@@ -3255,8 +3236,7 @@ class ProfileHandlers(BaseHandler):
             logger.info(f"User {user_id} successfully logged out")
 
         except Exception as e:
-            logger.error(f"Error confirming logout: {e}")
-            await self._handle_error(update)
+            await self._handle_error(update, exc=e, operation="confirm_logout")
 
 
 

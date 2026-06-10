@@ -4,6 +4,7 @@ Base handler class with shared error handling for Telegram bot handlers.
 import logging
 from typing import Any
 from telegram import Update
+from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from i18n import i18n
@@ -42,12 +43,24 @@ class BaseHandler:
         try:
             await query.edit_message_text(**kwargs)
             return
+        except BadRequest as exc:
+            reason = str(exc).lower()
+            if "message is not modified" in reason:
+                # The message already shows exactly this content; nothing to do.
+                return
+            if "there is no text in the message" in reason:
+                # Expected for media (photo/caption) messages: replace below.
+                logger.info("Callback message has no editable text; replacing message: %s", exc)
+            else:
+                logger.warning("Failed to edit callback message text; falling back to replace message: %s", exc)
+            edit_exc = exc
         except Exception as exc:
             logger.warning("Failed to edit callback message text; falling back to replace message: %s", exc)
+            edit_exc = exc
 
         message = getattr(query, "message", None)
         if not message:
-            raise
+            raise edit_exc
 
         try:
             await message.delete()
@@ -114,9 +127,9 @@ class BaseHandler:
             'error_type': type(exc).__name__ if exc is not None else None,
         }
         if exc is not None:
-            logger.error("Bot handler error: %s", exc, exc_info=exc, extra=log_extra)
+            logger.error("Bot handler error in %s: %s", operation or "unknown", exc, exc_info=exc, extra=log_extra)
         else:
-            logger.error("Bot handler error (no exception context)", extra=log_extra)
+            logger.error("Bot handler error in %s (no exception context)", operation or "unknown", extra=log_extra)
 
         await self._reply_error(update, text)
 

@@ -75,12 +75,18 @@ class AuthService:
         # Validate input data (phone is now optional)
         self._validate_registration_data(email, password, phone, first_name, last_name)
 
+        # Normalize the phone to E.164 once so dedup and insert agree. Without
+        # this, a surface-format variant (e.g. "+998 90 123 45 67") slips past
+        # the raw-string dedup query and only collides at the UNIQUE constraint
+        # (IntegrityError -> 500) instead of a clean ConflictError.
+        formatted_phone = format_phone_number(phone) if phone else None
+
         # Build query to check for existing users
         conditions = []
         if email:
             conditions.append(User.email == email.lower())
-        if phone:
-            conditions.append(User.phone == phone)
+        if formatted_phone:
+            conditions.append(User.phone == formatted_phone)
 
         if conditions:
             from sqlalchemy import or_
@@ -90,7 +96,7 @@ class AuthService:
             if existing_user:
                 if email and existing_user.email == email.lower():
                     raise ConflictError(get_translation("api.auth.email_already_exists"))
-                elif phone and existing_user.phone == phone:
+                elif formatted_phone and existing_user.phone == formatted_phone:
                     raise ConflictError(get_translation("error.validation.phone_already_exists"))
 
         # Create new user
@@ -122,9 +128,7 @@ class AuthService:
         }
         filtered_kwargs = {k: v for k, v in kwargs.items() if k in valid_user_fields}
 
-        # Format phone if provided
-        formatted_phone = format_phone_number(phone) if phone else None
-
+        # formatted_phone was computed at the top (used for dedup); reuse it.
         user = User(
             email=email.lower().strip() if email else None,
             phone=formatted_phone,
@@ -1600,6 +1604,12 @@ class AuthService:
 
         normalized_phone = normalize_phone_number(phone)
         telegram_id_str = str(telegram_id)
+
+        # Invalid / un-normalizable input must never degrade into
+        # filter_by(phone=None) -> WHERE phone IS NULL (arbitrary-row collision).
+        if not normalized_phone:
+            return {"available": True, "can_link": False, "existing_user_masked": None}
+
         existing_user = User.query.filter_by(phone=normalized_phone).first()
 
         if not existing_user:
@@ -1635,14 +1645,18 @@ class AuthService:
             if len(parts) == 2:
                 masked_email = parts[0][:2] + "***@" + parts[1]
 
-        return {
-            "available": False,
-            "can_link": can_link,
-            "existing_user_masked": {
+        existing_user_masked = None
+        if can_link:
+            existing_user_masked = {
                 "name": masked_name,
                 "email": masked_email,
                 "registration_source": existing_user.registration_source,
-            },
+            }
+
+        return {
+            "available": False,
+            "can_link": can_link,
+            "existing_user_masked": existing_user_masked,
         }
 
     def send_phone_link_otp(self, phone: str, telegram_id: str) -> Dict[str, Any]:
@@ -1651,6 +1665,9 @@ class AuthService:
         import json
 
         normalized_phone = normalize_phone_number(phone)
+        if not normalized_phone:
+            raise ValidationError(get_translation("error.validation.invalid_phone"))
+
         telegram_user = User.query.filter_by(telegram_id=str(telegram_id)).first()
         if not telegram_user:
             raise NotFoundError(get_translation("api.auth.telegram_user_not_found"))
@@ -1709,6 +1726,22 @@ class AuthService:
         web_user = User.query.get(web_user_id)
         if not web_user:
             raise NotFoundError(get_translation("api.auth.web_account_not_found"))
+
+        # Re-assert the invariants that held at staging time — the redis link
+        # state is stale/untrusted, and these guard the destructive merge below
+        # against account-takeover (e.g. web_user got a telegram_id, the phone
+        # changed, or the account was deactivated since the OTP was issued).
+        staged_phone = link_data.get("phone")
+        web_status = web_user.status.value if isinstance(web_user.status, UserStatus) else web_user.status
+        if (
+            not staged_phone
+            or web_user.phone != staged_phone
+            or web_user.telegram_id is not None
+            or web_status != UserStatus.ACTIVE.value
+        ):
+            # Drop the poisoned link intent so a retry can't re-enter this flow.
+            self.redis_client.delete(link_key)
+            raise ConflictError(get_translation("api.auth.phone_already_linked_to_telegram"))
 
         now_utc = datetime.now(timezone.utc)
         telegram_user.is_verified = True

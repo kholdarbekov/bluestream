@@ -717,7 +717,7 @@ async def validate_phone_number(phone: str) -> bool:
     return _validate(phone)
 
 
-def normalize_phone_number(phone: str) -> str:
+def normalize_phone_number(phone: str) -> Optional[str]:
     """Normalize phone number to standard format (delegates to shared validator)"""
     from shared.validators import normalize_phone_number as _normalize
     return _normalize(phone)

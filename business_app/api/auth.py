@@ -657,6 +657,9 @@ def send_otp():
     phone = data.get("phone")
     user_id = get_jwt_identity()
 
+    if not phone:
+        return validation_error_response(errors=[get_translation("error.validation.invalid_phone")])
+
     if phone_validator(phone):
         return validation_error_response(errors=[get_translation("error.validation.invalid_phone")])
 
@@ -1589,6 +1592,9 @@ def change_phone():
     new_phone = data.get("new_phone")
     user_id = get_jwt_identity()
 
+    if not new_phone:
+        return validation_error_response(errors=[get_translation("error.validation.invalid_phone")])
+
     if phone_validator(new_phone):
         return validation_error_response(errors=[get_translation("error.validation.invalid_phone")])
 
@@ -2151,6 +2157,18 @@ def check_phone_availability():
               type: string
     """
     data = request.get_json()
+
+    # Validate + normalize at the boundary so an un-normalizable phone is
+    # rejected with a clean 400 instead of reaching the service and degrading
+    # into a filter_by(phone=None) collision (200 with available:false).
+    # Service-layer guards remain as defense-in-depth.
+    from business_app.utils.validators import validate_uzbekistan_phone
+
+    is_valid, error_msg, normalized = validate_uzbekistan_phone(data["phone"])
+    if not is_valid:
+        raise ValidationError(error_msg)
+    data["phone"] = normalized
+
     availability = get_auth_service().check_phone_availability_for_telegram(
         phone=data["phone"],
         telegram_id=str(data["telegram_id"]),
@@ -2196,6 +2214,16 @@ def link_phone_send_otp():
         description: Cannot link - phone not found or already linked
     """
     data = request.get_json()
+
+    # Validate + normalize at the boundary (defense-in-depth on top of the
+    # service-layer None-guard) so an un-normalizable phone fails fast with 400.
+    from business_app.utils.validators import validate_uzbekistan_phone
+
+    is_valid, error_msg, normalized = validate_uzbekistan_phone(data["phone"])
+    if not is_valid:
+        raise ValidationError(error_msg)
+    data["phone"] = normalized
+
     otp_result = get_auth_service().send_phone_link_otp(
         phone=data["phone"],
         telegram_id=str(data["telegram_id"]),

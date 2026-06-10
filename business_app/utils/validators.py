@@ -4,7 +4,7 @@ Data validation utilities for the Water Business Platform
 
 import re
 from datetime import datetime, date
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Union
 import phonenumbers
 from phonenumbers import NumberParseException
 
@@ -77,7 +77,11 @@ class EmailValidator(Validator):
 
 
 class PhoneValidator(Validator):
-    """Phone number validation"""
+    """Phone number validation.
+
+    NOTE: this does NOT delegate to the shared phone SSOT (shared/validators.py);
+    it is intentionally kept self-contained for the staff/admin phone_validator() path.
+    """
 
     def __init__(self, value: Any, field_name: str = "phone", region: str = "UZ"):
         super().__init__(value, field_name)
@@ -412,191 +416,15 @@ def password_validator(value: Any, field: str) -> List[str]:
     return PasswordValidator(value, field).validate().get_errors()
 
 
-# Uzbekistan Phone Number Validation
-UZBEKISTAN_PHONE_REGEX = r"^\+998[0-9]{9}$"  # +998 XX XXX XX XX
+# --- Uzbekistan phone validation: delegated to the shared SSOT ---
+# shared/validators.py is the single source of truth (backed by phonenumbers).
+# These re-exports keep existing import sites working.
+from shared.validators import (  # noqa: F401,E402
+    normalize_phone_number,
+    validate_uzbekistan_phone,
+    validate_phone_number,
+    mask_phone_number,
+)
 
-# Valid Uzbekistan mobile operator prefixes (after +998)
-UZBEKISTAN_MOBILE_PREFIXES = [
-    "90",
-    "91",
-    "93",
-    "94",
-    "95",
-    "97",
-    "98",
-    "99",  # Mobile operators
-    "33",
-    "50",
-    "55",
-    "77",
-    "88",  # Additional mobile prefixes
-]
-
-
-class UzbekistanPhoneValidator:
-    """
-    Uzbekistan-specific phone number validation and normalization.
-
-    Valid input formats (all normalized to +998XXXXXXXXX):
-    - +998901234567
-    - +998 90 123 45 67
-    - 998901234567
-    - 90 123 45 67 (local format, prefix +998 added)
-    - 901234567 (9 digits, prefix +998 added)
-    """
-
-    def __init__(self, phone: str):
-        self.original = phone
-        self.normalized = None
-        self.errors = []
-
-    def normalize(self) -> Optional[str]:
-        """
-        Normalize phone number to +998XXXXXXXXX format.
-        Returns normalized phone or None if invalid.
-        """
-        if not self.original:
-            self.errors.append("Phone number is required")
-            return None
-
-        # Remove all non-digit characters except leading +
-        phone = str(self.original).strip()
-        digits = re.sub(r"\D", "", phone)
-
-        # Handle different input formats
-        if len(digits) == 12 and digits.startswith("998"):
-            # Full format: 998901234567
-            self.normalized = f"+{digits}"
-        elif len(digits) == 9 and digits[0] in "3579":
-            # Local format without country code: 901234567
-            self.normalized = f"+998{digits}"
-        elif len(digits) == 11 and digits.startswith("8998"):
-            # Old format with 8: 89981234567
-            self.normalized = f"+998{digits[1:]}"
-        else:
-            self.errors.append("Invalid phone number format. Use +998 XX XXX XX XX")
-            return None
-
-        return self.normalized
-
-    def validate(self) -> bool:
-        """
-        Validate the phone number is a valid Uzbekistan number.
-        Must call normalize() first or it will be called automatically.
-        """
-        if self.normalized is None:
-            self.normalize()
-
-        if self.normalized is None:
-            return False
-
-        # Check format
-        if not re.match(UZBEKISTAN_PHONE_REGEX, self.normalized):
-            self.errors.append("Phone number must be a valid Uzbekistan number (+998)")
-            return False
-
-        # Check operator prefix (digits 4-5 after +998)
-        prefix = self.normalized[4:6]
-        if prefix not in UZBEKISTAN_MOBILE_PREFIXES:
-            self.errors.append(f"Invalid mobile operator prefix: {prefix}")
-            return False
-
-        return True
-
-    def is_valid(self) -> bool:
-        """Check if validation passed"""
-        return len(self.errors) == 0
-
-    def get_errors(self) -> List[str]:
-        """Get validation errors"""
-        return self.errors
-
-    def get_normalized(self) -> Optional[str]:
-        """Get normalized phone number"""
-        return self.normalized
-
-    def get_masked(self) -> Optional[str]:
-        """Get masked phone number for display: +998***4567"""
-        if self.normalized:
-            return f"{self.normalized[:4]}***{self.normalized[-4:]}"
-        return None
-
-
-def validate_uzbekistan_phone(phone: str) -> tuple[bool, str, Optional[str]]:
-    """
-    Validate and normalize Uzbekistan phone number.
-
-    Args:
-        phone: Phone number in any common format
-
-    Returns:
-        Tuple of (is_valid, error_message_or_success, normalized_phone)
-
-    Examples:
-        >>> validate_uzbekistan_phone("+998901234567")
-        (True, "Phone is valid", "+998901234567")
-
-        >>> validate_uzbekistan_phone("90 123 45 67")
-        (True, "Phone is valid", "+998901234567")
-
-        >>> validate_uzbekistan_phone("+1234567890")
-        (False, "Phone number must be a valid Uzbekistan number (+998)", None)
-    """
-    validator = UzbekistanPhoneValidator(phone)
-    validator.normalize()
-
-    if validator.validate():
-        return True, "Phone is valid", validator.get_normalized()
-    else:
-        return False, validator.get_errors()[0] if validator.get_errors() else "Invalid phone", None
-
-
-def normalize_uzbekistan_phone(phone: str) -> Optional[str]:
-    """
-    Normalize phone number to +998XXXXXXXXX format.
-    Returns None if phone is invalid.
-
-    Args:
-        phone: Phone number in any common format
-
-    Returns:
-        Normalized phone number or None
-    """
-    validator = UzbekistanPhoneValidator(phone)
-    validator.normalize()
-    if validator.validate():
-        return validator.get_normalized()
-    return None
-
-
-def mask_phone_number(phone: str) -> str:
-    """
-    Mask phone number for display.
-
-    Args:
-        phone: Phone number (preferably normalized)
-
-    Returns:
-        Masked phone: +998***4567
-    """
-    if not phone:
-        return ""
-
-    # If already normalized
-    if phone.startswith("+998") and len(phone) == 13:
-        return f"{phone[:4]}***{phone[-4:]}"
-
-    # Try to normalize first
-    normalized = normalize_uzbekistan_phone(phone)
-    if normalized:
-        return f"{normalized[:4]}***{normalized[-4:]}"
-
-    # Fallback: mask middle portion
-    if len(phone) > 6:
-        return f"{phone[:3]}***{phone[-4:]}"
-
-    return "***"
-
-
-# Alias for convenience
-normalize_phone_number = normalize_uzbekistan_phone
+# Backwards-compatible alias for legacy imports.
+normalize_uzbekistan_phone = normalize_phone_number

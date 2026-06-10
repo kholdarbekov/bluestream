@@ -10,8 +10,9 @@ from business_app.models.order import Order
 from business_app.models.user import User
 from business_app.services.staff_service import StaffService
 from shared.enums import OrderStatus, PaymentMethod, PaymentStatus, UserRole
-from business_app.utils.exceptions import NotFoundError
+from business_app.utils.exceptions import NotFoundError, ValidationError
 from business_app.utils.password_security import hash_password
+from shared.enums import UserStatus
 
 
 def _create_user(db, phone: str, role: UserRole) -> User:
@@ -169,3 +170,41 @@ def test_get_cod_collection_projection_keeps_zero_outstanding_without_total_fall
 
     assert projection["cod_reserved_prepayment_amount"] == 0.0
     assert projection["expected_cash_to_collect"] == 0.0
+
+
+def test_create_client_user_rejects_unparseable_phone_instead_of_null_match(db):
+    """Phone-validation SSOT None-guard.
+
+    `format_phone_number("not-a-phone")` returns None. Without the guard the
+    uniqueness check would run `filter_by(phone=None)` -> `WHERE phone IS NULL`
+    and collide with an arbitrary NULL-phone user. The guard must raise
+    ValidationError before any query, so the NULL-phone bait user is never
+    matched and no duplicate-customer row is created.
+    """
+    # NULL-phone bait user: a telegram-only customer with no phone on file.
+    bait = User(
+        first_name="Bait",
+        password_hash=hash_password("TestPassword123!"),
+        role=UserRole.CUSTOMER,
+        status=UserStatus.ACTIVE.value,
+        telegram_id="999000111",
+        registration_source="telegram",
+    )
+    db.session.add(bait)
+    db.session.commit()
+    assert bait.phone is None
+
+    operator = _create_user(db, "+998903334444", UserRole.OPERATOR)
+
+    with pytest.raises(ValidationError) as exc_info:
+        StaffService.create_client_user(
+            operator_id=operator.id,
+            user_data={"phone": "not-a-phone", "first_name": "Customer"},
+        )
+
+    # It must be the invalid-format guard, not a downstream conflict from the
+    # NULL-row match (which would surface as STAFF_PHONE_EXISTS).
+    assert getattr(exc_info.value, "error_code", None) == "STAFF_PHONE_INVALID"
+
+    # No customer was created for the unparseable phone.
+    assert User.query.filter_by(first_name="Customer").first() is None

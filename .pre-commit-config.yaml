@@ -59,6 +59,18 @@ repos:
         pass_filenames: true
         require_serial: false
 
+      # Dependency-vulnerability gate (HIGH severity). Fires only when the
+      # lockfile changes (deps added/updated), so ordinary commits never pay
+      # the cost and a flaky npm-audit endpoint can't block unrelated work.
+      # Replaces the former `prebuild` npm hook that wrongly coupled this gate
+      # to the production image build.
+      - id: admin-ui-audit
+        name: admin_ui dependency audit (HIGH severity)
+        entry: bash -c 'cd admin_ui && npm run audit'
+        language: system
+        files: ^admin_ui/package-lock\.json$
+        pass_filenames: false
+
   # Full-suite test hooks (project requirement: every commit runs all tests
   # for every service — backend + bots + Celery + admin UI).
   #

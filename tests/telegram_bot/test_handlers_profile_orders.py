@@ -48,7 +48,9 @@ class TestProfileHandlerFlows:
         context = make_context()
         cleanup_mock = AsyncMock(return_value=True)
 
-        user_repo = SimpleNamespace(get_user_by_telegram_id=AsyncMock(return_value={"id": 1}))
+        user_repo = SimpleNamespace(
+            get_user_by_telegram_id=AsyncMock(return_value={"id": 1, "phone": "+998901112233"})
+        )
         monkeypatch.setattr(profile_module, "BotUserRepository", lambda _db: user_repo)
         monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
         monkeypatch.setattr(profile_module.MenuKeyboards, "main_menu", lambda _lang: "menu-kbd")

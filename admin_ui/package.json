@@ -15,7 +15,7 @@
     "lint:fix": "eslint src --fix",
     "security-check": "node scripts/security-check.js",
     "security-check:fix": "node scripts/security-check.js --fix",
-    "prebuild": "npm audit --audit-level=high",
+    "audit": "npm audit --audit-level=high",
     "precommit": "npm run security-check"
   },
   "dependencies": {

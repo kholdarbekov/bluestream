@@ -19,6 +19,8 @@ from business_app.models.loyalty import (
 from business_app.models.user import User
 from business_app.models.order import Order
 from business_app.utils.exceptions import ValidationError, NotFoundError, ConflictError
+from business_app.utils.translations import get_translation
+from business_app.utils.validators import normalize_phone_number
 from business_app.utils.constants import (
     LoyaltyActionType,
     LoyaltyTransactionType,
@@ -641,7 +643,11 @@ class LoyaltyService:
         if not sender_account or sender_account.current_balance < points_amount:
             raise ValidationError("Insufficient points")
 
-        recipient = User.query.filter_by(phone=recipient_phone).first()
+        normalized_recipient_phone = normalize_phone_number(recipient_phone)
+        if not normalized_recipient_phone:
+            raise ValidationError(get_translation("error.validation.invalid_phone"))
+
+        recipient = User.query.filter_by(phone=normalized_recipient_phone).first()
         if not recipient:
             raise NotFoundError("Recipient not found")
         if recipient.id == sender_id:

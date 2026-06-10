@@ -1,11 +1,10 @@
 """
 Input validators for Staff Bot
 """
-import re
 from typing import Optional, Tuple
 
 
-def normalize_phone(phone: str) -> str:
+def normalize_phone(phone: str) -> Optional[str]:
     """
     Normalize phone number to +998XXXXXXXXX format.
     Handles various input formats.
@@ -21,10 +20,8 @@ def validate_phone(phone: str) -> Tuple[bool, str]:
     Returns (is_valid, normalized_phone_or_error).
     """
     normalized = normalize_phone(phone)
-
-    if not re.match(r'^\+998\d{9}$', normalized):
+    if not normalized:
         return False, "Invalid phone format. Expected: +998XXXXXXXXX"
-
     return True, normalized
 
 

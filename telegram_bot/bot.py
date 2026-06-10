@@ -57,7 +57,7 @@ from api_client import api_client
 from webhook_server import webhook_server
 from token_manager import TokenManager
 from handlers import (
-    start_handler, main_menu_handler, language_handler,
+    main_menu_handler, language_handler,
     product_handlers, order_handlers, subscription_handlers,
     profile_handlers, loyalty_handlers, admin_handlers,
     support_handlers, payment_handlers, bottle_handlers,
@@ -65,7 +65,7 @@ from handlers import (
 )
 # Import conversation states directly (they are module-level constants)
 from handlers.profile import (
-    SELECT_LANGUAGE, PHONE, LINK_ACCOUNT_CONFIRM, LINK_ACCOUNT_OTP,
+    SELECT_LANGUAGE, PHONE, LINK_ACCOUNT_CONFIRM, LINK_ACCOUNT_OTP, REGISTER_OTP,
     ADDRESS_LOCATION, ADDRESS_TITLE, ADDRESS_REGION, ADDRESS_DISTRICT,
     ADDRESS_STREET, ADDRESS_BUILDING, ADDRESS_APARTMENT, ADDRESS_FLOOR,
     ADDRESS_ENTRANCE, ADDRESS_DELIVERY_INSTRUCTIONS, ADDRESS_GEOCODE_CONFIRM
@@ -249,7 +249,6 @@ class WaterBusinessBot:
         """Set up all bot handlers"""
 
         # Command handlers
-        # self.application.add_handler(CommandHandler("start", start_handler))
         self.application.add_handler(CommandHandler("menu", main_menu_handler))
         self.application.add_handler(CommandHandler("help", support_handlers.help_handler))
         self.application.add_handler(CommandHandler("language", language_handler.language_menu))
@@ -404,7 +403,7 @@ class WaterBusinessBot:
                 ],
                 PHONE: [
                     MessageHandler(filters.CONTACT, profile_handlers.phone_received),
-                    MessageHandler(filters.TEXT, profile_handlers.phone_text_received)
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.phone_text_received)
                 ],
                 # Account linking states
                 LINK_ACCOUNT_CONFIRM: [
@@ -413,11 +412,21 @@ class WaterBusinessBot:
                 LINK_ACCOUNT_OTP: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.link_account_otp)
                 ],
-                # profile_handlers.NAME: [
-                #     MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.name_received)
-                # ],
+                # Registration OTP captured in-conversation (Task 12). /cancel
+                # and /start fallbacks below now apply during OTP entry.
+                REGISTER_OTP: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.register_otp_received)
+                ],
             },
-            fallbacks=[CommandHandler("cancel", profile_handlers.cancel_registration)]
+            fallbacks=[
+                CommandHandler("start", profile_handlers.start_registration_new),
+                CommandHandler("cancel", profile_handlers.cancel_registration),
+            ],
+            per_chat=True,
+            per_user=True,
+            name="registration",
+            conversation_timeout=300,  # 5 minutes timeout
+            allow_reentry=True
         )
         self.application.add_handler(registration_handler, group=-2)
 

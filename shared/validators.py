@@ -5,60 +5,82 @@ Used by both backend (business_app) and telegram bot.
 import re
 from typing import Optional, Tuple
 
-
-# Valid Uzbekistan mobile operator prefixes
-_UZ_OPERATOR_PREFIXES = {
-    '90', '91', '93', '94', '95', '97', '98', '99',  # Standard mobile
-    '33', '55', '71', '77', '78', '88',  # Additional operators
-}
-
-_PHONE_CLEAN_RE = re.compile(r'[\s\-\(\)]')
-_NON_DIGIT_RE = re.compile(r'[^\d+]')
+import phonenumbers
 
 
-def validate_uzbekistan_phone(phone: str) -> Tuple[bool, str, Optional[str]]:
+# --- Uzbekistan phone validation: single source of truth (phonenumbers) ---
+
+_DEFAULT_REGION = "UZ"
+_UZ_COUNTRY_CODE = 998
+
+# Number types accepted for registration / SMS-OTP. libphonenumber reports some
+# valid UZ mobile ranges as FIXED_LINE_OR_MOBILE, so we accept both. Pure
+# FIXED_LINE is rejected (can't receive an SMS OTP).
+_ACCEPTED_NUMBER_TYPES = (
+    phonenumbers.PhoneNumberType.MOBILE,
+    phonenumbers.PhoneNumberType.FIXED_LINE_OR_MOBILE,
+)
+
+
+def _parse(phone):
+    """Best-effort parse to a libphonenumber object. Returns None, never raises."""
+    if not phone:
+        return None
+    candidate = str(phone).strip()
+    digits = re.sub(r"\D", "", candidate)
+    if candidate.startswith("+"):
+        to_parse = candidate
+    elif digits.startswith("998") and len(digits) == 12:
+        to_parse = "+" + digits          # full international, missing the '+'
+    elif len(digits) == 9:
+        to_parse = digits                # bare national number, region supplies +998
+    else:
+        to_parse = candidate
+    try:
+        return phonenumbers.parse(to_parse, _DEFAULT_REGION)
+    except phonenumbers.NumberParseException:
+        return None
+
+
+def normalize_phone_number(phone: str) -> Optional[str]:
     """
-    Validate and normalize an Uzbekistan phone number.
-
-    Accepts formats: +998901234567, 998901234567, 901234567, 90 123 45 67
-
-    Returns:
-        (is_valid, message, normalized_phone_or_None)
+    Normalize to E.164 (+998XXXXXXXXX) via libphonenumber.
+    Returns None if the input is not a valid Uzbekistan mobile number.
     """
+    parsed = _parse(phone)
+    if parsed is None or not phonenumbers.is_valid_number(parsed):
+        return None
+    # Restrict to Uzbekistan (+998). A bare/foreign number that libphonenumber
+    # happens to consider valid for another region must never be accepted.
+    if parsed.country_code != _UZ_COUNTRY_CODE:
+        return None
+    if phonenumbers.number_type(parsed) not in _ACCEPTED_NUMBER_TYPES:
+        return None
+    return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+
+
+def validate_uzbekistan_phone(phone: str):
+    """Returns (is_valid, message, normalized_phone_or_None)."""
     normalized = normalize_phone_number(phone)
-    if normalized and len(normalized) == 13 and normalized.startswith('+998'):
+    if normalized:
         return True, "Phone is valid", normalized
-    return False, "Phone number must be a valid Uzbekistan number (+998XXXXXXXXX)", None
-
-
-def normalize_phone_number(phone: str) -> str:
-    """
-    Normalize a phone number to +998XXXXXXXXX format.
-
-    Returns the cleaned number (best-effort) even if it doesn't fully validate,
-    so callers can inspect it or show it back to the user.
-    """
-    clean = _NON_DIGIT_RE.sub('', phone)
-
-    if clean.startswith('+998'):
-        clean = clean[1:]  # remove leading +
-    if clean.startswith('998') and len(clean) == 12:
-        return f'+{clean}'
-    if clean.startswith('8') and len(clean) == 10:
-        return f'+99{clean}'
-    if len(clean) == 9:
-        return f'+998{clean}'
-
-    # Already in full format or unrecognised – return with +
-    if clean.startswith('998'):
-        return f'+{clean}'
-    return clean
+    return False, "Phone number must be a valid Uzbekistan mobile number (+998XXXXXXXXX)", None
 
 
 def validate_phone_number(phone: str) -> bool:
-    """Simple boolean check for valid Uzbekistan phone."""
-    is_valid, _, _ = validate_uzbekistan_phone(phone)
-    return is_valid
+    """Boolean check for a valid Uzbekistan mobile phone."""
+    return normalize_phone_number(phone) is not None
+
+
+def mask_phone_number(phone: str) -> str:
+    """Mask for display: +998901234567 -> +998***4567."""
+    normalized = normalize_phone_number(phone)
+    target = normalized or (str(phone).strip() if phone else "")
+    # >= 7 keeps the 4-char prefix and 4-char suffix from overlapping
+    # (a valid E.164 UZ number is 13 chars, well above this floor).
+    if len(target) >= 7:
+        return f"{target[:4]}***{target[-4:]}"
+    return "***"
 
 
 # --- Password validation ---

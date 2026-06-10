@@ -308,3 +308,42 @@ class TestAuthServicePhoneFlows:
         db.session.refresh(sample_user)
         assert success is True
         assert sample_user.phone == original_phone
+
+    def test_register_user_dedups_phone_across_surface_formats(
+        self, app, db, auth_service_with_stateful_redis
+    ):
+        # The same human registers twice in two surface formats. The second
+        # attempt must raise a clean ConflictError (format-normalized dedup),
+        # never reach the UNIQUE constraint and surface as an IntegrityError/500.
+        with (
+            app.app_context(),
+            app.test_request_context("/api/v1/auth/register", method="POST"),
+            patch.object(
+                auth_service_with_stateful_redis,
+                "_generate_tokens",
+                return_value={"access_token": "access", "refresh_token": "refresh"},
+            ),
+            patch.object(auth_service_with_stateful_redis, "_create_user_session"),
+            patch.object(auth_service_with_stateful_redis, "_send_verification_notifications"),
+        ):
+            user, _ = auth_service_with_stateful_redis.register_user(
+                email="human-one@example.com",
+                password="StrongPass123!",
+                phone="+998901234567",
+                first_name="Human",
+            )
+
+            # Stored in E.164 thanks to format-normalization at insert time.
+            assert User.query.get(user.id).phone == "+998901234567"
+
+            # Second attempt arrives in a different surface format that does not
+            # string-match the stored E.164 value. The pre-insert dedup must
+            # normalize first, raising ConflictError instead of letting the row
+            # reach the UNIQUE constraint (IntegrityError -> 500).
+            with pytest.raises(ConflictError):
+                auth_service_with_stateful_redis.register_user(
+                    email="human-two@example.com",
+                    password="StrongPass123!",
+                    phone="+998 90 123 45 67",
+                    first_name="Human",
+                )

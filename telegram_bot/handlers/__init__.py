@@ -5,7 +5,6 @@ All conversation handlers and command processors
 
 from i18n import i18n
 
-from handlers.start import start_handler
 from handlers.menu import main_menu_handler
 from handlers.language import language_handler
 from handlers.products import product_handlers
@@ -81,7 +80,6 @@ support_handlers = SimpleHandlers()
 # payment_handlers is now imported from handlers.payments module
 
 __all__ = [
-    'start_handler',
     'main_menu_handler',
     'language_handler',
     'product_handlers',

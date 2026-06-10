@@ -14,10 +14,10 @@ from business_app.utils.validators import (
     PasswordValidator,
     PaymentValidator,
     PhoneValidator,
-    UzbekistanPhoneValidator,
     Validator,
     email_validator,
     mask_phone_number,
+    normalize_phone_number,
     normalize_uzbekistan_phone,
     password_validator,
     phone_validator,
@@ -135,19 +135,21 @@ class TestDomainValidators:
 
 @pytest.mark.unit
 class TestUzbekPhoneValidators:
-    def test_uzbek_phone_normalize_validate_and_mask(self):
-        validator = UzbekistanPhoneValidator("90 123 45 67")
-        normalized = validator.normalize()
-        assert normalized == "+998901234567"
-        assert validator.validate() is True
-        assert validator.get_masked() == "+998***4567"
+    def test_phone_normalize_validate_and_mask(self):
+        # Phone validation is now delegated to the shared phonenumbers-backed SSOT.
+        assert normalize_phone_number("90 123 45 67") == "+998901234567"
+        assert validate_uzbekistan_phone("90 123 45 67")[0] is True
+        assert mask_phone_number("90 123 45 67") == "+998***4567"
 
-        old_format = UzbekistanPhoneValidator("89981234567")
-        assert old_format.normalize() == "+9989981234567"
+        # Prefix 20 (Humans) — the prod outage number — is now accepted.
+        assert normalize_phone_number("+998200048156") == "+998200048156"
+        assert validate_uzbekistan_phone("+998200048156")[0] is True
 
-        bad_prefix = UzbekistanPhoneValidator("+998661234567")
-        bad_prefix.normalize()
-        assert bad_prefix.validate() is False
+        # Legacy 8-prefixed format is dropped (YAGNI) — must not normalize.
+        assert normalize_phone_number("89981234567") is None
+
+        # Foreign numbers are rejected.
+        assert normalize_phone_number("+12025550123") is None
 
     def test_helper_phone_functions(self):
         ok, msg, normalized = validate_uzbekistan_phone("+998901234567")
@@ -162,5 +164,6 @@ class TestUzbekPhoneValidators:
 
         assert normalize_uzbekistan_phone("90 123 45 67") == "+998901234567"
         assert mask_phone_number("+998901234567") == "+998***4567"
-        assert mask_phone_number("1234567") == "123***4567"
-        assert mask_phone_number("") == ""
+        # Un-normalizable but long-enough input is masked head/tail; empty -> placeholder.
+        assert mask_phone_number("1234567") == "1234***4567"
+        assert mask_phone_number("") == "***"

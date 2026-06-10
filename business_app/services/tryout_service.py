@@ -29,6 +29,8 @@ from shared.enums import (
     TryoutTaskType,
 )
 from business_app.utils.exceptions import ConflictError, NotFoundError, ValidationError
+from business_app.utils.translations import get_translation
+from business_app.utils.validators import normalize_phone_number
 
 
 class TryoutService:
@@ -85,6 +87,11 @@ class TryoutService:
         phone = (payload.get("phone") or "").strip()
         if not phone:
             raise ValidationError("Trial contact phone is required")
+
+        normalized_phone = normalize_phone_number(phone)
+        if not normalized_phone:
+            raise ValidationError(get_translation("error.validation.invalid_phone"))
+        phone = normalized_phone
 
         existing = TrialContact.query.filter_by(phone=phone).order_by(TrialContact.id.desc()).first()
         if existing:
@@ -240,7 +247,10 @@ class TryoutService:
         if "last_name" in payload:
             contact.last_name = (payload.get("last_name") or "").strip() or None
         if "phone" in payload and payload.get("phone"):
-            contact.phone = payload["phone"].strip()
+            normalized_phone = normalize_phone_number(payload["phone"])
+            if not normalized_phone:
+                raise ValidationError(get_translation("error.validation.invalid_phone"))
+            contact.phone = normalized_phone
         if "company_name" in payload:
             contact.company_name = (payload.get("company_name") or "").strip() or None
         if "preferred_language" in payload and payload.get("preferred_language"):
@@ -948,12 +958,15 @@ class TryoutService:
             }
 
         contact = tryout.trial_contact
-        user = User.query.filter_by(phone=contact.phone).first()
+        normalized_contact_phone = normalize_phone_number(contact.phone)
+        if not normalized_contact_phone:
+            raise ValidationError(get_translation("error.validation.invalid_phone"))
+        user = User.query.filter_by(phone=normalized_contact_phone).first()
         action = "linked_existing_user"
         if not user:
             auth_service = AuthService()
             user = auth_service.create_user_by_admin(
-                phone=contact.phone,
+                phone=normalized_contact_phone,
                 first_name=contact.first_name,
                 last_name=contact.last_name,
                 company_name=contact.company_name,

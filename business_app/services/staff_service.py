@@ -213,6 +213,8 @@ class StaffService:
                 raise NotFoundError("User not found", error_code="STAFF_USER_NOT_FOUND")
         else:
             formatted_phone = format_phone_number(phone)
+            if not formatted_phone:
+                raise ValidationError("Invalid phone number format", error_code="STAFF_PHONE_INVALID")
             user = User.query.filter_by(phone=formatted_phone).first()
             if not user:
                 creating_new_user = True
@@ -237,6 +239,8 @@ class StaffService:
 
         if phone and user.phone:
             formatted_phone = format_phone_number(phone)
+            if not formatted_phone:
+                raise ValidationError("Invalid phone number format", error_code="STAFF_PHONE_INVALID")
             if formatted_phone != user.phone:
                 duplicate_phone = User.query.filter(
                     User.phone == formatted_phone,
@@ -350,6 +354,8 @@ class StaffService:
 
         if "phone" in updates and updates.get("phone") is not None:
             formatted_phone = format_phone_number(updates.get("phone"))
+            if not formatted_phone:
+                raise ValidationError("Invalid phone number format", error_code="STAFF_PHONE_INVALID")
             duplicate_phone = User.query.filter(
                 User.phone == formatted_phone,
                 User.id != user.id,
@@ -450,6 +456,8 @@ class StaffService:
                 raise NotFoundError("User not found", error_code="STAFF_USER_NOT_FOUND")
         else:
             formatted_phone = format_phone_number(phone)
+            if not formatted_phone:
+                raise ValidationError("Invalid phone number format", error_code="STAFF_PHONE_INVALID")
             user = User.query.filter_by(phone=formatted_phone).first()
             if not user:
                 creating_new_user = True
@@ -467,6 +475,8 @@ class StaffService:
 
         if "phone" in staff_data and staff_data.get("phone"):
             formatted_phone = format_phone_number(staff_data.get("phone"))
+            if not formatted_phone:
+                raise ValidationError("Invalid phone number format", error_code="STAFF_PHONE_INVALID")
             duplicate_phone = User.query.filter(
                 User.phone == formatted_phone,
                 User.id != user.id,
@@ -549,6 +559,8 @@ class StaffService:
             StaffService._set_name_from_full_name(user, updates.get("full_name"))
         if "phone" in updates and updates.get("phone") is not None:
             formatted_phone = format_phone_number(updates.get("phone"))
+            if not formatted_phone:
+                raise ValidationError("Invalid phone number format", error_code="STAFF_PHONE_INVALID")
             duplicate_phone = User.query.filter(
                 User.phone == formatted_phone,
                 User.id != user.id,
@@ -1567,6 +1579,8 @@ class StaffService:
         from business_app.utils.helpers import format_phone_number
 
         formatted_phone = format_phone_number(phone)
+        if not formatted_phone:
+            raise ValidationError("Invalid phone number format", error_code="STAFF_PHONE_INVALID")
 
         existing = User.query.filter_by(phone=formatted_phone).first()
         if existing:

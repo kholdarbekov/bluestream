@@ -36,12 +36,14 @@ from handlers.base import BaseHandler
 logger = logging.getLogger('handlers')
 
 # Conversation states
-(SELECT_LANGUAGE, PHONE, NAME, ADDRESS_LOCATION, ADDRESS_TITLE,
+# NOTE: REGISTER_OTP is APPENDED as the last element so every pre-existing
+# constant keeps its integer value (purely additive — see Task 12).
+(SELECT_LANGUAGE, PHONE, ADDRESS_LOCATION, ADDRESS_TITLE,
  ADDRESS_REGION, ADDRESS_DISTRICT, ADDRESS_STREET, ADDRESS_BUILDING,
  ADDRESS_APARTMENT, ADDRESS_FLOOR, ADDRESS_ENTRANCE,
  ADDRESS_DELIVERY_INSTRUCTIONS, ADDRESS_GEOCODE_CONFIRM,
  PHONE_VERIFY_PHONE, PHONE_VERIFY_NAME,
- LINK_ACCOUNT_CONFIRM, LINK_ACCOUNT_OTP) = range(18)
+ LINK_ACCOUNT_CONFIRM, LINK_ACCOUNT_OTP, REGISTER_OTP) = range(18)
 
 
 class ProfileHandlers(BaseHandler):
@@ -392,6 +394,12 @@ class ProfileHandlers(BaseHandler):
                 return PHONE_VERIFY_PHONE
 
             phone = normalize_phone_number(contact.phone_number)
+            if not phone:
+                await update.message.reply_text(
+                    i18n.get('telegram.phone.invalid_format', language),
+                    reply_markup=ProfileKeyboards.phone_request(language)
+                )
+                return PHONE_VERIFY_PHONE
             logger.info(f"Phone contact received for user {user_id}: {phone}")
 
             # Store phone in context for later
@@ -675,6 +683,20 @@ class ProfileHandlers(BaseHandler):
 
                 return SELECT_LANGUAGE
             else:
+                # Existing row but phone never captured -> resume phone collection
+                # instead of dropping the user at the main menu with no phone.
+                if not existing_user.get('phone'):
+                    language = existing_user.get('preferred_language') or await i18n.get_user_language(user_id)
+                    keyboard = ProfileKeyboards.phone_request(language)
+                    await maybe_remove_stale_reply_keyboard(update, context)
+
+                    await update.message.reply_text(
+                        text=i18n.get('telegram.registration.share_contact_prompt', language),
+                        reply_markup=keyboard
+                    )
+
+                    return PHONE
+
                 # Already registered, show main menu
                 complete_text = i18n.get('telegram.welcome', telegram_language_code)
                 keyboard = MenuKeyboards.main_menu(telegram_language_code)
@@ -686,38 +708,6 @@ class ProfileHandlers(BaseHandler):
                 )
 
                 return ConversationHandler.END
-
-        except Exception as e:
-            logger.error(f"Error starting registration: {e}")
-            return ConversationHandler.END
-
-    async def start_registration(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Start registration process"""
-        try:
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
-
-            # Ask for phone number
-            phone_text = i18n.get('telegram.registration.enter_phone', language)
-            keyboard = ProfileKeyboards.phone_request(language)
-
-            if update.callback_query:
-                await update.callback_query.edit_message_text(
-                    text=phone_text
-                )
-                await update.callback_query.answer()
-                # Send new message with keyboard
-                await update.callback_query.message.reply_text(
-                    text=i18n.get('telegram.registration.share_contact_prompt', language),
-                    reply_markup=keyboard
-                )
-            else:
-                await update.message.reply_text(
-                    text=phone_text,
-                    reply_markup=keyboard
-                )
-
-            return PHONE
 
         except Exception as e:
             logger.error(f"Error starting registration: {e}")
@@ -830,6 +820,12 @@ class ProfileHandlers(BaseHandler):
                 return PHONE
 
             phone = normalize_phone_number(contact.phone_number)
+            if not phone:
+                await update.message.reply_text(
+                    i18n.get('telegram.phone.invalid_format', language),
+                    reply_markup=ProfileKeyboards.phone_request(language)
+                )
+                return PHONE
 
             # Check if phone is available via API
             try:
@@ -917,25 +913,11 @@ class ProfileHandlers(BaseHandler):
 
             except Exception as api_error:
                 logger.error(f"API error checking phone: {api_error}")
-                # Fall back to direct save (will fail if duplicate, which is caught below)
-                await self.user_repo.set_user_phone_verified(user_id, phone)
-
-                # Clean up the temporary phone-share keyboard before moving on.
                 await update.message.reply_text(
-                    i18n.get('telegram.phone.phone_accepted', language),
-                    reply_markup=ReplyKeyboardRemove()
+                    i18n.get('telegram.phone.verify_unavailable_now', language),
+                    reply_markup=ProfileKeyboards.phone_request(language)
                 )
-
-                complete_text = i18n.get('telegram.registration_complete', language)
-                keyboard = MenuKeyboards.main_menu(language)
-
-                await update.message.reply_text(
-                    text=complete_text,
-                    reply_markup=keyboard
-                )
-
-                logger.info(f"Registration completed for user {user_id}")
-                return ConversationHandler.END
+                return PHONE
 
         except Exception as e:
             logger.error(f"Error handling phone: {e}")
@@ -1021,12 +1003,16 @@ class ProfileHandlers(BaseHandler):
                             )
                         )
 
-                        context.user_data['awaiting_otp'] = True
+                        # Stay INSIDE the conversation and capture the OTP via
+                        # the dedicated REGISTER_OTP state (register_otp_received).
+                        # We deliberately do NOT set the global 'awaiting_otp'
+                        # flag here anymore — the in-conversation handler owns
+                        # this path now, so /cancel and /start behave correctly
+                        # during OTP entry and the global catch-all won't fire.
                         context.user_data['pending_phone_verification'] = phone
-                        context.user_data['otp_prompted_update_id'] = update.update_id
 
                         logger.info(f"Registration OTP sent to {phone} for user {user_id}")
-                        return ConversationHandler.END
+                        return REGISTER_OTP
 
                     elif response.success and not response_data.get('available'):
                         # Phone exists - check if linking is possible
@@ -1139,7 +1125,9 @@ class ProfileHandlers(BaseHandler):
                         response = await client.link_phone_send_otp(user_id, phone)
 
                         if response.success:
-                            phone_masked = response.data.get('phone_masked', phone)
+                            # Backend wraps payloads as {success, message, data:{...}}.
+                            link_payload = response.data.get('data', {}) if isinstance(response.data, dict) else {}
+                            phone_masked = link_payload.get('phone_masked', phone)
                             await query.edit_message_text(
                                 i18n.get(
                                     'telegram.phone.verification_code_sent_to_phone_prompt',
@@ -1238,8 +1226,11 @@ class ProfileHandlers(BaseHandler):
                         # Account linked successfully!
                         context.user_data.pop('pending_link_phone', None)
 
+                        # Backend wraps payloads as {success, message, data:{...}}.
+                        verify_payload = response.data.get('data', {}) if isinstance(response.data, dict) else {}
+
                         # Update cached tokens with the merged account's tokens
-                        new_tokens = response.data.get('tokens', {})
+                        new_tokens = verify_payload.get('tokens', {})
                         if new_tokens.get('access_token') and new_tokens.get('refresh_token'):
                             token_manager = context.bot_data.get('token_manager')
                             if token_manager:
@@ -1251,7 +1242,7 @@ class ProfileHandlers(BaseHandler):
                                 )
                                 logger.info(f"Updated cached tokens after account merge for user {user_id}")
 
-                        user_data = response.data.get('user', {})
+                        user_data = verify_payload.get('user', {})
                         name = user_data.get('first_name', i18n.get('telegram.common.user_fallback', language))
 
                         await update.message.reply_text(
@@ -1289,94 +1280,103 @@ class ProfileHandlers(BaseHandler):
             logger.error(f"Traceback: {traceback.format_exc()}")
             return ConversationHandler.END
 
-    async def name_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle name input or OTP verification"""
+    async def register_otp_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Verify the registration OTP from WITHIN the conversation (REGISTER_OTP).
+
+        This is the in-conversation counterpart to the legacy global
+        bot._handle_otp_verification catch-all. It verifies the code via the
+        REGISTRATION endpoint (client.verify_phone_otp) — NOT the account-merge
+        endpoint (client.link_phone_verify), which would be wrong/dangerous on
+        the fresh-registration path.
+
+        DRY note: the actual verify call (get_auth_token + verify_phone_otp) is
+        ~3 lines and is deliberately duplicated from bot._handle_otp_verification
+        rather than extracted into a shared helper — that method is on the bot
+        class in bot.py while this is on ProfileHandlers in profile.py, so a
+        shared helper would force awkward cross-class/cross-module coupling. The
+        surrounding success/error UX (conversation states, main-menu keyboard,
+        re-prompt vs. END) differs entirely between the two paths.
+        """
         try:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            text = update.message.text.strip()
+            otp = update.message.text.strip()
 
-            # Check if we're waiting for OTP verification
-            if context.user_data.get('awaiting_otp'):
-                # Validate OTP format (6 digits)
-                if not text.isdigit() or len(text) != 6:
-                    await update.message.reply_text(
-                        i18n.get('telegram.phone.otp_invalid', language)
+            # Validate OTP format (mirrors link_account_otp's 6-digit guard).
+            if not otp.isdigit() or len(otp) != 6:
+                await update.message.reply_text(
+                    i18n.get('telegram.bot.otp.invalid_format', language)
+                )
+                return REGISTER_OTP
+
+            # Defensive: if the pending phone is missing (stale/restarted state),
+            # end cleanly instead of verifying against no pending context
+            # (mirrors link_account_otp's missing-phone guard).
+            if not context.user_data.get('pending_phone_verification'):
+                await update.message.reply_text(
+                    i18n.get('telegram.phone.session_expired_start_again', language)
+                )
+                return ConversationHandler.END
+
+            try:
+                async with api_client as client:
+                    user_token = await get_auth_token(update, context, client)
+                    if not user_token:
+                        await update.message.reply_text(
+                            i18n.get('telegram.bot.otp.auth_error', language)
+                        )
+                        context.user_data.pop('pending_phone_verification', None)
+                        return ConversationHandler.END
+
+                    # Correct registration endpoint (NOT link_phone_verify).
+                    response = await client.verify_phone_otp(user_token, otp)
+
+                    if response.success:
+                        # Registration complete — clear pending state and show
+                        # the same completion message the contact path uses.
+                        context.user_data.pop('pending_phone_verification', None)
+
+                        await update.message.reply_text(
+                            i18n.get('telegram.registration_complete', language),
+                            reply_markup=MenuKeyboards.main_menu(language)
+                        )
+
+                        logger.info(f"Registration OTP verified for user {user_id}")
+                        return ConversationHandler.END
+
+                    error_msg = response.error or i18n.get(
+                        'telegram.phone.invalid_verification_code_default', language
                     )
-                    return NAME
 
-                # Verify OTP via API
-                try:
-                    async with api_client as client:
-                        user_token = await get_auth_token(update, context, client)
-                        if user_token:
-                            response = await client.verify_phone_otp(user_token, text)
-                            if response.success:
-                                await update.message.reply_text(
-                                    i18n.get('telegram.phone.otp_success', language),
-                                    parse_mode='Markdown'
-                                )
+                    # Expired / not-found: the code is unrecoverable, so end.
+                    if 'expired' in error_msg.lower() or 'not found' in error_msg.lower():
+                        await update.message.reply_text(
+                            i18n.get('telegram.phone.verification_code_expired_start_again', language)
+                        )
+                        context.user_data.pop('pending_phone_verification', None)
+                        return ConversationHandler.END
 
-                                # Clear OTP flags
-                                context.user_data.pop('awaiting_otp', None)
-                                context.user_data.pop('pending_phone_verification', None)
-                                context.user_data.pop('otp_prompted_update_id', None)
-
-                                logger.info(f"Phone verification successful for user {user_id}")
-
-                                # Now ask for name
-                                name_text = i18n.get('telegram.enter_name', language)
-                                await update.message.reply_text(name_text)
-
-                                return NAME
-                            else:
-                                await update.message.reply_text(
-                                    i18n.get(
-                                        'telegram.phone.verification_failed_with_error_skip',
-                                        language,
-                                        error=response.error
-                                    )
-                                )
-                                return NAME
-                except Exception as verify_error:
-                    logger.error(f"Error verifying OTP: {verify_error}")
+                    # Otherwise re-prompt so the user can retry the code.
                     await update.message.reply_text(
-                        i18n.get('telegram.phone.verification_failed_skip', language)
+                        i18n.get(
+                            'telegram.phone.verification_failed_with_error_retry',
+                            language,
+                            error=error_msg
+                        )
                     )
-                    return NAME
+                    return REGISTER_OTP
 
-            # Handle name input
-            name = text
-
-            if len(name) < 2:
-                await update.message.reply_text(i18n.get('telegram.name.too_short', language))
-                return NAME
-
-            # Update user profile
-            async with api_client as client:
-                user_token = await get_auth_token(update, context, client)
-                if user_token:
-                    profile_data = {
-                        'first_name': name.split()[0] if name.split() else name,
-                        'last_name': ' '.join(name.split()[1:]) if len(name.split()) > 1 else ''
-                    }
-                    await client.update_user_profile(user_token, profile_data)
-
-            # Registration complete
-            complete_text = i18n.get('telegram.registration_complete', language)
-            keyboard = MenuKeyboards.main_menu(language)
-
-            await update.message.reply_text(
-                text=complete_text,
-                reply_markup=keyboard
-            )
-
-            logger.info(f"Registration completed for user {user_id}")
-
-            return ConversationHandler.END
+            except Exception as api_error:
+                logger.error(f"API error verifying registration OTP: {api_error}")
+                await update.message.reply_text(
+                    i18n.get('telegram.phone.verification_failed_retry', language)
+                )
+                return REGISTER_OTP
 
         except Exception as e:
-            logger.error(f"Error handling name: {e}")
+            logger.error(f"Error in register_otp_received: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return ConversationHandler.END
 
     async def continue_registration(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3266,7 +3266,6 @@ profile_handlers = ProfileHandlers()
 # Export conversation states
 profile_handlers.SELECT_LANGUAGE = SELECT_LANGUAGE
 profile_handlers.PHONE = PHONE
-profile_handlers.NAME = NAME
 profile_handlers.ADDRESS_LOCATION = ADDRESS_LOCATION
 profile_handlers.ADDRESS_TITLE = ADDRESS_TITLE
 profile_handlers.ADDRESS_REGION = ADDRESS_REGION

@@ -7,8 +7,11 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci
+# Install dependencies.
+# `--no-audit` decouples the image build from npmjs.org's audit endpoint: the
+# high-severity dependency gate runs in CI (frontend-tests job), not here, so a
+# transient audit-service outage can never break a production build/deploy.
+RUN npm ci --no-audit --no-fund
 
 # Copy source code
 COPY . .

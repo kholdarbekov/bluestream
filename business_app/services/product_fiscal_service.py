@@ -13,6 +13,11 @@ from business_app.utils.audit_logger import audit_logger
 from shared.enums import MarkingCodeStatus
 from business_app.utils.exceptions import NotFoundError, ValidationError
 
+# Composite filter-only values for the admin Marking-codes dropdown. They are NOT
+# MarkingCodeStatus members — they narrow status=AVAILABLE by tax_committee_utilised_at.
+AVAILABLE_UNUTILISED_FILTER = "available_unutilised"
+AVAILABLE_PRE_UTILISED_FILTER = "available_pre_utilised"
+
 
 class ProductFiscalService:
     """Manage product fiscal metadata and marking-code inventory."""
@@ -172,7 +177,17 @@ class ProductFiscalService:
         query = ProductMarkingCode.query.filter_by(product_id=product_id)
         if search:
             query = query.filter(ProductMarkingCode.code.ilike(f"%{search.strip()}%"))
-        if status:
+        if status == AVAILABLE_UNUTILISED_FILTER:
+            query = query.filter(
+                ProductMarkingCode.status == MarkingCodeStatus.AVAILABLE,
+                ProductMarkingCode.tax_committee_utilised_at.is_(None),
+            )
+        elif status == AVAILABLE_PRE_UTILISED_FILTER:
+            query = query.filter(
+                ProductMarkingCode.status == MarkingCodeStatus.AVAILABLE,
+                ProductMarkingCode.tax_committee_utilised_at.isnot(None),
+            )
+        elif status:
             try:
                 query = query.filter(ProductMarkingCode.status == MarkingCodeStatus(status))
             except ValueError as exc:

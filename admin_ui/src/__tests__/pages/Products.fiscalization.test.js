@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -138,5 +138,52 @@ describe('Products fiscal workflow', () => {
     expect(await screen.findByText('MARK-001')).toBeInTheDocument();
     expect(screen.getByText(/add_marking_codes|Add Codes/i)).toBeInTheDocument();
     expect(screen.getByText('Available')).toBeInTheDocument();
+  });
+
+  it('offers utilisation sub-filters and queries with the sentinel status', async () => {
+    const user = userEvent.setup();
+    render(<Products />, { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(adminService.getProducts).toHaveBeenCalled();
+    });
+
+    await user.click(await screen.findByText(/view_details|View Details/i));
+    await user.click(await screen.findByText(/marking_codes|Marking Codes/i));
+
+    await waitFor(() => {
+      expect(adminService.listProductMarkingCodes).toHaveBeenCalledWith(44, expect.any(Object));
+    });
+
+    // Open the marking-code status filter, located by its placeholder label (not by
+    // position — the dialog also contains the table's pagination combobox).
+    const dialog = await screen.findByRole('dialog');
+    const filterSelect = within(dialog).getByText('Filter by status').closest('.ant-select');
+    await user.click(within(filterSelect).getByRole('combobox'));
+
+    // Both new utilisation sub-filter options render.
+    expect(await screen.findByText('Available (not utilised)')).toBeInTheDocument();
+    expect(screen.getByText('Available (pre-utilised)')).toBeInTheDocument();
+
+    // Selecting one re-queries with the composite sentinel value.
+    await user.click(screen.getByText('Available (not utilised)'));
+
+    await waitFor(() => {
+      expect(adminService.listProductMarkingCodes).toHaveBeenLastCalledWith(
+        44,
+        expect.objectContaining({ status: 'available_unutilised' }),
+      );
+    });
+
+    // The pre-utilised option sends its own sentinel value (guards against a value swap).
+    await user.click(within(filterSelect).getByRole('combobox'));
+    await user.click(screen.getByText('Available (pre-utilised)'));
+
+    await waitFor(() => {
+      expect(adminService.listProductMarkingCodes).toHaveBeenLastCalledWith(
+        44,
+        expect.objectContaining({ status: 'available_pre_utilised' }),
+      );
+    });
   });
 });

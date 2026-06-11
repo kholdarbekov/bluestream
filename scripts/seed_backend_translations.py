@@ -6167,6 +6167,8 @@ ADMIN_UI_PRODUCT_TRANSLATIONS = {
     'ui.products.marking_code_required': _ui_tr('Marking code is required'),
     'ui.products.marking_code_status_archived': _ui_tr('Archived', 'Arxivlangan', 'Архивирован'),
     'ui.products.marking_code_status_available': _ui_tr('Available', 'Mavjud', 'Доступен'),
+    'ui.products.marking_code_status_available_pre_utilised': _ui_tr('Available (pre-utilised)', 'Mavjud (oldindan faollashtirilgan)', 'Доступен (предв. утилизирован)'),
+    'ui.products.marking_code_status_available_unutilised': _ui_tr('Available (not utilised)', 'Mavjud (faollashtirilmagan)', 'Доступен (не утилизирован)'),
     'ui.products.marking_code_status_reserved': _ui_tr('Reserved', 'Band qilingan', 'Зарезервирован'),
     'ui.products.marking_code_status_used': _ui_tr('Used', 'Ishlatilgan', 'Использован'),
     'ui.products.marking_code_threshold': _ui_tr('Low-Stock Threshold'),

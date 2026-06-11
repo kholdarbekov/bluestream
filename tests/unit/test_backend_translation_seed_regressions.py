@@ -44,3 +44,10 @@ def test_seed_script_includes_orders_and_products_fiscalization_ui_catalogs():
     assert "'ui.products.marking_code_status_reserved': _ui_tr(" in text
     assert "'ui.products.marking_code_status_used': _ui_tr(" in text
     assert "'ui.products.marking_code_status_archived': _ui_tr(" in text
+
+
+def test_seed_script_includes_marking_code_utilisation_filter_keys():
+    text = SEED_SCRIPT.read_text(encoding="utf-8")
+
+    assert "'ui.products.marking_code_status_available_unutilised': _ui_tr(" in text
+    assert "'ui.products.marking_code_status_available_pre_utilised': _ui_tr(" in text

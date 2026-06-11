@@ -1,9 +1,15 @@
 """Unit tests for product fiscal metadata and marking-code inventory workflows."""
 
+import pytest
+from datetime import datetime, timezone
+
 from business_app import db
 from business_app.models.product import ProductMarkingCode
 from business_app.services.product_fiscal_service import ProductFiscalService
 from shared.enums import MarkingCodeStatus
+from business_app.utils.exceptions import ValidationError
+
+
 def test_import_marking_codes_csv_preserves_gs1_separator(db, sample_product):
     """Full GS1 marking codes containing ASCII 29 (GS) must be stored intact."""
     code_with_gs = '010460791191734421xzMK7TLH\x1d9151234567890'
@@ -189,3 +195,58 @@ def test_create_marking_codes_syncs_stock(db, sample_product):
 
     assert result['created'] == 3
     assert sample_product.stock_quantity == 3
+
+
+def _seed_pool(db, product_id):
+    """Four codes covering both AVAILABLE utilisation states plus RESERVED/USED."""
+    now = datetime.now(timezone.utc)
+    codes = [
+        ProductMarkingCode(product_id=product_id, code='POOL-AVAIL-NULL',
+                           status=MarkingCodeStatus.AVAILABLE, tax_committee_utilised_at=None),
+        ProductMarkingCode(product_id=product_id, code='POOL-AVAIL-UTIL',
+                           status=MarkingCodeStatus.AVAILABLE, tax_committee_utilised_at=now),
+        ProductMarkingCode(product_id=product_id, code='POOL-RESERVED',
+                           status=MarkingCodeStatus.RESERVED, tax_committee_utilised_at=None),
+        ProductMarkingCode(product_id=product_id, code='POOL-USED',
+                           status=MarkingCodeStatus.USED, tax_committee_utilised_at=now),
+    ]
+    db.session.add_all(codes)
+    db.session.flush()
+
+
+def test_list_marking_codes_available_unutilised_returns_only_null_timestamp(db, sample_product):
+    """available_unutilised → only AVAILABLE codes with tax_committee_utilised_at IS NULL."""
+    _seed_pool(db, sample_product.id)
+
+    result = ProductFiscalService().list_marking_codes(sample_product.id, status='available_unutilised')
+
+    returned = {item['code'] for item in result['items']}
+    assert returned == {'POOL-AVAIL-NULL'}
+
+
+def test_list_marking_codes_available_pre_utilised_returns_only_not_null_timestamp(db, sample_product):
+    """available_pre_utilised → only AVAILABLE codes with tax_committee_utilised_at IS NOT NULL."""
+    _seed_pool(db, sample_product.id)
+
+    result = ProductFiscalService().list_marking_codes(sample_product.id, status='available_pre_utilised')
+
+    returned = {item['code'] for item in result['items']}
+    assert returned == {'POOL-AVAIL-UTIL'}
+
+
+def test_list_marking_codes_available_includes_both_utilisation_states(db, sample_product):
+    """Regression: plain 'available' still returns ALL AVAILABLE codes regardless of utilisation."""
+    _seed_pool(db, sample_product.id)
+
+    result = ProductFiscalService().list_marking_codes(sample_product.id, status='available')
+
+    returned = {item['code'] for item in result['items']}
+    assert returned == {'POOL-AVAIL-NULL', 'POOL-AVAIL-UTIL'}
+
+
+def test_list_marking_codes_invalid_status_still_raises(db, sample_product):
+    """Unknown status values are still rejected."""
+    _seed_pool(db, sample_product.id)
+
+    with pytest.raises(ValidationError):
+        ProductFiscalService().list_marking_codes(sample_product.id, status='bogus_status')

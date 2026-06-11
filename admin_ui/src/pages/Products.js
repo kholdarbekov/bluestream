@@ -53,8 +53,20 @@ const { TextArea } = Input;
 
 const PRODUCT_STATUS_OPTIONS = ['active', 'inactive', 'out_of_stock', 'discontinued'];
 const MARKING_CODE_STATUS_OPTIONS = ['available', 'reserved', 'used', 'archived'];
+// Filter-only list: includes composite utilisation sub-filters that narrow AVAILABLE codes by
+// tax_committee_utilised_at. These are NOT real statuses, so the Edit-Code setter keeps the list above.
+const MARKING_CODE_STATUS_FILTER_OPTIONS = [
+  'available',
+  'available_unutilised',
+  'available_pre_utilised',
+  'reserved',
+  'used',
+  'archived',
+];
 const MARKING_CODE_STATUS_LABELS = {
   available: 'Available',
+  available_unutilised: 'Available (not utilised)',
+  available_pre_utilised: 'Available (pre-utilised)',
   reserved: 'Reserved',
   used: 'Used',
   archived: 'Archived',
@@ -955,7 +967,7 @@ const Products = () => {
                     placeholder={t('ui.products.filter_marking_codes', 'Filter by status')}
                     style={{ width: 180 }}
                   >
-                    {MARKING_CODE_STATUS_OPTIONS.map((status) => (
+                    {MARKING_CODE_STATUS_FILTER_OPTIONS.map((status) => (
                       <Option key={status} value={status}>
                         {getMarkingCodeStatusLabel(t, status)}
                       </Option>

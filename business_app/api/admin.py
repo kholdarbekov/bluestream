@@ -3437,6 +3437,33 @@ def update_admin_delivery(delivery_id):
         return internal_error_response("Failed to update delivery")
 
 
+@admin_bp.route("/deliveries/<int:delivery_id>/redispatch", methods=["POST"])
+@jwt_required()
+@validate_admin_action(["manage_delivery"])
+def redispatch_admin_delivery(delivery_id):
+    """Re-dispatch a failed delivery back to the unassigned pool so it can be
+    re-claimed by a driver. Only valid for deliveries in FAILED status."""
+    try:
+        payload = request.get_json(silent=True) or {}
+        reason = (payload.get("reason") or "").strip() or None
+        delivery = AdminDeliveryService.redispatch_delivery(
+            delivery_id,
+            int(get_jwt_identity()),
+            reason=reason,
+        )
+        return success_response(
+            data={"delivery": delivery},
+            message="Delivery re-dispatched to pool",
+        )
+    except NotFoundError as e:
+        return not_found_response(str(e))
+    except ValidationError as e:
+        return validation_error_response(str(e))
+    except Exception as e:
+        current_app.logger.error(f"Redispatch admin delivery error: {e}")
+        return internal_error_response("Failed to re-dispatch delivery")
+
+
 @admin_bp.route("/delivery-personnel", methods=["GET"])
 @jwt_required()
 @validate_admin_action(["view_delivery", "manage_delivery"])

@@ -34,6 +34,7 @@ def make_celery(app=None):
             "business_app.tasks.payment_tasks",
             "business_app.tasks.notification_tasks",
             "business_app.tasks.delivery_tasks",
+            "business_app.tasks.delivery_monitoring_tasks",
             "business_app.tasks.analytics_tasks",
             "business_app.tasks.subscription_tasks",
             "business_app.tasks.order_tasks",
@@ -86,6 +87,12 @@ def make_celery(app=None):
         "delivery-reminders": {
             "task": "business_app.tasks.delivery_tasks.send_delivery_reminders",
             "schedule": crontab(minute="*/30"),
+        },
+        # Surface "stranded" deliveries (pool status while still assigned to a
+        # driver) every 15 minutes via metric + warning log.
+        "monitor-stranded-deliveries": {
+            "task": "business_app.tasks.delivery_monitoring_tasks.monitor_stranded_deliveries",
+            "schedule": crontab(minute="*/15"),
         },
         # Reconcile PENDING payments against the gateway every 15 minutes (PAY-007).
         # Polls payments older than PAYMENT_RECONCILE_AFTER_MINUTES (default 10 min)
@@ -269,6 +276,7 @@ celery.conf.task_routes = {
     "business_app.tasks.payment_tasks.*": {"queue": "payment"},
     "business_app.tasks.notification_tasks.*": {"queue": "notifications"},
     "business_app.tasks.delivery_tasks.*": {"queue": "delivery"},
+    "business_app.tasks.delivery_monitoring_tasks.*": {"queue": "delivery"},
     "business_app.tasks.analytics_tasks.*": {"queue": "analytics"},
     "business_app.tasks.subscription_tasks.*": {"queue": "subscriptions"},
     "business_app.tasks.order_tasks.*": {"queue": "orders"},

@@ -146,6 +146,15 @@ class MenuKeyboards:
                 ),
             ])
 
+        # Operator/dispatcher: re-dispatch a failed delivery back to the pool.
+        if is_operator:
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"🔄 {i18n.get('staff.menu.redispatch_failed', language)}",
+                    callback_data="staff_redispatch_failed",
+                ),
+            ])
+
         # Common items
         keyboard.append([
             InlineKeyboardButton(

@@ -363,6 +363,22 @@ class StaffAPIClient:
             token=token
         )
 
+    async def get_failed_deliveries(self, token: str) -> APIResponse:
+        """Operator: list FAILED deliveries available for re-dispatch"""
+        return await self._make_request(
+            'GET',
+            f'{config.business_api.delivery_endpoint}/failed',
+            token=token
+        )
+
+    async def redispatch_delivery(self, token: str, delivery_id: int) -> APIResponse:
+        """Operator: re-dispatch a FAILED delivery back to the pool"""
+        return await self._make_request(
+            'POST',
+            f'{config.business_api.delivery_endpoint}/redispatch/{delivery_id}',
+            token=token
+        )
+
     async def update_delivery_status(
         self, token: str, delivery_id: int,
         status: str, metadata: Dict = None

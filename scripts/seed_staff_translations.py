@@ -38,6 +38,41 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Yangi buyurtmalar",
         "ru": "Новые заказы",
     },
+    "staff.menu.redispatch_failed": {
+        "en": "Re-dispatch Failed",
+        "uz": "Muvaffaqiyatsizni qayta yuborish",
+        "ru": "Переотправить неуданые",
+    },
+    "staff.redispatch.title": {
+        "en": "Re-dispatch Failed Delivery",
+        "uz": "Muvaffaqiyatsiz yetkazishni qayta yuborish",
+        "ru": "Переотправка неудачной доставки",
+    },
+    "staff.redispatch.pick": {
+        "en": "Pick a failed delivery to return to the pool:",
+        "uz": "Hovuzga qaytarish uchun muvaffaqiyatsiz yetkazishni tanlang:",
+        "ru": "Выберите неудачную доставку для возврата в пул:",
+    },
+    "staff.redispatch.none": {
+        "en": "There are no failed deliveries to re-dispatch.",
+        "uz": "Qayta yuboriladigan muvaffaqiyatsiz yetkazishlar yo‘q.",
+        "ru": "Нет неудачных доставок для переотправки.",
+    },
+    "staff.redispatch.button": {
+        "en": "Re-dispatch to pool",
+        "uz": "Hovuzga qayta yuborish",
+        "ru": "Вернуть в пул",
+    },
+    "staff.redispatch.attempts": {
+        "en": "Attempts",
+        "uz": "Urinishlar",
+        "ru": "Попытки",
+    },
+    "staff.redispatch.success": {
+        "en": "Delivery re-dispatched to the pool. A driver can now re-claim it.",
+        "uz": "Yetkazish hovuzga qayta yuborildi. Endi haydovchi uni qayta olishi mumkin.",
+        "ru": "Доставка возвращена в пул. Теперь водитель может взять её снова.",
+    },
     "staff.menu.new_orders_view": {
         "en": "New Orders (View)",
         "uz": "Yangi buyurtmalar (Korish)",

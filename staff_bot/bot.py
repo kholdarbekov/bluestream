@@ -90,6 +90,7 @@ from staff_bot.handlers.operator.manage_address import (
 )
 from staff_bot.handlers.operator.recent_orders import RecentOrdersHandler
 from staff_bot.handlers.operator.orders_pool_view import OperatorOrdersPoolViewHandler
+from staff_bot.handlers.operator.redispatch import RedispatchHandler
 from staff_bot.handlers.common.profile import ProfileHandler
 from staff_bot.handlers.common.help import HelpHandler
 
@@ -325,6 +326,7 @@ class StaffBot:
         manage_address_handler = ManageAddressHandler()
         recent_orders_handler = RecentOrdersHandler()
         operator_orders_pool_view_handler = OperatorOrdersPoolViewHandler()
+        redispatch_handler = RedispatchHandler()
 
         # Common handlers
         profile_handler = ProfileHandler()
@@ -371,6 +373,7 @@ class StaffBot:
             'create_order': create_order_handler,
             'manage_address': manage_address_handler,
             'recent_orders': recent_orders_handler,
+            'redispatch': redispatch_handler,
         }
         self._common_handlers = {
             'profile': profile_handler,
@@ -500,6 +503,8 @@ class StaffBot:
             CallbackQueryHandler(operator_orders_pool_view_handler.pool_pagination, pattern=r"^staff_op_pool_page_\d+$"),
             CallbackQueryHandler(manage_address_handler.show_addresses, pattern=r"^staff_op_addresses_\d+$"),
             CallbackQueryHandler(recent_orders_handler.show_recent_orders, pattern="^staff_recent_orders$"),
+            CallbackQueryHandler(redispatch_handler.show_failed_deliveries, pattern="^staff_redispatch_failed$"),
+            CallbackQueryHandler(redispatch_handler.redispatch_delivery, pattern=r"^staff_redispatch_do_\d+$"),
 
             # --- Common handlers ---
             CallbackQueryHandler(profile_handler.show_profile, pattern="^staff_profile$"),

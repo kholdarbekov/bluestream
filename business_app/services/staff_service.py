@@ -23,6 +23,7 @@ from business_app.utils.state_validators import (
     assert_delivery_person_for_status,
     assert_order_address_for_status,
     assert_order_creator_for_source,
+    assert_unassigned_for_pool_status,
 )
 from shared.enums import UserRole, UserStatus, OrderStatus, DeliveryStatus, PaymentMethod, UserType
 from shared.staff_constants import (
@@ -44,6 +45,15 @@ class StaffService:
         DeliveryStatus.PICKED_UP,
         DeliveryStatus.IN_TRANSIT,
         DeliveryStatus.ARRIVED,
+    )
+
+    # Statuses an unassigned delivery may be in while sitting in the pool waiting
+    # to be claimed. Only these can be accepted by a driver — accepting anything
+    # else (in-progress, delivered, failed, cancelled, returned) is invalid and
+    # must go through the admin/operator re-dispatch flow instead.
+    CLAIMABLE_DELIVERY_STATUSES = (
+        DeliveryStatus.SCHEDULED,
+        DeliveryStatus.PENDING,
     )
 
     @staticmethod
@@ -885,7 +895,22 @@ class StaffService:
         if not delivery:
             raise NotFoundError("Delivery not found", error_code="STAFF_DELIVERY_NOT_FOUND")
 
-        if delivery.delivery_person_id is not None:
+        # Only pool deliveries (scheduled/pending) are claimable. This guards
+        # against "accepting" a delivery that is already in progress, completed,
+        # or terminal (delivered/failed/cancelled/returned) — none of which
+        # should be silently reset to ASSIGNED.
+        if delivery.status not in StaffService.CLAIMABLE_DELIVERY_STATUSES:
+            raise ValidationError(
+                f"This delivery can no longer be accepted (status: {delivery.status.value})",
+                error_code="STAFF_DELIVERY_NOT_CLAIMABLE",
+            )
+
+        # A delivery already assigned to a *different* driver is taken. The same
+        # driver re-accepting their own still-claimable delivery (e.g. after a
+        # return-to-pool that left delivery_person_id populated) is allowed and
+        # idempotently re-confirms the assignment instead of being rejected
+        # against the driver themselves.
+        if delivery.delivery_person_id is not None and delivery.delivery_person_id != delivery_person_id:
             raise ValidationError(
                 "This delivery has already been accepted by another driver", error_code="STAFF_DELIVERY_ALREADY_TAKEN"
             )
@@ -997,6 +1022,132 @@ class StaffService:
         current_app.logger.info(f"Delivery {delivery_id} accepted by delivery person {delivery_person_id}")
 
         return delivery
+
+    @staticmethod
+    def return_delivery_to_pool(
+        delivery_id: int,
+        actor_id: int,
+        *,
+        reason: Optional[str] = None,
+        notes: Optional[str] = None,
+    ) -> Delivery:
+        """Return a delivery to the unassigned pool so it can be (re-)claimed.
+
+        This is the single supported way to move a delivery *back* toward the
+        pool and the foundation of the failed-delivery re-dispatch flow. It:
+
+        - clears the driver assignment (``delivery_person_id`` → None),
+        - resets the delivery status to SCHEDULED,
+        - restores the parent order to a pool-eligible status (CONFIRMED) when
+          it has moved past it (e.g. OUT_FOR_DELIVERY/RETURNED), so the delivery
+          actually surfaces in the pool (which requires the order to be in
+          CONFIRMED/PREPARING),
+        - records a DeliveryStatusHistory row attributed to ``actor_id``,
+        - resyncs the previous driver's active-delivery counters.
+
+        It enforces the invariant that a pool-status delivery never retains a
+        driver (``assert_unassigned_for_pool_status``).
+
+        Raises:
+            NotFoundError: If delivery not found.
+        """
+        delivery = Delivery.query.with_for_update().get(delivery_id)
+        if not delivery:
+            raise NotFoundError("Delivery not found", error_code="STAFF_DELIVERY_NOT_FOUND")
+
+        now = datetime.now(timezone.utc)
+        old_status = delivery.status
+        old_driver_id = delivery.delivery_person_id
+
+        delivery.delivery_person_id = None
+        delivery.status = DeliveryStatus.SCHEDULED
+        # Clear the stale failure reason so the next driver doesn't inherit it;
+        # delivery_attempts is intentionally preserved as the running counter.
+        delivery.failed_delivery_reason = None
+        delivery.updated_at = now
+
+        # Enforce the pool invariant on the row we just produced.
+        assert_unassigned_for_pool_status(delivery, DeliveryStatus.SCHEDULED)
+
+        # Make sure the order is pool-eligible. The pool only lists deliveries
+        # whose order is CONFIRMED/PREPARING; a failed/out-for-delivery order
+        # would keep the returned delivery hidden.
+        if delivery.order and delivery.order.status not in (OrderStatus.CONFIRMED, OrderStatus.PREPARING):
+            delivery.order.status = OrderStatus.CONFIRMED
+            delivery.order.updated_at = now
+
+        history = DeliveryStatusHistory(
+            delivery_id=delivery.id,
+            old_status=old_status,
+            new_status=DeliveryStatus.SCHEDULED,
+            changed_by=actor_id,
+            changed_at=now,
+            notes=notes or "Returned to delivery pool for re-dispatch",
+            reason=reason,
+        )
+        db.session.add(history)
+
+        # The previous driver lost a delivery — refresh their cached workload.
+        if old_driver_id:
+            StaffService.sync_active_delivery_counters([old_driver_id])
+
+        db.session.commit()
+
+        current_app.logger.info(
+            f"Delivery {delivery_id} returned to pool by user {actor_id} "
+            f"(was {old_status.value if old_status else None}, driver {old_driver_id})"
+        )
+
+        return delivery
+
+    @staticmethod
+    def redispatch_failed_delivery(
+        delivery_id: int,
+        actor_id: int,
+        *,
+        reason: Optional[str] = None,
+    ) -> Delivery:
+        """Re-dispatch a FAILED delivery by returning it to the pool.
+
+        Thin wrapper over ``return_delivery_to_pool`` that enforces the source
+        status. Shared entry point for the admin re-dispatch endpoint and the
+        operator staff-bot flow so the "only failed deliveries are
+        re-dispatchable" rule lives in one place.
+
+        Raises:
+            NotFoundError: If delivery not found.
+            ValidationError: If the delivery is not in FAILED status.
+        """
+        delivery = Delivery.query.get(delivery_id)
+        if not delivery:
+            raise NotFoundError("Delivery not found", error_code="STAFF_DELIVERY_NOT_FOUND")
+        if delivery.status != DeliveryStatus.FAILED:
+            raise ValidationError(
+                f"Only failed deliveries can be re-dispatched (current status: {delivery.status.value})",
+                error_code="STAFF_DELIVERY_NOT_REDISPATCHABLE",
+            )
+        return StaffService.return_delivery_to_pool(
+            delivery_id,
+            actor_id,
+            reason=reason,
+            notes="Re-dispatched from failed status",
+        )
+
+    @staticmethod
+    def get_failed_deliveries(limit: int = 25) -> List[Delivery]:
+        """List recent FAILED deliveries available for operator re-dispatch,
+        newest first."""
+        return (
+            Delivery.query.filter(Delivery.status == DeliveryStatus.FAILED)
+            .options(
+                joinedload(Delivery.order).joinedload(Order.order_items).joinedload(OrderItem.product),
+                joinedload(Delivery.order).joinedload(Order.delivery_address),
+                joinedload(Delivery.order).joinedload(Order.user),
+            )
+            .order_by(Delivery.updated_at.desc())
+            .limit(limit)
+            .all()
+        )
 
     @staticmethod
     def update_delivery_status(

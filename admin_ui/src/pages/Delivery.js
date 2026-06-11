@@ -35,7 +35,8 @@ import {
   CheckCircleOutlined,
   ExclamationCircleOutlined,
   ExportOutlined,
-  CalendarOutlined
+  CalendarOutlined,
+  RedoOutlined
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
@@ -120,6 +121,22 @@ const Delivery = () => {
 
     onError: (error) => {
       message.error(error?.response?.data?.message || t('ui.delivery.update_failed'));
+    },
+  });
+
+  // Re-dispatch a failed delivery back to the pool
+  const redispatchDeliveryMutation = useMutation({
+    mutationFn: (deliveryId) => adminService.redispatchDelivery(deliveryId),
+
+    onSuccess: (response) => {
+      message.success(response?.message || t('ui.delivery.redispatch_success'));
+      queryClient.invalidateQueries({
+        queryKey: ['deliveries'],
+      });
+    },
+
+    onError: (error) => {
+      message.error(error?.response?.data?.message || t('ui.delivery.redispatch_failed'));
     },
   });
 
@@ -276,7 +293,19 @@ const Delivery = () => {
                 icon: <UserOutlined />,
                 // eslint-disable-next-line no-use-before-define
                 onClick: () => handleAssignDelivery(record)
-              }
+              },
+              // Re-dispatch is only meaningful for a failed delivery: it clears
+              // the driver, returns it to the pool, and restores the order so a
+              // driver can re-claim it.
+              ...(record.status === 'failed'
+                ? [{
+                    key: 'redispatch',
+                    label: t('ui.delivery.redispatch_delivery'),
+                    icon: <RedoOutlined />,
+                    // eslint-disable-next-line no-use-before-define
+                    onClick: () => handleRedispatchDelivery(record)
+                  }]
+                : [])
             ]
           }}
           trigger={['click']}
@@ -309,6 +338,18 @@ const Delivery = () => {
 
   const handleAssignDelivery = (delivery) => {
     setAssignmentTarget(delivery);
+  };
+
+  const handleRedispatchDelivery = (delivery) => {
+    Modal.confirm({
+      title: t('ui.delivery.redispatch_confirm_title'),
+      content: t('ui.delivery.redispatch_confirm_message'),
+      okText: t('ui.delivery.redispatch_delivery'),
+      cancelText: t('common:cancel'),
+      onOk() {
+        redispatchDeliveryMutation.mutate(delivery.id);
+      }
+    });
   };
 
   const handleUpdateSubmit = (values) => {

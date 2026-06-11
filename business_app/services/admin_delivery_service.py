@@ -160,6 +160,20 @@ class AdminDeliveryService:
         return AdminDeliveryService.serialize_delivery(delivery)
 
     @staticmethod
+    def redispatch_delivery(delivery_id: int, actor_id: int, *, reason: Optional[str] = None) -> Dict[str, Any]:
+        """Re-dispatch a failed delivery back to the unassigned pool (admin panel
+        entry point). Delegates the status check + return-to-pool to
+        StaffService so the rule lives in a single place, then returns the
+        refreshed serialized delivery for the admin UI."""
+        StaffService.redispatch_failed_delivery(delivery_id, actor_id, reason=reason)
+        delivery = Delivery.query.options(
+            joinedload(Delivery.order),
+            joinedload(Delivery.status_history).joinedload(DeliveryStatusHistory.changed_by_user),
+            joinedload(Delivery.delivery_person),
+        ).get(delivery_id)
+        return AdminDeliveryService.serialize_delivery(delivery)
+
+    @staticmethod
     def reassign_delivery(delivery_id: int, new_person_id: int, actor_id: int) -> Delivery:
         """Reassign a delivery to a different delivery person."""
         delivery = Delivery.query.with_for_update().get(delivery_id)
@@ -189,12 +203,18 @@ class AdminDeliveryService:
                 )
 
         now = datetime.now(UTC)
+        old_status = delivery.status
         delivery.delivery_person_id = new_person_id
+        # A pool-status delivery (scheduled/pending) gains a driver here, so it
+        # is no longer "in the pool" — promote it to ASSIGNED to keep the
+        # (status, driver) pair consistent and avoid stranding the row.
+        if old_status in (DeliveryStatus.SCHEDULED, DeliveryStatus.PENDING):
+            delivery.status = DeliveryStatus.ASSIGNED
         delivery.updated_at = now
 
         history = DeliveryStatusHistory(
             delivery_id=delivery.id,
-            old_status=delivery.status,
+            old_status=old_status,
             new_status=delivery.status,
             changed_by=actor_id,
             changed_at=now,
@@ -346,11 +366,20 @@ class AdminDeliveryService:
 
         now = datetime.now(UTC)
         old_status = delivery.status
+        previous_driver_id = delivery.delivery_person_id
         delivery.status = new_status
         delivery.updated_at = now
 
+        # Moving a delivery back toward the pool (returned / scheduled / pending)
+        # must release its driver, otherwise it becomes a stranded row: hidden
+        # from the driver's active list (status filter) and from the pool
+        # (unassigned filter). Mirrors StaffService.return_delivery_to_pool and
+        # the assert_unassigned_for_pool_status invariant.
+        if new_status in {DeliveryStatus.RETURNED, DeliveryStatus.SCHEDULED, DeliveryStatus.PENDING}:
+            delivery.delivery_person_id = None
+
         if new_status == DeliveryStatus.RETURNED:
-            AdminDeliveryService._release_driver_workload(delivery)
+            AdminDeliveryService._release_driver_workload(delivery, driver_id=previous_driver_id)
             if delivery.order:
                 delivery.order.status = OrderStatus.RETURNED
                 delivery.order.updated_at = now
@@ -376,10 +405,14 @@ class AdminDeliveryService:
         db.session.commit()
 
     @staticmethod
-    def _release_driver_workload(delivery: Delivery) -> None:
-        if not delivery.delivery_person_id:
+    def _release_driver_workload(delivery: Delivery, *, driver_id: Optional[int] = None) -> None:
+        # The caller may have already cleared delivery.delivery_person_id (when
+        # returning the delivery toward the pool), so accept the previous driver
+        # id explicitly and fall back to the live value otherwise.
+        target = driver_id if driver_id is not None else delivery.delivery_person_id
+        if not target:
             return
-        StaffService.sync_active_delivery_counters([delivery.delivery_person_id])
+        StaffService.sync_active_delivery_counters([target])
 
     @staticmethod
     def _build_filtered_query(

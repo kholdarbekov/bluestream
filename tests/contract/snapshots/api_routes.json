@@ -469,6 +469,13 @@
     "rule": "/api/v1/admin/deliveries/<int:delivery_id>"
   },
   {
+    "endpoint": "admin.redispatch_admin_delivery",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/deliveries/<int:delivery_id>/redispatch"
+  },
+  {
     "endpoint": "admin.get_delivery_personnel",
     "methods": [
       "GET"
@@ -3242,6 +3249,13 @@
     "rule": "/api/v1/staff/delivery/active"
   },
   {
+    "endpoint": "staff.get_failed_deliveries",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/delivery/failed"
+  },
+  {
     "endpoint": "staff.get_delivery_history",
     "methods": [
       "GET"
@@ -3268,6 +3282,13 @@
       "GET"
     ],
     "rule": "/api/v1/staff/delivery/pool"
+  },
+  {
+    "endpoint": "staff.redispatch_failed_delivery",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/delivery/redispatch/<int:delivery_id>"
   },
   {
     "endpoint": "staff.get_delivery_stats",

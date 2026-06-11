@@ -560,6 +560,11 @@ class AdminService {
     return response.data;
   }
 
+  async redispatchDelivery(deliveryId) {
+    const response = await api.post(`/admin/deliveries/${deliveryId}/redispatch`, {});
+    return response.data;
+  }
+
   // Delivery Time Slot management
   async getTimeSlots(params = {}) {
     const response = await api.get('/admin/delivery/time-slots', { params });

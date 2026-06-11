@@ -64,6 +64,15 @@ pg_pool_in_use = Gauge(
     multiprocess_mode="liveall",
 )
 
+# Data-integrity gauge sampled by the delivery monitoring Celery task. A
+# "stranded" delivery is in a pool status (scheduled/pending) yet still has a
+# driver assigned — invisible to both the driver active list and the pool.
+stranded_deliveries = Gauge(
+    "stranded_deliveries",
+    "Deliveries in a pool status (scheduled/pending) that still have a driver assigned.",
+    multiprocess_mode="liveall",
+)
+
 
 _flask_exporter: Optional[PrometheusMetrics] = None
 
@@ -143,6 +152,15 @@ def observe_pending_payment_age(age_seconds: float) -> None:
     if age_seconds < 0:
         return
     payments_pending_age_seconds.observe(age_seconds)
+
+
+def set_stranded_deliveries(count: int) -> None:
+    """Set the current stranded-delivery count. Called by the delivery
+    monitoring Celery task. Best-effort: metrics must never break the task."""
+    try:
+        stranded_deliveries.set(max(int(count), 0))
+    except Exception:  # pragma: no cover — metrics are best-effort
+        pass
 
 
 def multiproc_collect_registry() -> CollectorRegistry:

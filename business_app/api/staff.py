@@ -376,6 +376,57 @@ def get_active_deliveries():
     )
 
 
+@staff_bp.route("/delivery/failed", methods=["GET"])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles("operator")
+def get_failed_deliveries():
+    """Operator: list recent FAILED deliveries available for re-dispatch."""
+    deliveries = StaffService.get_failed_deliveries()
+
+    items = []
+    for delivery in deliveries:
+        order = delivery.order
+        address = order.delivery_address if order else None
+        items.append(
+            {
+                "delivery_id": delivery.id,
+                "order_id": order.id if order else None,
+                "order_number": order.order_number if order else None,
+                "status": delivery.status.value if hasattr(delivery.status, "value") else delivery.status,
+                "customer_name": (
+                    f"{order.user.first_name} {order.user.last_name or ''}".strip() if order and order.user else ""
+                ),
+                "customer_phone": order.user.phone if order and order.user else "",
+                "address": get_address_line(address),
+                "total_amount": float(order.total_amount) if order and order.total_amount else 0,
+                "failed_delivery_reason": delivery.failed_delivery_reason,
+                "delivery_attempts": delivery.delivery_attempts or 0,
+            }
+        )
+
+    return success_response({"items": items, "total": len(items)})
+
+
+@staff_bp.route("/delivery/redispatch/<int:delivery_id>", methods=["POST"])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles("operator")
+def redispatch_failed_delivery(delivery_id):
+    """Operator: re-dispatch a FAILED delivery back to the unassigned pool."""
+    actor_id = int(get_jwt_identity())
+    payload = request.get_json(silent=True) or {}
+    reason = (payload.get("reason") or "").strip() or None
+    delivery = StaffService.redispatch_failed_delivery(delivery_id, actor_id, reason=reason)
+    return success_response(
+        {
+            "delivery_id": delivery.id,
+            "status": delivery.status.value if hasattr(delivery.status, "value") else delivery.status,
+            "message": "Delivery re-dispatched to pool",
+        }
+    )
+
+
 @staff_bp.route("/delivery/optimize-route", methods=["POST"])
 @handle_api_exception
 @jwt_required()

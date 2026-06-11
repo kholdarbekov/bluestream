@@ -6588,6 +6588,27 @@ ADMIN_UI_BACKFILL_TRANSLATIONS = {
     'ui.delivery.cancelled_at': _ui_tr('Cancelled at', 'Bekor qilingan vaqt', 'Отменено в'),
     'ui.delivery.close': _ui_tr('Close', 'Yopish', 'Закрыть'),
     'ui.delivery.completion_rate': _ui_tr('Completion Rate', 'Bajarish darajasi', 'Доля выполненных'),
+    'ui.delivery.redispatch_delivery': _ui_tr('Re-dispatch', 'Qayta yuborish', 'Переотправить'),
+    'ui.delivery.redispatch_confirm_title': _ui_tr(
+        'Re-dispatch this delivery?',
+        'Yetkazib berishni qayta yuborilsinmi?',
+        'Переотправить эту доставку?',
+    ),
+    'ui.delivery.redispatch_confirm_message': _ui_tr(
+        'This returns the failed delivery to the pool (clears the driver) so it can be re-claimed.',
+        'Bu muvaffaqiyatsiz yetkazib berishni hovuzga qaytaradi (haydovchini bo‘shatadi), shunda uni qayta olish mumkin.',
+        'Доставка вернётся в пул (водитель будет снят), чтобы её можно было взять заново.',
+    ),
+    'ui.delivery.redispatch_success': _ui_tr(
+        'Delivery re-dispatched to pool',
+        'Yetkazib berish hovuzga qayta yuborildi',
+        'Доставка переотправлена в пул',
+    ),
+    'ui.delivery.redispatch_failed': _ui_tr(
+        'Failed to re-dispatch delivery',
+        'Yetkazib berishni qayta yuborib bo‘lmadi',
+        'Не удалось переотправить доставку',
+    ),
     'ui.delivery.create_delivery_coming_soon': _ui_tr('Create delivery — coming soon', 'Yetkazib berish yaratish — tez orada', 'Создание доставки — скоро'),
     'ui.delivery.current_status': _ui_tr('Current Status', 'Joriy holat', 'Текущий статус'),
     'ui.delivery.customer': _ui_tr('Customer', 'Mijoz', 'Клиент'),

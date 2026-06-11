@@ -49,6 +49,19 @@ DELIVERY_REQUIRES_PERSON_STATES: FrozenSet[DeliveryStatus] = frozenset(
 )
 
 
+# Delivery: while unclaimed in the pool (scheduled/pending) it must NOT retain a
+# driver. The inverse of DELIVERY_REQUIRES_PERSON_STATES. A scheduled/pending
+# delivery that still has a delivery_person_id is stranded — hidden from both
+# the driver's active list (status filter excludes scheduled/pending) and the
+# pool (which only lists unassigned rows). See the delivery re-dispatch flow.
+DELIVERY_POOL_UNASSIGNED_STATES: FrozenSet[DeliveryStatus] = frozenset(
+    {
+        DeliveryStatus.SCHEDULED,
+        DeliveryStatus.PENDING,
+    }
+)
+
+
 def _coerce_order_status(value) -> Optional[OrderStatus]:
     if value is None or isinstance(value, OrderStatus):
         return value
@@ -146,6 +159,32 @@ def assert_delivery_person_for_status(
         current = _coerce_delivery_status(getattr(delivery, "status", None))
         raise InvalidStateTransition(
             f"Delivery cannot transition to {target.value} without a delivery person",
+            entity="delivery",
+            entity_id=getattr(delivery, "id", None),
+            from_state=current.value if current else None,
+            to_state=target.value,
+            missing_field="delivery_person_id",
+        )
+
+
+def assert_unassigned_for_pool_status(
+    delivery,
+    target_status: DeliveryStatus,
+) -> None:
+    """Reject leaving a delivery in a pool status (scheduled/pending) while it
+    still has a delivery person. Such rows are stranded — invisible to both the
+    driver's active list and the unassigned pool. Inverse of
+    ``assert_delivery_person_for_status``. Callers mutate the delivery (clear the
+    driver / set the status) before calling."""
+    target = _coerce_delivery_status(target_status)
+    if target not in DELIVERY_POOL_UNASSIGNED_STATES:
+        return
+
+    if getattr(delivery, "delivery_person_id", None) is not None:
+        current = _coerce_delivery_status(getattr(delivery, "status", None))
+        raise InvalidStateTransition(
+            f"Delivery cannot rest in {target.value} while assigned to a driver; "
+            "return it to the pool (clear the driver) instead",
             entity="delivery",
             entity_id=getattr(delivery, "id", None),
             from_state=current.value if current else None,

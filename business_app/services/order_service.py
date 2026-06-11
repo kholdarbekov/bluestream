@@ -28,6 +28,7 @@ from shared.enums import (  # noqa: E402
 )
 from shared.status_transitions import is_valid_order_transition  # noqa: E402
 from business_app.models.order import OrderStatusHistory  # noqa: E402
+from business_app.models.delivery import DeliveryStatusHistory  # noqa: E402
 from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity  # noqa: E402
 from business_app.utils.state_validators import (  # noqa: E402
     assert_order_address_for_status,
@@ -939,30 +940,15 @@ class OrderService:
             except ValueError:
                 pass
 
-        delivery_status = None
-        if order.delivery and getattr(order.delivery, "status", None) is not None:
-            delivery_status = order.delivery.status
-            if isinstance(delivery_status, str):
-                try:
-                    delivery_status = DeliveryStatus(delivery_status)
-                except ValueError:
-                    pass
-
-        if delivery_status in [
-            DeliveryStatus.PICKED_UP,
-            DeliveryStatus.IN_TRANSIT,
-            DeliveryStatus.ARRIVED,
-        ]:
-            raise ConflictError("Order cannot be cancelled while delivery is in transit")
-
         actor_id = actor_user_id if actor_user_id is not None else user_id
 
-        # Check if order can be cancelled
+        # An order can be cancelled at any stage *except* once it is delivered
+        # (or already cancelled). In-transit / out-for-delivery orders are now
+        # cancellable too — the associated delivery is cancelled in cascade by
+        # update_order_status -> _handle_status_change_actions, regardless of
+        # how far the delivery had progressed.
         if current_status in [OrderStatus.DELIVERED, OrderStatus.CANCELLED]:
             raise ConflictError("Order cannot be cancelled")
-
-        if current_status == OrderStatus.OUT_FOR_DELIVERY:
-            raise ConflictError("Order is out for delivery and cannot be cancelled")
 
         # Determine if stock was already deducted from the database
         # For non-cash orders: stock is deducted on CONFIRMED
@@ -1022,16 +1008,9 @@ class OrderService:
             payment_service = PaymentService()
             payment_service.process_refund(order.payment.id, order.total_amount, reason)
 
-        # Cancel delivery if it is still awaiting route execution
-        if order.delivery and delivery_status in [
-            DeliveryStatus.SCHEDULED,
-            DeliveryStatus.PENDING,
-            DeliveryStatus.ASSIGNED,
-        ]:
-            from .delivery_service import DeliveryService
-
-            delivery_service = DeliveryService()
-            delivery_service.cancel_delivery(order.delivery.id, reason)
+        # Note: the delivery is cancelled in cascade inside update_order_status
+        # (_handle_status_change_actions, CANCELLED branch) above, so every
+        # order-cancel path — including the admin status dropdown — cancels it.
 
         return order
 
@@ -1636,8 +1615,74 @@ class OrderService:
                 )
                 released_reserved_prepayment = True
 
-            if commit and (payment_synced or released_reserved_prepayment):
+            # Cascade an order cancellation onto its delivery so a cancelled
+            # order never leaves a live/scheduled delivery behind. Centralised
+            # here (not only in cancel_order) so EVERY path that moves an order
+            # to CANCELLED — including the admin status dropdown's direct
+            # update_order_status call — cancels the delivery. One-directional:
+            # this never changes the order status.
+            delivery_cancelled = False
+            if new_status == OrderStatus.CANCELLED:
+                delivery_cancelled = self._cancel_delivery_for_cancelled_order(order)
+
+            if commit and (payment_synced or released_reserved_prepayment or delivery_cancelled):
                 db.session.commit()
+
+    def _cancel_delivery_for_cancelled_order(self, order: Order) -> bool:
+        """Cascade an order cancellation onto its delivery.
+
+        Cancels any non-terminal delivery (scheduled → arrived) so a cancelled
+        order never leaves a live/scheduled delivery behind, and releases the
+        assigned driver's active-workload counter. One-directional: it sets the
+        delivery to CANCELLED but never touches the order status (the order is
+        already being cancelled by the caller).
+
+        Returns True if a delivery was cancelled (so the caller commits).
+        """
+        delivery = getattr(order, "delivery", None)
+        if delivery is None:
+            return False
+
+        status = delivery.status
+        if isinstance(status, str):
+            try:
+                status = DeliveryStatus(status)
+            except ValueError:
+                status = None
+
+        terminal = {
+            DeliveryStatus.DELIVERED,
+            DeliveryStatus.CANCELLED,
+            DeliveryStatus.FAILED,
+            DeliveryStatus.RETURNED,
+        }
+        if status in terminal:
+            return False
+
+        now = datetime.now(timezone.utc)
+        old_status = delivery.status
+        driver_id = delivery.delivery_person_id
+        delivery.status = DeliveryStatus.CANCELLED
+        delivery.updated_at = now
+
+        db.session.add(
+            DeliveryStatusHistory(
+                delivery_id=delivery.id,
+                old_status=old_status,
+                new_status=DeliveryStatus.CANCELLED,
+                changed_by=getattr(order, "updated_by", None),
+                changed_at=now,
+                notes="Delivery cancelled because the order was cancelled",
+            )
+        )
+
+        if driver_id:
+            from business_app.services.staff_service import StaffService
+
+            StaffService.sync_active_delivery_counters([driver_id])
+
+        logger.info(f"Delivery {delivery.id} cancelled in cascade from order {order.id} cancellation")
+        return True
 
     def _sync_payment_status_for_terminal_order_state(self, order: Order, new_status: OrderStatus) -> bool:
         """Cancel non-settled payments when the order reaches a terminal non-delivered state."""

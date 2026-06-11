@@ -1942,13 +1942,25 @@ def update_order_status(order_id):
         order_service = OrderService()
 
         try:
-            order = order_service.update_order_status(
-                order_id=order_id,
-                new_status=order_status,
-                updated_by=current_user_id,
-                notes=notes,
-                bottles_returned=bottles_returned,
-            )
+            if order_status == OrderStatus.CANCELLED:
+                # Route cancellation through cancel_order so the FULL cascade
+                # runs (stock restoration, inventory-reservation release,
+                # payment refund, corporate prepayment release, and delivery
+                # cancellation) — not just the bare status flip that
+                # update_order_status performs.
+                order = order_service.cancel_order(
+                    order_id=order_id,
+                    actor_user_id=current_user_id,
+                    reason=notes or None,
+                )
+            else:
+                order = order_service.update_order_status(
+                    order_id=order_id,
+                    new_status=order_status,
+                    updated_by=current_user_id,
+                    notes=notes,
+                    bottles_returned=bottles_returned,
+                )
 
             return success_response(
                 data={"order": serialize_order_admin(order)}, message="Order status updated successfully"

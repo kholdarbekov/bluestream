@@ -118,8 +118,11 @@ class TestOrderService:
         )
         release_for_order.assert_called_once()
 
-    def test_cancel_order_rejects_when_delivery_in_transit(self, order_service, sample_order, sample_user, db):
-        sample_order.status = OrderStatus.CONFIRMED
+    def test_cancel_order_now_cancels_in_transit_delivery(self, order_service, sample_order, sample_user, db, monkeypatch):
+        """Orders are cancellable at any stage except delivered; an in-transit
+        delivery is now cancelled in cascade instead of blocking the cancel."""
+        sample_order.status = OrderStatus.OUT_FOR_DELIVERY
+        sample_order.payment_method = PaymentMethod.CASH
         delivery = Delivery(
             order_id=sample_order.id,
             status=DeliveryStatus.IN_TRANSIT,
@@ -128,9 +131,57 @@ class TestOrderService:
         )
         db.session.add(delivery)
         db.session.commit()
+        monkeypatch.setattr(
+            order_service.inventory_service, "release_reservations", lambda *_a, **_k: {"success": True}
+        )
 
-        with pytest.raises(ConflictError, match="in transit"):
-            order_service.cancel_order(sample_order.id, user_id=sample_user.id, reason="Customer request")
+        with patch("business_app.services.corporate_contract_service.CorporateContractService.release_for_order"):
+            with patch(
+                "business_app.services.cash_collection_service.CashCollectionService.release_reserved_prepayment_for_order"
+            ):
+                cancelled = order_service.cancel_order(
+                    sample_order.id, user_id=sample_user.id, reason="Customer request"
+                )
+
+        db.session.refresh(sample_order)
+        db.session.refresh(delivery)
+        assert cancelled.status == OrderStatus.CANCELLED
+        assert delivery.status == DeliveryStatus.CANCELLED
+
+    def test_cancel_order_rejects_delivered_order(self, order_service, sample_order, sample_user, db):
+        """A delivered order is the one state that can never be cancelled."""
+        sample_order.status = OrderStatus.DELIVERED
+        db.session.commit()
+        with pytest.raises(ConflictError):
+            order_service.cancel_order(sample_order.id, user_id=sample_user.id, reason="too late")
+
+    def test_update_order_status_to_cancelled_cancels_delivery(self, order_service, sample_order, sample_user, db):
+        """The admin 'change status -> cancelled' path goes through
+        update_order_status directly (not cancel_order); it must still cancel the
+        linked delivery rather than leaving it scheduled. Regression for the
+        reported bug."""
+        sample_order.status = OrderStatus.CONFIRMED
+        sample_order.payment_method = PaymentMethod.PAYME
+        delivery = Delivery(
+            order_id=sample_order.id,
+            status=DeliveryStatus.SCHEDULED,
+            scheduled_date=datetime.now(UTC),
+            scheduled_time_slot="09:00-12:00",
+        )
+        db.session.add(delivery)
+        db.session.commit()
+
+        order_service.update_order_status(
+            order_id=sample_order.id,
+            new_status=OrderStatus.CANCELLED,
+            updated_by=sample_user.id,
+            notes="Cancelled via admin status dropdown",
+        )
+
+        db.session.refresh(sample_order)
+        db.session.refresh(delivery)
+        assert sample_order.status == OrderStatus.CANCELLED
+        assert delivery.status == DeliveryStatus.CANCELLED
 
     def test_cancel_order_cancels_pending_payment(self, order_service, sample_order, sample_payment, sample_user, db, monkeypatch):
         sample_order.payment_method = PaymentMethod.PAYME

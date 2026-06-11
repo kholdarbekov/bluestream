@@ -10,11 +10,13 @@ Two Celery beat tasks ship here:
   - ``backup_uploads_task`` — runs weekly (Sunday). Tars+gzips the uploads
     directory (paywall: ``UPLOAD_FOLDER`` config) and ships the same way.
 
-Retention is enforced after each run: anything older than
+Retention is enforced after each run. Local: anything older than
 ``BACKUP_LOCAL_RETENTION_DAYS`` (default 14) is deleted from the local
-backup dir. Offsite retention is the cloud bucket's own lifecycle policy
-(rclone doesn't touch remote files for us — by design, so a compromised
-host can't shred the offsite copies).
+backup dir. Offsite: pruned with a longer window via ``rclone delete
+--min-age`` — ``BACKUP_OFFSITE_RETENTION_DAYS_DB`` (default 90) and
+``BACKUP_OFFSITE_RETENTION_DAYS_UPLOADS`` (default 365) — because Google
+Drive has no lifecycle policy of its own. Offsite prune is best-effort:
+a failure is logged but never fails the backup.
 
 All operations log structured fields via ``audit_logger`` so each backup
 run produces an auditable record. Failures raise so Celery retries kick in
@@ -62,6 +64,21 @@ def _retention_days() -> int:
     return int(
         current_app.config.get("BACKUP_LOCAL_RETENTION_DAYS") or os.environ.get("BACKUP_LOCAL_RETENTION_DAYS", "14")
     )
+
+
+def _offsite_retention_days(kind: str) -> int:
+    """Offsite retention window (days) for a backup `kind` ('db' or 'uploads').
+
+    Offsite is kept LONGER than local (``BACKUP_LOCAL_RETENTION_DAYS``, default
+    14) because Google Drive has no lifecycle policy of its own — we prune it
+    explicitly. Defaults: db=90, uploads=365. Anything that isn't 'uploads'
+    uses the db window.
+    """
+    if kind == "uploads":
+        key, default = "BACKUP_OFFSITE_RETENTION_DAYS_UPLOADS", "365"
+    else:
+        key, default = "BACKUP_OFFSITE_RETENTION_DAYS_DB", "90"
+    return int(current_app.config.get(key) or os.environ.get(key, default))
 
 
 def _rclone_remote() -> Optional[str]:
@@ -150,6 +167,53 @@ def _enforce_local_retention(directory: Path, prefix: str, days: int) -> int:
     return deleted
 
 
+def _enforce_offsite_retention(remote_subdir: str, prefix: str, days: int) -> None:
+    """Delete offsite backups under ``<remote>/<remote_subdir>`` older than `days`.
+
+    The offsite analogue of :func:`_enforce_local_retention`. Google Drive has
+    no lifecycle policy, so we prune it ourselves with ``rclone delete
+    --min-age``, scoped to ``<prefix>*`` so a misconfigured remote pointed at a
+    shared folder can't delete unrelated files.
+
+    NON-FATAL by design: the backup upload already succeeded by the time this
+    runs, so a failed prune is logged but never raises (it must not trigger a
+    Celery retry of an otherwise-good backup). This differs from
+    :func:`_push_offsite`, where an upload failure IS fatal.
+    """
+    remote = _rclone_remote()
+    if not remote:
+        return
+    if not shutil.which("rclone"):
+        logger.warning("rclone not on PATH; skipping offsite retention sweep")
+        return
+
+    remote_target = f"{remote.rstrip('/')}/{remote_subdir.strip('/')}"
+    try:
+        result = _shell_run(
+            [
+                "rclone",
+                "delete",
+                remote_target,
+                "--min-age",
+                f"{days}d",
+                "--include",
+                f"{prefix}*",
+            ],
+            check=False,
+        )
+        if result.returncode != 0:
+            logger.warning(
+                "Offsite retention sweep on %s exited %s: %s",
+                remote_target,
+                result.returncode,
+                (result.stderr or "")[:1000],
+            )
+        else:
+            logger.info("Offsite retention sweep complete on %s (>%dd)", remote_target, days)
+    except Exception:  # noqa: BLE001 — prune failure must never fail the backup
+        logger.exception("Offsite retention sweep failed for %s", remote_target)
+
+
 # ---- Database backup -------------------------------------------------------
 
 
@@ -226,8 +290,10 @@ def backup_database_task(self):
         # Offsite ship
         remote_path = _push_offsite(target, remote_subdir="db")
 
-        # Retention sweep — local only; offsite is bucket-policy controlled
+        # Retention sweeps — local filesystem + offsite remote. Drive has no
+        # lifecycle policy, so we prune it explicitly with a longer window.
         deleted = _enforce_local_retention(backup_dir, prefix="db-", days=_retention_days())
+        _enforce_offsite_retention(remote_subdir="db", prefix="db-", days=_offsite_retention_days("db"))
 
         audit_logger.log_event(
             event_type=AuditEventType.SYSTEM_MAINTENANCE,
@@ -300,6 +366,7 @@ def backup_uploads_task(self):
         remote_path = _push_offsite(target, remote_subdir="uploads")
 
         deleted = _enforce_local_retention(backup_dir, prefix="uploads-", days=_retention_days())
+        _enforce_offsite_retention(remote_subdir="uploads", prefix="uploads-", days=_offsite_retention_days("uploads"))
 
         audit_logger.log_event(
             event_type=AuditEventType.SYSTEM_MAINTENANCE,

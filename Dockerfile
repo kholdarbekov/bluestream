@@ -95,6 +95,16 @@ RUN install -d /usr/share/postgresql-common/pgdg \
     postgresql-client-17 \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# rclone for offsite backup shipping + retention (backup_tasks.py).
+# - ca-certificates: required at runtime for rclone's HTTPS calls to Google Drive.
+# - unzip: required by rclone's official install script.
+# install.sh auto-detects the CPU arch (arm64 on the Raspberry Pi prod host).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates unzip \
+    && curl -fsSL https://rclone.org/install.sh | bash \
+    && rclone version \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 # Copy business app code (needed for tasks)
 COPY business_app/ ./business_app/
 

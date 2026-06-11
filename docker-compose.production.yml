@@ -147,6 +147,13 @@ services:
       - CELERY_WORKER_CONCURRENCY=8
       - CELERY_WORKER_MAX_MEMORY_PER_CHILD=500000
       - CELERY_WORKER_MAX_TASKS_PER_CHILD=1000
+      # GDRIVE-BACKUP: rclone reads its Google Drive OAuth token from this
+      # Compose file-secret (declared in the top-level secrets: block). Set
+      # BACKUP_RCLONE_REMOTE + the offsite retention vars in the Pi's .env.
+      # See docs/operations/google-drive-backups.md.
+      - RCLONE_CONFIG=/run/secrets/rclone_conf
+    secrets:
+      - rclone_conf
     deploy:
       resources:
         limits:
@@ -534,3 +541,7 @@ secrets:
   # in Postgres with this password.
   postgres_monitoring_password:
     file: ./secrets/postgres_monitoring_password
+  # GDRIVE-BACKUP: rclone OAuth token for offsite copies to Google Drive.
+  # Generate per docs/operations/google-drive-backups.md; git-ignored.
+  rclone_conf:
+    file: ./secrets/rclone.conf

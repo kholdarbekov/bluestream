@@ -657,6 +657,21 @@ def search_customers_for_cod_collection():
     return success_response({"items": items, "total": len(items)})
 
 
+@staff_bp.route("/customers/with-open-cod", methods=["GET"])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles("delivery_driver", "operator")
+def list_customers_with_open_cod():
+    """List customers with outstanding COD debt for staff collection flows."""
+    page = request.args.get("page", 1, type=int) or 1
+    per_page = request.args.get("per_page", 10, type=int) or 10
+
+    from business_app.services.cash_collection_service import CashCollectionService
+
+    result = CashCollectionService().paginate_users_with_open_cod_debts(page=page, per_page=per_page)
+    return success_response(result)
+
+
 # --- Operator Operations ---
 
 

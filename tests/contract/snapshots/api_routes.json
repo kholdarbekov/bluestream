@@ -3221,6 +3221,13 @@
     "rule": "/api/v1/staff/customers/search"
   },
   {
+    "endpoint": "staff.list_customers_with_open_cod",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/customers/with-open-cod"
+  },
+  {
     "endpoint": "staff.update_location",
     "methods": [
       "POST"

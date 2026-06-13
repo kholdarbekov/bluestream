@@ -556,6 +556,15 @@ class StaffAPIClient:
             },
         )
 
+    async def get_cod_debtors(self, token: str, *, page: int = 1, per_page: int = 10) -> APIResponse:
+        """List customers with outstanding COD debt (paginated)."""
+        return await self._make_request(
+            'GET',
+            '/api/v1/staff/customers/with-open-cod',
+            token=token,
+            params={'page': page, 'per_page': per_page},
+        )
+
     async def record_cash_collection(self, token: str, payload: Dict) -> APIResponse:
         """Record a COD cash collection event."""
         return await self._make_request(

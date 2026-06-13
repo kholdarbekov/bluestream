@@ -12,15 +12,15 @@ from staff_bot.keyboards.common import CommonKeyboards
 from staff_bot.keyboards.delivery import DeliveryKeyboards
 from staff_bot.permissions import require_auth, require_delivery_driver
 from staff_bot.utils import flow_state
-from staff_bot.utils.formatters import escape_html, format_currency, format_user_card
-from staff_bot.utils.search import detect_search_type, normalize_phone_query as _digits_only
+from staff_bot.utils.formatters import escape_html, format_currency
 
 logger = logging.getLogger(__name__)
 
-COLLECTION_SEARCH_INPUT = 103
 COLLECTION_AMOUNT_INPUT = 104
 COLLECTION_NOTE_INPUT = 105
 COLLECTION_OVERPAYMENT_CONFIRM = 106
+
+COD_DEBTORS_PER_PAGE = 10
 
 
 class CashCollectionHandler(BaseHandler):
@@ -68,89 +68,77 @@ class CashCollectionHandler(BaseHandler):
 
     @require_auth
     @require_delivery_driver
-    async def start_collection_search(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Prompt the driver to search for a customer with open COD debt."""
+    async def show_debtor_list(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = None
+    ):
+        """List customers with outstanding COD debt, paginated."""
         language = await self._get_language(update, context)
+        # Browsing the list awaits no text input — clear any pending flow so
+        # the catch-all text router doesn't swallow menu taps. Done before the
+        # token lookup so the flag is cleared even when that bails out below.
         await self._clear_flow(context, update)
-        context.user_data['pending_cod_collection_flow'] = {'awaiting_search_input': True}
-        await flow_state.mark_active(
-            update.effective_user.id, 'pending_cod_collection_flow'
-        )
-
-        text = i18n.get('staff.delivery.cod_collection_search_prompt', language)
-        if update.callback_query:
-            await update.callback_query.answer()
-            await update.callback_query.edit_message_text(text, parse_mode='HTML')
-        else:
-            await update.message.reply_text(text, parse_mode='HTML')
-        return COLLECTION_SEARCH_INPUT
-
-    @require_auth
-    @require_delivery_driver
-    async def receive_collection_search(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Search customers with open COD debt for standalone collection."""
-        language = await self._get_language(update, context)
         token = await self._get_auth_token(update, context)
         if not token:
             await self._handle_auth_error(update, language)
-            return ConversationHandler.END
+            return
 
-        query_text = update.message.text.strip()
-        if len(query_text) < 2:
-            await update.message.reply_text(
-                i18n.get('staff.operator.search_too_short', language),
-                parse_mode='HTML',
-            )
-            return COLLECTION_SEARCH_INPUT
+        if page is None:
+            page = 1
+        context.user_data['cod_list_page'] = page
 
         try:
-            search_type = detect_search_type(query_text)
-            # When the input looks like a phone number, strip formatting so a
-            # query like "+998 90 123-45" matches stored "+998901234567".
-            backend_query = query_text
-            if search_type == 'phone':
-                backend_query = _digits_only(query_text)
             async with api_client as client:
-                response = await client.search_customers(
-                    token,
-                    backend_query,
-                    search_type=search_type,
-                    only_with_open_cod=True,
+                response = await client.get_cod_debtors(
+                    token, page=page, per_page=COD_DEBTORS_PER_PAGE
                 )
 
             if not response.success:
                 await self._handle_api_response_error(update, response, language)
-                return COLLECTION_SEARCH_INPUT
+                return
 
-            customers = response.data if isinstance(response.data, list) else response.data.get('items', [])
-            if not customers:
-                await update.message.reply_text(
-                    i18n.get('staff.delivery.no_customer_cod_results', language, query=escape_html(query_text)),
-                    reply_markup=CommonKeyboards.back_button(language),
-                    parse_mode='HTML',
-                )
-                await self._clear_flow(context, update)
-                return ConversationHandler.END
+            data = response.data or {}
+            items = data.get('items', [])
+            pagination = data.get('pagination', {})
 
-            for customer in customers[:10]:
-                card = format_user_card(customer, language)
-                card += (
-                    f"\n💳 {i18n.get('staff.delivery.active_cod_debts', language)}: {customer.get('active_cod_debt_count', 0)}"
-                    f"\n💰 {i18n.get('staff.delivery.total_outstanding', language)}: "
-                    f"{format_currency(customer.get('total_outstanding_amount') or 0, language=language)}"
+            if not items and page > 1:
+                # Stale page (debts collected since render) — restart at page 1.
+                await self.show_debtor_list(update, context, page=1)
+                return
+
+            if not items:
+                text = f"✅ {i18n.get('staff.delivery.no_cod_debtors', language)}"
+                keyboard = CommonKeyboards.back_button(language, callback_data='staff_cash_hub')
+            else:
+                total = pagination.get('total', len(items))
+                text = (
+                    f"💳 <b>{i18n.get('staff.delivery.cod_debtors_title', language)}</b> ({total})\n"
+                    f"{i18n.get('staff.delivery.cod_debtors_hint', language)}"
                 )
-                await update.message.reply_text(
-                    card,
-                    reply_markup=DeliveryKeyboards.cod_customer_result(language, customer['id']),
-                    parse_mode='HTML',
+                keyboard = DeliveryKeyboards.cod_debtor_list(
+                    language, items, page, pagination.get('pages', 1)
                 )
 
-            await self._clear_flow(context, update)
-            return ConversationHandler.END
+            if update.callback_query:
+                await update.callback_query.answer()
+                await update.callback_query.edit_message_text(
+                    text, reply_markup=keyboard, parse_mode='HTML'
+                )
+            else:
+                await update.message.reply_text(text, reply_markup=keyboard, parse_mode='HTML')
         except Exception as exc:
-            logger.error("Error searching customers for COD collection: %s", exc, exc_info=True)
+            logger.error("Error showing COD debtor list: %s", exc, exc_info=True)
             await self._handle_error(update, context)
-            return ConversationHandler.END
+
+    @require_auth
+    @require_delivery_driver
+    async def paginate_debtor_list(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle ◀️/▶️ page flips on the COD debtor list."""
+        query = update.callback_query
+        try:
+            page = int(query.data.split('_')[-1])
+        except (ValueError, IndexError):
+            page = 1
+        await self.show_debtor_list(update, context, page=page)
 
     @require_auth
     @require_delivery_driver
@@ -185,6 +173,7 @@ class CashCollectionHandler(BaseHandler):
                     language,
                     customer_id,
                     can_collect=(statement.get('active_cod_debt_count', 0) > 0),
+                    back_callback=f"staff_cod_list_page_{context.user_data.get('cod_list_page', 1)}",
                 ),
                 parse_mode='HTML',
             )

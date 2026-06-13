@@ -438,10 +438,13 @@ class CashCollectionService:
 
         return self._to_decimal(total_reserved)
 
-    def list_users_with_open_cod_debts(self, *, limit: int = 200) -> List[Dict[str, Any]]:
-        """Return users that currently have at least one open delivered COD debt."""
-        safe_limit = max(1, min(int(limit or 200), 1000))
-        rows = (
+    def _open_cod_debtors_query(self):
+        """Grouped query of users with at least one open delivered COD debt.
+
+        Shared by the admin limit-based list and the staff paginated list so
+        the debt definition and ordering stay identical.
+        """
+        return (
             db.session.query(
                 User.id.label("user_id"),
                 User.first_name,
@@ -472,29 +475,49 @@ class CashCollectionService:
                 func.count(Payment.id).desc(),
                 User.id.asc(),
             )
-            .limit(safe_limit)
-            .all()
         )
 
-        items: List[Dict[str, Any]] = []
-        for row in rows:
-            active_count = int(row.active_cod_debt_count or 0)
-            role_value = row.role.value if hasattr(row.role, "value") else row.role
-            user_type_value = row.user_type.value if hasattr(row.user_type, "value") else row.user_type
-            items.append(
-                {
-                    "id": int(row.user_id),
-                    "first_name": row.first_name,
-                    "last_name": row.last_name,
-                    "phone": row.phone,
-                    "role": role_value,
-                    "user_type": user_type_value,
-                    "active_cod_debt_count": active_count,
-                    "total_outstanding_amount": float(row.total_outstanding_amount or 0),
-                    "cod_restricted": active_count >= self.COD_ACTIVE_DEBT_LIMIT,
-                }
-            )
-        return items
+    def _serialize_open_cod_debtor_row(self, row) -> Dict[str, Any]:
+        active_count = int(row.active_cod_debt_count or 0)
+        role_value = row.role.value if hasattr(row.role, "value") else row.role
+        user_type_value = row.user_type.value if hasattr(row.user_type, "value") else row.user_type
+        return {
+            "id": int(row.user_id),
+            "first_name": row.first_name,
+            "last_name": row.last_name,
+            "phone": row.phone,
+            "role": role_value,
+            "user_type": user_type_value,
+            "active_cod_debt_count": active_count,
+            "total_outstanding_amount": float(row.total_outstanding_amount or 0),
+            "cod_restricted": active_count >= self.COD_ACTIVE_DEBT_LIMIT,
+        }
+
+    def list_users_with_open_cod_debts(self, *, limit: int = 200) -> List[Dict[str, Any]]:
+        """Return users that currently have at least one open delivered COD debt."""
+        safe_limit = max(1, min(int(limit or 200), 1000))
+        rows = self._open_cod_debtors_query().limit(safe_limit).all()
+        return [self._serialize_open_cod_debtor_row(row) for row in rows]
+
+    def paginate_users_with_open_cod_debts(self, *, page: int = 1, per_page: int = 10) -> Dict[str, Any]:
+        """Page through users with open delivered COD debts (staff bot list)."""
+        safe_page = max(1, int(page or 1))
+        safe_per_page = max(1, min(int(per_page or 10), 100))
+
+        query = self._open_cod_debtors_query()
+        total = query.count()
+        pages = (total + safe_per_page - 1) // safe_per_page
+        rows = query.offset((safe_page - 1) * safe_per_page).limit(safe_per_page).all()
+
+        return {
+            "items": [self._serialize_open_cod_debtor_row(row) for row in rows],
+            "pagination": {
+                "page": safe_page,
+                "per_page": safe_per_page,
+                "total": total,
+                "pages": pages,
+            },
+        }
 
     def validate_customer_can_use_cod(self, customer_id: int) -> Dict[str, Any]:
         context = self.get_cod_restriction_context(customer_id)

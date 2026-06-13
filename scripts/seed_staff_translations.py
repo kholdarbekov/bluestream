@@ -1420,10 +1420,15 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Yig'im muvaffaqiyatli qayd qilindi.",
         "ru": "Сбор успешно записан.",
     },
-    "staff.delivery.cod_collection_search_prompt": {
-        "en": "Search by customer name, phone or order number:",
-        "uz": "Mijoz ismi, telefon raqami yoki buyurtma raqami bo'yicha qidiring:",
-        "ru": "Поиск по имени клиента, телефону или номеру заказа:",
+    "staff.delivery.cod_debtors_hint": {
+        "en": "Select a customer to view their statement:",
+        "uz": "Hisobotni ko'rish uchun mijozni tanlang:",
+        "ru": "Выберите клиента, чтобы открыть отчёт:",
+    },
+    "staff.delivery.cod_debtors_title": {
+        "en": "Customers with outstanding COD (Cash on Delivery) debt",
+        "uz": "To'lanmagan naqd to'lov qarzi bor mijozlar",
+        "ru": "Клиенты с непогашенным долгом по наложенному платежу",
     },
     "staff.delivery.cod_statement_title": {
         "en": "COD (Cash on Delivery) statement",
@@ -1455,10 +1460,10 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "To'lanmagan naqd to'lov qarzi yo'q.",
         "ru": "Нет непогашенного долга по наложенным платежам.",
     },
-    "staff.delivery.no_customer_cod_results": {
-        "en": "No customers with outstanding COD (Cash on Delivery) found for \"{query}\".",
-        "uz": "\"{query}\" bo'yicha to'lanmagan naqd to'lov bo'lgan mijozlar topilmadi.",
-        "ru": "По запросу \"{query}\" клиенты с непогашенным наложенным платежом не найдены.",
+    "staff.delivery.no_cod_debtors": {
+        "en": "No customers with outstanding COD (Cash on Delivery) debt right now.",
+        "uz": "Hozircha to'lanmagan naqd to'lov qarzi bor mijozlar yo'q.",
+        "ru": "Сейчас нет клиентов с непогашенным долгом по наложенному платежу.",
     },
     "staff.delivery.risk_flags": {
         "en": "Risk flags",
@@ -1469,11 +1474,6 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "Total outstanding",
         "uz": "Jami qoldiq",
         "ru": "Общий остаток",
-    },
-    "staff.delivery.view_cod_statement": {
-        "en": "View COD (Cash on Delivery) statement",
-        "uz": "Naqd to'lov hisobotini ko'rish",
-        "ru": "Посмотреть отчёт по наложенным платежам",
     },
     "staff.order.unknown": {
         "en": "Unknown order",

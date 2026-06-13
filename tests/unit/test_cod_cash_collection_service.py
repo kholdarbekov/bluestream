@@ -3,6 +3,7 @@
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import patch
+from uuid import uuid4
 
 import pytest
 from sqlalchemy.dialects import postgresql
@@ -101,6 +102,39 @@ def cod_delivery(db, cod_order, delivery_driver):
     db.session.add(delivery)
     db.session.commit()
     return delivery
+
+
+def _make_cod_debtor(db, service, *, email, phone, name, amount):
+    """Create a customer with one open delivered COD debt of `amount`."""
+    user = User(
+        email=email,
+        phone=phone,
+        password_hash=hash_password('DebtorPassword123!'),
+        first_name=name,
+        last_name='Debtor',
+        user_type=UserType.INDIVIDUAL,
+        role=UserRole.CUSTOMER,
+        is_verified=True,
+        created_at=datetime.now(UTC),
+    )
+    db.session.add(user)
+    db.session.flush()
+    order = Order(
+        user_id=user.id,
+        order_number=f"ORD-DEBT-{name.upper()}-{uuid4().hex[:8]}",
+        status=OrderStatus.DELIVERED,
+        subtotal=Decimal(amount),
+        delivery_fee=Decimal("0.00"),
+        discount_amount=Decimal("0.00"),
+        loyalty_discount=Decimal("0.00"),
+        total_amount=Decimal(amount),
+        payment_method=PaymentMethod.CASH,
+        created_at=datetime.now(UTC),
+    )
+    db.session.add(order)
+    db.session.flush()
+    service.ensure_cod_payment_for_order(order)
+    return user
 
 
 @pytest.mark.unit
@@ -448,6 +482,49 @@ class TestCashCollectionService:
 
             assert sample_user.id in user_ids
             assert admin_user.id in user_ids
+
+    def test_paginate_users_with_open_cod_debts_sorts_and_pages(self, app, db):
+        with app.app_context():
+            service = CashCollectionService()
+            u_low = _make_cod_debtor(db, service, email='debtor.low@example.com',
+                                     phone='+998900000111', name='Low', amount='10000.00')
+            u_mid = _make_cod_debtor(db, service, email='debtor.mid@example.com',
+                                     phone='+998900000112', name='Mid', amount='20000.00')
+            u_high = _make_cod_debtor(db, service, email='debtor.high@example.com',
+                                      phone='+998900000113', name='High', amount='30000.00')
+            db.session.commit()
+
+            page1 = service.paginate_users_with_open_cod_debts(page=1, per_page=2)
+            assert [item['id'] for item in page1['items']] == [u_high.id, u_mid.id]
+            assert page1['items'][0]['total_outstanding_amount'] == 30000.0
+            assert page1['items'][1]['total_outstanding_amount'] == 20000.0
+            assert page1['pagination'] == {'page': 1, 'per_page': 2, 'total': 3, 'pages': 2}
+            # Row shape parity with the admin list serialization.
+            assert set(page1['items'][0]) == {
+                'id', 'first_name', 'last_name', 'phone', 'role', 'user_type',
+                'active_cod_debt_count', 'total_outstanding_amount', 'cod_restricted',
+            }
+
+            page2 = service.paginate_users_with_open_cod_debts(page=2, per_page=2)
+            assert [item['id'] for item in page2['items']] == [u_low.id]
+
+    def test_paginate_users_with_open_cod_debts_out_of_range_page_returns_empty(self, app, db):
+        with app.app_context():
+            service = CashCollectionService()
+            _make_cod_debtor(db, service, email='debtor.solo@example.com',
+                             phone='+998900000114', name='Solo', amount='15000.00')
+            db.session.commit()
+
+            result = service.paginate_users_with_open_cod_debts(page=9, per_page=10)
+            assert result['items'] == []
+            assert result['pagination'] == {'page': 9, 'per_page': 10, 'total': 1, 'pages': 1}
+
+    def test_paginate_users_with_open_cod_debts_clamps_inputs(self, app, db):
+        with app.app_context():
+            service = CashCollectionService()
+            result = service.paginate_users_with_open_cod_debts(page=0, per_page=500)
+            assert result['items'] == []
+            assert result['pagination'] == {'page': 1, 'per_page': 100, 'total': 0, 'pages': 0}
 
     def test_prepayment_balance_is_applied_to_next_cod_payment(
         self,

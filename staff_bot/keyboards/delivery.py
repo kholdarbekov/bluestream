@@ -6,6 +6,8 @@ from typing import List, Dict
 
 from staff_bot.i18n import i18n
 from shared.staff_constants import DELIVERY_STATUS_TRANSITIONS, FAILED_DELIVERY_REASONS
+from staff_bot.keyboards.common import CommonKeyboards
+from staff_bot.utils.formatters import format_currency
 
 
 class DeliveryKeyboards:
@@ -213,14 +215,32 @@ class DeliveryKeyboards:
         return InlineKeyboardMarkup(keyboard)
 
     @staticmethod
-    def cod_customer_result(language: str, customer_id: int) -> InlineKeyboardMarkup:
-        """View COD debt details for a searched customer."""
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton(
-                f"📜 {i18n.get('staff.delivery.view_cod_statement', language)}",
-                callback_data=f"staff_cod_customer_{customer_id}"
-            )],
-        ])
+    def cod_debtor_list(
+        language: str, customers: List[Dict], page: int, total_pages: int
+    ) -> InlineKeyboardMarkup:
+        """Inline list of customers with outstanding COD debt.
+
+        Reuses the existing ``staff_cod_customer_<id>`` callback so tapping a
+        row opens the same statement view the old search flow used. Page
+        flips go through ``staff_cod_list_page_<n>``.
+        """
+        keyboard = []
+        for c in customers:
+            first = c.get('first_name') or ''
+            last = c.get('last_name') or ''
+            name = (f"{first} {last}".strip() or c.get('phone') or '—')[:40]
+            amount = format_currency(c.get('total_outstanding_amount') or 0, language=language)
+            keyboard.append([InlineKeyboardButton(
+                f"👤 {name} — 💰 {amount}",
+                callback_data=f"staff_cod_customer_{c['id']}"
+            )])
+        if total_pages > 1:
+            keyboard.append(CommonKeyboards.pagination(language, page, total_pages, 'staff_cod_list'))
+        keyboard.append([InlineKeyboardButton(
+            f"⬅️ {i18n.get('staff.back', language)}",
+            callback_data="staff_cash_hub"
+        )])
+        return InlineKeyboardMarkup(keyboard)
 
     @staticmethod
     def cod_statement_actions(
@@ -228,6 +248,7 @@ class DeliveryKeyboards:
         customer_id: int,
         *,
         can_collect: bool = True,
+        back_callback: str = "staff_back_to_main",
     ) -> InlineKeyboardMarkup:
         """Actions available from a customer's COD debt statement."""
         keyboard = []
@@ -242,7 +263,7 @@ class DeliveryKeyboards:
             )])
         keyboard.append([InlineKeyboardButton(
             f"⬅️ {i18n.get('staff.back', language)}",
-            callback_data="staff_back_to_main"
+            callback_data=back_callback
         )])
         return InlineKeyboardMarkup(keyboard)
 

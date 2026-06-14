@@ -228,10 +228,19 @@ class DeliveryKeyboards:
         for c in customers:
             first = c.get('first_name') or ''
             last = c.get('last_name') or ''
-            name = (f"{first} {last}".strip() or c.get('phone') or '—')[:40]
+            full_name = f"{first} {last}".strip()
+            phone = c.get('phone') or ''
+            # Cap the name so the phone + amount stay visible on narrow screens.
+            name = (full_name or phone or '—')[:24]
             amount = format_currency(c.get('total_outstanding_amount') or 0, language=language)
+            # Surface the phone as a disambiguator only when a real name exists;
+            # otherwise the phone is already standing in as the label.
+            if phone and full_name:
+                label = f"👤 {name} — 📞 {phone} — 💰 {amount}"
+            else:
+                label = f"👤 {name} — 💰 {amount}"
             keyboard.append([InlineKeyboardButton(
-                f"👤 {name} — 💰 {amount}",
+                label,
                 callback_data=f"staff_cod_customer_{c['id']}"
             )])
         if total_pages > 1:

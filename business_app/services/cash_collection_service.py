@@ -613,6 +613,9 @@ class CashCollectionService:
 
         return {
             "customer_id": customer_id,
+            "first_name": customer.first_name,
+            "last_name": customer.last_name,
+            "phone": customer.phone,
             "entity_subtype": (
                 customer.entity_subtype.value
                 if customer.entity_subtype is not None and hasattr(customer.entity_subtype, "value")

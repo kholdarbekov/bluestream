@@ -44,13 +44,45 @@ class CashCollectionHandler(BaseHandler):
             )
 
     @staticmethod
-    def _format_statement(statement: dict, language: str) -> str:
+    def _debtor_name(data: dict) -> str:
+        """Best-effort display name from a statement/debtor dict."""
+        first = (data.get('first_name') or '').strip()
+        last = (data.get('last_name') or '').strip()
+        return f"{first} {last}".strip()
+
+    @staticmethod
+    def _debtor_header(name: str, phone: str) -> str:
+        """One-line debtor identity banner prepended to every collection screen
+        so the driver always sees who they are collecting from before money
+        changes hands. Returns '' when no identity is known."""
+        parts = []
+        if name:
+            parts.append(f"👤 {escape_html(name)}")
+        if phone:
+            parts.append(f"📞 {escape_html(phone)}")
+        return ' · '.join(parts)
+
+    @classmethod
+    def _flow_header(cls, flow: dict) -> str:
+        """Debtor identity banner built from the stored collection flow."""
+        return cls._debtor_header(flow.get('customer_name') or '', flow.get('customer_phone') or '')
+
+    @staticmethod
+    def _with_header(header: str, body: str) -> str:
+        """Stack the debtor header above a screen body (no-op when header empty)."""
+        return f"{header}\n\n{body}" if header else body
+
+    @classmethod
+    def _format_statement(cls, statement: dict, language: str) -> str:
         items = statement.get('items') or []
-        lines = [
-            f"📜 <b>{i18n.get('staff.delivery.cod_statement_title', language)}</b>",
+        lines = [f"📜 <b>{i18n.get('staff.delivery.cod_statement_title', language)}</b>"]
+        header = cls._debtor_header(cls._debtor_name(statement), statement.get('phone') or '')
+        if header:
+            lines.append(header)
+        lines.extend([
             f"💳 {i18n.get('staff.delivery.active_cod_debts', language)}: {statement.get('active_cod_debt_count', 0)}",
             f"💰 {i18n.get('staff.delivery.total_outstanding', language)}: {format_currency(statement.get('total_outstanding_amount', 0), language=language)}",
-        ]
+        ])
 
         if not items:
             lines.append(i18n.get('staff.delivery.no_cod_debt', language))
@@ -165,6 +197,8 @@ class CashCollectionHandler(BaseHandler):
             context.user_data['pending_cod_collection_flow'] = {
                 'customer_id': customer_id,
                 'total_outstanding_amount': statement.get('total_outstanding_amount', 0),
+                'customer_name': self._debtor_name(statement),
+                'customer_phone': statement.get('phone') or '',
             }
 
             await query.edit_message_text(
@@ -207,21 +241,27 @@ class CashCollectionHandler(BaseHandler):
             await query.answer(i18n.get('staff.delivery.no_cod_debt', language), show_alert=True)
             return
 
-        context.user_data['pending_cod_collection_flow'] = {
+        flow = {
             'customer_id': customer_id,
             'amount': total_outstanding,
             'total_outstanding_amount': total_outstanding,
+            'customer_name': self._debtor_name(statement),
+            'customer_phone': statement.get('phone') or '',
         }
+        context.user_data['pending_cod_collection_flow'] = flow
         # C-2: mirror the flow into Redis so the webhook server can defer
         # pool-insertion suggestions until this collection completes.
         await flow_state.mark_active(
             update.effective_user.id, 'pending_cod_collection_flow'
         )
         await query.edit_message_text(
-            i18n.get(
-                'staff.delivery.cod_collection_note_prompt',
-                language,
-                amount=format_currency(total_outstanding, language=language),
+            self._with_header(
+                self._flow_header(flow),
+                i18n.get(
+                    'staff.delivery.cod_collection_note_prompt',
+                    language,
+                    amount=format_currency(total_outstanding, language=language),
+                ),
             ),
             reply_markup=CommonKeyboards.flow_cancel(language),
             parse_mode='HTML',
@@ -236,14 +276,29 @@ class CashCollectionHandler(BaseHandler):
         await query.answer()
         language = await self._get_language(update, context)
         customer_id = int(query.data.split('_')[-1])
-        context.user_data['pending_cod_collection_flow'] = {
-            'customer_id': customer_id,
-        }
+        # Merge into the flow set by show_customer_statement so the debtor
+        # identity (name/phone) carries into the custom-amount screens; drop any
+        # stale amount left over from a prior full-collection attempt.
+        flow = context.user_data.get('pending_cod_collection_flow') or {}
+        # Safety: if the cached identity belongs to a different customer (e.g. a
+        # stale inline button was tapped), discard it rather than risk showing
+        # the wrong debtor's name over this collection. An empty header is safe;
+        # a mismatched one is the exact human-factor error we're guarding.
+        if flow.get('customer_id') != customer_id:
+            flow.pop('customer_name', None)
+            flow.pop('customer_phone', None)
+        flow['customer_id'] = customer_id
+        flow.pop('amount', None)
+        flow.pop('pending_overpayment_amount', None)
+        context.user_data['pending_cod_collection_flow'] = flow
         await flow_state.mark_active(
             update.effective_user.id, 'pending_cod_collection_flow'
         )
         await query.edit_message_text(
-            i18n.get('staff.delivery.cod_collection_amount_prompt', language),
+            self._with_header(
+                self._flow_header(flow),
+                i18n.get('staff.delivery.cod_collection_amount_prompt', language),
+            ),
             reply_markup=CommonKeyboards.flow_cancel(language),
             parse_mode='HTML',
         )
@@ -286,12 +341,15 @@ class CashCollectionHandler(BaseHandler):
                 flow.pop('amount', None)
                 context.user_data['pending_cod_collection_flow'] = flow
                 await update.message.reply_text(
-                    i18n.get(
-                        'staff.delivery.cod_collection_overpayment_confirm',
-                        language,
-                        amount=format_currency(amount, language=language),
-                        outstanding=format_currency(total_outstanding, language=language),
-                        overpayment=format_currency(overpayment, language=language),
+                    self._with_header(
+                        self._flow_header(flow),
+                        i18n.get(
+                            'staff.delivery.cod_collection_overpayment_confirm',
+                            language,
+                            amount=format_currency(amount, language=language),
+                            outstanding=format_currency(total_outstanding, language=language),
+                            overpayment=format_currency(overpayment, language=language),
+                        ),
                     ),
                     reply_markup=CommonKeyboards.yes_no(
                         language,
@@ -306,10 +364,13 @@ class CashCollectionHandler(BaseHandler):
         flow['amount'] = amount
         context.user_data['pending_cod_collection_flow'] = flow
         await update.message.reply_text(
-            i18n.get(
-                'staff.delivery.cod_collection_note_prompt',
-                language,
-                amount=format_currency(amount, language=language),
+            self._with_header(
+                self._flow_header(flow),
+                i18n.get(
+                    'staff.delivery.cod_collection_note_prompt',
+                    language,
+                    amount=format_currency(amount, language=language),
+                ),
             ),
             reply_markup=CommonKeyboards.flow_cancel(language),
             parse_mode='HTML',
@@ -335,10 +396,13 @@ class CashCollectionHandler(BaseHandler):
         context.user_data['pending_cod_collection_flow'] = flow
 
         await query.edit_message_text(
-            i18n.get(
-                'staff.delivery.cod_collection_note_prompt',
-                language,
-                amount=format_currency(pending_amount, language=language),
+            self._with_header(
+                self._flow_header(flow),
+                i18n.get(
+                    'staff.delivery.cod_collection_note_prompt',
+                    language,
+                    amount=format_currency(pending_amount, language=language),
+                ),
             ),
             parse_mode='HTML',
         )
@@ -358,7 +422,10 @@ class CashCollectionHandler(BaseHandler):
         context.user_data['pending_cod_collection_flow'] = flow
 
         await query.edit_message_text(
-            i18n.get('staff.delivery.cod_collection_amount_prompt', language),
+            self._with_header(
+                self._flow_header(flow),
+                i18n.get('staff.delivery.cod_collection_amount_prompt', language),
+            ),
             parse_mode='HTML',
         )
         return COLLECTION_AMOUNT_INPUT
@@ -384,6 +451,10 @@ class CashCollectionHandler(BaseHandler):
         if not notes:
             await update.message.reply_text(i18n.get('staff.delivery.collection_notes_required', language))
             return COLLECTION_NOTE_INPUT
+
+        # Capture the debtor banner before _clear_flow wipes the flow so the
+        # receipt still names who the cash was collected from.
+        header = self._flow_header(flow)
 
         try:
             async with api_client as client:
@@ -411,11 +482,14 @@ class CashCollectionHandler(BaseHandler):
 
             await self._clear_flow(context, update)
             await update.message.reply_text(
-                i18n.get(
-                    'staff.delivery.cod_collection_recorded',
-                    language,
-                    amount=format_currency(amount, language=language),
-                    remaining=format_currency(remaining_outstanding, language=language),
+                self._with_header(
+                    header,
+                    i18n.get(
+                        'staff.delivery.cod_collection_recorded',
+                        language,
+                        amount=format_currency(amount, language=language),
+                        remaining=format_currency(remaining_outstanding, language=language),
+                    ),
                 ),
                 reply_markup=CommonKeyboards.back_button(language),
                 parse_mode='HTML',

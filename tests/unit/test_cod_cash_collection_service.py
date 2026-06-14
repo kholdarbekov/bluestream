@@ -153,6 +153,28 @@ class TestCashCollectionService:
             assert payment.amount_collected == Decimal("0.00")
             assert payment.outstanding_amount == cod_order.total_amount
 
+    def test_cod_statement_exposes_customer_identity(self, app, db):
+        """The staff statement payload must name the debtor (name + phone) so
+        the bot can confirm who the cash is being collected from before it
+        moves — guards against collecting from the wrong customer."""
+        with app.app_context():
+            service = CashCollectionService()
+            debtor = _make_cod_debtor(
+                db,
+                service,
+                email='cod.identity@example.com',
+                phone='+998900000777',
+                name='Identity',
+                amount='45000.00',
+            )
+            db.session.commit()
+
+            statement = service.get_customer_cod_statement(debtor.id)
+
+            assert statement['first_name'] == 'Identity'
+            assert statement['last_name'] == 'Debtor'
+            assert statement['phone'] == '+998900000777'
+
     def test_active_cod_for_update_query_locks_without_outer_join(self, app, sample_user):
         with app.app_context():
             service = CashCollectionService()

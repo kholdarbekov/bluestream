@@ -88,6 +88,11 @@ def _callback_datas(update):
     return [btn.callback_data for row in markup.inline_keyboard for btn in row]
 
 
+def _button_labels(update):
+    markup = update.callback_query.edit_message_text.call_args.kwargs["reply_markup"]
+    return [btn.text for row in markup.inline_keyboard for btn in row]
+
+
 def test_debtor_list_renders_customer_buttons_and_pagination(monkeypatch):
     update, context, _ = _run_show_debtor_list(
         monkeypatch,
@@ -147,6 +152,109 @@ def test_debtor_list_stale_page_falls_back_to_page_1(monkeypatch):
     assert fake.client.get_cod_debtors.await_args.kwargs["page"] == 1
     assert context.user_data["cod_list_page"] == 1
     assert "staff_cod_customer_11" in _callback_datas(update)
+
+
+def test_debtor_list_buttons_surface_phone_and_amount(monkeypatch):
+    """Each debtor row must carry the phone alongside name + amount so the
+    driver can disambiguate look-alike market names before tapping in."""
+    update, _, _ = _run_show_debtor_list(
+        monkeypatch,
+        [_response([_debtor(11, "Aziz", 50000)], 1, 1, 1)],
+    )
+
+    label = next(text for text in _button_labels(update) if "Aziz" in text)
+    assert "👤" in label
+    assert "📞 +998900000999" in label  # phone surfaced for disambiguation
+    assert "50,000" in label
+
+
+def test_debtor_list_button_omits_phone_marker_when_name_missing(monkeypatch):
+    """When a debtor has no name the phone already stands in as the label, so
+    it must not be duplicated behind a second 📞 marker."""
+    nameless = {
+        "id": 7,
+        "first_name": None,
+        "last_name": None,
+        "phone": "+998900000111",
+        "active_cod_debt_count": 1,
+        "total_outstanding_amount": 12000,
+    }
+    update, _, _ = _run_show_debtor_list(monkeypatch, [_response([nameless], 1, 1, 1)])
+
+    label = next(text for text in _button_labels(update) if "+998900000111" in text)
+    assert "📞" not in label  # phone is the name; no second marker
+    assert label.count("+998900000111") == 1
+
+
+def test_format_statement_includes_debtor_identity_header():
+    """The statement screen must name the debtor (name + phone) up top so the
+    driver confirms who they are collecting from."""
+    statement = {
+        "first_name": "Aziz",
+        "last_name": "Debtor",
+        "phone": "+998900000999",
+        "active_cod_debt_count": 1,
+        "total_outstanding_amount": 90000,
+        "items": [{"order_number": "AD_000281_26", "outstanding_amount": 90000}],
+    }
+
+    text = CashCollectionHandler._format_statement(statement, "en")
+
+    assert "👤 Aziz Debtor" in text
+    assert "📞 +998900000999" in text
+
+
+def test_flow_header_built_from_stored_identity():
+    header = CashCollectionHandler._flow_header(
+        {"customer_name": "Aziz Debtor", "customer_phone": "+998900000999"}
+    )
+    assert header == "👤 Aziz Debtor · 📞 +998900000999"
+
+
+def test_flow_header_is_empty_when_identity_missing():
+    """Missing identity must yield an empty banner so collection screens render
+    their body unchanged instead of a stray header."""
+    assert CashCollectionHandler._flow_header({}) == ""
+    assert CashCollectionHandler._with_header("", "Enter amount:") == "Enter amount:"
+
+
+def _run_start_custom_collection(monkeypatch, flow, customer_id):
+    from staff_bot.handlers.delivery import cash_collection as mod  # noqa: F401
+    from staff_bot.utils import flow_state
+
+    handler = CashCollectionHandler()
+    update, context = _make_update_context()
+    update.callback_query.data = f"staff_cod_collect_custom_{customer_id}"
+    context.user_data["pending_cod_collection_flow"] = flow
+    monkeypatch.setattr(handler, "_get_language", AsyncMock(return_value="en"))
+    monkeypatch.setattr(flow_state, "mark_active", AsyncMock())
+    asyncio.run(handler.start_custom_collection(update, context))
+    return context.user_data["pending_cod_collection_flow"]
+
+
+def test_custom_collection_preserves_identity_for_same_customer(monkeypatch):
+    saved = _run_start_custom_collection(
+        monkeypatch,
+        {"customer_id": 11, "customer_name": "Aziz Debtor", "customer_phone": "+998900000999"},
+        customer_id=11,
+    )
+    assert saved["customer_id"] == 11
+    assert saved["customer_name"] == "Aziz Debtor"
+    assert saved["customer_phone"] == "+998900000999"
+
+
+def test_custom_collection_drops_stale_identity_for_different_customer(monkeypatch):
+    """A stale inline button for a different customer must never carry the
+    previous debtor's name into this collection — drop it so the header is
+    empty rather than wrong."""
+    saved = _run_start_custom_collection(
+        monkeypatch,
+        {"customer_id": 99, "customer_name": "Wrong Person", "customer_phone": "+998900000000"},
+        customer_id=11,
+    )
+    assert saved["customer_id"] == 11
+    assert "customer_name" not in saved
+    assert "customer_phone" not in saved
 
 
 def test_bot_wiring_routes_collect_menu_to_list_and_search_is_gone():

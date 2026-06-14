@@ -156,16 +156,20 @@ def test_debtor_list_stale_page_falls_back_to_page_1(monkeypatch):
 
 def test_debtor_list_buttons_surface_phone_and_amount(monkeypatch):
     """Each debtor row must carry the phone alongside name + amount so the
-    driver can disambiguate look-alike market names before tapping in."""
+    driver can disambiguate look-alike market names before tapping in. The
+    label is two lines (name / debt — phone) so long names AND the full phone
+    stay readable on mobile."""
     update, _, _ = _run_show_debtor_list(
         monkeypatch,
         [_response([_debtor(11, "Aziz", 50000)], 1, 1, 1)],
     )
 
     label = next(text for text in _button_labels(update) if "Aziz" in text)
-    assert "👤" in label
-    assert "📞 +998900000999" in label  # phone surfaced for disambiguation
-    assert "50,000" in label
+    name_line, sep, debt_line = label.partition("\n")
+    assert sep == "\n"  # two-line button
+    assert "👤 Aziz Debtor" in name_line  # name on its own line
+    assert "📞 +998900000999" in debt_line  # full phone shares the debt line
+    assert "50,000" in debt_line
 
 
 def test_debtor_list_button_omits_phone_marker_when_name_missing(monkeypatch):

@@ -228,22 +228,13 @@ class DeliveryKeyboards:
         for c in customers:
             first = c.get('first_name') or ''
             last = c.get('last_name') or ''
-            full_name = f"{first} {last}".strip()
-            phone = c.get('phone') or ''
-            # Two-line label so long market names AND the full phone stay
-            # readable on mobile (Telegram renders \n in inline buttons as a
-            # second line on phone clients): name on top, outstanding debt +
-            # phone beneath. The name owns its own line, so the cap can be loose.
-            name = (full_name or phone or '—')[:32]
+            # Single-line name + amount. Telegram inline buttons render on one
+            # line and truncate, so the phone is NOT crammed here — it's shown
+            # on the customer's statement page once a row is tapped.
+            name = (f"{first} {last}".strip() or c.get('phone') or '—')[:40]
             amount = format_currency(c.get('total_outstanding_amount') or 0, language=language)
-            # Surface the phone as a disambiguator only when a real name exists;
-            # otherwise the phone is already standing in as the name line.
-            if phone and full_name:
-                label = f"👤 {name}\n💰 {amount} — 📞 {phone}"
-            else:
-                label = f"👤 {name}\n💰 {amount}"
             keyboard.append([InlineKeyboardButton(
-                label,
+                f"👤 {name} — 💰 {amount}",
                 callback_data=f"staff_cod_customer_{c['id']}"
             )])
         if total_pages > 1:

@@ -154,40 +154,20 @@ def test_debtor_list_stale_page_falls_back_to_page_1(monkeypatch):
     assert "staff_cod_customer_11" in _callback_datas(update)
 
 
-def test_debtor_list_buttons_surface_phone_and_amount(monkeypatch):
-    """Each debtor row must carry the phone alongside name + amount so the
-    driver can disambiguate look-alike market names before tapping in. The
-    label is two lines (name / debt — phone) so long names AND the full phone
-    stay readable on mobile."""
+def test_debtor_list_button_shows_name_and_amount_on_one_line(monkeypatch):
+    """The list row stays a single line with name + amount. Telegram inline
+    buttons render on one line and truncate, so the phone is NOT crammed here —
+    it lives on the statement page once a row is tapped."""
     update, _, _ = _run_show_debtor_list(
         monkeypatch,
         [_response([_debtor(11, "Aziz", 50000)], 1, 1, 1)],
     )
 
     label = next(text for text in _button_labels(update) if "Aziz" in text)
-    name_line, sep, debt_line = label.partition("\n")
-    assert sep == "\n"  # two-line button
-    assert "👤 Aziz Debtor" in name_line  # name on its own line
-    assert "📞 +998900000999" in debt_line  # full phone shares the debt line
-    assert "50,000" in debt_line
-
-
-def test_debtor_list_button_omits_phone_marker_when_name_missing(monkeypatch):
-    """When a debtor has no name the phone already stands in as the label, so
-    it must not be duplicated behind a second 📞 marker."""
-    nameless = {
-        "id": 7,
-        "first_name": None,
-        "last_name": None,
-        "phone": "+998900000111",
-        "active_cod_debt_count": 1,
-        "total_outstanding_amount": 12000,
-    }
-    update, _, _ = _run_show_debtor_list(monkeypatch, [_response([nameless], 1, 1, 1)])
-
-    label = next(text for text in _button_labels(update) if "+998900000111" in text)
-    assert "📞" not in label  # phone is the name; no second marker
-    assert label.count("+998900000111") == 1
+    assert "\n" not in label  # single line — no multi-line button
+    assert "👤 Aziz Debtor" in label
+    assert "50,000" in label
+    assert "+998900000999" not in label  # phone is on the statement, not the button
 
 
 def test_format_statement_includes_debtor_identity_header():

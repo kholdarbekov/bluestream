@@ -26,8 +26,10 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         language = await i18n.get_user_language(user_id)
         await maybe_remove_stale_reply_keyboard(update, context)
 
-        # menu_text = i18n.get('telegram.main_menu', language)
-        menu_text = i18n.get('telegram.welcome', language)
+        # Neutral, friendly greeting shown on every return to the menu.
+        # (telegram.welcome — "registration complete" — is reserved for the
+        # actual post-registration moment in profile.py.)
+        menu_text = i18n.get('telegram.main_menu', language)
         keyboard = MenuKeyboards.main_menu(language)
 
         if update.callback_query:

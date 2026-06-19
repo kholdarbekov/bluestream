@@ -4457,7 +4457,7 @@ BACKEND_TRANSLATIONS = {
     'telegram.profile_email': {
         'en': 'Email',
         'uz': 'Email',
-        'ru': 'Email'
+        'ru': 'Эл. почта'
     },
     'telegram.profile_language': {
         'en': 'Language',
@@ -5124,39 +5124,39 @@ BACKEND_TRANSLATIONS = {
         'ru': '📱 Поделиться номером'
     },
     'telegram.menu.products': {
-        'en': '🛍️ Products',
-        'uz': '🛍️ Mahsulotlar',
-        'ru': '🛍️ Товары'
+        'en': '💧 Order Water',
+        'uz': '💧 Suv buyurtma berish',
+        'ru': '💧 Заказать воду'
     },
     'telegram.menu.orders': {
-        'en': '📦 Orders',
-        'uz': '📦 Buyurtmalar',
-        'ru': '📦 Заказы'
+        'en': '📦 My Orders',
+        'uz': '📦 Buyurtmalarim',
+        'ru': '📦 Мои заказы'
     },
     'telegram.cart_title': {
-        'en': '🛒 Cart',
-        'uz': '🛒 Savat',
-        'ru': '🛒 Корзина'
+        'en': '🛒 My Cart',
+        'uz': '🛒 Savatim',
+        'ru': '🛒 Моя корзина'
     },
     'telegram.menu.subscriptions': {
-        'en': '🔄 Subscriptions',
-        'uz': '🔄 Obunalar',
-        'ru': '🔄 Подписки'
+        'en': '🔄 Auto-Delivery',
+        'uz': '🔄 Avto-yetkazib berish',
+        'ru': '🔄 Автодоставка'
     },
     'telegram.menu.loyalty': {
-        'en': '🎁 Loyalty',
-        'uz': '🎁 Sodiqlik',
-        'ru': '🎁 Лояльность'
+        'en': '🎁 Aqua Club',
+        'uz': '🎁 Aqua Club',
+        'ru': '🎁 Aqua Club'
     },
     'telegram.menu.profile': {
-        'en': '👤 Profile',
-        'uz': '👤 Profil',
-        'ru': '👤 Профиль'
+        'en': '👤 My Profile',
+        'uz': '👤 Profilim',
+        'ru': '👤 Мой профиль'
     },
     'telegram.menu.support': {
-        'en': '🆘 Support',
+        'en': '🆘 Get Help',
         'uz': '🆘 Yordam',
-        'ru': '🆘 Поддержка'
+        'ru': '🆘 Помощь'
     },
     'telegram.menu.language': {
         'en': '🌐 Language',
@@ -5334,18 +5334,18 @@ BACKEND_TRANSLATIONS = {
     # ============================================================================
     'telegram.back_to_menu': {
         'en': 'Back to menu',
-        'uz': 'Back to menu',
-        'ru': 'Back to menu'
+        'uz': 'Menyuga qaytish',
+        'ru': 'Назад в меню'
     },
     'telegram.cart_empty': {
-        'en': 'Cart empty',
-        'uz': 'Cart empty',
-        'ru': 'Cart empty'
+        'en': 'Your cart is empty. Add some water to get started!',
+        'uz': 'Savatingiz bo\'sh. Boshlash uchun suv qo\'shing!',
+        'ru': 'Ваша корзина пуста. Добавьте воду, чтобы начать!'
     },
     'telegram.cart_min_order_warning': {
-        'en': 'Cart min order warning',
-        'uz': 'Cart min order warning',
-        'ru': 'Cart min order warning'
+        'en': 'Minimum order is {min_amount} UZS. Add {remaining} UZS more to check out.',
+        'uz': 'Eng kam buyurtma {min_amount} UZS. Buyurtma berish uchun yana {remaining} UZS qo\'shing.',
+        'ru': 'Минимальный заказ — {min_amount} UZS. Добавьте ещё {remaining} UZS для оформления.'
     },
     'telegram.cart_min_qty_warning': {
         'en': '{product_name}: minimum order quantity is {min_qty}, add {remaining} more',
@@ -5353,9 +5353,9 @@ BACKEND_TRANSLATIONS = {
         'ru': '{product_name}: минимальное количество заказа {min_qty}, добавьте ещё {remaining}'
     },
     'telegram.cart_ready_checkout': {
-        'en': 'Cart ready checkout',
-        'uz': 'Cart ready checkout',
-        'ru': 'Cart ready checkout'
+        'en': 'Your cart is ready for checkout!',
+        'uz': 'Savatingiz buyurtma berishga tayyor!',
+        'ru': 'Корзина готова к оформлению!'
     },
     'telegram.products.min_order_quantity_label': {
         'en': 'Minimum order: {min_qty}',
@@ -5364,128 +5364,128 @@ BACKEND_TRANSLATIONS = {
     },
     'telegram.cart_total': {
         'en': 'Cart total',
-        'uz': 'Cart total',
-        'ru': 'Cart total'
+        'uz': 'Savat jami',
+        'ru': 'Итого по корзине'
     },
     'telegram.confirm': {
         'en': 'Confirm',
-        'uz': 'Confirm',
-        'ru': 'Confirm'
+        'uz': 'Tasdiqlash',
+        'ru': 'Подтвердить'
     },
     'telegram.continue': {
         'en': 'Continue',
-        'uz': 'Continue',
-        'ru': 'Continue'
+        'uz': 'Davom etish',
+        'ru': 'Продолжить'
     },
     'telegram.currency.uzs': {
-        'en': 'Uzs',
-        'uz': 'Uzs',
-        'ru': 'Uzs'
+        'en': 'UZS',
+        'uz': 'so\'m',
+        'ru': 'сум'
     },
     'telegram.delivery_address': {
         'en': 'Delivery address',
-        'uz': 'Delivery address',
-        'ru': 'Delivery address'
+        'uz': 'Yetkazib berish manzili',
+        'ru': 'Адрес доставки'
     },
     'telegram.error.auth_failed': {
-        'en': 'Auth failed',
-        'uz': 'Auth failed',
-        'ru': 'Auth failed'
+        'en': '⚠️ Your session has expired. Please log in again to continue.',
+        'uz': '⚠️ Sessiyangiz muddati tugadi. Davom etish uchun qaytadan tizimga kiring.',
+        'ru': '⚠️ Сессия истекла. Пожалуйста, войдите снова, чтобы продолжить.'
     },
     'telegram.error.generic': {
-        'en': 'Generic',
-        'uz': 'Generic',
-        'ru': 'Generic'
+        'en': '⚠️ Something went wrong. Please try again in a moment.',
+        'uz': '⚠️ Nimadir xato ketdi. Iltimos, birozdan so\'ng qayta urinib ko\'ring.',
+        'ru': '⚠️ Что-то пошло не так. Пожалуйста, повторите попытку чуть позже.'
     },
     'telegram.error.invalid_input': {
-        'en': 'Invalid input',
-        'uz': 'Invalid input',
-        'ru': 'Invalid input'
+        'en': '⚠️ Sorry, I didn\'t understand that. Please try again or use the menu.',
+        'uz': '⚠️ Kechirasiz, buni tushunmadim. Qaytadan urinib ko\'ring yoki menyudan foydalaning.',
+        'ru': '⚠️ Извините, не удалось распознать запрос. Попробуйте ещё раз или воспользуйтесь меню.'
     },
     'telegram.error.product_error': {
-        'en': 'Product error',
-        'uz': 'Product error',
-        'ru': 'Product error'
+        'en': '⚠️ We couldn\'t load the products right now. Please try again in a moment.',
+        'uz': '⚠️ Mahsulotlarni hozir yuklab bo\'lmadi. Iltimos, birozdan so\'ng qayta urinib ko\'ring.',
+        'ru': '⚠️ Не удалось загрузить товары прямо сейчас. Пожалуйста, повторите попытку чуть позже.'
     },
     'telegram.error_occurred': {
-        'en': 'Error occurred',
-        'uz': 'Error occurred',
-        'ru': 'Error occurred'
+        'en': '⚠️ Something went wrong. Please try again in a moment.',
+        'uz': '⚠️ Nimadir xato ketdi. Iltimos, birozdan so\'ng qayta urinib ko\'ring.',
+        'ru': '⚠️ Что-то пошло не так. Пожалуйста, повторите попытку чуть позже.'
     },
     'telegram.language.already_selected': {
-        'en': 'Already selected',
-        'uz': 'Already selected',
-        'ru': 'Already selected'
+        'en': 'You\'re already using this language.',
+        'uz': 'Siz allaqachon shu tildan foydalanyapsiz.',
+        'ru': 'Вы уже используете этот язык.'
     },
     'telegram.language.changed_success': {
-        'en': 'Changed success',
-        'uz': 'Changed success',
-        'ru': 'Changed success'
+        'en': 'Language changed',
+        'uz': 'Til o\'zgartirildi',
+        'ru': 'Язык изменён'
     },
     'telegram.language.confirmation_message': {
-        'en': 'Confirmation message',
-        'uz': 'Confirmation message',
-        'ru': 'Confirmation message'
+        'en': 'All menus and messages will now appear in your new language. Enjoy Aqua Element!',
+        'uz': 'Barcha menyular va xabarlar endi yangi tilingizda ko\'rsatiladi. Aqua Element xizmatidan zavqlaning!',
+        'ru': 'Теперь все меню и сообщения будут на новом языке. Приятного пользования Aqua Element!'
     },
     'telegram.language.confirmation_title': {
-        'en': 'Confirmation title',
-        'uz': 'Confirmation title',
-        'ru': 'Confirmation title'
+        'en': 'Language updated',
+        'uz': 'Til yangilandi',
+        'ru': 'Язык обновлён'
     },
     'telegram.language.current': {
-        'en': 'Current',
-        'uz': 'Current',
-        'ru': 'Current'
+        'en': 'Current language',
+        'uz': 'Joriy til',
+        'ru': 'Текущий язык'
     },
     'telegram.language.error_changing': {
-        'en': 'Error changing',
-        'uz': 'Error changing',
-        'ru': 'Error changing'
+        'en': 'Couldn\'t change the language. Please try again.',
+        'uz': 'Tilni o\'zgartirib bo\'lmadi. Iltimos, qaytadan urinib ko\'ring.',
+        'ru': 'Не удалось изменить язык. Пожалуйста, попробуйте ещё раз.'
     },
     'telegram.language.invalid_selection': {
-        'en': 'Invalid selection',
-        'uz': 'Invalid selection',
-        'ru': 'Invalid selection'
+        'en': 'This language isn\'t available. Please choose another.',
+        'uz': 'Bu til mavjud emas. Iltimos, boshqasini tanlang.',
+        'ru': 'Этот язык недоступен. Пожалуйста, выберите другой.'
     },
     'telegram.language.now_using': {
-        'en': 'Now using',
-        'uz': 'Now using',
-        'ru': 'Now using'
+        'en': 'You\'re now using {language}',
+        'uz': 'Endi {language} tilidan foydalanyapsiz',
+        'ru': 'Теперь вы используете язык {language}'
     },
     'telegram.language.select_prompt': {
-        'en': 'Select prompt',
-        'uz': 'Select prompt',
-        'ru': 'Select prompt'
+        'en': 'Choose your language:',
+        'uz': 'Tilingizni tanlang:',
+        'ru': 'Выберите язык:'
     },
     'telegram.loyalty.and_more': {
-        'en': 'And more',
-        'uz': 'And more',
-        'ru': 'And more'
+        'en': '...and {count} more',
+        'uz': '...va yana {count} ta',
+        'ru': '...и ещё {count}'
     },
     'telegram.loyalty.available_rewards': {
         'en': 'Available rewards',
-        'uz': 'Available rewards',
-        'ru': 'Available rewards'
+        'uz': 'Mavjud mukofotlar',
+        'ru': 'Доступные награды'
     },
     'telegram.loyalty.current_balance': {
         'en': 'Current balance',
-        'uz': 'Current balance',
-        'ru': 'Current balance'
+        'uz': 'Joriy balans',
+        'ru': 'Текущий баланс'
     },
     'telegram.loyalty.lifetime_earned': {
-        'en': 'Lifetime earned',
-        'uz': 'Lifetime earned',
-        'ru': 'Lifetime earned'
+        'en': 'Total earned',
+        'uz': 'Jami yig\'ilgan',
+        'ru': 'Всего заработано'
     },
     'telegram.loyalty.no_history': {
-        'en': 'No history',
-        'uz': 'No history',
-        'ru': 'No history'
+        'en': 'You have no AquaCoins transactions yet.',
+        'uz': 'Sizda hali AquaCoins bo\'yicha amallar yo\'q.',
+        'ru': 'У вас пока нет операций с AquaCoins.'
     },
     'telegram.loyalty.no_rewards_available': {
-        'en': 'No rewards available',
-        'uz': 'No rewards available',
-        'ru': 'No rewards available'
+        'en': 'No rewards are available right now.',
+        'uz': 'Hozircha mukofotlar mavjud emas.',
+        'ru': 'Пока нет доступных наград.'
     },
     'telegram.loyalty.points_history': {
         'en': 'AquaCoins history',
@@ -5498,9 +5498,9 @@ BACKEND_TRANSLATIONS = {
         'ru': 'AquaCoins'
     },
     'telegram.loyalty.redeem_success': {
-        'en': 'Redeem success',
-        'uz': 'Redeem success',
-        'ru': 'Redeem success'
+        'en': 'Reward redeemed successfully!',
+        'uz': 'Mukofot muvaffaqiyatli almashtirildi!',
+        'ru': 'Награда успешно обменяна!'
     },
     'telegram.loyalty.reward_selected': {
         'en': 'Reward selected — it will be applied at checkout',
@@ -5538,9 +5538,9 @@ BACKEND_TRANSLATIONS = {
         'ru': 'Награда убрана'
     },
     'telegram.loyalty.refer_friends': {
-        'en': 'Refer friends',
-        'uz': 'Refer friends',
-        'ru': 'Refer friends'
+        'en': 'Invite friends',
+        'uz': 'Do\'stlarni taklif qilish',
+        'ru': 'Пригласить друзей'
     },
     'telegram.loyalty.referral_code': {
         'en': 'Referral code',
@@ -5568,9 +5568,9 @@ BACKEND_TRANSLATIONS = {
         'ru': 'Обменять'
     },
     'telegram.loyalty.reward_fallback': {
-        'en': 'Reward fallback',
-        'uz': 'Reward fallback',
-        'ru': 'Reward fallback'
+        'en': 'Reward',
+        'uz': 'Mukofot',
+        'ru': 'Награда'
     },
     'telegram.loyalty.reward_applied': {
         'en': 'Reward applied',
@@ -5658,243 +5658,243 @@ BACKEND_TRANSLATIONS = {
     },
     'telegram.loyalty.view_rewards': {
         'en': 'View rewards',
-        'uz': 'View rewards',
-        'ru': 'View rewards'
+        'uz': 'Mukofotlarni ko\'rish',
+        'ru': 'Посмотреть награды'
     },
     'telegram.main_menu': {
-        'en': 'Main menu',
-        'uz': 'Main menu',
-        'ru': 'Main menu'
+        'en': '💧 Welcome to Aqua Element! Choose an option below to get started.',
+        'uz': '💧 Aqua Elementga xush kelibsiz! Boshlash uchun quyidagi bo\'limlardan birini tanlang.',
+        'ru': '💧 Добро пожаловать в Aqua Element! Выберите нужный раздел ниже, чтобы начать.'
     },
     'telegram.price': {
         'en': 'Price',
-        'uz': 'Price',
-        'ru': 'Price'
+        'uz': 'Narxi',
+        'ru': 'Цена'
     },
     'telegram.quantity': {
         'en': 'Quantity',
-        'uz': 'Quantity',
-        'ru': 'Quantity'
+        'uz': 'Soni',
+        'ru': 'Количество'
     },
     'telegram.registration.phone_shared': {
-        'en': 'Phone shared',
-        'uz': 'Phone shared',
-        'ru': 'Phone shared'
+        'en': 'Phone number saved. Thank you!',
+        'uz': 'Telefon raqamingiz saqlandi. Rahmat!',
+        'ru': 'Номер телефона сохранён. Спасибо!'
     },
     'telegram.subscription.active': {
         'en': 'Active',
-        'uz': 'Active',
-        'ru': 'Active'
+        'uz': 'Faol',
+        'ru': 'Активные'
     },
     'telegram.subscription.activity_logs': {
-        'en': 'Activity logs',
-        'uz': 'Activity logs',
-        'ru': 'Activity logs'
+        'en': 'Activity Log',
+        'uz': 'Faoliyat tarixi',
+        'ru': 'История действий'
     },
     'telegram.subscription.add_address': {
-        'en': 'Add address',
-        'uz': 'Add address',
-        'ru': 'Add address'
+        'en': 'Add Address',
+        'uz': 'Manzil qo\'shish',
+        'ru': 'Добавить адрес'
     },
     'telegram.subscription.add_more_or_continue': {
-        'en': 'Add more or continue',
-        'uz': 'Add more or continue',
-        'ru': 'Add more or continue'
+        'en': 'Add more items or continue.',
+        'uz': 'Yana mahsulot qo\'shing yoki davom eting.',
+        'ru': 'Добавьте ещё товары или продолжите.'
     },
     'telegram.subscription.add_new_address': {
-        'en': 'Add new address',
-        'uz': 'Add new address',
-        'ru': 'Add new address'
+        'en': 'Add New Address',
+        'uz': 'Yangi manzil qo\'shish',
+        'ru': 'Добавить новый адрес'
     },
     'telegram.subscription.amount': {
         'en': 'Amount',
-        'uz': 'Amount',
-        'ru': 'Amount'
+        'uz': 'Summa',
+        'ru': 'Сумма'
     },
     'telegram.subscription.average_order': {
         'en': 'Average order',
-        'uz': 'Average order',
-        'ru': 'Average order'
+        'uz': 'O\'rtacha buyurtma',
+        'ru': 'Средний заказ'
     },
     'telegram.subscription.back_to_items': {
-        'en': 'Back to items',
-        'uz': 'Back to items',
-        'ru': 'Back to items'
+        'en': 'Back to Items',
+        'uz': 'Mahsulotlarga qaytish',
+        'ru': 'Назад к товарам'
     },
     'telegram.subscription.billing_history': {
-        'en': 'Billing history',
-        'uz': 'Billing history',
-        'ru': 'Billing history'
+        'en': 'Billing History',
+        'uz': 'To\'lovlar tarixi',
+        'ru': 'История списаний'
     },
     'telegram.subscription.billing_retry_initiated': {
-        'en': 'Billing retry initiated',
-        'uz': 'Billing retry initiated',
-        'ru': 'Billing retry initiated'
+        'en': 'Billing retry started.',
+        'uz': 'To\'lovni qayta o\'tkazishga urinish boshlandi.',
+        'ru': 'Повторное списание запущено.'
     },
     'telegram.subscription.cancelled_success': {
-        'en': 'Cancelled success',
-        'uz': 'Cancelled success',
-        'ru': 'Cancelled success'
+        'en': 'Subscription cancelled.',
+        'uz': 'Obuna bekor qilindi.',
+        'ru': 'Подписка отменена.'
     },
     'telegram.subscription.confirm_title': {
-        'en': 'Confirm title',
-        'uz': 'Confirm title',
-        'ru': 'Confirm title'
+        'en': 'Confirm Subscription',
+        'uz': 'Obunani tasdiqlash',
+        'ru': 'Подтверждение подписки'
     },
     'telegram.subscription.create_template_or_custom': {
-        'en': 'Create template or custom',
-        'uz': 'Create template or custom',
-        'ru': 'Create template or custom'
+        'en': 'Start from a template or build your own subscription.',
+        'uz': 'Tayyor shablondan boshlang yoki o\'z obunangizni tuzing.',
+        'ru': 'Начните с шаблона или соберите свою подписку.'
     },
     'telegram.subscription.created_success': {
-        'en': 'Created success',
-        'uz': 'Created success',
-        'ru': 'Created success'
+        'en': 'Subscription created.',
+        'uz': 'Obuna yaratildi.',
+        'ru': 'Подписка создана.'
     },
     'telegram.subscription.creation_cancelled': {
-        'en': 'Creation cancelled',
-        'uz': 'Creation cancelled',
-        'ru': 'Creation cancelled'
+        'en': 'Subscription creation cancelled.',
+        'uz': 'Obuna yaratish bekor qilindi.',
+        'ru': 'Создание подписки отменено.'
     },
     'telegram.subscription.current_items': {
         'en': 'Current items',
-        'uz': 'Current items',
-        'ru': 'Current items'
+        'uz': 'Joriy mahsulotlar',
+        'ru': 'Текущие товары'
     },
     'telegram.subscription.details_title': {
-        'en': 'Details title',
-        'uz': 'Details title',
-        'ru': 'Details title'
+        'en': 'Subscription Details',
+        'uz': 'Obuna tafsilotlari',
+        'ru': 'Детали подписки'
     },
     'telegram.subscription.edit_menu': {
-        'en': 'Edit menu',
-        'uz': 'Edit menu',
-        'ru': 'Edit menu'
+        'en': 'What would you like to change in your subscription?',
+        'uz': 'Obunangizda nimani o\'zgartirmoqchisiz?',
+        'ru': 'Что вы хотите изменить в подписке?'
     },
     'telegram.subscription.favorite_product': {
         'en': 'Favorite product',
-        'uz': 'Favorite product',
-        'ru': 'Favorite product'
+        'uz': 'Sevimli mahsulot',
+        'ru': 'Любимый товар'
     },
     'telegram.subscription.frequency': {
         'en': 'Frequency',
-        'uz': 'Frequency',
-        'ru': 'Frequency'
+        'uz': 'Davriylik',
+        'ru': 'Периодичность'
     },
     'telegram.subscription.frequency_updated_successfully': {
-        'en': 'Frequency updated successfully',
-        'uz': 'Frequency updated successfully',
-        'ru': 'Frequency updated successfully'
+        'en': 'Delivery frequency updated.',
+        'uz': 'Yetkazib berish davriyligi yangilandi.',
+        'ru': 'Периодичность доставки обновлена.'
     },
     'telegram.subscription.id': {
-        'en': 'Id',
-        'uz': 'Id',
-        'ru': 'Id'
+        'en': 'Subscription ID',
+        'uz': 'Obuna ID',
+        'ru': 'ID подписки'
     },
     'telegram.subscription.item_added': {
-        'en': 'Item added',
-        'uz': 'Item added',
-        'ru': 'Item added'
+        'en': 'Item added to your subscription.',
+        'uz': 'Mahsulot obunangizga qo\'shildi.',
+        'ru': 'Товар добавлен в подписку.'
     },
     'telegram.subscription.item_added_successfully': {
-        'en': 'Item added successfully',
-        'uz': 'Item added successfully',
-        'ru': 'Item added successfully'
+        'en': 'Item added.',
+        'uz': 'Mahsulot qo\'shildi.',
+        'ru': 'Товар добавлен.'
     },
     'telegram.subscription.item_removed_successfully': {
-        'en': 'Item removed successfully',
-        'uz': 'Item removed successfully',
-        'ru': 'Item removed successfully'
+        'en': 'Item removed.',
+        'uz': 'Mahsulot olib tashlandi.',
+        'ru': 'Товар удалён.'
     },
     'telegram.subscription.item_updated_successfully': {
-        'en': 'Item updated successfully',
-        'uz': 'Item updated successfully',
-        'ru': 'Item updated successfully'
+        'en': 'Item updated.',
+        'uz': 'Mahsulot yangilandi.',
+        'ru': 'Товар обновлён.'
     },
     'telegram.subscription.items': {
         'en': 'Items',
-        'uz': 'Items',
-        'ru': 'Items'
+        'uz': 'Mahsulotlar',
+        'ru': 'Товары'
     },
     'telegram.subscription.next_billing': {
         'en': 'Next billing',
-        'uz': 'Next billing',
-        'ru': 'Next billing'
+        'uz': 'Keyingi to\'lov',
+        'ru': 'Следующее списание'
     },
     'telegram.subscription.next_delivery': {
         'en': 'Next delivery',
-        'uz': 'Next delivery',
-        'ru': 'Next delivery'
+        'uz': 'Keyingi yetkazib berish',
+        'ru': 'Следующая доставка'
     },
     'telegram.subscription.no_activity_logs': {
-        'en': 'No activity logs',
-        'uz': 'No activity logs',
-        'ru': 'No activity logs'
+        'en': 'No activity yet.',
+        'uz': 'Hozircha faoliyat yo\'q.',
+        'ru': 'Пока нет активности.'
     },
     'telegram.subscription.no_addresses': {
-        'en': 'No addresses',
-        'uz': 'No addresses',
-        'ru': 'No addresses'
+        'en': 'You don\'t have any saved addresses yet.',
+        'uz': 'Sizda hali saqlangan manzillar yo\'q.',
+        'ru': 'У вас пока нет сохранённых адресов.'
     },
     'telegram.subscription.no_billing_history': {
-        'en': 'No billing history',
-        'uz': 'No billing history',
-        'ru': 'No billing history'
+        'en': 'No billing history yet.',
+        'uz': 'Hozircha to\'lovlar tarixi yo\'q.',
+        'ru': 'Пока нет истории платежей.'
     },
     'telegram.subscription.no_items': {
-        'en': 'No items',
-        'uz': 'No items',
-        'ru': 'No items'
+        'en': 'No items in this subscription yet.',
+        'uz': 'Bu obunada hali mahsulotlar yo\'q.',
+        'ru': 'В этой подписке пока нет товаров.'
     },
     'telegram.subscription.no_subscriptions': {
-        'en': 'No subscriptions',
-        'uz': 'No subscriptions',
-        'ru': 'No subscriptions'
+        'en': 'You don\'t have any subscriptions yet.',
+        'uz': 'Sizda hali obunalar yo\'q.',
+        'ru': 'У вас пока нет подписок.'
     },
     'telegram.subscription.paused': {
         'en': 'Paused',
-        'uz': 'Paused',
-        'ru': 'Paused'
+        'uz': 'To\'xtatilgan',
+        'ru': 'Приостановлено'
     },
     'telegram.subscription.paused_success': {
-        'en': 'Paused success',
-        'uz': 'Paused success',
-        'ru': 'Paused success'
+        'en': 'Subscription paused.',
+        'uz': 'Obuna to\'xtatildi.',
+        'ru': 'Подписка приостановлена.'
     },
     'telegram.subscription.payment_method_updated_successfully': {
-        'en': 'Payment method updated successfully',
-        'uz': 'Payment method updated successfully',
-        'ru': 'Payment method updated successfully'
+        'en': 'Payment method updated.',
+        'uz': 'To\'lov usuli yangilandi.',
+        'ru': 'Способ оплаты обновлён.'
     },
     'telegram.subscription.resumed_success': {
-        'en': 'Resumed success',
-        'uz': 'Resumed success',
-        'ru': 'Resumed success'
+        'en': 'Subscription resumed.',
+        'uz': 'Obuna qayta tiklandi.',
+        'ru': 'Подписка возобновлена.'
     },
     'telegram.subscription.select_address': {
-        'en': 'Select address',
-        'uz': 'Select address',
-        'ru': 'Select address'
+        'en': 'Choose a delivery address:',
+        'uz': 'Yetkazib berish manzilini tanlang:',
+        'ru': 'Выберите адрес доставки:'
     },
     'telegram.subscription.select_at_least_one_item': {
-        'en': 'Select at least one item',
-        'uz': 'Select at least one item',
-        'ru': 'Select at least one item'
+        'en': 'Please add at least one item.',
+        'uz': 'Kamida bitta mahsulot qo\'shing.',
+        'ru': 'Добавьте хотя бы один товар.'
     },
     'telegram.subscription.select_frequency': {
-        'en': 'Select frequency',
-        'uz': 'Select frequency',
-        'ru': 'Select frequency'
+        'en': 'How often should we deliver?',
+        'uz': 'Qanchalik tez-tez yetkazib beraylik?',
+        'ru': 'Как часто доставлять?'
     },
     'telegram.subscription.select_new_frequency': {
-        'en': 'Select new frequency',
-        'uz': 'Select new frequency',
-        'ru': 'Select new frequency'
+        'en': 'Choose a new delivery frequency:',
+        'uz': 'Yangi yetkazib berish davriyligini tanlang:',
+        'ru': 'Выберите новую частоту доставки:'
     },
     'telegram.subscription.select_new_payment_method': {
-        'en': 'Select new payment method',
-        'uz': 'Select new payment method',
-        'ru': 'Select new payment method'
+        'en': 'Choose a new payment method:',
+        'uz': 'Yangi to\'lov usulini tanlang:',
+        'ru': 'Выберите новый способ оплаты:'
     },
     'telegram.subscription.select_new_quantity': {
         'en': 'Select new quantity:',
@@ -5902,9 +5902,9 @@ BACKEND_TRANSLATIONS = {
         'ru': 'Выберите новое количество:'
     },
     'telegram.subscription.select_payment': {
-        'en': 'Select payment',
-        'uz': 'Select payment',
-        'ru': 'Select payment'
+        'en': 'Choose a payment method:',
+        'uz': 'To\'lov usulini tanlang:',
+        'ru': 'Выберите способ оплаты:'
     },
     'telegram.subscription.select_product_to_add': {
         'en': 'Select a product to add:',
@@ -5927,24 +5927,24 @@ BACKEND_TRANSLATIONS = {
         'ru': 'Выберите количество для этого товара:'
     },
     'telegram.subscription.skip_success': {
-        'en': 'Skip success',
-        'uz': 'Skip success',
-        'ru': 'Skip success'
+        'en': 'Next delivery skipped.',
+        'uz': 'Keyingi yetkazib berish o\'tkazib yuborildi.',
+        'ru': 'Следующая доставка пропущена.'
     },
     'telegram.subscription.status': {
         'en': 'Status',
-        'uz': 'Status',
-        'ru': 'Status'
+        'uz': 'Holati',
+        'ru': 'Статус'
     },
     'telegram.subscription.title': {
-        'en': 'Title',
-        'uz': 'Title',
-        'ru': 'Title'
+        'en': '🔄 My subscriptions',
+        'uz': '🔄 Mening obunalarim',
+        'ru': '🔄 Мои подписки'
     },
     'telegram.subscription.total': {
         'en': 'Total',
-        'uz': 'Total',
-        'ru': 'Total'
+        'uz': 'Jami',
+        'ru': 'Итого'
     },
     'telegram.subscription.total_items': {
         'en': 'Total items',
@@ -5952,24 +5952,24 @@ BACKEND_TRANSLATIONS = {
         'ru': 'Всего товаров'
     },
     'telegram.subscription.trial': {
-        'en': 'Trial',
-        'uz': 'Trial',
-        'ru': 'Trial'
+        'en': 'Free trial: {} days',
+        'uz': 'Bepul sinov: {} kun',
+        'ru': 'Бесплатный пробный период: {} дн.'
     },
     'telegram.subscription.view': {
-        'en': 'View',
-        'uz': 'View',
-        'ru': 'View'
+        'en': 'View subscription',
+        'uz': 'Obunani ko\'rish',
+        'ru': 'Открыть подписку'
     },
     'telegram.total': {
         'en': 'Total',
-        'uz': 'Total',
-        'ru': 'Total'
+        'uz': 'Jami',
+        'ru': 'Итого'
     },
     'telegram.unknown_action': {
-        'en': 'Unknown action',
-        'uz': 'Unknown action',
-        'ru': 'Unknown action'
+        'en': 'Unknown action. Please try again.',
+        'uz': 'Noma\'lum amal. Iltimos, qaytadan urinib ko\'ring.',
+        'ru': 'Неизвестное действие. Пожалуйста, попробуйте снова.'
     },
     'telegram.welcome': {
         'en': '👋 Welcome to Aqua Element! Your registration is complete. Use the menu below to start ordering.',

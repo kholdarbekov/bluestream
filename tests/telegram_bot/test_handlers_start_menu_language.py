@@ -27,7 +27,7 @@ class TestMainMenuHandlerFlows:
 
         cleanup_mock.assert_awaited_once_with(update, context)
         update.callback_query.edit_message_text.assert_awaited_once_with(
-            text="telegram.welcome:en",
+            text="telegram.main_menu:en",
             reply_markup="menu-kbd",
         )
         update.callback_query.answer.assert_awaited_once()
@@ -45,7 +45,7 @@ class TestMainMenuHandlerFlows:
 
         cleanup_mock.assert_awaited_once_with(update, context)
         update.message.reply_text.assert_awaited_once_with(
-            text="telegram.welcome:ru",
+            text="telegram.main_menu:ru",
             reply_markup="menu-kbd",
         )
 

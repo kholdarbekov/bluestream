@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { DEFAULT_PAGE_SIZE } from '../utils/constants';
+import { DEFAULT_PAGE_SIZE, BULK_LOAD_PAGE_SIZE } from '../utils/constants';
+import { fetchAllPages } from '../utils/pagination';
 import {
   Table,
   Card,
@@ -199,9 +200,16 @@ const Orders = () => {
   const [userSearchTerm, setUserSearchTerm] = useState('');
   const userSearchDebounceRef = useRef();
 
+  // The backend caps per_page at MAX_PAGE_SIZE (100), so a single request would
+  // silently truncate the matches. Loop every page for the search term so the
+  // picker shows ALL matching users, not just the first page.
   const { data: usersData, isFetching: isUsersFetching } = useQuery({
     queryKey: ['users-for-order', userSearchTerm],
-    queryFn: () => adminService.getUsers({ search: userSearchTerm, per_page: DEFAULT_PAGE_SIZE }),
+    queryFn: () => fetchAllPages(
+      (page) => adminService.getUsers({ search: userSearchTerm, page, per_page: BULK_LOAD_PAGE_SIZE }),
+      (resp) => resp?.data?.items || [],
+      BULK_LOAD_PAGE_SIZE,
+    ),
     enabled: isCreateModalVisible && userSearchTerm.length >= 2,
     placeholderData: keepPreviousData,
   });
@@ -215,7 +223,7 @@ const Orders = () => {
   const selectedUserRecord = selectedUserData?.data?.user || selectedUserData?.data || null;
 
   const userOptions = useMemo(() => {
-    const items = usersData?.data?.items || [];
+    const items = usersData || [];
     const formatLabel = (u) => `${u.first_name || ''} ${u.last_name || ''}`.trim() + (u.phone ? ` - ${u.phone}` : '');
     const options = items.map((u) => ({ value: u.id, label: formatLabel(u) }));
     if (selectedUserRecord && !options.find((o) => o.value === selectedUserRecord.id)) {

@@ -805,22 +805,11 @@ def get_loyalty_handbook_context():
         if r.is_effective(now)
     ]
 
-    # Surprise reward: random delight bonus on a delivered+paid order for
-    # individual customers. Surfaced on the handbook only when enabled, with the
-    # live config so the page never overstates the mechanic.
-    surprise_amounts = [
-        int(p.strip())
-        for p in str((program.surprise_amounts if program else "") or "").split(",")
-        if p.strip().isdigit()
-    ]
-    surprise = {
-        "enabled": bool(program.surprise_enabled) if program else False,
-        "chance_percent": (program.surprise_chance_percent if program else 0) or 0,
-        "amounts": surprise_amounts,
-        "amounts_display": " / ".join(str(a) for a in surprise_amounts),
-        "cooldown_days": (program.surprise_cooldown_days if program else 0) or 0,
-        "daily_cap": (program.surprise_daily_cap if program else 0) or 0,
-    }
+    # Surprise reward: an occasional, random delight bonus on a delivered+paid
+    # order for individual customers. The handbook surfaces only *whether* it is
+    # enabled — never the amounts, odds, or cooldown — so it stays a genuine
+    # surprise rather than a formula customers can anticipate or game.
+    surprise = {"enabled": bool(program.surprise_enabled) if program else False}
 
     return {
         "uzs_per_point": uzs_per_point,

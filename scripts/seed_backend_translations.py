@@ -7126,15 +7126,15 @@ LOYALTY_GUIDE_TRANSLATIONS = {
     ),
     'loyalty_guide.earn.surprise_title': _ui_tr('Surprise rewards', 'Kutilmagan mukofotlar', 'Сюрприз-награды'),
     'loyalty_guide.earn.surprise_desc': _ui_tr(
-        'Every so often, an order delivered and fully paid the same day randomly drops {amounts} bonus AquaCoins — for individual members. Checked daily, about a {chance}% chance, at most once every {cooldown} days.',
-        "Goho o'sha kuni yetkazib berilib, to'liq to'langan buyurtma tasodifan {amounts} bonus AquaCoins beradi — faqat jismoniy shaxs a'zolar uchun. Har kuni tekshiriladi, taxminan {chance}% imkoniyat, {cooldown} kunda ko'pi bilan bir marta.",
-        'Иногда заказ, доставленный и полностью оплаченный в тот же день, случайно приносит {amounts} бонусных AquaCoins — только для индивидуальных участников. Проверяется ежедневно, шанс около {chance}%, не чаще одного раза в {cooldown} дней.',
+        "Every now and then we surprise members who order with a little extra — a bonus of AquaCoins that lands in your balance when you least expect it. No schedule, no formula; that's what keeps it a surprise.",
+        "Vaqti-vaqti bilan buyurtma bergan a'zolarni kichik sovg'a bilan xursand qilamiz — siz kutmagan paytda balansingizga AquaCoins bonusi tushadi. Jadval ham, formula ham yo'q; mana shu uni chinakam syurprizga aylantiradi.",
+        'Время от времени мы радуем участников, которые делают заказы, приятным бонусом — AquaCoins появляются на вашем балансе тогда, когда вы меньше всего этого ждёте. Без расписания и без формул — именно это и делает его сюрпризом.',
     ),
 
     'loyalty_guide.example.title': _ui_tr('See it in action', 'Amalda koʻring', 'Пример расчёта'),
     'loyalty_guide.example.body': _ui_tr(
-        "Spend {spend} {unit} as a {tier} member and you'll earn {base} base AquaCoins × {mult} = {points} AquaCoins.",
-        "{tier} aʼzosi sifatida {spend} {unit} sarflang va {base} asosiy AquaCoins × {mult} = {points} AquaCoins yigʻasiz.",
+        "Spend {spend} {unit} as a {tier} tier member and you'll earn {base} base AquaCoins × {mult} = {points} AquaCoins.",
+        "{tier} darajasidagi aʼzo sifatida {spend} {unit} sarflang va {base} asosiy AquaCoins × {mult} = {points} AquaCoins yigʻasiz.",
         'Потратьте {spend} {unit} как участник уровня {tier} — и получите {base} базовых AquaCoins × {mult} = {points} AquaCoins.',
     ),
 
@@ -7367,9 +7367,9 @@ LOYALTY_GUIDE_TRANSLATIONS = {
         'Что такое сюрприз-награды?',
     ),
     'loyalty_guide.faq.a8': _ui_tr(
-        "A random bonus of {amounts} AquaCoins for individual members, drawn once a day from orders that were delivered and fully paid that same day — about a {chance}% chance, and at most one surprise per member every {cooldown} days. An order paid the next day doesn't qualify.",
-        "Jismoniy shaxs a'zolar uchun tasodifiy {amounts} AquaCoinlik bonus: har kuni o'sha kuni yetkazib berilib, to'liq to'langan buyurtmalardan tanlanadi — taxminan {chance}% imkoniyat va har {cooldown} kunda a'zoga ko'pi bilan bitta sovg'a. Keyingi kuni to'langan buyurtma hisobga olinmaydi.",
-        'Случайный бонус в {amounts} AquaCoins для индивидуальных участников: раз в день разыгрывается среди заказов, доставленных и полностью оплаченных в тот же день — шанс около {chance}%, не более одного сюрприза на участника раз в {cooldown} дней. Заказ, оплаченный на следующий день, не участвует.',
+        "Exactly what the name says — a little delight. Once in a while, members who order are picked at random to receive a bonus of AquaCoins. We won't say when it happens or how much it'll be; just keep ordering, and one might quietly land in your balance.",
+        "Nomidan ko'rinib turibdi — yoqimli kutilmagan sovg'a. Vaqti-vaqti bilan buyurtma bergan a'zolar tasodifan tanlanib, AquaCoins bonusini oladi. Qachon va qancha bo'lishini aytmaymiz; faqat buyurtma berishda davom eting — bonus balansingizga sokin tushib qolishi mumkin.",
+        'Ровно то, что следует из названия, — приятный сюрприз. Время от времени участники, которые делают заказы, случайно выбираются для бонуса AquaCoins. Мы не скажем, когда это случится и сколько это будет; просто продолжайте заказывать — и он может тихо появиться на вашем балансе.',
     ),
 
     'loyalty_guide.cta.title': _ui_tr('Ready to start earning?', "Yig'ishni boshlashga tayyormisiz?", 'Готовы начать копить?'),

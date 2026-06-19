@@ -20,7 +20,7 @@
 {% set _ = faq.items.append({'q': 'loyalty_guide.faq.q5' | t, 'a': 'loyalty_guide.faq.a5' | t}) %}
 {% set _ = faq.items.append({'q': 'loyalty_guide.faq.q6' | t, 'a': 'loyalty_guide.faq.a6' | t}) %}
 {% set _ = faq.items.append({'q': 'loyalty_guide.faq.q7' | t, 'a': 'loyalty_guide.faq.a7' | t}) %}
-{% if handbook.surprise.enabled %}{% set _ = faq.items.append({'q': 'loyalty_guide.faq.q8' | t, 'a': 'loyalty_guide.faq.a8' | t(amounts=handbook.surprise.amounts_display, chance=handbook.surprise.chance_percent, cooldown=handbook.surprise.cooldown_days)}) %}{% endif %}
+{% if handbook.surprise.enabled %}{% set _ = faq.items.append({'q': 'loyalty_guide.faq.q8' | t, 'a': 'loyalty_guide.faq.a8' | t}) %}{% endif %}
 
 {% block extra_meta %}
 {% set faq_schema = namespace(items=[]) %}
@@ -133,7 +133,7 @@
         <article class="lg-card">
           <span class="lg-ico" aria-hidden="true"><i class="fas fa-star"></i></span>
           <h3>{{ 'loyalty_guide.earn.surprise_title' | t }}</h3>
-          <p>{{ 'loyalty_guide.earn.surprise_desc' | t(amounts=handbook.surprise.amounts_display, chance=handbook.surprise.chance_percent, cooldown=handbook.surprise.cooldown_days) }}</p>
+          <p>{{ 'loyalty_guide.earn.surprise_desc' | t }}</p>
         </article>
         {% endif %}
       </div>

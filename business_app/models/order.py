@@ -149,12 +149,13 @@ class Order(db.Model, TimestampMixin):
         """Calculate order total including discounts and delivery fee"""
         self.subtotal = sum(item.total_price for item in self.order_items)
 
-        # Loyalty points are redeemed only via rewards (LoyaltyReward.points_cost),
-        # never converted to a UZS discount on the order. Keep the column at 0.
-        self.loyalty_discount = Decimal("0.00")
+        # loyalty_discount holds the discount from a redeemed loyalty reward
+        # (rewards-only; never a points->UZS conversion). Preserve whatever the
+        # redemption engine set; defaults to Decimal("0.00") for non-reward orders.
+        loyalty_discount = self.loyalty_discount or Decimal("0.00")
 
         # Calculate final total
-        self.total_amount = self.subtotal - self.discount_amount + self.delivery_fee
+        self.total_amount = self.subtotal - self.discount_amount + self.delivery_fee - loyalty_discount
 
         # NOTE: loyalty_points_earned is calculated by LoyaltyService.calculate_points_for_purchase()
         # when the order is confirmed/processed, using LoyaltyProgram configuration and tier multipliers.

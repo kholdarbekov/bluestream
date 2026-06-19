@@ -955,18 +955,38 @@ class PaymentService:
                 current_app.logger.exception("Failed to trigger bot payment success webhook")
 
     def _process_points_refund(self, payment: Payment, amount: int, reason: str) -> bool:
-        """Process loyalty points refund"""
+        """Refund a points-paid order by RETURNING the redeemed points.
+
+        Loyalty is rewards-only: there is no UZS↔points conversion. This path
+        only runs for orders paid with loyalty points, so the refund returns the
+        points the customer actually spent (``order.loyalty_points_used``),
+        proportional to the refunded fraction. The credit is a non-qualifying
+        ADJUSTMENT (via ``reverse_earnings``) — no tier multiplier, and it does
+        not count toward tier qualification.
+        """
+        from decimal import Decimal
+
         from .loyalty_service import LoyaltyService
 
-        loyalty_service = LoyaltyService()
+        order = payment.order
+        redeemed = int(getattr(order, "loyalty_points_used", 0) or 0)
+        payment_amount = Decimal(str(payment.amount or 0))
+        if redeemed <= 0 or payment_amount <= 0:
+            return True
 
-        # Calculate points to refund
-        from ..utils.helpers import calculate_loyalty_points
+        # Proportional to the refunded fraction (full refund -> all points back).
+        fraction = min(Decimal("1"), Decimal(str(amount)) / payment_amount)
+        points_to_refund = int(redeemed * fraction)
+        if points_to_refund <= 0:
+            return True
 
-        points_to_refund = calculate_loyalty_points(amount)
-
-        loyalty_service.award_points(
-            payment.user_id, points_to_refund, f"Refund for order #{payment.order.order_number}"
+        LoyaltyService().reverse_earnings(
+            user_id=payment.user_id,
+            order_id=order.id,
+            old_points_earned=0,
+            new_points_earned=points_to_refund,
+            clamp=False,
+            description=f"Refund of redeemed points for order #{order.order_number}",
         )
 
         return True

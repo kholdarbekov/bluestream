@@ -407,7 +407,8 @@ class BaseConfig:
     # Earning is DB-driven (LoyaltyProgram.uzs_per_point); this is the legacy
     # fallback ratio. Points redeem only via rewards — no points→UZS conversion.
     LOYALTY_POINTS_RATIO = business_config.LOYALTY_POINTS_RATIO  # UZS per earned point
-    REFERRAL_BONUS_POINTS = int(os.environ.get("REFERRAL_BONUS_POINTS", 500))
+    # Bonus amounts (signup/referral/birthday) are DB-driven via LoyaltyProgram —
+    # the former REFERRAL_BONUS_POINTS config was removed (loyalty SSOT, Unit E).
 
     # Subscription Configuration
     SUBSCRIPTION_TRIAL_DAYS = int(os.environ.get("SUBSCRIPTION_TRIAL_DAYS", 7))

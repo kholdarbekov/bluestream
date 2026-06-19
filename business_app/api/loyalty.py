@@ -5,7 +5,7 @@ Loyalty Program API endpoints for the Water Business Platform
 from flask import Blueprint, request, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
-from business_app.utils.service_factory import get_loyalty_service, get_notification_service
+from business_app.utils.service_factory import get_loyalty_service
 from business_app.utils.helpers import get_current_language
 from business_app.serializers.loyalty_serializers import (
     serialize_loyalty_reward,
@@ -13,7 +13,7 @@ from business_app.serializers.loyalty_serializers import (
     serialize_loyalty_program,
 )
 from business_app.utils.decorators import validate_json, cache_response
-from business_app.utils.constants import LoyaltyActionType, NotificationType
+from business_app.utils.constants import LoyaltyActionType
 from business_app.utils.api_responses import (
     success_response,
     error_response,
@@ -36,19 +36,6 @@ def _validation_error_key_for_points_history(message: str) -> str:
         return "api.loyalty.error.invalid_start_date_format"
     if "end date" in lower:
         return "api.loyalty.error.invalid_end_date_format"
-    return "api.loyalty.error.validation_failed"
-
-
-def _validation_error_key_for_redeem(message: str) -> str:
-    lower = message.lower()
-    if "auto-applied" in lower:
-        return "api.loyalty.error.reward_auto_applied"
-    if "no longer available" in lower:
-        return "api.loyalty.error.reward_no_longer_available"
-    if "insufficient points" in lower:
-        return "api.loyalty.error.insufficient_points"
-    if "redemption limit" in lower:
-        return "api.loyalty.error.redemption_limit_reached"
     return "api.loyalty.error.validation_failed"
 
 
@@ -210,7 +197,7 @@ def get_available_rewards():
             rewards.append(
                 {
                     **serialize_loyalty_reward(reward, None),
-                    "can_redeem": user_points >= reward.points_cost,
+                    "can_redeem": payload["can_redeem_by_id"].get(reward.id, False),
                     "points_needed": max(0, reward.points_cost - user_points),
                 }
             )
@@ -262,62 +249,6 @@ def get_reward_details(reward_id):
     except Exception as exc:
         current_app.logger.error(f"Get reward details error: {exc}")
         return internal_error_response(get_translation("api.loyalty.error.get_reward_details_failed"))
-
-
-@loyalty_bp.route("/rewards/<int:reward_id>/redeem", methods=["POST"])
-@jwt_required()
-def redeem_reward(reward_id):
-    """Redeem a loyalty reward."""
-    try:
-        current_user_id = get_jwt_identity()
-        data = request.get_json() or {}
-        language = get_current_language()
-
-        payload = get_loyalty_service().redeem_reward_for_user(
-            user_id=current_user_id,
-            reward_id=reward_id,
-            delivery_address_id=data.get("delivery_address_id"),
-            notes=data.get("notes"),
-        )
-        reward = payload["reward"]
-        redemption = payload["redemption"]
-
-        get_notification_service().send_notification(
-            current_user_id,
-            NotificationType.REWARD_REDEEMED,
-            template_data={
-                "reward_name": reward.get_translated("name", language),
-                "points_spent": reward.points_cost,
-                "remaining_points": payload["remaining_points"],
-                "redemption_code": redemption["redemption_code"],
-                "expires_at": redemption["expires_at"],
-                "loyalty_url": f"{current_app.config.get('FRONTEND_URL', '')}/cabinet/loyalty",
-            },
-        )
-
-        return created_response(
-            data={
-                "redemption": {
-                    "id": redemption["id"],
-                    "reward_name": reward.get_translated("name", language),
-                    "points_spent": redemption["points_spent"],
-                    "status": redemption["status"],
-                    "redemption_code": redemption["redemption_code"],
-                    "expires_at": redemption["expires_at"],
-                }
-            },
-            message=get_translation("api.loyalty.reward_redeemed_successfully"),
-        )
-    except NotFoundError as exc:
-        if "reward" in str(exc).lower():
-            return not_found_response(get_translation("api.loyalty.error.reward_not_found"))
-        return not_found_response(get_translation("user_not_found"))
-    except ValidationError as exc:
-        current_app.logger.warning(f"Redeem reward validation error: {exc}")
-        return error_response(get_translation(_validation_error_key_for_redeem(str(exc))))
-    except Exception as exc:
-        current_app.logger.error(f"Redeem reward error: {exc}")
-        return internal_error_response(get_translation("api.loyalty.error.redeem_reward_failed"))
 
 
 @loyalty_bp.route("/rewards/history", methods=["GET"])
@@ -404,7 +335,7 @@ def earn_points():
         transaction = loyalty_service.award_points(
             user_id=current_user_id,
             points=points_amount or loyalty_service.get_action_points(action),
-            description=f"Points earned for {action.replace('_', ' ')}",
+            description=f"AquaCoins earned for {action.replace('_', ' ')}",
             action_type=action_type_map.get(action, LoyaltyActionType.WELCOME_BONUS),
             reference_id=reference_id,
         )
@@ -431,7 +362,6 @@ def get_referral_info():
         current_user_id = get_jwt_identity()
         payload = get_loyalty_service().get_referral_info_for_user(
             user_id=current_user_id,
-            host_url=request.host_url,
         )
         return success_response(data=payload)
     except NotFoundError:
@@ -456,19 +386,6 @@ def get_loyalty_statistics():
     except Exception as exc:
         current_app.logger.error(f"Get loyalty statistics error: {exc}")
         return internal_error_response(get_translation("api.loyalty.error.get_statistics_failed"))
-
-
-@loyalty_bp.route("/challenges", methods=["GET"])
-@jwt_required()
-def get_loyalty_challenges():
-    """Get available loyalty challenges."""
-    try:
-        current_user_id = get_jwt_identity()
-        challenges = get_loyalty_service().get_user_challenges(current_user_id)
-        return success_response(data={"challenges": challenges})
-    except Exception as exc:
-        current_app.logger.error(f"Get loyalty challenges error: {exc}")
-        return internal_error_response(get_translation("api.loyalty.error.get_challenges_failed"))
 
 
 @loyalty_bp.route("/tier-benefits", methods=["GET"])

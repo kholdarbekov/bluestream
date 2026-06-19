@@ -1,0 +1,405 @@
+{% extends "frontend/base.html" %}
+
+{# ============================================================================
+   Loyalty Program Handbook — public, marketing-grade, trilingual (uz/ru/en).
+   All prose is DB-backed via the `t` filter; all numbers come from the
+   `handbook` context (get_loyalty_handbook_context) so the page never drifts
+   from the live program / tier configuration. Linked from the Telegram bot.
+   ========================================================================= #}
+
+{% set meta_description = 'loyalty_guide.meta.description' | t %}
+
+{% block title %}{{ 'loyalty_guide.meta.title' | t }} · {{ company_name }}{% endblock %}
+
+{# ---- FAQ list built once, reused for both the accordion and JSON-LD ---- #}
+{% set faq = namespace(items=[]) %}
+{% set _ = faq.items.append({'q': 'loyalty_guide.faq.q1' | t, 'a': 'loyalty_guide.faq.a1' | t(days=handbook.expiry_days)}) %}
+{% set _ = faq.items.append({'q': 'loyalty_guide.faq.q2' | t, 'a': 'loyalty_guide.faq.a2' | t}) %}
+{% set _ = faq.items.append({'q': 'loyalty_guide.faq.q3' | t, 'a': 'loyalty_guide.faq.a3' | t}) %}
+{% set _ = faq.items.append({'q': 'loyalty_guide.faq.q4' | t, 'a': 'loyalty_guide.faq.a4' | t}) %}
+{% set _ = faq.items.append({'q': 'loyalty_guide.faq.q5' | t, 'a': 'loyalty_guide.faq.a5' | t}) %}
+{% set _ = faq.items.append({'q': 'loyalty_guide.faq.q6' | t, 'a': 'loyalty_guide.faq.a6' | t}) %}
+{% set _ = faq.items.append({'q': 'loyalty_guide.faq.q7' | t, 'a': 'loyalty_guide.faq.a7' | t}) %}
+{% if handbook.surprise.enabled %}{% set _ = faq.items.append({'q': 'loyalty_guide.faq.q8' | t, 'a': 'loyalty_guide.faq.a8' | t(amounts=handbook.surprise.amounts_display, chance=handbook.surprise.chance_percent, cooldown=handbook.surprise.cooldown_days)}) %}{% endif %}
+
+{% block extra_meta %}
+{% set faq_schema = namespace(items=[]) %}
+{% for item in faq.items %}
+    {% set _ = faq_schema.items.append({
+        "@type": "Question",
+        "name": item.q,
+        "acceptedAnswer": {"@type": "Answer", "text": item.a}
+    }) %}
+{% endfor %}
+<script type="application/ld+json">{{ {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "name": ('loyalty_guide.meta.title' | t),
+    "url": canonical_href,
+    "mainEntity": faq_schema.items
+} | tojson }}</script>
+{% endblock %}
+
+{% block extra_head %}
+<link href="{{ url_for('static', filename='css/pages/loyalty-guide.css') }}" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+{# Reusable number macro: locale-neutral thousands separator (space). #}
+{% macro pts(n) %}{{ "{:,}".format(n).replace(",", " ") }}{% endmacro %}
+
+<div class="lg" id="lg-top">
+
+  {# ---------------------------------------------------------------- HERO #}
+  <section class="lg-hero">
+    <div class="auto-container">
+      <div class="lg-hero__inner">
+        <p class="lg-eyebrow lg-reveal">💧 {{ 'loyalty_guide.hero.eyebrow' | t }}</p>
+        <h1 class="lg-hero__title lg-reveal" style="--d:.05s">{{ 'loyalty_guide.hero.title' | t }}</h1>
+        <p class="lg-hero__subtitle lg-reveal" style="--d:.12s">{{ 'loyalty_guide.hero.subtitle' | t }}</p>
+        <div class="lg-hero__cta lg-reveal" style="--d:.2s">
+          <a class="lg-btn lg-btn--primary" href="{{ url_for('frontend.shop') }}">{{ 'loyalty_guide.hero.cta_primary' | t }} <i class="fas fa-arrow-right" aria-hidden="true"></i></a>
+          <a class="lg-btn lg-btn--ghost" href="#lg-tiers">{{ 'loyalty_guide.hero.cta_secondary' | t }}</a>
+        </div>
+
+        <ul class="lg-stats lg-reveal" style="--d:.28s">
+          <li class="lg-stat">
+            <span class="lg-stat__num">1<span class="lg-stat__sup">{{ 'loyalty_guide.unit.point' | t }}</span></span>
+            <span class="lg-stat__label">{{ 'loyalty_guide.stat.rate_label' | t(uzs=pts(handbook.uzs_per_point), unit=('loyalty_guide.unit.uzs' | t)) }}</span>
+          </li>
+          <li class="lg-stat">
+            <span class="lg-stat__num">+{{ pts(handbook.signup_bonus) }}</span>
+            <span class="lg-stat__label">{{ 'loyalty_guide.stat.welcome_label' | t }}</span>
+          </li>
+          <li class="lg-stat">
+            <span class="lg-stat__num">{{ handbook.tiers | length }}</span>
+            <span class="lg-stat__label">{{ 'loyalty_guide.stat.tiers_label' | t }}</span>
+          </li>
+          <li class="lg-stat">
+            <span class="lg-stat__num">{{ handbook.max_multiplier }}×</span>
+            <span class="lg-stat__label">{{ 'loyalty_guide.stat.multiplier_label' | t }}</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+    <div class="lg-hero__shape" aria-hidden="true"></div>
+  </section>
+
+  {# ------------------------------------------------------------- EARNING #}
+  <section class="lg-section" id="lg-earn">
+    <div class="auto-container">
+      <header class="lg-head">
+        <span class="lg-kicker">{{ 'loyalty_guide.earn.kicker' | t }}</span>
+        <h2 class="lg-h2">{{ 'loyalty_guide.earn.title' | t }}</h2>
+        <p class="lg-lede">{{ 'loyalty_guide.earn.subtitle' | t }}</p>
+      </header>
+
+      <div class="lg-grid lg-grid--earn">
+        <article class="lg-card lg-card--feature">
+          <span class="lg-ico" aria-hidden="true"><i class="fas fa-tint"></i></span>
+          <h3>{{ 'loyalty_guide.earn.purchase_title' | t }}</h3>
+          <p>{{ 'loyalty_guide.earn.purchase_desc' | t(uzs=pts(handbook.uzs_per_point), unit=('loyalty_guide.unit.uzs' | t)) }}</p>
+        </article>
+        <article class="lg-card">
+          <span class="lg-ico" aria-hidden="true"><i class="fas fa-gift"></i></span>
+          <h3>{{ 'loyalty_guide.earn.welcome_title' | t }}</h3>
+          <p>{{ 'loyalty_guide.earn.welcome_desc' | t(pts=pts(handbook.signup_bonus)) }}</p>
+        </article>
+        <article class="lg-card">
+          <span class="lg-ico" aria-hidden="true"><i class="fas fa-user-plus"></i></span>
+          <h3>{{ 'loyalty_guide.earn.referral_title' | t }}</h3>
+          <p>{{ 'loyalty_guide.earn.referral_desc' | t(you=pts(handbook.referral_bonus), friend=pts(handbook.referee_bonus)) }}</p>
+        </article>
+        <article class="lg-card">
+          <span class="lg-ico" aria-hidden="true"><i class="fas fa-birthday-cake"></i></span>
+          <h3>{{ 'loyalty_guide.earn.birthday_title' | t }}</h3>
+          <p>{{ 'loyalty_guide.earn.birthday_desc' | t(pts=pts(handbook.birthday_bonus)) }}</p>
+        </article>
+        {% if handbook.streak_rules %}
+        <article class="lg-card">
+          <span class="lg-ico" aria-hidden="true"><i class="fas fa-fire"></i></span>
+          <h3>{{ 'loyalty_guide.earn.streak_title' | t }}</h3>
+          <ul class="lg-streak-list">
+            {% for rule in handbook.streak_rules %}
+            <li>
+              <strong>{{ rule.name }}</strong>
+              <span>{{ 'loyalty_guide.earn.streak_line' | t(orders=rule.required_orders, days=rule.window_days, pts=pts(rule.bonus_points), unit=('loyalty_guide.unit.points' | t)) }}{% if rule.min_order_amount %} · {{ 'loyalty_guide.earn.streak_min' | t(uzs=pts(rule.min_order_amount|int), unit=('loyalty_guide.unit.uzs' | t)) }}{% endif %}</span>
+            </li>
+            {% endfor %}
+          </ul>
+        </article>
+        {% endif %}
+        {% if handbook.surprise.enabled %}
+        <article class="lg-card">
+          <span class="lg-ico" aria-hidden="true"><i class="fas fa-star"></i></span>
+          <h3>{{ 'loyalty_guide.earn.surprise_title' | t }}</h3>
+          <p>{{ 'loyalty_guide.earn.surprise_desc' | t(amounts=handbook.surprise.amounts_display, chance=handbook.surprise.chance_percent, cooldown=handbook.surprise.cooldown_days) }}</p>
+        </article>
+        {% endif %}
+      </div>
+
+      {# Worked example — derived from live config #}
+      <div class="lg-example">
+        <div class="lg-example__label">{{ 'loyalty_guide.example.title' | t }}</div>
+        <p class="lg-example__body">{{ 'loyalty_guide.example.body' | t(
+            spend=handbook.example.spend_display,
+            unit=('loyalty_guide.unit.uzs' | t),
+            base=handbook.example.base,
+            tier=handbook.example.tier_name,
+            mult=handbook.example.multiplier,
+            points=handbook.example.points
+        ) }}</p>
+        <div class="lg-example__math" aria-hidden="true">
+          <span>{{ handbook.example.spend_display }}</span><i class="fas fa-divide"></i><span>{{ pts(handbook.uzs_per_point) }}</span>
+          <i class="fas fa-times"></i><span>{{ handbook.example.multiplier }}×</span>
+          <i class="fas fa-equals"></i><strong>{{ handbook.example.points }} {{ 'loyalty_guide.unit.points' | t }}</strong>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  {# ----------------------------------------------------------- REFERRALS #}
+  <section class="lg-section lg-section--alt" id="lg-referral">
+    <div class="auto-container">
+      <header class="lg-head">
+        <span class="lg-kicker">{{ 'loyalty_guide.referral.kicker' | t }}</span>
+        <h2 class="lg-h2">{{ 'loyalty_guide.referral.title' | t }}</h2>
+        <p class="lg-lede">{{ 'loyalty_guide.referral.subtitle' | t(you=pts(handbook.referral_bonus), friend=pts(handbook.referee_bonus)) }}</p>
+      </header>
+
+      <ol class="lg-steps">
+        <li>
+          <span class="lg-steps__n">1</span>
+          <div><h4>{{ 'loyalty_guide.referral.s1_title' | t }}</h4><p>{{ 'loyalty_guide.referral.s1_desc' | t }}</p></div>
+        </li>
+        <li>
+          <span class="lg-steps__n">2</span>
+          <div><h4>{{ 'loyalty_guide.referral.s2_title' | t }}</h4><p>{{ 'loyalty_guide.referral.s2_desc' | t }}</p></div>
+        </li>
+        <li>
+          <span class="lg-steps__n">3</span>
+          <div><h4>{{ 'loyalty_guide.referral.s3_title' | t }}</h4><p>{{ 'loyalty_guide.referral.s3_desc' | t(you=pts(handbook.referral_bonus), friend=pts(handbook.referee_bonus)) }}</p></div>
+        </li>
+      </ol>
+
+      <div class="lg-callout lg-callout--reassure">
+        <i class="fas fa-check-circle" aria-hidden="true"></i>
+        <p><strong>{{ 'loyalty_guide.referral.note_title' | t }}</strong> {{ 'loyalty_guide.referral.note_body' | t }}</p>
+      </div>
+      <p class="lg-fineprint"><i class="fas fa-clock" aria-hidden="true"></i> {{ 'loyalty_guide.referral.timing' | t }}</p>
+    </div>
+  </section>
+
+  {# --------------------------------------------------------------- TIERS #}
+  <section class="lg-section lg-section--tiers" id="lg-tiers">
+    <div class="auto-container">
+      <header class="lg-head">
+        <span class="lg-kicker">{{ 'loyalty_guide.tiers.kicker' | t }}</span>
+        <h2 class="lg-h2">{{ 'loyalty_guide.tiers.title' | t }}</h2>
+        <p class="lg-lede">{{ 'loyalty_guide.tiers.subtitle' | t }}</p>
+      </header>
+
+      <div class="lg-tiers">
+        {% for tier in handbook.tiers %}
+        {# Tagline/benefit are keyed by the tier's display_order (a rename-proof
+           identity), so renaming a tier never drops its handbook copy. #}
+        {% set ttag = ('loyalty_guide.tier.' ~ tier.order ~ '.tagline') | t %}
+        {% if ttag.startswith('loyalty_guide.') %}{% set ttag = '' %}{% endif %}
+        <article class="lg-tier lg-tier--{{ tier.key }}">
+          <div class="lg-tier__crest" aria-hidden="true"><i class="fas fa-{{ 'crown' if loop.last else 'medal' }}"></i></div>
+          <h3 class="lg-tier__name">{{ tier.name }}</h3>
+          {% if ttag %}<p class="lg-tier__tag">{{ ttag }}</p>{% endif %}
+          <p class="lg-tier__threshold">
+            {{ 'loyalty_guide.tier.from' | t(pts=pts(tier.min_points)) }}
+          </p>
+          <ul class="lg-tier__stats">
+            <li><strong>{{ tier.multiplier }}×</strong><span>{{ 'loyalty_guide.tier.label_multiplier' | t }}</span></li>
+            <li><strong>{{ tier.discount_percentage | int }}%</strong><span>{{ 'loyalty_guide.tier.label_discount' | t }}</span></li>
+          </ul>
+          <ul class="lg-tier__perks">
+            {# Multiplier + discount bullets are SHARED, config-driven keys (rendered
+               per tier from live config); the discount bullet is hidden at 0%. #}
+            {% set pm = 'loyalty_guide.tier.perk_multiplier' | t(mult=tier.multiplier) %}
+            {% if not pm.startswith('loyalty_guide.') %}<li><i class="fas fa-check" aria-hidden="true"></i>{{ pm }}</li>{% endif %}
+            {% if (tier.discount_percentage | int) > 0 %}
+              {% set pd = 'loyalty_guide.tier.perk_discount' | t(pct=(tier.discount_percentage | int)) %}
+              {% if not pd.startswith('loyalty_guide.') %}<li><i class="fas fa-check" aria-hidden="true"></i>{{ pd }}</li>{% endif %}
+            {% endif %}
+            {% for i in [1, 2, 3] %}
+              {% set pb = ('loyalty_guide.tier.' ~ tier.order ~ '.benefit' ~ i) | t %}
+              {% if not pb.startswith('loyalty_guide.') %}<li><i class="fas fa-check" aria-hidden="true"></i>{{ pb }}</li>{% endif %}
+            {% endfor %}
+          </ul>
+        </article>
+        {% endfor %}
+      </div>
+
+      {# How promotion works #}
+      <div class="lg-promo">
+        <h3 class="lg-h3">{{ 'loyalty_guide.promo.title' | t }}</h3>
+        <ol class="lg-steps">
+          <li>
+            <span class="lg-steps__n">1</span>
+            <div><h4>{{ 'loyalty_guide.promo.s1_title' | t }}</h4><p>{{ 'loyalty_guide.promo.s1_desc' | t }}</p></div>
+          </li>
+          <li>
+            <span class="lg-steps__n">2</span>
+            <div><h4>{{ 'loyalty_guide.promo.s2_title' | t }}</h4><p>{{ 'loyalty_guide.promo.s2_desc' | t(days=handbook.expiry_days) }}</p></div>
+          </li>
+          <li>
+            <span class="lg-steps__n">3</span>
+            <div><h4>{{ 'loyalty_guide.promo.s3_title' | t }}</h4><p>{{ 'loyalty_guide.promo.s3_desc' | t }}</p></div>
+          </li>
+        </ol>
+        <div class="lg-callout lg-callout--rolling">
+          <i class="fas fa-sync-alt" aria-hidden="true"></i>
+          <p><strong>{{ 'loyalty_guide.rolling.title' | t }}</strong> {{ 'loyalty_guide.rolling.body' | t(days=handbook.expiry_days) }}</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  {# -------------------------------------------------- TWO KINDS OF POINTS #}
+  <section class="lg-section lg-section--alt" id="lg-points">
+    <div class="auto-container">
+      <header class="lg-head">
+        <span class="lg-kicker">{{ 'loyalty_guide.twopoints.kicker' | t }}</span>
+        <h2 class="lg-h2">{{ 'loyalty_guide.twopoints.title' | t }}</h2>
+      </header>
+      <div class="lg-grid lg-grid--two">
+        <article class="lg-card lg-card--balance">
+          <span class="lg-ico lg-ico--blue" aria-hidden="true"><i class="fas fa-wallet"></i></span>
+          <h3>{{ 'loyalty_guide.twopoints.balance_title' | t }}</h3>
+          <p>{{ 'loyalty_guide.twopoints.balance_desc' | t }}</p>
+        </article>
+        <article class="lg-card lg-card--status">
+          <span class="lg-ico lg-ico--gold" aria-hidden="true"><i class="fas fa-medal"></i></span>
+          <h3>{{ 'loyalty_guide.twopoints.status_title' | t }}</h3>
+          <p>{{ 'loyalty_guide.twopoints.status_desc' | t(days=handbook.expiry_days) }}</p>
+        </article>
+      </div>
+      <div class="lg-callout lg-callout--reassure">
+        <i class="fas fa-shield-alt" aria-hidden="true"></i>
+        <p>{{ 'loyalty_guide.twopoints.note' | t }}</p>
+      </div>
+    </div>
+  </section>
+
+  {# ------------------------------------------------- REWARDS & REDEMPTION #}
+  <section class="lg-section" id="lg-rewards">
+    <div class="auto-container">
+      <header class="lg-head">
+        <span class="lg-kicker">{{ 'loyalty_guide.rewards.kicker' | t }}</span>
+        <h2 class="lg-h2">{{ 'loyalty_guide.rewards.title' | t }}</h2>
+        <p class="lg-lede">{{ 'loyalty_guide.rewards.subtitle' | t }}</p>
+      </header>
+
+      <div class="lg-grid lg-grid--two">
+        <article class="lg-card lg-card--reward">
+          <span class="lg-ico" aria-hidden="true"><i class="fas fa-tags"></i></span>
+          <h3>{{ 'loyalty_guide.rewards.discount_title' | t }}</h3>
+          <p>{{ 'loyalty_guide.rewards.discount_desc' | t }}</p>
+        </article>
+        <article class="lg-card lg-card--reward">
+          <span class="lg-ico" aria-hidden="true"><i class="fas fa-box-open"></i></span>
+          <h3>{{ 'loyalty_guide.rewards.product_title' | t }}</h3>
+          <p>{{ 'loyalty_guide.rewards.product_desc' | t }}</p>
+        </article>
+      </div>
+
+      <div class="lg-redeem">
+        <h3 class="lg-h3">{{ 'loyalty_guide.redeem.title' | t }}</h3>
+        <ol class="lg-steps lg-steps--flow">
+          <li><span class="lg-steps__n">1</span><div><p>{{ 'loyalty_guide.redeem.s1' | t }}</p></div></li>
+          <li><span class="lg-steps__n">2</span><div><p>{{ 'loyalty_guide.redeem.s2' | t }}</p></div></li>
+          <li><span class="lg-steps__n">3</span><div><p>{{ 'loyalty_guide.redeem.s3' | t }}</p></div></li>
+        </ol>
+        <p class="lg-fineprint"><i class="fas fa-info-circle" aria-hidden="true"></i> {{ 'loyalty_guide.redeem.note' | t }}</p>
+      </div>
+
+      {# Expiry + free-delivery reassurance #}
+      <div class="lg-grid lg-grid--two lg-mt">
+        <div class="lg-callout lg-callout--clock">
+          <i class="fas fa-clock" aria-hidden="true"></i>
+          <p><strong>{{ 'loyalty_guide.expiry.title' | t }}</strong> {{ 'loyalty_guide.expiry.body' | t(days=handbook.expiry_days) }}</p>
+        </div>
+        <div class="lg-callout lg-callout--free">
+          <i class="fas fa-truck" aria-hidden="true"></i>
+          <p>{{ 'loyalty_guide.delivery_note' | t }}</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  {# ----------------------------------------------------------------- FAQ #}
+  <section class="lg-section lg-section--alt" id="lg-faq">
+    <div class="auto-container">
+      <header class="lg-head">
+        <span class="lg-kicker">{{ 'loyalty_guide.faq.kicker' | t }}</span>
+        <h2 class="lg-h2">{{ 'loyalty_guide.faq.title' | t }}</h2>
+      </header>
+      <div class="lg-faq">
+        {% for item in faq.items %}
+        <details class="lg-faq__item"{% if loop.first %} open{% endif %}>
+          <summary class="lg-faq__q">{{ item.q }}<i class="fas fa-plus" aria-hidden="true"></i></summary>
+          <div class="lg-faq__a"><p>{{ item.a }}</p></div>
+        </details>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+
+  {# ----------------------------------------------------------------- CTA #}
+  <section class="lg-cta">
+    <div class="auto-container">
+      <div class="lg-cta__card">
+        <h2 class="lg-cta__title">{{ 'loyalty_guide.cta.title' | t }}</h2>
+        <p class="lg-cta__body">{{ 'loyalty_guide.cta.body' | t }}</p>
+        <div class="lg-cta__actions">
+          <a class="lg-btn lg-btn--primary lg-btn--lg" href="{{ url_for('frontend.shop') }}">{{ 'loyalty_guide.cta.button' | t }} <i class="fas fa-arrow-right" aria-hidden="true"></i></a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  // The site header is transparent and absolutely positioned over the hero. Its
+  // height varies by language (the nav-right controls wrap onto a second row in
+  // ru/uz, making it ~270px vs ~155px in en), so match the hero's top padding to
+  // the live header height to guarantee the banner content always clears it.
+  (function () {
+    var header = document.querySelector('.main-header .header-lower') || document.querySelector('.main-header');
+    var hero = document.querySelector('.lg-hero');
+    if (!header || !hero) return;
+    var fit = function () {
+      hero.style.paddingTop = Math.max(150, Math.round(header.getBoundingClientRect().height) + 34) + 'px';
+    };
+    fit();
+    window.addEventListener('load', fit);
+    window.addEventListener('resize', fit);
+  })();
+
+  // Progressive enhancement: reveal-on-scroll for .lg-reveal blocks beyond the
+  // hero (the hero animates on load via animation-delay). Respects reduced motion.
+  (function () {
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add('is-in'); io.unobserve(e.target); } });
+    }, { threshold: 0.15 });
+    document.querySelectorAll('.lg-section .lg-card, .lg-section .lg-tier, .lg-section .lg-head, .lg-promo, .lg-redeem, .lg-callout, .lg-example, .lg-cta__card').forEach(function (el) {
+      el.classList.add('lg-onscroll'); io.observe(el);
+    });
+    // FAQ: single-open accordion behaviour for <details>.
+    var items = document.querySelectorAll('.lg-faq__item');
+    items.forEach(function (d) {
+      d.addEventListener('toggle', function () {
+        if (d.open) items.forEach(function (o) { if (o !== d) o.open = false; });
+      });
+    });
+  })();
+</script>
+{% endblock %}

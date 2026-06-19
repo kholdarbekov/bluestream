@@ -840,8 +840,11 @@ class CartService:
             return loyalty_service.calculate_points_for_purchase(user.id, int(final_total))
         except Exception as e:
             logger.warning(f"Failed to calculate loyalty points for user {user.id}: {e}")
-            # Fallback to simple calculation if service fails
-            return max(0, int(final_total / 100))
+            # Fallback to the SSOT base rate (UZS per point) when the service is
+            # unavailable — never a divergent hardcoded ratio. Tier multiplier is
+            # not applied in the degraded path.
+            points_ratio = current_app.config.get("LOYALTY_POINTS_RATIO", 250)
+            return max(0, int(final_total / points_ratio))
 
 
 # Singleton instance

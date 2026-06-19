@@ -41,6 +41,23 @@ class TestLoyaltyTasks:
         assert result["processed_count"] == 2
         assert result["total_points_awarded"] == 150
 
+    def test_process_daily_surprise_rewards_uses_service_contract(self, app):
+        with (
+            app.app_context(),
+            patch("business_app.tasks.loyalty_tasks.LoyaltyService") as loyalty_service_cls,
+        ):
+            loyalty_service_cls.return_value.process_daily_surprise_rewards.return_value = {
+                "candidates": 7,
+                "awarded": 3,
+            }
+
+            result = loyalty_tasks.process_daily_surprise_rewards.run()
+
+        loyalty_service_cls.return_value.process_daily_surprise_rewards.assert_called_once_with()
+        assert result["success"] is True
+        assert result["candidates"] == 7
+        assert result["awarded"] == 3
+
     def test_send_points_expiring_soon_reminders_sends_expected_template_data(self, app):
         with (
             app.app_context(),

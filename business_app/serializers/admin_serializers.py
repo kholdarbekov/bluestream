@@ -683,19 +683,27 @@ def serialize_order_admin(order: Order) -> Dict[str, Any]:
 
         # Add order items summary
         if hasattr(order, "order_items") and order.order_items:
+            from business_app.serializers.order_serializers import is_free_reward_item
+
             data["item_count"] = len(order.order_items)
             data["items_summary"] = [
                 {
                     "product_name": item.product.name if item.product else "Unknown",
+                    "product_id": item.product_id,
                     "quantity": item.quantity,
                     "unit_price": float(item.unit_price),
                     "total_price": float(item.total_price),
+                    "is_reward": is_free_reward_item(item),
                 }
                 for item in order.order_items[:5]  # Show first 5 items
             ]
+            data["has_loyalty_reward"] = float(getattr(order, "loyalty_discount", 0) or 0) > 0 or any(
+                is_free_reward_item(it) for it in order.order_items
+            )
         else:
             data["item_count"] = 0
             data["items_summary"] = []
+            data["has_loyalty_reward"] = float(getattr(order, "loyalty_discount", 0) or 0) > 0
 
         # Add delivery information
         if hasattr(order, "delivery") and order.delivery:

@@ -187,12 +187,35 @@ class OrderHandlers(BaseHandler):
             details_text = MessageBuilder.build_order_summary(order, language)
             logger.info(f"order_details handler: details_text: {details_text}")
 
-            # Add order items if available
+            # Add order items if available. A free loyalty-reward line (is_reward)
+            # for a purchased product is merged into that product's line as a
+            # "+N free 🎁" bonus; a reward product not otherwise purchased is shown
+            # as its own "🎁 … free" line — clearer than a duplicate product row.
             if order.get('order_items'):
                 details_text += f"\n\n📋 {i18n.get('telegram.orders.items_header', language)}:\n"
-                for item in order['order_items']:
-                    details_text += f"• {item.get('product_name', unknown_text)} x{item.get('quantity', 1)}\n"
-                    details_text += f"  💰 {format_price(item.get('total_price', 0))} UZS\n"
+                items = order['order_items']
+                free_suffix = i18n.get('telegram.loyalty.free_suffix', language)
+                free_by_pid = {}
+                for it in items:
+                    if it.get('is_reward'):
+                        pid = it.get('product_id')
+                        free_by_pid[pid] = free_by_pid.get(pid, 0) + (it.get('quantity') or 0)
+                paid_pids = {it.get('product_id') for it in items if not it.get('is_reward')}
+                for it in items:
+                    if it.get('is_reward'):
+                        continue
+                    bonus = free_by_pid.get(it.get('product_id'), 0)
+                    suffix = f" (+{bonus} {free_suffix} 🎁)" if bonus else ""
+                    details_text += f"• {it.get('product_name', unknown_text)} x{it.get('quantity', 1)}{suffix}\n"
+                    details_text += f"  💰 {format_price(it.get('total_price', 0))} UZS\n"
+                standalone = {}
+                for it in items:
+                    if it.get('is_reward') and it.get('product_id') not in paid_pids:
+                        pid = it.get('product_id')
+                        standalone[pid] = standalone.get(pid, 0) + (it.get('quantity') or 0)
+                for pid, qty in standalone.items():
+                    name = next((i.get('product_name', unknown_text) for i in items if i.get('product_id') == pid), unknown_text)
+                    details_text += f"• 🎁 {name} x{qty} — {free_suffix}\n"
 
             details_text = escape_markdown(details_text, version=2)
 
@@ -671,6 +694,7 @@ class OrderHandlers(BaseHandler):
             context.user_data.pop('checkout_addresses', None)
             context.user_data.pop('checkout_source', None)
             context.user_data.pop('quick_order_address_id', None)
+            context.user_data.pop('selected_reward_id', None)
 
             await query.edit_message_text(
                 text=i18n.get('telegram.action_cancelled', language),
@@ -726,6 +750,20 @@ class OrderHandlers(BaseHandler):
                         } for item in cart['cart_items']
                     ]
                 }
+
+                # Apply a loyalty reward selected via the loyalty rewards menu
+                # (Phase 3 apply-at-checkout flow). Backend CreateOrderRequest
+                # accepts an optional reward_id and applies it during creation.
+                #
+                # Consume the selection at read time (pop, not get) so it is
+                # cleared once per checkout attempt regardless of outcome. If we
+                # only cleared it on the success path, a failure path (503 Tax
+                # Committee, generic API error, outer except) would leak the
+                # selection into the user's next order and silently re-apply the
+                # reward.
+                selected_reward_id = context.user_data.pop('selected_reward_id', None)
+                if selected_reward_id:
+                    order_data['reward_id'] = selected_reward_id
 
                 response = await client.create_order(user_token, order_data)
                 if not response.success:
@@ -937,7 +975,7 @@ class OrderHandlers(BaseHandler):
             for key in (
                 'psp_failed_order_id', 'selected_address_id', 'selected_address_title',
                 'selected_address_full', 'selected_payment_method', 'checkout_addresses',
-                'checkout_source', 'quick_order_address_id',
+                'checkout_source', 'quick_order_address_id', 'selected_reward_id',
             ):
                 context.user_data.pop(key, None)
 
@@ -967,6 +1005,7 @@ class OrderHandlers(BaseHandler):
         # Get cart items from API by api_client.get_cart and show them
         cart_total_amount = 0
         min_qty_violations: list = []
+        selected_reward = None
         async with api_client as client:
             user_token = await get_auth_token(update, context, client)
             if not user_token:
@@ -1001,6 +1040,17 @@ class OrderHandlers(BaseHandler):
                         'remaining': min_qty - quantity,
                     })
 
+            # A loyalty reward chosen from the rewards menu is applied server-side
+            # at order creation; fetch it here to preview it on this screen.
+            selected_reward_id = context.user_data.get('selected_reward_id')
+            if selected_reward_id:
+                rewards_resp = await client.get_loyalty_rewards(user_token)
+                if rewards_resp.success:
+                    _all_rewards = (rewards_resp.data or {}).get('data', {}).get('rewards', [])
+                    selected_reward = next(
+                        (r for r in _all_rewards if r.get('id') == selected_reward_id), None
+                    )
+
         # Add address info
         address_id = context.user_data.get('selected_address_id')
         if address_id:
@@ -1023,11 +1073,35 @@ class OrderHandlers(BaseHandler):
             )
             confirmation_text += f"{i18n.get('telegram.orders.payment_info', language)}: {payment_method_label}\n\n"
 
+        # Selected reward preview + its effect on the grand total. The backend
+        # (LoyaltyService.apply_reward_to_order) is authoritative; this mirrors the
+        # simple discount rule so the confirm screen matches the placed order. A
+        # discount only applies once the order meets the reward's min order value.
+        reward_discount = 0.0
+        if selected_reward:
+            reward_name = selected_reward.get('name') or i18n.get('telegram.loyalty.reward_fallback', language)
+            reward_type = selected_reward.get('reward_type')
+            min_order_value = float(selected_reward.get('min_order_value') or 0)
+            reward_label = i18n.get('telegram.loyalty.reward_applied', language)
+            if reward_type == 'discount' and cart_total_amount >= min_order_value:
+                discount_type = selected_reward.get('discount_type') or 'fixed'
+                discount_value = float(selected_reward.get('discount_value') or 0)
+                raw = (cart_total_amount * discount_value / 100.0) if discount_type == 'percentage' else discount_value
+                reward_discount = min(round(raw, 2), float(cart_total_amount))
+                confirmation_text += f"🎁 {reward_label}: {reward_name}\n   −{format_price(reward_discount)} UZS\n\n"
+            elif reward_type == 'free_product':
+                free_qty = int(selected_reward.get('free_product_quantity') or 1)
+                free_suffix = i18n.get('telegram.loyalty.free_suffix', language)
+                confirmation_text += f"🎁 {reward_label}: {reward_name} ({free_qty}× {free_suffix})\n\n"
+            else:
+                confirmation_text += f"🎁 {reward_label}: {reward_name}\n\n"
+
         # Add total amount
+        grand_total_amount = max(0.0, float(cart_total_amount) - reward_discount)
         confirmation_text += f"💰 {i18n.get('telegram.total', language)}: {format_price(cart_total_amount)} UZS\n"
         confirmation_text += f"🚚 {i18n.get('telegram.orders.delivery_fee', language, amount=0)}\n"
         confirmation_text += "────────────────\n"
-        confirmation_text += f"💳 {i18n.get('telegram.orders.grand_total', language, amount=format_price(cart_total_amount))}"
+        confirmation_text += f"💳 {i18n.get('telegram.orders.grand_total', language, amount=format_price(grand_total_amount))}"
 
         if payment_method == 'cash':
             cod_prepayment = cart.get('cod_prepayment') or {}
@@ -1082,7 +1156,11 @@ class OrderHandlers(BaseHandler):
                     remaining=v['remaining'],
                 ) + "\n"
 
-        keyboard = OrderKeyboards.order_confirmation(language, meets_minimum=meets_minimum)
+        keyboard = OrderKeyboards.order_confirmation(
+            language,
+            meets_minimum=meets_minimum,
+            has_reward=bool(context.user_data.get('selected_reward_id')),
+        )
 
         await update.callback_query.edit_message_text(
             text=confirmation_text,
@@ -1096,6 +1174,79 @@ class OrderHandlers(BaseHandler):
             await self._show_order_confirmation(update, context)
         except Exception as e:
             await self._handle_error(update, exc=e, operation="back_to_order_confirm")
+
+    async def checkout_choose_reward(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show a picker of loyalty rewards that can be applied to this order.
+
+        Only rewards the user can actually redeem (``can_redeem``) AND that meet
+        this order's subtotal vs. the reward's ``min_order_value`` are offered, so
+        the backend never rejects the selection at order creation. Tapping one
+        routes to checkout_apply_reward; Back returns to the confirmation screen.
+        """
+        try:
+            query = update.callback_query
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+
+            async with api_client as client:
+                user_token = await get_auth_token(update, context, client)
+                if not user_token:
+                    await self._handle_auth_error(update, language)
+                    return
+
+                cart_response = await client.get_cart(user_token)
+                if not cart_response.success:
+                    await self._handle_api_error(update, cart_response.error, language)
+                    return
+                cart = (cart_response.data or {}).get('data', {}).get('cart') or {}
+                subtotal = sum(
+                    (item.get('product') or {}).get('current_price', 0) * item.get('quantity', 1)
+                    for item in cart.get('cart_items', [])
+                )
+
+                rewards_response = await client.get_loyalty_rewards(user_token)
+                rewards = (
+                    (rewards_response.data or {}).get('data', {}).get('rewards', [])
+                    if rewards_response.success else []
+                )
+
+            # Offer only rewards that will actually apply to this order.
+            qualifying = [
+                r for r in rewards
+                if r.get('can_redeem') and float(r.get('min_order_value') or 0) <= float(subtotal)
+            ]
+
+            text = f"🎁 {i18n.get('telegram.loyalty.choose_reward_title', language)}\n\n"
+            if not qualifying:
+                text += i18n.get('telegram.loyalty.no_rewards_for_order', language)
+
+            keyboard = OrderKeyboards.checkout_reward_picker(qualifying, language)
+            await query.edit_message_text(text=text, reply_markup=keyboard)
+            await query.answer()
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="checkout_choose_reward")
+
+    async def checkout_apply_reward(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Store the chosen reward and re-render the confirmation (with its preview)."""
+        try:
+            query = update.callback_query
+            reward_id = int(query.data.rsplit('_', 1)[1])
+            context.user_data['selected_reward_id'] = reward_id
+            await self._show_order_confirmation(update, context)
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="checkout_apply_reward")
+
+    async def checkout_remove_reward(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Clear the selected reward and re-render the confirmation screen."""
+        try:
+            query = update.callback_query
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+            context.user_data.pop('selected_reward_id', None)
+            await query.answer(i18n.get('telegram.loyalty.reward_removed', language))
+            await self._show_order_confirmation(update, context)
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="checkout_remove_reward")
 
 
 # Global handler instance

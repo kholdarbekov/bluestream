@@ -35,7 +35,6 @@ def test_loyalty_api_delegates_migrated_flows_to_loyalty_service():
         "get_filtered_points_history_for_user(",
         "get_rewards_for_user(",
         "get_reward_details_for_user(",
-        "redeem_reward_for_user(",
         "get_redemption_history_for_user(",
         "get_active_programs(",
         "get_referral_info_for_user(",
@@ -59,7 +58,6 @@ def test_loyalty_api_targeted_routes_do_not_contain_query_calls():
         "get_points_history",
         "get_available_rewards",
         "get_reward_details",
-        "redeem_reward",
         "get_redemption_history",
         "get_loyalty_programs",
         "get_referral_info",
@@ -81,5 +79,4 @@ def test_loyalty_service_contains_loyalty_api_entrypoints():
     assert "def get_account_dashboard_for_user(" in text
     assert "def get_profile_for_user(" in text
     assert "def get_filtered_points_history_for_user(" in text
-    assert "def redeem_reward_for_user(" in text
     assert "def gift_points_by_phone(" in text

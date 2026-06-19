@@ -1,6 +1,6 @@
 {% extends "emails/base.html" %}
 
-{% block title %}Баллы лояльности начислены - {{ company_name }}{% endblock %}
+{% block title %}AquaCoins начислены - {{ company_name }}{% endblock %}
 
 {% block header %}
 <h1>Поздравляем!</h1>
@@ -10,13 +10,13 @@
 <h2>Отличные новости, {{ user_name }}!</h2>
 
 <div class="success-box">
-    <p>Вы только что заработали <strong>{{ points }} баллов лояльности</strong>!</p>
+    <p>Вы только что заработали <strong>{{ points }} AquaCoins</strong>!</p>
 </div>
 
 <div class="code-display">
-    <p style="margin: 0; color: #64748b; font-size: 14px;">Ваш баланс баллов</p>
+    <p style="margin: 0; color: #64748b; font-size: 14px;">Ваш баланс AquaCoins</p>
     <span class="code">{{ total_points }}</span>
-    <p style="margin: 5px 0 0 0; color: #64748b; font-size: 12px;">баллов</p>
+    <p style="margin: 5px 0 0 0; color: #64748b; font-size: 12px;">AquaCoins</p>
 </div>
 
 <h3 style="color: #1e293b; margin-top: 30px;">Как вы заработали</h3>
@@ -27,7 +27,7 @@
         <td>{{ activity_type }}</td>
     </tr>
     <tr>
-        <th>Начислено баллов</th>
+        <th>Начислено AquaCoins</th>
         <td style="color: #22c55e; font-weight: 600;">+{{ points }}</td>
     </tr>
     {% if order_number %}
@@ -45,7 +45,7 @@
 <hr class="divider">
 
 <div class="info-box">
-    <p><strong>Знаете ли вы?</strong> Вы можете обменять баллы на скидки для будущих заказов. Посетите свой аккаунт, чтобы увидеть доступные награды!</p>
+    <p><strong>Знаете ли вы?</strong> Вы можете обменять AquaCoins на скидки для будущих заказов. Посетите свой аккаунт, чтобы увидеть доступные награды!</p>
 </div>
 
 <p style="text-align: center;">
@@ -53,6 +53,6 @@
 </p>
 
 <p style="color: #94a3b8; font-size: 13px; text-align: center;">
-    Продолжайте заказывать, чтобы накапливать баллы и получать эксклюзивные награды!
+    Продолжайте заказывать, чтобы накапливать AquaCoins и получать эксклюзивные награды!
 </p>
 {% endblock %}

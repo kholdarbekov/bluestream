@@ -28,7 +28,7 @@ from business_app.middleware import jwt_required_with_refresh
 from business_app.utils.validators import phone_validator
 from business_app.utils.exceptions import ValidationError, UnauthorizedError, ConflictError
 from business_app.utils.translations import get_translation
-from shared.enums import UserRole, UserStatus
+from shared.enums import UserRole
 from business_app.utils.csrf_protection import csrf_required
 from business_app.models.user import User
 from business_app import db
@@ -1944,38 +1944,11 @@ def telegram_register():
                 status_code=409,
             )
 
-        # Create new telegram user in unified table
-        logger.info("Creating new telegram user in unified table...")
-
-        user = User(
-            telegram_id=str(telegram_id),
-            first_name=data.get("first_name", "Telegram User"),
-            last_name=data.get("last_name", ""),
-            email=f"telegram_{telegram_id}@bluestream.local",  # Placeholder email
-            phone=None,  # Phone will be collected later
-            password_hash="telegram_user",  # Placeholder, no password needed
-            role=UserRole.CUSTOMER,
-            status=UserStatus.ACTIVE,
-            is_verified=False,
-            registration_source="telegram",
-            preferred_language=data.get("language_code", "en"),
-            # Bot-specific fields in unified table
-            telegram_username=data.get("username"),
-            is_bot_active=True,
-            bot_state="{}",  # Empty initial state
-            last_bot_interaction=datetime.now(timezone.utc),
-        )
-
-        db.session.add(user)
-        db.session.commit()
-
-        # Generate tokens using TokenService
-        from business_app.services.token_service import TokenService
-
-        token_service = TokenService()
-        tokens = token_service.generate_tokens(user)
-
-        logger.info(f"Successfully created telegram user with ID: {user.id}")
+        # Create the new telegram user via the service layer — the single source
+        # for telegram signup side effects (welcome bonus + referral + tokens), so
+        # this path can't drift from the web/phone registration paths.
+        logger.info("Creating new telegram user via auth service...")
+        user, tokens = get_auth_service().register_telegram_user(data)
 
         return created_response(
             data={"user": user.to_dict(), "tokens": tokens}, message=get_translation("api.auth.registration_successful")

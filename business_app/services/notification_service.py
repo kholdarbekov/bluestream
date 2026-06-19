@@ -2528,8 +2528,8 @@ class NotificationService:
             NotificationType.ORDER_STATUS_UPDATE.value: [NotificationChannel.SMS, NotificationChannel.TELEGRAM],
             NotificationType.ORDER_UPDATE.value: [NotificationChannel.SMS, NotificationChannel.TELEGRAM],
             NotificationType.ORDER_EDITED.value: [NotificationChannel.TELEGRAM],
-            NotificationType.DELIVERY_UPDATE.value: [NotificationChannel.SMS, NotificationChannel.TELEGRAM],
-            NotificationType.DELIVERY_REMINDER.value: [NotificationChannel.SMS, NotificationChannel.TELEGRAM],
+            NotificationType.DELIVERY_UPDATE.value: [NotificationChannel.TELEGRAM],
+            NotificationType.DELIVERY_REMINDER.value: [NotificationChannel.TELEGRAM],
             NotificationType.PAYMENT_CONFIRMATION.value: [NotificationChannel.EMAIL],
             NotificationType.SUBSCRIPTION_REMINDER.value: [NotificationChannel.EMAIL],
             NotificationType.SUBSCRIPTION_CREATED.value: [NotificationChannel.EMAIL, NotificationChannel.TELEGRAM],
@@ -2565,50 +2565,41 @@ class NotificationService:
         }
 
     def _resolve_delivery_status_channels(self, user: User, status_value: str) -> List[NotificationChannel]:
-        """Resolve channels for a delivery status event with Telegram override rules."""
-        channels = list(self._get_user_preferred_channels(user.id, NotificationType.DELIVERY_UPDATE))
-        deduped = {self._status_value(channel): channel for channel in channels}
-        delivery_telegram_setting = self.get_delivery_telegram_status_updates_setting(user.id)
-        delivery_telegram_enabled = delivery_telegram_setting["delivery_telegram_status_updates_enabled"]
+        """Resolve channels for a customer delivery-status event.
 
-        if not delivery_telegram_enabled:
-            if deduped.pop(NotificationChannel.TELEGRAM.value, None) is not None:
-                logger.info(
-                    "Delivery Telegram notifications disabled by explicit preference: user_id=%s status=%s",
-                    user.id,
-                    status_value,
-                )
-            return list(deduped.values())
+        Business rule: delivery updates never use SMS. Only customer-facing
+        milestones (in_transit / arrived) notify the customer — via Telegram
+        when a bot is connected, otherwise via email, otherwise not at all.
+        """
+        if not self._should_force_delivery_status_telegram(status_value):
+            # delivered / pending / failed / etc. — no customer notification.
+            logger.info(
+                "No customer notification for non-milestone delivery status: user_id=%s status=%s",
+                user.id,
+                status_value,
+            )
+            return []
 
-        if self._should_force_delivery_status_telegram(status_value):
-            if self._user_has_connected_telegram(user):
-                deduped[NotificationChannel.TELEGRAM.value] = NotificationChannel.TELEGRAM
-                logger.info(
-                    "Forced Telegram delivery notification enabled: user_id=%s status=%s history_rule=connected_bot",
-                    user.id,
-                    status_value,
-                )
-            else:
-                logger.info(
-                    "Skipped forced Telegram delivery notification: user_id=%s status=%s reason=bot_not_connected",
-                    user.id,
-                    status_value,
-                )
-                if deduped.pop(NotificationChannel.TELEGRAM.value, None) is not None:
-                    logger.info(
-                        "Removed Telegram from delivery notification: user_id=%s status=%s reason=bot_not_connected",
-                        user.id,
-                        status_value,
-                    )
-        else:
-            if deduped.pop(NotificationChannel.TELEGRAM.value, None) is not None:
-                logger.info(
-                    "Removed Telegram from non-target delivery notification: user_id=%s status=%s",
-                    user.id,
-                    status_value,
-                )
+        telegram_enabled = self.get_delivery_telegram_status_updates_setting(user.id)[
+            "delivery_telegram_status_updates_enabled"
+        ]
+        if telegram_enabled and self._user_has_connected_telegram(user):
+            return [NotificationChannel.TELEGRAM]
 
-        return list(deduped.values())
+        if getattr(user, "email", None):
+            logger.info(
+                "Delivery status update routed to email (no connected bot): user_id=%s status=%s",
+                user.id,
+                status_value,
+            )
+            return [NotificationChannel.EMAIL]
+
+        logger.info(
+            "Delivery status update has no deliverable channel: user_id=%s status=%s",
+            user.id,
+            status_value,
+        )
+        return []
 
     def _extract_delivery_status_code(self, template_data: Dict[str, Any]) -> Optional[str]:
         """Extract normalized delivery status from template payload."""
@@ -2708,6 +2699,11 @@ class NotificationService:
             "delivery_id": delivery.id,
             "order_id": delivery.order.id if delivery.order else None,
             "history_id": history.id,
+            # Company contact details so the email/Telegram body renders real
+            # values instead of leaving `{company_phone}` placeholders verbatim.
+            "company_name": self.company_name,
+            "company_phone": self.company_phone,
+            "company_email": self.company_email,
         }
 
     def _is_payment_order_delivered(self, payment: Payment) -> bool:
@@ -2862,6 +2858,22 @@ class NotificationService:
             template_data,
             language,
         )
+
+        # Business rule: delivery updates/reminders never go out over SMS — they
+        # are Telegram-or-email only. This backstop guarantees no delivery SMS
+        # leaves the system regardless of caller or stored channel preferences.
+        notification_type_value = self._status_value(notification_type)
+        if notification_type_value in (
+            NotificationType.DELIVERY_UPDATE.value,
+            NotificationType.DELIVERY_REMINDER.value,
+        ):
+            logger.info(
+                "SMS suppressed for delivery notification: user_id=%s notification_type=%s",
+                getattr(user, "id", None),
+                notification_type_value,
+            )
+            return {"success": True, "skipped": True, "reason": "delivery_sms_disabled"}
+
         if not self.eskiz_client:
             logger.error(f"_send_sms_notification error Eskiz SMS not configured")  # noqa: F541
             raise ConfigurationError(get_translation("error.configuration.sms_not_configured"))
@@ -3273,7 +3285,7 @@ class NotificationService:
             NotificationType.ORDER_CONFIRMATION: [NotificationChannel.EMAIL, NotificationChannel.SMS],
             NotificationType.ORDER_STATUS_UPDATE: [NotificationChannel.SMS, NotificationChannel.TELEGRAM],
             NotificationType.ORDER_EDITED: [NotificationChannel.TELEGRAM],
-            NotificationType.DELIVERY_UPDATE: [NotificationChannel.SMS, NotificationChannel.TELEGRAM],
+            NotificationType.DELIVERY_UPDATE: [NotificationChannel.TELEGRAM],
             NotificationType.PAYMENT_CONFIRMATION: [NotificationChannel.EMAIL],
             NotificationType.SUBSCRIPTION_REMINDER: [NotificationChannel.EMAIL],
             NotificationType.PROMOTIONAL: [NotificationChannel.EMAIL],
@@ -3681,21 +3693,21 @@ Thank you for your purchase!"""
         "name": "loyalty_reward_email",
         "translations": {
             "uz": {
-                "subject": "Sodiqlik ballari yangiligi - {{company_name}}",
-                "content": """<h2>Sodiqlik ballari yangiligi</h2>
-<p>Tabriklaymiz! Siz {points} sodiqlik ballini qo'lga kiritdingiz.</p>
+                "subject": "AquaCoins yangiligi - {{company_name}}",
+                "content": """<h2>AquaCoins yangiligi</h2>
+<p>Tabriklaymiz! Siz {points} AquaCoins qo'lga kiritdingiz.</p>
 <p>Joriy balansingiz va mavjud mukofotlarni ko'rish uchun hisobingizga tashrif buyuring.</p>""",
             },
             "en": {
-                "subject": "Loyalty Points Update - {{company_name}}",
-                "content": """<h2>Loyalty Points Update</h2>
-<p>Congratulations! You've earned {points} loyalty points.</p>
+                "subject": "AquaCoins Update - {{company_name}}",
+                "content": """<h2>AquaCoins Update</h2>
+<p>Congratulations! You've earned {points} AquaCoins.</p>
 <p>Visit your account to see your current balance and available rewards.</p>""",
             },
             "ru": {
-                "subject": "Обновление баллов лояльности - {{company_name}}",
-                "content": """<h2>Обновление баллов лояльности</h2>
-<p>Поздравляем! Вы заработали {points} баллов лояльности.</p>
+                "subject": "Обновление AquaCoins - {{company_name}}",
+                "content": """<h2>Обновление AquaCoins</h2>
+<p>Поздравляем! Вы заработали {points} AquaCoins.</p>
 <p>Посетите свой аккаунт, чтобы увидеть текущий баланс и доступные награды.</p>""",
             },
         },

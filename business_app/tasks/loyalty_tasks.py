@@ -95,6 +95,39 @@ def process_pending_referral_rewards() -> Dict[str, Any]:
 
 
 @shared_task(time_limit=1800, soft_time_limit=1700)
+def process_daily_surprise_rewards() -> Dict[str, Any]:
+    """
+    Share surprise rewards for the previous delivery day.
+
+    Runs at business midnight: scans orders that were delivered and fully paid
+    within yesterday's delivery day and randomly grants surprise bonuses to
+    eligible individual customers (gated by per-user cooldown + global daily cap).
+
+    Returns:
+        Dict with processing results
+    """
+    try:
+        logger.info("Processing daily surprise rewards")
+
+        result = LoyaltyService().process_daily_surprise_rewards()
+
+        awarded = result.get("awarded", 0)
+        candidates = result.get("candidates", 0)
+        logger.info(f"Surprise rewards processed: {awarded} awarded from {candidates} candidate orders")
+
+        return {
+            "success": True,
+            "candidates": candidates,
+            "awarded": awarded,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to process daily surprise rewards: {e}")
+        return {"success": False, "error": str(e), "timestamp": datetime.now(timezone.utc).isoformat()}
+
+
+@shared_task(time_limit=1800, soft_time_limit=1700)
 def send_points_expiring_soon_reminders() -> Dict[str, Any]:
     """
     Send reminders to users whose points are expiring soon.
@@ -215,4 +248,35 @@ def update_loyalty_tiers() -> Dict[str, Any]:
 
     except Exception as e:
         logger.error(f"Failed to update loyalty tiers: {e}")
+        return {"success": False, "error": str(e), "timestamp": datetime.now(timezone.utc).isoformat()}
+
+
+@shared_task(time_limit=1800, soft_time_limit=1700)
+def grant_birthday_bonuses() -> Dict[str, Any]:
+    """
+    Grant the birthday bonus to users whose birthday is today.
+
+    Runs daily. Amount comes from LoyaltyProgram (DB SSOT); idempotent within a
+    calendar year so repeated runs never double-grant.
+
+    Returns:
+        Dict with the number of birthday bonuses granted.
+    """
+    try:
+        logger.info("Granting birthday bonuses")
+
+        loyalty_service = LoyaltyService()
+        result = loyalty_service.grant_birthday_bonuses()
+        granted = result.get("granted", 0)
+
+        logger.info(f"Birthday bonuses granted: {granted}")
+
+        return {
+            "success": True,
+            "granted": granted,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to grant birthday bonuses: {e}")
         return {"success": False, "error": str(e), "timestamp": datetime.now(timezone.utc).isoformat()}

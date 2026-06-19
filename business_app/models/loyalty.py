@@ -29,6 +29,13 @@ class LoyaltyTransaction(db.Model, TimestampMixin):
     expires_at = Column(DateTime(timezone=True), nullable=True)
     is_expired = Column(Boolean, default=False)
 
+    # FIFO lot accounting: the unspent remainder of a positive earn lot.
+    # A positive (EARNED/BONUS/positive-ADJUSTMENT) transaction is a "lot" whose
+    # ``remaining_points`` is drawn down (oldest-first) by redemptions, clawbacks,
+    # and expiry. NULL means "not tracked as a lot" (negative transactions) or a
+    # pre-FIFO legacy row — computations COALESCE a NULL remainder to ``points``.
+    remaining_points = Column(Integer, nullable=True)
+
     # Additional metadata
     extra_data = Column(JSON, default={})
 
@@ -44,6 +51,11 @@ class LoyaltyTransaction(db.Model, TimestampMixin):
                 self.transaction_type.value if hasattr(self.transaction_type, "value") else self.transaction_type
             ),
             "description": self.description,
+            # Granular action (referral/purchase/welcome_bonus/streak_bonus/
+            # reward_refund/...) lives in extra_data; expose it so clients can
+            # render a stable, localized category instead of the English
+            # description or the coarse transaction_type.
+            "action_type": (self.extra_data or {}).get("action_type"),
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,
             "is_expired": self.is_expired,
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -52,6 +64,7 @@ class LoyaltyTransaction(db.Model, TimestampMixin):
         }
 
 
+@translatable("name", "description", "terms_and_conditions")
 class LoyaltyProgram(db.Model, TimestampMixin):
     """Loyalty program configurations"""
 
@@ -66,7 +79,6 @@ class LoyaltyProgram(db.Model, TimestampMixin):
     is_default = Column(Boolean, default=False)
 
     # Earning rules
-    points_per_uzs = Column(Float, default=1.0)  # DEPRECATED: Points earned per UZS spent
     uzs_per_point = Column(Integer, default=250)  # UZS spent to earn 1 point
     signup_bonus = Column(Integer, default=100)  # Welcome bonus points
     referral_bonus = Column(Integer, default=50)  # Points for referring someone
@@ -76,9 +88,20 @@ class LoyaltyProgram(db.Model, TimestampMixin):
     points_expiry_days = Column(Integer, default=365)  # Points expire after X days
     min_redemption_points = Column(Integer, default=100)  # Minimum points to redeem
 
-    # Tier system (DEPRECATED - use LoyaltyTierConfig instead)
-    tier_thresholds = Column(JSON, default={})  # Points needed for each tier
-    tier_multipliers = Column(JSON, default={})  # Point multipliers per tier
+    # Surprise reward — random delight bonus on a delivered+paid order for
+    # individual customers. All knobs are admin-configurable (DB SSOT); see
+    # LoyaltyService.process_daily_surprise_rewards (nightly batch).
+    surprise_enabled = Column(Boolean, default=True, nullable=False, server_default="true")
+    surprise_chance_percent = Column(Integer, default=5, nullable=False, server_default="5")  # 0–100
+    surprise_amounts = Column(
+        String(100), default="50,100,200", nullable=False, server_default="50,100,200"
+    )  # CSV of point values
+    surprise_cooldown_days = Column(Integer, default=7, nullable=False, server_default="7")  # per-user cooldown
+    surprise_daily_cap = Column(Integer, default=5, nullable=False, server_default="5")  # global awards per day
+
+    # NOTE: deprecated columns points_per_uzs / tier_thresholds / tier_multipliers
+    # were dropped (loyalty SSOT, Phase 2). Earning uses uzs_per_point; tiers are
+    # owned by LoyaltyTierConfig. See migration a1c2e3f4d5b6.
 
     # Program metadata
     terms_and_conditions = Column(Text, nullable=True)
@@ -95,15 +118,19 @@ class LoyaltyProgram(db.Model, TimestampMixin):
             "description": self.description,
             "is_active": self.is_active,
             "is_default": self.is_default,
-            "points_per_uzs": self.points_per_uzs,
             "uzs_per_point": self.uzs_per_point,
             "signup_bonus": self.signup_bonus,
             "referral_bonus": self.referral_bonus,
             "birthday_bonus": self.birthday_bonus,
             "points_expiry_days": self.points_expiry_days,
             "min_redemption_points": self.min_redemption_points,
-            "tier_thresholds": self.tier_thresholds,
-            "tier_multipliers": self.tier_multipliers,
+            "surprise_enabled": self.surprise_enabled,
+            "surprise_chance_percent": self.surprise_chance_percent,
+            "surprise_amounts": self.surprise_amounts,
+            "surprise_cooldown_days": self.surprise_cooldown_days,
+            "surprise_daily_cap": self.surprise_daily_cap,
+            # tier_thresholds / tier_multipliers deliberately omitted — deprecated
+            # JSON superseded by LoyaltyTierConfig (single source of truth).
             "terms_and_conditions": self.terms_and_conditions,
             "start_date": self.start_date.isoformat() if self.start_date else None,
             "end_date": self.end_date.isoformat() if self.end_date else None,
@@ -111,6 +138,7 @@ class LoyaltyProgram(db.Model, TimestampMixin):
         }
 
 
+@translatable("name")
 class LoyaltyTierConfig(db.Model, TimestampMixin):
     """
     Admin-managed loyalty tier configuration.
@@ -227,6 +255,67 @@ class LoyaltyTierConfig(db.Model, TimestampMixin):
         return query.order_by(cls.display_order.asc()).all()
 
 
+@translatable("name")
+class LoyaltyStreakRule(db.Model, TimestampMixin):
+    """Admin-configurable streak earning rule.
+
+    Awards bonus points when a user completes ``required_orders`` delivered orders
+    within a trailing ``window_days`` window (each order optionally ≥
+    ``min_order_amount``). Repeatable at most once per ``window_days`` (cooldown).
+    """
+
+    __tablename__ = "loyalty_streak_rules"
+
+    id = Column(Integer, primary_key=True)
+    program_id = Column(Integer, ForeignKey("loyalty_programs.id"), nullable=False, index=True)
+
+    name = Column(String(100), nullable=False)  # user-facing, translatable
+    required_orders = Column(Integer, nullable=False)
+    window_days = Column(Integer, nullable=False)
+    min_order_amount = Column(Numeric(precision=10, scale=2), nullable=True)
+    bonus_points = Column(Integer, nullable=False)
+
+    is_active = Column(Boolean, default=True)
+    starts_at = Column(DateTime(timezone=True), nullable=True)
+    ends_at = Column(DateTime(timezone=True), nullable=True)
+    display_order = Column(Integer, default=0)
+
+    program = relationship("LoyaltyProgram")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "program_id": self.program_id,
+            "name": self.name,
+            "required_orders": self.required_orders,
+            "window_days": self.window_days,
+            "min_order_amount": float(self.min_order_amount) if self.min_order_amount is not None else None,
+            "bonus_points": self.bonus_points,
+            "is_active": self.is_active,
+            "starts_at": self.starts_at.isoformat() if self.starts_at else None,
+            "ends_at": self.ends_at.isoformat() if self.ends_at else None,
+            "display_order": self.display_order,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+    def is_effective(self, now):
+        """True when active and ``now`` is within the optional [starts_at, ends_at].
+
+        Normalizes ``starts_at``/``ends_at`` to UTC-aware datetimes so the
+        comparison works whether the DB backend returns tz-aware (PostgreSQL) or
+        tz-naive (SQLite in tests) values.
+        """
+        from business_app.utils.timezone_utils import ensure_utc
+
+        if not self.is_active:
+            return False
+        if self.starts_at and now < ensure_utc(self.starts_at):
+            return False
+        if self.ends_at and now > ensure_utc(self.ends_at):
+            return False
+        return True
+
+
 class LoyaltyPoints(db.Model, TimestampMixin):
     """User loyalty points balance"""
 
@@ -250,11 +339,6 @@ class LoyaltyPoints(db.Model, TimestampMixin):
     points_to_next_tier = Column(Integer, default=0)
     tier_valid_until = Column(DateTime(timezone=True), nullable=True)  # Date until current tier is guaranteed
 
-    # Streak Tracking
-    current_streak = Column(Integer, default=0)
-    last_streak_update = Column(DateTime(timezone=True), nullable=True)
-    streak_orders_this_month = Column(Integer, default=0)
-
     # Metadata
     last_activity_date = Column(DateTime(timezone=True), nullable=True)
     last_expiry_check = Column(DateTime(timezone=True), nullable=True)
@@ -262,84 +346,38 @@ class LoyaltyPoints(db.Model, TimestampMixin):
     program = relationship("LoyaltyProgram")
 
     def calculate_current_balance(self):
-        """Calculate current balance from transactions"""
-        from sqlalchemy import func
+        """Derive the cached balance from the FIFO ledger (single source of truth).
 
-        # Sum all non-expired transactions
-        earned = (
-            db.session.query(func.sum(LoyaltyTransaction.points))
+        Balance = the sum of unspent remainders of non-expired positive lots.
+        Redemptions/clawbacks/expiry have already drawn down those remainders, so
+        negatives must NOT be subtracted again (that was the historical
+        double-count bug). NULL remainders (legacy rows) fall back to ``points``.
+        """
+        from sqlalchemy import func, or_
+
+        now = datetime.now(UTC)
+        balance = (
+            db.session.query(func.sum(func.coalesce(LoyaltyTransaction.remaining_points, LoyaltyTransaction.points)))
             .filter(
                 LoyaltyTransaction.user_id == self.user_id,
                 LoyaltyTransaction.points > 0,
                 LoyaltyTransaction.is_expired == False,
+                # Exclude lots already past their expiry but not yet swept, so this
+                # matches LoyaltyService.get_available_points exactly (one SSOT).
+                or_(LoyaltyTransaction.expires_at.is_(None), LoyaltyTransaction.expires_at > now),
             )
             .scalar()
             or 0
         )
 
-        redeemed = abs(
-            db.session.query(func.sum(LoyaltyTransaction.points))
-            .filter(LoyaltyTransaction.user_id == self.user_id, LoyaltyTransaction.points < 0)
-            .scalar()
-            or 0
-        )
-
-        self.current_balance = earned - redeemed
+        self.current_balance = int(balance)
         return self.current_balance
 
-    def calculate_tier(self):
-        """Calculate user's current tier based on points"""
-        total_points = self.total_earned
-
-        # Use program-specific thresholds if available, otherwise use centralized config
-        if self.program and self.program.tier_thresholds:
-            thresholds = self.program.tier_thresholds
-            current_tier = "Bronze"
-            points_to_next = 0
-
-            for tier, threshold in sorted(thresholds.items(), key=lambda x: x[1]):
-                if total_points >= threshold:
-                    current_tier = tier
-                else:
-                    points_to_next = threshold - total_points
-                    break
-        else:
-            # Use centralized tier config
-            # Use LoyaltyTierConfig model directly
-            from business_app.models.loyalty import LoyaltyTierConfig
-
-            # Find current tier
-            tier = LoyaltyTierConfig.get_tier_for_points(total_points, self.program_id)
-            current_tier = tier.name if tier else "Bronze"
-
-            # Find next tier
-            next_tier = None
-            if tier:
-                next_tier = (
-                    LoyaltyTierConfig.query.filter(
-                        LoyaltyTierConfig.program_id == self.program_id,
-                        LoyaltyTierConfig.is_active == True,
-                        LoyaltyTierConfig.display_order > tier.display_order,
-                    )
-                    .order_by(LoyaltyTierConfig.display_order.asc())
-                    .first()
-                )
-            else:
-                # If fell back to bronze or none, find lowest tier that is higher than 0?
-                # Actually if no tier found, assuming below lowest. Find lowest.
-                next_tier = (
-                    LoyaltyTierConfig.query.filter(
-                        LoyaltyTierConfig.program_id == self.program_id, LoyaltyTierConfig.is_active == True
-                    )
-                    .order_by(LoyaltyTierConfig.display_order.asc())
-                    .first()
-                )
-
-            points_to_next = max(0, next_tier.min_points - total_points) if next_tier else 0
-
-        self.current_tier = current_tier
-        self.points_to_next_tier = points_to_next
-        return current_tier
+    # NOTE: the former LoyaltyPoints.calculate_tier() was removed (loyalty SSOT,
+    # Unit D). It was an orphan that read the deprecated program.tier_thresholds
+    # JSON first and based tier on lifetime total_earned — both contradicting the
+    # single tier basis. Tier is owned by LoyaltyService._check_tier_upgrade
+    # (rolling 365-day qualifying points) + LoyaltyTierConfig.
 
     def to_dict(self):
         return {
@@ -353,8 +391,6 @@ class LoyaltyPoints(db.Model, TimestampMixin):
             "current_tier": self.current_tier,
             "points_to_next_tier": self.points_to_next_tier,
             "tier_valid_until": self.tier_valid_until.isoformat() if self.tier_valid_until else None,
-            "current_streak": self.current_streak,
-            "streak_orders_this_month": self.streak_orders_this_month,
             "last_activity_date": self.last_activity_date.isoformat() if self.last_activity_date else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
@@ -372,7 +408,7 @@ class LoyaltyReward(db.Model, TimestampMixin, TranslatableMixin):
     # Reward details
     name = Column(String(200), nullable=False)  # Default/fallback name (Uzbek)
     description = Column(Text, nullable=True)  # Default/fallback description (Uzbek)
-    reward_type = Column(String(50), nullable=False)  # discount, free_product, free_delivery, voucher
+    reward_type = Column(String(50), nullable=False)  # discount, free_product
 
     # Redemption requirements
     points_cost = Column(Integer, nullable=False)
@@ -384,7 +420,7 @@ class LoyaltyReward(db.Model, TimestampMixin, TranslatableMixin):
     discount_type = Column(String(20), nullable=True)
     discount_value = Column(Numeric(precision=10, scale=2), nullable=True)
     free_product_id = Column(Integer, ForeignKey("products.id"), nullable=True)
-    voucher_code = Column(String(50), nullable=True)
+    free_product_quantity = Column(Integer, nullable=True, default=1, server_default="1")
 
     # Availability
     is_active = Column(Boolean, default=True)
@@ -410,40 +446,11 @@ class LoyaltyReward(db.Model, TimestampMixin, TranslatableMixin):
     program = relationship("LoyaltyProgram")
     free_product = relationship("Product")
 
-    def is_available_for_user(self, user_id):
-        """Check if reward is available for specific user"""
-        if not self.is_active:
-            return False, "Reward is not active"
-
-        # Check date validity
-        now = datetime.now(UTC)
-        if self.valid_from and now < self.valid_from:
-            return False, "Reward not yet available"
-
-        if self.valid_until and now > self.valid_until:
-            return False, "Reward has expired"
-
-        # Check total redemption limit
-        if self.max_redemptions and self.redemptions_used >= self.max_redemptions:
-            return False, "Reward redemption limit reached"
-
-        # Check user-specific usage limit
-        if self.max_uses_per_user:
-            from business_app.models.order import Order
-
-            user_redemptions = (
-                Order.query.join(LoyaltyTransaction)
-                .filter(
-                    LoyaltyTransaction.user_id == user_id,
-                    LoyaltyTransaction.description.contains(f"Redeemed reward: {self.name}"),
-                )
-                .count()
-            )
-
-            if user_redemptions >= self.max_uses_per_user:
-                return False, "User redemption limit reached"
-
-        return True, "Available"
+    # NOTE: is_available_for_user was removed (loyalty SSOT, Phase 2). It was an
+    # orphan with a semantically-wrong Order<->LoyaltyTransaction join and a
+    # fragile description-string redemption count. The wired availability check
+    # is LoyaltyService.can_redeem_reward; per-user redemption counting becomes
+    # FK-based once the RewardRedemption table lands (Phase 3).
 
     def to_dict(self, language=None, include_all_translations=False):
         """Convert to dictionary with multilingual support"""
@@ -461,7 +468,7 @@ class LoyaltyReward(db.Model, TimestampMixin, TranslatableMixin):
                 "discount_type": self.discount_type,
                 "discount_value": float(self.discount_value) if self.discount_value else None,
                 "free_product_id": self.free_product_id,
-                "voucher_code": self.voucher_code,
+                "free_product_quantity": self.free_product_quantity,
                 "is_active": self.is_active,
                 "is_featured": self.is_featured,
                 "is_system_reward": self.is_system_reward,
@@ -488,8 +495,11 @@ class ReferralProgram(db.Model, TimestampMixin):
     referrer_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     referee_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
 
-    # Referral details
-    referral_code = Column(String(20), nullable=False, unique=True)
+    # Referral details. NOT unique: this records WHICH referrer code was used, and
+    # one referrer code is reused across all the people they refer (a unique
+    # constraint here would cap each referrer at a single referral). Per-referee
+    # uniqueness is enforced via User.referred_by_user_id at referral creation.
+    referral_code = Column(String(20), nullable=False, index=True)
     status = Column(String(20), default="pending")  # pending, completed, cancelled
 
     # Rewards
@@ -518,5 +528,42 @@ class ReferralProgram(db.Model, TimestampMixin):
             "referred_at": self.referred_at.isoformat() if self.referred_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
             "first_order_id": self.first_order_id,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class RewardRedemption(db.Model, TimestampMixin):
+    """A single applied reward redemption (SSOT for redemption records, codes, limits)."""
+
+    __tablename__ = "reward_redemptions"
+    __table_args__ = (Index("idx_reward_redemptions_reward_user", "reward_id", "user_id"),)
+
+    id = Column(Integer, primary_key=True)
+    reward_id = Column(Integer, ForeignKey("loyalty_rewards.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    order_id = Column(Integer, ForeignKey("orders.id"), nullable=True, index=True)
+
+    reward_type = Column(String(50), nullable=False)  # 'discount' | 'free_product'
+    points_spent = Column(Integer, nullable=False, default=0)
+    discount_amount = Column(Numeric(precision=10, scale=2), nullable=True)
+    free_product_id = Column(Integer, ForeignKey("products.id"), nullable=True)
+    code = Column(String(20), nullable=False, unique=True, index=True)
+    status = Column(String(20), nullable=False, default="applied")  # 'applied' | 'cancelled'
+
+    reward = relationship("LoyaltyReward")
+    order = relationship("Order")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "reward_id": self.reward_id,
+            "user_id": self.user_id,
+            "order_id": self.order_id,
+            "reward_type": self.reward_type,
+            "points_spent": self.points_spent,
+            "discount_amount": float(self.discount_amount) if self.discount_amount is not None else None,
+            "free_product_id": self.free_product_id,
+            "code": self.code,
+            "status": self.status,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

@@ -1,6 +1,6 @@
 """Service-level regressions for loyalty API boundary migration."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -47,6 +47,23 @@ def _create_loyalty_account(db, user_id: int, program_id: int, balance: int = 0)
     )
     db.session.add(account)
     db.session.commit()
+    # Back the cached balance with a real FIFO earn lot (production balances only
+    # ever come from award_points, which creates a lot). Dated in the past so it
+    # does not count toward "points this month" aggregations.
+    if balance > 0:
+        lot = LoyaltyTransaction(
+            user_id=user_id,
+            transaction_type=LoyaltyTransactionType.EARNED,
+            points=balance,
+            remaining_points=balance,
+            description='seed balance',
+            expires_at=datetime.now(UTC) + timedelta(days=365),
+            is_expired=False,
+        )
+        db.session.add(lot)
+        db.session.flush()
+        lot.created_at = datetime.now(UTC) - timedelta(days=60)
+        db.session.commit()
     return account
 
 
@@ -104,21 +121,6 @@ def test_get_filtered_points_history_for_user_rejects_invalid_type(
             per_page=20,
             transaction_type='bad-type',
         )
-
-
-def test_redeem_reward_for_user_returns_remaining_points(
-    db,
-    sample_user,
-    loyalty_service,
-    loyalty_program,
-):
-    _create_loyalty_account(db, sample_user.id, loyalty_program.id, balance=500)
-    reward = _create_reward(db, loyalty_program.id, points_cost=200)
-
-    payload = loyalty_service.redeem_reward_for_user(sample_user.id, reward.id)
-
-    assert payload['redemption']['points_spent'] == 200
-    assert payload['remaining_points'] == 300
 
 
 def test_gift_points_by_phone_rejects_self(db, sample_user, loyalty_service, loyalty_program):

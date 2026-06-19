@@ -30,6 +30,46 @@ def _create_program() -> LoyaltyProgram:
     return program
 
 
+def test_get_member_transactions_paginates_full_ledger(db, sample_user):
+    program = _create_program()
+    account = LoyaltyPoints(
+        user_id=sample_user.id,
+        program_id=program.id,
+        total_earned=1000,
+        total_redeemed=0,
+        current_balance=1000,
+        current_tier="Bronze",
+        points_to_next_tier=0,
+    )
+    db.session.add(account)
+    for i in range(12):
+        db.session.add(
+            LoyaltyTransaction(
+                user_id=sample_user.id,
+                points=10 + i,
+                transaction_type=LoyaltyTransactionType.EARNED,
+                description=f"txn {i}",
+                created_at=datetime(2026, 2, 1 + i, tzinfo=UTC),
+            )
+        )
+    db.session.commit()
+
+    page1 = AdminLoyaltyService.get_member_transactions(sample_user.id, page=1, per_page=10)
+    assert page1["total"] == 12
+    assert page1["page"] == 1
+    assert page1["per_page"] == 10
+    assert len(page1["items"]) == 10
+    # Newest-first ordering: txn 11 (2026-02-12) is first.
+    assert page1["items"][0]["description"] == "txn 11"
+
+    page2 = AdminLoyaltyService.get_member_transactions(sample_user.id, page=2, per_page=10)
+    assert len(page2["items"]) == 2
+
+    # per_page is capped at 100.
+    capped = AdminLoyaltyService.get_member_transactions(sample_user.id, page=1, per_page=9999)
+    assert capped["per_page"] == 100
+
+
 def test_list_members_returns_summary_and_canonical_fields(db, sample_user):
     program = _create_program()
     tier = LoyaltyTierConfig(

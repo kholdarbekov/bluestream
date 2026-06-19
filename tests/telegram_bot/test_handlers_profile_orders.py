@@ -21,6 +21,18 @@ def _resp(success=True, data=None, error=None, status_code=200):
 @pytest.mark.unit
 @pytest.mark.anyio
 class TestProfileHandlerFlows:
+    def test_capture_referral_arg_stores_code_from_deep_link(self):
+        # t.me/<bot>?start=ref_CODE arrives as context.args == ["ref_CODE"].
+        ctx = SimpleNamespace(args=["ref_REFMM8UQU"], user_data={})
+        profile_module.ProfileHandlers._capture_referral_arg(ctx)
+        assert ctx.user_data["referral_code"] == "REFMM8UQU"
+
+    def test_capture_referral_arg_ignores_non_referral_args(self):
+        for args in (["somepromo"], [], ["ref_"]):
+            ctx = SimpleNamespace(args=args, user_data={})
+            profile_module.ProfileHandlers._capture_referral_arg(ctx)
+            assert "referral_code" not in ctx.user_data
+
     async def test_add_phone_number_starts_conversation(self, monkeypatch):
         handler = profile_module.ProfileHandlers()
         update = DummyUpdate()

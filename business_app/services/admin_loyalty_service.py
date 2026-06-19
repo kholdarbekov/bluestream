@@ -177,25 +177,48 @@ class AdminLoyaltyService:
         loyalty_service = LoyaltyService()
         account = loyalty_service.get_or_create_loyalty_account(user_id)
 
-        transactions = (
-            LoyaltyTransaction.query.filter_by(user_id=user_id)
+        # Recent redemptions stay as a small at-a-glance card; the full transaction
+        # ledger is served (paginated) by get_member_transactions so admins can see
+        # there are more than the most recent rows.
+        redemptions = (
+            LoyaltyTransaction.query.filter_by(
+                user_id=user_id,
+                transaction_type=LoyaltyTransactionType.REDEEMED,
+            )
             .order_by(LoyaltyTransaction.created_at.desc())
             .limit(10)
             .all()
         )
-        redemptions = [txn for txn in transactions if txn.transaction_type == LoyaltyTransactionType.REDEEMED]
 
         return {
             "member": AdminLoyaltyService.serialize_member(account, user),
-            "recent_transactions": [serialize_loyalty_transaction(item) for item in transactions],
             "recent_redemptions": [serialize_loyalty_transaction(item) for item in redemptions],
             "referral_statistics": loyalty_service.get_referral_statistics(user_id),
             "tier_progress": loyalty_service.calculate_tier_progress(user_id),
-            "streak": {
-                "current_streak": account.current_streak or 0,
-                "orders_this_month": account.streak_orders_this_month or 0,
-                "last_streak_update": (account.last_streak_update.isoformat() if account.last_streak_update else None),
-            },
+            "streak_progress": loyalty_service.get_streak_progress(user_id),
+        }
+
+    @staticmethod
+    def get_member_transactions(user_id: int, page: int = 1, per_page: int = 20) -> Dict[str, Any]:
+        """Return a member's full loyalty transaction ledger, paginated (newest first)."""
+        user = User.query.get(user_id)
+        if not user:
+            raise NotFoundError("User not found")
+
+        page = max(page, 1)
+        per_page = min(max(per_page, 1), 100)
+
+        pagination = (
+            LoyaltyTransaction.query.filter_by(user_id=user_id)
+            .order_by(LoyaltyTransaction.created_at.desc(), LoyaltyTransaction.id.desc())
+            .paginate(page=page, per_page=per_page, error_out=False)
+        )
+
+        return {
+            "items": [serialize_loyalty_transaction(item) for item in pagination.items],
+            "total": pagination.total,
+            "page": page,
+            "per_page": per_page,
         }
 
     @staticmethod

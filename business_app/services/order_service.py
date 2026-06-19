@@ -88,6 +88,13 @@ class OrderService:
         # Validate order data
         self._validate_order_data(order_data)
 
+        # A promo code and a redeemed loyalty reward are mutually exclusive on a
+        # single order. Guard up front (before any DB work) so the conflict is
+        # reported before points are touched or rows are created.
+        reward_id = order_data.get("reward_id")
+        if reward_id and order_data.get("promo_code"):
+            raise ValidationError("A promo code and a loyalty reward cannot be used on the same order")
+
         # Get user
         user = User.query.get(user_id)
         if not user:
@@ -214,6 +221,28 @@ class OrderService:
                     )
                     db.session.add(order_item)
                 db.session.flush()
+
+                # Apply a redeemed loyalty reward (discount or free product) to this
+                # order, atomically within the order transaction. Adjusts
+                # order.loyalty_discount / order.total_amount or injects a free item,
+                # deducts points, and records a RewardRedemption. Done before the
+                # payment row is created so order.total_amount is final.
+                if reward_id:
+                    from business_app.services.loyalty_service import LoyaltyService
+
+                    _redemption = LoyaltyService().apply_reward_to_order(order, reward_id, commit=False)
+                    db.session.flush()
+                    # A free-product reward injects an OrderItem that confirm_reservations
+                    # will decrement at confirmation; include it in the reservation so it
+                    # is availability-checked + reserved (prevents oversell). If the free
+                    # product is out of stock, reservation fails and the whole order
+                    # (incl. the points deduction) rolls back atomically.
+                    if _redemption is not None and getattr(_redemption, "free_product_id", None):
+                        from business_app.models.loyalty import LoyaltyReward
+
+                        _free_reward = LoyaltyReward.query.get(_redemption.reward_id)
+                        _free_qty = (_free_reward.free_product_quantity or 1) if _free_reward else 1
+                        items_data = items_data + [{"product_id": _redemption.free_product_id, "quantity": _free_qty}]
 
                 # Reserve inventory (Redis-backed). Surface a failure as
                 # ValidationError so the outer transaction rolls back DB state
@@ -979,6 +1008,16 @@ class OrderService:
         # Cancel order
         order = self.update_order_status(order_id, OrderStatus.CANCELLED, actor_id, reason)
 
+        # Reverse any applied reward redemption: refund spent points (non-tier-
+        # qualifying), flip the redemption to cancelled, decrement reward usage.
+        # Best-effort: a loyalty failure must not block the cancellation itself.
+        from business_app.services.loyalty_service import LoyaltyService
+
+        try:
+            LoyaltyService().cancel_redemption_for_order(order_id, commit=True)
+        except Exception:
+            logger.exception("Failed to refund reward redemption for cancelled order %s", order_id)
+
         # Release reserved corporate prepayment units (if any).
         from business_app.services.corporate_contract_service import CorporateContractService
 
@@ -1199,31 +1238,6 @@ class OrderService:
         }
 
         return self.create_order(user_id, order_data)
-
-    def apply_discount(self, order_id: int, discount_code: str = None, discount_amount: int = None) -> Order:
-        """Apply discount to order"""
-        order = Order.query.get(order_id)
-        if not order:
-            raise NotFoundError("Order not found")
-
-        if order.status != OrderStatus.PENDING:
-            raise ConflictError("Cannot apply discount to confirmed order")
-
-        if discount_code:
-            # Validate discount code
-            from .loyalty_service import LoyaltyService
-
-            loyalty_service = LoyaltyService()
-            discount_amount = loyalty_service.validate_discount_code(discount_code, order.user_id)
-
-        if discount_amount and discount_amount > 0:
-            order.discount_amount = min(discount_amount, order.subtotal)
-            order.total_amount = order.subtotal + order.delivery_fee - order.discount_amount
-            order.discount_code = discount_code
-
-            db.session.commit()
-
-        return order
 
     # Private methods
     def _validate_order_data(self, order_data: Dict[str, Any]):
@@ -1473,8 +1487,11 @@ class OrderService:
                 # Check/Update Streak
                 loyalty_service.update_streak(order.user_id, commit=commit)
 
-                # Check for Surprise Reward
-                loyalty_service.check_surprise_reward(order.user_id, commit=commit)
+                # NOTE: Surprise rewards are no longer evaluated here. They run in a
+                # nightly batch (LoyaltyService.process_daily_surprise_rewards via
+                # the process-daily-surprise-rewards beat task) over the day's
+                # delivered AND fully-paid orders — so a COD order paid later the
+                # same day still qualifies, while one paid the next day does not.
 
             except Exception:
                 logger.exception("Failed to process loyalty triggers for delivered order %s", order.id)

@@ -6,19 +6,21 @@ Handles loyalty points, rewards, referrals, and customer retention programs
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional
 from flask import current_app
-from sqlalchemy import func, and_
+from sqlalchemy import func, and_, or_
 
 from business_app.models.loyalty import (
     LoyaltyPoints,
     LoyaltyTransaction,
     LoyaltyReward,
     LoyaltyProgram,
+    LoyaltyStreakRule,
     ReferralProgram,
     LoyaltyTierConfig,
 )
 from business_app.models.user import User
 from business_app.models.order import Order
 from business_app.utils.exceptions import ValidationError, NotFoundError, ConflictError
+from business_app.utils.timezone_utils import ensure_utc
 from business_app.utils.translations import get_translation
 from business_app.utils.validators import normalize_phone_number
 from business_app.utils.constants import (
@@ -28,6 +30,7 @@ from business_app.utils.constants import (
 )
 from shared.enums import (
     OrderStatus,
+    UserType,
 )
 from business_app import db
 
@@ -38,12 +41,23 @@ class LoyaltyService:
     # TODO: Note for mylself: correct loyalty points for user_id in (8,9,1, 12,7,13,10,31,22);
 
     def __init__(self):
-        self.points_ratio = current_app.config[
-            "LOYALTY_POINTS_RATIO"
-        ]  # UZS per earned point (legacy fallback; earning is DB-driven)
-        # No redemption_ratio: points are spent only on rewards, not converted to UZS.
-        self.referral_bonus = current_app.config.get("REFERRAL_BONUS_POINTS", 500)
-        self.points_expiry_days = current_app.config.get("LOYALTY_POINTS_EXPIRY_DAYS", 365)
+        # All economics are DB-driven via LoyaltyProgram (uzs_per_point,
+        # points_expiry_days, signup/referral/birthday bonus). No instance caches
+        # and no config fallbacks. Points are spent only on rewards (rewards-only).
+        pass
+
+    def _get_default_program(self) -> Optional[LoyaltyProgram]:
+        """The authoritative program for program-level economics (bonus amounts)."""
+        return (
+            LoyaltyProgram.query.filter_by(is_default=True, is_active=True).first()
+            or LoyaltyProgram.query.filter_by(is_active=True).first()
+        )
+
+    def _program_bonus(self, field: str, default: int) -> int:
+        """Read a bonus amount from the default LoyaltyProgram (single source of truth)."""
+        program = self._get_default_program()
+        value = getattr(program, field, None) if program else None
+        return int(value) if value is not None else default
 
     def calculate_points_for_purchase(self, user_id: int, amount: int) -> int:
         """
@@ -120,7 +134,7 @@ class LoyaltyService:
         # Return empty list if no tiers configured in database
         return []
 
-    def get_or_create_loyalty_account(self, user_id: int) -> LoyaltyPoints:
+    def get_or_create_loyalty_account(self, user_id: int, commit: bool = True) -> LoyaltyPoints:
         """Get or create loyalty account for user"""
         account = LoyaltyPoints.query.filter_by(user_id=user_id).first()
 
@@ -168,9 +182,35 @@ class LoyaltyService:
             )
 
             db.session.add(account)
-            db.session.commit()
+            if commit:
+                db.session.commit()
+            else:
+                db.session.flush()
 
         return account
+
+    def grant_welcome_bonus(self, user_id: int) -> int:
+        """Grant the one-time welcome (signup) bonus from the DB SSOT.
+
+        Idempotent: a user who already has a WELCOME_BONUS transaction is skipped,
+        so it is safe to call from every registration path. Returns points granted
+        (0 if none). Kept OUT of get_or_create_loyalty_account so read/GET paths
+        never mutate the ledger.
+        """
+        account = self.get_or_create_loyalty_account(user_id)
+        signup_bonus = (account.program.signup_bonus if account.program else 0) or 0
+        if signup_bonus <= 0:
+            return 0
+
+        already = LoyaltyTransaction.query.filter(
+            LoyaltyTransaction.user_id == user_id,
+            LoyaltyTransaction.transaction_type == LoyaltyTransactionType.BONUS,
+        ).all()
+        if any((t.extra_data or {}).get("action_type") == LoyaltyActionType.WELCOME_BONUS.value for t in already):
+            return 0
+
+        self.award_points(user_id, signup_bonus, "Welcome bonus", action_type=LoyaltyActionType.WELCOME_BONUS)
+        return signup_bonus
 
     def get_points_summary_for_user(self, user_id: int) -> Dict[str, Any]:
         """Get points summary payload for API."""
@@ -223,15 +263,19 @@ class LoyaltyService:
             .first()
         )
 
+        # Tier progress is measured against the qualifying-points basis (rolling
+        # 365-day EARNED+BONUS), NOT the spendable balance — so redeeming points
+        # never appears to drop the customer's tier progress.
+        qualifying_points = self.calculate_qualifying_points(user_id)
         if next_tier_config:
             next_tier_points = next_tier_config.min_points
-            points_needed = max(0, next_tier_points - current_balance)
-            current_progress = current_balance - current_tier_points
+            points_needed = max(0, next_tier_points - qualifying_points)
+            current_progress = qualifying_points - current_tier_points
             next_tier_progress_target = next_tier_points - current_tier_points
         else:
             next_tier_points = current_tier_points
             points_needed = 0
-            current_progress = current_balance
+            current_progress = qualifying_points
             next_tier_progress_target = 0
 
         available_rewards_count = LoyaltyReward.query.filter(
@@ -251,6 +295,9 @@ class LoyaltyService:
             "available_rewards_count": available_rewards_count,
             "total_earned": account.total_earned or 0,
             "total_redeemed": account.total_redeemed or 0,
+            # Live per-rule streak progress — consumed by the customer loyalty page
+            # (static/js/pages/loyalty.js fetches /loyalty/account).
+            "streak_progress": self.get_streak_progress(user_id),
         }
 
     def get_loyalty_history_for_user(self, user_id: int, page: int, per_page: int) -> Dict[str, Any]:
@@ -373,8 +420,16 @@ class LoyaltyService:
             query = query.filter(LoyaltyReward.points_cost <= max_points)
 
         rewards = query.order_by(LoyaltyReward.points_cost.asc()).all()
+        # Hide misconfigured manually-redeemable rewards (broken discount/free_product)
+        # so they are never advertised; any other (legacy/system) reward type is
+        # left listed exactly as before — defensive, no such types are creatable now.
+        visible = [
+            r for r in rewards if r.reward_type not in ("discount", "free_product") or self.is_reward_configured(r)
+        ]
+        can_redeem_by_id = {r.id: self.can_redeem_reward(user_id, r.id) for r in visible}
         return {
-            "rewards": rewards,
+            "rewards": visible,
+            "can_redeem_by_id": can_redeem_by_id,
             "user_points_balance": user_points,
             "categories": self.get_reward_categories(),
         }
@@ -393,54 +448,8 @@ class LoyaltyService:
         return {
             "reward": reward,
             "user_points_balance": user_points,
-            "can_redeem": user_points >= reward.points_cost,
+            "can_redeem": self.can_redeem_reward(user_id, reward_id),
             "points_needed": max(0, reward.points_cost - user_points),
-        }
-
-    def redeem_reward_for_user(
-        self,
-        user_id: int,
-        reward_id: int,
-        delivery_address_id: Optional[int] = None,
-        notes: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """Validate and redeem reward for API."""
-        user = User.query.get(user_id)
-        if not user:
-            raise NotFoundError("User not found")
-
-        reward = LoyaltyReward.query.filter_by(
-            id=reward_id,
-            is_active=True,
-        ).first()
-        if not reward:
-            raise NotFoundError("Reward not found")
-
-        if reward.is_system_reward:
-            raise ValidationError("Reward is auto-applied")
-
-        if reward.max_redemptions and reward.redemptions_used >= reward.max_redemptions:
-            raise ValidationError("Reward is no longer available")
-
-        account = LoyaltyPoints.query.filter_by(user_id=user_id).first()
-        if not account or account.current_balance < reward.points_cost:
-            raise ValidationError("Insufficient points")
-
-        if not self.can_redeem_reward(user_id, reward_id):
-            raise ValidationError("Redemption limit reached")
-
-        redemption = self.redeem_reward(
-            user_id=user_id,
-            reward_id=reward_id,
-            delivery_address_id=delivery_address_id,
-            notes=notes,
-        )
-        refreshed_account = LoyaltyPoints.query.filter_by(user_id=user_id).first()
-
-        return {
-            "reward": reward,
-            "redemption": redemption,
-            "remaining_points": refreshed_account.current_balance if refreshed_account else 0,
         }
 
     def get_redemption_history_for_user(
@@ -497,7 +506,7 @@ class LoyaltyService:
             .all()
         )
 
-    def get_referral_info_for_user(self, user_id: int, host_url: str) -> Dict[str, Any]:
+    def get_referral_info_for_user(self, user_id: int) -> Dict[str, Any]:
         """Get referral payload for API."""
         user = User.query.get(user_id)
         if not user:
@@ -539,9 +548,15 @@ class LoyaltyService:
                 }
             )
 
+        # Public, shareable signup link built from the COMPANY_WEBSITE config SSOT
+        # — not request.host_url, which over the bot's internal Docker call resolves
+        # to an empty host (http:///register?ref=...). Bot clients build their own
+        # t.me deep link from the code; this web link serves web/admin surfaces.
+        site = current_app.config.get("COMPANY_WEBSITE", "https://aqua-element.uz").rstrip("/")
+
         return {
             "referral_code": referral_code,
-            "referral_link": f"{host_url}register?ref={referral_code}",
+            "referral_link": f"{site}/register?ref={referral_code}",
             "statistics": referral_stats,
             "recent_referrals": recent_referrals_data,
             "rewards": {
@@ -598,7 +613,12 @@ class LoyaltyService:
             monthly_points[month_key] = sum(
                 txn.points
                 for txn in transactions
-                if (txn.transaction_type == LoyaltyTransactionType.EARNED and month_start <= txn.created_at < month_end)
+                if (
+                    txn.transaction_type == LoyaltyTransactionType.EARNED
+                    # created_at can be tz-naive when read back from some backends;
+                    # normalize to UTC so the aware month-window comparison never raises.
+                    and month_start <= ensure_utc(txn.created_at) < month_end
+                )
             )
             previous_month_anchor = month_start - timedelta(days=1)
             current_month_anchor = previous_month_anchor.replace(day=1)
@@ -614,7 +634,6 @@ class LoyaltyService:
                 "current_tier": account.current_tier if account else "Bronze",
                 "points_by_source": points_by_source,
                 "monthly_points_trend": monthly_points,
-                "tier_history": self.get_tier_history(user_id),
             },
         }
 
@@ -638,6 +657,10 @@ class LoyaltyService:
         """Gift points to a recipient resolved by phone number."""
         if points_amount <= 0:
             raise ValidationError("Points amount must be positive")
+
+        # JWT identities arrive as strings; coerce so the recipient==sender guard
+        # below (an int comparison) actually fires and self-gifting is blocked.
+        sender_id = int(sender_id)
 
         sender_account = LoyaltyPoints.query.filter_by(user_id=sender_id).first()
         if not sender_account or sender_account.current_balance < points_amount:
@@ -668,6 +691,7 @@ class LoyaltyService:
         action_type: LoyaltyActionType = LoyaltyActionType.PURCHASE,
         reference_id: int = None,
         expires_at: datetime = None,
+        extra_data: dict = None,
         commit: bool = True,
     ) -> LoyaltyTransaction:
         """
@@ -687,11 +711,13 @@ class LoyaltyService:
         if points <= 0:
             raise ValidationError("Points must be positive")
 
-        account = self.get_or_create_loyalty_account(user_id)
+        account = self.get_or_create_loyalty_account(user_id, commit=commit)
 
-        # Set expiry date if not provided
+        # Set expiry date if not provided, using the program's configured window
+        # (DB SSOT) — falling back to the bootstrap default only if unset.
         if expires_at is None:
-            expires_at = datetime.now(timezone.utc) + timedelta(days=self.points_expiry_days)
+            expiry_days = (account.program.points_expiry_days if account.program else None) or 365
+            expires_at = datetime.now(timezone.utc) + timedelta(days=expiry_days)
 
         # Create transaction
         # Map transaction_type to enum value expected by model
@@ -702,6 +728,8 @@ class LoyaltyService:
             transaction_type_enum = LoyaltyTransactionType.BONUS
         elif action_type == LoyaltyActionType.WELCOME_BONUS:
             transaction_type_enum = LoyaltyTransactionType.BONUS
+        elif action_type == LoyaltyActionType.SURPRICE_REWARD:
+            transaction_type_enum = LoyaltyTransactionType.BONUS
 
         transaction = LoyaltyTransaction(
             user_id=user_id,
@@ -710,7 +738,12 @@ class LoyaltyService:
             description=description,
             order_id=reference_id if action_type == LoyaltyActionType.PURCHASE else None,
             expires_at=expires_at,
-            extra_data={"action_type": action_type.value if hasattr(action_type, "value") else action_type},
+            # New FIFO lot: the full award is initially unspent.
+            remaining_points=points,
+            extra_data={
+                "action_type": action_type.value if hasattr(action_type, "value") else action_type,
+                **(extra_data or {}),
+            },
         )
 
         db.session.add(transaction)
@@ -761,7 +794,7 @@ class LoyaltyService:
         cascade summary.
         """
         if old_points_earned < 0 or new_points_earned < 0:
-            raise ValidationError("Loyalty point totals must be non-negative")
+            raise ValidationError("AquaCoins totals must be non-negative")
 
         account = self.get_or_create_loyalty_account(user_id)
         result: Dict[str, Any] = {
@@ -805,19 +838,32 @@ class LoyaltyService:
                     },
                 )
                 db.session.add(txn)
+                # Draw the clawback down the FIFO lots so the ledger and the
+                # cached balance stay consistent (no-op when there are no lots,
+                # e.g. legacy accounts seeded without a transaction history).
+                self._consume_lots_fifo(user_id, clawback)
                 account.current_balance = available_balance - clawback
-                account.total_redeemed = (account.total_redeemed or 0) + clawback
+                # A clawback reverses earning — reduce lifetime total_earned
+                # (symmetric with the award branch). total_redeemed stays reserved
+                # for actual reward redemptions (M1).
+                account.total_earned = max(0, (account.total_earned or 0) - clawback)
                 db.session.flush()
                 result["transaction_id"] = txn.id
         else:
             # diff < 0: new earnings exceed old, award the extra.
             award = -diff
+            # Positive adjustment is a new spendable lot — it MUST carry an
+            # expiry (same DB-driven window as awards) or the expiry job can
+            # never sweep it and the points leak forever.
+            expiry_days = (account.program.points_expiry_days if account.program else None) or 365
             txn = LoyaltyTransaction(
                 user_id=user_id,
                 transaction_type=LoyaltyTransactionType.ADJUSTMENT,
                 points=award,
                 description=description or f"Order #{order_id} edit award",
                 order_id=order_id,
+                remaining_points=award,
+                expires_at=datetime.now(timezone.utc) + timedelta(days=expiry_days),
                 extra_data={
                     "action_type": "order_edit_award",
                     "old_points_earned": old_points_earned,
@@ -843,6 +889,7 @@ class LoyaltyService:
         reference_id: int = None,
         skip_notification: bool = True,
         notification_type_str: str = None,
+        commit: bool = True,
     ) -> LoyaltyTransaction:
         """Deduct loyalty points from user
 
@@ -853,11 +900,14 @@ class LoyaltyService:
             reference_id: Optional reference ID (e.g., order_id)
             skip_notification: If True, don't send points notification (default: True since callers usually handle their own)  # noqa: E501
             notification_type_str: String value of NotificationType enum to use for notification
+            commit: If True, commit the transaction; if False, flush only so the
+                caller controls the enclosing transaction (e.g. apply_reward_to_order).
+                A notification is only ever sent on an actual commit.
         """
         if points <= 0:
             raise ValidationError("Points must be positive")
 
-        account = self.get_or_create_loyalty_account(user_id)
+        account = self.get_or_create_loyalty_account(user_id, commit=commit)
 
         # Check if user has enough points
         available_points = self.get_available_points(user_id)
@@ -875,17 +925,61 @@ class LoyaltyService:
 
         db.session.add(transaction)
 
-        # Update account balance
+        # Draw the spent points down the FIFO lots (oldest first) so expiry
+        # never re-counts points the user already spent.
+        self._consume_lots_fifo(user_id, points)
+
+        # Update account balance cache
         account.current_balance -= points
         account.total_redeemed += points
 
-        db.session.commit()
+        if commit:
+            db.session.commit()
+        else:
+            db.session.flush()
 
-        # Send notification only if explicitly requested
-        if not skip_notification:
+        # Send notification only on an actual commit (and only if requested), so a
+        # caller-controlled transaction that may still roll back never pushes a
+        # premature notification to the customer.
+        if commit and not skip_notification:
             self._send_points_notification(user_id, points, "redeemed", notification_type_str)
 
         return transaction
+
+    def _consume_lots_fifo(self, user_id: int, amount: int, now: datetime = None) -> int:
+        """Draw ``amount`` points down the user's live earn lots, oldest first.
+
+        A "live" lot is a positive transaction that is not expired and whose
+        expiry (if any) is still in the future. Returns the amount actually
+        consumed (may be less than ``amount`` only for inconsistent/legacy data).
+        """
+        if amount <= 0:
+            return 0
+        now = now or datetime.now(timezone.utc)
+
+        lots = (
+            LoyaltyTransaction.query.filter(
+                LoyaltyTransaction.user_id == user_id,
+                LoyaltyTransaction.points > 0,
+                LoyaltyTransaction.is_expired == False,  # noqa: E712
+                or_(LoyaltyTransaction.expires_at.is_(None), LoyaltyTransaction.expires_at > now),
+            )
+            .order_by(LoyaltyTransaction.created_at.asc(), LoyaltyTransaction.id.asc())
+            .all()
+        )
+
+        to_consume = amount
+        for lot in lots:
+            if to_consume <= 0:
+                break
+            lot_remaining = lot.remaining_points if lot.remaining_points is not None else lot.points
+            if lot_remaining <= 0:
+                continue
+            take = min(lot_remaining, to_consume)
+            lot.remaining_points = lot_remaining - take
+            to_consume -= take
+
+        return amount - to_consume
 
     def get_user_points(self, user_id: int) -> int:
         """Get user's current points balance"""
@@ -893,10 +987,25 @@ class LoyaltyService:
         return account.current_balance if account else 0
 
     def get_available_points(self, user_id: int) -> int:
-        """Get user's available (non-expired) points"""
-        # Remove expired points first
-        self._remove_expired_points(user_id)
-        return self.get_user_points(user_id)
+        """Get user's available (spendable) points.
+
+        Pure read: derived directly from the FIFO ledger — the sum of unspent
+        remainders of lots that are neither flagged expired nor past their
+        expiry date. Performs NO writes, so it is safe to call from read paths
+        and cannot race the scheduled expiry job.
+        """
+        now = datetime.now(timezone.utc)
+        total = (
+            db.session.query(func.sum(func.coalesce(LoyaltyTransaction.remaining_points, LoyaltyTransaction.points)))
+            .filter(
+                LoyaltyTransaction.user_id == user_id,
+                LoyaltyTransaction.points > 0,
+                LoyaltyTransaction.is_expired == False,  # noqa: E712
+                or_(LoyaltyTransaction.expires_at.is_(None), LoyaltyTransaction.expires_at > now),
+            )
+            .scalar()
+        )
+        return int(total or 0)
 
     def get_loyalty_history(self, user_id: int, page: int = 1, per_page: int = 20) -> Dict[str, Any]:
         """Get user's loyalty transaction history"""
@@ -946,170 +1055,223 @@ class LoyaltyService:
         Returns:
             Dictionary with referral processing results
         """
-        # Find referrer
-        referrer_account = LoyaltyPoints.query.filter_by(referral_code=referrer_code).first()
-        if not referrer_account:
+        # Resolve referrer by the persisted User.referral_code (single source of truth).
+        referrer = User.query.filter_by(referral_code=referrer_code).first()
+        if not referrer:
             raise ValidationError("Invalid referral code")
 
-        # Check if referee already used a referral
         referee = User.query.get(referee_user_id)
         if not referee:
             raise NotFoundError("Referee user not found")
 
-        if referee.referred_by:
-            raise ConflictError("User has already used a referral code")
-
-        # Cannot refer yourself
-        if referrer_account.user_id == referee_user_id:
+        if referrer.id == referee_user_id:
             raise ValidationError("Cannot refer yourself")
 
-        # Create referral record
+        if referee.referred_by_user_id:
+            raise ConflictError("User has already used a referral code")
+
+        # Snapshot the bonus amounts (DB SSOT) onto the row at creation, so a later
+        # program change can't retroactively alter an in-flight referral's payout.
+        referrer_points = self.get_referrer_bonus_points()
+        referee_points = self.get_referee_bonus_points()
+
+        # Create the referral as PENDING. Bonuses are granted by
+        # process_pending_referrals once the referee's first order is both
+        # delivered and fully paid.
         referral = ReferralProgram(
-            referrer_id=referrer_account.user_id,
+            referrer_id=referrer.id,
             referee_id=referee_user_id,
             referral_code=referrer_code,
-            status="completed",
-            completed_at=datetime.now(timezone.utc),
+            status="pending",
+            referrer_bonus_points=referrer_points,
+            referee_bonus_points=referee_points,
         )
-
         db.session.add(referral)
-
-        # Update referee record
-        referee.referred_by = referrer_account.user_id
-
-        # Award points to referrer
-        referrer_points = self.referral_bonus
-        self.award_points(
-            referrer_account.user_id,
-            referrer_points,
-            f"Referral bonus for {referee.first_name} {referee.last_name}",
-            LoyaltyActionType.REFERRAL,
-            referral.id,
-        )
-
-        # Award points to referee
-        referee_points = self.referral_bonus // 2  # Half points for referee
-        self.award_points(
-            referee_user_id, referee_points, "Referral signup bonus", LoyaltyActionType.REFERRAL, referral.id
-        )
-
+        referee.referred_by_user_id = referrer.id
         db.session.commit()
 
-        return {"referrer_points": referrer_points, "referee_points": referee_points, "referral_id": referral.id}
+        return {
+            "referral_id": referral.id,
+            "status": "pending",
+            "referrer_points": referrer_points,
+            "referee_points": referee_points,
+        }
 
-    def create_reward(
-        self,
-        name: str,
-        description: str,
-        points_required: int,
-        reward_type: str = "discount",
-        reward_value: int = 0,
-        is_active: bool = True,
-        expires_at: datetime = None,
-    ) -> LoyaltyReward:
-        """Create a new loyalty reward"""
-        reward = LoyaltyReward(
-            name=name,
-            description=description,
-            points_required=points_required,
-            reward_type=reward_type,
-            reward_value=reward_value,
-            is_active=is_active,
-            expires_at=expires_at,
-        )
+    def _generate_unique_referral_code(self) -> str:
+        """Generate a short, unique, shareable referral code."""
+        from business_app.utils.helpers import generate_random_string
 
-        db.session.add(reward)
-        db.session.commit()
+        for _ in range(10):
+            code = f"REF{generate_random_string(6).upper()}"
+            if not User.query.filter_by(referral_code=code).first():
+                return code
+        # Extremely unlikely fallback: longer code.
+        return f"REF{generate_random_string(10).upper()}"
 
-        return reward
+    def _compute_reward_discount(self, reward, subtotal):
+        """UZS discount for a discount reward, capped at subtotal.
 
-    def redeem_reward(
-        self, user_id: int, reward_id: int, delivery_address_id: int = None, notes: str = None
-    ) -> Dict[str, Any]:
-        """Redeem a loyalty reward"""
-        reward = LoyaltyReward.query.get(reward_id)
+        ``subtotal`` is already a Decimal supplied by the caller.
+        """
+        from decimal import Decimal, ROUND_HALF_UP
+
+        value = reward.discount_value or Decimal("0")
+        if (reward.discount_type or "fixed") == "percentage":
+            discount = subtotal * Decimal(str(value)) / Decimal("100")
+        else:
+            discount = Decimal(str(value))
+        discount = discount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        return min(discount, subtotal)
+
+    def apply_reward_to_order(self, order, reward_id, *, commit=True):
+        """Atomically redeem a reward and apply its benefit to an order."""
+        from decimal import Decimal
+        from business_app.models.loyalty import RewardRedemption
+        from business_app.models.order import OrderItem
+
+        reward = LoyaltyReward.query.with_for_update().get(reward_id)
         if not reward or not reward.is_active:
             raise NotFoundError("Reward not found or inactive")
-
-        # System rewards cannot be manually redeemed - they are applied automatically
         if reward.is_system_reward:
-            raise ValidationError("This reward is automatically applied by the system and cannot be manually redeemed")
+            raise ValidationError("This reward is applied automatically and cannot be redeemed")
+        if reward.reward_type not in ("discount", "free_product"):
+            raise ValidationError(f"Unsupported reward type: {reward.reward_type}")
 
-        # Check expiry - normalize naive datetimes to UTC for safe comparison.
+        now = datetime.now(timezone.utc)
         valid_until = reward.valid_until
         if valid_until and valid_until.tzinfo is None:
             valid_until = valid_until.replace(tzinfo=timezone.utc)
-
-        if valid_until and valid_until < datetime.now(timezone.utc):
+        valid_from = reward.valid_from
+        if valid_from and valid_from.tzinfo is None:
+            valid_from = valid_from.replace(tzinfo=timezone.utc)
+        if valid_from and now < valid_from:
+            raise ValidationError("Reward is not yet available")
+        if valid_until and now > valid_until:
             raise ValidationError("Reward has expired")
 
-        # Get points cost (actual model field name)
+        subtotal = Decimal(str(order.subtotal or 0))
+        if reward.min_order_value and subtotal < Decimal(str(reward.min_order_value)):
+            raise ValidationError("Order does not meet the minimum value for this reward")
+
         points_cost = reward.points_cost or 0
+        if self.get_available_points(order.user_id) < points_cost:
+            raise ValidationError(f"Insufficient points. Required: {points_cost}")
 
-        # Check if user has enough points
-        available_points = self.get_available_points(user_id)
-        if available_points < points_cost:
-            raise ValidationError(f"Insufficient points. Required: {points_cost}, Available: {available_points}")
+        # Only one reward may be applied per order. Checked before the per-user /
+        # max-redemptions limits so a repeat application on the same order reports
+        # the precise reason rather than a generic limit message.
+        if RewardRedemption.query.filter_by(order_id=order.id, status="applied").first():
+            raise ValidationError("A reward has already been applied to this order")
 
-        # Deduct points (skip notification - the API sends reward_redeemed notification separately)
-        transaction = self.deduct_points(
-            user_id,
-            points_cost,
-            f"Redeemed reward: {reward.name}",
-            reward.id,
-            skip_notification=True,  # API handles the proper reward_redeemed notification
-        )
+        if reward.max_uses_per_user:
+            used = RewardRedemption.query.filter_by(
+                reward_id=reward.id, user_id=order.user_id, status="applied"
+            ).count()
+            if used >= reward.max_uses_per_user:
+                raise ValidationError("Per-user redemption limit reached")
+        if reward.max_redemptions and (reward.redemptions_used or 0) >= reward.max_redemptions:
+            raise ValidationError("Reward redemption limit reached")
 
-        # Increment redemption count
-        reward.redemptions_used = (reward.redemptions_used or 0) + 1
-        db.session.commit()
-
-        # Generate reward code/voucher
-        reward_code = self._generate_reward_code(reward, user_id)
-
-        # Return redemption data as a dictionary
-        return {
-            "id": transaction.id,
-            "reward_id": reward.id,
-            "reward_name": reward.name,
-            "points_spent": points_cost,
-            "status": "pending",
-            "redemption_code": reward_code,
-            "expires_at": valid_until.isoformat() if valid_until else None,
-            "transaction_id": transaction.id,
-        }
-
-    def get_available_rewards(self, user_id: int) -> List[Dict[str, Any]]:
-        """Get rewards available to user"""
-        user_points = self.get_available_points(user_id)
-
-        rewards = LoyaltyReward.query.filter(
-            LoyaltyReward.is_active == True,
-            and_(LoyaltyReward.expires_at.is_(None), LoyaltyReward.expires_at > datetime.now(timezone.utc)),
-        ).all()
-
-        available_rewards = []
-        for reward in rewards:
-            available_rewards.append(
-                {
-                    "id": reward.id,
-                    "name": reward.name,
-                    "description": reward.description,
-                    "points_required": reward.points_required,
-                    "reward_type": reward.reward_type,
-                    "reward_value": reward.reward_value,
-                    "can_redeem": user_points >= reward.points_required,
-                    "expires_at": reward.expires_at.isoformat() if reward.expires_at else None,
-                }
+        discount_amount = None
+        free_product_id = None
+        if reward.reward_type == "discount":
+            discount_amount = self._compute_reward_discount(reward, subtotal)
+            order.loyalty_discount = discount_amount
+            order.total_amount = max(
+                Decimal("0.00"),
+                subtotal
+                - Decimal(str(order.discount_amount or 0))
+                - discount_amount
+                + Decimal(str(order.delivery_fee or 0)),
+            )
+        else:  # free_product
+            if not self.is_reward_configured(reward):
+                raise ValidationError("Reward is not available")
+            free_product_id = reward.free_product_id
+            order.order_items.append(
+                OrderItem(
+                    order_id=order.id,
+                    product_id=free_product_id,
+                    quantity=reward.free_product_quantity or 1,
+                    unit_price=Decimal("0.00"),
+                    total_price=Decimal("0.00"),
+                )
             )
 
-        return available_rewards
+        if points_cost > 0:
+            # commit=False keeps every mutation in the single transaction this
+            # method (and its callers) controls; flush only, no notification.
+            self.deduct_points(
+                order.user_id,
+                points_cost,
+                f"Redeemed reward: {reward.name}",
+                order.id,
+                skip_notification=True,
+                commit=False,
+            )
 
-    def validate_discount_code(self, discount_code: str, user_id: int) -> int:
-        """Validate and return discount amount for a code"""
-        # This could be a loyalty reward code or other discount code
-        # Implementation depends on your discount code system
-        return 0  # Placeholder
+        redemption = RewardRedemption(
+            reward_id=reward.id,
+            user_id=order.user_id,
+            order_id=order.id,
+            reward_type=reward.reward_type,
+            points_spent=points_cost,
+            discount_amount=discount_amount,
+            free_product_id=free_product_id,
+            code=self._generate_reward_code(reward, order.user_id),
+            status="applied",
+        )
+        db.session.add(redemption)
+        reward.redemptions_used = (reward.redemptions_used or 0) + 1
+
+        if commit:
+            db.session.commit()
+        else:
+            db.session.flush()
+        return redemption
+
+    def cancel_redemption_for_order(self, order_id, *, commit=True):
+        """Reverse an applied reward redemption when its order is cancelled:
+        refund the spent points (as a non-tier-qualifying ADJUSTMENT credit lot),
+        flip status to cancelled, and decrement the reward's usage counter.
+        No-op if there is no applied redemption. Idempotent."""
+        from business_app.models.loyalty import RewardRedemption, LoyaltyTransaction
+
+        redemption = RewardRedemption.query.with_for_update().filter_by(order_id=order_id, status="applied").first()
+        if not redemption:
+            return None
+
+        refund = redemption.points_spent or 0
+        if refund > 0:
+            account = self.get_or_create_loyalty_account(redemption.user_id, commit=False)
+            expiry_days = (account.program.points_expiry_days if account.program else None) or 365
+            txn = LoyaltyTransaction(
+                user_id=redemption.user_id,
+                transaction_type=LoyaltyTransactionType.ADJUSTMENT,
+                points=refund,
+                remaining_points=refund,
+                description=f"Refund of redeemed reward (order #{order_id})",
+                order_id=order_id,
+                expires_at=datetime.now(timezone.utc) + timedelta(days=expiry_days),
+                extra_data={"action_type": "reward_refund"},
+            )
+            db.session.add(txn)
+            # Reverse the deduction's bookkeeping: restore spendable balance and
+            # un-redeem the lifetime counter. Do NOT touch total_earned (a refund
+            # is not earning). ADJUSTMENT type keeps it out of tier qualification.
+            account.current_balance = (account.current_balance or 0) + refund
+            account.total_redeemed = max(0, (account.total_redeemed or 0) - refund)
+
+        redemption.status = "cancelled"
+        reward = LoyaltyReward.query.with_for_update().get(redemption.reward_id)
+        if reward:
+            reward.redemptions_used = max(0, (reward.redemptions_used or 0) - 1)
+
+        if commit:
+            db.session.commit()
+        else:
+            db.session.flush()
+        return redemption
 
     def get_user_tier_info(self, user_id: int) -> Dict[str, Any]:
         """Get user's tier information and benefits"""
@@ -1127,141 +1289,134 @@ class LoyaltyService:
             "tier_benefits": tier_benefits,
             "next_tier": next_tier_info,
             "requalification": requalification,
-            "streak": {
-                "current_streak": account.current_streak,
-                "orders_this_month": account.streak_orders_this_month,  # Tracking internal or display
-            },
-            "referral_code": getattr(account, "referral_code", f"REF{user_id}"),
+            "referral_code": self.get_user_referral_code(user_id),
             "referrals_count": self._get_referrals_count(user_id),
+            "streak_progress": self.get_streak_progress(user_id),
         }
 
-    def get_loyalty_analytics(self, start_date: datetime = None, end_date: datetime = None) -> Dict[str, Any]:
-        """Get loyalty program analytics"""
-        query = LoyaltyTransaction.query
-
-        if start_date:
-            query = query.filter(LoyaltyTransaction.created_at >= start_date)
-        if end_date:
-            query = query.filter(LoyaltyTransaction.created_at <= end_date)
-
-        transactions = query.all()
-
-        # Calculate metrics - positive points are awarded, negative are redeemed
-        total_points_awarded = sum(t.points for t in transactions if t.points > 0)
-        total_points_redeemed = abs(sum(t.points for t in transactions if t.points < 0))
-
-        # Active users
-        active_accounts = LoyaltyPoints.query.count()
-
-        # Tier distribution
-        tier_distribution = (
-            db.session.query(LoyaltyPoints.current_tier, func.count(LoyaltyPoints.id))
-            .group_by(LoyaltyPoints.current_tier)
-            .all()
-        )
-
-        # Referral metrics
-        try:
-            referrals = ReferralProgram.query.filter_by(status="completed")
-            if start_date:
-                referrals = referrals.filter(ReferralProgram.completed_at >= start_date)
-            if end_date:
-                referrals = referrals.filter(ReferralProgram.completed_at <= end_date)
-
-            referral_count = referrals.count()
-        except Exception:
-            # Database schema mismatch or table doesn't exist
-            db.session.rollback()
-            referral_count = 0
-
-        return {
-            "total_points_awarded": total_points_awarded,
-            "total_points_redeemed": total_points_redeemed,
-            "net_points_issued": total_points_awarded - total_points_redeemed,
-            "active_loyalty_members": active_accounts,
-            "referrals_completed": referral_count,
-            "tier_distribution": dict(tier_distribution),
-            "redemption_rate": (total_points_redeemed / total_points_awarded) * 100 if total_points_awarded > 0 else 0,
-        }
+    # NOTE: LoyaltyService.get_loyalty_analytics was removed (loyalty SSOT, Phase 2).
+    # It was an orphan duplicate; AdminLoyaltyService.get_analytics is the single
+    # wired analytics source (and applies correct transaction-type filtering).
 
     def expire_points(self) -> Dict[str, int]:
-        """Expire old loyalty points (called by scheduled task)"""
-        # Find earned/bonus points that have expired
-        expired_transactions = LoyaltyTransaction.query.filter(
-            LoyaltyTransaction.transaction_type.in_([LoyaltyTransactionType.EARNED, LoyaltyTransactionType.BONUS]),
-            LoyaltyTransaction.expires_at < datetime.now(timezone.utc),
-            LoyaltyTransaction.is_expired == False,
-        ).all()
+        """Expire old loyalty points (called by the scheduled daily task).
+
+        Iterates affected users and commits PER USER so a failure (or the
+        non-negative balance CHECK constraint) for one user can never roll back
+        the whole run for everyone. Expiry is represented solely by the lot's
+        ``is_expired`` flag — no synthetic negative EXPIRED transaction — so the
+        ledger has exactly one representation per event.
+        """
+        now = datetime.now(timezone.utc)
+
+        user_ids = [
+            row[0]
+            for row in db.session.query(LoyaltyTransaction.user_id)
+            .filter(
+                LoyaltyTransaction.points > 0,
+                LoyaltyTransaction.is_expired == False,  # noqa: E712
+                LoyaltyTransaction.expires_at.isnot(None),
+                LoyaltyTransaction.expires_at <= now,
+            )
+            .distinct()
+            .all()
+        ]
 
         total_expired_points = 0
-        users_affected = set()
+        affected_users = []
 
-        for transaction in expired_transactions:
-            # Mark transaction as expired
-            transaction.is_expired = True
+        for user_id in user_ids:
+            try:
+                expired = self._expire_user_points(user_id, now=now)
+                db.session.commit()
+                if expired > 0:
+                    total_expired_points += expired
+                    affected_users.append(user_id)
+            except Exception as exc:  # one user's failure must not abort the batch
+                db.session.rollback()
+                current_app.logger.error(f"Failed to expire loyalty points for user {user_id}: {exc}")
 
-            # Create expiry transaction
-            expiry_transaction = LoyaltyTransaction(
-                user_id=transaction.user_id,
-                transaction_type=LoyaltyTransactionType.EXPIRED,
-                points=-transaction.points,  # Negative for deductions
-                description=f"Points expired from transaction #{transaction.id}",
-                extra_data={"original_transaction_id": transaction.id},
-            )
+        # Notify only users who actually lost points (after successful commits).
+        # Guarded so a single failed enqueue (e.g. broker outage) cannot drop the
+        # remaining already-committed users' notifications.
+        for user_id in affected_users:
+            try:
+                self._send_points_expiry_notification(user_id)
+            except Exception as exc:
+                current_app.logger.error(f"Failed to enqueue loyalty expiry notification for user {user_id}: {exc}")
 
-            db.session.add(expiry_transaction)
+        return {"total_expired_points": total_expired_points, "affected_users": len(affected_users)}
 
-            # Update user's balance
-            account = LoyaltyPoints.query.filter_by(user_id=transaction.user_id).first()
-            if account:
-                account.current_balance -= transaction.points
-                account.updated_at = datetime.now(timezone.utc)
+    def _expire_user_points(self, user_id: int, now: datetime = None) -> int:
+        """Expire a single user's lapsed lots. Does NOT commit (caller controls).
 
-            total_expired_points += transaction.points
-            users_affected.add(transaction.user_id)
+        For each positive lot past its expiry date and not yet flagged:
+          * flag ``is_expired`` (closes the lot, prevents re-querying),
+          * add only its UNSPENT remainder to the expired total (a lot already
+            spent via FIFO has nothing left to expire — no double-counting),
+          * zero its ``remaining_points``.
+        Decrements the cached balance (floored at 0), bumps ``total_expired``,
+        and stamps ``last_expiry_check``. Returns the points actually expired.
+        """
+        now = now or datetime.now(timezone.utc)
 
-        db.session.commit()
+        lots = LoyaltyTransaction.query.filter(
+            LoyaltyTransaction.user_id == user_id,
+            LoyaltyTransaction.points > 0,
+            LoyaltyTransaction.is_expired == False,  # noqa: E712
+            LoyaltyTransaction.expires_at.isnot(None),
+            LoyaltyTransaction.expires_at <= now,
+        ).all()
 
-        # Send notifications to affected users
-        for user_id in users_affected:
-            self._send_points_expiry_notification(user_id)
+        if not lots:
+            return 0
 
-        return {"total_expired_points": total_expired_points, "affected_users": len(users_affected)}
+        total_expired = 0
+        for lot in lots:
+            lot_remaining = lot.remaining_points if lot.remaining_points is not None else lot.points
+            lot.is_expired = True
+            if lot_remaining > 0:
+                total_expired += lot_remaining
+                lot.remaining_points = 0
+
+        account = LoyaltyPoints.query.filter_by(user_id=user_id).first()
+        if account:
+            if total_expired > 0:
+                account.current_balance = max(0, (account.current_balance or 0) - total_expired)
+                account.total_expired = (account.total_expired or 0) + total_expired
+            account.last_expiry_check = now
+            account.updated_at = now
+
+        return total_expired
 
     # Private helper methods
     def _remove_expired_points(self, user_id: int):
-        """Remove expired points for a specific user"""
-        expired_transactions = LoyaltyTransaction.query.filter(
-            LoyaltyTransaction.user_id == user_id,
-            LoyaltyTransaction.transaction_type.in_([LoyaltyTransactionType.EARNED, LoyaltyTransactionType.BONUS]),
-            LoyaltyTransaction.expires_at < datetime.now(timezone.utc),
-            LoyaltyTransaction.is_expired == False,
-        ).all()
+        """Backward-compatible per-user expiry sweep (delegates to the SSOT helper).
 
-        total_expired = 0
-        for transaction in expired_transactions:
-            transaction.is_expired = True
-            total_expired += transaction.points
-
-        if total_expired > 0:
-            # Update account balance
-            account = LoyaltyPoints.query.filter_by(user_id=user_id).first()
-            if account:
-                account.current_balance -= total_expired
-
+        Commits only when points were actually expired, so a no-op sweep never
+        flushes unrelated pending session work.
+        """
+        if self._expire_user_points(user_id) > 0:
             db.session.commit()
 
+    # Tier qualification window: 1 year (rolling). Owner decision 2026-06-14.
+    TIER_QUALIFYING_WINDOW_DAYS = 365
+
     def calculate_qualifying_points(self, user_id: int) -> int:
-        """Calculate qualifying points earned in the last 180 days"""
-        cutoff_date = datetime.now(timezone.utc) - timedelta(days=180)
+        """Points that count toward tier qualification.
+
+        Single tier basis (owner decision 2026-06-14): all EARNED + BONUS points
+        credited in the trailing 365 days. Bonuses DO count; refund/clawback
+        ADJUSTMENT rows and EXPIRED rows do not.
+        """
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=self.TIER_QUALIFYING_WINDOW_DAYS)
 
         result = (
             db.session.query(func.sum(LoyaltyTransaction.points))
             .filter(
                 LoyaltyTransaction.user_id == user_id,
                 LoyaltyTransaction.points > 0,
-                LoyaltyTransaction.transaction_type
-                != LoyaltyTransactionType.BONUS,  # Only earned points count for tier
+                LoyaltyTransaction.transaction_type.in_([LoyaltyTransactionType.EARNED, LoyaltyTransactionType.BONUS]),
                 LoyaltyTransaction.created_at >= cutoff_date,
             )
             .scalar()
@@ -1273,10 +1428,12 @@ class LoyaltyService:
         """
         Check if user qualifies for tier upgrade or needs downgrade update.
         Logic:
-        1. Calculate Qualifying Points (Earned in last 180 days).
+        1. Calculate Qualifying Points (rolling 365-day EARNED+BONUS window).
         2. Determine target tier based on Qualifying Points.
         3. Implementation of Rules:
-           - Upgrade: Immediate. Lock for 180 days.
+           - Upgrade: Immediate. Lock for 365 days.
+           - Requalify (same tier): refresh the 365-day lock so a continuously
+             active customer is never downgraded mid-window.
            - Downgrade: Only IF tier_valid_until < Now AND Qualifying Points < Current Tier Threshold.
         """
         qualifying_points = self.calculate_qualifying_points(account.user_id)
@@ -1303,10 +1460,12 @@ class LoyaltyService:
 
         now = datetime.now(timezone.utc)
 
+        lock_until = now + timedelta(days=self.TIER_QUALIFYING_WINDOW_DAYS)
+
         # CASE 1: Upgrade
         if target_weight > current_weight:
             account.current_tier = target_tier_name
-            account.tier_valid_until = now + timedelta(days=180)  # Lock for 180 days
+            account.tier_valid_until = lock_until  # Lock for 365 days
 
             # Update points to next tier
             self._update_points_to_next_tier(account, target_tier_config)
@@ -1314,9 +1473,11 @@ class LoyaltyService:
             self._send_tier_upgrade_notification(account.user_id, target_tier_name)
 
         # CASE 2: Downgrade Check
-        # Only downgrade if lock expired AND qualifying points are insufficient
+        # Only downgrade if lock expired AND qualifying points are insufficient.
+        # ensure_utc guards against a tz-naive tier_valid_until (some backends drop
+        # tzinfo on read) so this comparison never raises offset-naive/aware errors.
         elif target_weight < current_weight:
-            if not account.tier_valid_until or account.tier_valid_until < now:
+            if not account.tier_valid_until or ensure_utc(account.tier_valid_until) < now:
                 # Lock expired, and points support lower tier -> Downgrade
                 account.current_tier = target_tier_name
                 account.tier_valid_until = None
@@ -1324,9 +1485,10 @@ class LoyaltyService:
                 # Recalculate next tier target
                 self._update_points_to_next_tier(account, target_tier_config)
 
-        # CASE 3: Same tier - still need to update points_to_next_tier
-        # as user's qualifying_points may have changed
+        # CASE 3: Same tier - the user still qualifies, so refresh the lock and
+        # recompute points_to_next_tier (qualifying_points may have changed).
         else:
+            account.tier_valid_until = lock_until
             self._update_points_to_next_tier(account, target_tier_config)
 
     def _update_points_to_next_tier(self, account: LoyaltyPoints, current_tier_config: LoyaltyTierConfig):
@@ -1378,84 +1540,225 @@ class LoyaltyService:
             "points_needed_to_keep": points_needed,
         }
 
-    def update_streak(self, user_id: int, commit: bool = True):
-        """
-        Updates streak for a user.
-        Logic:
-        - Streaks are monthly based (e.g. 3 orders in 30 days logic, but user simplified to "3 orders in 30 days" earlier).  # noqa: E501
-        - Let's implement: count orders in last 30 days. If >= 3, +1 Streak Count (if not already incremented this period).  # noqa: E501
-        - OR simplified from planning: "3 orders in 30 days → +300 pts".
-        - "6 consecutive months → Free 10L bottle".
+    def _qualifying_order_count(self, user_id: int, rule, now: datetime) -> int:
+        """Delivered orders for ``user_id`` within the rule's trailing window,
+        counting only orders whose total meets ``min_order_amount`` when set."""
+        window_start = now - timedelta(days=rule.window_days)
+        q = Order.query.filter(
+            Order.user_id == user_id,
+            Order.status == OrderStatus.DELIVERED,
+            Order.created_at >= window_start,
+        )
+        if rule.min_order_amount is not None:
+            q = q.filter(Order.total_amount >= rule.min_order_amount)
+        return q.count()
 
-        Implementation:
-        - Check orders in last 30 days.
-        - If >= 3 AND streak_orders_this_month < 3 (tracking flag):
-             - Award +300 pts "Streak Bonus: 3 Orders in 30 days"
-             - Increment current_streak (months)
-             - Reset streak_orders_this_month = 3 (marker)
-        """
-        account = self.get_or_create_loyalty_account(user_id)
+    def get_streak_progress(self, user_id: int):
+        """Live progress toward each active, currently-effective streak rule for the
+        default program. Computed from recent orders — no stored counter."""
+        from business_app.utils.helpers import get_current_language
+
+        program = (
+            LoyaltyProgram.query.filter_by(is_default=True, is_active=True).first()
+            or LoyaltyProgram.query.filter_by(is_active=True).first()
+        )
+        if not program:
+            return []
         now = datetime.now(timezone.utc)
-
-        # Calculate orders in last 30 days
-        thirty_days_ago = now - timedelta(days=30)
-        recent_orders_count = Order.query.filter(
-            Order.user_id == user_id, Order.status == "delivered", Order.created_at >= thirty_days_ago
-        ).count()
-
-        # Logic for "3 orders in 30 days" bonus
-        # We need to ensure we don't award this multiple times for the same sliding window excessively.
-        # Simplified robust logic:
-        # If user hit 3 orders, and we haven't awarded streak bonus recently (e.g. last 30 days).
-
-        # Check last streak reward
-        last_streak_tx = LoyaltyTransaction.query.filter(
-            LoyaltyTransaction.user_id == user_id,
-            LoyaltyTransaction.description == "Streak Bonus: 3 Orders in 30 days",
-            LoyaltyTransaction.created_at >= thirty_days_ago,
-        ).first()
-
-        if recent_orders_count >= 3 and not last_streak_tx:
-            # Award Bonus
-            self.award_points(
-                user_id, 300, "Streak Bonus: 3 Orders in 30 days", LoyaltyActionType.STREAK_BONUS, commit=commit
+        lang = get_current_language()
+        out = []
+        rules = (
+            LoyaltyStreakRule.query.filter_by(program_id=program.id, is_active=True)
+            .order_by(LoyaltyStreakRule.display_order.asc())
+            .all()
+        )
+        for rule in rules:
+            if not rule.is_effective(now):
+                continue
+            count = self._qualifying_order_count(user_id, rule, now)
+            out.append(
+                {
+                    "name": rule.get_translated("name", lang),
+                    "required_orders": rule.required_orders,
+                    "current_orders": min(count, rule.required_orders),
+                    "window_days": rule.window_days,
+                    "min_order_amount": float(rule.min_order_amount) if rule.min_order_amount is not None else None,
+                    "bonus_points": rule.bonus_points,
+                }
             )
+        return out
 
-            # Update Streak Counter (Consecutive Months Logic is complex without Monthly Job,
-            # but we can approximate: increment streak count)
-            account.current_streak += 1
-            account.last_streak_update = now
-
-            # Check for 6-month Milestone
-            if account.current_streak % 6 == 0:
-                # "6 consecutive months" -> In this model, every 6th streak increment.
-                # Award Free Bottle Reward Coupon or Points equivalent.
-                # For simplicity now: Huge Bonus Points equivalent to bottle price (e.g. 15000 UZS -> 60 coins? No, that's small.  # noqa: E501
-                # Value of 10L bottle ~? Let's say 500 bonus points or Create a special Reward).
-                # User said "Free 10L bottle". We'll award points for it for now to be safe or a voucher.
-                self.award_points(
-                    user_id, 1000, "6-Month Streak Milestone Bonus", LoyaltyActionType.STREAK_BONUS, commit=commit
-                )
-
-            if commit:
-                db.session.commit()
-
-    def check_surprise_reward(self, user_id: int, commit: bool = True):
+    def update_streak(self, user_id: int, commit: bool = True):
+        """Award every active, currently-effective streak rule the user now
+        satisfies. Each rule is independent and re-awardable at most once per its
+        own ``window_days`` (cooldown), tracked via ``streak_rule_id`` in the
+        award transaction's ``extra_data``.
         """
-        Randomly award surprise points (5-10% chance).
-        """
-        import random
+        program = (
+            LoyaltyProgram.query.filter_by(is_default=True, is_active=True).first()
+            or LoyaltyProgram.query.filter_by(is_active=True).first()
+        )
+        if not program:
+            return
 
-        # 5% chance
-        if random.random() < 0.05:
-            bonus = random.choice([50, 100, 200])  # Small delight
+        now = datetime.now(timezone.utc)
+        rules = LoyaltyStreakRule.query.filter_by(program_id=program.id, is_active=True).all()
+        awarded = False
+
+        for rule in rules:
+            if not rule.is_effective(now):
+                continue
+            if self._qualifying_order_count(user_id, rule, now) < rule.required_orders:
+                continue
+            if self._streak_rule_in_cooldown(user_id, rule, now):
+                continue
             self.award_points(
                 user_id,
-                bonus,
+                rule.bonus_points,
+                rule.name,
+                LoyaltyActionType.STREAK_BONUS,
+                extra_data={"streak_rule_id": rule.id},
+                commit=False,
+            )
+            awarded = True
+
+        if awarded and commit:
+            db.session.commit()
+
+    def _streak_rule_in_cooldown(self, user_id: int, rule, now: datetime) -> bool:
+        """True if this rule was already awarded to the user within the last
+        ``window_days``."""
+        window_start = now - timedelta(days=rule.window_days)
+        recent = LoyaltyTransaction.query.filter(
+            LoyaltyTransaction.user_id == user_id,
+            LoyaltyTransaction.created_at >= window_start,
+        ).all()
+        for t in recent:
+            ed = t.extra_data or {}
+            if ed.get("action_type") == LoyaltyActionType.STREAK_BONUS.value and ed.get("streak_rule_id") == rule.id:
+                return True
+        return False
+
+    @staticmethod
+    def _parse_surprise_amounts(raw) -> List[int]:
+        """Parse the admin-configured CSV (e.g. '50,100,200') into positive ints.
+        Bad/blank entries are dropped; an empty result means 'no award'."""
+        amounts: List[int] = []
+        for part in str(raw or "").split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                value = int(part)
+            except ValueError:
+                continue
+            if value > 0:
+                amounts.append(value)
+        return amounts
+
+    def _user_in_surprise_cooldown(self, user_id: int, cooldown_days: int) -> bool:
+        """True if the user received a surprise reward within the last
+        ``cooldown_days`` (relative to now — the award moment). Anchoring on now
+        keeps the batch idempotent: a re-run sees the award it just made and skips
+        the user, so a duplicate/retried run never double-awards."""
+        if cooldown_days <= 0:
+            return False
+        since = datetime.now(timezone.utc) - timedelta(days=cooldown_days)
+        rows = LoyaltyTransaction.query.filter(
+            LoyaltyTransaction.user_id == user_id,
+            LoyaltyTransaction.transaction_type == LoyaltyTransactionType.BONUS,
+            LoyaltyTransaction.created_at >= since,
+        ).all()
+        return any((t.extra_data or {}).get("action_type") == LoyaltyActionType.SURPRICE_REWARD.value for t in rows)
+
+    def process_daily_surprise_rewards(self, for_date=None) -> Dict[str, Any]:
+        """Share surprise rewards for one delivery day's eligible orders.
+
+        Run nightly by a Celery beat task. Scans orders that were DELIVERED on the
+        target day (``Delivery.delivered_at``) AND are fully paid by the end of that
+        day — so a prepaid order and a COD order paid the same day both qualify,
+        while a COD order paid the next day does not. For each eligible INDIVIDUAL
+        customer (one roll per user per day), not in cooldown and under the global
+        daily cap, the configured win-chance roll may grant a random configured
+        amount as a BONUS (action_type=surprise_reward).
+
+        ``for_date`` is a business-calendar date; defaults to yesterday.
+        Returns ``{"candidates": int, "awarded": int}``.
+        """
+        import random
+        from zoneinfo import ZoneInfo
+        from shared.constants import DISPLAY_TIMEZONE
+        from shared.enums import DeliveryStatus
+        from business_app.models.delivery import Delivery
+
+        program = (
+            LoyaltyProgram.query.filter_by(is_default=True, is_active=True).first()
+            or LoyaltyProgram.query.filter_by(is_active=True).first()
+        )
+        if not program or not program.surprise_enabled:
+            return {"candidates": 0, "awarded": 0}
+
+        amounts = self._parse_surprise_amounts(program.surprise_amounts)
+        chance = program.surprise_chance_percent or 0
+        if not amounts or chance <= 0:
+            return {"candidates": 0, "awarded": 0}
+
+        tz = ZoneInfo(DISPLAY_TIMEZONE)
+        if for_date is None:
+            for_date = (datetime.now(tz) - timedelta(days=1)).date()
+        day_start = datetime(for_date.year, for_date.month, for_date.day, tzinfo=tz).astimezone(timezone.utc)
+        day_end = (datetime(for_date.year, for_date.month, for_date.day, tzinfo=tz) + timedelta(days=1)).astimezone(
+            timezone.utc
+        )
+
+        # Candidate orders for the day: their Delivery is marked DELIVERED with a
+        # delivered_at on the target day, and the order is fully paid by the end of
+        # that day (prepaid: paid earlier; COD-same-day: paid within the day; a
+        # COD order paid the next day has paid_at >= day_end → excluded).
+        candidates = (
+            Order.query.join(Delivery, Delivery.order_id == Order.id)
+            .filter(
+                Delivery.status == DeliveryStatus.DELIVERED,
+                Delivery.delivered_at >= day_start,
+                Delivery.delivered_at < day_end,
+                Order.is_paid.is_(True),
+                Order.paid_at.isnot(None),
+                Order.paid_at < day_end,
+            )
+            .order_by(Delivery.delivered_at.asc())
+            .all()
+        )
+
+        daily_cap = program.surprise_daily_cap or 0
+        cooldown_days = program.surprise_cooldown_days or 0
+        awarded = 0
+        seen_users = set()
+        for order in candidates:
+            if daily_cap and awarded >= daily_cap:
+                break
+            uid = order.user_id
+            if uid in seen_users:
+                continue  # one roll per eligible user per day
+            seen_users.add(uid)
+
+            user = User.query.get(uid)
+            if not user or user.user_type != UserType.INDIVIDUAL:
+                continue
+            if self._user_in_surprise_cooldown(uid, cooldown_days):
+                continue
+            if random.random() >= chance / 100.0:
+                continue
+
+            self.award_points(
+                uid,
+                random.choice(amounts),
                 "Surprise Reward! Thanks for being loyal 💙",
                 LoyaltyActionType.SURPRICE_REWARD,
-                commit=commit,
+                commit=True,
             )
+            awarded += 1
+
+        return {"candidates": len(candidates), "awarded": awarded}
 
     def _get_tier_benefits(self, tier_name: str, program_id: int = None) -> Dict[str, Any]:
         """Get benefits for a specific tier using centralized config"""
@@ -1496,7 +1799,8 @@ class LoyaltyService:
         )
 
         if next_tier:
-            points_needed = next_tier.min_points - account.total_earned
+            qualifying_points = self.calculate_qualifying_points(account.user_id)
+            points_needed = next_tier.min_points - qualifying_points
             return {"tier": next_tier.name, "points_needed": max(0, points_needed), "threshold": next_tier.min_points}
 
         return None
@@ -1511,13 +1815,21 @@ class LoyaltyService:
             return 0
 
     def _generate_reward_code(self, reward: LoyaltyReward, user_id: int) -> str:
-        """Generate unique reward code"""
-        import hashlib
-        import time
+        """Generate a random, collision-resistant, unique reward code.
 
-        data = f"{reward.id}{user_id}{time.time()}"
-        hash_object = hashlib.md5(data.encode())
-        return f"RWD{hash_object.hexdigest()[:8].upper()}"
+        Random (not time-derived) so two same-second redemptions cannot produce
+        the same code and violate the UNIQUE constraint on
+        ``reward_redemptions.code``; each candidate is checked against existing
+        rows before use.
+        """
+        import secrets
+        from business_app.models.loyalty import RewardRedemption
+
+        for _ in range(10):
+            code = f"RWD{secrets.token_hex(4).upper()}"  # RWD + 8 hex chars
+            if not RewardRedemption.query.filter_by(code=code).first():
+                return code
+        return f"RWD{secrets.token_hex(8).upper()}"  # extremely unlikely fallback
 
     def _send_points_notification(self, user_id: int, points: int, action: str, notification_type_str: str = None):
         """Send points notification
@@ -1552,15 +1864,16 @@ class LoyaltyService:
         """Calculate tier progress for user"""
         account = self.get_or_create_loyalty_account(user_id)
         next_tier_info = self._get_next_tier_info(account)
+        qualifying_points = self.calculate_qualifying_points(user_id)
 
-        if next_tier_info:
-            progress_percentage = max(0, min(100, (account.total_earned / next_tier_info["threshold"]) * 100))
+        if next_tier_info and next_tier_info["threshold"]:
+            progress_percentage = max(0, min(100, (qualifying_points / next_tier_info["threshold"]) * 100))
         else:
             progress_percentage = 100  # Already at highest tier
 
         return {
             "current_tier": account.current_tier,
-            "current_points": account.total_earned,
+            "current_points": qualifying_points,
             "next_tier": next_tier_info["tier"] if next_tier_info else None,
             "points_to_next_tier": next_tier_info["points_needed"] if next_tier_info else 0,
             "progress_percentage": progress_percentage,
@@ -1571,55 +1884,95 @@ class LoyaltyService:
         categories = db.session.query(LoyaltyReward.reward_type).distinct().all()
         return [category[0] for category in categories if category[0]]
 
-    def can_redeem_reward(self, user_id: int, reward_id: int) -> bool:
-        """Check if user can redeem a specific reward"""
-        reward = LoyaltyReward.query.get(reward_id)
-        if not reward or not reward.is_active:
-            return False
+    def is_reward_configured(self, reward) -> bool:
+        """Structural usability of a reward, independent of the user.
 
-        # Check points balance
-        available_points = self.get_available_points(user_id)
-        if available_points < reward.points_cost:
-            return False
+        A reward that is not configured must never be offered for redemption.
+        """
+        from decimal import Decimal
+        from business_app.models.product import Product
 
-        # Check expiry
-        if reward.valid_until and reward.valid_until < datetime.now(timezone.utc).date():
-            return False
-
-        # Check redemption limits
-        if reward.max_redemptions and reward.redemptions_used >= reward.max_redemptions:
-            return False
-
-        # Check user-specific usage limit
-        if reward.max_uses_per_user:
-            user_redemptions = LoyaltyTransaction.query.filter(
-                LoyaltyTransaction.user_id == user_id,
-                LoyaltyTransaction.transaction_type == LoyaltyTransactionType.REDEEMED,
-                LoyaltyTransaction.description.contains(f"Redeemed reward: {reward.name}"),
-            ).count()
-
-            if user_redemptions >= reward.max_uses_per_user:
+        if reward.reward_type == "discount":
+            if reward.discount_type not in ("percentage", "fixed"):
                 return False
+            return reward.discount_value is not None and Decimal(str(reward.discount_value)) > 0
 
+        if reward.reward_type == "free_product":
+            if not reward.free_product_id:
+                return False
+            if (reward.free_product_quantity or 0) < 1:
+                return False
+            product = Product.query.get(reward.free_product_id)
+            return bool(product and product.is_active)
+
+        # Removed/legacy reward types (free_delivery, voucher) are not redeemable.
+        return False
+
+    def can_redeem_reward(self, user_id, reward_id):
+        from business_app.models.loyalty import RewardRedemption
+
+        reward = LoyaltyReward.query.get(reward_id)
+        if not reward or not reward.is_active or reward.is_system_reward:
+            return False
+        # is_reward_configured() also rejects other types, but this fast-exit
+        # avoids the Product DB lookup for structurally unsupported types.
+        if reward.reward_type not in ("discount", "free_product"):
+            return False
+        if not self.is_reward_configured(reward):
+            return False
+        if self.get_available_points(user_id) < (reward.points_cost or 0):
+            return False
+
+        now = datetime.now(timezone.utc)
+        valid_until = reward.valid_until
+        if valid_until and valid_until.tzinfo is None:
+            valid_until = valid_until.replace(tzinfo=timezone.utc)
+        if valid_until and valid_until < now:
+            return False
+        valid_from = reward.valid_from
+        if valid_from and valid_from.tzinfo is None:
+            valid_from = valid_from.replace(tzinfo=timezone.utc)
+        if valid_from and now < valid_from:
+            return False
+
+        if reward.max_redemptions and (reward.redemptions_used or 0) >= reward.max_redemptions:
+            return False
+        if reward.max_uses_per_user:
+            used = RewardRedemption.query.filter_by(reward_id=reward.id, user_id=user_id, status="applied").count()
+            if used >= reward.max_uses_per_user:
+                return False
         return True
 
     def get_action_points(self, action: str) -> int:
-        """Get points for specific action"""
-        action_points = {
-            "referral_signup": 500,
+        """Points for a given engagement action.
+
+        referral / birthday come from the LoyaltyProgram DB columns (single
+        source of truth). The remaining engagement actions are not modeled on
+        LoyaltyProgram, so they keep operational defaults.
+        """
+        if action == "referral_signup":
+            return self._program_bonus("referral_bonus", 50)
+        if action == "birthday_bonus":
+            return self._program_bonus("birthday_bonus", 25)
+
+        engagement_defaults = {
             "social_share": 50,
             "review_submitted": 100,
-            "birthday_bonus": 200,
             "survey_completed": 75,
             "app_install": 100,
             "newsletter_signup": 25,
         }
-        return action_points.get(action, 0)
+        return engagement_defaults.get(action, 0)
 
     def get_user_referral_code(self, user_id: int) -> str:
-        """Get user's referral code"""
-        account = self.get_or_create_loyalty_account(user_id)
-        return getattr(account, "referral_code", f"REF{user_id}")
+        """Get the user's persisted referral code, generating it once on first use."""
+        user = User.query.get(user_id)
+        if not user:
+            raise NotFoundError("User not found")
+        if not user.referral_code:
+            user.referral_code = self._generate_unique_referral_code()
+            db.session.commit()
+        return user.referral_code
 
     def get_referral_statistics(self, user_id: int) -> Dict[str, Any]:
         """Get referral statistics for user"""
@@ -1652,7 +2005,8 @@ class LoyaltyService:
         return {
             "total_referrals": total_referrals,
             "pending_referrals": pending_referrals,
-            "total_points_earned": referral_points,
+            # Key matches the exception-fallback dict + both consumers (bot + web).
+            "points_earned_from_referrals": referral_points,
         }
 
     def get_referral_points_earned(self, referrer_id: int, referee_id: int) -> int:
@@ -1665,40 +2019,34 @@ class LoyaltyService:
         if not referral:
             return 0
 
-        # Find the transaction for this referral (stored in extra_data)
-        transaction = LoyaltyTransaction.query.filter(
-            LoyaltyTransaction.user_id == referrer_id,
-            LoyaltyTransaction.extra_data["action_type"].astext == LoyaltyActionType.REFERRAL.value,
-            LoyaltyTransaction.description.contains("referral"),
-        ).first()
+        # Find the transaction for this referral. action_type lives in the JSON
+        # extra_data; filter it in Python (matching grant_welcome_bonus) rather than
+        # via a JSON-path SQL operator, which is not portable across DB backends.
+        candidates = (
+            LoyaltyTransaction.query.filter(
+                LoyaltyTransaction.user_id == referrer_id,
+                LoyaltyTransaction.description.contains("referral"),
+            )
+            .order_by(LoyaltyTransaction.created_at.asc())
+            .all()
+        )
+        for transaction in candidates:
+            if (transaction.extra_data or {}).get("action_type") == LoyaltyActionType.REFERRAL.value:
+                return transaction.points
 
-        return transaction.points if transaction else 0
+        return 0
 
     def get_referrer_bonus_points(self) -> int:
-        """Get referrer bonus points amount"""
-        return self.referral_bonus
+        """Referrer bonus = LoyaltyProgram.referral_bonus (DB SSOT)."""
+        return self._program_bonus("referral_bonus", 50)
 
     def get_referee_bonus_points(self) -> int:
-        """Get referee bonus points amount"""
-        return self.referral_bonus // 2
+        """Referee bonus = half the referral bonus (DB SSOT)."""
+        return self._program_bonus("referral_bonus", 50) // 2
 
-    def get_tier_history(self, user_id: int) -> List[Dict[str, Any]]:
-        """Get user's tier upgrade history"""
-        # This would typically come from a tier_history table
-        # For now, return current tier info
-        account = self.get_or_create_loyalty_account(user_id)
-        return [
-            {
-                "tier": account.current_tier,
-                "achieved_at": account.created_at.isoformat(),
-                "points_at_upgrade": account.total_earned,
-            }
-        ]
-
-    def get_user_challenges(self, user_id: int) -> List[Dict[str, Any]]:
-        """Get user's current challenges"""
-        # Implement challenge system - for now return empty list
-        return []
+    # NOTE: get_tier_history and get_user_challenges were removed (loyalty SSOT,
+    # Phase 2). Both were stubs with no backing model/table; the challenges API
+    # route and the synthetic tier_history payload were removed with them.
 
     def get_tier_benefits(self, tier: str) -> Dict[str, Any]:
         """Get benefits for specific tier"""
@@ -1708,13 +2056,14 @@ class LoyaltyService:
         """Get tier upgrade requirements for user"""
         account = self.get_or_create_loyalty_account(user_id)
         next_tier_info = self._get_next_tier_info(account)
+        qualifying_points = self.calculate_qualifying_points(user_id)
 
         if next_tier_info:
             return {
                 "current_tier": account.current_tier,
                 "next_tier": next_tier_info["tier"],
                 "points_needed": next_tier_info["points_needed"],
-                "current_points": account.total_earned,
+                "current_points": qualifying_points,
                 "target_points": next_tier_info["threshold"],
             }
         else:
@@ -1722,7 +2071,7 @@ class LoyaltyService:
                 "current_tier": account.current_tier,
                 "next_tier": None,
                 "points_needed": 0,
-                "current_points": account.total_earned,
+                "current_points": qualifying_points,
                 "target_points": None,
                 "message": "You have reached the highest tier!",
             }
@@ -1760,20 +2109,22 @@ class LoyaltyService:
             if not referral.referee_id:
                 continue
 
-            first_order = referral.first_order
-            if not first_order:
-                first_order = (
-                    Order.query.filter_by(user_id=referral.referee_id).order_by(Order.created_at.asc()).first()
-                )
-                if first_order:
-                    referral.first_order_id = first_order.id
-
-            if not first_order:
+            # Qualify on the referee's FIRST order that is both DELIVERED and
+            # fully PAID. is_paid is the payment SSOT (set only when payment is
+            # COMPLETED — including COD cash collection — and cleared on refund),
+            # so a delivered-but-unpaid order (e.g. COD with collection still
+            # pending) must NOT pay out. Do NOT pin first_order_id to a
+            # non-qualifying order — that would freeze the referral forever and a
+            # later delivered+paid order would never pay out.
+            first_qualifying = (
+                Order.query.filter_by(user_id=referral.referee_id, status=OrderStatus.DELIVERED, is_paid=True)
+                .order_by(Order.created_at.asc())
+                .first()
+            )
+            if not first_qualifying:
                 continue
 
-            if first_order.status != OrderStatus.DELIVERED:
-                continue
-
+            referral.first_order_id = first_qualifying.id
             referral.status = "completed"
             referral.completed_at = datetime.now(timezone.utc)
 
@@ -1807,6 +2158,58 @@ class LoyaltyService:
             "processed_count": processed_count,
             "total_points_awarded": total_points_awarded,
         }
+
+    def grant_birthday_bonuses(self) -> Dict[str, int]:
+        """Grant the birthday bonus to users whose birthday is today.
+
+        Amount comes from the LoyaltyProgram DB column (SSOT). Idempotent within
+        a calendar year: a user who already received a birthday bonus this year
+        is skipped, so re-runs (or a backfill) never double-grant.
+        """
+        from zoneinfo import ZoneInfo
+        from shared.constants import DISPLAY_TIMEZONE
+
+        bonus = self._program_bonus("birthday_bonus", 25)
+        if bonus <= 0:
+            return {"granted": 0}
+
+        # Compare birthdays on the BUSINESS calendar, not UTC. date_of_birth is a
+        # timestamptz storing local midnight (so its UTC instant lands on the prior
+        # day for UTC+ zones); matching by UTC EXTRACT would fire a day early.
+        business_tz = ZoneInfo(DISPLAY_TIMEZONE)
+        today_local = datetime.now(business_tz)
+
+        granted = 0
+        for user in User.query.filter(User.date_of_birth.isnot(None)).all():
+            dob = user.date_of_birth
+            if dob.tzinfo is None:
+                dob = dob.replace(tzinfo=timezone.utc)
+            dob_local = dob.astimezone(business_tz)
+            if dob_local.month != today_local.month or dob_local.day != today_local.day:
+                continue
+
+            # Idempotency check in Python (cross-DB; avoids backend-specific JSON
+            # operators): has this user already received a birthday bonus this year?
+            year_bonuses = LoyaltyTransaction.query.filter(
+                LoyaltyTransaction.user_id == user.id,
+                LoyaltyTransaction.transaction_type == LoyaltyTransactionType.BONUS,
+            ).all()
+            already = any(
+                (t.extra_data or {}).get("action_type") == LoyaltyActionType.BIRTHDAY_BONUS.value
+                and t.created_at
+                and t.created_at.year == today_local.year
+                for t in year_bonuses
+            )
+            if already:
+                continue
+            try:
+                self.award_points(user.id, bonus, "Birthday bonus", action_type=LoyaltyActionType.BIRTHDAY_BONUS)
+                granted += 1
+            except Exception as exc:
+                db.session.rollback()
+                current_app.logger.error(f"Failed to grant birthday bonus to user {user.id}: {exc}")
+
+        return {"granted": granted}
 
     def get_points_expiring_soon(self, days: int = 7) -> List[Dict[str, Any]]:
         """Return users with positive earned points expiring soon."""

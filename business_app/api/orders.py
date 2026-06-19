@@ -350,6 +350,7 @@ def create_order():
             "payment_method": order_request.payment_method,
             "loyalty_points_used": order_request.loyalty_points_used,
             "promo_code": order_request.promo_code,
+            "reward_id": order_request.reward_id,
             "order_source": order_request.source,
         }
 

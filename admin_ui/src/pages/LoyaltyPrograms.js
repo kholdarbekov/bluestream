@@ -4,6 +4,7 @@ import {
   Button,
   Card,
   Col,
+  Divider,
   Form,
   Input,
   InputNumber,
@@ -48,8 +49,10 @@ const LoyaltyPrograms = () => {
   const [pagination, setPagination] = useState({ page: 1, per_page: DEFAULT_PAGE_SIZE });
   const [programModal, setProgramModal] = useState({ open: false, program: null });
   const [tierModal, setTierModal] = useState({ open: false, tier: null });
+  const [streakModal, setStreakModal] = useState({ open: false, rule: null });
   const [programForm] = Form.useForm();
   const [tierForm] = Form.useForm();
+  const [streakForm] = Form.useForm();
 
   const programsQuery = useQuery({
     queryKey: ['loyalty-programs', pagination, searchText, statusFilter],
@@ -83,6 +86,15 @@ const LoyaltyPrograms = () => {
 
   const tiers = tiersQuery.data?.items || [];
 
+  const streakRulesQuery = useQuery({
+    queryKey: ['loyalty-streak-rules', selectedProgramId],
+    queryFn: () => adminService.getLoyaltyStreakRules({ program_id: selectedProgramId }),
+    enabled: Boolean(selectedProgramId),
+    placeholderData: keepPreviousData,
+  });
+
+  const streakRules = streakRulesQuery.data?.streak_rules || [];
+
   const invalidateLoyaltyQueries = () => {
     queryClient.invalidateQueries({
       queryKey: ['loyalty-programs'],
@@ -92,6 +104,9 @@ const LoyaltyPrograms = () => {
     });
     queryClient.invalidateQueries({
       queryKey: ['loyalty-program-options'],
+    });
+    queryClient.invalidateQueries({
+      queryKey: ['loyalty-streak-rules'],
     });
   };
 
@@ -157,6 +172,37 @@ const LoyaltyPrograms = () => {
     },
   });
 
+  const createStreakRuleMutation = useMutation({
+    mutationFn: (values) => adminService.createLoyaltyStreakRule(values),
+
+    onSuccess: () => {
+      message.success(t('ui.loyalty.streak_create_success', { defaultValue: 'Streak rule created successfully' }));
+      setStreakModal({ open: false, rule: null });
+      streakForm.resetFields();
+      invalidateLoyaltyQueries();
+    },
+  });
+
+  const updateStreakRuleMutation = useMutation({
+    mutationFn: ({ ruleId, values }) => adminService.updateLoyaltyStreakRule(ruleId, values),
+
+    onSuccess: () => {
+      message.success(t('ui.loyalty.streak_update_success', { defaultValue: 'Streak rule updated successfully' }));
+      setStreakModal({ open: false, rule: null });
+      streakForm.resetFields();
+      invalidateLoyaltyQueries();
+    },
+  });
+
+  const deleteStreakRuleMutation = useMutation({
+    mutationFn: (ruleId) => adminService.deleteLoyaltyStreakRule(ruleId),
+
+    onSuccess: () => {
+      message.success(t('ui.loyalty.streak_delete_success', { defaultValue: 'Streak rule removed successfully' }));
+      invalidateLoyaltyQueries();
+    },
+  });
+
   const handleExport = async () => {
     const result = await exportUtils.exportLoyaltyPrograms({
       search: searchText,
@@ -183,7 +229,7 @@ const LoyaltyPrograms = () => {
       )
     },
     {
-      title: t('ui.loyalty.uzs_per_point', { defaultValue: 'UZS per Point' }),
+      title: t('ui.loyalty.uzs_per_point', { defaultValue: 'UZS per AquaCoin' }),
       dataIndex: 'uzs_per_point',
       key: 'uzs_per_point',
       width: 140,
@@ -256,7 +302,7 @@ const LoyaltyPrograms = () => {
       render: (_, record) => <Tag color={record.color || 'gold'}>{record.name}</Tag>
     },
     {
-      title: t('ui.loyalty.points_range', { defaultValue: 'Points Range' }),
+      title: t('ui.loyalty.points_range', { defaultValue: 'AquaCoins Range' }),
       dataIndex: 'points_range',
       key: 'points_range',
     },
@@ -292,7 +338,11 @@ const LoyaltyPrograms = () => {
             icon={<EditOutlined />}
             onClick={() => {
               setTierModal({ open: true, tier: record });
-              tierForm.setFieldsValue(record);
+              tierForm.setFieldsValue({
+                ...record,
+                name_ru: record.translations?.name?.ru,
+                name_uz: record.translations?.name?.uz,
+              });
             }}
           />
           <Button
@@ -311,6 +361,79 @@ const LoyaltyPrograms = () => {
       )
     }
   ]), [deleteTierMutation, t, tierForm]);
+
+  const streakRuleColumns = useMemo(() => ([
+    {
+      title: t('ui.loyalty.streak_name', { defaultValue: 'Name' }),
+      dataIndex: 'name',
+      key: 'name',
+    },
+    {
+      title: t('ui.loyalty.streak_required_orders', { defaultValue: 'Required Orders' }),
+      dataIndex: 'required_orders',
+      key: 'required_orders',
+      width: 150,
+    },
+    {
+      title: t('ui.loyalty.streak_window_days', { defaultValue: 'Window (days)' }),
+      dataIndex: 'window_days',
+      key: 'window_days',
+      width: 130,
+    },
+    {
+      title: t('ui.loyalty.streak_min_order_amount', { defaultValue: 'Min/order' }),
+      dataIndex: 'min_order_amount',
+      key: 'min_order_amount',
+      width: 120,
+      render: (value) => (value != null ? value : '—'),
+    },
+    {
+      title: t('ui.loyalty.streak_bonus_points', { defaultValue: 'Bonus AquaCoins' }),
+      dataIndex: 'bonus_points',
+      key: 'bonus_points',
+      width: 130,
+    },
+    {
+      title: t('ui.loyalty.status', { defaultValue: 'Status' }),
+      dataIndex: 'is_active',
+      key: 'is_active',
+      width: 120,
+      render: (value) => <Tag color={value ? 'green' : 'red'}>{value ? 'Active' : 'Inactive'}</Tag>,
+    },
+    {
+      title: t('ui.loyalty.actions', { defaultValue: 'Actions' }),
+      key: 'actions',
+      width: 120,
+      render: (_, record) => (
+        <Space>
+          <Button
+            type="text"
+            icon={<EditOutlined />}
+            onClick={() => {
+              setStreakModal({ open: true, rule: record });
+              streakForm.setFieldsValue({
+                ...record,
+                name_ru: record.translations?.name?.ru,
+                name_uz: record.translations?.name?.uz,
+              });
+            }}
+          />
+          <Button
+            type="text"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => {
+              Modal.confirm({
+                title: t('ui.loyalty.delete_streak_confirm_title', { defaultValue: 'Delete streak rule?' }),
+                content: t('ui.loyalty.delete_streak_confirm_message', { defaultValue: `Delete ${record.name}?` }),
+                onOk: () => deleteStreakRuleMutation.mutate(record.id),
+              });
+            }}
+          />
+        </Space>
+      ),
+    },
+  ]), [deleteStreakRuleMutation, streakForm, t]);
 
   return (
     <div>
@@ -401,6 +524,11 @@ const LoyaltyPrograms = () => {
                             birthday_bonus: 25,
                             points_expiry_days: 365,
                             min_redemption_points: 100,
+                            surprise_enabled: true,
+                            surprise_chance_percent: 5,
+                            surprise_amounts: '50,100,200',
+                            surprise_cooldown_days: 7,
+                            surprise_daily_cap: 5,
                           });
                         }}
                       >
@@ -487,6 +615,55 @@ const LoyaltyPrograms = () => {
                   />
                 </>
               )
+            },
+            {
+              key: 'streak_rules',
+              label: t('ui.loyalty.tab_streak_rules', { defaultValue: 'Streak Rules' }),
+              children: (
+                <>
+                  <div className="table-actions">
+                    <Space wrap>
+                      <Select
+                        placeholder={t('ui.loyalty.program', { defaultValue: 'Program' })}
+                        style={{ width: 240 }}
+                        value={selectedProgramId}
+                        onChange={setSelectedProgramId}
+                        options={programs.map((program) => ({
+                          value: program.id,
+                          label: program.name,
+                        }))}
+                      />
+                    </Space>
+                    <Space>
+                      <Button
+                        type="primary"
+                        icon={<PlusOutlined />}
+                        disabled={!selectedProgramId}
+                        onClick={() => {
+                          setStreakModal({ open: true, rule: null });
+                          streakForm.resetFields();
+                          streakForm.setFieldsValue({
+                            is_active: true,
+                          });
+                        }}
+                      >
+                        {t('ui.loyalty.create_streak_rule', { defaultValue: 'Add Streak Rule' })}
+                      </Button>
+                    </Space>
+                  </div>
+
+                  <Table
+                    rowKey="id"
+                    columns={streakRuleColumns}
+                    dataSource={streakRules}
+                    loading={streakRulesQuery.isLoading}
+                    locale={{
+                      emptyText: <EmptyState description={t('ui.loyalty.no_streak_rules', { defaultValue: 'No streak rules configured' })} />
+                    }}
+                    pagination={false}
+                  />
+                </>
+              )
             }
           ]}
         />
@@ -517,7 +694,7 @@ const LoyaltyPrograms = () => {
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="uzs_per_point" label={t('ui.loyalty.uzs_per_point', { defaultValue: 'UZS per Point' })} rules={[{ required: true }]}>
+              <Form.Item name="uzs_per_point" label={t('ui.loyalty.uzs_per_point', { defaultValue: 'UZS per AquaCoin' })} rules={[{ required: true }]}>
                 <InputNumber min={1} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
@@ -547,7 +724,7 @@ const LoyaltyPrograms = () => {
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="points_expiry_days" label={t('ui.loyalty.points_expiry_days', { defaultValue: 'Points Expiry Days' })}>
+              <Form.Item name="points_expiry_days" label={t('ui.loyalty.points_expiry_days', { defaultValue: 'AquaCoins Expiry Days' })}>
                 <InputNumber min={0} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
@@ -555,7 +732,7 @@ const LoyaltyPrograms = () => {
 
           <Row gutter={16}>
             <Col span={12}>
-              <Form.Item name="min_redemption_points" label={t('ui.loyalty.min_redemption_points', { defaultValue: 'Minimum Redemption Points' })}>
+              <Form.Item name="min_redemption_points" label={t('ui.loyalty.min_redemption_points', { defaultValue: 'Minimum Redemption AquaCoins' })}>
                 <InputNumber min={0} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
@@ -568,6 +745,43 @@ const LoyaltyPrograms = () => {
                   <Switch />
                 </Form.Item>
               </Space>
+            </Col>
+          </Row>
+
+          <Divider orientation="left">
+            {t('ui.loyalty.surprise_section', { defaultValue: 'Surprise Rewards' })}
+          </Divider>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="surprise_enabled" label={t('ui.loyalty.surprise_enabled', { defaultValue: 'Surprise Rewards Enabled' })} valuePropName="checked">
+                <Switch />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="surprise_chance_percent" label={t('ui.loyalty.surprise_chance', { defaultValue: 'Win Chance (%)' })}>
+                <InputNumber min={0} max={100} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="surprise_amounts"
+                label={t('ui.loyalty.surprise_amounts', { defaultValue: 'Reward Amounts (comma-separated)' })}
+                tooltip={t('ui.loyalty.surprise_amounts_hint', { defaultValue: 'One value is picked at random per win, e.g. 50,100,200' })}
+              >
+                <Input placeholder="50,100,200" />
+              </Form.Item>
+            </Col>
+            <Col span={6}>
+              <Form.Item name="surprise_cooldown_days" label={t('ui.loyalty.surprise_cooldown', { defaultValue: 'Per-user Cooldown (days)' })}>
+                <InputNumber min={0} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={6}>
+              <Form.Item name="surprise_daily_cap" label={t('ui.loyalty.surprise_daily_cap', { defaultValue: 'Global Daily Cap' })}>
+                <InputNumber min={0} style={{ width: '100%' }} />
+              </Form.Item>
             </Col>
           </Row>
 
@@ -598,6 +812,15 @@ const LoyaltyPrograms = () => {
             const payload = {
               ...values,
               program_id: values.program_id || selectedProgramId,
+              translations: {
+                name: {
+                  // Keep `en` in sync with the canonical name field so the page's
+                  // get_translated() never falls back to another language for English.
+                  en: values.name,
+                  ru: values.name_ru || undefined,
+                  uz: values.name_uz || undefined,
+                },
+              },
             };
             if (tierModal.tier) {
               updateTierMutation.mutate({ tierId: tierModal.tier.id, values: payload });
@@ -624,12 +847,25 @@ const LoyaltyPrograms = () => {
 
           <Row gutter={16}>
             <Col span={12}>
-              <Form.Item name="min_points" label={t('ui.loyalty.min_points', { defaultValue: 'Minimum Points' })} rules={[{ required: true }]}>
+              <Form.Item name="name_ru" label={t('ui.loyalty.name_ru', { defaultValue: 'Name (RU)' })}>
+                <Input />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="name_uz" label={t('ui.loyalty.name_uz', { defaultValue: 'Name (UZ)' })}>
+                <Input />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="min_points" label={t('ui.loyalty.min_points', { defaultValue: 'Minimum AquaCoins' })} rules={[{ required: true }]}>
                 <InputNumber min={0} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="max_points" label={t('ui.loyalty.max_points', { defaultValue: 'Maximum Points' })}>
+              <Form.Item name="max_points" label={t('ui.loyalty.max_points', { defaultValue: 'Maximum AquaCoins' })}>
                 <InputNumber min={0} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
@@ -672,6 +908,98 @@ const LoyaltyPrograms = () => {
               </Button>
               <AsyncButton type="primary" htmlType="submit" loading={createTierMutation.isPending || updateTierMutation.isPending}>
                 {tierModal.tier ? t('ui.loyalty.update', { defaultValue: 'Update' }) : t('ui.loyalty.create', { defaultValue: 'Create' })}
+              </AsyncButton>
+            </Space>
+          </Form.Item>
+        </Form>
+      </Modal>
+      <Modal
+        open={streakModal.open}
+        title={streakModal.rule ? t('ui.loyalty.edit_streak_rule', { defaultValue: 'Edit Streak Rule' }) : t('ui.loyalty.create_streak_rule', { defaultValue: 'Add Streak Rule' })}
+        onCancel={() => setStreakModal({ open: false, rule: null })}
+        footer={null}
+        width={640}
+      >
+        <Form
+          form={streakForm}
+          layout="vertical"
+          onFinish={(values) => {
+            const payload = {
+              ...values,
+              min_order_amount: values.min_order_amount || null,
+              program_id: selectedProgramId,
+              translations: {
+                name: {
+                  ru: values.name_ru || undefined,
+                  uz: values.name_uz || undefined,
+                },
+              },
+            };
+            if (streakModal.rule) {
+              updateStreakRuleMutation.mutate({ ruleId: streakModal.rule.id, values: payload });
+              return;
+            }
+            createStreakRuleMutation.mutate(payload);
+          }}
+        >
+          <Row gutter={16}>
+            <Col span={24}>
+              <Form.Item name="name" label={t('ui.loyalty.streak_name', { defaultValue: 'Name' })} rules={[{ required: true }]}>
+                <Input />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="name_ru" label={t('ui.loyalty.name_ru', { defaultValue: 'Name (RU)' })}>
+                <Input />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="name_uz" label={t('ui.loyalty.name_uz', { defaultValue: 'Name (UZ)' })}>
+                <Input />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="required_orders" label={t('ui.loyalty.streak_required_orders', { defaultValue: 'Required Orders' })} rules={[{ required: true }]}>
+                <InputNumber min={1} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="window_days" label={t('ui.loyalty.streak_window_days', { defaultValue: 'Window (days)' })} rules={[{ required: true }]}>
+                <InputNumber min={1} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="min_order_amount" label={t('ui.loyalty.streak_min_order_amount', { defaultValue: 'Min/order (optional)' })}>
+                <InputNumber min={0} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="bonus_points" label={t('ui.loyalty.streak_bonus_points', { defaultValue: 'Bonus AquaCoins' })} rules={[{ required: true }]}>
+                <InputNumber min={1} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Form.Item name="is_active" label={t('ui.loyalty.active', { defaultValue: 'Active' })} valuePropName="checked">
+            <Switch />
+          </Form.Item>
+
+          <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
+            <Space>
+              <Button onClick={() => setStreakModal({ open: false, rule: null })}>
+                {t('ui.loyalty.cancel', { defaultValue: 'Cancel' })}
+              </Button>
+              <AsyncButton type="primary" htmlType="submit" loading={createStreakRuleMutation.isPending || updateStreakRuleMutation.isPending}>
+                {streakModal.rule ? t('ui.loyalty.update', { defaultValue: 'Update' }) : t('ui.loyalty.create', { defaultValue: 'Create' })}
               </AsyncButton>
             </Space>
           </Form.Item>

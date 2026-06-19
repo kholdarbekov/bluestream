@@ -98,6 +98,10 @@ class User(db.Model, TimestampMixin):
     registration_source = Column(String(50), default="web", index=True)
     registration_method = Column(String(20), default="email", index=True)  # 'email', 'phone', 'telegram'
 
+    # Referral (loyalty SSOT): the user's own shareable code, and who referred them.
+    referral_code = Column(String(20), unique=True, nullable=True, index=True)
+    referred_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+
     # Telegram/Bot-specific fields
     telegram_id = Column(String(50), unique=True, nullable=True, index=True)
     telegram_username = Column(String(255), nullable=True)

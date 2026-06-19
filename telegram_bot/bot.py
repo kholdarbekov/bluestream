@@ -284,6 +284,11 @@ class WaterBusinessBot:
             # Order callbacks
             CallbackQueryHandler(order_handlers.orders_menu, pattern="^menu_orders$"),
             CallbackQueryHandler(order_handlers.order_details, pattern="^order_"),
+            # Reward-in-checkout handlers MUST precede the broad "^checkout" catch-all
+            # below, or it would swallow these checkout_* callbacks.
+            CallbackQueryHandler(order_handlers.checkout_choose_reward, pattern="^checkout_choose_reward$"),
+            CallbackQueryHandler(order_handlers.checkout_apply_reward, pattern="^checkout_apply_reward_\\d+$"),
+            CallbackQueryHandler(order_handlers.checkout_remove_reward, pattern="^checkout_remove_reward$"),
             CallbackQueryHandler(order_handlers.checkout_handler, pattern="^checkout"),
             CallbackQueryHandler(order_handlers.address_handler, pattern="^address_"),
             CallbackQueryHandler(order_handlers.payment_handler, pattern="^payment_(cash|card|payme|click|uzcard|humo|business_account)$"),
@@ -356,7 +361,9 @@ class WaterBusinessBot:
 
             # Loyalty callbacks
             CallbackQueryHandler(loyalty_handlers.loyalty_menu, pattern="^menu_loyalty$"),
-            CallbackQueryHandler(loyalty_handlers.loyalty_history, pattern="^loyalty_history$"),
+            CallbackQueryHandler(loyalty_handlers.loyalty_history, pattern=r"^loyalty_history(_page_\d+)?$"),
+            CallbackQueryHandler(loyalty_handlers.loyalty_rewards, pattern="^loyalty_rewards$"),
+            CallbackQueryHandler(loyalty_handlers.loyalty_referral, pattern="^loyalty_referral$"),
             CallbackQueryHandler(loyalty_handlers.redeem_reward, pattern="^redeem_"),
 
             # Support callbacks

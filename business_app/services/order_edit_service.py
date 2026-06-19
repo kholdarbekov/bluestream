@@ -563,22 +563,18 @@ class OrderEditService:
             subtotal += change.unit_price * Decimal(change.new_quantity)
         discount = Decimal(str(order.discount_amount or 0))
         delivery_fee = Decimal(str(order.delivery_fee or 0))
-        # Loyalty redemption is clamped to (subtotal - discount) so the
-        # post-edit order can never go negative. Points-per-1-UZS is fixed at
-        # 100 to match Order.calculate_total(). The actual redemption refund
-        # to the customer's loyalty wallet happens in _cascade_loyalty.
-        old_points_used = int(order.loyalty_points_used or 0)
-        max_loyalty_uzs = max(Decimal("0.00"), subtotal - discount)
-        new_points_used = min(old_points_used, int(max_loyalty_uzs // Decimal("100")))
-        loyalty_discount = Decimal(new_points_used) * Decimal("100")
-        total = subtotal - discount - loyalty_discount + delivery_fee
+        # Loyalty is rewards-only: points are NEVER converted to a UZS order
+        # discount (matches Order.calculate_total() and cart_service). So the
+        # projection carries no loyalty discount and no redemption clamp/refund;
+        # loyalty_points_used is left unchanged.
+        total = subtotal - discount + delivery_fee
         return {
             "subtotal": float(subtotal),
             "discount_amount": float(discount),
             "delivery_fee": float(delivery_fee),
-            "loyalty_discount": float(loyalty_discount),
-            "loyalty_points_used": new_points_used,
-            "loyalty_points_refunded": old_points_used - new_points_used,
+            "loyalty_discount": 0.0,
+            "loyalty_points_used": int(order.loyalty_points_used or 0),
+            "loyalty_points_refunded": 0,
             "total_amount": float(total),
         }
 
@@ -1040,7 +1036,10 @@ class OrderEditService:
         """
         loyalty_summary: Dict[str, Any] = {"applied": False}
 
-        # --- Redemption side (always — independent of award status) ---
+        # --- Redemption side ---
+        # Loyalty is rewards-only, so the projection never reduces
+        # loyalty_points_used and this refund is inert (points_to_refund == 0).
+        # Kept defensively for any legacy order carrying a non-zero redemption.
         old_points_used = int(order.loyalty_points_used or 0)
         new_points_used = int(plan.totals_after.get("loyalty_points_used", old_points_used))
         points_to_refund = old_points_used - new_points_used

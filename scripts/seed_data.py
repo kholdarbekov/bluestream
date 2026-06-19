@@ -126,19 +126,19 @@ def seed_essential_translations():
 
     TEMPLATE_TRANSLATIONS = {
         "1 point per $1 spent": {
-            "en": "1 point per $1 spent",
-            "uz": "Har $1 uchun 1 ball",
-            "ru": "1 балл за каждый $1"
+            "en": "1 AquaCoin per $1 spent",
+            "uz": "Har $1 uchun 1 AquaCoin",
+            "ru": "1 AquaCoin за каждый $1"
         },
         "1.25 points per $1 spent": {
-            "en": "1.25 points per $1 spent",
-            "uz": "Har $1 uchun 1.25 ball",
-            "ru": "1.25 балла за каждый $1"
+            "en": "1.25 AquaCoins per $1 spent",
+            "uz": "Har $1 uchun 1.25 AquaCoins",
+            "ru": "1.25 AquaCoins за каждый $1"
         },
         "1.5 points per $1 spent": {
-            "en": "1.5 points per $1 spent",
-            "uz": "Har $1 uchun 1.5 ball",
-            "ru": "1.5 балла за каждый $1"
+            "en": "1.5 AquaCoins per $1 spent",
+            "uz": "Har $1 uchun 1.5 AquaCoins",
+            "ru": "1.5 AquaCoins за каждый $1"
         },
         "10% birthday discount": {
             "en": "10% birthday discount",
@@ -161,9 +161,9 @@ def seed_essential_translations():
             "ru": "15% скидка на день рождения"
         },
         "2 points per $1 spent": {
-            "en": "2 points per $1 spent",
-            "uz": "Har $1 uchun 2 ball",
-            "ru": "2 балла за каждый $1"
+            "en": "2 AquaCoins per $1 spent",
+            "uz": "Har $1 uchun 2 AquaCoins",
+            "ru": "2 AquaCoins за каждый $1"
         },
         "20 bottles of 19L water per month": {
             "en": "20 bottles of 19L water per month",
@@ -901,9 +901,9 @@ def seed_essential_translations():
             "uz": "Joriy parol"
         },
         "Current Points": {
-            "en": "Current Points",
-            "ru": "Текущие баллы",
-            "uz": "Joriy ballar"
+            "en": "Current AquaCoins",
+            "ru": "Текущие AquaCoins",
+            "uz": "Joriy AquaCoins"
         },
         "Current Tier": {
             "en": "Current Tier",
@@ -1076,24 +1076,24 @@ def seed_essential_translations():
             "uz": "Yangi mahsulotlarga erta kirish"
         },
         "Earn 1-2 points for every dollar spent (based on your tier)": {
-            "en": "Earn 1-2 points for every dollar spent (based on your tier)",
-            "ru": "Зарабатывайте 1-2 балла за каждый потраченный доллар (в зависимости от уровня)",
-            "uz": "Har sarflangan 1 dollarga 1-2 ball oling (darajangizga qarab)"
+            "en": "Earn 1-2 AquaCoins for every dollar spent (based on your tier)",
+            "ru": "Зарабатывайте 1-2 AquaCoins за каждый потраченный доллар (в зависимости от уровня)",
+            "uz": "Har sarflangan 1 dollarga 1-2 AquaCoins oling (darajangizga qarab)"
         },
         "Earn 50 points for each product review you write": {
-            "en": "Earn 50 points for each product review you write",
-            "ru": "Получайте 50 баллов за каждый отзыв о продукте",
-            "uz": "Har bir mahsulot sharhi uchun 50 ball oling"
+            "en": "Earn 50 AquaCoins for each product review you write",
+            "ru": "Получайте 50 AquaCoins за каждый отзыв о продукте",
+            "uz": "Har bir mahsulot sharhi uchun 50 AquaCoins oling"
         },
         "Earn points with every purchase and redeem them for amazing rewards!": {
-            "en": "Earn points with every purchase and redeem them for amazing rewards!",
-            "ru": "Зарабатывайте баллы с каждой покупкой и обменивайте их на потрясающие награды!",
-            "uz": "Har bir xariddan ball yig'ing va ularni ajoyib sovrinlarga almashtiring!"
+            "en": "Earn AquaCoins with every purchase and redeem them for amazing rewards!",
+            "ru": "Зарабатывайте AquaCoins с каждой покупкой и обменивайте их на потрясающие награды!",
+            "uz": "Har bir xariddan AquaCoins yig'ing va ularni ajoyib sovrinlarga almashtiring!"
         },
         "Earn points with every purchase and unlock exclusive rewards": {
-            "en": "Earn points with every purchase and unlock exclusive rewards",
-            "ru": "Получайте баллы с каждой покупкой и открывайте эксклюзивные награды",
-            "uz": "Har bir xaridda ball yig'ing va eksklyuziv mukofotlarni oching"
+            "en": "Earn AquaCoins with every purchase and unlock exclusive rewards",
+            "ru": "Получайте AquaCoins с каждой покупкой и открывайте эксклюзивные награды",
+            "uz": "Har bir xaridda AquaCoins yig'ing va eksklyuziv mukofotlarni oching"
         },
         "Easy online account management": {
             "en": "Easy online account management",
@@ -1370,9 +1370,9 @@ def seed_essential_translations():
             "uz": "Buyurtmalarni yuklab bo'lmadi. Iltimos, qaytadan urinib ko'ring."
         },
         "Failed to load points history": {
-            "en": "Failed to load points history",
-            "ru": "Не удалось загрузить историю баллов",
-            "uz": "Ballar tarixini yuklab bo'lmadi"
+            "en": "Failed to load AquaCoins history",
+            "ru": "Не удалось загрузить историю AquaCoins",
+            "uz": "AquaCoins tarixini yuklab bo'lmadi"
         },
         "Failed to load reward details": {
             "en": "Failed to load reward details",
@@ -1608,14 +1608,14 @@ def seed_essential_translations():
             "uz": "Jins"
         },
         "Get 200 bonus points on your birthday every year": {
-            "en": "Get 200 bonus points on your birthday every year",
-            "ru": "Получайте 200 бонусных баллов в день рождения каждый год",
-            "uz": "Har yili tug'ilgan kuningizda 200 bonus ball oling"
+            "en": "Get 200 bonus AquaCoins on your birthday every year",
+            "ru": "Получайте 200 бонусных AquaCoins в день рождения каждый год",
+            "uz": "Har yili tug'ilgan kuningizda 200 bonus AquaCoins oling"
         },
         "Get 500 points for each friend who makes their first order": {
-            "en": "Get 500 points for each friend who makes their first order",
-            "ru": "Получайте 500 баллов за каждого друга, который сделал первый заказ",
-            "uz": "Birinchi buyurtma qilgan har bir do'stingiz uchun 500 ball oling"
+            "en": "Get 500 AquaCoins for each friend who makes their first order",
+            "ru": "Получайте 500 AquaCoins за каждого друга, который сделал первый заказ",
+            "uz": "Birinchi buyurtma qilgan har bir do'stingiz uchun 500 AquaCoins oling"
         },
         "Get In Touch": {
             "en": "Get In Touch",
@@ -1851,9 +1851,9 @@ def seed_essential_translations():
             "uz": "Faol bo'lmagan obunalar yuklanmoqda..."
         },
         "Loading points history...": {
-            "en": "Loading points history...",
-            "ru": "Загрузка истории баллов...",
-            "uz": "Ballar tarixi yuklanmoqda..."
+            "en": "Loading AquaCoins history...",
+            "ru": "Загрузка истории AquaCoins...",
+            "uz": "AquaCoins tarixi yuklanmoqda..."
         },
         "Loading rewards...": {
             "en": "Loading rewards...",
@@ -1911,9 +1911,9 @@ def seed_essential_translations():
             "uz": "Chiqish"
         },
         "Loyalty Points": {
-            "en": "Loyalty Points",
-            "ru": "Бонусные баллы",
-            "uz": "Sodiqlik ballari"
+            "en": "AquaCoins",
+            "ru": "AquaCoins",
+            "uz": "AquaCoins"
         },
         "Loyalty Program": {
             "en": "Loyalty Program",
@@ -2153,9 +2153,9 @@ def seed_essential_translations():
             "uz": "Telefon raqami mavjud emas"
         },
         "No points history found": {
-            "en": "No points history found",
-            "ru": "История баллов не найдена",
-            "uz": "Ballar tarixi topilmadi"
+            "en": "No AquaCoins history found",
+            "ru": "История AquaCoins не найдена",
+            "uz": "AquaCoins tarixi topilmadi"
         },
         "No rewards available": {
             "en": "No rewards available",
@@ -2535,34 +2535,34 @@ def seed_essential_translations():
             "uz": "Iltimos, xavfsizlikni oshirish uchun telefon raqamingizni tasdiqlang"
         },
         "Points": {
-            "en": "Points",
-            "ru": "Баллы",
-            "uz": "Ballar"
+            "en": "AquaCoins",
+            "ru": "AquaCoins",
+            "uz": "AquaCoins"
         },
         "Points Earned": {
-            "en": "Points Earned",
-            "ru": "Заработанные баллы",
-            "uz": "Topilgan ballar"
+            "en": "AquaCoins Earned",
+            "ru": "Заработанные AquaCoins",
+            "uz": "Topilgan AquaCoins"
         },
         "Points Expired": {
-            "en": "Points Expired",
-            "ru": "Баллы истекли",
-            "uz": "Ballar muddati tugadi"
+            "en": "AquaCoins Expired",
+            "ru": "AquaCoins истекли",
+            "uz": "AquaCoins muddati tugadi"
         },
         "Points History": {
-            "en": "Points History",
-            "ru": "История баллов",
-            "uz": "Ballar tarixi"
+            "en": "AquaCoins History",
+            "ru": "История AquaCoins",
+            "uz": "AquaCoins tarixi"
         },
         "Points Redeemed": {
-            "en": "Points Redeemed",
-            "ru": "Использованные баллы",
-            "uz": "Foydalanilgan ballar"
+            "en": "AquaCoins Redeemed",
+            "ru": "Использованные AquaCoins",
+            "uz": "Foydalanilgan AquaCoins"
         },
         "Points Required": {
-            "en": "Points Required",
-            "ru": "Необходимые баллы",
-            "uz": "Kerakli ballar"
+            "en": "AquaCoins Required",
+            "ru": "Необходимые AquaCoins",
+            "uz": "Kerakli AquaCoins"
         },
         "Postal Code": {
             "en": "Postal Code",
@@ -3809,9 +3809,9 @@ def seed_essential_translations():
             "uz": "Suv tozalash inshooti"
         },
         "Ways to Earn Points": {
-            "en": "Ways to Earn Points",
-            "ru": "Способы заработать баллы",
-            "uz": "Ballarni yig'ish yo'llari"
+            "en": "Ways to Earn AquaCoins",
+            "ru": "Способы заработать AquaCoins",
+            "uz": "AquaCoins yig'ish yo'llari"
         },
         "We Always Want Safe and Healthy Water for Healthy Life": {
             "en": "We Always Want Safe and Healthy Water for Healthy Life",
@@ -4014,9 +4014,9 @@ def seed_essential_translations():
             "uz": "Ismingiz"
         },
         "Your Points": {
-            "en": "Your Points",
-            "ru": "Ваши баллы",
-            "uz": "Sizning ballaringiz"
+            "en": "Your AquaCoins",
+            "ru": "Ваши AquaCoins",
+            "uz": "Sizning AquaCoins"
         },
         "Your Referral Code": {
             "en": "Your Referral Code",
@@ -4069,19 +4069,19 @@ def seed_essential_translations():
             "uz": "ko'proq mahsulot"
         },
         "points": {
-            "en": "points",
-            "ru": "баллы",
-            "uz": "ballar"
+            "en": "AquaCoins",
+            "ru": "AquaCoins",
+            "uz": "AquaCoins"
         },
         "points to next tier": {
-            "en": "points to next tier",
-            "ru": "баллов до следующего уровня",
-            "uz": "keyingi darajaga qolgan ballar"
+            "en": "AquaCoins to next tier",
+            "ru": "AquaCoins до следующего уровня",
+            "uz": "keyingi darajaga qolgan AquaCoins"
         },
         "pts": {
-            "en": "pts",
-            "ru": "очков",
-            "uz": "ball"
+            "en": "AquaCoins",
+            "ru": "AquaCoins",
+            "uz": "AquaCoins"
         },
         "this month": {
             "en": "this month",

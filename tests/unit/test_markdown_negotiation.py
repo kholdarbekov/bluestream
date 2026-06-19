@@ -190,9 +190,25 @@ class TestConvertHookDirect:
         assert out.mimetype == "text/html"
 
 
+@pytest.fixture
+def anon_client(app):
+    """A fresh, cookie-free test client.
+
+    The shared session-scoped ``client`` fixture accumulates cookies across the
+    run: any authenticated request triggers the JWT auto-refresh after_request
+    (test tokens expire in 10s, always inside the 30-min refresh window), which
+    sets ``access_token_cookie`` on the shared client. A later "anonymous" request
+    on that client is then treated as personalized — markdown is suppressed and
+    the homepage hits the language redirect (302). These agent/anonymous tests
+    must therefore start from a clean client (mirrors the fresh client used by
+    test_authenticated_request_gets_html_not_markdown)."""
+    return app.test_client()
+
+
 @pytest.mark.unit
 class TestMarkdownNegotiationIntegration:
-    def test_about_returns_markdown_for_agent(self, client, db):
+    def test_about_returns_markdown_for_agent(self, anon_client, db):
+        client = anon_client
         resp = client.get("/about", headers={"Accept": "text/markdown"})
         assert resp.status_code == 200
         assert resp.headers["Content-Type"] == "text/markdown; charset=utf-8"
@@ -202,7 +218,8 @@ class TestMarkdownNegotiationIntegration:
         assert "Accept" in vary
         assert "Cookie" in vary and "Accept-Language" in vary
 
-    def test_about_returns_html_for_browser(self, client, db):
+    def test_about_returns_html_for_browser(self, anon_client, db):
+        client = anon_client
         resp = client.get(
             "/about",
             headers={"Accept": "text/html,application/xhtml+xml,*/*;q=0.8"},
@@ -211,13 +228,15 @@ class TestMarkdownNegotiationIntegration:
         assert resp.mimetype == "text/html"
         assert "x-markdown-tokens" not in resp.headers
 
-    def test_cart_stays_html_even_for_agent(self, client, db):
+    def test_cart_stays_html_even_for_agent(self, anon_client, db):
+        client = anon_client
         # /cart is interactive and not in the allowlist.
         resp = client.get("/cart", headers={"Accept": "text/markdown"})
         assert resp.status_code == 200
         assert resp.mimetype == "text/html"
 
-    def test_link_discovery_header_present_on_markdown(self, client, db):
+    def test_link_discovery_header_present_on_markdown(self, anon_client, db):
+        client = anon_client
         resp = client.get("/about", headers={"Accept": "text/markdown"})
         assert 'rel="api-catalog"' in resp.headers.get("Link", "")
 
@@ -243,7 +262,8 @@ class TestMarkdownAuthGuard:
         assert resp.mimetype == "text/html"  # personalized -> NOT converted
         assert "x-markdown-tokens" not in resp.headers
 
-    def test_anonymous_request_to_homepage_gets_markdown(self, client, db):
+    def test_anonymous_request_to_homepage_gets_markdown(self, anon_client, db):
+        client = anon_client
         resp = client.get("/", headers={"Accept": "text/markdown"})
         assert resp.status_code == 200
         assert resp.headers["Content-Type"] == "text/markdown; charset=utf-8"

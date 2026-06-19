@@ -41,11 +41,12 @@ DEFAULT_DELIVERY_FEE = _int("DEFAULT_DELIVERY_FEE", 0)  # UZS
 EMERGENCY_DELIVERY_FEE = _int("EMERGENCY_DELIVERY_FEE", 0)  # UZS
 
 # ─── Loyalty ────────────────────────────────────────────────────────────
-# Earning is DB-driven (LoyaltyProgram.uzs_per_point, default 250); this legacy
-# config only feeds the deprecated helpers.calculate_loyalty_points fallback.
-# Points are redeemed ONLY via rewards (LoyaltyReward.points_cost) — there is no
-# direct points→UZS conversion (LOYALTY_REDEMPTION_RATIO has been removed).
-LOYALTY_POINTS_RATIO = _int("LOYALTY_POINTS_RATIO", 250)  # UZS per earned point
+# Earning rate / bonus amounts / tier thresholds / expiry are all DB-driven
+# (LoyaltyProgram + LoyaltyTierConfig). LOYALTY_POINTS_RATIO is only the
+# bootstrap default for a new default program. Points are redeemed ONLY via
+# rewards (LoyaltyReward.points_cost) — no direct points→UZS conversion.
+LOYALTY_POINTS_RATIO = _int("LOYALTY_POINTS_RATIO", 250)  # UZS per earned point (bootstrap default)
+
 
 # ─── OTP / Auth ─────────────────────────────────────────────────────────
 OTP_EXPIRY_SECONDS = _int("OTP_EXPIRY_SECONDS", 300)  # generic/email OTP (5 min)

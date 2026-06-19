@@ -1,0 +1,46 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Yetkazib berish yangiligi - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Yetkazib berish yangiligi</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Assalomu alaykum{% if user_name %}, {{ user_name }}{% endif %}!</h2>
+
+<div class="info-box">
+    <p>Buyurtmangiz <strong>#{{ order_number }}</strong> yetkazib berilishi bo'yicha yangilik bor.</p>
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Buyurtma raqami</th>
+        <td>#{{ order_number }}</td>
+    </tr>
+    {% if delivery_status %}
+    <tr>
+        <th>Holati</th>
+        <td>{{ delivery_status }}</td>
+    </tr>
+    {% endif %}
+    {% if tracking_code %}
+    <tr>
+        <th>Kuzatish</th>
+        <td>{{ tracking_code }}</td>
+    </tr>
+    {% endif %}
+    {% if estimated_delivery %}
+    <tr>
+        <th>Taxminiy yetkazib berish</th>
+        <td>{{ estimated_delivery }}</td>
+    </tr>
+    {% endif %}
+</table>
+
+<hr class="divider">
+
+<div class="info-box">
+    <p>Yetkazib berish bo'yicha savollaringiz bo'lsa, biz bilan bog'laning <a href="tel:{{ company_phone }}">{{ company_phone }}</a>.</p>
+</div>
+{% endblock %}

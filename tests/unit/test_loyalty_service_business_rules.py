@@ -7,7 +7,9 @@ from unittest.mock import Mock
 
 import pytest
 
+from business_app import db as _db
 from business_app.models.loyalty import LoyaltyPoints, LoyaltyProgram, LoyaltyReward, LoyaltyTransaction
+from business_app.models.product import Product, ProductSizeEnum
 from business_app.services.loyalty_service import LoyaltyService
 from business_app.utils.constants import LoyaltyActionType, LoyaltyTransactionType
 from business_app.utils.exceptions import NotFoundError, ValidationError
@@ -163,42 +165,6 @@ class TestLoyaltyServiceBusinessRules:
 
         notify.assert_called_once_with(loyalty_account.user_id, 100, "redeemed", "reward_redeemed")
 
-    def test_redeem_reward_rejects_system_rewards(self, loyalty_service, active_reward, db):
-        active_reward.is_system_reward = True
-        db.session.commit()
-
-        with pytest.raises(ValidationError, match="automatically applied"):
-            loyalty_service.redeem_reward(user_id=1, reward_id=active_reward.id)
-
-    def test_redeem_reward_rejects_when_user_points_are_insufficient(self, loyalty_service, active_reward, monkeypatch):
-        monkeypatch.setattr(loyalty_service, "get_available_points", lambda _uid: 100)
-
-        with pytest.raises(ValidationError, match="Insufficient points"):
-            loyalty_service.redeem_reward(user_id=1, reward_id=active_reward.id)
-
-    def test_redeem_reward_success_increments_usage_and_returns_payload(
-        self,
-        loyalty_service,
-        active_reward,
-        db,
-        monkeypatch,
-    ):
-        monkeypatch.setattr(loyalty_service, "get_available_points", lambda _uid: 5000)
-        monkeypatch.setattr(
-            loyalty_service,
-            "deduct_points",
-            lambda *args, **kwargs: SimpleNamespace(id=777),
-        )
-        monkeypatch.setattr(loyalty_service, "_generate_reward_code", lambda *_args, **_kwargs: "RWDTEST01")
-
-        result = loyalty_service.redeem_reward(user_id=1, reward_id=active_reward.id)
-
-        db.session.refresh(active_reward)
-        assert result["transaction_id"] == 777
-        assert result["points_spent"] == active_reward.points_cost
-        assert result["redemption_code"] == "RWDTEST01"
-        assert active_reward.redemptions_used == 1
-
     def test_remove_expired_points_marks_transactions_and_reduces_balance(
         self,
         loyalty_service,
@@ -233,5 +199,52 @@ class TestLoyaltyServiceBusinessRules:
         assert active_tx.is_expired is False
         assert loyalty_account.current_balance == 800
 
-    def test_validate_discount_code_currently_returns_zero(self, loyalty_service, sample_user):
-        assert loyalty_service.validate_discount_code("ANY-CODE", sample_user.id) == 0
+
+@pytest.mark.unit
+def test_is_reward_configured_truth_table(db, loyalty_program, sample_category):
+    svc = LoyaltyService()
+    active_product = Product(name="P", base_price=Decimal("1000"), category_id=sample_category.id,
+                             size=ProductSizeEnum.SIZE_19L, is_active=True)
+    inactive_product = Product(name="PX", base_price=Decimal("1000"), category_id=sample_category.id,
+                               size=ProductSizeEnum.SIZE_19L, is_active=False)
+    _db.session.add_all([active_product, inactive_product]); _db.session.commit()
+
+    def reward(**kw):
+        base = dict(program_id=loyalty_program.id, name="r", points_cost=10, is_active=True)
+        base.update(kw)
+        return LoyaltyReward(**base)
+
+    # discount
+    assert svc.is_reward_configured(reward(reward_type="discount", discount_type="fixed",
+                                           discount_value=Decimal("500"))) is True
+    assert svc.is_reward_configured(reward(reward_type="discount", discount_type="fixed",
+                                           discount_value=Decimal("0"))) is False
+    assert svc.is_reward_configured(reward(reward_type="discount", discount_value=Decimal("500"))) is False  # no type
+    # free_product
+    assert svc.is_reward_configured(reward(reward_type="free_product",
+                                           free_product_id=active_product.id, free_product_quantity=2)) is True
+    assert svc.is_reward_configured(reward(reward_type="free_product", free_product_id=None)) is False
+    assert svc.is_reward_configured(reward(reward_type="free_product",
+                                           free_product_id=inactive_product.id)) is False
+    assert svc.is_reward_configured(reward(reward_type="free_product",
+                                           free_product_id=active_product.id,
+                                           free_product_quantity=0)) is False
+    # unsupported / removed types are never configured
+    assert svc.is_reward_configured(reward(reward_type="free_delivery")) is False
+    assert svc.is_reward_configured(reward(reward_type="voucher")) is False
+
+
+@pytest.mark.unit
+def test_get_rewards_for_user_excludes_misconfigured(db, sample_user, loyalty_program):
+    svc = LoyaltyService()
+    good = LoyaltyReward(program_id=loyalty_program.id, name="ok", reward_type="discount", points_cost=10,
+                         discount_type="fixed", discount_value=Decimal("500"), is_active=True)
+    bad = LoyaltyReward(program_id=loyalty_program.id, name="bad", reward_type="free_product", points_cost=10,
+                        free_product_id=None, is_active=True)
+    _db.session.add_all([good, bad]); _db.session.commit()
+
+    payload = svc.get_rewards_for_user(sample_user.id)
+    names = {r.name for r in payload["rewards"]}
+    assert "ok" in names and "bad" not in names
+    # user has no points -> good reward is listed but not redeemable
+    assert payload["can_redeem_by_id"][good.id] is False

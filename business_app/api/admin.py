@@ -2247,6 +2247,8 @@ def get_order_details(order_id):
         order_data["items"] = []
         order_data["items_summary"] = []  # For backward compatibility
         if order.order_items:
+            from business_app.serializers.order_serializers import is_free_reward_item
+
             for item in order.order_items:
                 item_data = {
                     "id": item.id,
@@ -2256,11 +2258,16 @@ def get_order_details(order_id):
                     "quantity": item.quantity,
                     "unit_price": float(item.unit_price),
                     "total_price": float(item.total_price),
+                    "is_reward": is_free_reward_item(item),
                 }
                 order_data["items"].append(item_data)
                 order_data["items_summary"].append(item_data)
 
         order_data["item_count"] = len(order_data["items"])
+        order_data["loyalty_discount"] = float(getattr(order, "loyalty_discount", 0) or 0)
+        order_data["has_loyalty_reward"] = order_data["loyalty_discount"] > 0 or any(
+            it.get("is_reward") for it in order_data["items"]
+        )
 
         # Add delivery information
         if order.delivery:
@@ -6331,6 +6338,30 @@ def get_loyalty_member_detail(user_id):
         return internal_error_response("Failed to get loyalty member detail")
 
 
+@admin_bp.route("/loyalty/members/<int:user_id>/transactions", methods=["GET"])
+@jwt_required()
+@validate_admin_action(["view_loyalty", "manage_loyalty"])
+def get_loyalty_member_transactions(user_id):
+    """Get a loyalty member's full transaction ledger, paginated (newest first)."""
+    try:
+        result = AdminLoyaltyService.get_member_transactions(
+            user_id,
+            page=request.args.get("page", 1, type=int),
+            per_page=request.args.get("per_page", 20, type=int),
+        )
+        return paginated_response(
+            items=result["items"],
+            total=result["total"],
+            page=result["page"],
+            per_page=result["per_page"],
+        )
+    except NotFoundError as exc:
+        return not_found_response(str(exc))
+    except Exception as e:
+        current_app.logger.error(f"Get loyalty member transactions error: {e}")
+        return internal_error_response("Failed to get loyalty member transactions")
+
+
 @admin_bp.route("/loyalty/rewards", methods=["GET"])
 @jwt_required()
 @validate_admin_action(["view_loyalty", "manage_loyalty"])
@@ -6342,7 +6373,7 @@ def get_loyalty_rewards():
         - page: Page number (default: 1)
         - per_page: Items per page (default: 20)
         - program_id: Filter by loyalty program
-        - reward_type: Filter by reward type (discount, free_product, free_delivery, voucher)
+        - reward_type: Filter by reward type (discount, free_product)
         - is_active: Filter by active status
         - is_featured: Filter by featured status
         - search: Search in name and description
@@ -6396,7 +6427,7 @@ def create_loyalty_reward():
         - program_id: ID of loyalty program
         - name: Reward name
         - description: Reward description
-        - reward_type: Type (discount, free_product, free_delivery, voucher)
+        - reward_type: Type (discount, free_product)
         - points_cost: Points required
         - min_order_value: Minimum order value (optional)
         - max_uses_per_user: Max uses per user (default: 1)
@@ -6404,7 +6435,6 @@ def create_loyalty_reward():
         - discount_type: percentage or fixed (for discount rewards)
         - discount_value: Discount value
         - free_product_id: Product ID (for free_product rewards)
-        - voucher_code: Voucher code (for voucher rewards)
         - is_active: Active status (default: true)
         - is_featured: Featured status (default: false)
         - valid_from: Valid from date (ISO format)
@@ -6436,9 +6466,11 @@ def create_loyalty_reward():
         if not program:
             return not_found_response("Loyalty program not found")
 
-        # Validate reward type
+        # Validate reward type. Only discount + free_product are real, redeemable
+        # reward types; free_delivery (delivery is always free) and voucher were
+        # never applied/redeemable and have been removed.
         reward_type = data.get("reward_type")
-        valid_types = ["discount", "free_product", "free_delivery", "voucher"]
+        valid_types = ["discount", "free_product"]
         if reward_type not in valid_types:
             return validation_error_response(f'Invalid reward_type. Must be one of: {", ".join(valid_types)}')
 
@@ -6450,6 +6482,8 @@ def create_loyalty_reward():
         if reward_type == "free_product":
             if not data.get("free_product_id"):
                 return validation_error_response("free_product_id required for free_product rewards")
+            if int(data.get("free_product_quantity", 1)) < 1:
+                return validation_error_response("free_product_quantity must be at least 1")
 
         # Create reward
         reward = LoyaltyReward(
@@ -6458,13 +6492,13 @@ def create_loyalty_reward():
             description=data.get("description"),
             reward_type=reward_type,
             points_cost=data.get("points_cost"),
-            min_order_value=Decimal(str(data.get("min_order_value", 0))),
+            min_order_value=Decimal(str(data.get("min_order_value") or 0)),
             max_uses_per_user=data.get("max_uses_per_user", 1),
             max_redemptions=data.get("max_redemptions"),
             discount_type=data.get("discount_type"),
             discount_value=Decimal(str(data.get("discount_value"))) if data.get("discount_value") else None,
             free_product_id=data.get("free_product_id"),
-            voucher_code=data.get("voucher_code"),
+            free_product_quantity=data.get("free_product_quantity", 1) if reward_type == "free_product" else None,
             is_active=data.get("is_active", True),
             is_featured=data.get("is_featured", False),
             applicable_products=data.get("applicable_products", []),
@@ -6524,7 +6558,9 @@ def update_loyalty_reward(reward_id):
         if "points_cost" in data:
             reward.points_cost = data["points_cost"]
         if "min_order_value" in data:
-            reward.min_order_value = Decimal(str(data["min_order_value"]))
+            reward.min_order_value = (
+                Decimal(str(data["min_order_value"])) if data["min_order_value"] not in (None, "") else Decimal("0.00")
+            )
         if "max_uses_per_user" in data:
             reward.max_uses_per_user = data["max_uses_per_user"]
         if "max_redemptions" in data:
@@ -6532,11 +6568,13 @@ def update_loyalty_reward(reward_id):
         if "discount_type" in data:
             reward.discount_type = data["discount_type"]
         if "discount_value" in data:
-            reward.discount_value = Decimal(str(data["discount_value"]))
+            reward.discount_value = (
+                Decimal(str(data["discount_value"])) if data["discount_value"] not in (None, "") else None
+            )
         if "free_product_id" in data:
             reward.free_product_id = data["free_product_id"]
-        if "voucher_code" in data:
-            reward.voucher_code = data["voucher_code"]
+        if "free_product_quantity" in data:
+            reward.free_product_quantity = data["free_product_quantity"]
         if "is_active" in data:
             reward.is_active = data["is_active"]
         if "is_featured" in data:
@@ -6650,15 +6688,19 @@ def create_loyalty_program():
             description=data.get("description"),
             is_active=data.get("is_active", True),
             is_default=data.get("is_default", False),
-            points_per_uzs=data.get("points_per_uzs", 1.0),
             uzs_per_point=data.get("uzs_per_point", 250),
             signup_bonus=data.get("signup_bonus", 100),
             referral_bonus=data.get("referral_bonus", 50),
             birthday_bonus=data.get("birthday_bonus", 25),
             points_expiry_days=data.get("points_expiry_days", 365),
             min_redemption_points=data.get("min_redemption_points", 100),
-            tier_thresholds=data.get("tier_thresholds", {}),
-            tier_multipliers=data.get("tier_multipliers", {}),
+            surprise_enabled=data.get("surprise_enabled", True),
+            surprise_chance_percent=data.get("surprise_chance_percent", 5),
+            surprise_amounts=data.get("surprise_amounts", "50,100,200"),
+            surprise_cooldown_days=data.get("surprise_cooldown_days", 7),
+            surprise_daily_cap=data.get("surprise_daily_cap", 5),
+            # tier_thresholds / tier_multipliers intentionally NOT set: tiers are
+            # owned by LoyaltyTierConfig (single source of truth), not program JSON.
             terms_and_conditions=data.get("terms_and_conditions"),
             start_date=data.get("start_date"),
             end_date=data.get("end_date"),
@@ -6666,6 +6708,10 @@ def create_loyalty_program():
 
         db.session.add(program)
         db.session.commit()
+
+        if "translations" in data:
+            program.set_translations(data["translations"])
+            db.session.commit()
 
         current_app.logger.info(f"Loyalty program created: {program.name} (ID: {program.id})")
 
@@ -6699,8 +6745,6 @@ def update_loyalty_program(program_id):
             program.description = data["description"]
         if "is_active" in data:
             program.is_active = data["is_active"]
-        if "points_per_uzs" in data:
-            program.points_per_uzs = data["points_per_uzs"]
         if "uzs_per_point" in data:
             program.uzs_per_point = data["uzs_per_point"]
         if "signup_bonus" in data:
@@ -6713,14 +6757,26 @@ def update_loyalty_program(program_id):
             program.points_expiry_days = data["points_expiry_days"]
         if "min_redemption_points" in data:
             program.min_redemption_points = data["min_redemption_points"]
-        if "tier_thresholds" in data:
-            program.tier_thresholds = data["tier_thresholds"]
-        if "tier_multipliers" in data:
-            program.tier_multipliers = data["tier_multipliers"]
+        if "surprise_enabled" in data:
+            program.surprise_enabled = data["surprise_enabled"]
+        if "surprise_chance_percent" in data:
+            program.surprise_chance_percent = data["surprise_chance_percent"]
+        if "surprise_amounts" in data:
+            program.surprise_amounts = data["surprise_amounts"]
+        if "surprise_cooldown_days" in data:
+            program.surprise_cooldown_days = data["surprise_cooldown_days"]
+        if "surprise_daily_cap" in data:
+            program.surprise_daily_cap = data["surprise_daily_cap"]
+        # tier_thresholds / tier_multipliers intentionally NOT writable: tiers are
+        # owned by LoyaltyTierConfig (single source of truth), not program JSON.
         if "terms_and_conditions" in data:
             program.terms_and_conditions = data["terms_and_conditions"]
 
         db.session.commit()
+
+        if "translations" in data:
+            program.set_translations(data["translations"])
+            db.session.commit()
 
         return success_response(data={"program": program.to_dict()}, message="Loyalty program updated successfully")
 
@@ -6802,7 +6858,14 @@ def get_loyalty_tier_configs():
 
         tiers = query.order_by(LoyaltyTierConfig.display_order.asc()).all()
 
-        return success_response(data={"tiers": [tier.to_dict() for tier in tiers], "tier_count": len(tiers)})
+        return success_response(
+            data={
+                "tiers": [
+                    {**tier.to_dict(), "translations": {"name": tier.get_all_translations("name")}} for tier in tiers
+                ],
+                "tier_count": len(tiers),
+            }
+        )
 
     except Exception as e:
         current_app.logger.error(f"Get loyalty tier configs error: {e}")
@@ -6866,6 +6929,10 @@ def create_loyalty_tier_config():
 
         db.session.add(tier)
         db.session.commit()
+
+        if "translations" in data:
+            tier.set_translations(data["translations"])
+            db.session.commit()
 
         # Invalidate tier cache
         from business_app.utils.decorators import invalidate_cache
@@ -6935,6 +7002,10 @@ def update_loyalty_tier_config(tier_id):
 
         db.session.commit()
 
+        if "translations" in data:
+            tier.set_translations(data["translations"])
+            db.session.commit()
+
         # Invalidate tier cache
         from business_app.utils.decorators import invalidate_cache
 
@@ -6991,6 +7062,195 @@ def delete_loyalty_tier_config(tier_id):
         db.session.rollback()
         current_app.logger.error(f"Delete loyalty tier config error: {e}")
         return internal_error_response("Failed to delete loyalty tier")
+
+
+# LOYALTY STREAK RULE MANAGEMENT ENDPOINTS
+# ============================================================================
+
+
+@admin_bp.route("/loyalty/streak-rules", methods=["GET"])
+@jwt_required()
+@validate_admin_action(["view_loyalty", "manage_loyalty"])
+def get_loyalty_streak_rules():
+    """
+    List streak rules.
+
+    Query Parameters:
+        - program_id: Filter by loyalty program (optional, uses default if not specified)
+    """
+    try:
+        from business_app.models.loyalty import LoyaltyStreakRule
+
+        program_id = request.args.get("program_id", type=int)
+
+        query = LoyaltyStreakRule.query
+
+        if program_id:
+            query = query.filter_by(program_id=program_id)
+        else:
+            default_program = LoyaltyProgram.query.filter_by(is_default=True, is_active=True).first()
+            if default_program:
+                query = query.filter_by(program_id=default_program.id)
+
+        rules = query.order_by(LoyaltyStreakRule.display_order.asc()).all()
+
+        return success_response(
+            data={
+                "streak_rules": [
+                    {**rule.to_dict(), "translations": {"name": rule.get_all_translations("name")}} for rule in rules
+                ],
+                "streak_rule_count": len(rules),
+            }
+        )
+
+    except Exception as e:
+        current_app.logger.error(f"Get loyalty streak rules error: {e}")
+        return internal_error_response("Failed to get loyalty streak rules")
+
+
+@admin_bp.route("/loyalty/streak-rules", methods=["POST"])
+@jwt_required()
+@validate_admin_action(["manage_loyalty"])
+@validate_json(["name", "required_orders", "window_days", "bonus_points"])
+def create_loyalty_streak_rule():
+    """
+    Create a streak rule.
+
+    Request Body:
+        - name: Rule name (user-facing, translatable)
+        - program_id: Loyalty program ID (optional, uses default)
+        - required_orders: Number of orders to complete (≥ 1)
+        - window_days: Trailing window in days (≥ 1)
+        - bonus_points: Points awarded on streak completion (≥ 1)
+        - min_order_amount: Minimum order amount per order (optional, > 0)
+        - is_active: Active status (default: true)
+        - starts_at: ISO datetime when rule becomes effective (optional)
+        - ends_at: ISO datetime when rule expires (optional)
+        - display_order: Display ordering (default: 0)
+        - translations: Dict of {lang: name} overrides (optional)
+    """
+    try:
+        from business_app.models.loyalty import LoyaltyStreakRule
+        from datetime import datetime as _dt
+
+        data = request.get_json()
+
+        # Resolve program
+        program_id = data.get("program_id")
+        if not program_id:
+            default_program = LoyaltyProgram.query.filter_by(is_default=True).first()
+            if not default_program:
+                return validation_error_response("No default loyalty program found")
+            program_id = default_program.id
+
+        # Validate numeric constraints
+        if int(data["required_orders"]) < 1 or int(data["window_days"]) < 1 or int(data["bonus_points"]) < 1:
+            return validation_error_response("required_orders, window_days and bonus_points must be ≥ 1")
+        if data.get("min_order_amount") is not None and float(data["min_order_amount"]) <= 0:
+            return validation_error_response("min_order_amount must be > 0 when set")
+
+        # Parse optional datetime fields
+        starts_at = _dt.fromisoformat(data["starts_at"]) if data.get("starts_at") else None
+        ends_at = _dt.fromisoformat(data["ends_at"]) if data.get("ends_at") else None
+        if starts_at and ends_at and ends_at <= starts_at:
+            return validation_error_response("ends_at must be after starts_at")
+
+        rule = LoyaltyStreakRule(
+            program_id=program_id,
+            name=data["name"],
+            required_orders=int(data["required_orders"]),
+            window_days=int(data["window_days"]),
+            bonus_points=int(data["bonus_points"]),
+            min_order_amount=data.get("min_order_amount"),
+            is_active=data.get("is_active", True),
+            starts_at=starts_at,
+            ends_at=ends_at,
+            display_order=data.get("display_order", 0),
+        )
+        db.session.add(rule)
+        db.session.commit()
+
+        if "translations" in data:
+            rule.set_translations(data["translations"])
+            db.session.commit()
+
+        current_app.logger.info(f"Loyalty streak rule created: {rule.name} (ID: {rule.id})")
+        return success_response(
+            data={"streak_rule": rule.to_dict()},
+            message="Streak rule created successfully",
+            status_code=201,
+        )
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Create loyalty streak rule error: {e}")
+        return internal_error_response("Failed to create streak rule")
+
+
+@admin_bp.route("/loyalty/streak-rules/<int:rule_id>", methods=["PUT"])
+@jwt_required()
+@validate_admin_action(["manage_loyalty"])
+def update_loyalty_streak_rule(rule_id):
+    """Update a streak rule."""
+    try:
+        from business_app.models.loyalty import LoyaltyStreakRule
+        from datetime import datetime as _dt
+
+        rule = LoyaltyStreakRule.query.get(rule_id)
+        if not rule:
+            return not_found_response("Streak rule not found")
+        data = request.get_json()
+
+        for field, caster in (
+            ("name", str),
+            ("required_orders", int),
+            ("window_days", int),
+            ("bonus_points", int),
+            ("display_order", int),
+            ("is_active", bool),
+        ):
+            if field in data and data[field] is not None:
+                setattr(rule, field, caster(data[field]))
+        if "min_order_amount" in data:
+            rule.min_order_amount = data["min_order_amount"]  # may be None
+        if "starts_at" in data:
+            rule.starts_at = _dt.fromisoformat(data["starts_at"]) if data["starts_at"] else None
+        if "ends_at" in data:
+            rule.ends_at = _dt.fromisoformat(data["ends_at"]) if data["ends_at"] else None
+        if rule.required_orders < 1 or rule.window_days < 1 or rule.bonus_points < 1:
+            return validation_error_response("required_orders, window_days and bonus_points must be ≥ 1")
+        if rule.starts_at and rule.ends_at and rule.ends_at <= rule.starts_at:
+            return validation_error_response("ends_at must be after starts_at")
+
+        db.session.commit()
+        if "translations" in data:
+            rule.set_translations(data["translations"])
+            db.session.commit()
+        return success_response(data={"streak_rule": rule.to_dict()}, message="Streak rule updated")
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Update loyalty streak rule error: {e}")
+        return internal_error_response("Failed to update streak rule")
+
+
+@admin_bp.route("/loyalty/streak-rules/<int:rule_id>", methods=["DELETE"])
+@jwt_required()
+@validate_admin_action(["manage_loyalty"])
+def delete_loyalty_streak_rule(rule_id):
+    """Delete a streak rule (hard delete — rules carry no per-user state)."""
+    try:
+        from business_app.models.loyalty import LoyaltyStreakRule
+
+        rule = LoyaltyStreakRule.query.get(rule_id)
+        if not rule:
+            return not_found_response("Streak rule not found")
+        db.session.delete(rule)
+        db.session.commit()
+        return success_response(message="Streak rule deleted successfully")
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Delete loyalty streak rule error: {e}")
+        return internal_error_response("Failed to delete streak rule")
 
 
 @admin_bp.route("/loyalty/analytics", methods=["GET"])
@@ -7557,13 +7817,11 @@ def get_system_settings():
                 "same_day_delivery_cutoff_hour": current_app.config.get("SAME_DAY_DELIVERY_CUTOFF_HOUR", 14),
                 "avg_delivery_time_minutes": current_app.config.get("AVG_DELIVERY_TIME_MINUTES", 60),
             },
-            "loyalty": {
-                "loyalty_enabled": current_app.config.get("LOYALTY_ENABLED", True),
-                "points_per_uzs": current_app.config.get("LOYALTY_POINTS_PER_UZS", 1),
-                "signup_bonus_points": current_app.config.get("LOYALTY_SIGNUP_BONUS", 100),
-                "referral_bonus_points": current_app.config.get("LOYALTY_REFERRAL_BONUS", 50),
-                "points_expiry_days": current_app.config.get("LOYALTY_POINTS_EXPIRY_DAYS", 365),
-            },
+            # Loyalty config is NOT exposed here: it lives in LoyaltyProgram rows
+            # (single source of truth) and is managed via the dedicated admin
+            # loyalty programs/rewards/tiers endpoints. The former System-Settings
+            # loyalty category was a phantom surface reading undefined config keys
+            # (always 1/100/50/365) with no UI consumer — removed (loyalty SSOT, Phase 2).
             "notifications": {
                 "sms_enabled": current_app.config.get("SMS_ENABLED", True),
                 "email_enabled": current_app.config.get("EMAIL_ENABLED", True),
@@ -7634,7 +7892,7 @@ def update_system_settings():
             "business",
             "orders",
             "delivery",
-            "loyalty",
+            # "loyalty" removed (loyalty SSOT, Phase 2): config lives in LoyaltyProgram.
             "notifications",
             "payments",
             "security",
@@ -7674,10 +7932,6 @@ def update_system_settings():
                             return validation_error_response("Delivery radius must be positive")
                         if key == "same_day_delivery_cutoff_hour" and (value < 0 or value > 23):
                             return validation_error_response("Cutoff hour must be between 0 and 23")
-
-                    if category == "loyalty":
-                        if key in ["points_per_uzs", "signup_bonus_points", "referral_bonus_points"] and value < 0:
-                            return validation_error_response(f"{key} cannot be negative")
 
                     if category == "security":
                         if key == "password_min_length" and value < 6:
@@ -7753,11 +8007,8 @@ def get_system_settings_categories():
                 "name": "Delivery Settings",
                 "description": "Delivery radius, time slots, same-day delivery cutoff",
             },
-            {
-                "key": "loyalty",
-                "name": "Loyalty Program Settings",
-                "description": "Points earning, bonuses, expiry, and program features",
-            },
+            # Loyalty Program Settings removed (loyalty SSOT, Phase 2): managed via
+            # the dedicated admin loyalty programs/tiers/rewards endpoints.
             {
                 "key": "notifications",
                 "name": "Notification Settings",
@@ -7801,7 +8052,6 @@ def reset_system_settings():
             "business",
             "orders",
             "delivery",
-            "loyalty",
             "notifications",
             "payments",
             "security",
@@ -7830,11 +8080,7 @@ def reset_system_settings():
             "DELIVERY_DELIVERY_SLOTS_ENABLED": True,
             "DELIVERY_SAME_DAY_DELIVERY_CUTOFF_HOUR": 14,
             "DELIVERY_AVG_DELIVERY_TIME_MINUTES": 60,
-            "LOYALTY_LOYALTY_ENABLED": True,
-            "LOYALTY_POINTS_PER_UZS": 1,
-            "LOYALTY_SIGNUP_BONUS_POINTS": 100,
-            "LOYALTY_REFERRAL_BONUS_POINTS": 50,
-            "LOYALTY_POINTS_EXPIRY_DAYS": 365,
+            # Loyalty defaults removed (loyalty SSOT, Phase 2) — managed via LoyaltyProgram.
             "NOTIFICATIONS_SMS_ENABLED": True,
             "NOTIFICATIONS_EMAIL_ENABLED": True,
             "NOTIFICATIONS_TELEGRAM_ENABLED": True,

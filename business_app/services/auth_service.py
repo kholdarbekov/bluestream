@@ -144,6 +144,14 @@ class AuthService:
         db.session.add(user)
         db.session.commit()
 
+        # Grant the one-time welcome bonus at registration (best-effort).
+        self._grant_welcome_bonus(user.id)
+
+        # Record a referral if one was supplied (e.g. web ?ref=CODE). Best-effort.
+        referral_code = kwargs.get("referral_code")
+        if referral_code:
+            self._process_referral_code(user.id, referral_code)
+
         # Generate tokens
         tokens = self._generate_tokens(user)
 
@@ -772,6 +780,9 @@ class AuthService:
         db.session.add(user)
         db.session.commit()
 
+        # Grant the one-time welcome bonus at registration (best-effort).
+        self._grant_welcome_bonus(user.id)
+
         # Process referral code if provided
         if referral_code:
             try:
@@ -894,10 +905,75 @@ class AuthService:
             "resend_available_in": self.PHONE_OTP_RESEND_COOLDOWN,
         }
 
+    def _grant_welcome_bonus(self, user_id: int):
+        """Grant the one-time welcome bonus at registration (best-effort).
+
+        Idempotent (LoyaltyService.grant_welcome_bonus guards on an existing
+        WELCOME_BONUS transaction); a failure must never block registration.
+        """
+        from business_app.services.loyalty_service import LoyaltyService
+
+        try:
+            LoyaltyService().grant_welcome_bonus(user_id)
+        except Exception as e:
+            logger.warning(f"Could not grant welcome bonus to user {user_id}: {e}")
+
     def _process_referral_code(self, user_id: int, referral_code: str):
-        """Process referral code for new user (placeholder - implement based on your referral system)"""
-        # TODO: Implement referral code processing if you have a referral system
-        logger.info(f"Processing referral code {referral_code} for user {user_id}")
+        """Record a referral for a newly-registered user.
+
+        Creates a PENDING ReferralProgram row (bonuses are granted by the loyalty
+        cron once the referee's first order is both delivered and fully paid).
+        Best-effort: a bad or duplicate referral code must never block registration.
+        """
+        from business_app.services.loyalty_service import LoyaltyService
+
+        try:
+            LoyaltyService().process_referral(referral_code, user_id)
+        except Exception as e:
+            logger.warning(f"Could not process referral code {referral_code} for user {user_id}: {e}")
+
+    def register_telegram_user(self, data: Dict[str, Any]) -> Tuple[User, Dict[str, str]]:
+        """Create a new Telegram user (unified table) with the standard signup side
+        effects — welcome bonus + optional referral — then issue tokens.
+
+        Single source of truth for Telegram registration so the /telegram-register
+        route can't drift from the web/phone paths. The welcome bonus was
+        previously granted by register_user / complete_phone_registration but NOT
+        on the Telegram path, so bot signups silently missed it.
+        """
+        from business_app.services.token_service import TokenService
+
+        telegram_id = data["telegram_id"]
+        user = User(
+            telegram_id=str(telegram_id),
+            first_name=data.get("first_name", "Telegram User"),
+            last_name=data.get("last_name", ""),
+            email=f"telegram_{telegram_id}@bluestream.local",  # Placeholder email
+            phone=None,  # Phone collected later
+            password_hash="telegram_user",  # Placeholder, no password needed
+            role=UserRole.CUSTOMER,
+            status=UserStatus.ACTIVE,
+            is_verified=False,
+            registration_source="telegram",
+            preferred_language=data.get("language_code", "en"),
+            telegram_username=data.get("username"),
+            is_bot_active=True,
+            bot_state="{}",
+            last_bot_interaction=datetime.now(timezone.utc),
+        )
+        db.session.add(user)
+        db.session.commit()
+
+        # Standard post-registration side effects. Both are best-effort: a failure
+        # here must never undo an otherwise-successful signup.
+        self._grant_welcome_bonus(user.id)
+        referral_code = data.get("referral_code")
+        if referral_code:
+            self._process_referral_code(user.id, referral_code)
+
+        tokens = TokenService().generate_tokens(user)
+        logger.info(f"Created telegram user {user.id} (welcome bonus + referral applied)")
+        return user, tokens
 
     # =============================================================================
     # End Phone Registration Methods
@@ -2238,6 +2314,11 @@ class AuthService:
                 db.session.commit()
 
                 logger.info(f"Successfully created new telegram user with ID: {user.id}")
+
+                # Grant the welcome bonus on this create path too (idempotent,
+                # best-effort) so no telegram-user creation path can silently skip
+                # the signup bonus the way /telegram-register used to.
+                self._grant_welcome_bonus(user.id)
 
             except Exception as e:
                 logger.exception("Error creating telegram user (type=%s)", type(e).__name__)

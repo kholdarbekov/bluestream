@@ -99,29 +99,6 @@
         document.getElementById('pointsThisMonth').textContent = '+' + (loyalty.points_this_month || 0) + ' ' + PAGE_DATA.i18n.this_month;
         document.getElementById('currentTier').textContent = currentUserTier;
 
-        if (loyalty.streak) {
-            document.getElementById('currentStreak').textContent = loyalty.streak.current_streak || 0;
-            var ordersThisMonth = loyalty.streak.orders_this_month || 0;
-            var targetOrders = 3;
-            var ordersNeeded = Math.max(0, targetOrders - ordersThisMonth);
-            var progressPercent = Math.min((ordersThisMonth / targetOrders) * 100, 100);
-
-            var progressBar = document.getElementById('streakProgress');
-            if (progressBar) {
-                progressBar.style.width = progressPercent + '%';
-                progressBar.setAttribute('aria-valuenow', progressPercent);
-            }
-
-            var nextText = document.getElementById('streakNextText');
-            if (ordersNeeded > 0) {
-                nextText.textContent = ordersNeeded + ' ' + PAGE_DATA.i18n.more_orders_for_bonus;
-                nextText.className = 'text-warning font-weight-bold';
-            } else {
-                nextText.textContent = PAGE_DATA.i18n.monthly_goal_achieved;
-                nextText.className = 'text-success font-weight-bold';
-            }
-        }
-
         if (loyalty.tier_valid_until) {
             var date = new Date(loyalty.tier_valid_until);
             var dateStr = date.toLocaleDateString();
@@ -155,6 +132,40 @@
                 card.classList.add('current-tier');
             }
         });
+
+        var streakWidget = document.getElementById('currentStreak') &&
+            document.getElementById('currentStreak').closest('.loyalty-card');
+        if (Array.isArray(loyalty.streak_progress) && loyalty.streak_progress.length) {
+            if (streakWidget) streakWidget.style.display = '';
+            // Show count of active rules in the header number slot
+            document.getElementById('currentStreak').textContent = loyalty.streak_progress.length;
+            // Render per-rule rows into the streakNextText element
+            var rulesHtml = '<ul class="streak-rules-list list-unstyled text-left mb-0 mt-1">' +
+                loyalty.streak_progress.map(function (r) {
+                    var pct = Math.min((r.current_orders / r.required_orders) * 100, 100);
+                    return '<li class="streak-rule mb-2">' +
+                        '<div class="d-flex justify-content-between align-items-baseline">' +
+                        '<span class="streak-rule__name font-weight-bold small">' + escapeHtml(r.name) + '</span>' +
+                        '<span class="streak-rule__meta text-muted small">' +
+                            escapeHtml(String(r.current_orders)) + '/' + escapeHtml(String(r.required_orders)) +
+                            ' · ' + escapeHtml(String(r.window_days)) + 'd → +' + escapeHtml(String(r.bonus_points)) +
+                        '</span>' +
+                        '</div>' +
+                        '<div class="progress mt-1" style="height:4px;">' +
+                        '<div class="progress-bar bg-danger" role="progressbar" style="width:' + pct + '%"></div>' +
+                        '</div></li>';
+                }).join('') +
+                '</ul>';
+            var streakProgressBar = document.getElementById('streakProgress');
+            if (streakProgressBar) streakProgressBar.closest('.mt-2').style.display = 'none';
+            var streakNextText = document.getElementById('streakNextText');
+            if (streakNextText) {
+                streakNextText.innerHTML = rulesHtml;
+                streakNextText.className = '';
+            }
+        } else {
+            if (streakWidget) streakWidget.style.display = 'none';
+        }
     }
 
     async function loadLoyaltyData() {
@@ -241,18 +252,15 @@
             return;
         }
 
-        var currentPoints = parseInt(document.getElementById('currentPoints').textContent, 10) || 0;
-
+        // Reward-type vocabulary matches the backend whitelist (discount, free_product).
+        // free_delivery and voucher were removed (never applied/redeemable).
         var typeLabelMap = {
             'discount': PAGE_DATA.i18n.type_discount,
-            'free_delivery': PAGE_DATA.i18n.type_free_delivery,
-            'free_product': PAGE_DATA.i18n.type_free_product,
-            'gift_card': PAGE_DATA.i18n.type_gift_card
+            'free_product': PAGE_DATA.i18n.type_free_product
         };
 
         var html = rewards.map(function (reward) {
             var pointsCost = reward.points_cost || reward.points_required || 0;
-            var canRedeem = currentPoints >= pointsCost;
             var rewardType = reward.reward_type || 'discount';
             var isSystemReward = reward.is_system_reward || false;
             var typeLabel = typeLabelMap[rewardType] || rewardType;
@@ -291,11 +299,7 @@
                 '<div class="reward-points-cost">' +
                 '<span class="points-badge"><i class="far fa-star"></i> ' +
                 pointsCost.toLocaleString() + ' ' + escapeHtml(PAGE_DATA.i18n.aquacoins) + '</span>' +
-                '<button class="btn redeem-btn ' + (canRedeem ? 'can-redeem' : 'cannot-redeem') + '" ' +
-                'data-action="redeem-reward" data-id="' + reward.id + '"' +
-                (!canRedeem ? ' disabled' : '') + '>' +
-                escapeHtml(canRedeem ? PAGE_DATA.i18n.redeem : PAGE_DATA.i18n.need_more) +
-                '</button></div></div></div>';
+                '</div></div></div>';
         }).join('');
 
         rewardsGrid.innerHTML = html;
@@ -320,77 +324,6 @@
         }
     }
 
-    async function confirmRedeemReward(rewardId) {
-        try {
-            var response = await apiRequest('/loyalty/rewards/' + rewardId + '/redeem', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({})
-            });
-
-            var result = await response.json();
-
-            if (response.ok && result.success) {
-                showNotification(PAGE_DATA.i18n.redeem_success, 'success');
-                $('#rewardModal').modal('hide');
-                loadLoyaltyData();
-                loadPointsHistory();
-                loadAvailableRewards();
-            } else {
-                showNotification(result.message || PAGE_DATA.i18n.redeem_failed, 'error');
-            }
-        } catch (error) {
-            console.error('Failed to redeem reward:', error);
-            showNotification(PAGE_DATA.i18n.redeem_failed, 'error');
-        }
-    }
-
-    function showRewardModal(reward) {
-        var modalContent = document.getElementById('rewardModalContent');
-        var redeemBtn = document.getElementById('redeemRewardBtn');
-
-        var expiryBlock = reward.expiry_date
-            ? '<div class="info-item"><strong>' + escapeHtml(PAGE_DATA.i18n.expires) + ':</strong> ' + escapeHtml(formatDate(reward.expiry_date)) + '</div>'
-            : '';
-        var termsBlock = reward.terms_conditions
-            ? '<div class="info-item mt-3"><small class="text-muted">' + escapeHtml(reward.terms_conditions) + '</small></div>'
-            : '';
-
-        modalContent.innerHTML =
-            '<div class="reward-details">' +
-            '<div class="row">' +
-            '<div class="col-md-4">' +
-            '<img src="' + escapeHtml(reward.image_url || '/static/images/rewards/default.jpg') + '" alt="' + escapeHtml(reward.name) + '" class="img-fluid rounded">' +
-            '</div>' +
-            '<div class="col-md-8">' +
-            '<h4>' + escapeHtml(reward.name) + '</h4>' +
-            '<p class="text-muted">' + escapeHtml(reward.description) + '</p>' +
-            '<div class="reward-info">' +
-            '<div class="info-item"><strong>' + escapeHtml(PAGE_DATA.i18n.points_required) + ':</strong> ' + reward.points_required + ' ' + escapeHtml(PAGE_DATA.i18n.aquacoins) + '</div>' +
-            '<div class="info-item"><strong>' + escapeHtml(PAGE_DATA.i18n.your_points) + ':</strong> ' + escapeHtml(document.getElementById('currentPoints').textContent) + ' ' + escapeHtml(PAGE_DATA.i18n.aquacoins) + '</div>' +
-            expiryBlock + termsBlock +
-            '</div></div></div></div>';
-
-        redeemBtn.onclick = function () { confirmRedeemReward(reward.id); };
-        $('#rewardModal').modal('show');
-    }
-
-    async function redeemReward(rewardId) {
-        try {
-            var response = await apiRequest('/loyalty/rewards/' + rewardId);
-            var result = await response.json();
-
-            if (response.ok && result.success) {
-                showRewardModal(result.data);
-            } else {
-                showNotification(result.message || PAGE_DATA.i18n.details_failed, 'error');
-            }
-        } catch (error) {
-            console.error('Failed to load reward details:', error);
-            showNotification(PAGE_DATA.i18n.details_failed, 'error');
-        }
-    }
-
     async function generateReferralCode() {
         try {
             var response = await apiRequest('/loyalty/referral');
@@ -402,7 +335,7 @@
                 document.getElementById('referralCount').textContent =
                     (result.data.statistics && result.data.statistics.total_referrals) || 0;
                 document.getElementById('referralPoints').textContent =
-                    (result.data.statistics && result.data.statistics.total_points_earned) || 0;
+                    (result.data.statistics && result.data.statistics.points_earned_from_referrals) || 0;
                 $('#referralModal').modal('show');
             } else {
                 showNotification(result.message || PAGE_DATA.i18n.referral_failed, 'error');
@@ -457,9 +390,6 @@
                     break;
                 case 'share-referral':
                     shareReferralCode();
-                    break;
-                case 'redeem-reward':
-                    redeemReward(parseInt(target.dataset.id, 10));
                     break;
             }
         });

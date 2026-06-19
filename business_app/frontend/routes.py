@@ -728,6 +728,131 @@ def coverage():
     )
 
 
+def get_loyalty_handbook_context():
+    """Config-driven numbers for the public loyalty handbook.
+
+    Everything customer-facing on /loyalty-guide is derived from the live
+    program + tier configuration (and DB-backed LoyaltyStreakRule rows),
+    so the handbook can never silently drift from how the program actually
+    behaves. All prose is translated in the template via the ``t`` filter;
+    these numbers are interpolated into those strings at render time.
+    """
+    from business_app.models.loyalty import LoyaltyProgram, LoyaltyTierConfig, LoyaltyStreakRule
+    from shared.business_config import LOYALTY_POINTS_RATIO
+
+    program = (
+        LoyaltyProgram.query.filter_by(is_default=True, is_active=True).first()
+        or LoyaltyProgram.query.filter_by(is_active=True).first()
+    )
+    uzs_per_point = (program.uzs_per_point if program and program.uzs_per_point else LOYALTY_POINTS_RATIO) or 250
+    referral_bonus = (program.referral_bonus if program else 0) or 0
+
+    lang = get_current_language()
+    tiers = LoyaltyTierConfig.query.filter_by(is_active=True).order_by(LoyaltyTierConfig.display_order.asc()).all()
+    tier_list = [
+        {
+            # Name is model-translatable (LoyaltyTierConfig.name entity translation):
+            # renaming/localizing a tier in admin drives the page directly, with no
+            # page-specific static name keys to keep in sync.
+            "name": tier.get_translated("name", lang),
+            # Stable identity for handbook copy (tagline/benefit) + CSS accent — keyed
+            # by display_order so a tier rename never drops its card content.
+            "order": tier.display_order or 0,
+            # Canonical slug retained only for the illustrative worked-example lookup.
+            "key": (tier.name or "").strip().lower(),
+            "min_points": tier.min_points or 0,
+            "max_points": tier.max_points,
+            "multiplier": tier.points_multiplier or 1.0,
+            "discount_percentage": tier.discount_percentage or 0,
+        }
+        for tier in tiers
+    ]
+    max_multiplier = max((t["multiplier"] for t in tier_list), default=1.0)
+
+    # Worked earning example, derived from live config (illustrated at the Gold
+    # tier when present, else the highest tier) so it always matches the rules.
+    example_spend = 50000
+    example_base = (example_spend // uzs_per_point) if uzs_per_point else 0
+    example_tier = next((t for t in tier_list if t["key"] == "gold"), None) or (tier_list[-1] if tier_list else None)
+    example_multiplier = example_tier["multiplier"] if example_tier else 1.0
+    example = {
+        "spend": example_spend,
+        "spend_display": f"{example_spend:,}".replace(",", " "),
+        "base": example_base,
+        "tier_name": example_tier["name"] if example_tier else None,
+        "multiplier": example_multiplier,
+        "points": int(example_base * example_multiplier),
+    }
+
+    # Streak rules: DB-driven, translated in the request language (lang above).
+    now = datetime.now(UTC)
+    streak_rule_rows = (
+        LoyaltyStreakRule.query.filter_by(program_id=program.id, is_active=True)
+        .order_by(LoyaltyStreakRule.display_order.asc())
+        .all()
+        if program
+        else []
+    )
+    streak_rules = [
+        {
+            "name": r.get_translated("name", lang),
+            "required_orders": r.required_orders,
+            "window_days": r.window_days,
+            "min_order_amount": float(r.min_order_amount) if r.min_order_amount is not None else None,
+            "bonus_points": r.bonus_points,
+        }
+        for r in streak_rule_rows
+        if r.is_effective(now)
+    ]
+
+    # Surprise reward: random delight bonus on a delivered+paid order for
+    # individual customers. Surfaced on the handbook only when enabled, with the
+    # live config so the page never overstates the mechanic.
+    surprise_amounts = [
+        int(p.strip())
+        for p in str((program.surprise_amounts if program else "") or "").split(",")
+        if p.strip().isdigit()
+    ]
+    surprise = {
+        "enabled": bool(program.surprise_enabled) if program else False,
+        "chance_percent": (program.surprise_chance_percent if program else 0) or 0,
+        "amounts": surprise_amounts,
+        "amounts_display": " / ".join(str(a) for a in surprise_amounts),
+        "cooldown_days": (program.surprise_cooldown_days if program else 0) or 0,
+        "daily_cap": (program.surprise_daily_cap if program else 0) or 0,
+    }
+
+    return {
+        "uzs_per_point": uzs_per_point,
+        "signup_bonus": ((program.signup_bonus if program else 0) or 0),
+        "referral_bonus": referral_bonus,
+        "referee_bonus": referral_bonus // 2,
+        "birthday_bonus": ((program.birthday_bonus if program else 0) or 0),
+        "expiry_days": ((program.points_expiry_days if program else 365) or 365),
+        "min_redemption_points": ((program.min_redemption_points if program else 0) or 0),
+        "streak_rules": streak_rules,
+        "surprise": surprise,
+        "tiers": tier_list,
+        "max_multiplier": max_multiplier,
+        "example": example,
+    }
+
+
+@frontend_bp.route("/loyalty-guide")
+def loyalty_guide():
+    """Public, marketing-grade loyalty program handbook.
+
+    Config-driven (see get_loyalty_handbook_context) and trilingual via the
+    site's translation system. Linked from the Telegram bot's Loyalty menu;
+    indexable with FAQ JSON-LD for search + AI-assistant grounding.
+    """
+    return render_template(
+        "frontend/loyalty_guide.html",
+        handbook=get_loyalty_handbook_context(),
+        company_website=current_app.config.get("COMPANY_WEBSITE", "https://aqua-element.uz"),
+    )
+
+
 @frontend_bp.route("/contact")
 def contact():
     """Contact page"""

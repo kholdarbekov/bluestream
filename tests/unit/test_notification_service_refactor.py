@@ -309,16 +309,17 @@ def test_send_delivery_status_change_notification_forces_telegram_for_connected_
     assert result['telegram']['success'] is True
     assert captured['user_id'] == sample_user.id
     assert captured['notification_type'] == NotificationType.DELIVERY_UPDATE
-    assert captured['channels'] == [NotificationChannel.SMS, NotificationChannel.TELEGRAM]
+    assert captured['channels'] == [NotificationChannel.TELEGRAM]
     assert captured['template_data']['delivery_status_code'] == DeliveryStatus.IN_TRANSIT.value
     assert captured['template_data']['delivery_status'] == 'In Transit'
 
 
-def test_send_delivery_status_change_notification_skips_forced_telegram_when_bot_inactive(
+def test_send_delivery_status_change_notification_falls_back_to_email_when_bot_inactive(
     db, sample_user, sample_order
 ):
     sample_user.telegram_id = '998900001235'
     sample_user.is_bot_active = False
+    # A stored SMS preference must be ignored — delivery updates never use SMS.
     db.session.add(
         NotificationPreference(
             user_id=sample_user.id,
@@ -349,16 +350,16 @@ def test_send_delivery_status_change_notification_skips_forced_telegram_when_bot
 
     def _fake_send_notification(user_id, notification_type, channels=None, template_data=None, priority='normal'):
         captured['channels'] = channels
-        return {'sms': {'success': True}}
+        return {'email': {'success': True}}
 
     service.send_notification = _fake_send_notification
 
     service.send_delivery_status_change_notification(history.id)
 
-    assert captured['channels'] == [NotificationChannel.SMS]
+    assert captured['channels'] == [NotificationChannel.EMAIL]
 
 
-def test_send_delivery_status_change_notification_removes_preferred_telegram_when_bot_not_connected(
+def test_send_delivery_status_change_notification_falls_back_to_email_when_bot_not_connected(
     db, sample_user, sample_order
 ):
     sample_user.telegram_id = None
@@ -401,16 +402,53 @@ def test_send_delivery_status_change_notification_removes_preferred_telegram_whe
 
     def _fake_send_notification(user_id, notification_type, channels=None, template_data=None, priority='normal'):
         captured['channels'] = channels
-        return {'sms': {'success': True}}
+        return {'email': {'success': True}}
 
     service.send_notification = _fake_send_notification
 
     service.send_delivery_status_change_notification(history.id)
 
-    assert captured['channels'] == [NotificationChannel.SMS]
+    assert captured['channels'] == [NotificationChannel.EMAIL]
 
 
-def test_send_delivery_status_change_notification_preserves_non_target_status_channels(
+def test_send_delivery_status_change_notification_sends_nothing_when_no_bot_and_no_email(
+    db, sample_user, sample_order
+):
+    sample_user.telegram_id = None
+    sample_user.is_bot_active = False
+    sample_user.email = None
+    delivery = Delivery(
+        order_id=sample_order.id,
+        status=DeliveryStatus.IN_TRANSIT,
+        scheduled_date=datetime.now(UTC),
+        scheduled_time_slot='09:00-12:00',
+    )
+    db.session.add(delivery)
+    db.session.flush()
+    history = DeliveryStatusHistory(
+        delivery_id=delivery.id,
+        old_status=DeliveryStatus.ASSIGNED,
+        new_status=DeliveryStatus.IN_TRANSIT,
+        changed_at=datetime.now(UTC),
+    )
+    db.session.add(history)
+    db.session.commit()
+
+    service = NotificationService()
+    captured = {}
+
+    def _fake_send_notification(user_id, notification_type, channels=None, template_data=None, priority='normal'):
+        captured['channels'] = channels
+        return {}
+
+    service.send_notification = _fake_send_notification
+
+    service.send_delivery_status_change_notification(history.id)
+
+    assert captured['channels'] == []
+
+
+def test_send_delivery_status_change_notification_sends_nothing_for_delivered_status(
     db, sample_user, sample_order
 ):
     sample_user.telegram_id = '998900001236'
@@ -445,16 +483,16 @@ def test_send_delivery_status_change_notification_preserves_non_target_status_ch
 
     def _fake_send_notification(user_id, notification_type, channels=None, template_data=None, priority='normal'):
         captured['channels'] = channels
-        return {'sms': {'success': True}}
+        return {}
 
     service.send_notification = _fake_send_notification
 
     service.send_delivery_status_change_notification(history.id)
 
-    assert captured['channels'] == [NotificationChannel.SMS]
+    assert captured['channels'] == []
 
 
-def test_send_delivery_status_change_notification_removes_telegram_from_default_channels_for_non_target_status(
+def test_send_delivery_status_change_notification_sends_nothing_for_non_target_status_with_default_channels(
     db, sample_user, sample_order
 ):
     sample_user.telegram_id = '998900001238'
@@ -481,13 +519,13 @@ def test_send_delivery_status_change_notification_removes_telegram_from_default_
 
     def _fake_send_notification(user_id, notification_type, channels=None, template_data=None, priority='normal'):
         captured['channels'] = channels
-        return {'sms': {'success': True}}
+        return {}
 
     service.send_notification = _fake_send_notification
 
     service.send_delivery_status_change_notification(history.id)
 
-    assert captured['channels'] == [NotificationChannel.SMS]
+    assert captured['channels'] == []
 
 
 def test_send_delivery_status_change_notification_returns_error_for_missing_history(db):
@@ -897,7 +935,85 @@ def test_resolve_delivery_status_channels_honors_explicit_delivery_telegram_disa
     service = NotificationService()
     channels = service._resolve_delivery_status_channels(sample_user, DeliveryStatus.IN_TRANSIT.value)
 
-    assert channels == [NotificationChannel.SMS]
+    assert channels == [NotificationChannel.EMAIL]
+
+
+def test_send_sms_notification_is_disabled_for_delivery_updates(db, sample_user):
+    service = NotificationService()
+    service.eskiz_client = Mock()
+
+    result = service._send_sms_notification(
+        sample_user,
+        NotificationType.DELIVERY_UPDATE,
+        {'order_number': 'AD_000342_26', 'delivery_status': 'Delivered'},
+        'uz',
+    )
+
+    assert result['success'] is True
+    assert result['skipped'] is True
+    assert result['reason'] == 'delivery_sms_disabled'
+    service.eskiz_client.send_sms.assert_not_called()
+
+
+def test_send_sms_notification_is_disabled_for_delivery_reminders(db, sample_user):
+    service = NotificationService()
+    service.eskiz_client = Mock()
+
+    result = service._send_sms_notification(
+        sample_user,
+        NotificationType.DELIVERY_REMINDER,
+        {'order_number': 'AD_000342_26'},
+        'uz',
+    )
+
+    assert result['skipped'] is True
+    service.eskiz_client.send_sms.assert_not_called()
+
+
+def test_build_delivery_status_template_data_populates_company_contact_fields(db, sample_user, sample_order):
+    service = NotificationService()
+    delivery = Delivery(
+        order_id=sample_order.id,
+        status=DeliveryStatus.IN_TRANSIT,
+        scheduled_date=datetime.now(UTC),
+        scheduled_time_slot='09:00-12:00',
+    )
+    db.session.add(delivery)
+    db.session.flush()
+    history = DeliveryStatusHistory(
+        delivery_id=delivery.id,
+        old_status=DeliveryStatus.ASSIGNED,
+        new_status=DeliveryStatus.IN_TRANSIT,
+        changed_at=datetime.now(UTC),
+    )
+    db.session.add(history)
+    db.session.commit()
+
+    data = service._build_delivery_status_template_data(delivery=delivery, history=history, language='uz')
+
+    assert 'company_phone' in data
+    assert data['company_phone'] == service.company_phone
+    assert 'company_name' in data
+    assert 'company_email' in data
+
+
+def test_delivery_update_email_template_renders_without_placeholder(app):
+    from business_app.services.email_template_service import get_email_template_service
+
+    rendered = get_email_template_service().render_notification_email(
+        'delivery_update',
+        'uz',
+        {
+            'order_number': 'AD_000342_26',
+            'delivery_status': "Yo'lda",
+            'tracking_code': 'TRK202606161552C5FD14',
+            'user_name': 'Test User',
+        },
+    )
+
+    assert rendered is not None
+    assert '{company_phone}' not in rendered['content']
+    assert 'AD_000342_26' in rendered['content']
 
 
 def test_set_delivery_telegram_setting_requires_reason_for_admin_source(db, sample_user):

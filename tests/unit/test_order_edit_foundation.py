@@ -95,7 +95,11 @@ def test_reverse_earnings_clamps_when_balance_insufficient(db, sample_user):
 
     account = LoyaltyPoints.query.filter_by(user_id=sample_user.id).first()
     assert account.current_balance == 0  # clamped, never negative
-    assert account.total_redeemed == 20
+    # M1: a clawback reverses earning, so it reduces lifetime total_earned
+    # (symmetric with the order-edit award branch) — NOT total_redeemed, which is
+    # reserved for actual reward redemptions.
+    assert account.total_redeemed == 0
+    assert account.total_earned == 30  # 50 earned - 20 clawed back
 
     txn = LoyaltyTransaction.query.get(result["transaction_id"])
     assert txn.points == -20

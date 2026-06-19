@@ -150,33 +150,14 @@ class RewardStatus(Enum):
     CANCELLED = "cancelled"
 
 
-# Free Delivery Reward Constants
-FREE_DELIVERY_REWARD_SLUG = "free-delivery"
-FREE_DELIVERY_POINTS_COST = 200  # Points required for free delivery
+# Free-delivery reward constants removed (loyalty SSOT, Phase 2): the free-delivery
+# reward is a LoyaltyReward DB row (is_system_reward), not a hardcoded constant.
 
 
-class MembershipTier(Enum):
-    """Membership tier enumeration"""
-
-    BRONZE = "bronze"
-    SILVER = "silver"
-    GOLD = "gold"
-    PLATINUM = "platinum"
-
-
-# =============================================================================
-# DEPRECATED: MEMBERSHIP_TIERS - Fallback Configuration Only
-# =============================================================================
-# These constants are DEPRECATED and kept only as fallback when database
-# tiers (LoyaltyTierConfig) are not available.
-#
-# PRIMARY SOURCE: LoyaltyTierConfig model in business_app/models/loyalty.py
-# Use LoyaltyService.get_tiers() or LoyaltyTierConfig.get_all_tiers() instead.
-#
-# Admin can manage tiers via:
-#   - Admin API: /admin/loyalty/tiers (CRUD)
-#   - Database: loyalty_tier_configs table
-# =============================================================================
+# Membership tiers are owned entirely by the LoyaltyTierConfig model (DB, single
+# source of truth) — the former MembershipTier enum and MEMBERSHIP_TIERS fallback
+# dict were removed (loyalty SSOT, Unit D). Use LoyaltyService.get_tiers() /
+# LoyaltyTierConfig.get_all_tiers().
 
 
 class NotificationStatus(Enum):
@@ -278,7 +259,8 @@ BUSINESS_RULES = {
     "MAX_DELIVERY_DISTANCE": 20,  # km
     "DEFAULT_DELIVERY_TIME": 60,  # minutes
     "MAX_DELIVERY_TIME": 240,  # minutes
-    "LOYALTY_POINTS_EXPIRY_DAYS": 365,
+    # LOYALTY_POINTS_EXPIRY_DAYS removed — the points-expiry window is DB-driven
+    # via LoyaltyProgram.points_expiry_days (single source of truth).
     "MAX_REFERRALS_PER_DAY": 5,
     "SESSION_TIMEOUT_MINUTES": 30,
     "PASSWORD_RESET_EXPIRY_HOURS": 24,

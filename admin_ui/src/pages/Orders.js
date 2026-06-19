@@ -65,6 +65,30 @@ const fiscalizationStatusColor = (status) => {
   return 'orange';
 };
 
+// Fold free loyalty-reward lines into their matching purchased line as a "+N free"
+// bonus; reward products with no purchased counterpart become standalone rows.
+const buildRewardDisplayItems = (rawItems) => {
+  const raw = rawItems || [];
+  const freeByPid = {};
+  raw.filter((i) => i.is_reward).forEach((i) => {
+    freeByPid[i.product_id] = (freeByPid[i.product_id] || 0) + (i.quantity || 0);
+  });
+  const paidPids = new Set(raw.filter((i) => !i.is_reward).map((i) => i.product_id));
+  const result = [];
+  raw.filter((i) => !i.is_reward).forEach((i) => result.push({ ...i, bonusQty: freeByPid[i.product_id] || 0 }));
+  const seen = new Set();
+  raw.filter((i) => i.is_reward && !paidPids.has(i.product_id)).forEach((i) => {
+    if (seen.has(i.product_id)) {
+      const existing = result.find((d) => d.standalone && d.product_id === i.product_id);
+      if (existing) existing.quantity += i.quantity || 0;
+      return;
+    }
+    seen.add(i.product_id);
+    result.push({ ...i, standalone: true });
+  });
+  return result;
+};
+
 const getOrderStatusColor = (status) => {
   switch (status) {
     case 'pending':
@@ -625,6 +649,14 @@ const Orders = () => {
   const selectedOrderFiscalizationTrail = selectedOrder?.fiscalization_audit_trail || [];
   const selectedOrderMarkingActivity = selectedOrder?.marking_code_activity || [];
 
+  // Derive merged display items for the detail modal: fold reward lines into their
+  // matching purchased line as "+N free" bonus; standalone reward products get their
+  // own row flagged as `standalone: true`.
+  const detailDisplayItems = useMemo(
+    () => buildRewardDisplayItems(selectedOrder?.items || selectedOrder?.items_summary || []),
+    [selectedOrder?.items, selectedOrder?.items_summary],
+  );
+
   const orderColumns = [
     {
       title: t('ui.orders.order_number', 'Order Number'),
@@ -653,14 +685,18 @@ const Orders = () => {
         if (!items || items.length === 0) {
           return <Tag color="blue">{record.items_count || 0} {t('ui.orders.items_count', 'items')}</Tag>;
         }
+        // Merge reward lines into their paid counterparts for display
+        const mergedItems = buildRewardDisplayItems(items);
         return (
           <div style={{ fontSize: 12 }}>
-            {items.slice(0, 2).map((item) => (
-              <div key={`${item.product_id || 'product'}-${item.product_name || 'item'}`} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {item.quantity}x {item.product_name}
+            {mergedItems.slice(0, 2).map((item) => (
+              <div key={`${item.product_id || 'product'}-${item.product_name || 'item'}-${item.standalone ? 'r' : 'p'}`} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {item.standalone
+                  ? `🎁 ${item.product_name} ${t('ui.orders.free', 'Free')}`
+                  : `${item.quantity}x ${item.product_name}${item.bonusQty > 0 ? ` (+${item.bonusQty} ${t('ui.orders.free', 'free')} 🎁)` : ''}`}
               </div>
             ))}
-            {items.length > 2 ? <span style={{ color: '#999' }}>+{items.length - 2} {t('ui.orders.more_items', 'more')}</span> : null}
+            {mergedItems.length > 2 ? <span style={{ color: '#999' }}>+{mergedItems.length - 2} {t('ui.orders.more_items', 'more')}</span> : null}
           </div>
         );
       },
@@ -696,18 +732,24 @@ const Orders = () => {
     {
       title: t('ui.orders.alerts', 'Alerts'),
       key: 'alerts',
-      width: 170,
+      width: 200,
       render: (_, record) => {
-        if (!record.fiscalization_retries_exhausted) return null;
-        return (
-          <Tag
-            color="red"
-            icon={<WarningOutlined />}
-            style={{ margin: 0 }}
-          >
-            {t('ui.orders.fiscalization_retries_exhausted', 'Fiscalization Failed')}
-          </Tag>
-        );
+        const tags = [];
+        if (record.has_loyalty_reward) {
+          tags.push(
+            <Tag key="reward" color="gold" style={{ margin: '0 4px 2px 0' }}>
+              🎁 {t('ui.orders.reward', 'Reward')}
+            </Tag>,
+          );
+        }
+        if (record.fiscalization_retries_exhausted) {
+          tags.push(
+            <Tag key="fisc" color="red" icon={<WarningOutlined />} style={{ margin: '0 4px 2px 0' }}>
+              {t('ui.orders.fiscalization_retries_exhausted', 'Fiscalization Failed')}
+            </Tag>,
+          );
+        }
+        return tags.length > 0 ? <span>{tags}</span> : null;
       },
     },
     {
@@ -901,6 +943,11 @@ const Orders = () => {
                 <Tag color={getOrderStatusColor(selectedOrder.status)}>
                   {t(`ui.orders.status_${selectedOrder.status}`, selectedOrder.status)}
                 </Tag>
+                {selectedOrder.has_loyalty_reward ? (
+                  <Tag color="gold" style={{ marginLeft: 4 }}>
+                    🎁 {t('ui.orders.reward', 'Reward')}
+                  </Tag>
+                ) : null}
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.orders.customer', 'Customer')}>
                 {selectedOrder.customer_name}
@@ -1228,8 +1275,8 @@ const Orders = () => {
             <Divider>{t('ui.orders.order_items', 'Order Items')}</Divider>
             <Spin spinning={orderDetailsLoading}>
               <Table
-                dataSource={selectedOrder.items || selectedOrder.items_summary || []}
-                rowKey={(record) => record.id || `${record.product_id || 'product'}-${record.product_name || 'item'}`}
+                dataSource={detailDisplayItems}
+                rowKey={(record) => record.id ?? `${record.product_id}-${record.standalone ? 'r' : 'p'}`}
                 pagination={false}
                 size="small"
                 columns={[
@@ -1237,13 +1284,29 @@ const Orders = () => {
                     title: t('ui.orders.product_name', 'Product'),
                     dataIndex: 'product_name',
                     key: 'product_name',
+                    render: (name, record) => (
+                      <span>
+                        {name}
+                        {(record.bonusQty > 0 || record.standalone) ? (
+                          <Tag color="gold" style={{ marginLeft: 6 }}>
+                            🎁 {t('ui.orders.reward', 'Reward')}
+                          </Tag>
+                        ) : null}
+                      </span>
+                    ),
                   },
                   {
                     title: t('ui.orders.quantity', 'Qty'),
                     dataIndex: 'quantity',
                     key: 'quantity',
-                    width: 80,
+                    width: 120,
                     align: 'center',
+                    render: (qty, record) => (
+                      <span>
+                        {qty}
+                        {record.bonusQty > 0 ? ` (+${record.bonusQty} ${t('ui.orders.free', 'free')})` : ''}
+                      </span>
+                    ),
                   },
                   {
                     title: t('ui.orders.unit_price', 'Unit Price'),
@@ -1251,7 +1314,10 @@ const Orders = () => {
                     key: 'unit_price',
                     width: 140,
                     align: 'right',
-                    render: (price) => `${Number(price || 0).toLocaleString()} UZS`,
+                    render: (price, record) =>
+                      record.standalone
+                        ? <span style={{ color: '#52c41a', fontWeight: 600 }}>{t('ui.orders.free', 'Free')}</span>
+                        : `${Number(price || 0).toLocaleString()} UZS`,
                   },
                   {
                     title: t('ui.orders.total_price', 'Total'),
@@ -1259,7 +1325,10 @@ const Orders = () => {
                     key: 'total_price',
                     width: 140,
                     align: 'right',
-                    render: (price) => <span style={{ fontWeight: 600 }}>{Number(price || 0).toLocaleString()} UZS</span>,
+                    render: (price, record) =>
+                      record.standalone
+                        ? <span style={{ fontWeight: 600, color: '#52c41a' }}>{t('ui.orders.free', 'Free')}</span>
+                        : <span style={{ fontWeight: 600 }}>{Number(price || 0).toLocaleString()} UZS</span>,
                   },
                 ]}
                 footer={() => (
@@ -1958,7 +2027,7 @@ const Orders = () => {
                   if (!loy) return '—';
                   return t(
                     'ui.orders.loyalty_change',
-                    `${loy.old_points_earned || 0} pts → ${loy.new_points_earned || 0} pts`,
+                    `${loy.old_points_earned || 0} AquaCoins → ${loy.new_points_earned || 0} AquaCoins`,
                   );
                 })()}
               </Descriptions.Item>

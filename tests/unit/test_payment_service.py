@@ -140,6 +140,43 @@ class TestRefunds:
         assert success is True
         assert cash_payment.status == PaymentStatus.PARTIALLY_REFUNDED
 
+    def test_points_refund_returns_redeemed_points_proportionally(self, payment_service, monkeypatch):
+        """Loyalty is rewards-only: refunding a points-paid order returns the
+        points the customer actually redeemed (proportional to the refund),
+        credited as a non-qualifying ADJUSTMENT — NOT a UZS->points conversion
+        and NOT with the earning tier multiplier."""
+        from types import SimpleNamespace
+
+        from business_app.services.loyalty_service import LoyaltyService
+
+        captured = {}
+
+        def fake_reverse(self, user_id, order_id, old_points_earned, new_points_earned, **kwargs):
+            captured.update(
+                user_id=user_id, order_id=order_id, old=old_points_earned, new=new_points_earned
+            )
+            return {"transaction_id": 1}
+
+        monkeypatch.setattr(LoyaltyService, "reverse_earnings", fake_reverse)
+
+        def _no_conversion(self, *args, **kwargs):
+            raise AssertionError("refund must not convert UZS->points")
+
+        monkeypatch.setattr(LoyaltyService, "calculate_points_for_purchase", _no_conversion)
+
+        payment = SimpleNamespace(
+            user_id=42,
+            amount=1000,
+            order=SimpleNamespace(id=7, order_number="N-1", loyalty_points_used=200),
+        )
+        # Half the order is refunded -> half the redeemed points returned.
+        result = payment_service._process_points_refund(payment, amount=500, reason="test")
+
+        assert result is True
+        assert captured["user_id"] == 42
+        assert captured["old"] == 0
+        assert captured["new"] == 100  # 200 redeemed * (500 / 1000)
+
 
 @pytest.mark.unit
 @pytest.mark.payment

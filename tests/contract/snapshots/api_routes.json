@@ -630,6 +630,13 @@
     "rule": "/api/v1/admin/loyalty/members/<int:user_id>"
   },
   {
+    "endpoint": "admin.get_loyalty_member_transactions",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/loyalty/members/<int:user_id>/transactions"
+  },
+  {
     "endpoint": "admin.create_loyalty_program",
     "methods": [
       "POST"
@@ -691,6 +698,34 @@
       "PUT"
     ],
     "rule": "/api/v1/admin/loyalty/rewards/<int:reward_id>"
+  },
+  {
+    "endpoint": "admin.create_loyalty_streak_rule",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/loyalty/streak-rules"
+  },
+  {
+    "endpoint": "admin.get_loyalty_streak_rules",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/loyalty/streak-rules"
+  },
+  {
+    "endpoint": "admin.delete_loyalty_streak_rule",
+    "methods": [
+      "DELETE"
+    ],
+    "rule": "/api/v1/admin/loyalty/streak-rules/<int:rule_id>"
+  },
+  {
+    "endpoint": "admin.update_loyalty_streak_rule",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/loyalty/streak-rules/<int:rule_id>"
   },
   {
     "endpoint": "admin.create_loyalty_tier_config",
@@ -2402,13 +2437,6 @@
     "rule": "/api/v1/loyalty/account"
   },
   {
-    "endpoint": "loyalty.get_loyalty_challenges",
-    "methods": [
-      "GET"
-    ],
-    "rule": "/api/v1/loyalty/challenges"
-  },
-  {
     "endpoint": "loyalty.earn_points",
     "methods": [
       "POST"
@@ -2477,13 +2505,6 @@
       "GET"
     ],
     "rule": "/api/v1/loyalty/rewards/<int:reward_id>"
-  },
-  {
-    "endpoint": "loyalty.redeem_reward",
-    "methods": [
-      "POST"
-    ],
-    "rule": "/api/v1/loyalty/rewards/<int:reward_id>/redeem"
   },
   {
     "endpoint": "loyalty.get_redemption_history",

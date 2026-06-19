@@ -879,13 +879,13 @@
 <div class="points-history mb-4">
     <div class="card">
         <div class="card-header d-flex justify-content-between align-items-center">
-            <h5><i class="far fa-history"></i> {{ 'Points History'|t }}</h5>
+            <h5><i class="far fa-history"></i> {{ 'AquaCoins History'|t }}</h5>
             <div class="filter-options">
                 <select class="form-control form-control-sm" id="historyFilter">
                     <option value="">{{ 'All Activity'|t }}</option>
-                    <option value="earned">{{ 'Points Earned'|t }}</option>
-                    <option value="redeemed">{{ 'Points Redeemed'|t }}</option>
-                    <option value="expired">{{ 'Points Expired'|t }}</option>
+                    <option value="earned">{{ 'AquaCoins Earned'|t }}</option>
+                    <option value="redeemed">{{ 'AquaCoins Redeemed'|t }}</option>
+                    <option value="expired">{{ 'AquaCoins Expired'|t }}</option>
                 </select>
             </div>
         </div>
@@ -893,7 +893,7 @@
             <div class="points-history-list" id="pointsHistoryList">
                 <div class="text-center py-4">
                     <i class="far fa-spinner fa-spin fa-2x"></i>
-                    <p class="mt-2">{{ 'Loading points history...'|t }}</p>
+                    <p class="mt-2">{{ 'Loading AquaCoins history...'|t }}</p>
                 </div>
             </div>
         </div>
@@ -921,7 +921,7 @@
 <div class="earn-points-section">
     <div class="card">
         <div class="card-header">
-            <h5><i class="far fa-lightbulb"></i> {{ 'Ways to Earn Points'|t }}</h5>
+            <h5><i class="far fa-lightbulb"></i> {{ 'Ways to Earn AquaCoins'|t }}</h5>
         </div>
         <div class="card-body">
             <div class="row">
@@ -949,7 +949,7 @@
                                 {{ 'Refer Friends'|t }}
                                 <span class="earn-points-value">+500 AquaCoins</span>
                             </h6>
-                            <p>{{ 'Invite friends with your referral code. Earn 500 points when they place their first order!'|t }}</p>
+                            <p>{{ 'Invite friends with your referral code. Earn 500 AquaCoins when they place their first order!'|t }}</p>
                         </div>
                     </div>
                 </div>
@@ -963,7 +963,7 @@
                                 {{ 'Write Reviews'|t }}
                                 <span class="earn-points-value">+50 AquaCoins</span>
                             </h6>
-                            <p>{{ 'Share your experience by reviewing products. Get 50 points for each review!'|t }}</p>
+                            <p>{{ 'Share your experience by reviewing products. Get 50 AquaCoins for each review!'|t }}</p>
                         </div>
                     </div>
                 </div>
@@ -977,7 +977,7 @@
                                 {{ 'Birthday Bonus'|t }}
                                 <span class="earn-points-value">+200 AquaCoins</span>
                             </h6>
-                            <p>{{ 'Celebrate with us! Receive 200 bonus points automatically on your birthday.'|t }}</p>
+                            <p>{{ 'Celebrate with us! Receive 200 bonus AquaCoins automatically on your birthday.'|t }}</p>
                         </div>
                     </div>
                 </div>
@@ -986,27 +986,6 @@
                 <button class="btn btn-primary" data-action="generate-referral">
                     <i class="far fa-share"></i> {{ 'Get My Referral Code'|t }}
                 </button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Reward Redemption Modal -->
-<div class="modal fade" id="rewardModal" tabindex="-1" role="dialog" aria-labelledby="rewardModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg" role="document">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="rewardModalLabel">{{ 'Redeem Reward'|t }}</h5>
-                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                    <span aria-hidden="true">&times;</span>
-                </button>
-            </div>
-            <div class="modal-body" id="rewardModalContent">
-                <!-- Reward details will be loaded here -->
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-dismiss="modal">{{ 'Cancel'|t }}</button>
-                <button type="button" class="btn btn-primary" id="redeemRewardBtn">{{ 'Redeem Reward'|t }}</button>
             </div>
         </div>
     </div>
@@ -1046,7 +1025,7 @@
                         <div class="col-6">
                             <div class="stat-item">
                                 <h5 id="referralPoints">0</h5>
-                                <p class="text-muted">{{ 'Points Earned'|t }}</p>
+                                <p class="text-muted">{{ 'AquaCoins Earned'|t }}</p>
                             </div>
                         </div>
                     </div>
@@ -1077,24 +1056,23 @@
         'status_secured': 'Status Secured' | t,
         'coins_to_next_tier': 'AquaCoins to next tier' | t,
         'order': 'Order' | t,
-        'no_history': 'No points history found' | t,
-        'history_failed': 'Failed to load points history' | t,
+        'no_history': 'No AquaCoins history found' | t,
+        'history_failed': 'Failed to load AquaCoins history' | t,
         'no_rewards': 'No rewards available' | t,
         'rewards_failed': 'Failed to load rewards' | t,
         'type_discount': 'Discount' | t,
-        'type_free_delivery': 'Free Delivery' | t,
         'type_free_product': 'Free Product' | t,
         'type_gift_card': 'Gift Card' | t,
         'auto_applied': 'Auto-Applied' | t,
         'applied_auto_order': 'Applied automatically to every order' | t,
         'redeem': 'Redeem' | t,
-        'need_more': 'Need more points' | t,
+        'need_more': 'Need more AquaCoins' | t,
         'redeem_success': 'Reward redeemed successfully!' | t,
         'redeem_failed': 'Failed to redeem reward' | t,
         'details_failed': 'Failed to load reward details' | t,
         'expires': 'Expires' | t,
-        'points_required': 'Points Required' | t,
-        'your_points': 'Your Points' | t,
+        'points_required': 'AquaCoins Required' | t,
+        'your_points': 'Your AquaCoins' | t,
         'referral_failed': 'Failed to generate referral code' | t,
         'referral_copied': 'Referral code copied to clipboard!' | t,
         'referral_copy_failed': 'Failed to copy referral code' | t,

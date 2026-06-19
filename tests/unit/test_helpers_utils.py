@@ -1,7 +1,6 @@
 """Unit tests for generic helper utilities."""
 
 from datetime import datetime, timedelta, timezone
-import warnings
 
 import pytest
 
@@ -119,12 +118,5 @@ class TestHelpersI18nAndTime:
 
         start, end = helpers.get_analytics_date_range(3)
         assert (end - start) >= timedelta(days=3)
-
-        with app.app_context():
-            app.config["LOYALTY_POINTS_RATIO"] = 1000
-            with warnings.catch_warnings(record=True) as caught:
-                warnings.simplefilter("always")
-                points = helpers.calculate_loyalty_points(5500)
-            assert points == 5
-            assert any(issubclass(w.category, DeprecationWarning) for w in caught)
-            # calculate_discount_from_points removed — points redeem only via rewards.
+        # calculate_loyalty_points removed — earning is DB-driven via
+        # LoyaltyService.calculate_points_for_purchase (rewards-only redemption).

@@ -1,6 +1,6 @@
 """Unit tests for notification task edge cases and payload contracts."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -165,3 +165,37 @@ class TestNotificationTasks:
 
         assert result["telegram"]["success"] is True
         mock_service.send_delivery_status_change_notification.assert_called_once_with(321)
+
+    def test_notify_driver_assignment_task_excludes_sms_channel(self, app):
+        with (
+            app.app_context(),
+            patch("business_app.tasks.notification_tasks.Delivery") as mock_delivery_cls,
+            patch("business_app.tasks.notification_tasks.NotificationService") as mock_service_cls,
+        ):
+            mock_delivery = MagicMock()
+            mock_delivery.estimated_delivery_time = None
+            mock_delivery_cls.query.get.return_value = mock_delivery
+            mock_service = mock_service_cls.return_value
+            mock_service.send_notification.return_value = {"telegram": {"success": True}}
+
+            notification_tasks.notify_driver_assignment_task.run(99)
+
+            channels = mock_service.send_notification.call_args.args[2]
+            assert NotificationChannel.SMS not in channels
+            assert NotificationChannel.TELEGRAM in channels
+
+    def test_send_daily_delivery_reminders_uses_email_not_sms(self, app):
+        with (
+            app.app_context(),
+            patch.object(notification_tasks.Delivery, "query") as mock_query,
+            patch("business_app.tasks.notification_tasks.NotificationService") as mock_service_cls,
+        ):
+            mock_delivery = MagicMock()
+            mock_query.filter.return_value.all.return_value = [mock_delivery]
+            mock_service = mock_service_cls.return_value
+
+            notification_tasks.send_daily_delivery_reminders.run()
+
+            channels = mock_service.send_notification.call_args.args[2]
+            assert NotificationChannel.SMS not in channels
+            assert channels == [NotificationChannel.EMAIL]

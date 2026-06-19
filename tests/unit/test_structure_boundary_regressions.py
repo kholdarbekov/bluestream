@@ -16,7 +16,7 @@ STAFF_BOT_SEARCH_UTIL = ROOT / "staff_bot" / "utils" / "search.py"
 API_BOUNDARY_SCORE_BUDGET = {
     "__init__.py": 0,
     "addresses.py": 18,
-    "admin.py": 482,
+    "admin.py": 503,  # +4 loyalty streak-rule CRUD endpoints (configurable streak rules)
     "admin_bottles.py": 0,
     "admin_tryouts.py": 0,
     "analytics.py": 25,

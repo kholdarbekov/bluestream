@@ -226,7 +226,7 @@ def notify_driver_assignment_task(self, delivery_id: int):
         result = notification_service.send_notification(
             delivery.driver_id,
             NotificationType.DELIVERY_UPDATE,
-            [NotificationChannel.SMS, NotificationChannel.TELEGRAM],
+            [NotificationChannel.TELEGRAM],
             template_data,
         )
 
@@ -269,7 +269,7 @@ def notify_delivery_cancellation_task(self, delivery_id: int):
             driver_result = notification_service.send_notification(
                 delivery.driver_id,
                 NotificationType.DELIVERY_UPDATE,
-                [NotificationChannel.SMS, NotificationChannel.TELEGRAM],
+                [NotificationChannel.TELEGRAM],
                 template_data,
             )
 
@@ -356,7 +356,7 @@ def send_daily_delivery_reminders():
                 }
 
                 notification_service.send_notification(
-                    delivery.order.user_id, NotificationType.DELIVERY_UPDATE, [NotificationChannel.SMS], template_data
+                    delivery.order.user_id, NotificationType.DELIVERY_UPDATE, [NotificationChannel.EMAIL], template_data
                 )
 
                 sent_count += 1

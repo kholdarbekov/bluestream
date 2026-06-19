@@ -255,6 +255,41 @@ class TestOrderHandlerDeepFlows:
         await handler.order_details(update, context)
         handler._handle_api_error.assert_awaited_once_with(update, "order not found", "en")
 
+    async def test_order_details_merges_free_reward_into_paid_line(self, monkeypatch):
+        """A free reward line for a purchased product is merged additively
+        ('+1 free 🎁') into that product's line, not shown as a duplicate row."""
+        handler = orders_module.OrderHandlers()
+        update = DummyUpdate()
+        update.callback_query = DummyCallbackQuery(data="order_7")
+        context = make_context()
+
+        order = {
+            "id": 7, "order_number": "TG_TEST", "created_at": "2026-06-15T00:00:00",
+            "total_amount": 36000, "status": "confirmed",
+            "order_items": [
+                {"product_id": 2, "product_name": "19 litrlik suv", "quantity": 2,
+                 "unit_price": 18000, "total_price": 36000, "is_reward": False},
+                {"product_id": 2, "product_name": "19 litrlik suv", "quantity": 1,
+                 "unit_price": 0, "total_price": 0, "is_reward": True},
+            ],
+        }
+        monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)
+        monkeypatch.setattr(orders_module, "get_auth_token", AsyncMock(return_value="jwt"))
+        monkeypatch.setattr(orders_module.OrderKeyboards, "order_details", lambda *_a, **_k: "kbd")
+        monkeypatch.setattr(
+            orders_module, "api_client",
+            FakeAPIClientContext(get_order=_resp(success=True, data={"data": {"order": order, "delivery": None}})),
+        )
+
+        await handler.order_details(update, context)
+
+        text = update.callback_query.edit_message_text.await_args.kwargs["text"]
+        # Merged into a single product line (not two identical "19 litrlik suv" rows).
+        assert text.count("19 litrlik suv") == 1
+        # The free-bonus marker is present.
+        assert "🎁" in text
+
     async def test_track_order_fallback_when_no_timeline(self, monkeypatch):
         handler = orders_module.OrderHandlers()
         update = DummyUpdate()
@@ -472,6 +507,43 @@ class TestLoyaltyHandlerDeepFlows:
         update.callback_query.edit_message_text.assert_awaited_once()
         update.callback_query.answer.assert_awaited_once()
 
+    def test_loyalty_guide_url_is_localized(self, monkeypatch):
+        monkeypatch.setenv("COMPANY_WEBSITE", "https://aqua-element.uz")
+        handler = loyalty_module.LoyaltyHandlers()
+        # Default language (uz) gets a clean URL; others carry an explicit ?lang=.
+        assert handler._loyalty_guide_url("uz") == "https://aqua-element.uz/loyalty-guide"
+        assert handler._loyalty_guide_url("ru") == "https://aqua-element.uz/loyalty-guide?lang=ru"
+        assert handler._loyalty_guide_url("en") == "https://aqua-element.uz/loyalty-guide?lang=en"
+        # Trailing slash on the base is normalized.
+        monkeypatch.setenv("COMPANY_WEBSITE", "https://aqua-element.uz/")
+        assert handler._loyalty_guide_url("uz") == "https://aqua-element.uz/loyalty-guide"
+
+    async def test_loyalty_menu_includes_guide_url_button(self, monkeypatch):
+        monkeypatch.setenv("COMPANY_WEBSITE", "https://aqua-element.uz")
+        handler = loyalty_module.LoyaltyHandlers()
+        update = DummyUpdate()
+        update.callback_query = DummyCallbackQuery(data="menu_loyalty")
+        context = make_context()
+
+        monkeypatch.setattr(loyalty_module, "user_middleware", AsyncMock(return_value={"id": 1}))
+        monkeypatch.setattr(loyalty_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(loyalty_module.i18n, "get", _i18n_get)
+        monkeypatch.setattr(loyalty_module, "get_auth_token", AsyncMock(return_value="jwt"))
+        monkeypatch.setattr(
+            loyalty_module,
+            "api_client",
+            FakeAPIClientContext(
+                get_loyalty_points=_resp(success=True, data={"current_balance": 10, "lifetime_earned": 10}),
+                get_loyalty_rewards=_resp(success=True, data={"rewards": []}),
+            ),
+        )
+
+        await handler.loyalty_menu(update, context)
+
+        markup = update.callback_query.edit_message_text.await_args.kwargs["reply_markup"]
+        urls = [b.url for row in markup.inline_keyboard for b in row if b.url]
+        assert "https://aqua-element.uz/loyalty-guide?lang=en" in urls
+
     async def test_loyalty_menu_supports_api_envelope_payloads(self, monkeypatch):
         handler = loyalty_module.LoyaltyHandlers()
         update = DummyUpdate()
@@ -584,7 +656,10 @@ class TestLoyaltyHandlerDeepFlows:
         text = update.callback_query.edit_message_text.await_args.kwargs["text"]
         assert "+55" in text
 
-    async def test_redeem_reward_success_calls_loyalty_menu(self, monkeypatch):
+    async def test_redeem_reward_stores_selection_and_returns_to_menu(self, monkeypatch):
+        """Phase 3 apply-at-checkout: tapping redeem_<id> just stores the reward
+        id in conversation state and confirms it will be applied at checkout —
+        no standalone redeem API call (that route was removed)."""
         handler = loyalty_module.LoyaltyHandlers()
         handler.loyalty_menu = AsyncMock()
         update = DummyUpdate()
@@ -593,14 +668,160 @@ class TestLoyaltyHandlerDeepFlows:
 
         monkeypatch.setattr(loyalty_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(loyalty_module.i18n, "get", _i18n_get)
-        monkeypatch.setattr(loyalty_module, "get_auth_token", AsyncMock(return_value="jwt"))
-        monkeypatch.setattr(
-            loyalty_module,
-            "api_client",
-            FakeAPIClientContext(redeem_reward=_resp(success=True)),
-        )
 
         await handler.redeem_reward(update, context)
 
-        update.callback_query.answer.assert_awaited_once_with("telegram.loyalty.redeem_success:en")
+        assert context.user_data["selected_reward_id"] == 42
+        update.callback_query.answer.assert_awaited_once_with(
+            "telegram.loyalty.reward_selected:en", show_alert=True
+        )
         handler.loyalty_menu.assert_awaited_once_with(update, context)
+
+
+@pytest.mark.unit
+class TestLoyaltyHistoryDisplay:
+    """Pure helpers behind the AquaCoins history view.
+
+    Color is by SIGN of the amount (credit = green, debit = red), mirroring the
+    admin UI; the label is a localized category derived from action_type /
+    transaction_type, never the raw English description.
+    """
+
+    # --- _signed_amount: color by sign ---
+    def test_signed_amount_credit_is_green(self):
+        assert loyalty_module.LoyaltyHandlers._signed_amount(540) == ("🟢", "+540")
+
+    def test_signed_amount_debit_is_red(self):
+        assert loyalty_module.LoyaltyHandlers._signed_amount(-4000) == ("🔴", "-4000")
+
+    def test_refund_credit_is_green_not_yellow(self):
+        # A refund is a positive ADJUSTMENT; it must read as a credit (green),
+        # fixing the old behaviour where it showed yellow ("other").
+        assert loyalty_module.LoyaltyHandlers._signed_amount(4000)[0] == "🟢"
+
+    def test_signed_amount_handles_non_int(self):
+        assert loyalty_module.LoyaltyHandlers._signed_amount(None) == ("🟢", "+0")
+
+    # --- _transaction_category: stable category + format args ---
+    def test_category_referral(self):
+        cat, fmt = loyalty_module.LoyaltyHandlers._transaction_category(
+            {"transaction_type": "bonus", "action_type": "referral",
+             "description": "Referral bonus for user #75"}
+        )
+        assert cat == "referral"
+        assert fmt == {}
+
+    def test_category_welcome(self):
+        cat, _ = loyalty_module.LoyaltyHandlers._transaction_category(
+            {"transaction_type": "bonus", "action_type": "welcome_bonus"})
+        assert cat == "welcome"
+
+    def test_category_birthday(self):
+        cat, _ = loyalty_module.LoyaltyHandlers._transaction_category(
+            {"transaction_type": "bonus", "action_type": "birthday_bonus"})
+        assert cat == "birthday"
+
+    def test_category_streak(self):
+        cat, _ = loyalty_module.LoyaltyHandlers._transaction_category(
+            {"transaction_type": "earned", "action_type": "streak_bonus"})
+        assert cat == "streak"
+
+    def test_category_purchase_is_order_earn(self):
+        cat, fmt = loyalty_module.LoyaltyHandlers._transaction_category(
+            {"transaction_type": "earned", "action_type": "purchase",
+             "description": "Order #TG_000066_26"})
+        assert cat == "order_earn"
+        assert fmt == {}
+
+    def test_category_surprise_reward_is_not_order_earn(self):
+        # type=earned but action=surprise_reward → its own label, not order earnings.
+        cat, fmt = loyalty_module.LoyaltyHandlers._transaction_category(
+            {"transaction_type": "earned", "action_type": "surprise_reward",
+             "description": "Surprise Reward! Thanks for being loyal 💙"})
+        assert cat == "surprise"
+        assert fmt == {}
+
+    def test_category_redeem_named_extracts_reward(self):
+        cat, fmt = loyalty_module.LoyaltyHandlers._transaction_category(
+            {"transaction_type": "redeemed",
+             "description": "Redeemed reward: 19 litrlik suv"}
+        )
+        assert cat == "redeem_named"
+        assert fmt == {"name": "19 litrlik suv"}
+
+    def test_category_redeem_unknown_description_falls_back(self):
+        cat, fmt = loyalty_module.LoyaltyHandlers._transaction_category(
+            {"transaction_type": "redeemed", "description": "something else"})
+        assert cat == "redeem"
+        assert fmt == {}
+
+    def test_category_refund_with_order(self):
+        cat, fmt = loyalty_module.LoyaltyHandlers._transaction_category(
+            {"transaction_type": "adjustment", "action_type": "reward_refund",
+             "order_id": 141, "description": "Refund of redeemed reward (order #141)"}
+        )
+        assert cat == "refund_order"
+        assert fmt == {"order_id": 141}
+
+    def test_category_refund_without_order(self):
+        cat, fmt = loyalty_module.LoyaltyHandlers._transaction_category(
+            {"transaction_type": "adjustment", "action_type": "reward_refund"})
+        assert cat == "refund"
+        assert fmt == {}
+
+    def test_category_order_edit_is_adjustment(self):
+        cat, _ = loyalty_module.LoyaltyHandlers._transaction_category(
+            {"transaction_type": "adjustment", "action_type": "order_edit_award"})
+        assert cat == "adjustment"
+
+    def test_category_unknown_falls_back_to_other(self):
+        cat, fmt = loyalty_module.LoyaltyHandlers._transaction_category(
+            {"transaction_type": "weird", "description": "x"})
+        assert cat == "other"
+        assert fmt == {}
+
+
+@pytest.mark.unit
+class TestLoyaltyHistoryPagination:
+    """Page parsing + nav-button construction for the paginated history."""
+
+    # --- _parse_history_page: page lives in the callback_data ---
+    def test_base_callback_is_page_one(self):
+        assert loyalty_module.LoyaltyHandlers._parse_history_page("loyalty_history") == 1
+
+    def test_numbered_callback(self):
+        assert loyalty_module.LoyaltyHandlers._parse_history_page("loyalty_history_page_4") == 4
+
+    def test_zero_and_garbage_default_to_one(self):
+        assert loyalty_module.LoyaltyHandlers._parse_history_page("loyalty_history_page_0") == 1
+        assert loyalty_module.LoyaltyHandlers._parse_history_page("garbage") == 1
+        assert loyalty_module.LoyaltyHandlers._parse_history_page(None) == 1
+
+    # --- _history_nav_buttons: only the arrows that apply, + Back ---
+    @staticmethod
+    def _callbacks(rows):
+        return [b.get("callback_data") for row in rows for b in row]
+
+    def _nav(self, page, pages, monkeypatch):
+        monkeypatch.setattr(loyalty_module.i18n, "get", _i18n_get)
+        return loyalty_module.LoyaltyHandlers._history_nav_buttons(page, pages, "en")
+
+    def test_first_page_has_next_only(self, monkeypatch):
+        cbs = self._callbacks(self._nav(1, 3, monkeypatch))
+        assert "loyalty_history_page_2" in cbs          # next
+        assert not any(c == "loyalty_history_page_0" for c in cbs)  # no prev
+
+    def test_middle_page_has_both(self, monkeypatch):
+        cbs = self._callbacks(self._nav(2, 3, monkeypatch))
+        assert "loyalty_history_page_1" in cbs          # prev
+        assert "loyalty_history_page_3" in cbs          # next
+
+    def test_last_page_has_prev_only(self, monkeypatch):
+        cbs = self._callbacks(self._nav(3, 3, monkeypatch))
+        assert "loyalty_history_page_2" in cbs          # prev
+        assert "loyalty_history_page_4" not in cbs      # no next past the end
+
+    def test_single_page_has_no_arrows_but_keeps_back(self, monkeypatch):
+        cbs = self._callbacks(self._nav(1, 1, monkeypatch))
+        assert all("loyalty_history_page_" not in (c or "") for c in cbs)
+        assert "back_to_main" in cbs

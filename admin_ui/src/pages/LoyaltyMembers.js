@@ -41,6 +41,8 @@ const LoyaltyMembers = () => {
   const [programId, setProgramId] = useState();
   const [pagination, setPagination] = useState({ page: 1, per_page: DEFAULT_PAGE_SIZE });
   const [selectedMemberId, setSelectedMemberId] = useState(null);
+  const [txPage, setTxPage] = useState(1);
+  const TX_PAGE_SIZE = 10;
 
   const membersQuery = useQuery({
     queryKey: ['loyalty-members', pagination, searchText, programId],
@@ -65,6 +67,16 @@ const LoyaltyMembers = () => {
     queryKey: ['loyalty-member-detail', selectedMemberId],
     queryFn: () => adminService.getLoyaltyMember(selectedMemberId),
     enabled: Boolean(selectedMemberId),
+  });
+
+  const memberTransactionsQuery = useQuery({
+    queryKey: ['loyalty-member-transactions', selectedMemberId, txPage],
+    queryFn: () => adminService.getLoyaltyMemberTransactions(selectedMemberId, {
+      page: txPage,
+      per_page: TX_PAGE_SIZE,
+    }),
+    enabled: Boolean(selectedMemberId),
+    placeholderData: keepPreviousData,
   });
 
   const summary = membersQuery.data?.summary || {};
@@ -98,18 +110,18 @@ const LoyaltyMembers = () => {
       render: (value) => <Tag color="gold">{value || 'Bronze'}</Tag>
     },
     {
-      title: t('ui.loyalty.current_points', { defaultValue: 'Current Points' }),
+      title: t('ui.loyalty.current_points', { defaultValue: 'Current AquaCoins' }),
       dataIndex: 'current_balance',
       key: 'current_balance',
       width: 160,
-      render: (value) => `${value || 0} pts`
+      render: (value) => `${value || 0} AquaCoins`
     },
     {
       title: t('ui.loyalty.total_earned', { defaultValue: 'Total Earned' }),
       dataIndex: 'total_earned',
       key: 'total_earned',
       width: 160,
-      render: (value) => `${value || 0} pts`
+      render: (value) => `${value || 0} AquaCoins`
     },
     {
       title: t('ui.loyalty.last_activity', { defaultValue: 'Last Activity' }),
@@ -126,7 +138,7 @@ const LoyaltyMembers = () => {
         <Button
           type="text"
           icon={<EyeOutlined />}
-          onClick={() => setSelectedMemberId(record.user_id)}
+          onClick={() => { setTxPage(1); setSelectedMemberId(record.user_id); }}
         />
       )
     }
@@ -157,7 +169,7 @@ const LoyaltyMembers = () => {
         <Col xs={24} md={8}>
           <Card>
             <Statistic
-              title={t('ui.loyalty.points_distributed', { defaultValue: 'Points In Circulation' })}
+              title={t('ui.loyalty.points_distributed', { defaultValue: 'AquaCoins In Circulation' })}
               value={summary.total_points_in_circulation || 0}
               prefix={<StarOutlined />}
             />
@@ -166,7 +178,7 @@ const LoyaltyMembers = () => {
         <Col xs={24} md={8}>
           <Card>
             <Statistic
-              title={t('ui.loyalty.avg_points_per_member', { defaultValue: 'Average Points per Member' })}
+              title={t('ui.loyalty.avg_points_per_member', { defaultValue: 'Average AquaCoins per Member' })}
               value={summary.average_points_balance || 0}
               prefix={<TrophyOutlined />}
             />
@@ -252,34 +264,43 @@ const LoyaltyMembers = () => {
           <Space direction="vertical" size={24} style={{ width: '100%' }}>
             <Descriptions bordered size="small" column={2}>
               <Descriptions.Item label={t('ui.loyalty.program', { defaultValue: 'Program' })}>
-                {memberDetailQuery.data.member.program_name || '-'}
+                {memberDetailQuery.data?.member?.program_name || '-'}
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.loyalty.tier', { defaultValue: 'Tier' })}>
-                {memberDetailQuery.data.member.current_tier || '-'}
+                {memberDetailQuery.data?.member?.current_tier || '-'}
               </Descriptions.Item>
-              <Descriptions.Item label={t('ui.loyalty.current_points', { defaultValue: 'Current Points' })}>
-                {memberDetailQuery.data.member.current_balance || 0}
+              <Descriptions.Item label={t('ui.loyalty.current_points', { defaultValue: 'Current AquaCoins' })}>
+                {memberDetailQuery.data?.member?.current_balance || 0}
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.loyalty.total_earned', { defaultValue: 'Total Earned' })}>
-                {memberDetailQuery.data.member.total_earned || 0}
+                {memberDetailQuery.data?.member?.total_earned || 0}
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.loyalty.member_since', { defaultValue: 'Member Since' })}>
-                {formatDate(memberDetailQuery.data.member.member_since)}
+                {formatDate(memberDetailQuery.data?.member?.member_since)}
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.loyalty.last_activity', { defaultValue: 'Last Activity' })}>
-                {memberDetailQuery.data.member.last_activity_at ? formatDateTime(memberDetailQuery.data.member.last_activity_at) : '-'}
+                {memberDetailQuery.data?.member?.last_activity_at ? formatDateTime(memberDetailQuery.data.member.last_activity_at) : '-'}
               </Descriptions.Item>
             </Descriptions>
 
             <Card
               size="small"
-              title={t('ui.loyalty.recent_activity', { defaultValue: 'Recent Transactions' })}
+              title={`${t('ui.loyalty.transactions', { defaultValue: 'Transactions' })} (${memberTransactionsQuery.data?.total ?? 0})`}
             >
               <List
+                loading={memberTransactionsQuery.isLoading}
                 locale={{
                   emptyText: t('ui.loyalty.no_recent_activity', { defaultValue: 'No recent transactions' })
                 }}
-                dataSource={memberDetailQuery.data.recent_transactions || []}
+                dataSource={memberTransactionsQuery.data?.items || []}
+                pagination={{
+                  current: txPage,
+                  pageSize: TX_PAGE_SIZE,
+                  total: memberTransactionsQuery.data?.total ?? 0,
+                  onChange: (page) => setTxPage(page),
+                  size: 'small',
+                  hideOnSinglePage: true,
+                }}
                 renderItem={(item) => (
                   <List.Item>
                     <List.Item.Meta
@@ -302,7 +323,7 @@ const LoyaltyMembers = () => {
                 locale={{
                   emptyText: t('ui.loyalty.no_recent_redemptions', { defaultValue: 'No recent redemptions' })
                 }}
-                dataSource={memberDetailQuery.data.recent_redemptions || []}
+                dataSource={memberDetailQuery.data?.recent_redemptions || []}
                 renderItem={(item) => (
                   <List.Item>
                     <List.Item.Meta

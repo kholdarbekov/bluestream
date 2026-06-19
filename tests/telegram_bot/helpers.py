@@ -123,8 +123,8 @@ class FakeAPIClientContext:
     async def get_loyalty_history(self, *_args, **_kwargs):
         return self._method_results.get("get_loyalty_history")
 
-    async def redeem_reward(self, *_args, **_kwargs):
-        return self._method_results.get("redeem_reward")
+    async def get_referral_info(self, *_args, **_kwargs):
+        return self._method_results.get("get_referral_info")
 
     async def update_user_profile(self, *_args, **_kwargs):
         return self._method_results.get("update_user_profile")

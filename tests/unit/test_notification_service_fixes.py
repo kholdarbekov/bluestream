@@ -77,7 +77,7 @@ class TestSmsTemplateMissing:
         ns_module.logger.addHandler(caplog.handler)
         try:
             with caplog.at_level(logging.INFO, logger="business_app.services.notification_service"):
-                result = svc._send_sms_notification(user, "delivery_reminder", {}, "uz")
+                result = svc._send_sms_notification(user, "order_confirmation", {}, "uz")
         finally:
             ns_module.logger.removeHandler(caplog.handler)
 
@@ -85,7 +85,7 @@ class TestSmsTemplateMissing:
         assert result.get("skipped") is True
         assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
         warning_text = " ".join(r.getMessage() for r in caplog.records if r.levelno == logging.WARNING)
-        assert "delivery_reminder" in warning_text
+        assert "order_confirmation" in warning_text
 
 
 @pytest.mark.unit

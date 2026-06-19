@@ -75,9 +75,9 @@ class EmailTemplateService:
             "ru": "Оплата подтверждена - {company_name}",
         },
         "loyalty_reward": {
-            "uz": "Sodiqlik ballari qo'shildi - {company_name}",
-            "en": "Loyalty Points Earned - {company_name}",
-            "ru": "Баллы лояльности начислены - {company_name}",
+            "uz": "AquaCoins qo'shildi - {company_name}",
+            "en": "AquaCoins Earned - {company_name}",
+            "ru": "AquaCoins начислены - {company_name}",
         },
         "delivery_update": {
             "uz": "Yetkazib berish yangiligi - {company_name}",

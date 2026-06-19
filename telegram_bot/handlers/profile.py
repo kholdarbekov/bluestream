@@ -654,11 +654,27 @@ class ProfileHandlers(BaseHandler):
         except Exception as e:
             await self._handle_error(update, exc=e, operation="verify_phone_number")
 
+    @staticmethod
+    def _capture_referral_arg(context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Store a ``ref_<code>`` /start deep-link param for use at registration."""
+        args = getattr(context, "args", None) or []
+        if not args:
+            return
+        param = str(args[0])
+        if param.startswith("ref_") and context.user_data is not None:
+            code = param[len("ref_"):].strip()
+            if code:
+                context.user_data["referral_code"] = code
+
     async def start_registration_new(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start registration process"""
         try:
             user_id = update.effective_user.id
             telegram_language_code = update.effective_user.language_code
+
+            # Capture a referral deep-link param (t.me/<bot>?start=ref_CODE arrives
+            # as "/start ref_CODE") so it can be applied on registration below.
+            self._capture_referral_arg(context)
 
             user_repo = BotUserRepository(db_manager)
             # Check if user already exists
@@ -736,6 +752,10 @@ class ProfileHandlers(BaseHandler):
                             'username': user.username,
                             'language_code': language_code
                         }
+                        # Apply a referral code captured from a /start deep link.
+                        referral_code = (context.user_data or {}).get('referral_code')
+                        if referral_code:
+                            registration_data['referral_code'] = referral_code
                         response = await client.register_telegram_user(user_id, registration_data)
                         if not response.success:
                             logger.error(f"Failed to register telegram user {user_id}: {response.error}")
@@ -760,6 +780,10 @@ class ProfileHandlers(BaseHandler):
                                     tokens.get('expires_in', 3600)
                                 )
                                 logger.info(f"Cached fresh registration tokens for user {user_id}")
+
+                        # Referral code (if any) has now been consumed by the backend.
+                        if context.user_data is not None:
+                            context.user_data.pop('referral_code', None)
                 except Exception as e:
                     logger.error(f"Exception during telegram user registration: {e}")
                     import traceback

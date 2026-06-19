@@ -83,6 +83,23 @@ def make_celery(app=None):
             "task": "business_app.tasks.loyalty_tasks.update_loyalty_tiers",
             "schedule": crontab(hour=1, minute=0, day_of_month=1),
         },
+        # Grant birthday bonuses daily at 6 AM
+        "grant-birthday-bonuses": {
+            "task": "business_app.tasks.loyalty_tasks.grant_birthday_bonuses",
+            "schedule": crontab(hour=6, minute=0),
+        },
+        # Process pending referral rewards daily at 2 AM (grants once the referee's
+        # first order is delivered).
+        "process-pending-referral-rewards": {
+            "task": "business_app.tasks.loyalty_tasks.process_pending_referral_rewards",
+            "schedule": crontab(hour=2, minute=0),
+        },
+        # Share surprise rewards just after business midnight, over the day that
+        # just ended (celery timezone is DISPLAY_TIMEZONE, so hour=0 is local).
+        "process-daily-surprise-rewards": {
+            "task": "business_app.tasks.loyalty_tasks.process_daily_surprise_rewards",
+            "schedule": crontab(hour=0, minute=20),
+        },
         # Send delivery reminders every 30 minutes
         "delivery-reminders": {
             "task": "business_app.tasks.delivery_tasks.send_delivery_reminders",

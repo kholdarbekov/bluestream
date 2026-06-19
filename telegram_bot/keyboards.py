@@ -539,12 +539,19 @@ class OrderKeyboards:
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod
-    def order_confirmation(language: str = 'en', meets_minimum: bool = True) -> InlineKeyboardMarkup:
+    def order_confirmation(
+        language: str = 'en', meets_minimum: bool = True, has_reward: bool = False
+    ) -> InlineKeyboardMarkup:
         """Order confirmation buttons.
 
         When ``meets_minimum`` is False, the Confirm button is replaced by a
         non-actionable warning so the user must go back and fix the cart
         before placing the order.
+
+        ``has_reward`` toggles the loyalty-reward row: an "Apply reward" button
+        when none is selected, or "Change"/"Remove" buttons when one is. The row
+        is only shown once the order meets the minimum (it's part of placing the
+        order, not fixing the cart).
         """
         if meets_minimum:
             primary_row = [
@@ -560,11 +567,46 @@ class OrderKeyboards:
                 {'text': i18n.get('telegram.cancel', language), 'callback_data': 'cancel_order'},
             ]
 
-        buttons = [
-            primary_row,
-            [{'text': i18n.get('telegram.order.edit', language), 'callback_data': 'edit_order'}],
-        ]
+        buttons = [primary_row]
 
+        if meets_minimum:
+            if has_reward:
+                buttons.append([
+                    {'text': '🎁 ' + i18n.get('telegram.loyalty.change_reward', language),
+                     'callback_data': 'checkout_choose_reward'},
+                    {'text': '🗑 ' + i18n.get('telegram.loyalty.remove_reward', language),
+                     'callback_data': 'checkout_remove_reward'},
+                ])
+            else:
+                buttons.append([
+                    {'text': '🎁 ' + i18n.get('telegram.loyalty.apply_reward', language),
+                     'callback_data': 'checkout_choose_reward'},
+                ])
+
+        buttons.append([{'text': i18n.get('telegram.order.edit', language), 'callback_data': 'edit_order'}])
+
+        return KeyboardBuilder.build_inline_keyboard(buttons)
+
+    @staticmethod
+    def checkout_reward_picker(rewards: List[Dict[str, Any]], language: str = 'en') -> InlineKeyboardMarkup:
+        """Picker shown during checkout: one button per redeemable reward + Back.
+
+        ``rewards`` is the already-filtered list of rewards that will actually
+        apply to this order (caller checks affordability + min order value).
+        """
+        points_unit = i18n.get('telegram.loyalty.points_unit', language)
+        buttons = []
+        for reward in rewards:
+            name = reward.get('name') or i18n.get('telegram.loyalty.reward_fallback', language)
+            cost = reward.get('points_cost', 0)
+            buttons.append([{
+                'text': f"🎁 {name} — {cost} {points_unit}",
+                'callback_data': f"checkout_apply_reward_{reward.get('id')}",
+            }])
+        buttons.append([{
+            'text': i18n.get('telegram.back', language),
+            'callback_data': 'back_to_order_confirm',
+        }])
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod

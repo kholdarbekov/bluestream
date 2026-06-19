@@ -152,6 +152,7 @@ class CreateOrderRequest(BaseModel):
     payment_method: Optional[str] = None
     loyalty_points_used: int = Field(default=0, ge=0)
     promo_code: Optional[str] = None
+    reward_id: Optional[int] = Field(default=None, ge=1)
     source: str = Field(default="web")
     special_instructions: Optional[str] = None
 
@@ -363,6 +364,17 @@ def serialize_order(order: Order, include_items=False, include_delivery=False, i
         }
 
 
+def is_free_reward_item(order_item) -> bool:
+    """Whether an order item is a free loyalty-reward (free_product) line.
+
+    Free items in this system come only from a free_product reward redemption,
+    so a zero-priced line is treated as the reward item. Used by customer, bot
+    and admin serializers to render it as an additive "+N free" bonus rather
+    than a confusing duplicate product line.
+    """
+    return float(order_item.unit_price or 0) == 0 and float(order_item.total_price or 0) == 0
+
+
 def serialize_order_item(order_item: OrderItem) -> Dict[str, Any]:
     """Serialize order item object"""
     try:
@@ -374,6 +386,7 @@ def serialize_order_item(order_item: OrderItem) -> Dict[str, Any]:
             "quantity": order_item.quantity,
             "unit_price": float(order_item.unit_price),
             "total_price": float(order_item.total_price),
+            "is_reward": is_free_reward_item(order_item),
             # 'product_image_url': getattr(order_item, 'product_image_url', None)
         }
     except Exception:
@@ -383,6 +396,7 @@ def serialize_order_item(order_item: OrderItem) -> Dict[str, Any]:
             "quantity": order_item.quantity,
             "unit_price": float(order_item.unit_price),
             "total_price": float(order_item.total_price),
+            "is_reward": is_free_reward_item(order_item),
         }
 
 

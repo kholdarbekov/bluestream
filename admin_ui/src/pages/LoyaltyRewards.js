@@ -44,8 +44,6 @@ const { TextArea } = Input;
 const rewardTypeOptions = [
   { value: 'discount', label: 'Discount' },
   { value: 'free_product', label: 'Free Product' },
-  { value: 'free_delivery', label: 'Free Delivery' },
-  { value: 'voucher', label: 'Voucher' },
 ];
 
 const LoyaltyRewards = () => {
@@ -78,6 +76,12 @@ const LoyaltyRewards = () => {
   const programsQuery = useQuery({
     queryKey: ['loyalty-program-options'],
     queryFn: () => adminService.getLoyaltyPrograms({ page: 1, per_page: 100 }),
+    placeholderData: keepPreviousData,
+  });
+
+  const productsQuery = useQuery({
+    queryKey: ['loyalty-product-options'],
+    queryFn: () => adminService.getProducts({ page: 1, per_page: 100, is_active: true }),
     placeholderData: keepPreviousData,
   });
 
@@ -130,6 +134,7 @@ const LoyaltyRewards = () => {
   const rewards = rewardsQuery.data?.items || [];
   const totalRewards = rewardsQuery.data?.total || 0;
   const programs = programsQuery.data?.items || [];
+  const productOptions = (productsQuery.data?.data?.items || []).map((p) => ({ value: p.id, label: p.name }));
   const rewardTypeValue = Form.useWatch('reward_type', rewardForm);
 
   const columns = useMemo(() => ([
@@ -152,7 +157,7 @@ const LoyaltyRewards = () => {
       render: (value) => <Tag color="blue">{value}</Tag>
     },
     {
-      title: t('ui.loyalty.points_cost', { defaultValue: 'Points Cost' }),
+      title: t('ui.loyalty.points_cost', { defaultValue: 'AquaCoins Cost' }),
       dataIndex: 'points_cost',
       key: 'points_cost',
       width: 140,
@@ -317,7 +322,7 @@ const LoyaltyRewards = () => {
                 rewardForm.setFieldsValue({
                   is_active: true,
                   is_featured: false,
-                  reward_type: 'voucher',
+                  reward_type: 'discount',
                   max_uses_per_user: 1,
                   sort_order: 0,
                 });
@@ -366,31 +371,31 @@ const LoyaltyRewards = () => {
         >
           <Descriptions bordered column={2} size="small">
             <Descriptions.Item label={t('ui.loyalty.program', { defaultValue: 'Program' })}>
-              {rewardDetailQuery.data.program_name || '-'}
+              {rewardDetailQuery.data?.program_name || '-'}
             </Descriptions.Item>
             <Descriptions.Item label={t('ui.loyalty.type', { defaultValue: 'Type' })}>
-              {rewardDetailQuery.data.reward_type || '-'}
+              {rewardDetailQuery.data?.reward_type || '-'}
             </Descriptions.Item>
-            <Descriptions.Item label={t('ui.loyalty.points_cost', { defaultValue: 'Points Cost' })}>
-              {rewardDetailQuery.data.points_cost || 0}
+            <Descriptions.Item label={t('ui.loyalty.points_cost', { defaultValue: 'AquaCoins Cost' })}>
+              {rewardDetailQuery.data?.points_cost || 0}
             </Descriptions.Item>
             <Descriptions.Item label={t('ui.loyalty.redemptions', { defaultValue: 'Redemptions' })}>
-              {rewardDetailQuery.data.redemptions_used || 0}
+              {rewardDetailQuery.data?.redemptions_used || 0}
             </Descriptions.Item>
             <Descriptions.Item label={t('ui.loyalty.valid_from', { defaultValue: 'Valid From' })}>
-              {rewardDetailQuery.data.valid_from ? formatDateTime(rewardDetailQuery.data.valid_from) : '-'}
+              {rewardDetailQuery.data?.valid_from ? formatDateTime(rewardDetailQuery.data?.valid_from) : '-'}
             </Descriptions.Item>
             <Descriptions.Item label={t('ui.loyalty.valid_until', { defaultValue: 'Valid Until' })}>
-              {rewardDetailQuery.data.valid_until ? formatDateTime(rewardDetailQuery.data.valid_until) : '-'}
+              {rewardDetailQuery.data?.valid_until ? formatDateTime(rewardDetailQuery.data?.valid_until) : '-'}
             </Descriptions.Item>
             <Descriptions.Item label={t('ui.loyalty.featured', { defaultValue: 'Featured' })}>
-              {rewardDetailQuery.data.is_featured ? 'Yes' : 'No'}
+              {rewardDetailQuery.data?.is_featured ? 'Yes' : 'No'}
             </Descriptions.Item>
             <Descriptions.Item label={t('ui.loyalty.status', { defaultValue: 'Status' })}>
-              {rewardDetailQuery.data.is_active ? 'Active' : 'Inactive'}
+              {rewardDetailQuery.data?.is_active ? 'Active' : 'Inactive'}
             </Descriptions.Item>
             <Descriptions.Item label={t('ui.loyalty.description', { defaultValue: 'Description' })} span={2}>
-              {rewardDetailQuery.data.description || '-'}
+              {rewardDetailQuery.data?.description || '-'}
             </Descriptions.Item>
             <Descriptions.Item label={t('ui.loyalty.terms', { defaultValue: 'Terms' })} span={2}>
               {rewardDetailQuery.data?.terms_conditions || '-'}
@@ -443,7 +448,7 @@ const LoyaltyRewards = () => {
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="points_cost" label={t('ui.loyalty.points_cost', { defaultValue: 'Points Cost' })} rules={[{ required: true }]}>
+              <Form.Item name="points_cost" label={t('ui.loyalty.points_cost', { defaultValue: 'AquaCoins Cost' })} rules={[{ required: true }]}>
                 <InputNumber min={0} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
@@ -495,15 +500,24 @@ const LoyaltyRewards = () => {
           ) : null}
 
           {rewardTypeValue === 'free_product' ? (
-            <Form.Item name="free_product_id" label={t('ui.loyalty.free_product_id', { defaultValue: 'Free Product ID' })}>
-              <InputNumber min={1} style={{ width: '100%' }} />
-            </Form.Item>
-          ) : null}
-
-          {rewardTypeValue === 'voucher' ? (
-            <Form.Item name="voucher_code" label={t('ui.loyalty.voucher_code', { defaultValue: 'Voucher Code' })}>
-              <Input />
-            </Form.Item>
+            <Row gutter={16}>
+              <Col span={12}>
+                <Form.Item name="free_product_id" label={t('ui.loyalty.free_product', { defaultValue: 'Free Product' })} rules={[{ required: true }]}>
+                  <Select
+                    showSearch
+                    optionFilterProp="label"
+                    placeholder={t('ui.loyalty.free_product', { defaultValue: 'Free Product' })}
+                    options={productOptions}
+                    loading={productsQuery.isLoading}
+                  />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item name="free_product_quantity" label={t('ui.loyalty.free_product_quantity', { defaultValue: 'Quantity' })} initialValue={1}>
+                  <InputNumber min={1} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+            </Row>
           ) : null}
 
           <Row gutter={16}>

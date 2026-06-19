@@ -327,7 +327,7 @@
                                     <i class="flaticon-star"></i>
                                 </div>
                                 <h4><a href="{{ url_for('frontend.my_loyalty') }}">{{ reward.name }}</a></h4>
-                                <p>{{ reward.description[:50] }}{% if reward.description|length > 50 %}...{% endif %}</p>
+                                <p>{{ (reward.description or '')[:50] }}{% if reward.description and reward.description|length > 50 %}...{% endif %}</p>
                                 <div class="points-required">
                                     <strong>{{ reward.points_cost }} {{ 'landing.loyalty.points'|t }}</strong>
                                 </div>

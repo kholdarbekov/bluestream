@@ -602,13 +602,13 @@ class AdminService {
     return response.data?.data || {};
   }
 
-  async getLoyaltyPrograms(params = {}) {
-    const response = await api.get('/admin/loyalty/programs', { params });
+  async getLoyaltyMemberTransactions(userId, params = {}) {
+    const response = await api.get(`/admin/loyalty/members/${userId}/transactions`, { params });
     return normalizeAdminCollectionResponse(response.data);
   }
 
-  async getLoyaltyCustomers(params = {}) {
-    const response = await api.get('/admin/loyalty-customers', { params });
+  async getLoyaltyPrograms(params = {}) {
+    const response = await api.get('/admin/loyalty/programs', { params });
     return normalizeAdminCollectionResponse(response.data);
   }
 
@@ -645,6 +645,27 @@ class AdminService {
 
   async deleteLoyaltyTier(tierId) {
     const response = await api.delete(`/admin/loyalty/tiers/${tierId}`);
+    return response.data;
+  }
+
+  // Loyalty Streak Rule management
+  async getLoyaltyStreakRules(params = {}) {
+    const response = await api.get('/admin/loyalty/streak-rules', { params });
+    return response.data?.data || { streak_rules: [], streak_rule_count: 0 };
+  }
+
+  async createLoyaltyStreakRule(ruleData) {
+    const response = await api.post('/admin/loyalty/streak-rules', ruleData);
+    return response.data?.data?.streak_rule || response.data;
+  }
+
+  async updateLoyaltyStreakRule(ruleId, ruleData) {
+    const response = await api.put(`/admin/loyalty/streak-rules/${ruleId}`, ruleData);
+    return response.data?.data?.streak_rule || response.data;
+  }
+
+  async deleteLoyaltyStreakRule(ruleId) {
+    const response = await api.delete(`/admin/loyalty/streak-rules/${ruleId}`);
     return response.data;
   }
 

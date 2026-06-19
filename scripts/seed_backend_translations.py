@@ -1340,34 +1340,34 @@ BACKEND_TRANSLATIONS = {
     # API - Loyalty (api.loyalty.*)
     # ============================================================================
     'api.loyalty.points_earned': {
-        'en': 'Loyalty points earned',
-        'uz': 'Sodiqlik ballari olindi',
-        'ru': 'Баллы лояльности начислены'
+        'en': 'AquaCoins earned',
+        'uz': 'AquaCoins hisobingizga qo‘shildi',
+        'ru': 'AquaCoins начислены'
     },
     'api.loyalty.points_redeemed': {
-        'en': 'Points redeemed successfully',
-        'uz': 'Ballar muvaffaqiyatli ishlatildi',
-        'ru': 'Баллы успешно использованы'
+        'en': 'AquaCoins redeemed successfully',
+        'uz': 'AquaCoins muvaffaqiyatli ishlatildi',
+        'ru': 'AquaCoins успешно списаны'
     },
     'api.loyalty.insufficient_points': {
-        'en': 'Insufficient loyalty points',
-        'uz': 'Yetarli sodiqlik ballari yo\'q',
-        'ru': 'Недостаточно баллов лояльности'
+        'en': 'Not enough AquaCoins',
+        'uz': 'AquaCoins yetarli emas',
+        'ru': 'Недостаточно AquaCoins'
     },
     'api.loyalty.reward_redeemed_successfully': {
         'en': 'Reward redeemed successfully',
-        'uz': 'Mukofot muvaffaqiyatli ishlatildi',
-        'ru': 'Награда успешно активирована'
+        'uz': 'Mukofot muvaffaqiyatli olindi',
+        'ru': 'Награда успешно получена'
     },
     'api.loyalty.points_awarded_successfully': {
-        'en': 'Points awarded successfully',
-        'uz': 'Ballar muvaffaqiyatli berildi',
-        'ru': 'Баллы успешно начислены'
+        'en': 'AquaCoins awarded successfully',
+        'uz': 'AquaCoins muvaffaqiyatli hisobga qo\'shildi',
+        'ru': 'AquaCoins успешно начислены'
     },
     'api.loyalty.points_gifted_successfully': {
-        'en': 'Points gifted successfully',
-        'uz': 'Ballar muvaffaqiyatli sovg\'a qilindi',
-        'ru': 'Баллы успешно подарены'
+        'en': 'AquaCoins gifted successfully',
+        'uz': 'AquaCoins muvaffaqiyatli sovg\'a qilindi',
+        'ru': 'AquaCoins успешно подарены'
     },
     'api.loyalty.error.validation_failed': {
         'en': 'Invalid loyalty request data',
@@ -1410,9 +1410,9 @@ BACKEND_TRANSLATIONS = {
         'ru': 'Неверный формат end_date'
     },
     'api.loyalty.error.insufficient_points': {
-        'en': 'Insufficient points balance',
-        'uz': 'Ballar balansi yetarli emas',
-        'ru': 'Недостаточный баланс баллов'
+        'en': 'Insufficient AquaCoins balance',
+        'uz': 'AquaCoins balansi yetarli emas',
+        'ru': 'Недостаточно AquaCoins на балансе'
     },
     'api.loyalty.error.redemption_limit_reached': {
         'en': 'You have reached the redemption limit for this reward',
@@ -1430,14 +1430,14 @@ BACKEND_TRANSLATIONS = {
         'ru': 'Награда больше недоступна'
     },
     'api.loyalty.error.points_amount_must_be_positive': {
-        'en': 'Points amount must be positive',
-        'uz': 'Ballar miqdori musbat bo\'lishi kerak',
-        'ru': 'Количество баллов должно быть положительным'
+        'en': 'AquaCoins amount must be positive',
+        'uz': 'AquaCoins miqdori musbat bo\'lishi kerak',
+        'ru': 'Количество AquaCoins должно быть положительным'
     },
     'api.loyalty.error.cannot_gift_to_self': {
-        'en': 'Cannot gift points to yourself',
-        'uz': 'O\'zingizga ballar sovg\'a qilib bo\'lmaydi',
-        'ru': 'Нельзя подарить баллы самому себе'
+        'en': 'Cannot gift AquaCoins to yourself',
+        'uz': 'O\'zingizga AquaCoins sovg\'a qilib bo\'lmaydi',
+        'ru': 'Нельзя подарить AquaCoins самому себе'
     },
     'api.loyalty.error.get_membership_tiers_failed': {
         'en': 'Failed to get membership tiers',
@@ -1445,9 +1445,9 @@ BACKEND_TRANSLATIONS = {
         'ru': 'Не удалось получить уровни членства'
     },
     'api.loyalty.error.get_points_failed': {
-        'en': 'Failed to get loyalty points',
-        'uz': 'Sodiqlik ballarini olishda xatolik',
-        'ru': 'Не удалось получить баллы лояльности'
+        'en': 'Failed to retrieve AquaCoins information',
+        'uz': 'AquaCoins ma\'lumotlarini olishda xatolik',
+        'ru': 'Не удалось получить информацию об AquaCoins'
     },
     'api.loyalty.error.get_account_failed': {
         'en': 'Failed to get loyalty account',
@@ -1465,9 +1465,9 @@ BACKEND_TRANSLATIONS = {
         'ru': 'Не удалось получить профиль лояльности'
     },
     'api.loyalty.error.get_points_history_failed': {
-        'en': 'Failed to get points history',
-        'uz': 'Ballar tarixini olishda xatolik',
-        'ru': 'Не удалось получить историю баллов'
+        'en': 'Failed to get AquaCoins history',
+        'uz': 'AquaCoins tarixini olishda xatolik',
+        'ru': 'Не удалось получить историю AquaCoins'
     },
     'api.loyalty.error.get_rewards_failed': {
         'en': 'Failed to get rewards',
@@ -1495,9 +1495,9 @@ BACKEND_TRANSLATIONS = {
         'ru': 'Не удалось получить программы лояльности'
     },
     'api.loyalty.error.earn_points_failed': {
-        'en': 'Failed to earn points',
-        'uz': 'Ballar olishda xatolik',
-        'ru': 'Не удалось начислить баллы'
+        'en': 'Failed to award AquaCoins',
+        'uz': 'AquaCoins hisobga qo‘shishda xatolik',
+        'ru': 'Не удалось начислить AquaCoins'
     },
     'api.loyalty.error.get_referral_info_failed': {
         'en': 'Failed to get referral info',
@@ -1520,9 +1520,9 @@ BACKEND_TRANSLATIONS = {
         'ru': 'Не удалось получить преимущества уровня'
     },
     'api.loyalty.error.gift_points_failed': {
-        'en': 'Failed to gift points',
-        'uz': 'Ballarni sovg\'a qilishda xatolik',
-        'ru': 'Не удалось подарить баллы'
+        'en': 'Failed to gift AquaCoins',
+        'uz': 'AquaCoins sovg\'a qilishda xatolik',
+        'ru': 'Не удалось подарить AquaCoins'
     },
 
     # ============================================================================
@@ -1669,19 +1669,19 @@ BACKEND_TRANSLATIONS = {
         'ru': 'Лояльность'
     },
     'ui.analytics.loyalty_points_earned': {
-        'en': 'Points Earned',
-        'uz': 'Yig\'ilgan ballar',
-        'ru': 'Начисленные баллы'
+        'en': 'AquaCoins Earned',
+        'uz': 'Hisoblangan AquaCoinlar',
+        'ru': 'Начисленные AquaCoins'
     },
     'ui.analytics.loyalty_points_redeemed': {
-        'en': 'Points Redeemed',
-        'uz': 'Ishlatilgan ballar',
-        'ru': 'Списанные баллы'
+        'en': 'AquaCoins Redeemed',
+        'uz': 'Ishlatilgan AquaCoins',
+        'ru': 'Использованные AquaCoins'
     },
     'ui.analytics.loyalty_points_trend': {
-        'en': 'Loyalty Points Trend',
-        'uz': 'Sodiqlik ballari dinamikasi',
-        'ru': 'Динамика баллов лояльности'
+        'en': 'AquaCoins Trend',
+        'uz': 'AquaCoins dinamikasi',
+        'ru': 'Динамика AquaCoins'
     },
     'ui.analytics.members': {
         'en': 'Members',
@@ -1689,14 +1689,14 @@ BACKEND_TRANSLATIONS = {
         'ru': 'Участники'
     },
     'ui.analytics.points': {
-        'en': 'Points',
-        'uz': 'Ballar',
-        'ru': 'Баллы'
+        'en': 'AquaCoins',
+        'uz': 'AquaCoinlar',
+        'ru': 'AquaCoins'
     },
     'ui.analytics.points_in_circulation': {
-        'en': 'Points In Circulation',
-        'uz': 'Aylanmadagi ballar',
-        'ru': 'Баллы в обращении'
+        'en': 'AquaCoins In Circulation',
+        'uz': 'Muomaladagi AquaCoinlar',
+        'ru': 'AquaCoins в обороте'
     },
     'ui.analytics.program': {
         'en': 'Program',
@@ -1854,9 +1854,9 @@ BACKEND_TRANSLATIONS = {
         'ru': 'Активные награды'
     },
     'ui.loyalty.avg_points_per_member': {
-        'en': 'Average Points per Member',
-        'uz': 'Bir a\'zoga o\'rtacha ball',
-        'ru': 'Среднее число баллов на участника'
+        'en': 'Average AquaCoins per Member',
+        'uz': 'Bir a\'zoga o\'rtacha AquaCoins',
+        'ru': 'Среднее число AquaCoins на участника'
     },
     'ui.loyalty.birthday_bonus': {
         'en': 'Birthday Bonus',
@@ -1899,9 +1899,9 @@ BACKEND_TRANSLATIONS = {
         'ru': 'Создано'
     },
     'ui.loyalty.current_points': {
-        'en': 'Current Points',
-        'uz': 'Joriy ballar',
-        'ru': 'Текущие баллы'
+        'en': 'Current AquaCoins',
+        'uz': 'Joriy AquaCoins',
+        'ru': 'Текущие AquaCoins'
     },
     'ui.loyalty.customer': {
         'en': 'Customer',
@@ -2018,10 +2018,20 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Tavsif',
         'ru': 'Описание'
     },
+    'ui.loyalty.free_product': {
+        'en': 'Free Product',
+        'uz': 'Bepul mahsulot',
+        'ru': 'Бесплатный товар'
+    },
     'ui.loyalty.free_product_id': {
         'en': 'Free Product',
         'uz': 'Bepul mahsulot',
         'ru': 'Бесплатный товар'
+    },
+    'ui.loyalty.free_product_quantity': {
+        'en': 'Quantity',
+        'uz': 'Miqdori',
+        'ru': 'Количество'
     },
     'ui.loyalty.image_url': {
         'en': 'Image URL',
@@ -2034,9 +2044,9 @@ BACKEND_TRANSLATIONS = {
         'ru': 'Последняя активность'
     },
     'ui.loyalty.max_points': {
-        'en': 'Maximum Points',
-        'uz': 'Maksimal ball',
-        'ru': 'Максимум баллов'
+        'en': 'Maximum AquaCoins',
+        'uz': 'Maksimal AquaCoins',
+        'ru': 'Максимум AquaCoins'
     },
     'ui.loyalty.max_redemptions': {
         'en': 'Maximum Redemptions',
@@ -2069,14 +2079,14 @@ BACKEND_TRANSLATIONS = {
         'ru': 'Минимальная сумма заказа'
     },
     'ui.loyalty.min_points': {
-        'en': 'Minimum Points',
-        'uz': 'Minimal ball',
-        'ru': 'Минимум баллов'
+        'en': 'Minimum AquaCoins',
+        'uz': 'Minimal AquaCoins',
+        'ru': 'Минимум AquaCoins'
     },
     'ui.loyalty.min_redemption_points': {
-        'en': 'Minimum Redemption Points',
-        'uz': 'Minimal yechib olish ballari',
-        'ru': 'Минимум баллов для списания'
+        'en': 'Minimum Redemption AquaCoins',
+        'uz': 'Minimal yechib olish AquaCoins',
+        'ru': 'Минимум AquaCoins для списания'
     },
     'ui.loyalty.multiplier': {
         'en': 'Multiplier',
@@ -2114,24 +2124,24 @@ BACKEND_TRANSLATIONS = {
         'ru': 'Уровни не настроены'
     },
     'ui.loyalty.points_cost': {
-        'en': 'Points Cost',
-        'uz': 'Ball qiymati',
-        'ru': 'Стоимость в баллах'
+        'en': 'AquaCoins Cost',
+        'uz': 'AquaCoins qiymati',
+        'ru': 'Стоимость в AquaCoins'
     },
     'ui.loyalty.points_distributed': {
-        'en': 'Points In Circulation',
-        'uz': 'Aylanmadagi ballar',
-        'ru': 'Баллы в обращении'
+        'en': 'AquaCoins In Circulation',
+        'uz': 'Muomaladagi AquaCoinlar',
+        'ru': 'AquaCoins в обороте'
     },
     'ui.loyalty.points_expiry_days': {
-        'en': 'Points Expiry Days',
-        'uz': 'Ball amal qilish kunlari',
-        'ru': 'Срок действия баллов в днях'
+        'en': 'AquaCoins Expiry Days',
+        'uz': 'AquaCoinlar amal qilish muddati',
+        'ru': 'Срок действия AquaCoins в днях'
     },
     'ui.loyalty.points_range': {
-        'en': 'Points Range',
-        'uz': 'Ball oralig\'i',
-        'ru': 'Диапазон баллов'
+        'en': 'AquaCoins Range',
+        'uz': 'AquaCoins oralig\'i',
+        'ru': 'Диапазон AquaCoins'
     },
     'ui.loyalty.program': {
         'en': 'Program',
@@ -2147,6 +2157,11 @@ BACKEND_TRANSLATIONS = {
         'en': 'Recent Transactions',
         'uz': 'So\'nggi tranzaksiyalar',
         'ru': 'Недавние транзакции'
+    },
+    'ui.loyalty.transactions': {
+        'en': 'Transactions',
+        'uz': 'Tranzaksiyalar',
+        'ru': 'Транзакции'
     },
     'ui.loyalty.recent_redemptions': {
         'en': 'Recent Redemptions',
@@ -2324,9 +2339,9 @@ BACKEND_TRANSLATIONS = {
         'ru': 'Программа успешно обновлена'
     },
     'ui.loyalty.uzs_per_point': {
-        'en': 'UZS per Point',
-        'uz': 'Bir ball uchun UZS',
-        'ru': 'UZS за балл'
+        'en': 'UZS per AquaCoin',
+        'uz': 'Bir AquaCoin uchun UZS',
+        'ru': 'UZS за AquaCoin'
     },
     'ui.loyalty.valid_from': {
         'en': 'Valid From',
@@ -2337,11 +2352,6 @@ BACKEND_TRANSLATIONS = {
         'en': 'Valid Until',
         'uz': 'Amal qilish muddati',
         'ru': 'Действует до'
-    },
-    'ui.loyalty.voucher_code': {
-        'en': 'Voucher Code',
-        'uz': 'Vaucher kodi',
-        'ru': 'Код ваучера'
     },
     'ui.orders.payment_business_account': {
         'en': 'Business Account',
@@ -3686,6 +3696,11 @@ BACKEND_TRANSLATIONS = {
         'en': 'Next ➡️',
         'uz': 'Keyingi ➡️',
         'ru': 'Далее ➡️'
+    },
+    'telegram.loyalty.history_page_info': {
+        'en': 'Page {page} of {pages}',
+        'uz': 'Sahifa {page}/{pages}',
+        'ru': 'Страница {page} из {pages}'
     },
 
     # ============================================================================
@@ -5473,44 +5488,173 @@ BACKEND_TRANSLATIONS = {
         'ru': 'No rewards available'
     },
     'telegram.loyalty.points_history': {
-        'en': 'Points history',
-        'uz': 'Points history',
-        'ru': 'Points history'
+        'en': 'AquaCoins history',
+        'uz': 'AquaCoins tarixi',
+        'ru': 'История AquaCoins'
     },
     'telegram.loyalty.points_unit': {
-        'en': 'Points unit',
-        'uz': 'Points unit',
-        'ru': 'Points unit'
+        'en': 'AquaCoins',
+        'uz': 'AquaCoins',
+        'ru': 'AquaCoins'
     },
     'telegram.loyalty.redeem_success': {
         'en': 'Redeem success',
         'uz': 'Redeem success',
         'ru': 'Redeem success'
     },
+    'telegram.loyalty.reward_selected': {
+        'en': 'Reward selected — it will be applied at checkout',
+        'uz': "Mukofot tanlandi — buyurtma rasmiylashtirilganda qo'llaniladi",
+        'ru': 'Награда выбрана — она будет применена при оформлении заказа'
+    },
+    'telegram.loyalty.apply_reward': {
+        'en': 'Apply reward',
+        'uz': 'Mukofotni qo\'llash',
+        'ru': 'Применить награду'
+    },
+    'telegram.loyalty.change_reward': {
+        'en': 'Change reward',
+        'uz': 'Mukofotni o\'zgartirish',
+        'ru': 'Изменить награду'
+    },
+    'telegram.loyalty.remove_reward': {
+        'en': 'Remove reward',
+        'uz': 'Mukofotni olib tashlash',
+        'ru': 'Убрать награду'
+    },
+    'telegram.loyalty.choose_reward_title': {
+        'en': 'Choose a reward to apply to this order',
+        'uz': 'Ushbu buyurtmaga qo\'llash uchun mukofotni tanlang',
+        'ru': 'Выберите награду для этого заказа'
+    },
+    'telegram.loyalty.no_rewards_for_order': {
+        'en': 'No rewards are available for this order yet.',
+        'uz': 'Ushbu buyurtma uchun hozircha mukofotlar mavjud emas.',
+        'ru': 'Для этого заказа пока нет доступных наград.'
+    },
+    'telegram.loyalty.reward_removed': {
+        'en': 'Reward removed',
+        'uz': 'Mukofot olib tashlandi',
+        'ru': 'Награда убрана'
+    },
     'telegram.loyalty.refer_friends': {
         'en': 'Refer friends',
         'uz': 'Refer friends',
         'ru': 'Refer friends'
+    },
+    'telegram.loyalty.referral_code': {
+        'en': 'Referral code',
+        'uz': 'Referal kod',
+        'ru': 'Реферальный код'
+    },
+    'telegram.loyalty.referral_total': {
+        'en': 'Total referrals',
+        'uz': 'Jami referallar',
+        'ru': 'Всего рефералов'
+    },
+    'telegram.loyalty.referral_pending': {
+        'en': 'Pending referrals',
+        'uz': 'Kutilayotgan referallar',
+        'ru': 'Ожидающие рефералы'
+    },
+    'telegram.loyalty.referral_points_earned': {
+        'en': 'AquaCoins earned',
+        'uz': "Yig'ilgan AquaCoins",
+        'ru': 'Заработано AquaCoins'
+    },
+    'telegram.loyalty.redeem': {
+        'en': 'Redeem',
+        'uz': 'Almashtirish',
+        'ru': 'Обменять'
     },
     'telegram.loyalty.reward_fallback': {
         'en': 'Reward fallback',
         'uz': 'Reward fallback',
         'ru': 'Reward fallback'
     },
-    'telegram.loyalty.transaction_earned': {
-        'en': 'Transaction earned',
-        'uz': 'Transaction earned',
-        'ru': 'Transaction earned'
+    'telegram.loyalty.reward_applied': {
+        'en': 'Reward applied',
+        'uz': "Mukofot qo'llanildi",
+        'ru': 'Награда применена'
     },
-    'telegram.loyalty.transaction_other': {
-        'en': 'Transaction other',
-        'uz': 'Transaction other',
-        'ru': 'Transaction other'
+    'telegram.loyalty.free_suffix': {
+        'en': 'free',
+        'uz': 'bepul',
+        'ru': 'бесплатно'
     },
-    'telegram.loyalty.transaction_redeemed': {
-        'en': 'Transaction redeemed',
-        'uz': 'Transaction redeemed',
-        'ru': 'Transaction redeemed'
+    # AquaCoins history labels — localized, category-based (derived from the
+    # transaction's action_type/transaction_type in the bot). These replace the
+    # old telegram.loyalty.transaction_* keys, which were never translated and
+    # showed confusing "Transaction other/earned/redeemed" in every language.
+    'telegram.loyalty.txn.order_earn': {
+        'en': 'Order earnings',
+        'uz': 'Buyurtma uchun hisoblandi',
+        'ru': 'Начислено за заказ',
+    },
+    'telegram.loyalty.txn.referral': {
+        'en': 'Referral bonus',
+        'uz': 'Referal bonusi',
+        'ru': 'Реферальный бонус',
+    },
+    'telegram.loyalty.txn.welcome': {
+        'en': 'Welcome bonus',
+        'uz': 'Xush kelibsiz bonusi',
+        'ru': 'Приветственный бонус',
+    },
+    'telegram.loyalty.txn.birthday': {
+        'en': 'Birthday bonus',
+        'uz': "Tug'ilgan kun bonusi",
+        'ru': 'Бонус на день рождения',
+    },
+    'telegram.loyalty.txn.streak': {
+        'en': 'Streak bonus',
+        'uz': 'Seriya bonusi',
+        'ru': 'Бонус за серию заказов',
+    },
+    'telegram.loyalty.txn.surprise': {
+        'en': 'Surprise reward',
+        'uz': 'Kutilmagan mukofot',
+        'ru': 'Сюрприз-бонус',
+    },
+    'telegram.loyalty.txn.redeem': {
+        'en': 'Reward redeemed',
+        'uz': 'Mukofot almashtirildi',
+        'ru': 'Обмен на награду',
+    },
+    'telegram.loyalty.txn.redeem_named': {
+        'en': 'Redeemed: {name}',
+        'uz': 'Almashtirildi: {name}',
+        'ru': 'Обмен: {name}',
+    },
+    'telegram.loyalty.txn.refund': {
+        'en': 'Reward refund',
+        'uz': 'Mukofot qaytarildi',
+        'ru': 'Возврат обмена',
+    },
+    'telegram.loyalty.txn.refund_order': {
+        'en': 'Reward refund (order #{order_id})',
+        'uz': 'Mukofot qaytarildi (buyurtma #{order_id})',
+        'ru': 'Возврат обмена (заказ #{order_id})',
+    },
+    'telegram.loyalty.txn.adjustment': {
+        'en': 'Adjustment',
+        'uz': 'Tuzatish',
+        'ru': 'Корректировка',
+    },
+    'telegram.loyalty.txn.bonus': {
+        'en': 'Bonus',
+        'uz': 'Bonus',
+        'ru': 'Бонус',
+    },
+    'telegram.loyalty.txn.expired': {
+        'en': 'Expired',
+        'uz': 'Muddati tugadi',
+        'ru': 'Срок действия истёк',
+    },
+    'telegram.loyalty.txn.other': {
+        'en': 'Transaction',
+        'uz': 'Amal',
+        'ru': 'Операция',
     },
     'telegram.loyalty.view_rewards': {
         'en': 'View rewards',
@@ -5861,6 +6005,20 @@ def _resolve_seed_value(
 
     return localized_value, False
 
+
+def _category_for(key: str) -> str:
+    """Derive the Translation.category for a key.
+
+    Dotted keys (``ui.loyalty.x``) use their first segment; dotless
+    English-literal storefront keys (looked up by the literal text via the
+    ``t`` filter) have no category and default to ``general`` — mirroring
+    TranslationService._get_cache_timeout. The result is capped to the
+    ``varchar(50)`` column width so a long key can never abort the reseed.
+    """
+    category = key.split('.')[0] if '.' in key else 'general'
+    return category[:50]
+
+
 ADMIN_UI_ORDER_TRANSLATIONS = {
     'ui.common.archive': _ui_tr('Archive', 'Arxivlash', 'Архивировать'),
     'ui.common.disabled': _ui_tr('Disabled', "O'chirilgan", 'Отключено'),
@@ -6063,7 +6221,7 @@ ADMIN_UI_ORDER_TRANSLATIONS = {
         'Соберите доплату НАЛИЧНЫМИ через «Оплата на личную карту» (карта повторно не списывается)',
     ),
     'ui.orders.payment_totals_only': _ui_tr('Totals updated; no payment change', 'Jami yangilandi; to\'lov o\'zgarmadi', 'Итоги обновлены; оплата не изменилась'),
-    'ui.orders.loyalty_change': _ui_tr('Loyalty points change', 'Sodiqlik balli o\'zgarishi', 'Изменение баллов лояльности'),
+    'ui.orders.loyalty_change': _ui_tr('Loyalty AquaCoins change', 'Sodiqlik AquaCoins o\'zgarishi', 'Изменение AquaCoins лояльности'),
     'ui.orders.no_bottle_change': _ui_tr('No bottle balance change', 'Idish qoldig\'i o\'zgarmaydi', 'Баланс тары не изменяется'),
     'ui.orders.no_corporate_change': _ui_tr('No corporate ledger change', 'Korporativ buxgalteriya o\'zgarmaydi', 'Корпоративная книга не изменяется'),
     'ui.orders.corporate_manual': _ui_tr(
@@ -6543,8 +6701,8 @@ ADMIN_UI_BACKFILL_TRANSLATIONS = {
     # ---- ui.corporate.* ----
     'ui.corporate.loyalty_eligible': _ui_tr('Loyalty Eligible', 'Sodiqlikka loyiq', 'Доступна программа лояльности'),
     'ui.corporate.loyalty_ineligible': _ui_tr('Loyalty Ineligible', 'Sodiqlikka loyiq emas', 'Программа лояльности недоступна'),
-    'ui.corporate.loyalty_points': _ui_tr('Loyalty Points', 'Sodiqlik ballari', 'Баллы лояльности'),
-    'ui.corporate.loyalty_points_eligible': _ui_tr('Loyalty points eligible', 'Sodiqlik ballariga loyiq', 'Доступно для начисления баллов'),
+    'ui.corporate.loyalty_points': _ui_tr('Loyalty AquaCoins', 'Sodiqlik AquaCoins', 'AquaCoins лояльности'),
+    'ui.corporate.loyalty_points_eligible': _ui_tr('Loyalty AquaCoins eligible', 'Sodiqlik AquaCoins olishga loyiq', 'Доступно для начисления AquaCoins'),
     'ui.corporate.overlap_conflicts_summary': _ui_tr('Overlap conflicts summary', 'Bir-biriga mos kelmaslik xulosasi', 'Сводка по пересечениям'),
 
     # ---- ui.dashboard.* ----
@@ -6884,6 +7042,463 @@ ADMIN_UI_BACKFILL_TRANSLATIONS = {
 BACKEND_TRANSLATIONS.update(ADMIN_UI_BACKFILL_TRANSLATIONS)
 
 
+# ── Public loyalty handbook (/loyalty-guide) + bot entry button ──────────────
+# Prose for the customer-facing loyalty program guide. Numbers are interpolated
+# at render time from get_loyalty_handbook_context (live program/tier config),
+# so these strings stay free of hard-coded amounts. Placeholders: {uzs} {unit}
+# {pts} {you} {friend} {orders} {days} {spend} {base} {tier} {mult} {points}.
+LOYALTY_GUIDE_TRANSLATIONS = {
+    'loyalty_guide.meta.title': _ui_tr(
+        'Loyalty Program Guide — Earn, Redeem & Rise',
+        "Sodiqlik dasturi qo'llanmasi — Yig'ing, sarflang, ko'tariling",
+        'Гид по программе лояльности — копите, тратьте, растите',
+    ),
+    'loyalty_guide.meta.description': _ui_tr(
+        'Everything about the Aqua Element loyalty program: how you earn AquaCoins, tiers and multipliers, expiry, and how to redeem rewards.',
+        "Aqua Element sodiqlik dasturi haqida hammasi: AquaCoins qanday yig'asiz, darajalar va koeffitsiyentlar, amal qilish muddati va mukofotlarni almashtirish.",
+        'Всё о программе лояльности Aqua Element: как начисляются AquaCoins, уровни и множители, срок действия и как обменивать награды.',
+    ),
+    'loyalty_guide.hero.eyebrow': _ui_tr('Aqua Club · Loyalty Program', 'Aqua Club · Sodiqlik dasturi', 'Aqua Club · Программа лояльности'),
+    'loyalty_guide.hero.title': _ui_tr('Every drop rewards you.', 'Har bir tomchi sizni mukofotlaydi.', 'Каждая капля вознаграждает вас.'),
+    'loyalty_guide.hero.subtitle': _ui_tr(
+        'Earn AquaCoins on every order, climb through four tiers, and turn your loyalty into real discounts and free water.',
+        "Har bir buyurtmada AquaCoins to'plang, to'rtta darajadan ko'tariling va sodiqligingizni haqiqiy chegirma va bepul suvga aylantiring.",
+        'Зарабатывайте AquaCoins за каждый заказ, поднимайтесь по четырём уровням и превращайте лояльность в реальные скидки и бесплатную воду.',
+    ),
+    'loyalty_guide.hero.cta_primary': _ui_tr('Start earning', "Yig'ishni boshlash", 'Начать копить'),
+    'loyalty_guide.hero.cta_secondary': _ui_tr('See the tiers', "Darajalarni ko'rish", 'Смотреть уровни'),
+
+    'loyalty_guide.unit.point': _ui_tr('AquaCoin', 'AquaCoin', 'AquaCoin'),
+    'loyalty_guide.unit.points': _ui_tr('AquaCoins', 'AquaCoins', 'AquaCoins'),
+    'loyalty_guide.unit.uzs': _ui_tr('UZS', "so'm", 'сум'),
+
+    'loyalty_guide.stat.rate_label': _ui_tr('for every {uzs} {unit} spent', 'har {uzs} {unit} uchun', 'за каждые {uzs} {unit}'),
+    'loyalty_guide.stat.welcome_label': _ui_tr('welcome bonus', 'xush kelibsiz bonusi', 'приветственный бонус'),
+    'loyalty_guide.stat.tiers_label': _ui_tr('status tiers', 'daraja', 'уровня статуса'),
+    'loyalty_guide.stat.multiplier_label': _ui_tr('max AquaCoins rate', 'maksimal AquaCoins', 'макс. множитель'),
+
+    'loyalty_guide.earn.kicker': _ui_tr('Earning', "Yig'ish", 'Начисление'),
+    'loyalty_guide.earn.title': _ui_tr('How you earn AquaCoins', "AquaCoins qanday yig'asiz", 'Как вы зарабатываете AquaCoins'),
+    'loyalty_guide.earn.subtitle': _ui_tr(
+        'Five easy ways to grow your balance — most of them happen automatically.',
+        "Balansingizni oshirishning beshta oson yo'li — aksariyati avtomatik.",
+        'Пять простых способов пополнить баланс — большинство происходит автоматически.',
+    ),
+    'loyalty_guide.earn.purchase_title': _ui_tr('Every order', 'Har bir buyurtma', 'Каждый заказ'),
+    'loyalty_guide.earn.purchase_desc': _ui_tr(
+        'Earn 1 AquaCoin for every {uzs} {unit} you spend — then multiplied by your tier rate.',
+        "Sarflagan har {uzs} {unit} uchun 1 AquaCoin oling — so'ng darajangiz koeffitsiyentiga ko'paytiriladi.",
+        'Получайте 1 AquaCoin за каждые {uzs} {unit} — затем сумма умножается на множитель вашего уровня.',
+    ),
+    'loyalty_guide.earn.welcome_title': _ui_tr('Welcome gift', 'Xush kelibsiz sovgʻasi', 'Приветственный подарок'),
+    'loyalty_guide.earn.welcome_desc': _ui_tr(
+        'Get {pts} AquaCoins the moment you join. Our gift to start you off.',
+        "Qo'shilishingiz bilan {pts} AquaCoins oling. Boshlashingiz uchun sovgʻamiz.",
+        'Получите {pts} AquaCoins сразу при регистрации. Наш подарок для старта.',
+    ),
+    'loyalty_guide.earn.referral_title': _ui_tr('Invite friends', "Do'stlarni taklif qiling", 'Приглашайте друзей'),
+    'loyalty_guide.earn.referral_desc': _ui_tr(
+        'Invite a friend: you get {you} AquaCoins and they get {friend}, after their first delivered and paid order.',
+        "Do'stingizni taklif qiling: ularning birinchi yetkazib berilgan va to'langan buyurtmasidan so'ng siz {you} AquaCoins, ular {friend} AquaCoins olasiz.",
+        'Пригласите друга: вы получите {you} AquaCoins, а он — {friend}, после его первого доставленного и оплаченного заказа.',
+    ),
+    'loyalty_guide.earn.birthday_title': _ui_tr('Birthday bonus', "Tug'ilgan kun bonusi", 'Бонус на день рождения'),
+    'loyalty_guide.earn.birthday_desc': _ui_tr(
+        'Celebrate with {pts} bonus AquaCoins on your birthday — even more at higher tiers.',
+        "Tug'ilgan kuningizda {pts} bonus AquaCoins bilan nishonlang — yuqori darajalarda yanada ko'proq.",
+        'Отпразднуйте с {pts} бонусными AquaCoins в день рождения — на высоких уровнях ещё больше.',
+    ),
+    'loyalty_guide.earn.streak_title': _ui_tr('Order streak', 'Buyurtmalar seriyasi', 'Серия заказов'),
+    'loyalty_guide.earn.streak_desc': _ui_tr(
+        'Place {orders} orders within {days} days and earn a {pts}-AquaCoin streak bonus.',
+        '{days} kun ichida {orders} ta buyurtma bering va {pts} AquaCoinlik seriya bonusini oling.',
+        'Сделайте {orders} заказа за {days} дней и получите бонус серии в {pts} AquaCoins.',
+    ),
+    'loyalty_guide.earn.streak_line': _ui_tr(
+        '{orders} orders / {days} days → +{pts} {unit}',
+        '{orders} buyurtma / {days} kun → +{pts} {unit}',
+        '{orders} заказа / {days} дней → +{pts} {unit}',
+    ),
+    'loyalty_guide.earn.streak_min': _ui_tr(
+        'each order ≥ {uzs} {unit}',
+        'har bir buyurtma ≥ {uzs} {unit}',
+        'каждый заказ ≥ {uzs} {unit}',
+    ),
+    'loyalty_guide.earn.surprise_title': _ui_tr('Surprise rewards', 'Kutilmagan mukofotlar', 'Сюрприз-награды'),
+    'loyalty_guide.earn.surprise_desc': _ui_tr(
+        'Every so often, an order delivered and fully paid the same day randomly drops {amounts} bonus AquaCoins — for individual members. Checked daily, about a {chance}% chance, at most once every {cooldown} days.',
+        "Goho o'sha kuni yetkazib berilib, to'liq to'langan buyurtma tasodifan {amounts} bonus AquaCoins beradi — faqat jismoniy shaxs a'zolar uchun. Har kuni tekshiriladi, taxminan {chance}% imkoniyat, {cooldown} kunda ko'pi bilan bir marta.",
+        'Иногда заказ, доставленный и полностью оплаченный в тот же день, случайно приносит {amounts} бонусных AquaCoins — только для индивидуальных участников. Проверяется ежедневно, шанс около {chance}%, не чаще одного раза в {cooldown} дней.',
+    ),
+
+    'loyalty_guide.example.title': _ui_tr('See it in action', 'Amalda koʻring', 'Пример расчёта'),
+    'loyalty_guide.example.body': _ui_tr(
+        "Spend {spend} {unit} as a {tier} member and you'll earn {base} base AquaCoins × {mult} = {points} AquaCoins.",
+        "{tier} aʼzosi sifatida {spend} {unit} sarflang va {base} asosiy AquaCoins × {mult} = {points} AquaCoins yigʻasiz.",
+        'Потратьте {spend} {unit} как участник уровня {tier} — и получите {base} базовых AquaCoins × {mult} = {points} AquaCoins.',
+    ),
+
+    # --- Referral section (dedicated "How referrals work" flow) ---
+    'loyalty_guide.referral.kicker': _ui_tr('Refer & earn', "Taklif qiling va yig'ing", 'Приглашайте и зарабатывайте'),
+    'loyalty_guide.referral.title': _ui_tr(
+        'Invite friends, earn together',
+        "Do'stlarni taklif qiling — birga yig'ing",
+        'Приглашайте друзей — зарабатывайте вместе',
+    ),
+    'loyalty_guide.referral.subtitle': _ui_tr(
+        'Share your personal link. When a friend joins and completes their first order, you get {you} AquaCoins and they get {friend}.',
+        "Shaxsiy havolangizni ulashing. Do'stingiz qo'shilib, birinchi buyurtmasini yakunlaganda siz {you} AquaCoins, u esa {friend} AquaCoins oladi.",
+        'Поделитесь своей персональной ссылкой. Когда друг зарегистрируется и завершит первый заказ, вы получите {you} AquaCoins, а он — {friend}.',
+    ),
+    'loyalty_guide.referral.s1_title': _ui_tr('Share your link', 'Havolangizni ulashing', 'Поделитесь ссылкой'),
+    'loyalty_guide.referral.s1_desc': _ui_tr(
+        'Open the Loyalty section in our Telegram bot to get your personal referral link, then send it to a friend.',
+        "Telegram botimizdagi Sodiqlik bo'limini ochib, shaxsiy referal havolangizni oling va do'stingizga yuboring.",
+        'Откройте раздел «Лояльность» в нашем Telegram-боте, получите персональную реферальную ссылку и отправьте другу.',
+    ),
+    'loyalty_guide.referral.s2_title': _ui_tr('Your friend joins', "Do'stingiz qo'shiladi", 'Друг присоединяется'),
+    'loyalty_guide.referral.s2_desc': _ui_tr(
+        'They open your link, register and start ordering. The referral now shows as Pending.',
+        "U havolangizni ochadi, ro'yxatdan o'tadi va buyurtma bera boshlaydi. Referal endi «Kutilmoqda» holatida ko'rinadi.",
+        'Он переходит по ссылке, регистрируется и начинает заказывать. Реферал отображается как «Ожидается».',
+    ),
+    'loyalty_guide.referral.s3_title': _ui_tr('You both earn', "Ikkalangiz ham yig'asiz", 'Вы оба зарабатываете'),
+    'loyalty_guide.referral.s3_desc': _ui_tr(
+        "Once your friend's first order is delivered and fully paid, you get {you} AquaCoins and they get {friend} — added automatically.",
+        "Do'stingizning birinchi buyurtmasi yetkazib berilib, to'liq to'langach, siz {you} AquaCoins, u esa {friend} AquaCoins olasiz — avtomatik qo'shiladi.",
+        'Как только первый заказ друга доставлен и полностью оплачен, вы получаете {you} AquaCoins, а он — {friend} — начисляется автоматически.',
+    ),
+    'loyalty_guide.referral.note_title': _ui_tr(
+        'When does a referral count?',
+        'Referal qachon hisobga olinadi?',
+        'Когда реферал засчитывается?',
+    ),
+    'loyalty_guide.referral.note_body': _ui_tr(
+        "A referral is successful only when your friend's first order is both delivered and fully paid. Until then it stays Pending — a delivered order that hasn't been paid yet (for example, cash on delivery awaiting collection) does not count.",
+        "Referal faqat do'stingizning birinchi buyurtmasi yetkazib berilib, to'liq to'langandagina muvaffaqiyatli hisoblanadi. Shu paytgacha u «Kutilmoqda» bo'lib qoladi — yetkazib berilgan, ammo hali to'lanmagan buyurtma (masalan, yetkazib berishda naqd to'lov hali yig'ilmagan) hisobga olinmaydi.",
+        'Реферал считается успешным, только когда первый заказ друга доставлен и полностью оплачен. До этого он остаётся «Ожидается» — доставленный, но ещё не оплаченный заказ (например, наличными при доставке, оплата ещё не получена) не засчитывается.',
+    ),
+    'loyalty_guide.referral.timing': _ui_tr(
+        'Bonuses are granted automatically and may take up to a day to appear after the order is delivered and paid.',
+        "Bonuslar avtomatik qo'shiladi va buyurtma yetkazib berilib, to'langach paydo bo'lishi bir kungacha vaqt olishi mumkin.",
+        'Бонусы начисляются автоматически и могут появиться в течение суток после доставки и оплаты заказа.',
+    ),
+
+    'loyalty_guide.tiers.kicker': _ui_tr('Status', 'Maqom', 'Статус'),
+    'loyalty_guide.tiers.title': _ui_tr('Climb the tiers', "Darajalar bo'ylab ko'tariling", 'Поднимайтесь по уровням'),
+    'loyalty_guide.tiers.subtitle': _ui_tr(
+        'The more you earn over a year, the higher you rise — and the faster every future AquaCoin adds up.',
+        "Bir yil davomida qancha ko'p yig'sangiz, shuncha yuqori ko'tarilasiz — va har bir kelajakdagi AquaCoin tezroq to'planadi.",
+        'Чем больше вы зарабатываете за год, тем выше поднимаетесь — и тем быстрее растут будущие AquaCoins.',
+    ),
+    'loyalty_guide.tier.from': _ui_tr('From {pts} AquaCoins', '{pts} AquaCoinsdan', 'От {pts} AquaCoins'),
+    'loyalty_guide.tier.label_multiplier': _ui_tr('AquaCoins rate', 'AquaCoins koeffitsiyenti', 'множитель'),
+    'loyalty_guide.tier.label_discount': _ui_tr('tier discount', 'daraja chegirmasi', 'скидка уровня'),
+
+    # Tier NAMES are model-translatable (LoyaltyTierConfig.name entity translations,
+    # editable in admin) — intentionally NOT seeded here as static keys.
+    #
+    # Multiplier & discount perks are SHARED, config-driven keys rendered per tier
+    # from live LoyaltyTierConfig; the discount bullet is hidden at 0%.
+    'loyalty_guide.tier.perk_multiplier': _ui_tr('{mult}× AquaCoins on every order', 'Har buyurtmada {mult}× AquaCoins', '{mult}× AquaCoins за каждый заказ'),
+    'loyalty_guide.tier.perk_discount': _ui_tr('{pct}% tier discount', '{pct}% daraja chegirmasi', 'Скидка уровня {pct}%'),
+
+    # Tagline + qualitative benefit bullets are keyed by tier display_order (0=lowest
+    # tier), a rename-proof identity — renaming a tier never drops its handbook copy.
+    'loyalty_guide.tier.0.tagline': _ui_tr('Where every member starts', "Har bir a'zo shu yerdan boshlaydi", 'С этого начинают все'),
+    'loyalty_guide.tier.0.benefit1': _ui_tr('Full access to the rewards catalog', "Mukofotlar katalogiga to'liq kirish", 'Полный доступ к каталогу наград'),
+    'loyalty_guide.tier.0.benefit2': _ui_tr('Standard delivery, always free', 'Standart yetkazib berish, doim bepul', 'Стандартная доставка, всегда бесплатно'),
+
+    'loyalty_guide.tier.1.tagline': _ui_tr('For our regulars', 'Doimiy mijozlarimiz uchun', 'Для постоянных клиентов'),
+    'loyalty_guide.tier.1.benefit1': _ui_tr('Priority support & faster delivery', 'Ustuvor qo‘llab-quvvatlash va tezroq yetkazish', 'Приоритетная поддержка и быстрая доставка'),
+
+    'loyalty_guide.tier.2.tagline': _ui_tr('For true water lovers', 'Haqiqiy suv ixlosmandlari uchun', 'Для настоящих ценителей воды'),
+    'loyalty_guide.tier.2.benefit1': _ui_tr('VIP support & early access to promos', 'VIP qo‘llab-quvvatlash va aksiyalarga erta kirish', 'VIP-поддержка и ранний доступ к акциям'),
+
+    'loyalty_guide.tier.3.tagline': _ui_tr('Our most valued members', "Eng qadrli a'zolarimiz", 'Самые ценные участники'),
+    'loyalty_guide.tier.3.benefit1': _ui_tr('Dedicated manager & free express delivery', 'Shaxsiy menejer va bepul ekspress yetkazish', 'Персональный менеджер и бесплатная экспресс-доставка'),
+
+    'loyalty_guide.promo.title': _ui_tr('How tier promotion works', 'Daraja oshirish qanday ishlaydi', 'Как происходит повышение уровня'),
+    'loyalty_guide.promo.s1_title': _ui_tr('Cross a threshold', "Chegaradan o'ting", 'Преодолейте порог'),
+    'loyalty_guide.promo.s1_desc': _ui_tr(
+        "Reach a tier's AquaCoin threshold and you're upgraded instantly — no waiting.",
+        'Daraja AquaCoins chegarasiga yeting va darhol koʻtarilasiz — kutishsiz.',
+        'Достигните порога уровня — и повышение происходит мгновенно, без ожидания.',
+    ),
+    'loyalty_guide.promo.s2_title': _ui_tr('Locked in for a year', 'Bir yilga mustahkamlanadi', 'Закреплён на год'),
+    'loyalty_guide.promo.s2_desc': _ui_tr(
+        "Your new tier is guaranteed for {days} days — you won't be downgraded while you stay active.",
+        'Yangi darajangiz {days} kunga kafolatlanadi — faol boʻlib turganingizda pasaytirilmaysiz.',
+        'Ваш новый уровень гарантирован на {days} дней — вы не понизитесь, пока остаётесь активны.',
+    ),
+    'loyalty_guide.promo.s3_title': _ui_tr('Stay active', 'Faol boʻling', 'Оставайтесь активны'),
+    'loyalty_guide.promo.s3_desc': _ui_tr(
+        'Keep ordering to refresh your status and hold your tier — or climb to the next one.',
+        'Maqomingizni yangilash va darajangizni saqlash uchun buyurtma berishda davom eting — yoki keyingisiga koʻtariling.',
+        'Продолжайте заказывать, чтобы обновлять статус и сохранять уровень — или подняться выше.',
+    ),
+    'loyalty_guide.rolling.title': _ui_tr('Your status uses the last 12 months.', 'Maqomingiz soʻnggi 12 oyga asoslanadi.', 'Статус считается за последние 12 месяцев.'),
+    'loyalty_guide.rolling.body': _ui_tr(
+        'Only AquaCoins earned in the trailing {days} days count toward your tier. Spending AquaCoins on rewards never changes your status.',
+        'Faqat soʻnggi {days} kun ichida yigʻilgan AquaCoins darajangizga hisoblanadi. Mukofotlarga AquaCoins sarflash maqomingizni oʻzgartirmaydi.',
+        'К уровню учитываются только AquaCoins за последние {days} дней. Трата AquaCoins на награды никогда не меняет статус.',
+    ),
+
+    'loyalty_guide.twopoints.kicker': _ui_tr('Good to know', 'Bilib qoʻying', 'Важно знать'),
+    'loyalty_guide.twopoints.title': _ui_tr('Two kinds of AquaCoins', 'Ikki xil AquaCoins', 'Два вида AquaCoins'),
+    'loyalty_guide.twopoints.balance_title': _ui_tr('Spendable balance', 'Sarflanadigan balans', 'Доступный баланс'),
+    'loyalty_guide.twopoints.balance_desc': _ui_tr(
+        'The AquaCoins you can redeem right now for discounts and free products.',
+        'Hozir chegirma va bepul mahsulotlarga almashtira oladigan AquaCoins.',
+        'AquaCoins, которые можно прямо сейчас обменять на скидки и товары.',
+    ),
+    'loyalty_guide.twopoints.status_title': _ui_tr('Status AquaCoins', 'Maqom AquaCoins', 'Статусные AquaCoins'),
+    'loyalty_guide.twopoints.status_desc': _ui_tr(
+        'AquaCoins earned in the last {days} days. These decide your tier — and redeeming never reduces them.',
+        'Soʻnggi {days} kun ichida yigʻilgan AquaCoins. Ular darajangizni belgilaydi — va almashtirish ularni kamaytirmaydi.',
+        'AquaCoins за последние {days} дней. Они определяют уровень — и обмен их не уменьшает.',
+    ),
+    'loyalty_guide.twopoints.note': _ui_tr(
+        'Redeeming rewards never lowers your tier. Spend your balance freely — your status stays.',
+        'Mukofotlarni almashtirish darajangizni hech qachon pasaytirmaydi. Balansingizni bemalol sarflang — maqomingiz saqlanadi.',
+        'Обмен наград никогда не понижает уровень. Тратьте баланс свободно — статус сохраняется.',
+    ),
+
+    'loyalty_guide.rewards.kicker': _ui_tr('Rewards', 'Mukofotlar', 'Награды'),
+    'loyalty_guide.rewards.title': _ui_tr("Rewards you'll love", 'Sizga yoqadigan mukofotlar', 'Награды, которые вам понравятся'),
+    'loyalty_guide.rewards.subtitle': _ui_tr(
+        'Turn your AquaCoins into savings on the water you already order.',
+        'AquaCoins allaqachon buyurtma qilayotgan suvingizdagi tejamga aylantiring.',
+        'Превратите AquaCoins в экономию на воде, которую вы и так заказываете.',
+    ),
+    'loyalty_guide.rewards.discount_title': _ui_tr('Discounts', 'Chegirmalar', 'Скидки'),
+    'loyalty_guide.rewards.discount_desc': _ui_tr(
+        'Knock a fixed amount off your order total at checkout.',
+        'Toʻlov paytida buyurtma summangizdan belgilangan miqdorni chegiring.',
+        'Снижайте сумму заказа на фиксированную величину при оформлении.',
+    ),
+    'loyalty_guide.rewards.product_title': _ui_tr('Free products', 'Bepul mahsulotlar', 'Бесплатные товары'),
+    'loyalty_guide.rewards.product_desc': _ui_tr(
+        'Add a free bottle of water straight to your order.',
+        'Buyurtmangizga bepul suv shishasini qoʻshing.',
+        'Добавьте бесплатную бутылку воды прямо в заказ.',
+    ),
+    'loyalty_guide.redeem.title': _ui_tr('How to redeem', 'Qanday almashtirish', 'Как обменять'),
+    'loyalty_guide.redeem.s1': _ui_tr(
+        'Pick a reward at checkout in the app or Telegram bot.',
+        'Ilova yoki Telegram botda toʻlov paytida mukofotni tanlang.',
+        'Выберите награду при оформлении в приложении или Telegram-боте.',
+    ),
+    'loyalty_guide.redeem.s2': _ui_tr('Your AquaCoins are deducted instantly.', 'AquaCoins darhol yechib olinadi.', 'AquaCoins списываются мгновенно.'),
+    'loyalty_guide.redeem.s3': _ui_tr(
+        'The discount or free item applies to that order.',
+        'Chegirma yoki bepul mahsulot oʻsha buyurtmaga qoʻllaniladi.',
+        'Скидка или бесплатный товар применяется к этому заказу.',
+    ),
+    'loyalty_guide.redeem.note': _ui_tr(
+        'One reward per order. Some rewards have a minimum order value. Cancel an order and your AquaCoins are refunded.',
+        'Har buyurtmaga bitta mukofot. Baʼzi mukofotlarda minimal buyurtma summasi bor. Buyurtmani bekor qilsangiz, AquaCoins qaytariladi.',
+        'Одна награда на заказ. У некоторых наград есть минимальная сумма заказа. При отмене заказа AquaCoins возвращаются.',
+    ),
+
+    'loyalty_guide.expiry.title': _ui_tr('Make them count.', 'AquaCoins ishlating.', 'Используйте вовремя.'),
+    'loyalty_guide.expiry.body': _ui_tr(
+        'AquaCoins are valid for {days} days from the day you earn them, and we always use your oldest AquaCoins first — so put them to use within the year.',
+        'AquaCoins yigʻilgan kundan {days} kun amal qiladi va biz doim eng eski AquaCoins birinchi ishlatamiz — shuning uchun ularni yil davomida ishlating.',
+        'AquaCoins действуют {days} дней с момента начисления, и мы всегда используем самые старые AquaCoins первыми — поэтому используйте их в течение года.',
+    ),
+    'loyalty_guide.delivery_note': _ui_tr(
+        'Delivery is always free — you never spend AquaCoins on it.',
+        'Yetkazib berish doim bepul — bunga hech qachon AquaCoins sarflamaysiz.',
+        'Доставка всегда бесплатна — AquaCoins на неё не тратятся.',
+    ),
+
+    'loyalty_guide.faq.kicker': _ui_tr('FAQ', 'Savol-javob', 'Вопросы и ответы'),
+    'loyalty_guide.faq.title': _ui_tr('Questions, answered', 'Savollarga javoblar', 'Ответы на вопросы'),
+    'loyalty_guide.faq.q1': _ui_tr('Do my AquaCoins expire?', 'AquaCoins muddati tugaydimi?', 'Сгорают ли мои AquaCoins?'),
+    'loyalty_guide.faq.a1': _ui_tr(
+        'Yes — AquaCoins stay valid for {days} days from when you earn them. We always spend your oldest AquaCoins first.',
+        'Ha — AquaCoins yigʻilgan kundan {days} kun amal qiladi. Biz doim eng eski AquaCoins birinchi sarflaymiz.',
+        'Да — AquaCoins действуют {days} дней с момента начисления. Сначала всегда расходуются самые старые.',
+    ),
+    'loyalty_guide.faq.q2': _ui_tr('Does redeeming rewards lower my tier?', 'Mukofot almashtirish darajamni pasaytiradimi?', 'Понижает ли обмен наград мой уровень?'),
+    'loyalty_guide.faq.a2': _ui_tr(
+        "No. Your tier is based on the AquaCoins you've earned, not your spendable balance. Redeem freely — your status stays.",
+        'Yoʻq. Darajangiz sarflanadigan balansga emas, yigʻgan AquaCoins asoslanadi. Bemalol almashtiring — maqomingiz saqlanadi.',
+        'Нет. Уровень зависит от заработанных AquaCoins, а не от доступного баланса. Обменивайте свободно — статус сохраняется.',
+    ),
+    'loyalty_guide.faq.q3': _ui_tr('How is my tier decided?', 'Darajam qanday aniqlanadi?', 'Как определяется мой уровень?'),
+    'loyalty_guide.faq.a3': _ui_tr(
+        "By the AquaCoins you earn in a rolling 12-month window. Cross a threshold and you're upgraded instantly, then locked in.",
+        'Soʻnggi 12 oy ichida yigʻgan AquaCoins boʻyicha. Chegaradan oʻtsangiz, darhol koʻtarilasiz va daraja mustahkamlanadi.',
+        'По AquaCoins за скользящие 12 месяцев. Преодолели порог — повышение мгновенно, затем уровень закрепляется.',
+    ),
+    'loyalty_guide.faq.q4': _ui_tr('How do I redeem a reward?', 'Mukofotni qanday almashtiraman?', 'Как обменять награду?'),
+    'loyalty_guide.faq.a4': _ui_tr(
+        'Pick a reward at checkout in the app or our Telegram bot. Your AquaCoins are deducted and the benefit applies to that order.',
+        'Ilova yoki Telegram botimizda toʻlov paytida mukofotni tanlang. AquaCoins yechiladi va imtiyoz oʻsha buyurtmaga qoʻllaniladi.',
+        'Выберите награду при оформлении в приложении или Telegram-боте. AquaCoins спишутся, а выгода применится к заказу.',
+    ),
+    'loyalty_guide.faq.q5': _ui_tr('Where can I see my balance and tier?', 'Balans va darajamni qayerdan koʻraman?', 'Где посмотреть баланс и уровень?'),
+    'loyalty_guide.faq.a5': _ui_tr(
+        'Open the Loyalty section in our Telegram bot, or your account on the website — your balance, tier and history are all there.',
+        'Telegram botimizdagi Sodiqlik boʻlimini yoki saytdagi hisobingizni oching — balans, daraja va tarix shu yerda.',
+        'Откройте раздел «Лояльность» в Telegram-боте или личный кабинет на сайте — там баланс, уровень и история.',
+    ),
+    'loyalty_guide.faq.q6': _ui_tr('Is delivery free?', 'Yetkazib berish bepulmi?', 'Доставка бесплатная?'),
+    'loyalty_guide.faq.a6': _ui_tr(
+        'Yes, delivery is always free — you never need to spend AquaCoins on it.',
+        'Ha, yetkazib berish doim bepul — bunga AquaCoins sarflash shart emas.',
+        'Да, доставка всегда бесплатна — тратить на неё AquaCoins не нужно.',
+    ),
+    'loyalty_guide.faq.q7': _ui_tr(
+        'When does a referral count as successful?',
+        'Referal qachon muvaffaqiyatli hisoblanadi?',
+        'Когда реферал считается успешным?',
+    ),
+    'loyalty_guide.faq.a7': _ui_tr(
+        "When your invited friend's first order is both delivered and fully paid. Until then it shows as Pending; once both are done, you and your friend receive your AquaCoins automatically.",
+        "Taklif qilgan do'stingizning birinchi buyurtmasi yetkazib berilib, to'liq to'langanda. Shu paytgacha u «Kutilmoqda» bo'lib turadi; ikkala shart bajarilgach, siz va do'stingiz AquaCoins avtomatik olasiz.",
+        'Когда первый заказ приглашённого друга доставлен и полностью оплачен. До этого он показывается как «Ожидается»; после выполнения обоих условий вы и ваш друг получаете AquaCoins автоматически.',
+    ),
+    'loyalty_guide.faq.q8': _ui_tr(
+        'What are surprise rewards?',
+        'Kutilmagan mukofotlar nima?',
+        'Что такое сюрприз-награды?',
+    ),
+    'loyalty_guide.faq.a8': _ui_tr(
+        "A random bonus of {amounts} AquaCoins for individual members, drawn once a day from orders that were delivered and fully paid that same day — about a {chance}% chance, and at most one surprise per member every {cooldown} days. An order paid the next day doesn't qualify.",
+        "Jismoniy shaxs a'zolar uchun tasodifiy {amounts} AquaCoinlik bonus: har kuni o'sha kuni yetkazib berilib, to'liq to'langan buyurtmalardan tanlanadi — taxminan {chance}% imkoniyat va har {cooldown} kunda a'zoga ko'pi bilan bitta sovg'a. Keyingi kuni to'langan buyurtma hisobga olinmaydi.",
+        'Случайный бонус в {amounts} AquaCoins для индивидуальных участников: раз в день разыгрывается среди заказов, доставленных и полностью оплаченных в тот же день — шанс около {chance}%, не более одного сюрприза на участника раз в {cooldown} дней. Заказ, оплаченный на следующий день, не участвует.',
+    ),
+
+    'loyalty_guide.cta.title': _ui_tr('Ready to start earning?', "Yig'ishni boshlashga tayyormisiz?", 'Готовы начать копить?'),
+    'loyalty_guide.cta.body': _ui_tr(
+        'Every bottle brings you closer to your next reward. Place an order and watch your AquaCoins grow.',
+        'Har bir shisha sizni keyingi mukofotingizga yaqinlashtiradi. Buyurtma bering va AquaCoins oʻsishini kuzating.',
+        'Каждая бутылка приближает вас к следующей награде. Сделайте заказ и наблюдайте, как растут AquaCoins.',
+    ),
+    'loyalty_guide.cta.button': _ui_tr('Order now', 'Hozir buyurtma berish', 'Заказать сейчас'),
+
+    # Bot entry button (Telegram Loyalty menu → opens /loyalty-guide).
+    'telegram.loyalty.guide_button': _ui_tr('How it works', 'Qanday ishlaydi', 'Как это работает'),
+
+    # Web storefront (loyalty.html / my_account.html) — the migrated English
+    # AquaCoins strings are keyed by their English text via the |t filter, so
+    # these provide the uz/ru localizations. The coin name stays Latin.
+    'AquaCoins': _ui_tr('AquaCoins', 'AquaCoins', 'AquaCoins'),
+    'AquaCoins Balance': _ui_tr('AquaCoins Balance', 'AquaCoins balansi', 'Баланс AquaCoins'),
+    'AquaCoins to next tier': _ui_tr(
+        'AquaCoins to next tier',
+        'keyingi darajagacha AquaCoins',
+        'AquaCoins до следующего уровня',
+    ),
+    'more coins to keep status': _ui_tr(
+        'more coins to keep status',
+        'maqomni saqlash uchun yana AquaCoins',
+        'ещё AquaCoins для сохранения статуса',
+    ),
+    'Blue Stream AquaCoins': _ui_tr('Blue Stream AquaCoins', 'Blue Stream AquaCoins', 'Blue Stream AquaCoins'),
+    'Earn AquaCoins with every purchase, build streaks, and unlock exclusive rewards': _ui_tr(
+        'Earn AquaCoins with every purchase, build streaks, and unlock exclusive rewards',
+        "Har bir xariddan AquaCoins yig'ing, streaklar to'plang va eksklyuziv mukofotlarni oching",
+        'Зарабатывайте AquaCoins с каждой покупкой, копите серии и открывайте эксклюзивные награды',
+    ),
+    'Earn 1 AquaCoin for every 250 UZS spent. Higher tiers earn up to 2x coins!': _ui_tr(
+        'Earn 1 AquaCoin for every 250 UZS spent. Higher tiers earn up to 2x coins!',
+        "Har 250 so'm uchun 1 AquaCoin oling. Yuqori darajalar 2 baravargacha AquaCoins beradi!",
+        'Получайте 1 AquaCoin за каждые 250 UZS. Высокие уровни дают до 2x AquaCoins!',
+    ),
+    'AquaCoins History': _ui_tr(
+        'AquaCoins History',
+        'AquaCoins tarixi',
+        'История AquaCoins',
+    ),
+    'AquaCoins Earned': _ui_tr(
+        'AquaCoins Earned',
+        "Yig'ilgan AquaCoins",
+        'Начисленные AquaCoins',
+    ),
+    'AquaCoins Redeemed': _ui_tr(
+        'AquaCoins Redeemed',
+        'Ishlatilgan AquaCoins',
+        'Списанные AquaCoins',
+    ),
+    'AquaCoins Expired': _ui_tr(
+        'AquaCoins Expired',
+        'Muddati tugagan AquaCoins',
+        'Истёкшие AquaCoins',
+    ),
+    'Loading AquaCoins history...': _ui_tr(
+        'Loading AquaCoins history...',
+        'AquaCoins tarixi yuklanmoqda...',
+        'Загрузка истории AquaCoins...',
+    ),
+    'Ways to Earn AquaCoins': _ui_tr(
+        'Ways to Earn AquaCoins',
+        "AquaCoins yig'ish yo'llari",
+        'Способы заработать AquaCoins',
+    ),
+    'Invite friends with your referral code. Earn 500 AquaCoins when they place their first order!': _ui_tr(
+        'Invite friends with your referral code. Earn 500 AquaCoins when they place their first order!',
+        "Referal kodingiz bilan do'stlaringizni taklif qiling. Ular birinchi buyurtmasini berganda 500 AquaCoins oling!",
+        'Приглашайте друзей по реферальному коду. Получите 500 AquaCoins, когда они сделают первый заказ!',
+    ),
+    'Share your experience by reviewing products. Get 50 AquaCoins for each review!': _ui_tr(
+        'Share your experience by reviewing products. Get 50 AquaCoins for each review!',
+        "Mahsulotlarga sharh qoldirib, tajribangiz bilan o'rtoqlashing. Har bir sharh uchun 50 AquaCoins oling!",
+        'Делитесь опытом, оставляя отзывы о товарах. Получайте 50 AquaCoins за каждый отзыв!',
+    ),
+    'Celebrate with us! Receive 200 bonus AquaCoins automatically on your birthday.': _ui_tr(
+        'Celebrate with us! Receive 200 bonus AquaCoins automatically on your birthday.',
+        "Biz bilan nishonlang! Tug'ilgan kuningizda avtomatik ravishda 200 bonus AquaCoins oling.",
+        'Празднуйте с нами! Получите 200 бонусных AquaCoins автоматически в день рождения.',
+    ),
+    'No AquaCoins history found': _ui_tr(
+        'No AquaCoins history found',
+        'AquaCoins tarixi topilmadi',
+        'История AquaCoins не найдена',
+    ),
+    'Failed to load AquaCoins history': _ui_tr(
+        'Failed to load AquaCoins history',
+        'AquaCoins tarixini yuklab bo\'lmadi',
+        'Не удалось загрузить историю AquaCoins',
+    ),
+    'Need more AquaCoins': _ui_tr(
+        'Need more AquaCoins',
+        "Ko'proq AquaCoins kerak",
+        'Нужно больше AquaCoins',
+    ),
+    'AquaCoins Required': _ui_tr(
+        'AquaCoins Required',
+        'Kerakli AquaCoins',
+        'Требуется AquaCoins',
+    ),
+    'Your AquaCoins': _ui_tr(
+        'Your AquaCoins',
+        'Sizning AquaCoins',
+        'Ваши AquaCoins',
+    ),
+    'Earn bonus AquaCoins on subscription orders. Redeem for discounts, free products, and exclusive perks.': _ui_tr(
+        'Earn bonus AquaCoins on subscription orders. Redeem for discounts, free products, and exclusive perks.',
+        "Obuna buyurtmalarida bonus AquaCoins yig'ing. Chegirmalar, bepul mahsulotlar va eksklyuziv imtiyozlar uchun ishlating.",
+        'Зарабатывайте бонусные AquaCoins на заказах по подписке. Тратьте их на скидки, бесплатные товары и эксклюзивные привилегии.',
+    ),
+    'Subscription members save up to 20% compared to one-time purchases. You also get free delivery, earn bonus AquaCoins (up to 2x multiplier), and access exclusive subscriber-only promotions. The exact savings depend on your chosen products and frequency.': _ui_tr(
+        'Subscription members save up to 20% compared to one-time purchases. You also get free delivery, earn bonus AquaCoins (up to 2x multiplier), and access exclusive subscriber-only promotions. The exact savings depend on your chosen products and frequency.',
+        "Obuna a'zolari bir martalik xaridlarga nisbatan 20% gacha tejaydi. Shuningdek, bepul yetkazib berish, bonus AquaCoins (2x gacha koeffitsiyent) va faqat obunachilar uchun maxsus aksiyalardan foydalanasiz. Aniq tejamkorlik tanlangan mahsulotlar va buyurtma chastotasiga bog'liq.",
+        'Участники подписки экономят до 20% по сравнению с разовыми покупками. Вы также получаете бесплатную доставку, зарабатываете бонусные AquaCoins (множитель до 2x) и доступ к эксклюзивным акциям только для подписчиков. Точная экономия зависит от выбранных товаров и частоты заказов.',
+    ),
+    'landing.loyalty.points': _ui_tr('AquaCoins', 'AquaCoins', 'AquaCoins'),
+    'landing.loyalty.subtitle': _ui_tr(
+        'Earn AquaCoins with every purchase and redeem them for amazing rewards!',
+        "Har bir xarid bilan AquaCoins to'plang va ularni ajoyib mukofotlarga almashtiring!",
+        'Зарабатывайте AquaCoins с каждой покупкой и обменивайте их на удивительные награды!',
+    ),
+}
+BACKEND_TRANSLATIONS.update(LOYALTY_GUIDE_TRANSLATIONS)
+
+
 def main():
     """Seed backend translation keys"""
     app = create_app()
@@ -6924,7 +7539,7 @@ def main():
                         print(f"    [{language}] Updating: '{existing.value}' → '{value}'")
                         existing.value = value
                         existing.is_active = True
-                        existing.category = key.split('.')[0]  # Extract category from key
+                        existing.category = _category_for(key)
                         updated_count += 1
                     else:
                         skipped_count += 1
@@ -6934,7 +7549,7 @@ def main():
                         key=key,
                         language=language,
                         value=value,
-                        category=key.split('.')[0],  # e.g., 'api', 'error', 'success'
+                        category=_category_for(key),
                         description=f"Backend translation for {key}",
                         is_active=True
                     )

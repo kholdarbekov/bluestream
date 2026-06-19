@@ -1531,9 +1531,9 @@ PAYMENT_TRANSLATIONS = {
     "payme": {"en": "Payme", "uz": "Payme", "ru": "Payme"},
     "click": {"en": "Click", "uz": "Click", "ru": "Click"},
     "loyalty_points": {
-        "en": "Loyalty Points",
-        "uz": "Bonus ballari",
-        "ru": "Бонусные баллы",
+        "en": "AquaCoins",
+        "uz": "AquaCoins",
+        "ru": "AquaCoins",
     },
     "business_account": {
         "en": "Business Account",

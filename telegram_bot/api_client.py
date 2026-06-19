@@ -932,9 +932,10 @@ class BusinessAPIClient:
         return await self._make_request('GET', '/api/v1/loyalty/points',
                                        user_token=user_token)
 
-    async def get_loyalty_history(self, user_token: str) -> APIResponse:
-        """Get loyalty points history"""
+    async def get_loyalty_history(self, user_token: str, page: int = 1, per_page: int = 10) -> APIResponse:
+        """Get loyalty points history (paginated)."""
         return await self._make_request('GET', '/api/v1/loyalty/history',
+                                       params={'page': page, 'per_page': per_page},
                                        user_token=user_token)
 
     async def get_loyalty_rewards(self, user_token: str) -> APIResponse:
@@ -942,9 +943,9 @@ class BusinessAPIClient:
         return await self._make_request('GET', '/api/v1/loyalty/rewards',
                                        user_token=user_token)
 
-    async def redeem_reward(self, user_token: str, reward_id: int) -> APIResponse:
-        """Redeem loyalty reward"""
-        return await self._make_request('POST', f'/api/v1/loyalty/rewards/{reward_id}/redeem',
+    async def get_referral_info(self, user_token: str) -> APIResponse:
+        """Get the user's referral code, link, and stats"""
+        return await self._make_request('GET', '/api/v1/loyalty/referral',
                                        user_token=user_token)
 
     # Analytics methods (admin only)

@@ -318,7 +318,10 @@ class PaymentFiscalizationService:
         order = payment.order
         if not order:
             return False
-        return any(item.product and item.product.fiscalization_enabled for item in (order.order_items or []))
+        return any(
+            item.product and item.product.fiscalization_enabled and self._is_fiscalizable_item(item)
+            for item in (order.order_items or [])
+        )
 
     def queue_click_fiscalization(
         self,
@@ -1148,8 +1151,17 @@ class PaymentFiscalizationService:
         )
         reserved_lookup = self._reserved_code_lookup(payment)
         commission_info = self._build_commission_info(payment)
+        # Loyalty reward discount (order-level) is expressed on the receipt via
+        # Click's per-item ``Discount`` field, filled line-by-line: each line
+        # absorbs up to its own gross Price, the remainder spills to the next.
+        # The budget always allocates fully (remaining reaches 0): loyalty_discount
+        # is capped at subtotal upstream (_compute_reward_discount), and the paid
+        # lines' gross prices sum to that same subtotal.
+        remaining_discount_tiyin = self._to_tiyin(order.loyalty_discount or 0)
         items_payload: List[Dict[str, Any]] = []
         for order_item in order.order_items or []:
+            if not self._is_fiscalizable_item(order_item):
+                continue
             product = order_item.product
             if not product:
                 self._log_fiscal_step(
@@ -1215,16 +1227,26 @@ class PaymentFiscalizationService:
                 )
                 raise ValidationError(f"Order item {order_item.id} has invalid total price: {order_item.total_price}")
             vat_percent = self._normalize_vat_percent(product.vat_percent)
-            vat_amount = (total_price * vat_percent / Decimal("100")).quantize(Decimal("0.01"))
+            # Sequential-fill: this line takes as much of the remaining discount
+            # as fits within its own gross Price; the rest spills to later lines.
+            line_price_tiyin = self._to_tiyin(total_price)
+            line_discount_tiyin = min(remaining_discount_tiyin, line_price_tiyin)
+            remaining_discount_tiyin -= line_discount_tiyin
+            # VAT base is the NET line amount (Price - Discount). With no discount
+            # this is identical to the previous gross calculation.
+            net_price = total_price - (Decimal(line_discount_tiyin) / Decimal("100"))
+            vat_amount = (net_price * vat_percent / Decimal("100")).quantize(Decimal("0.01"))
             item_payload = {
                 "Name": product_name,
                 "SPIC": spic,
                 "PackageCode": package_code,
-                "Price": self._to_tiyin(total_price),
+                "Price": line_price_tiyin,
                 "Amount": quantity * 1000,  # Click developers informed that 'Amount' field should be multiplied by 1000
                 "VAT": self._to_tiyin(vat_amount),
                 "VATPercent": int(vat_percent),
             }
+            if line_discount_tiyin > 0:
+                item_payload["Discount"] = line_discount_tiyin
             labels = reserved_lookup.get(order_item.id, [])
             if product.requires_marking_codes:
                 if len(labels) != quantity:
@@ -1258,6 +1280,10 @@ class PaymentFiscalizationService:
             self._log_fiscal_step("build_payload_failed_no_items", level="error", payment=payment)
             raise ValidationError("No fiscalized items found for Click fiscalization request")
 
+        # received_card is the full charged amount. Σ(Price - Discount) over the
+        # paid lines reconciles with this exactly only while delivery_fee == 0
+        # (the production default); a future nonzero delivery fee would sit in
+        # total_amount without a matching item line, as it does today.
         received_card_tiyin = self._to_tiyin(Decimal(str(order.total_amount or payment.amount or 0)))
 
         try:
@@ -1325,7 +1351,12 @@ class PaymentFiscalizationService:
         reserved_count = 0
         for order_item in order.order_items or []:
             product = order_item.product
-            if not product or not product.fiscalization_enabled or not product.requires_marking_codes:
+            if (
+                not product
+                or not product.fiscalization_enabled
+                or not product.requires_marking_codes
+                or not self._is_fiscalizable_item(order_item)
+            ):
                 continue
 
             already_allocated = self._get_active_allocated_codes(payment, order_item)
@@ -1531,7 +1562,7 @@ class PaymentFiscalizationService:
         reserved_count = 0
         for order_item in order.order_items or []:
             product = order_item.product
-            if not product or not product.requires_marking_codes:
+            if not product or not product.requires_marking_codes or not self._is_fiscalizable_item(order_item):
                 continue
 
             existing_codes = self._get_active_allocated_codes(payment, order_item)
@@ -1734,6 +1765,13 @@ class PaymentFiscalizationService:
             raise NotFoundError("Payment not found")
         self._log_fiscal_step("get_payment_completed", payment=payment)
         return payment
+
+    @staticmethod
+    def _is_fiscalizable_item(order_item) -> bool:
+        """Reward/bonus lines (``is_reward_item``) are off the books — excluded
+        from Click fiscalization and Asl Belgisi marking-code accounting
+        entirely (no code reserved, none utilised, not on the receipt)."""
+        return not bool(getattr(order_item, "is_reward_item", False))
 
     @staticmethod
     def _to_tiyin(value: Any) -> int:

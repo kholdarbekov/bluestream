@@ -915,6 +915,163 @@ class TestClickFiscalizationService:
                     endpoint_label='submit_items',
                 )
 
+    def test_build_payload_excludes_reward_item(self, app, db, fiscalized_click_payment, sample_product):
+        _configure_click_fiscal_context(app)
+        provider = Mock()
+        provider.resolve_click_payment_id.return_value = 555
+        provider.service_id = '98060'
+        service = PaymentFiscalizationService(click_provider_service=provider)
+        payment = Payment.query.get(fiscalized_click_payment.id)
+        # Free bonus unit of the SAME marked product (the 6th-bottle scenario).
+        # The fixture has exactly 2 marking codes for 2 paid units; if the reward
+        # line were NOT excluded, reservation would need a 3rd code and raise.
+        db.session.add(OrderItem(
+            order_id=payment.order_id, product_id=sample_product.id,
+            quantity=1, unit_price=Decimal('0.00'), total_price=Decimal('0.00'),
+            is_reward_item=True,
+        ))
+        db.session.commit()
+
+        service.reserve_required_marking_codes(payment)
+        payload = service.build_click_fiscalization_payload(payment)
+
+        assert len(payload['items']) == 1            # reward line is not on the receipt
+        assert payload['items'][0]['Amount'] == 2000  # only the 2 paid units
+        assert payload['items'][0]['Labels'] == ['MARK-001', 'MARK-002']
+
+    def test_reserve_skips_reward_item(self, app, db, fiscalized_click_payment, sample_product):
+        _configure_click_fiscal_context(app)
+        service = PaymentFiscalizationService(click_provider_service=Mock())
+        payment = Payment.query.get(fiscalized_click_payment.id)
+        db.session.add(OrderItem(
+            order_id=payment.order_id, product_id=sample_product.id,
+            quantity=1, unit_price=Decimal('0.00'), total_price=Decimal('0.00'),
+            is_reward_item=True,
+        ))
+        db.session.commit()
+
+        # Must NOT raise "Not enough marking codes" (would, if it tried to reserve 3).
+        result = service.reserve_required_marking_codes(payment)
+        assert result['reserved'] == 2
+        reserved = [oi for (oi, _code) in service._get_reserved_codes(payment)]
+        assert all(oi.is_reward_item is False for oi in reserved)
+        assert len(reserved) == 2
+
+    def test_requires_fiscalization_false_when_only_reward_item_is_fiscalized(
+        self, app, db, sample_order, sample_product
+    ):
+        _configure_click_fiscal_context(app)
+        sample_order.payment_method = PaymentMethod.CLICK
+        sample_order.subtotal = Decimal('0.00')
+        sample_order.total_amount = Decimal('0.00')
+        db.session.add(ProductFiscalProfile(
+            product_id=sample_product.id, spic='SPIC-X', package_code='PK-X',
+            units='1213733', vat_percent=Decimal('12.00'),
+            fiscalization_enabled=True, requires_marking_codes=True,
+        ))
+        db.session.flush()
+        db.session.add(OrderItem(
+            order_id=sample_order.id, product_id=sample_product.id,
+            quantity=1, unit_price=Decimal('0.00'), total_price=Decimal('0.00'),
+            is_reward_item=True,
+        ))
+        payment = Payment(
+            order_id=sample_order.id, user_id=sample_order.user_id,
+            payment_method=PaymentMethod.CLICK, amount=Decimal('0.00'),
+            currency='UZS', status=PaymentStatus.COMPLETED, payment_id='click-reward-only',
+        )
+        db.session.add(payment)
+        db.session.commit()
+
+        service = PaymentFiscalizationService(click_provider_service=Mock())
+        assert service.payment_requires_click_fiscalization(payment) is False
+
+    def test_discount_single_line_sets_discount_and_net_vat(self, app, db, fiscalized_click_payment):
+        _configure_click_fiscal_context(app)
+        provider = Mock()
+        provider.resolve_click_payment_id.return_value = 600
+        provider.service_id = '98060'
+        service = PaymentFiscalizationService(click_provider_service=provider)
+        payment = Payment.query.get(fiscalized_click_payment.id)
+        order = payment.order
+        order.delivery_fee = Decimal('0.00')       # delivery is always free in prod
+        order.loyalty_discount = Decimal('5000.00')
+        order.total_amount = Decimal('25000.00')   # 30000 subtotal - 5000 discount
+        payment.amount = Decimal('25000.00')
+        db.session.flush()
+        service.reserve_required_marking_codes(payment)
+
+        payload = service.build_click_fiscalization_payload(payment)
+        item = payload['items'][0]
+
+        assert item['Price'] == 3000000            # gross line total (tiyin)
+        assert item['Discount'] == 500000          # 5000 UZS off
+        assert item['VAT'] == 300000               # VAT on net 25000 -> 3000.00
+        assert payload['received_card'] == 2500000
+        assert item['Price'] - item['Discount'] == payload['received_card']
+
+    def test_discount_zero_omits_discount_key(self, app, db, fiscalized_click_payment):
+        _configure_click_fiscal_context(app)
+        provider = Mock()
+        provider.resolve_click_payment_id.return_value = 601
+        provider.service_id = '98060'
+        service = PaymentFiscalizationService(click_provider_service=provider)
+        payment = Payment.query.get(fiscalized_click_payment.id)
+        service.reserve_required_marking_codes(payment)
+
+        payload = service.build_click_fiscalization_payload(payment)
+        item = payload['items'][0]
+
+        assert 'Discount' not in item              # no loyalty discount -> key omitted
+        assert item['VAT'] == 360000               # unchanged: VAT on full 30000
+
+    def test_discount_spills_across_lines(self, app, db, sample_order, sample_category):
+        _configure_click_fiscal_context(app)
+        provider = Mock()
+        provider.resolve_click_payment_id.return_value = 602
+        provider.service_id = '98060'
+        service = PaymentFiscalizationService(click_provider_service=provider)
+
+        def _fiscal_product(name, price):
+            p = Product(name=name, description='d', category_id=sample_category.id,
+                        size='19L', volume=19.0, volume_unit='L', base_price=Decimal(str(price)),
+                        stock_quantity=100, min_stock_level=1, max_stock_level=200, is_active=True)
+            db.session.add(p); db.session.flush()
+            db.session.add(ProductFiscalProfile(
+                product_id=p.id, spic=f'SPIC-{name}', package_code=f'PK-{name}', units='1213733',
+                vat_percent=Decimal('12.00'), fiscalization_enabled=True, requires_marking_codes=False,
+            ))
+            db.session.flush()
+            return p
+
+        p1 = _fiscal_product('P1', 50000)
+        p2 = _fiscal_product('P2', 40000)
+        sample_order.payment_method = PaymentMethod.CLICK
+        sample_order.delivery_fee = Decimal('0.00')
+        sample_order.subtotal = Decimal('90000.00')
+        sample_order.loyalty_discount = Decimal('60000.00')
+        sample_order.total_amount = Decimal('30000.00')
+        db.session.add_all([
+            OrderItem(order_id=sample_order.id, product_id=p1.id, quantity=1,
+                      unit_price=Decimal('50000.00'), total_price=Decimal('50000.00')),
+            OrderItem(order_id=sample_order.id, product_id=p2.id, quantity=1,
+                      unit_price=Decimal('40000.00'), total_price=Decimal('40000.00')),
+        ])
+        payment = Payment(order_id=sample_order.id, user_id=sample_order.user_id,
+                          payment_method=PaymentMethod.CLICK, amount=Decimal('30000.00'),
+                          currency='UZS', status=PaymentStatus.COMPLETED, payment_id='click-spill')
+        db.session.add(payment); db.session.commit()
+
+        payload = service.build_click_fiscalization_payload(payment)
+        items = payload['items']
+
+        assert items[0]['Price'] == 5000000 and items[0]['Discount'] == 5000000  # line1 fully discounted
+        assert items[0]['VAT'] == 0
+        assert items[1]['Price'] == 4000000 and items[1]['Discount'] == 1000000  # remainder spills
+        assert items[1]['VAT'] == 360000                                          # VAT on net 30000
+        assert payload['received_card'] == 3000000
+        assert sum(i['Price'] - i.get('Discount', 0) for i in items) == payload['received_card']
+
 
 @pytest.mark.unit
 @pytest.mark.payment

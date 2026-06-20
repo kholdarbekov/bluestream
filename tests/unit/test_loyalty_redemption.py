@@ -266,3 +266,23 @@ def test_apply_free_product_rejects_inactive_product(service, db, sample_user, s
     order = _order(db, sample_user.id, 10000)
     with pytest.raises(ValidationError, match="not available"):
         service.apply_reward_to_order(order, reward.id, commit=True)
+
+
+def test_apply_free_product_marks_item_as_reward(service, db, sample_user, sample_category, program, monkeypatch):
+    monkeypatch.setattr(LoyaltyService, "_send_points_notification", lambda *a, **k: None)
+    product = Product(name="Free Bottle", base_price=Decimal("8000.00"), category_id=sample_category.id,
+                      size=ProductSizeEnum.SIZE_19L, is_active=True)
+    _db.session.add(product); _db.session.commit()
+    reward = LoyaltyReward(program_id=program.id, name="free bottle", reward_type="free_product",
+                           points_cost=200, free_product_id=product.id, is_active=True,
+                           max_uses_per_user=5, redemptions_used=0)
+    _db.session.add(reward); _db.session.commit()
+    _account_with_points(db, sample_user.id, program.id, 1000)
+    order = _order(db, sample_user.id, 10000)
+
+    service.apply_reward_to_order(order, reward.id, commit=True)
+    db.session.refresh(order)
+
+    free_items = [i for i in order.order_items if i.product_id == product.id]
+    assert len(free_items) == 1
+    assert free_items[0].is_reward_item is True

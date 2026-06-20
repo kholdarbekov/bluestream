@@ -1195,6 +1195,7 @@ class LoyaltyService:
                     quantity=reward.free_product_quantity or 1,
                     unit_price=Decimal("0.00"),
                     total_price=Decimal("0.00"),
+                    is_reward_item=True,
                 )
             )
 

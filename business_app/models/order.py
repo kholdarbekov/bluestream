@@ -205,6 +205,9 @@ class OrderItem(db.Model):
     unit_price = Column(Numeric(precision=10, scale=2), nullable=False)
     discount_amount = Column(Numeric(precision=10, scale=2), default=Decimal("0.00"))
     total_price = Column(Numeric(precision=10, scale=2), nullable=False)
+    # Loyalty free-product reward lines are flagged here so fiscalization /
+    # marking-code accounting can skip them entirely (off the books).
+    is_reward_item = Column(Boolean, nullable=False, default=False, server_default="false")
 
     order = relationship("Order", back_populates="order_items")
     # Removed back_populates since Product model doesn't have order_items relationship

@@ -79,3 +79,29 @@ class TestAuthService:
 
     def test_logout_without_token_returns_true(self, auth_service):
         assert auth_service.logout_user() is True
+
+    def test_unlock_user_account_audits_via_logger_with_valid_event_type(
+        self, auth_service, app, db, sample_user
+    ):
+        """Account unlock must audit through ``audit_logger.log_event`` with a
+        valid ``AuditEventType`` member.
+
+        Regression: it used ``AuditEventType.ADMIN_ACTION`` (which does not
+        exist) plus an ``event_details`` kwarg that is not a column, so the
+        audit silently failed and no row was recorded.
+        """
+        from business_app.models.audit import AuditEventType
+
+        sample_user.account_locked_until = None
+        db.session.commit()
+
+        with app.test_request_context("/api/v1/admin/users/unlock", method="POST"):
+            with patch("business_app.utils.audit_logger.audit_logger.log_event") as mock_log:
+                result = auth_service.unlock_user_account(sample_user.id, admin_user_id=999)
+
+        assert result is True
+        mock_log.assert_called_once()
+        kwargs = mock_log.call_args.kwargs
+        # event_type must be a real enum member (not the nonexistent ADMIN_ACTION)
+        assert kwargs["event_type"] in set(AuditEventType)
+        assert kwargs["action"] == "unlock_account"

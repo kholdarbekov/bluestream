@@ -272,7 +272,8 @@ class SubscriptionService:
 
         subscription.status = SubscriptionStatus.PAUSED
         subscription.paused_at = datetime.now(timezone.utc)
-        subscription.pause_until = pause_until
+        subscription.pause_start_date = datetime.now(timezone.utc)
+        subscription.pause_end_date = pause_until
         subscription.updated_at = datetime.now(timezone.utc)
 
         db.session.commit()
@@ -300,13 +301,13 @@ class SubscriptionService:
 
         subscription.status = SubscriptionStatus.ACTIVE
         subscription.paused_at = None
-        subscription.pause_until = None
-        subscription.resumed_at = datetime.now(timezone.utc)
+        subscription.pause_end_date = None
+        subscription.resume_date = datetime.now(timezone.utc)
         subscription.updated_at = datetime.now(timezone.utc)
 
         # Recalculate next billing date
         subscription.next_billing_date = self._calculate_next_billing_date(
-            datetime.now(timezone.utc), subscription.frequency
+            datetime.now(timezone.utc), subscription.billing_cycle
         )
 
         db.session.commit()
@@ -395,17 +396,21 @@ class SubscriptionService:
 
         order_service = OrderService()
 
+        # Address lives on the UserAddress relationship (delivery_address_id FK),
+        # not flat columns. create_order requires delivery_address_id.
+        address = subscription.delivery_address
         order_data = {
             "items": [
                 {"product_id": item.product_id, "quantity": item.quantity} for item in subscription.subscription_items
             ],
             "delivery_address": {
-                "street": subscription.delivery_address_street,
-                "city": subscription.delivery_address_city,
-                "latitude": subscription.delivery_address_latitude,
-                "longitude": subscription.delivery_address_longitude,
+                "delivery_address_id": subscription.delivery_address_id,
+                "street": address.street_address if address else None,
+                "city": address.city if address else None,
+                "latitude": address.latitude if address else None,
+                "longitude": address.longitude if address else None,
             },
-            "delivery_instructions": subscription.delivery_instructions,
+            "delivery_instructions": address.delivery_instructions if address else None,
             "notes": f"Subscription order #{subscription.id}",
         }
 
@@ -420,7 +425,7 @@ class SubscriptionService:
 
                 # Use subscription's preferred payment method
                 payment_method = subscription.payment_method or "card"
-                payment = payment_service.create_payment(order.id, payment_method, subscription.total_amount)
+                payment = payment_service.create_payment(order.id, payment_method, subscription.billing_amount)
 
                 # Auto-charge if payment method is stored
                 if subscription.payment_token:
@@ -430,13 +435,16 @@ class SubscriptionService:
                         # Payment failed - handle accordingly
                         self._handle_payment_failure(subscription)
 
-            # Update subscription
-            subscription.last_order_id = order.id
+            # Update subscription. Link the generated order back to the
+            # subscription (the model exposes Subscription.orders via
+            # Order.subscription_id) and advance the billing counters using the
+            # real model fields.
+            order.subscription_id = subscription.id
             subscription.last_billing_date = datetime.now(timezone.utc)
             subscription.next_billing_date = self._calculate_next_billing_date(
-                datetime.now(timezone.utc), subscription.frequency
+                datetime.now(timezone.utc), subscription.billing_cycle
             )
-            subscription.billing_cycle_count += 1
+            subscription.total_orders_generated = (subscription.total_orders_generated or 0) + 1
 
             # Convert from trial to active if applicable
             if subscription.status == SubscriptionStatus.TRIAL:
@@ -447,7 +455,7 @@ class SubscriptionService:
             return {
                 "success": True,
                 "order_id": order.id,
-                "amount": subscription.total_amount,
+                "amount": float(subscription.billing_amount),
                 "next_billing_date": subscription.next_billing_date.isoformat(),
             }
 

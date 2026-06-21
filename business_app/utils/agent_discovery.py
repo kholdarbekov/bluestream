@@ -33,6 +33,12 @@ PUBLIC_DISCOVERY_LINKS = (
         "application/json",
         "Delivery coverage check (address or lat/lng -> deliverable)",
     ),
+    (
+        "service-desc",
+        "/api/public/loyalty.json",
+        "application/json",
+        "Loyalty program facts (Aqua Club tiers + earn rules + rewards) — Schema.org MemberProgram",
+    ),
     ("service-doc", "/llms.txt", "text/markdown", "LLM-friendly index of public pages"),
 )
 

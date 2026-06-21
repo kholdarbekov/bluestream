@@ -4,7 +4,7 @@ This file should be placed in business_app/tasks/delivery_tasks.py
 """
 
 from celery import shared_task
-from celery.exceptions import MaxRetriesExceededError, Retry
+from celery.exceptions import MaxRetriesExceededError, Retry, SoftTimeLimitExceeded
 from celery.utils.log import get_task_logger
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any
@@ -333,7 +333,7 @@ def update_delivery_zones_task(self):
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=30, time_limit=120, soft_time_limit=100)
+@shared_task(bind=True, max_retries=3, default_retry_delay=30, time_limit=300, soft_time_limit=270)
 def optimize_driver_route_task(self, driver_id: int, trigger: str = "auto"):
     """Recompute the optimal delivery sequence for a driver.
 
@@ -367,6 +367,12 @@ def optimize_driver_route_task(self, driver_id: int, trigger: str = "auto"):
             "matrix_source": (route.extra_data or {}).get("matrix_source"),
         }
 
+    except SoftTimeLimitExceeded:
+        # Soft limit hit: abort gracefully so the hard limit never SIGKILLs the
+        # worker mid-commit. A blind retry would just re-run the same slow I/O.
+        db.session.rollback()
+        logger.warning("Route optimization for driver %s exceeded soft time limit; skipping", driver_id)
+        return {"optimized": False, "reason": "time_budget_exceeded"}
     except Exception as exc:
         db.session.rollback()
         logger.error(f"Route optimization failed for driver {driver_id}: {exc}")
@@ -945,7 +951,11 @@ def process_delivery_confirmation_task(self, delivery_id: int, confirmation_data
         if order_status != OrderStatus.DELIVERED.value:
             from business_app.services.order_service import OrderService
 
-            OrderService().update_order_status(delivery.order_id, OrderStatus.DELIVERED)
+            # Pass the delivering driver as the actor so COD cash settled at
+            # delivery always has a collector fallback.
+            OrderService().update_order_status(
+                delivery.order_id, OrderStatus.DELIVERED, updated_by=delivery.delivery_person_id
+            )
             db.session.refresh(delivery)
 
         # Persist delivery confirmation artifacts after status transition.

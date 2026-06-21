@@ -505,9 +505,9 @@ class NotificationService:
 
         template_data = {
             "subscription_id": subscription.id,
-            "plan_name": subscription.plan.name if subscription.plan else "Standard",
-            "frequency": subscription.frequency.value,
-            "total_amount": subscription.total_amount,
+            "plan_name": subscription.name or "Standard",
+            "frequency": subscription.billing_cycle.value,
+            "total_amount": float(subscription.billing_amount) if subscription.billing_amount is not None else None,
             "next_billing_date": subscription.next_billing_date.isoformat() if subscription.next_billing_date else None,
             "event_type": event_type,
         }

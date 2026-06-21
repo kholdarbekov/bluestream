@@ -812,5 +812,7 @@ class TestOrderHandlerFlows:
         await handler.cancel_order_confirm_no(update, context)
 
         assert "cancelling_order_id" not in context.user_data
-        assert update.callback_query.data == "order_789"
-        handler.order_details.assert_awaited_once_with(update, context)
+        # Callback data is no longer mutated (CallbackQuery is immutable);
+        # the id is passed explicitly instead.
+        assert update.callback_query.data == "cancel_order_confirm_no"
+        handler.order_details.assert_awaited_once_with(update, context, order_id=789)

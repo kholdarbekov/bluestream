@@ -121,6 +121,8 @@ class TestRefunds:
             payment_service.process_refund(cash_payment.id, amount=Decimal('1000.00'))
 
     def test_process_refund_full_sets_cancelled(self, payment_service, cash_payment, db):
+        collector_id = cash_payment.user_id  # read before mutating to avoid autoflush mid-change
+        cash_payment.collected_by = collector_id  # completed cash requires a collector
         cash_payment.status = PaymentStatus.COMPLETED
         db.session.commit()
 
@@ -131,6 +133,8 @@ class TestRefunds:
         assert cash_payment.status == PaymentStatus.CANCELLED
 
     def test_process_refund_partial_sets_partially_refunded(self, payment_service, cash_payment, db):
+        collector_id = cash_payment.user_id  # read before mutating to avoid autoflush mid-change
+        cash_payment.collected_by = collector_id  # completed cash requires a collector
         cash_payment.status = PaymentStatus.COMPLETED
         db.session.commit()
 

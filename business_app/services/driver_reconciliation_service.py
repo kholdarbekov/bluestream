@@ -979,17 +979,31 @@ class DriverReconciliationService:
             DriverCashSession.last_cash_activity_at,
             DriverCashSession.updated_at,
         )
+        # The window dates are operator-local (DISPLAY_TIMEZONE). Convert each
+        # local day boundary to a UTC instant and compare the UTC timestamp
+        # columns directly. Comparing func.date(col) (which yields the *UTC*
+        # date) against a local date previously dropped early-local-morning
+        # sessions (00:00-05:00 Tashkent = still the previous UTC day) from
+        # "today" and leaked just-after-local-midnight sessions into it.
+        tz = ZoneInfo(current_app.config.get("DISPLAY_TIMEZONE", "Asia/Tashkent"))
         if start_date:
             normalized_start = self._coerce_date(start_date)
+            start_utc = datetime(
+                normalized_start.year, normalized_start.month, normalized_start.day, tzinfo=tz
+            ).astimezone(UTC)
             query = query.filter(
                 or_(
                     is_active,
-                    func.date(effective_end) >= normalized_start,
+                    effective_end >= start_utc,
                 )
             )
         if end_date:
             normalized_end = self._coerce_date(end_date)
-            query = query.filter(func.date(DriverCashSession.session_started_at) <= normalized_end)
+            # Inclusive of the whole local end-day -> strictly before next local midnight.
+            end_exclusive_utc = (
+                datetime(normalized_end.year, normalized_end.month, normalized_end.day, tzinfo=tz) + timedelta(days=1)
+            ).astimezone(UTC)
+            query = query.filter(DriverCashSession.session_started_at < end_exclusive_utc)
         return query
 
     def _apply_warning_only_filter(self, query):

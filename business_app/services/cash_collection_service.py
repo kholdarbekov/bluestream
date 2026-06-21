@@ -277,8 +277,14 @@ class CashCollectionService:
         payment: Payment,
         *,
         collected_at: Optional[datetime] = None,
+        collected_by: Optional[int] = None,
     ) -> Decimal:
-        """Convert reserved prepayment allocations into settled COD payment amounts."""
+        """Convert reserved prepayment allocations into settled COD payment amounts.
+
+        ``collected_by`` is a fallback collector id; the authoritative collector
+        is derived from the consumed reservation's source cash-collection event
+        (whoever physically collected the cash earlier).
+        """
         if not payment or payment.payment_method != PaymentMethod.CASH:
             return Decimal("0.00")
 
@@ -299,12 +305,19 @@ class CashCollectionService:
         )
 
         consumed_total = Decimal("0.00")
+        collector_from_event: Optional[int] = None
         for allocation in reservations:
             amount = self._to_decimal(allocation.allocated_amount)
             if amount <= Decimal("0.00"):
                 continue
             payment.amount_collected = self._to_decimal(payment.amount_collected) + amount
             consumed_total += amount
+            # The cash was physically collected by the reservation's source
+            # event collector (fall back to whoever recorded it).
+            if collector_from_event is None:
+                event = allocation.cash_collection_event
+                if event is not None:
+                    collector_from_event = event.collector_user_id or event.recorded_by_user_id
             allocation.allocation_mode = "prepaid_credit"
             metadata = dict(allocation.allocation_metadata or {})
             metadata["reservation_state"] = "consumed"
@@ -313,7 +326,11 @@ class CashCollectionService:
             allocation.allocation_metadata = metadata
 
         if consumed_total > Decimal("0.00"):
-            self.sync_payment_projection(payment, collected_at=effective_collected_at)
+            self.sync_payment_projection(
+                payment,
+                collected_at=effective_collected_at,
+                collected_by=collector_from_event or collected_by,
+            )
 
         self._sync_reserved_prepayment_projection(payment)
         return self._to_decimal(consumed_total)
@@ -917,6 +934,7 @@ class CashCollectionService:
         payment: Payment,
         *,
         collected_at: Optional[datetime] = None,
+        collected_by: Optional[int] = None,
     ) -> Payment:
         amount = self._to_decimal(payment.amount)
         amount_collected = max(Decimal("0.00"), self._to_decimal(payment.amount_collected))
@@ -936,6 +954,15 @@ class CashCollectionService:
 
         if payment.amount_collected > Decimal("0.00"):
             payment.last_collected_at = collected_at or payment.last_collected_at or datetime.now(UTC)
+
+        # ARCH-006: a cash payment may only become COMPLETED with a recorded
+        # collector. This is the single authoritative point — stamp the supplied
+        # collector (if not already set) and enforce the invariant so the row
+        # never violates ck_payments_cash_completed_requires_collector.
+        if payment.status == PaymentStatus.COMPLETED and payment.payment_method == PaymentMethod.CASH:
+            if not payment.collected_by and collected_by is not None:
+                payment.collected_by = collected_by
+            assert_cash_payment_collector(payment, payment.status)
 
         if payment.order:
             order = payment.order
@@ -1644,20 +1671,15 @@ class CashCollectionService:
 
         if affect_payment_projection:
             payment.amount_collected = self._to_decimal(payment.amount_collected) + amount
-            self.sync_payment_projection(payment, collected_at=event.occurred_at)
-
-            # ARCH-006: when a cash payment crosses into COMPLETED via this
-            # allocation, propagate an auditable identity onto the payment row.
-            # Prefer the on-route collector; fall back to whoever recorded the
-            # event (e.g. an admin booking a balance-application allocation).
-            if (
-                payment.payment_method == PaymentMethod.CASH
-                and payment.status == PaymentStatus.COMPLETED
-                and not payment.collected_by
-            ):
-                payment.collected_by = event.collector_user_id or event.recorded_by_user_id
-
-            assert_cash_payment_collector(payment, payment.status)
+            # ARCH-006: propagate an auditable collector identity onto the payment
+            # row as it projects. Prefer the on-route collector; fall back to
+            # whoever recorded the event (e.g. an admin booking a balance-
+            # application allocation). sync_payment_projection stamps + enforces.
+            self.sync_payment_projection(
+                payment,
+                collected_at=event.occurred_at,
+                collected_by=event.collector_user_id or event.recorded_by_user_id,
+            )
         else:
             self._sync_reserved_prepayment_projection(payment)
 

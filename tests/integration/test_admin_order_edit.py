@@ -392,6 +392,7 @@ def _seed_paid_cash_delivered_order(sample_user, sample_product, *, quantity: in
         outstanding_amount=Decimal("0.00"),
         payment_method=PaymentMethod.CASH,
         status=PaymentStatus.COMPLETED,
+        collected_by=sample_user.id,  # completed cash requires a collector (ARCH-006)
     )
     _db.session.add(payment)
     _db.session.commit()

@@ -157,16 +157,22 @@ class OrderHandlers(BaseHandler):
         except Exception as e:
             await self._handle_error(update, exc=e, operation="orders_menu")
 
-    async def order_details(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Show order details"""
+    async def order_details(self, update: Update, context: ContextTypes.DEFAULT_TYPE, order_id: int | None = None):
+        """Show order details.
+
+        ``order_id`` may be passed explicitly (e.g. when re-dispatched from
+        another handler); otherwise it is parsed from the callback data. This
+        avoids mutating the immutable ``CallbackQuery.data`` to re-route.
+        """
         try:
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
             unknown_text = i18n.get('telegram.common.unknown', language)
 
-            # Extract order ID
-            order_id = int(query.data.split('_')[1])
+            # Extract order ID (parse from callback data only when not supplied)
+            if order_id is None:
+                order_id = int(query.data.split('_')[1])
 
             # Get order details
             async with api_client as client:
@@ -321,10 +327,9 @@ class OrderHandlers(BaseHandler):
             # Clear context
             context.user_data.pop('cancelling_order_id', None)
 
-            # Return to order details
-            # Hack: modify query.data to be what order_details expects
-            query.data = f"order_{order_id}"
-            await self.order_details(update, context)
+            # Return to order details (pass the id explicitly — never mutate
+            # the immutable CallbackQuery.data).
+            await self.order_details(update, context, order_id=order_id)
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="cancel_order_confirm_no")

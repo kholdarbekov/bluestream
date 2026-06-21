@@ -24,6 +24,11 @@ class MapsService:
         self.google_api_key = current_app.config.get("GOOGLE_MAPS_API_KEY")
         self.yandex_api_key = current_app.config.get("YANDEX_MAPS_API_KEY")
 
+        # Per-request timeout (seconds) for all outbound map HTTP calls. A bare
+        # request with no timeout blocks indefinitely on a stalled connection,
+        # which previously hung optimize_driver_route_task past its hard limit.
+        self.request_timeout = current_app.config.get("MAPS_REQUEST_TIMEOUT", 10)
+
         # API endpoints
         self.google_geocoding_url = "https://maps.googleapis.com/maps/api/geocode/json"
         self.google_directions_url = "https://maps.googleapis.com/maps/api/directions/json"
@@ -196,7 +201,7 @@ class MapsService:
 
         params = {"address": address, "key": self.google_api_key, "region": "uz"}
 
-        response = requests.get(self.google_geocoding_url, params=params)
+        response = requests.get(self.google_geocoding_url, params=params, timeout=self.request_timeout)
         response.raise_for_status()
 
         data = response.json()
@@ -221,7 +226,7 @@ class MapsService:
 
         params = {"latlng": f"{latitude},{longitude}", "key": self.google_api_key, "language": "en"}
 
-        response = requests.get(self.google_geocoding_url, params=params)
+        response = requests.get(self.google_geocoding_url, params=params, timeout=self.request_timeout)
         response.raise_for_status()
 
         data = response.json()
@@ -260,7 +265,7 @@ class MapsService:
             waypoint_str = "|".join([f"{lat},{lon}" for lat, lon in waypoints])
             params["waypoints"] = waypoint_str
 
-        response = requests.get(self.google_directions_url, params=params)
+        response = requests.get(self.google_directions_url, params=params, timeout=self.request_timeout)
         response.raise_for_status()
 
         data = response.json()
@@ -301,7 +306,7 @@ class MapsService:
             "key": self.google_api_key,
         }
 
-        response = requests.get(self.google_places_url, params=params)
+        response = requests.get(self.google_places_url, params=params, timeout=self.request_timeout)
         response.raise_for_status()
 
         data = response.json()
@@ -330,7 +335,7 @@ class MapsService:
 
         params = {"geocode": address, "apikey": self.yandex_api_key, "format": "json", "lang": "en"}
 
-        response = requests.get(self.yandex_geocoding_url, params=params)
+        response = requests.get(self.yandex_geocoding_url, params=params, timeout=self.request_timeout)
         response.raise_for_status()
 
         data = response.json()
@@ -458,7 +463,9 @@ class MapsService:
         params = {"q": address, "format": "json", "limit": 1, "countrycodes": "uz"}
 
         headers = {"User-Agent": "WaterBusinessPlatform/1.0"}
-        response = requests.get(f"{self.osm_nominatim_url}/search", params=params, headers=headers)
+        response = requests.get(
+            f"{self.osm_nominatim_url}/search", params=params, headers=headers, timeout=self.request_timeout
+        )
         response.raise_for_status()
 
         data = response.json()
@@ -480,7 +487,9 @@ class MapsService:
         params = {"lat": latitude, "lon": longitude, "format": "json"}
 
         headers = {"User-Agent": "WaterBusinessPlatform/1.0"}
-        response = requests.get(f"{self.osm_nominatim_url}/reverse", params=params, headers=headers)
+        response = requests.get(
+            f"{self.osm_nominatim_url}/reverse", params=params, headers=headers, timeout=self.request_timeout
+        )
         response.raise_for_status()
 
         data = response.json()
@@ -510,7 +519,7 @@ class MapsService:
         url = f"{self.osm_routing_url}/{coords}"
         params = {"overview": "full", "geometries": "polyline", "steps": "true"}
 
-        response = requests.get(url, params=params)
+        response = requests.get(url, params=params, timeout=self.request_timeout)
         response.raise_for_status()
 
         data = response.json()

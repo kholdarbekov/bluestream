@@ -22,6 +22,15 @@ from shared.enums import SubscriptionFrequency, SubscriptionStatus
 
 def _billing_subscription():
     item = SimpleNamespace(product_id=7, quantity=3)
+    # Mirror the real model: address is a UserAddress relationship reached via
+    # delivery_address_id, money is billing_amount, cadence is billing_cycle.
+    address = SimpleNamespace(
+        street_address="Amir Temur 1",
+        city="Tashkent",
+        latitude=41.31,
+        longitude=69.28,
+        delivery_instructions=None,
+    )
     return SimpleNamespace(
         id=42,
         user_id=5,
@@ -29,17 +38,13 @@ def _billing_subscription():
         last_billing_date=None,
         next_billing_date=datetime.now(timezone.utc),
         subscription_items=[item],
-        delivery_address_street="Amir Temur 1",
-        delivery_address_city="Tashkent",
-        delivery_address_latitude=41.31,
-        delivery_address_longitude=69.28,
-        delivery_instructions=None,
+        delivery_address_id=314,
+        delivery_address=address,
         payment_method="card",
         payment_token=None,
-        total_amount=Decimal("50000.00"),
-        frequency=SubscriptionFrequency.WEEKLY,
-        billing_cycle_count=0,
-        last_order_id=None,
+        billing_amount=Decimal("50000.00"),
+        billing_cycle=SubscriptionFrequency.WEEKLY,
+        total_orders_generated=0,
     )
 
 
@@ -64,6 +69,9 @@ def test_process_subscription_billing_builds_order_items_from_subscription_items
     assert create_order.call_count == 1
     order_data = create_order.call_args[0][1]
     assert order_data["items"] == [{"product_id": 7, "quantity": 3}]
+    # create_order subscripts delivery_address["delivery_address_id"], so the
+    # billing path must supply it from the subscription FK.
+    assert order_data["delivery_address"]["delivery_address_id"] == 314
     assert result["success"] is True
     assert result["order_id"] == 99
 

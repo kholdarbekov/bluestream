@@ -292,6 +292,44 @@
         {% endif %}
         <!-- subscription-section end -->
 
+        <!-- aqua-club-public-section -->
+        {% if loyalty_handbook %}
+        <section class="service-section" id="aqua-club-public">
+            <div class="auto-container">
+                <div class="sec-title centred">
+                    <h2>{{ 'landing.loyalty.public_title'|t }}</h2>
+                    <p>{{ 'landing.loyalty.public_subtitle'|t }}</p>
+                </div>
+                <div class="row clearfix">
+                    <div class="col-lg-4 col-md-6 col-sm-12">
+                        <div class="aqua-club-fact">
+                            <h4>{{ 'landing.loyalty.public_earn_title'|t }}</h4>
+                            <p>{{ 'landing.loyalty.public_earn'|t(bonus=loyalty_handbook.signup_bonus) }}</p>
+                        </div>
+                    </div>
+                    <div class="col-lg-4 col-md-6 col-sm-12">
+                        <div class="aqua-club-fact">
+                            <h4>{{ 'landing.loyalty.public_tiers_title'|t }}</h4>
+                            <p>
+                                {% for t in loyalty_handbook.tiers %}{{ t.name }}{% if not loop.last %} · {% endif %}{% endfor %}
+                            </p>
+                        </div>
+                    </div>
+                    <div class="col-lg-4 col-md-6 col-sm-12">
+                        <div class="aqua-club-fact">
+                            <h4>{{ 'landing.loyalty.public_redeem_title'|t }}</h4>
+                            <p>{{ 'landing.loyalty.public_redeem'|t }}</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="more-btn text-center">
+                    <a href="{{ external_url_for_lang('frontend.loyalty_guide') }}" class="theme-btn btn-one">{{ 'landing.loyalty.public_cta_primary'|t }}</a>
+                </div>
+            </div>
+        </section>
+        {% endif %}
+        <!-- aqua-club-public-section end -->
+
         <!-- loyalty-section -->
         {% if featured_rewards %}
         <section class="service-section bg-color-2">

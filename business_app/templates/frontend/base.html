@@ -61,7 +61,8 @@
         "email": {{ company_email|tojson }},
         "telephone": {{ company_phone|tojson }}{% if seo.founding_date %},
         "foundingDate": "{{ seo.founding_date }}"{% endif %}{% if seo.same_as_links %},
-        "sameAs": {{ seo.same_as_links|tojson }}{% endif %}
+        "sameAs": {{ seo.same_as_links|tojson }}{% endif %},
+        "hasMemberProgram": {"@id": "{{ company_website|default('https://aqua-element.uz', true) }}#aquaclub"}
     }
     </script>
 
@@ -102,6 +103,12 @@
     }
     </script>
     {% endif %}
+
+    <style>
+      .nav-badge{display:inline-block;margin-left:6px;padding:1px 7px;font-size:10px;font-weight:700;
+        line-height:1.7;border-radius:10px;background:#ffb703;color:#023047;vertical-align:middle;
+        text-transform:uppercase;letter-spacing:.3px;}
+    </style>
 
     {% block extra_meta %}{% endblock %}
 
@@ -229,6 +236,9 @@
                                     </li>
                                     <li class="{% if request.endpoint == 'frontend.coverage' %}current{% endif %}">
                                         <a href="{{ external_url_for_lang('frontend.coverage') }}">{{ 'landing.nav.coverage'|t }}</a>
+                                    </li>
+                                    <li class="{% if request.endpoint == 'frontend.loyalty_guide' %}current{% endif %}">
+                                        <a href="{{ external_url_for_lang('frontend.loyalty_guide') }}">{{ 'landing.nav.aqua_club'|t }}<span class="nav-badge">{{ 'landing.nav.aqua_club_badge'|t }}</span></a>
                                     </li>
                                     <li class="dropdown">
                                         <a href="#">{{ 'landing.nav.pages'|t }}</a>
@@ -519,6 +529,7 @@
                                         <li><a href="{{ external_url_for_lang('frontend.about') }}">{{ 'landing.footer.about_company'|t }}</a></li>
                                         <li><a href="{{ external_url_for_lang('frontend.services') }}">{{ 'landing.nav.services'|t }}</a></li>
                                         <li><a href="{{ external_url_for_lang('frontend.coverage') }}">{{ 'landing.nav.coverage'|t }}</a></li>
+                                        <li><a href="{{ external_url_for_lang('frontend.loyalty_guide') }}">{{ 'landing.footer.aqua_club'|t }}</a></li>
                                         <li><a href="{{ external_url_for_lang('frontend.shop') }}">{{ 'landing.shop.page_title'|t }}</a></li>
                                         <li><a href="{{ external_url_for_lang('frontend.process_filtration') }}">{% if current_language == 'ru' %}11 этапов фильтрации{% elif current_language == 'uz' %}11 bosqichli filtratsiya{% else %}11-Step Filtration{% endif %}</a></li>
                                         <li><a href="{{ external_url_for_lang('frontend.blog_list') }}">{{ 'landing.footer.our_blog'|t }}</a></li>

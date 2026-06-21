@@ -38,6 +38,25 @@
     "url": canonical_href,
     "mainEntity": faq_schema.items
 } | tojson }}</script>
+{% set program_tiers = namespace(items=[]) %}
+{% for t in handbook.tiers %}
+    {% set _ = program_tiers.items.append({
+        "@type": "MemberProgramTier",
+        "@id": ((company_website | default('https://aqua-element.uz', true)) ~ "#aquaclub-tier-" ~ t.order),
+        "name": t.name,
+        "url": canonical_href
+    }) %}
+{% endfor %}
+<script type="application/ld+json">{{ {
+    "@context": "https://schema.org",
+    "@type": "MemberProgram",
+    "@id": ((company_website | default('https://aqua-element.uz', true)) ~ "#aquaclub"),
+    "name": (company_name ~ " — Aqua Club"),
+    "description": ('loyalty_guide.meta.description' | t),
+    "url": canonical_href,
+    "hostingOrganization": {"@id": ((company_website | default('https://aqua-element.uz', true)) ~ "#organization")},
+    "hasTiers": program_tiers.items
+} | tojson }}</script>
 {% endblock %}
 
 {% block extra_head %}

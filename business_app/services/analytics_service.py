@@ -493,11 +493,13 @@ class AnalyticsService:
 
         growth_rate = ((total_revenue - previous_revenue) / previous_revenue * 100) if previous_revenue > 0 else 0
 
+        # Coerce Decimal money/aggregate values to float so report_data (a JSON
+        # column) is serializable — consistent with every sibling metric method.
         return {
-            "total_revenue": total_revenue,
-            "average_order_value": round(avg_order_value, 2),
-            "growth_rate": round(growth_rate, 2),
-            "previous_period_revenue": previous_revenue,
+            "total_revenue": float(total_revenue),
+            "average_order_value": round(float(avg_order_value), 2),
+            "growth_rate": round(float(growth_rate), 2),
+            "previous_period_revenue": float(previous_revenue),
         }
 
     def _get_order_metrics(self, start_date: datetime, end_date: datetime) -> Dict[str, Any]:
@@ -1034,7 +1036,7 @@ class AnalyticsService:
             .all()
         )
 
-        total_clv = sum(customer.total_value for customer in customer_values)
+        total_clv = float(sum(customer.total_value for customer in customer_values))
         avg_clv = total_clv / len(customer_values) if customer_values else 0
 
         # Calculate average customer lifespan

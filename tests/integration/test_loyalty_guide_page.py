@@ -25,6 +25,7 @@ def loyalty_program(db):
         birthday_bonus=200,
         points_expiry_days=365,
         min_redemption_points=200,
+        surprise_enabled=False,
     )
     db.session.add(program)
     db.session.commit()
@@ -79,7 +80,11 @@ class TestLoyaltyGuidePage:
 
     @pytest.mark.parametrize("path", ["/loyalty-guide", "/loyalty-guide?lang=ru", "/loyalty-guide?lang=en"])
     def test_page_renders_in_all_languages(self, client, loyalty_program, tiers, path):
-        resp = client.get(path)
+        # follow_redirects: the session-scoped `client` can carry a non-default
+        # session["language"] from a prior test, which makes the no-?lang= path
+        # 302 to /loyalty-guide?lang=<lang> (intentional SEO canonicalization in
+        # before_request). Following it keeps this assertion deterministic.
+        resp = client.get(path, follow_redirects=True)
         assert resp.status_code == 200, resp.get_data(as_text=True)[:500]
         html = resp.get_data(as_text=True)
         # Config-driven content present: a tier name and the page CSS.
@@ -203,3 +208,51 @@ class TestLoyaltyGuidePage:
         resp = client.get("/loyalty-guide?lang=en")
         assert resp.status_code == 200
         assert b"Frequent Buyer Bonus" in resp.data
+
+
+@pytest.mark.integration
+@pytest.mark.api
+class TestPublicLoyaltyFacts:
+    def test_facts_expose_program_tiers_in_all_languages(self, app, loyalty_program, tiers):
+        from business_app.frontend.routes import get_public_loyalty_facts
+
+        facts = get_public_loyalty_facts()
+        prog = facts["program"]
+        assert prog["uzs_per_point"] == 250
+        assert prog["signup_bonus"] == 200
+        assert prog["referral_bonus"] == 500
+        assert prog["referee_bonus"] == 250
+        assert prog["birthday_bonus"] == 200
+        assert prog["expiry_days"] == 365
+        assert prog["min_redemption_points"] == 200
+        assert prog["surprise_enabled"] is False
+
+        assert [t["key"] for t in facts["tiers"]] == ["bronze", "silver", "gold", "platinum"]
+        for tier in facts["tiers"]:
+            assert set(tier["name"].keys()) == {"uz", "ru", "en"}
+        plat = facts["tiers"][-1]
+        assert plat["multiplier"] == 2.0
+        assert plat["max_points"] is None
+
+    def test_facts_never_expose_a_cash_exchange_rate(self, app, loyalty_program, tiers):
+        """Rewards-only invariant: no points->UZS conversion rate may leak."""
+        from business_app.frontend.routes import get_public_loyalty_facts
+
+        facts = get_public_loyalty_facts()
+        # uzs_per_point is the EARN ratio (UZS spent per AquaCoin), not a cash-out
+        # rate; there must be no 'redemption_value', 'cash_value', or 'point_value'.
+        prog_keys = set(facts["program"].keys())
+        assert not (prog_keys & {"redemption_value", "cash_value", "point_value", "uzs_per_redeemed_point"})
+
+    def test_handbook_context_still_matches_legacy_shape(self, app, loyalty_program, tiers):
+        """Regression: the refactor must not change the page's display contract."""
+        from business_app.frontend.routes import get_loyalty_handbook_context
+
+        ctx = get_loyalty_handbook_context()
+        assert ctx["uzs_per_point"] == 250
+        assert ctx["referee_bonus"] == 250
+        assert [t["key"] for t in ctx["tiers"]] == ["bronze", "silver", "gold", "platinum"]
+        assert ctx["max_multiplier"] == 2.0
+        assert ctx["example"]["base"] == 200
+        assert ctx["example"]["points"] == 300
+        assert ctx["example"]["tier_name"] == "Gold"

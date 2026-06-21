@@ -97,7 +97,8 @@ class TestPaymentEdgeAwardWiring:
         payment = self._cod_payment(db, sample_order, collected=sample_order.total_amount)
 
         with patch.object(OrderService, "maybe_award_purchase_points") as award:
-            CashCollectionService().sync_payment_projection(payment)
+            # A completed cash payment records its collector (ARCH-006).
+            CashCollectionService().sync_payment_projection(payment, collected_by=sample_order.user_id)
 
         assert sample_order.is_paid is True
         award.assert_called_once()

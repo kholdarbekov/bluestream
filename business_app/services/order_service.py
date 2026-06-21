@@ -1474,6 +1474,7 @@ class OrderService:
                 cash_collection_service.consume_reserved_prepayment_for_payment(
                     payment,
                     collected_at=order.delivered_at,
+                    collected_by=updated_by,
                 )
                 cash_collection_service.apply_customer_prepaid_credit_to_payment(payment)
 

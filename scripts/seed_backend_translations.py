@@ -4698,6 +4698,15 @@ BACKEND_TRANSLATIONS = {
     'landing.nav.coverage': {
         'en': 'Coverage', 'uz': 'Hududlar', 'ru': 'Зона доставки'
     },
+    'landing.nav.aqua_club': {
+        'en': 'Aqua Club', 'uz': 'Aqua Club', 'ru': 'Aqua Club'
+    },
+    'landing.nav.aqua_club_badge': {
+        'en': 'Rewards', 'uz': 'Bonus', 'ru': 'Бонусы'
+    },
+    'landing.footer.aqua_club': {
+        'en': 'Aqua Club rewards', 'uz': 'Aqua Club dasturi', 'ru': 'Программа Aqua Club'
+    },
     'landing.coverage.title': {
         'en': 'Where we deliver', 'uz': 'Biz qayerga yetkazib beramiz', 'ru': 'Куда мы доставляем'
     },
@@ -7495,6 +7504,38 @@ LOYALTY_GUIDE_TRANSLATIONS = {
         "Har bir xarid bilan AquaCoins to'plang va ularni ajoyib mukofotlarga almashtiring!",
         'Зарабатывайте AquaCoins с каждой покупкой и обменивайте их на удивительные награды!',
     ),
+    'landing.loyalty.public_title': {
+        'en': 'Join Aqua Club — earn AquaCoins on every order',
+        'uz': "Aqua Club'ga qo'shiling — har bir buyurtmada AquaCoins yig'ing",
+        'ru': 'Вступайте в Aqua Club — копите AquaCoins с каждого заказа'
+    },
+    'landing.loyalty.public_subtitle': {
+        'en': 'Our free loyalty programme rewards every delivered order. Earn AquaCoins, climb tiers, and redeem rewards.',
+        'uz': "Bepul sodiqlik dasturimiz har bir yetkazilgan buyurtmani mukofotlaydi. AquaCoins yig'ing, darajalar bo'ylab ko'tariling va sovg'alarni oling.",
+        'ru': 'Наша бесплатная программа лояльности вознаграждает каждый доставленный заказ. Копите AquaCoins, повышайте уровень и получайте награды.'
+    },
+    'landing.loyalty.public_earn_title': {
+        'en': 'Earn on every order', 'uz': 'Har bir buyurtmada yig\'ing', 'ru': 'Копите с каждого заказа'
+    },
+    'landing.loyalty.public_earn': {
+        'en': 'Get a {bonus} AquaCoins welcome bonus when you join, then earn on every delivered, paid order.',
+        'uz': "Qo'shilganingizda {bonus} AquaCoins kutib olish bonusini oling, so'ngra har bir yetkazilgan va to'langan buyurtmada yig'ing.",
+        'ru': 'Получите приветственный бонус {bonus} AquaCoins при вступлении, затем копите с каждого доставленного оплаченного заказа.'
+    },
+    'landing.loyalty.public_tiers_title': {
+        'en': 'Tiers that reward loyalty', 'uz': 'Sodiqlikni mukofotlovchi darajalar', 'ru': 'Уровни за лояльность'
+    },
+    'landing.loyalty.public_redeem_title': {
+        'en': 'Redeem for rewards', 'uz': 'Sovg\'alarga almashtiring', 'ru': 'Обменивайте на награды'
+    },
+    'landing.loyalty.public_redeem': {
+        'en': 'Spend your AquaCoins on discounts and free products at checkout.',
+        'uz': "AquaCoins'ni to'lov vaqtida chegirmalar va bepul mahsulotlarga sarflang.",
+        'ru': 'Тратьте AquaCoins на скидки и бесплатные товары при оформлении заказа.'
+    },
+    'landing.loyalty.public_cta_primary': {
+        'en': 'See how Aqua Club works', 'uz': 'Aqua Club qanday ishlashini ko\'ring', 'ru': 'Узнать, как работает Aqua Club'
+    },
 }
 BACKEND_TRANSLATIONS.update(LOYALTY_GUIDE_TRANSLATIONS)
 

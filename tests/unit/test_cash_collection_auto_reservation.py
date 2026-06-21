@@ -665,6 +665,11 @@ class TestAutoReserveAgainstPendingPayments:
             assert pending_payment.amount_collected == Decimal("57000.00")
             assert pending_payment.outstanding_amount == Decimal("0.00")
             assert pending_payment.status == PaymentStatus.COMPLETED
+            # A COMPLETED cash payment must record WHO collected it (ARCH-006 /
+            # ck_payments_cash_completed_requires_collector). Consumption of a
+            # reservation derives the collector from the reservation's source
+            # event — here Driver B, who physically collected the cash.
+            assert pending_payment.collected_by == second_delivery_driver.id
             # No reservation remains; the marker is reset to 0.
             assert pending_payment.provider_data.get(
                 "cod_prepayment_reserved_amount"

@@ -158,6 +158,7 @@ def test_get_cod_collection_projection_keeps_zero_outstanding_without_total_fall
         status=PaymentStatus.COMPLETED,
         amount_collected=Decimal("90000"),
         outstanding_amount=Decimal("0"),
+        collected_by=sample_order.user_id,  # completed cash requires a collector (ARCH-006)
         provider_data={},
     )
     payment.provider_data = {"cod_prepayment_reserved_amount": 0}

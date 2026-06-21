@@ -13,6 +13,7 @@ from sqlalchemy import (
     Index,
     Numeric,
     UniqueConstraint,
+    CheckConstraint,
     text as sa_text,
 )
 from sqlalchemy.orm import relationship, backref
@@ -35,6 +36,13 @@ class Payment(db.Model, TimestampMixin):
         Index("idx_payments_status_created", "status", "created_at"),
         Index("idx_payments_method_status", "payment_method", "status"),
         Index("idx_payments_outstanding_status", "outstanding_amount", "status"),
+        # ARCH-006 invariant (mirrors migration a6c1b9d0e201): a completed cash
+        # payment must record its collector. Declared on the model too so the
+        # SQLite-backed test suite enforces it, not just Postgres.
+        CheckConstraint(
+            "payment_method <> 'cash' OR status <> 'completed' OR collected_by IS NOT NULL",
+            name="ck_payments_cash_completed_requires_collector",
+        ),
     )
 
     id = Column(Integer, primary_key=True)

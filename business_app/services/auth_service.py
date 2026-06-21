@@ -2177,18 +2177,22 @@ class AuthService:
         user.failed_login_attempts = 0
         db.session.commit()
 
-        # Log to audit trail
+        # Log to audit trail via the central audit logger (auto-populates
+        # event_id, severity/action and request context). Routed through an
+        # existing enum member — account unlock is a user-status change.
         try:
-            from business_app.models.audit import AuditLog, AuditEventType
+            from business_app.utils.audit_logger import audit_logger
+            from business_app.models.audit import AuditEventType, AuditSeverity
 
-            audit_log = AuditLog(
-                user_id=admin_user_id,
-                event_type=AuditEventType.ADMIN_ACTION.value,
-                event_details={"action": "unlock_account", "target_user_id": user_id, "was_locked": was_locked},
-                ip_address=request.remote_addr if request else None,
+            audit_logger.log_event(
+                event_type=AuditEventType.USER_STATUS_CHANGED,
+                action="unlock_account",
+                severity=AuditSeverity.HIGH,
+                resource_type="user",
+                resource_id=str(user_id),
+                description=f"Account unlocked for user {user_id} by admin {admin_user_id}.",
+                additional_data={"admin_user_id": admin_user_id, "was_locked": was_locked},
             )
-            db.session.add(audit_log)
-            db.session.commit()
         except Exception as e:
             logger.warning(f"Failed to create audit log for account unlock: {e}")
 

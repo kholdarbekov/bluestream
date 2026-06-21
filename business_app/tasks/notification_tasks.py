@@ -205,18 +205,19 @@ def notify_driver_assignment_task(self, delivery_id: int):
         logger.info(f"Notifying driver about delivery assignment {delivery_id}")
 
         delivery = Delivery.query.get(delivery_id)
-        if not delivery or not delivery.driver:
+        if not delivery or not delivery.delivery_person:
             logger.error(f"Delivery {delivery_id} not found or no driver assigned")
             return {"success": False, "error": "Delivery or driver not found"}
 
         notification_service = NotificationService()
 
+        order_address = delivery.order.delivery_address
         template_data = {
             "delivery_id": delivery.id,
-            "tracking_code": delivery.tracking_code,
+            "tracking_code": delivery.tracking_number,
             "order_number": delivery.order.order_number,
             "customer_name": f"{delivery.order.user.first_name} {delivery.order.user.last_name}",
-            "delivery_address": delivery.delivery_address_street,
+            "delivery_address": order_address.street_address if order_address else None,
             "customer_phone": delivery.order.user.phone,
             "estimated_delivery_time": (
                 delivery.estimated_delivery_time.isoformat() if delivery.estimated_delivery_time else None
@@ -224,7 +225,7 @@ def notify_driver_assignment_task(self, delivery_id: int):
         }
 
         result = notification_service.send_notification(
-            delivery.driver_id,
+            delivery.delivery_person_id,
             NotificationType.DELIVERY_UPDATE,
             [NotificationChannel.TELEGRAM],
             template_data,

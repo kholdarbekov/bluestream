@@ -171,6 +171,30 @@ class TestOptimizeDriverRouteTask:
             assert result == {"optimized": False, "reason": "no_active_deliveries"}
             nru.assert_not_called()
 
+    def test_soft_time_limit_returns_graceful_result_without_retry(self, app, db, driver, monkeypatch):
+        """A SoftTimeLimitExceeded must abort gracefully (so the hard 120s
+        SIGKILL never fires mid-commit), not fall through to a blind retry."""
+        from celery.exceptions import SoftTimeLimitExceeded
+
+        class _StallService:
+            def optimize_for_driver(self, *_a, **_k):
+                raise SoftTimeLimitExceeded()
+
+        with app.app_context():
+            monkeypatch.setattr(
+                "business_app.services.route_optimization_service.RouteOptimizationService",
+                _StallService,
+            )
+            result = optimize_driver_route_task.run(driver.id, trigger="auto")
+
+        assert result == {"optimized": False, "reason": "time_budget_exceeded"}
+
+    def test_task_time_limits_provisioned_for_external_io(self):
+        """The task does sequential external geocode/matrix I/O; its budget must
+        not regress back to the anomalously tight 120s/100s that SIGKILLed it."""
+        assert optimize_driver_route_task.time_limit >= 300
+        assert optimize_driver_route_task.soft_time_limit >= 270
+
     def test_optimizes_and_pushes_route_updated_webhook(
         self, app, db, driver, driver_with_location, customer, monkeypatch
     ):

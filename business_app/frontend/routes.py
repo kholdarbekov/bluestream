@@ -325,6 +325,7 @@ def index():
         featured_posts=featured_posts,
         user_data=user_data,
         loyalty_data=loyalty_data,
+        loyalty_handbook=get_loyalty_handbook_context(),
     )
 
 
@@ -728,16 +729,22 @@ def coverage():
     )
 
 
-def get_loyalty_handbook_context():
-    """Config-driven numbers for the public loyalty handbook.
+def get_public_loyalty_facts(languages=("uz", "ru", "en")):
+    """Single source of truth for the public loyalty program facts.
 
-    Everything customer-facing on /loyalty-guide is derived from the live
-    program + tier configuration (and DB-backed LoyaltyStreakRule rows),
-    so the handbook can never silently drift from how the program actually
-    behaves. All prose is translated in the template via the ``t`` filter;
-    these numbers are interpolated into those strings at render time.
+    Returns *raw*, language-keyed program data from the live LoyaltyProgram /
+    LoyaltyTierConfig / LoyaltyStreakRule / LoyaltyReward rows. Three consumers
+    read from this: the /api/public/loyalty.json feed, the MemberProgram JSON-LD
+    on /loyalty-guide, and get_loyalty_handbook_context() (the page's display
+    wrapper). Rewards-only: no points->UZS cash-out rate is exposed, and the
+    surprise reward is reported as a boolean only.
     """
-    from business_app.models.loyalty import LoyaltyProgram, LoyaltyTierConfig, LoyaltyStreakRule
+    from business_app.models.loyalty import (
+        LoyaltyProgram,
+        LoyaltyReward,
+        LoyaltyStreakRule,
+        LoyaltyTierConfig,
+    )
     from shared.business_config import LOYALTY_POINTS_RATIO
 
     program = (
@@ -747,30 +754,103 @@ def get_loyalty_handbook_context():
     uzs_per_point = (program.uzs_per_point if program and program.uzs_per_point else LOYALTY_POINTS_RATIO) or 250
     referral_bonus = (program.referral_bonus if program else 0) or 0
 
-    lang = get_current_language()
-    tiers = LoyaltyTierConfig.query.filter_by(is_active=True).order_by(LoyaltyTierConfig.display_order.asc()).all()
-    tier_list = [
+    def i18n(entity, field):
+        return {lang: entity.get_translated(field, lang) for lang in languages}
+
+    tier_rows = LoyaltyTierConfig.query.filter_by(is_active=True).order_by(LoyaltyTierConfig.display_order.asc()).all()
+    tiers = [
         {
-            # Name is model-translatable (LoyaltyTierConfig.name entity translation):
-            # renaming/localizing a tier in admin drives the page directly, with no
-            # page-specific static name keys to keep in sync.
-            "name": tier.get_translated("name", lang),
-            # Stable identity for handbook copy (tagline/benefit) + CSS accent — keyed
-            # by display_order so a tier rename never drops its card content.
             "order": tier.display_order or 0,
-            # Canonical slug retained only for the illustrative worked-example lookup.
             "key": (tier.name or "").strip().lower(),
+            "name": i18n(tier, "name"),
             "min_points": tier.min_points or 0,
             "max_points": tier.max_points,
             "multiplier": tier.points_multiplier or 1.0,
             "discount_percentage": tier.discount_percentage or 0,
         }
-        for tier in tiers
+        for tier in tier_rows
+    ]
+
+    now = datetime.now(UTC)
+    streak_rows = (
+        LoyaltyStreakRule.query.filter_by(program_id=program.id, is_active=True)
+        .order_by(LoyaltyStreakRule.display_order.asc())
+        .all()
+        if program
+        else []
+    )
+    streak_rules = [
+        {
+            "name": i18n(r, "name"),
+            "required_orders": r.required_orders,
+            "window_days": r.window_days,
+            "min_order_amount": float(r.min_order_amount) if r.min_order_amount is not None else None,
+            "bonus_points": r.bonus_points,
+        }
+        for r in streak_rows
+        if r.is_effective(now)
+    ]
+
+    # Active rewards: expose only non-sensitive metadata (type, name, cost).
+    # Defensive get_translated mirrors the public product feed.
+    rewards = []
+    reward_rows = LoyaltyReward.query.filter_by(is_active=True).order_by(LoyaltyReward.points_cost.asc()).all()
+    for r in reward_rows:
+        try:
+            name = {lang: r.get_translated("name", lang) for lang in languages}
+        except Exception:
+            name = {lang: (r.name or "") for lang in languages}
+        rewards.append(
+            {
+                "type": getattr(r, "reward_type", None),
+                "name": name,
+                "points_cost": r.points_cost or 0,
+            }
+        )
+
+    return {
+        "program": {
+            "uzs_per_point": uzs_per_point,
+            "signup_bonus": ((program.signup_bonus if program else 0) or 0),
+            "referral_bonus": referral_bonus,
+            "referee_bonus": referral_bonus // 2,
+            "birthday_bonus": ((program.birthday_bonus if program else 0) or 0),
+            "expiry_days": ((program.points_expiry_days if program else 365) or 365),
+            "min_redemption_points": ((program.min_redemption_points if program else 0) or 0),
+            "surprise_enabled": bool(program.surprise_enabled) if program else False,
+        },
+        "tiers": tiers,
+        "streak_rules": streak_rules,
+        "rewards": rewards,
+    }
+
+
+def get_loyalty_handbook_context():
+    """Display wrapper around get_public_loyalty_facts() for /loyalty-guide.
+
+    Picks the request language out of the language-keyed facts and adds the
+    display-only marketing extras (worked example, max_multiplier). The page's
+    rendered output and context contract are unchanged.
+    """
+    lang = get_current_language()
+    facts = get_public_loyalty_facts()
+    prog = facts["program"]
+
+    tier_list = [
+        {
+            "name": t["name"].get(lang) or t["name"].get("uz"),
+            "order": t["order"],
+            "key": t["key"],
+            "min_points": t["min_points"],
+            "max_points": t["max_points"],
+            "multiplier": t["multiplier"],
+            "discount_percentage": t["discount_percentage"],
+        }
+        for t in facts["tiers"]
     ]
     max_multiplier = max((t["multiplier"] for t in tier_list), default=1.0)
 
-    # Worked earning example, derived from live config (illustrated at the Gold
-    # tier when present, else the highest tier) so it always matches the rules.
+    uzs_per_point = prog["uzs_per_point"]
     example_spend = 50000
     example_base = (example_spend // uzs_per_point) if uzs_per_point else 0
     example_tier = next((t for t in tier_list if t["key"] == "gold"), None) or (tier_list[-1] if tier_list else None)
@@ -784,43 +864,27 @@ def get_loyalty_handbook_context():
         "points": int(example_base * example_multiplier),
     }
 
-    # Streak rules: DB-driven, translated in the request language (lang above).
-    now = datetime.now(UTC)
-    streak_rule_rows = (
-        LoyaltyStreakRule.query.filter_by(program_id=program.id, is_active=True)
-        .order_by(LoyaltyStreakRule.display_order.asc())
-        .all()
-        if program
-        else []
-    )
     streak_rules = [
         {
-            "name": r.get_translated("name", lang),
-            "required_orders": r.required_orders,
-            "window_days": r.window_days,
-            "min_order_amount": float(r.min_order_amount) if r.min_order_amount is not None else None,
-            "bonus_points": r.bonus_points,
+            "name": r["name"].get(lang) or r["name"].get("uz"),
+            "required_orders": r["required_orders"],
+            "window_days": r["window_days"],
+            "min_order_amount": r["min_order_amount"],
+            "bonus_points": r["bonus_points"],
         }
-        for r in streak_rule_rows
-        if r.is_effective(now)
+        for r in facts["streak_rules"]
     ]
-
-    # Surprise reward: an occasional, random delight bonus on a delivered+paid
-    # order for individual customers. The handbook surfaces only *whether* it is
-    # enabled — never the amounts, odds, or cooldown — so it stays a genuine
-    # surprise rather than a formula customers can anticipate or game.
-    surprise = {"enabled": bool(program.surprise_enabled) if program else False}
 
     return {
         "uzs_per_point": uzs_per_point,
-        "signup_bonus": ((program.signup_bonus if program else 0) or 0),
-        "referral_bonus": referral_bonus,
-        "referee_bonus": referral_bonus // 2,
-        "birthday_bonus": ((program.birthday_bonus if program else 0) or 0),
-        "expiry_days": ((program.points_expiry_days if program else 365) or 365),
-        "min_redemption_points": ((program.min_redemption_points if program else 0) or 0),
+        "signup_bonus": prog["signup_bonus"],
+        "referral_bonus": prog["referral_bonus"],
+        "referee_bonus": prog["referee_bonus"],
+        "birthday_bonus": prog["birthday_bonus"],
+        "expiry_days": prog["expiry_days"],
+        "min_redemption_points": prog["min_redemption_points"],
         "streak_rules": streak_rules,
-        "surprise": surprise,
+        "surprise": {"enabled": prog["surprise_enabled"]},
         "tiers": tier_list,
         "max_multiplier": max_multiplier,
         "example": example,
@@ -1465,6 +1529,7 @@ def sitemap_static():
         "/subscriptions",
         "/services",
         "/coverage",
+        "/loyalty-guide",
         "/about",
         "/contact",
         "/gallery",
@@ -1922,6 +1987,93 @@ def public_products_feed():
 
     response = current_app.response_class(
         response=__import__("json").dumps(feed, ensure_ascii=False, indent=2),
+        status=200,
+        mimetype="application/json; charset=utf-8",
+    )
+    response.headers["Cache-Control"] = "public, max-age=900"  # 15 min
+    response.headers["Access-Control-Allow-Origin"] = "*"  # AI bots fetch cross-origin
+    return response
+
+
+@frontend_bp.route("/api/public/loyalty.json")
+def public_loyalty_feed():
+    """Public, machine-readable loyalty-program feed (Schema.org MemberProgram).
+
+    Stable URL referenced from /llms.txt and the api-catalog so AI assistants
+    (ChatGPT, Gemini, Perplexity, Claude, Yandex) can ingest the Aqua Club
+    program — tiers, earn rules, streak bonuses, reward types — in one request,
+    in all three languages, with brand-authority context. Rewards-only: no
+    points->cash rate; the surprise reward is a boolean.
+    """
+    facts = get_public_loyalty_facts()
+    company_website = current_app.config.get("COMPANY_WEBSITE", "https://aqua-element.uz")
+
+    wikidata_id = current_app.config.get("COMPANY_WIKIDATA_ID", "")
+    same_as = []
+    if wikidata_id:
+        same_as.append(f"https://www.wikidata.org/wiki/{wikidata_id}")
+    for env_key in ("COMPANY_GOOGLE_BUSINESS_URL", "COMPANY_YANDEX_BUSINESS_URL", "COMPANY_WIKIPEDIA_URL"):
+        val = current_app.config.get(env_key, "")
+        if val:
+            same_as.append(val)
+
+    prog = facts["program"]
+    feed = {
+        "@context": "https://schema.org",
+        "@type": "MemberProgram",
+        "@id": f"{company_website}#aquaclub",
+        "name": f"{current_app.config.get('COMPANY_NAME', 'Aqua Element')} — Aqua Club",
+        "description": (
+            "Aqua Club is the Aqua Element customer loyalty programme. Customers "
+            "earn AquaCoins on every delivered, paid order, climb tiers for higher "
+            "earn multipliers and tier discounts, and redeem AquaCoins for rewards. "
+            "AquaCoins are reward points, not cash, and are not exchangeable for money."
+        ),
+        "url": _absolute_public_url("/api/public/loyalty.json"),
+        "guideUrl": _absolute_public_url("/loyalty-guide"),
+        "lastUpdated": datetime.now(UTC).isoformat(),
+        "brand": {
+            "@type": "Brand",
+            "name": current_app.config.get("COMPANY_NAME", "Aqua Element"),
+            "url": company_website,
+            "sameAs": same_as,
+        },
+        "currencyDisplayName": "AquaCoins",
+        "earnRules": {
+            "uzsPerAquaCoin": prog["uzs_per_point"],
+            "signupBonus": prog["signup_bonus"],
+            "referralBonusReferrer": prog["referral_bonus"],
+            "referralBonusReferee": prog["referee_bonus"],
+            "birthdayBonus": prog["birthday_bonus"],
+            "expiryDays": prog["expiry_days"],
+            "minRedemptionAquaCoins": prog["min_redemption_points"],
+            "surpriseRewardEnabled": prog["surprise_enabled"],
+        },
+        "tiers": [
+            {
+                "@type": "MemberProgramTier",
+                "key": t["key"],
+                "order": t["order"],
+                "name": t["name"],
+                "minAquaCoins": t["min_points"],
+                "maxAquaCoins": t["max_points"],
+                "earnMultiplier": t["multiplier"],
+                "tierDiscountPercent": t["discount_percentage"],
+            }
+            for t in facts["tiers"]
+        ],
+        "streakBonuses": facts["streak_rules"],
+        "rewards": facts["rewards"],
+        "supportedLanguages": ["uz", "ru", "en"],
+        "orderChannels": {
+            "web": company_website,
+            "telegramBot": current_app.config.get("COMPANY_TELEGRAM_BOT_URL", "https://t.me/aqua_element_bot"),
+            "phone": current_app.config.get("COMPANY_PHONE", ""),
+        },
+    }
+
+    response = current_app.response_class(
+        response=json.dumps(feed, ensure_ascii=False, indent=2),
         status=200,
         mimetype="application/json; charset=utf-8",
     )

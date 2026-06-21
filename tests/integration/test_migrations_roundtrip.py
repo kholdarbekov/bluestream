@@ -111,3 +111,44 @@ def test_migrations_upgrade_downgrade_upgrade(ephemeral_pg_database):
         upgrade(revision='head')
         downgrade(revision='base')
         upgrade(revision='head')
+
+
+@pytest.mark.integration
+def test_auditeventtype_enum_covers_all_python_members(ephemeral_pg_database):
+    """Every ``AuditEventType`` Python member must exist as a label in the
+    Postgres ``auditeventtype`` enum once migrated to head.
+
+    Regression (prod): ``order_edited``, ``session_reopened`` and
+    ``payment_verification_code_verified`` were added to the Python enum but no
+    ``ALTER TYPE ... ADD VALUE`` migration was ever created, so audit inserts
+    for those events failed with ``InvalidTextRepresentation`` and the audit
+    rows were silently dropped.
+    """
+    from business_app import create_app, db
+    from business_app.models.audit import AuditEventType
+    from flask_migrate import upgrade
+
+    app = create_app({
+        'TESTING': True,
+        'SQLALCHEMY_DATABASE_URI': ephemeral_pg_database,
+        'SQLALCHEMY_TRACK_MODIFICATIONS': False,
+        'SECRET_KEY': 'test-secret-key-for-migration-roundtrip-32-chars',
+        'JWT_SECRET_KEY': 'test-jwt-secret-key-for-migration-roundtrip',
+        'CELERY_ALWAYS_EAGER': True,
+    })
+
+    with app.app_context():
+        upgrade(revision='head')
+        pg_labels = set(
+            db.session.execute(
+                text(
+                    "SELECT e.enumlabel FROM pg_enum e "
+                    "JOIN pg_type t ON e.enumtypid = t.oid "
+                    "WHERE t.typname = 'auditeventtype'"
+                )
+            ).scalars().all()
+        )
+
+    python_values = {member.value for member in AuditEventType}
+    missing = python_values - pg_labels
+    assert not missing, f"PG auditeventtype enum missing labels: {sorted(missing)}"

@@ -14,7 +14,6 @@ from business_app.models.delivery import (
     DeliveryTimeSlot,
 )
 from business_app.models.order import Order
-from business_app.models.user import User
 from business_app.utils.exceptions import ValidationError, NotFoundError, DeliveryError
 from business_app.utils.state_validators import assert_delivery_person_for_status
 from business_app.utils.constants import DeliveryType, DELIVERY_ZONES
@@ -138,8 +137,11 @@ class DeliveryService:
         if not delivery:
             raise NotFoundError("Delivery not found")
 
-        driver = User.query.filter_by(id=driver_id, role="delivery_driver").first()
-        if not driver:
+        # Driver identity is the DeliveryPerson profile, not the (drift-prone)
+        # singular User.role — this matches how auto_assign_delivery_task selects
+        # candidates and the ARCH-006 canonical join.
+        driver_profile = DeliveryPerson.query.filter_by(user_id=driver_id, is_active=True).first()
+        if not driver_profile:
             raise NotFoundError("Driver not found")
 
         # Check if driver is available
@@ -153,10 +155,12 @@ class DeliveryService:
             delivery_person_id=driver_id,
         )
 
-        # Assign driver
-        delivery.driver_id = driver_id
+        # Assign driver. `delivery_person_id` is the real mapped FK column; it
+        # must be set before the status flips to ASSIGNED so the row satisfies
+        # ck_deliveries_person_required_after_assigned.
+        delivery.delivery_person_id = driver_id
         delivery.status = DeliveryStatus.ASSIGNED
-        delivery.assigned_at = datetime.now(timezone.utc)
+        delivery.route_data = {**(delivery.route_data or {}), "assigned_at": datetime.now(timezone.utc).isoformat()}
 
         db.session.commit()
 
@@ -782,12 +786,16 @@ class DeliveryService:
         if history_id is not None:
             self._enqueue_delivery_status_notification(history_id)
 
-        # Update order status if delivery is completed AND sync is enabled
+        # Update order status if delivery is completed AND sync is enabled.
+        # Pass the delivering driver as the actor so COD cash settled at delivery
+        # has a collector fallback (ck_payments_cash_completed_requires_collector).
         if new_status == DeliveryStatus.DELIVERED and sync_order_status:
             from .order_service import OrderService
 
             order_service = OrderService()
-            order_service.update_order_status(delivery.order_id, OrderStatus.DELIVERED)
+            order_service.update_order_status(
+                delivery.order_id, OrderStatus.DELIVERED, updated_by=delivery.delivery_person_id
+            )
 
     def _enqueue_delivery_status_notification(self, history_id: int):
         """Enqueue one canonical delivery-status notification for a committed history event."""

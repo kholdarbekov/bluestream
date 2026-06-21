@@ -50,6 +50,7 @@ def _create_payment(*, user_id: int, order_id: int, amount: Decimal, payment_id:
         amount=amount,
         payment_method=PaymentMethod.CASH,
         status=PaymentStatus.COMPLETED,
+        collected_by=user_id,  # completed cash requires a collector (ARCH-006)
     )
     db.session.add(payment)
     db.session.flush()

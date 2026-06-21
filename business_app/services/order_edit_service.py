@@ -1065,10 +1065,10 @@ class OrderEditService:
             }
 
         # --- Earned side ---
-        is_cash = order.payment_method == PaymentMethod.CASH
-        awarded = (not is_cash and order.status not in {OrderStatus.PENDING}) or (
-            is_cash and order.status == OrderStatus.DELIVERED
-        )
+        # Earnings exist only once the order is delivered AND fully paid (the
+        # same rule the award path enforces); otherwise there is nothing to
+        # re-quote on edit and the recompute is deferred.
+        awarded = order.status == OrderStatus.DELIVERED and bool(order.is_paid)
         if not awarded:
             loyalty_summary["earnings"] = {"applied": False, "deferred": True}
             plan.cascade_summary["loyalty"] = loyalty_summary

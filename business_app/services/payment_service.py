@@ -908,6 +908,15 @@ class PaymentService:
             order_service = OrderService()
             order_service.update_order_status(order.id, OrderStatus.CONFIRMED)
 
+        # Award purchase AquaCoins if this payment completes an order that was
+        # already delivered (e.g. a prepaid payment settled after delivery). The
+        # guard self-checks (delivered AND paid) and is idempotent, so for the
+        # normal prepaid flow (paid before delivery) this is a no-op — the award
+        # then fires on the DELIVERED transition instead.
+        from .order_service import OrderService
+
+        OrderService().maybe_award_purchase_points(order, commit=False)
+
         if not trigger_notifications:
             return
 

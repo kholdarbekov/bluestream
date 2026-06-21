@@ -1444,9 +1444,11 @@ class OrderService:
 
                 DeliveryService().create_delivery(order.id)
 
-            # Award loyalty points only for non-cash orders (cash orders get points on delivery)
-            if not is_cash_order:
-                self._process_loyalty_points_for_order(order, commit=commit)
+            # NOTE: purchase AquaCoins are NOT awarded at CONFIRMED. They are
+            # earned only once the order is delivered AND fully paid (see the
+            # DELIVERED branch and the payment-edge hooks), so a confirmed-but-
+            # unpaid order — including admin/manual confirmations with no
+            # completed payment — never accrues points prematurely.
 
         elif new_status == OrderStatus.DELIVERED:
             # Mark delivery as completed (sync_order_status=False to prevent circular callback)
@@ -1460,12 +1462,10 @@ class OrderService:
                 if delivery_status != DeliveryStatus.DELIVERED.value:
                     delivery_service.complete_delivery(order.delivery.id, sync_order_status=False, commit=commit)
 
-            # For cash orders, confirm inventory and award loyalty points on delivery
+            # For cash orders, confirm inventory and settle any prepaid COD balance on delivery
             is_cash_order = order.payment_method == PaymentMethod.CASH if order.payment_method else False
             if is_cash_order:
                 self._confirm_inventory_for_order(order)
-                # Process loyalty points for cash orders
-                self._process_loyalty_points_for_order(order, commit=commit)
                 # Auto-apply any customer COD prepayment balance to this delivered COD order.
                 from business_app.services.cash_collection_service import CashCollectionService
 
@@ -1476,6 +1476,14 @@ class OrderService:
                     collected_at=order.delivered_at,
                 )
                 cash_collection_service.apply_customer_prepaid_credit_to_payment(payment)
+
+            # Award purchase AquaCoins now that the order is delivered. The guard
+            # self-checks (delivered AND fully paid) and is idempotent, so:
+            #   - prepaid orders (is_paid set at payment time) earn here;
+            #   - COD orders settled by prepaid credit at delivery (above) earn here;
+            #   - COD orders whose cash is collected later earn when the
+            #     cash-collection projection flips is_paid (see CashCollectionService).
+            self.maybe_award_purchase_points(order, commit=commit)
 
             # --- LOYALTY OVERHAUL TRIGGERS ---
             # Triggers that must happen only on successful delivery
@@ -1751,6 +1759,34 @@ class OrderService:
         if strict:
             raise ValidationError(msg, error_code="BOTTLE_SESSION_REQUIRED")
         logger.warning("[BOTTLE] (legacy) %s — skipping session tally", msg)
+
+    def maybe_award_purchase_points(self, order: Order, commit: bool = True) -> None:
+        """Award purchase AquaCoins for an order, but only once it is BOTH
+        delivered AND fully paid.
+
+        This is the single guarded entry point for purchase accrual. The two
+        qualifying events — delivery and full payment — fire in different
+        services and in either order, so this is invoked from every edge
+        (delivery completion, prepaid payment success, COD cash collection).
+        It is idempotent: an order that already earned its purchase AquaCoins is
+        never credited again, so concurrent edges collapse to a single award.
+
+        Errors are swallowed so loyalty accrual never breaks the order/payment
+        flow that triggered it.
+        """
+        try:
+            status_value = order.status.value if hasattr(order.status, "value") else order.status
+            if status_value != OrderStatus.DELIVERED.value or not order.is_paid:
+                return
+
+            from .loyalty_service import LoyaltyService
+
+            if LoyaltyService().has_purchase_award(order.id):
+                return
+
+            self._process_loyalty_points_for_order(order, commit=commit)
+        except Exception:
+            logger.exception("Failed to evaluate purchase AquaCoins for order %s", getattr(order, "id", "?"))
 
     def _process_loyalty_points_for_order(self, order: Order, commit: bool = True):
         """

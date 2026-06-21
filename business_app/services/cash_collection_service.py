@@ -938,8 +938,19 @@ class CashCollectionService:
             payment.last_collected_at = collected_at or payment.last_collected_at or datetime.now(UTC)
 
         if payment.order:
-            payment.order.is_paid = payment.status == PaymentStatus.COMPLETED
-            payment.order.paid_at = payment.paid_at if payment.order.is_paid else None
+            order = payment.order
+            became_fully_paid = (payment.status == PaymentStatus.COMPLETED) and not order.is_paid
+            order.is_paid = payment.status == PaymentStatus.COMPLETED
+            order.paid_at = payment.paid_at if order.is_paid else None
+
+            if became_fully_paid:
+                # The order just became fully paid (e.g. COD cash collected after
+                # delivery). Award purchase AquaCoins if it is also delivered —
+                # the guard self-checks (delivered AND paid) and is idempotent,
+                # so this is a no-op for not-yet-delivered or already-awarded orders.
+                from business_app.services.order_service import OrderService
+
+                OrderService().maybe_award_purchase_points(order, commit=False)
 
         return payment
 

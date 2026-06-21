@@ -683,6 +683,26 @@ class LoyaltyService:
             message=message,
         )
 
+    def has_purchase_award(self, order_id: int) -> bool:
+        """Whether an order has already earned its purchase AquaCoins.
+
+        Idempotency probe for the (delivered AND fully paid) award path. Only a
+        PURCHASE award writes an ``EARNED`` transaction carrying an ``order_id``
+        (see ``award_points``); order-edit clawbacks use ``ADJUSTMENT`` and the
+        various bonuses use ``BONUS`` with ``order_id=None`` — so an ``EARNED``
+        row for this ``order_id`` uniquely marks the initial purchase accrual.
+        """
+        if not order_id:
+            return False
+        return bool(
+            db.session.query(
+                LoyaltyTransaction.query.filter(
+                    LoyaltyTransaction.order_id == order_id,
+                    LoyaltyTransaction.transaction_type == LoyaltyTransactionType.EARNED,
+                ).exists()
+            ).scalar()
+        )
+
     def award_points(
         self,
         user_id: int,

@@ -9,6 +9,7 @@ import json
 from datetime import datetime, timezone
 
 from config import config
+from shared.loyalty_eligibility import LOYALTY_ELIGIBLE_SQL
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +145,20 @@ class BotUserRepository:
         WHERE telegram_id = $2
         """
         await self.db.execute(query, phone, str(telegram_id))
+
+    async def get_user_loyalty_eligible(self, telegram_id: int) -> bool:
+        """Check whether the user is eligible for the loyalty programme.
+
+        Executes the canonical LOYALTY_ELIGIBLE_SQL expression (shared with the
+        backend parity test) in a single fetchval call.  Returns True for unknown
+        users (no row) so callers default-open rather than locking out unregistered
+        visitors.
+        """
+        value = await self.db.fetchval(
+            f"SELECT {LOYALTY_ELIGIBLE_SQL} FROM users u WHERE u.telegram_id = $1",
+            str(telegram_id),
+        )
+        return True if value is None else bool(value)
 
     async def clear_user_session(self, telegram_id: int):
         """Clear user session data and bot state"""

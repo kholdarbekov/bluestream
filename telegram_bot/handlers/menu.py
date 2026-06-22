@@ -5,6 +5,7 @@ import logging
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from eligibility import main_menu_for
 from i18n import i18n
 from keyboards import MenuKeyboards
 from utils import maybe_remove_stale_reply_keyboard
@@ -30,7 +31,7 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # (telegram.welcome — "registration complete" — is reserved for the
         # actual post-registration moment in profile.py.)
         menu_text = i18n.get('telegram.main_menu', language)
-        keyboard = MenuKeyboards.main_menu(language)
+        keyboard = await main_menu_for(update.effective_user.id, language)
 
         if update.callback_query:
             # Edit existing message

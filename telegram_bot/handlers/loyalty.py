@@ -223,6 +223,9 @@ class LoyaltyHandlers(BaseHandler):
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
+            if not await self._ensure_loyalty_eligible(update, context, user_id, language):
+                return
+
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if not user_token:
@@ -309,6 +312,10 @@ class LoyaltyHandlers(BaseHandler):
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
+
+            if not await self._ensure_loyalty_eligible(update, context, user_id, language):
+                return
+
             points_unit = i18n.get('telegram.loyalty.points_unit', language)
             page = self._parse_history_page(query.data if query else None)
 
@@ -373,6 +380,9 @@ class LoyaltyHandlers(BaseHandler):
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
+            if not await self._ensure_loyalty_eligible(update, context, user_id, language):
+                return
+
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if not user_token:
@@ -422,6 +432,10 @@ class LoyaltyHandlers(BaseHandler):
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
+
+            if not await self._ensure_loyalty_eligible(update, context, user_id, language):
+                return
+
             points_unit = i18n.get('telegram.loyalty.points_unit', language)
 
             async with api_client as client:
@@ -482,6 +496,9 @@ class LoyaltyHandlers(BaseHandler):
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
+
+            if not await self._ensure_loyalty_eligible(update, context, user_id, language):
+                return
 
             reward_id = int(query.data.split('_')[1])
 

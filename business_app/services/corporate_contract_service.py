@@ -1890,6 +1890,15 @@ class CorporateContractService:
             )
         return results
 
+    def get_business_account_balances(self, user) -> List[Dict[str, Any]]:
+        """Active corporate prepayment balances if the user may pay via the
+        business_account method, else []. Grocery stores never use prepaid
+        bottle settlement; individuals have no contracts (so naturally []).
+        This is the single source for "is business_account offered to a user"."""
+        if user is None or getattr(user, "is_grocery_store", False):
+            return []
+        return self.get_active_contract_balances_for_user(user.id)
+
     def get_ledger(
         self,
         contract_id: int,

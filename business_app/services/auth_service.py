@@ -1426,6 +1426,8 @@ class AuthService:
 
     def get_user_profile_data(self, user_id: int) -> Dict[str, Any]:
         """Get profile payload for a user."""
+        from business_app.services.loyalty_service import LoyaltyService
+
         user = User.query.get(user_id)
         if not user:
             raise NotFoundError(get_translation("error.not_found"))
@@ -1445,6 +1447,7 @@ class AuthService:
             "created_at": user.created_at.isoformat(),
             "last_login": user.last_login.isoformat() if user.last_login else None,
             "preferred_language": getattr(user, "preferred_language", "en"),
+            "loyalty_eligible": LoyaltyService.is_user_loyalty_eligible(user),
             "permissions": self.get_user_permissions(user_id),
         }
 

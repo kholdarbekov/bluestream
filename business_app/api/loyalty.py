@@ -12,7 +12,7 @@ from business_app.serializers.loyalty_serializers import (
     serialize_loyalty_transaction,
     serialize_loyalty_program,
 )
-from business_app.utils.decorators import validate_json, cache_response
+from business_app.utils.decorators import validate_json, cache_response, require_loyalty_eligible
 from business_app.utils.constants import LoyaltyActionType
 from business_app.utils.api_responses import (
     success_response,
@@ -69,6 +69,7 @@ def get_membership_tiers():
 
 @loyalty_bp.route("/points", methods=["GET"])
 @jwt_required()
+@require_loyalty_eligible
 def get_loyalty_points():
     """Get user's loyalty points balance."""
     try:
@@ -82,6 +83,7 @@ def get_loyalty_points():
 
 @loyalty_bp.route("/account", methods=["GET"])
 @jwt_required()
+@require_loyalty_eligible
 def get_loyalty_account():
     """Get complete loyalty account data for frontend dashboard."""
     try:
@@ -95,6 +97,7 @@ def get_loyalty_account():
 
 @loyalty_bp.route("/history", methods=["GET"])
 @jwt_required()
+@require_loyalty_eligible
 def get_loyalty_points_history():
     """Get loyalty points transaction history."""
     try:
@@ -120,6 +123,7 @@ def get_loyalty_points_history():
 
 @loyalty_bp.route("/profile", methods=["GET"])
 @jwt_required()
+@require_loyalty_eligible
 def get_loyalty_profile():
     """Get user's loyalty profile."""
     try:
@@ -143,6 +147,7 @@ def get_loyalty_profile():
 
 @loyalty_bp.route("/points/history", methods=["GET"])
 @jwt_required()
+@require_loyalty_eligible
 def get_points_history():
     """Get user's points transaction history."""
     try:
@@ -176,6 +181,7 @@ def get_points_history():
 
 @loyalty_bp.route("/rewards", methods=["GET"])
 @jwt_required()
+@require_loyalty_eligible
 def get_available_rewards():
     """Get available loyalty rewards."""
     try:
@@ -216,6 +222,7 @@ def get_available_rewards():
 
 @loyalty_bp.route("/rewards/<int:reward_id>", methods=["GET"])
 @jwt_required()
+@require_loyalty_eligible
 def get_reward_details(reward_id):
     """Get single reward details by ID."""
     try:
@@ -253,6 +260,7 @@ def get_reward_details(reward_id):
 
 @loyalty_bp.route("/rewards/history", methods=["GET"])
 @jwt_required()
+@require_loyalty_eligible
 def get_redemption_history():
     """Get user's reward redemption history."""
     try:
@@ -298,6 +306,7 @@ def get_loyalty_programs():
 
 @loyalty_bp.route("/earn-points", methods=["POST"])
 @jwt_required()
+@require_loyalty_eligible
 @validate_json(["action"])
 def earn_points():
     """Manually award points for specific actions."""
@@ -356,6 +365,7 @@ def earn_points():
 
 @loyalty_bp.route("/referral", methods=["GET"])
 @jwt_required()
+@require_loyalty_eligible
 def get_referral_info():
     """Get user's referral code and statistics."""
     try:
@@ -373,6 +383,7 @@ def get_referral_info():
 
 @loyalty_bp.route("/statistics", methods=["GET"])
 @jwt_required()
+@require_loyalty_eligible
 def get_loyalty_statistics():
     """Get user's loyalty statistics."""
     try:
@@ -403,6 +414,7 @@ def get_tier_benefits():
 
 @loyalty_bp.route("/gift-points", methods=["POST"])
 @jwt_required()
+@require_loyalty_eligible
 @validate_json(["recipient_phone", "points_amount"])
 def gift_points():
     """Gift points to another user."""

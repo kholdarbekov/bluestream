@@ -69,6 +69,28 @@ class BaseHandler:
 
         await message.reply_text(**kwargs)
 
+    async def _ensure_loyalty_eligible(self, update, context, telegram_id, language) -> bool:
+        """Block loyalty actions for ineligible users: brief toast + main menu.
+
+        Returns True when the user may proceed, False when blocked (caller returns).
+        """
+        import eligibility
+        from keyboards import MenuKeyboards
+
+        if await eligibility.is_loyalty_eligible(telegram_id):
+            return True
+
+        query = getattr(update, "callback_query", None)
+        toast = i18n.get('telegram.loyalty.not_available', language)
+        if query is not None:
+            await query.answer(toast, show_alert=False)
+            await self._edit_or_replace_callback_message(
+                query,
+                text=i18n.get('telegram.main_menu', language),
+                reply_markup=MenuKeyboards.main_menu(language, show_loyalty=False),
+            )
+        return False
+
     async def _resolve_language(self, update: Update) -> str:
         """Best-effort language lookup for error replies. Falls back to 'en'."""
         try:

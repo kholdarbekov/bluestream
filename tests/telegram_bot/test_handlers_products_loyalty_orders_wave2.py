@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+import eligibility
 from handlers import loyalty as loyalty_module
 from handlers import orders as orders_module
 from handlers import products as products_module
@@ -339,7 +340,7 @@ class TestOrderHandlerWave2:
         monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(orders_module, "get_auth_token", AsyncMock(return_value="jwt"))
         monkeypatch.setattr(orders_module.MessageBuilder, "build_order_summary", lambda _o, _l: "order-summary")
-        monkeypatch.setattr(orders_module.MenuKeyboards, "main_menu", lambda _l: "menu-kbd")
+        monkeypatch.setattr(orders_module, "main_menu_for", AsyncMock(return_value="menu-kbd"))
         monkeypatch.setattr(orders_module, "api_client", FakeAPIClientContext(
             get_cart=_resp(success=True, data=cart_data),
             create_order=_resp(success=True, data=order_data),
@@ -438,6 +439,7 @@ class TestOrderHandlerWave2:
             }
         }
         monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(eligibility, "is_loyalty_eligible", AsyncMock(return_value=True))
         monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(orders_module, "get_auth_token", AsyncMock(return_value="jwt"))
         monkeypatch.setattr(orders_module.OrderKeyboards, "order_confirmation", lambda *_a, **_k: "confirm-kbd")
@@ -475,6 +477,7 @@ class TestOrderHandlerWave2:
             }
         }
         monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(eligibility, "is_loyalty_eligible", AsyncMock(return_value=True))
         monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(orders_module, "get_auth_token", AsyncMock(return_value="jwt"))
         monkeypatch.setattr(orders_module.OrderKeyboards, "order_confirmation", lambda *_a, **_k: "confirm-kbd")
@@ -506,6 +509,7 @@ class TestOrderHandlerWave2:
              "discount_type": "fixed", "discount_value": 10000, "min_order_value": 0},
         ]}}
         monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(eligibility, "is_loyalty_eligible", AsyncMock(return_value=True))
         monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(orders_module, "get_auth_token", AsyncMock(return_value="jwt"))
         monkeypatch.setattr(orders_module.OrderKeyboards, "order_confirmation", lambda *_a, **_k: "confirm-kbd")
@@ -539,6 +543,7 @@ class TestOrderHandlerWave2:
              "free_product_id": 2, "free_product_quantity": 2, "min_order_value": 0},
         ]}}
         monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(eligibility, "is_loyalty_eligible", AsyncMock(return_value=True))
         monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(orders_module, "get_auth_token", AsyncMock(return_value="jwt"))
         monkeypatch.setattr(orders_module.OrderKeyboards, "order_confirmation", lambda *_a, **_k: "confirm-kbd")
@@ -604,6 +609,7 @@ class TestCheckoutRewardSelection:
             return "picker-kbd"
 
         monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(eligibility, "is_loyalty_eligible", AsyncMock(return_value=True))
         monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(orders_module, "get_auth_token", AsyncMock(return_value="jwt"))
         monkeypatch.setattr(orders_module.OrderKeyboards, "checkout_reward_picker", staticmethod(_picker))
@@ -626,6 +632,7 @@ class TestCheckoutRewardSelection:
         context = make_context()
 
         monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(eligibility, "is_loyalty_eligible", AsyncMock(return_value=True))
         monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)
 
         await handler.checkout_apply_reward(update, context)
@@ -642,6 +649,7 @@ class TestCheckoutRewardSelection:
         context.user_data["selected_reward_id"] = 7
 
         monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(eligibility, "is_loyalty_eligible", AsyncMock(return_value=True))
         monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)
 
         await handler.checkout_remove_reward(update, context)
@@ -673,6 +681,7 @@ class TestLoyaltyHandlerWave2:
         context = make_context()
 
         monkeypatch.setattr(loyalty_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(eligibility, "is_loyalty_eligible", AsyncMock(return_value=True))
         monkeypatch.setattr(loyalty_module, "get_auth_token", AsyncMock(return_value="jwt"))
         monkeypatch.setattr(loyalty_module, "api_client", FakeAPIClientContext(
             get_loyalty_history=_resp(success=False, error="history failed"),
@@ -689,6 +698,7 @@ class TestLoyaltyHandlerWave2:
         context = make_context()
 
         monkeypatch.setattr(loyalty_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(eligibility, "is_loyalty_eligible", AsyncMock(return_value=True))
 
         await handler.redeem_reward(update, context)
         handler._handle_error.assert_awaited_once()
@@ -719,6 +729,7 @@ class TestLoyaltyHandlerWave2:
 
         monkeypatch.setattr(loyalty_module, "user_middleware", AsyncMock(return_value={"id": 1}))
         monkeypatch.setattr(loyalty_module.i18n, "get_user_language", AsyncMock(return_value="ru"))
+        monkeypatch.setattr(eligibility, "is_loyalty_eligible", AsyncMock(return_value=True))
         monkeypatch.setattr(loyalty_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(loyalty_module, "get_auth_token", AsyncMock(return_value="jwt"))
         monkeypatch.setattr(loyalty_module, "api_client", FakeAPIClientContext(
@@ -749,6 +760,7 @@ class TestLoyaltyHandlerWave2:
         context = make_context()
 
         monkeypatch.setattr(loyalty_module.i18n, "get_user_language", AsyncMock(return_value="ru"))
+        monkeypatch.setattr(eligibility, "is_loyalty_eligible", AsyncMock(return_value=True))
         monkeypatch.setattr(loyalty_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(loyalty_module, "get_auth_token", AsyncMock(return_value="jwt"))
         monkeypatch.setattr(loyalty_module, "api_client", FakeAPIClientContext(
@@ -791,6 +803,7 @@ class TestLoyaltyHandlerWave2:
         context = make_context()
 
         monkeypatch.setattr(loyalty_module.i18n, "get_user_language", AsyncMock(return_value="ru"))
+        monkeypatch.setattr(eligibility, "is_loyalty_eligible", AsyncMock(return_value=True))
         monkeypatch.setattr(loyalty_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(loyalty_module, "get_auth_token", AsyncMock(return_value="jwt"))
 
@@ -829,6 +842,7 @@ class TestLoyaltyHandlerWave2:
         context.bot.username = "aqua_element_bot"  # runtime truth from getMe
 
         monkeypatch.setattr(loyalty_module.i18n, "get_user_language", AsyncMock(return_value="ru"))
+        monkeypatch.setattr(eligibility, "is_loyalty_eligible", AsyncMock(return_value=True))
         monkeypatch.setattr(loyalty_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(loyalty_module, "get_auth_token", AsyncMock(return_value="jwt"))
         monkeypatch.setattr(loyalty_module, "api_client", FakeAPIClientContext(

@@ -100,6 +100,14 @@ class OrderService:
         if not user:
             raise NotFoundError("User not found")
 
+        # A redeemed loyalty reward may only be applied by a loyalty-eligible
+        # user. Reject early — before any reward lookup or DB writes.
+        if reward_id:
+            from business_app.services.loyalty_service import LoyaltyService
+
+            if not LoyaltyService.is_user_loyalty_eligible(user):
+                raise ValidationError("Loyalty rewards are not available for this account")
+
         # Require phone number for placing orders
         if not user.phone:
             raise ValidationError("Phone number is required to place an order. Please update your profile.")

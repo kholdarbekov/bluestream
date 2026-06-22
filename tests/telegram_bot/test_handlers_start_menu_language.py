@@ -20,7 +20,7 @@ class TestMainMenuHandlerFlows:
         cleanup_mock = AsyncMock(return_value=True)
         monkeypatch.setattr(menu_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(menu_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
-        monkeypatch.setattr(menu_module.MenuKeyboards, "main_menu", lambda _lang: "menu-kbd")
+        monkeypatch.setattr(menu_module, "main_menu_for", AsyncMock(return_value="menu-kbd"))
         monkeypatch.setattr(menu_module, "maybe_remove_stale_reply_keyboard", cleanup_mock)
 
         await menu_module.main_menu_handler(update, context)
@@ -38,7 +38,7 @@ class TestMainMenuHandlerFlows:
         cleanup_mock = AsyncMock(return_value=True)
         monkeypatch.setattr(menu_module.i18n, "get_user_language", AsyncMock(return_value="ru"))
         monkeypatch.setattr(menu_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
-        monkeypatch.setattr(menu_module.MenuKeyboards, "main_menu", lambda _lang: "menu-kbd")
+        monkeypatch.setattr(menu_module, "main_menu_for", AsyncMock(return_value="menu-kbd"))
         monkeypatch.setattr(menu_module, "maybe_remove_stale_reply_keyboard", cleanup_mock)
 
         await menu_module.main_menu_handler(update, context)
@@ -53,7 +53,7 @@ class TestMainMenuHandlerFlows:
         update = DummyUpdate()
         update.callback_query = DummyCallbackQuery(data="menu")
         context = make_context()
-        monkeypatch.setattr(menu_module.MenuKeyboards, "main_menu", lambda _lang: (_ for _ in ()).throw(RuntimeError("boom")))
+        monkeypatch.setattr(menu_module, "main_menu_for", AsyncMock(side_effect=RuntimeError("boom")))
         monkeypatch.setattr(menu_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(menu_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
 
@@ -123,7 +123,7 @@ class TestLanguageHandlerFlows:
         monkeypatch.setattr(language_module.i18n, "get_language_flag", lambda _lang: "🇷🇺")
         monkeypatch.setattr(language_module.i18n, "get_language_name", lambda _lang, _display: "Русский")
         monkeypatch.setattr(language_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
-        monkeypatch.setattr(language_module.MenuKeyboards, "main_menu", lambda _lang: "menu-kbd")
+        monkeypatch.setattr(language_module, "main_menu_for", AsyncMock(return_value="menu-kbd"))
 
         await handler.set_language(update, context)
 

@@ -62,7 +62,7 @@ class TestLinkAccountResponseNesting:
 
         monkeypatch.setattr(profile_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **kw: f"{key}:{lang}:{kw}")
-        monkeypatch.setattr(profile_module.MenuKeyboards, "main_menu", lambda _lang: "menu-kbd")
+        monkeypatch.setattr(profile_module, "main_menu_for", AsyncMock(return_value="menu-kbd"))
         monkeypatch.setattr(profile_module, "api_client", _APIContext())
 
         state = await handler.link_account_otp(update, context)
@@ -150,7 +150,7 @@ class TestStrandedUserReprompt:
         )
         monkeypatch.setattr(profile_module, "BotUserRepository", lambda _db: user_repo)
         monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
-        monkeypatch.setattr(profile_module.MenuKeyboards, "main_menu", lambda _lang: "menu-kbd")
+        monkeypatch.setattr(profile_module, "main_menu_for", AsyncMock(return_value="menu-kbd"))
         monkeypatch.setattr(profile_module, "maybe_remove_stale_reply_keyboard", cleanup_mock)
 
         state = await handler.start_registration_new(update, context)
@@ -323,7 +323,7 @@ class TestRegistrationOtpInsideConversation:
 
         monkeypatch.setattr(profile_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **kw: f"{key}:{lang}")
-        monkeypatch.setattr(profile_module.MenuKeyboards, "main_menu", lambda _lang: "menu-kbd")
+        monkeypatch.setattr(profile_module, "main_menu_for", AsyncMock(return_value="menu-kbd"))
         monkeypatch.setattr(profile_module, "get_auth_token", AsyncMock(return_value="user-token"))
         monkeypatch.setattr(profile_module, "api_client", _APIContext())
 

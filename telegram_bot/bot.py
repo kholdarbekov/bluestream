@@ -70,6 +70,7 @@ from handlers.profile import (
     ADDRESS_STREET, ADDRESS_BUILDING, ADDRESS_APARTMENT, ADDRESS_FLOOR,
     ADDRESS_ENTRANCE, ADDRESS_DELIVERY_INSTRUCTIONS, ADDRESS_GEOCODE_CONFIRM
 )
+from eligibility import main_menu_for
 from utils import error_handler, rate_limiter, user_middleware, get_auth_token
 from keyboards import MenuKeyboards
 
@@ -800,7 +801,7 @@ class WaterBusinessBot:
                     await update.message.reply_text(
                         i18n.get('telegram.bot.otp.success_message', language),
                         parse_mode='Markdown',
-                        reply_markup=MenuKeyboards.main_menu(language)
+                        reply_markup=await main_menu_for(update.effective_user.id, language)
                     )
 
                     # Clear OTP flags
@@ -935,7 +936,7 @@ class WaterBusinessBot:
                         latitude=location.latitude,
                         longitude=location.longitude
                     ),
-                    reply_markup=MenuKeyboards.main_menu(language)
+                    reply_markup=await main_menu_for(update.effective_user.id, language)
                 )
 
         except Exception as e:

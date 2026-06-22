@@ -9,6 +9,7 @@ from telegram import Update, constants
 from telegram.ext import ContextTypes
 from telegram.helpers import escape_markdown
 
+from eligibility import main_menu_for
 from i18n import i18n
 from keyboards import OrderKeyboards, MenuKeyboards, PaymentKeyboards
 from api_client import api_client
@@ -37,10 +38,15 @@ class OrderHandlers(BaseHandler):
                 'type': 'cash',
                 'name': i18n.get('telegram.payment_cash', language),
             })
-        if any(code != 'cash' for code in method_codes):
+        if any(code not in ('cash', 'business_account') for code in method_codes):
             payment_methods.append({
                 'type': 'card',
                 'name': i18n.get('telegram.payment_card', language),
+            })
+        if 'business_account' in method_codes:
+            payment_methods.append({
+                'type': 'business_account',
+                'name': i18n.get('telegram.payment_business_account', language),
             })
         return payment_methods
 
@@ -107,7 +113,7 @@ class OrderHandlers(BaseHandler):
 
             if not orders:
                 no_orders_text = i18n.get('telegram.orders.no_orders', language)
-                keyboard = MenuKeyboards.main_menu(language)
+                keyboard = await main_menu_for(update.effective_user.id, language)
 
                 if update.callback_query:
                     try:
@@ -673,7 +679,7 @@ class OrderHandlers(BaseHandler):
             language = await i18n.get_user_language(user_id)
 
             # Extract payment method
-            payment_method = query.data.split('_')[1]
+            payment_method = query.data.split('_', 1)[1]
 
             # Store payment method
             context.user_data['selected_payment_method'] = payment_method
@@ -703,7 +709,7 @@ class OrderHandlers(BaseHandler):
 
             await query.edit_message_text(
                 text=i18n.get('telegram.action_cancelled', language),
-                reply_markup=MenuKeyboards.main_menu(language),
+                reply_markup=await main_menu_for(update.effective_user.id, language),
             )
             await query.answer(i18n.get('telegram.action_cancelled_short', language))
 
@@ -919,7 +925,7 @@ class OrderHandlers(BaseHandler):
                     language=language,
                 )
 
-            keyboard = MenuKeyboards.main_menu(language)
+            keyboard = await main_menu_for(update.effective_user.id, language)
 
             await query.edit_message_text(
                 text=success_text,
@@ -988,7 +994,7 @@ class OrderHandlers(BaseHandler):
             success_text += MessageBuilder.build_order_summary(order, language)
             success_text += "\n\n" + i18n.get('telegram.orders.cash_note', language)
 
-            keyboard = MenuKeyboards.main_menu(language)
+            keyboard = await main_menu_for(update.effective_user.id, language)
             await self._edit_or_replace_callback_message(
                 query, success_text, reply_markup=keyboard,
             )
@@ -1071,6 +1077,7 @@ class OrderHandlers(BaseHandler):
                 'cash': i18n.get('telegram.payment_cash', language),
                 'card': i18n.get('telegram.payment_card', language),
                 'payme': i18n.get('telegram.payment_payme', language),
+                'business_account': i18n.get('telegram.payment_business_account', language),
             }
             payment_method_label = payment_method_labels.get(
                 payment_method,
@@ -1161,10 +1168,13 @@ class OrderHandlers(BaseHandler):
                     remaining=v['remaining'],
                 ) + "\n"
 
+        import eligibility
+        show_reward = await eligibility.is_loyalty_eligible(update.effective_user.id)
         keyboard = OrderKeyboards.order_confirmation(
             language,
             meets_minimum=meets_minimum,
             has_reward=bool(context.user_data.get('selected_reward_id')),
+            show_reward=show_reward,
         )
 
         await update.callback_query.edit_message_text(
@@ -1192,6 +1202,9 @@ class OrderHandlers(BaseHandler):
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
+
+            if not await self._ensure_loyalty_eligible(update, context, user_id, language):
+                return
 
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
@@ -1235,6 +1248,12 @@ class OrderHandlers(BaseHandler):
         """Store the chosen reward and re-render the confirmation (with its preview)."""
         try:
             query = update.callback_query
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+
+            if not await self._ensure_loyalty_eligible(update, context, user_id, language):
+                return
+
             reward_id = int(query.data.rsplit('_', 1)[1])
             context.user_data['selected_reward_id'] = reward_id
             await self._show_order_confirmation(update, context)
@@ -1247,6 +1266,10 @@ class OrderHandlers(BaseHandler):
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
+
+            if not await self._ensure_loyalty_eligible(update, context, user_id, language):
+                return
+
             context.user_data.pop('selected_reward_id', None)
             await query.answer(i18n.get('telegram.loyalty.reward_removed', language))
             await self._show_order_confirmation(update, context)

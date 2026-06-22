@@ -65,7 +65,7 @@ class TestProfileHandlerFlows:
         )
         monkeypatch.setattr(profile_module, "BotUserRepository", lambda _db: user_repo)
         monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
-        monkeypatch.setattr(profile_module.MenuKeyboards, "main_menu", lambda _lang: "menu-kbd")
+        monkeypatch.setattr(profile_module, "main_menu_for", AsyncMock(return_value="menu-kbd"))
         monkeypatch.setattr(profile_module, "maybe_remove_stale_reply_keyboard", cleanup_mock)
 
         state = await handler.start_registration_new(update, context)
@@ -197,7 +197,7 @@ class TestProfileHandlerFlows:
             "api_client",
             FakeAPIClientContext(update_user_profile=_resp(success=True)),
         )
-        monkeypatch.setattr(profile_module.MenuKeyboards, "main_menu", lambda _lang: "menu-kbd")
+        monkeypatch.setattr(profile_module, "main_menu_for", AsyncMock(return_value="menu-kbd"))
 
         state = await handler.phone_verify_name_received(update, context)
 
@@ -228,7 +228,7 @@ class TestProfileHandlerFlows:
         monkeypatch.setattr(profile_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
         monkeypatch.setattr(profile_module, "normalize_phone_number", lambda phone: phone)
-        monkeypatch.setattr(profile_module.MenuKeyboards, "main_menu", lambda _lang: "menu-kbd")
+        monkeypatch.setattr(profile_module, "main_menu_for", AsyncMock(return_value="menu-kbd"))
         monkeypatch.setattr(profile_module, "api_client", _APIContext())
 
         state = await handler.phone_received(update, context)
@@ -298,7 +298,7 @@ class TestProfileHandlerFlows:
 
         monkeypatch.setattr(profile_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
-        monkeypatch.setattr(profile_module.MenuKeyboards, "main_menu", lambda _lang: "menu-kbd")
+        monkeypatch.setattr(profile_module, "main_menu_for", AsyncMock(return_value="menu-kbd"))
 
         state = await handler.cancel_phone_verification(update, context)
 
@@ -321,7 +321,7 @@ class TestProfileHandlerFlows:
 
         monkeypatch.setattr(profile_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
-        monkeypatch.setattr(profile_module.MenuKeyboards, "main_menu", lambda _lang: "menu-kbd")
+        monkeypatch.setattr(profile_module, "main_menu_for", AsyncMock(return_value="menu-kbd"))
 
         state = await handler.cancel_registration(update, context)
 
@@ -693,7 +693,7 @@ class TestOrderHandlerFlows:
             "api_client",
             FakeAPIClientContext(get_user_orders=_resp(success=True, data={"data": {"orders": []}})),
         )
-        monkeypatch.setattr(orders_module.MenuKeyboards, "main_menu", lambda _lang: "menu-kbd")
+        monkeypatch.setattr(orders_module, "main_menu_for", AsyncMock(return_value="menu-kbd"))
 
         await handler.orders_menu(update, context)
 
@@ -763,7 +763,7 @@ class TestOrderHandlerFlows:
 
         monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(orders_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
-        monkeypatch.setattr(orders_module.MenuKeyboards, "main_menu", lambda _lang: "main-menu-kbd")
+        monkeypatch.setattr(orders_module, "main_menu_for", AsyncMock(return_value="main-menu-kbd"))
 
         await handler.cancel_checkout(update, context)
 

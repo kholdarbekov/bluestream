@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+import eligibility
 from handlers import loyalty as loyalty_module
 from handlers import orders as orders_module
 from handlers import products as products_module
@@ -474,6 +475,7 @@ class TestLoyaltyHandlerDeepFlows:
 
         monkeypatch.setattr(loyalty_module, "user_middleware", AsyncMock(return_value={"id": 1}))
         monkeypatch.setattr(loyalty_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(eligibility, "is_loyalty_eligible", AsyncMock(return_value=True))
         monkeypatch.setattr(loyalty_module, "get_auth_token", AsyncMock(return_value=None))
         monkeypatch.setattr(loyalty_module, "api_client", FakeAPIClientContext())
 
@@ -488,6 +490,7 @@ class TestLoyaltyHandlerDeepFlows:
 
         monkeypatch.setattr(loyalty_module, "user_middleware", AsyncMock(return_value={"id": 1}))
         monkeypatch.setattr(loyalty_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(eligibility, "is_loyalty_eligible", AsyncMock(return_value=True))
         monkeypatch.setattr(loyalty_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(loyalty_module, "get_auth_token", AsyncMock(return_value="jwt"))
         monkeypatch.setattr(
@@ -527,6 +530,7 @@ class TestLoyaltyHandlerDeepFlows:
 
         monkeypatch.setattr(loyalty_module, "user_middleware", AsyncMock(return_value={"id": 1}))
         monkeypatch.setattr(loyalty_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(eligibility, "is_loyalty_eligible", AsyncMock(return_value=True))
         monkeypatch.setattr(loyalty_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(loyalty_module, "get_auth_token", AsyncMock(return_value="jwt"))
         monkeypatch.setattr(
@@ -552,6 +556,7 @@ class TestLoyaltyHandlerDeepFlows:
 
         monkeypatch.setattr(loyalty_module, "user_middleware", AsyncMock(return_value={"id": 1}))
         monkeypatch.setattr(loyalty_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(eligibility, "is_loyalty_eligible", AsyncMock(return_value=True))
         monkeypatch.setattr(loyalty_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(loyalty_module, "get_auth_token", AsyncMock(return_value="jwt"))
         monkeypatch.setattr(
@@ -582,6 +587,7 @@ class TestLoyaltyHandlerDeepFlows:
         context = make_context()
 
         monkeypatch.setattr(loyalty_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(eligibility, "is_loyalty_eligible", AsyncMock(return_value=True))
         monkeypatch.setattr(loyalty_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(loyalty_module, "get_auth_token", AsyncMock(return_value="jwt"))
         monkeypatch.setattr(loyalty_module.MenuKeyboards, "back_button", lambda _l: "back-kbd")
@@ -607,6 +613,7 @@ class TestLoyaltyHandlerDeepFlows:
 
         history = [{"created_at": "2026-02-23T10:00:00Z", "points": 40, "transaction_type": "earned"}]
         monkeypatch.setattr(loyalty_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(eligibility, "is_loyalty_eligible", AsyncMock(return_value=True))
         monkeypatch.setattr(loyalty_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(loyalty_module, "get_auth_token", AsyncMock(return_value="jwt"))
         monkeypatch.setattr(loyalty_module.MenuKeyboards, "back_button", lambda _l: "back-kbd")
@@ -627,6 +634,7 @@ class TestLoyaltyHandlerDeepFlows:
         context = make_context()
 
         monkeypatch.setattr(loyalty_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(eligibility, "is_loyalty_eligible", AsyncMock(return_value=True))
         monkeypatch.setattr(loyalty_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(loyalty_module, "get_auth_token", AsyncMock(return_value="jwt"))
         monkeypatch.setattr(loyalty_module.MenuKeyboards, "back_button", lambda _l: "back-kbd")
@@ -667,6 +675,7 @@ class TestLoyaltyHandlerDeepFlows:
         context = make_context()
 
         monkeypatch.setattr(loyalty_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(eligibility, "is_loyalty_eligible", AsyncMock(return_value=True))
         monkeypatch.setattr(loyalty_module.i18n, "get", _i18n_get)
 
         await handler.redeem_reward(update, context)

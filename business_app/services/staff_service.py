@@ -2064,13 +2064,8 @@ class StaffService:
             },
         ]
 
-        # Business Account is only available to workplace entities. Grocery
-        # stores never use prepaid bottle settlement; they pay cash/card and
-        # carry money debt.
-        is_grocery_store = bool(user.is_grocery_store)
-        corporate_balances = (
-            [] if is_grocery_store else CorporateContractService().get_active_contract_balances_for_user(user_id)
-        )
+        # Business Account availability — single source of truth.
+        corporate_balances = CorporateContractService().get_business_account_balances(user)
         if corporate_balances:
             methods.append(
                 {

@@ -121,9 +121,21 @@ class CorporateContract(db.Model, TimestampMixin):
             return False
         if self.status != CorporateContractStatus.ACTIVE:
             return False
-        if self.start_date and self.start_date > now:
+        # Normalise stored dates: SQLite returns naive datetimes even for
+        # DateTime(timezone=True) columns; assume UTC if tzinfo is absent.
+        start = (
+            self.start_date.replace(tzinfo=timezone.utc)
+            if self.start_date and self.start_date.tzinfo is None
+            else self.start_date
+        )
+        end = (
+            self.end_date.replace(tzinfo=timezone.utc)
+            if self.end_date and self.end_date.tzinfo is None
+            else self.end_date
+        )
+        if start and start > now:
             return False
-        if self.end_date and self.end_date < now:
+        if end and end < now:
             return False
         return True
 

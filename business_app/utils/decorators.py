@@ -877,6 +877,29 @@ def validate_file_upload(
     return decorator
 
 
+def require_loyalty_eligible(f):
+    """Block users not eligible for the loyalty program. Apply AFTER @jwt_required()."""
+
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        from flask_jwt_extended import get_jwt_identity
+        from business_app.models.user import User
+        from business_app.services.loyalty_service import LoyaltyService
+        from business_app.utils.api_responses import error_response
+        from business_app.utils.translations import get_translation
+
+        user = User.query.get(get_jwt_identity())
+        if not LoyaltyService.is_user_loyalty_eligible(user):
+            return error_response(
+                get_translation("api.loyalty.error.not_eligible"),
+                status_code=403,
+                data={"code": "loyalty_not_available"},
+            )
+        return f(*args, **kwargs)
+
+    return decorated_function
+
+
 def require_subscription(subscription_type: str = None):
     """Require active subscription"""
 

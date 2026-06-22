@@ -5,6 +5,7 @@ import logging
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from eligibility import main_menu_for
 from i18n import i18n
 from keyboards import LanguageKeyboards, MenuKeyboards
 from database import db_manager, BotUserRepository
@@ -118,7 +119,7 @@ class LanguageHandler:
             confirmation_text += f"{i18n.get('telegram.language.confirmation_message', language_code)}"
 
             # Return to main menu with new language
-            keyboard = MenuKeyboards.main_menu(language_code)
+            keyboard = await main_menu_for(update.effective_user.id, language_code)
 
             await query.edit_message_text(
                 text=confirmation_text,

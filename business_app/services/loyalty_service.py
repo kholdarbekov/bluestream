@@ -40,6 +40,20 @@ class LoyaltyService:
 
     # TODO: Note for mylself: correct loyalty points for user_id in (8,9,1, 12,7,13,10,31,22);
 
+    @staticmethod
+    def is_user_loyalty_eligible(user) -> bool:
+        """Single source of truth: may this user use the loyalty program?
+
+        Individuals and staff are always eligible. Entity (corporate) users are
+        eligible only if they hold at least one corporate contract that is
+        currently active AND flagged is_loyalty_points_eligible.
+        """
+        if user is None:
+            return False
+        if not getattr(user, "is_entity_user", False):
+            return True
+        return any(c.is_currently_active and c.is_loyalty_points_eligible for c in user.corporate_contracts)
+
     def __init__(self):
         # All economics are DB-driven via LoyaltyProgram (uzs_per_point,
         # points_expiry_days, signup/referral/birthday bonus). No instance caches

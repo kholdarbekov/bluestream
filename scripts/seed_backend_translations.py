@@ -1524,6 +1524,11 @@ BACKEND_TRANSLATIONS = {
         'uz': 'AquaCoins sovg\'a qilishda xatolik',
         'ru': 'Не удалось подарить AquaCoins'
     },
+    'api.loyalty.error.not_eligible': {
+        'en': 'The loyalty program is not available for your account.',
+        'uz': 'Sodiqlik dasturi hisobingiz uchun mavjud emas.',
+        'ru': 'Программа лояльности недоступна для вашего аккаунта.'
+    },
 
     # ============================================================================
     # API - Admin/Notifications Success Messages
@@ -5333,6 +5338,11 @@ BACKEND_TRANSLATIONS = {
         'uz': '💰 Naqd pul',
         'ru': '💰 Наличными'
     },
+    'telegram.payment_business_account': {
+        'en': 'Bank Transfer',
+        'uz': "Bank o'tkazmasi",
+        'ru': 'Банковский перевод'
+    },
     'telegram.payment_payme': {
         'en': '📱 Payme',
         'uz': '📱 Payme',
@@ -5590,6 +5600,11 @@ BACKEND_TRANSLATIONS = {
         'en': 'free',
         'uz': 'bepul',
         'ru': 'бесплатно'
+    },
+    'telegram.loyalty.not_available': {
+        'en': "🎁 The loyalty program isn't available for your account.",
+        'uz': "🎁 Sodiqlik dasturi hisobingiz uchun mavjud emas.",
+        'ru': "🎁 Программа лояльности недоступна для вашего аккаунта."
     },
     # AquaCoins history labels — localized, category-based (derived from the
     # transaction's action_type/transaction_type in the bot). These replace the

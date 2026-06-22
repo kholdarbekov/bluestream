@@ -85,31 +85,28 @@ class MenuKeyboards:
     """Main menu keyboards"""
 
     @staticmethod
-    def main_menu(language: str = 'en') -> InlineKeyboardMarkup:
-        """Main menu keyboard"""
-        buttons = [
-            [
-                {'text': i18n.get('telegram.menu.products', language), 'callback_data': 'menu_products'},
-            ],
-            [
-                {'text': i18n.get('telegram.menu.orders', language), 'callback_data': 'menu_orders'}
-            ],
-            [
-                {'text': i18n.get('telegram.cart_title', language), 'callback_data': 'cart_view'},
-            ],
-            [
-                {'text': i18n.get('telegram.menu.subscriptions', language), 'callback_data': 'menu_subscriptions'},
+    def main_menu(language: str = 'en', show_loyalty: bool = True) -> InlineKeyboardMarkup:
+        """Main menu keyboard. ``show_loyalty`` hides the loyalty button for
+        users not eligible for the loyalty program (ineligible entity users)."""
+        subs_loyalty_row = [
+            {'text': i18n.get('telegram.menu.subscriptions', language), 'callback_data': 'menu_subscriptions'},
+        ]
+        if show_loyalty:
+            subs_loyalty_row.append(
                 {'text': i18n.get('telegram.menu.loyalty', language), 'callback_data': 'menu_loyalty'}
-            ],
+            )
+
+        buttons = [
+            [{'text': i18n.get('telegram.menu.products', language), 'callback_data': 'menu_products'}],
+            [{'text': i18n.get('telegram.menu.orders', language), 'callback_data': 'menu_orders'}],
+            [{'text': i18n.get('telegram.cart_title', language), 'callback_data': 'cart_view'}],
+            subs_loyalty_row,
             [
                 {'text': i18n.get('telegram.menu.profile', language), 'callback_data': 'menu_profile'},
-                {'text': i18n.get('telegram.menu.support', language), 'callback_data': 'menu_support'}
+                {'text': i18n.get('telegram.menu.support', language), 'callback_data': 'menu_support'},
             ],
-            [
-                {'text': i18n.get('telegram.menu.language', language), 'callback_data': 'menu_language'}
-            ]
+            [{'text': i18n.get('telegram.menu.language', language), 'callback_data': 'menu_language'}],
         ]
-
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod
@@ -502,7 +499,7 @@ class OrderKeyboards:
             'card': '💳',
             'click': '💳',
             'payme': '💳',
-            'business_account': '🏢'
+            'business_account': '🏦'
         }
 
         for method in methods:
@@ -540,7 +537,8 @@ class OrderKeyboards:
 
     @staticmethod
     def order_confirmation(
-        language: str = 'en', meets_minimum: bool = True, has_reward: bool = False
+        language: str = 'en', meets_minimum: bool = True, has_reward: bool = False,
+        show_reward: bool = True,
     ) -> InlineKeyboardMarkup:
         """Order confirmation buttons.
 
@@ -569,7 +567,7 @@ class OrderKeyboards:
 
         buttons = [primary_row]
 
-        if meets_minimum:
+        if meets_minimum and show_reward:
             if has_reward:
                 buttons.append([
                     {'text': '🎁 ' + i18n.get('telegram.loyalty.change_reward', language),

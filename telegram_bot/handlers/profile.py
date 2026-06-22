@@ -10,6 +10,7 @@ from telegram.helpers import escape_markdown
 from telegram.ext import ContextTypes, ConversationHandler
 from telegram.error import BadRequest
 
+from eligibility import main_menu_for
 from i18n import i18n
 from keyboards import ProfileKeyboards, MenuKeyboards, LanguageKeyboards, KeyboardBuilder
 from shared.constants import (
@@ -523,7 +524,7 @@ class ProfileHandlers(BaseHandler):
 
             # Show success and main menu
             success_text = i18n.get('telegram.profile_updated', language)
-            keyboard = MenuKeyboards.main_menu(language)
+            keyboard = await main_menu_for(update.effective_user.id, language)
 
             await update.message.reply_text(
                 text=success_text,
@@ -549,7 +550,7 @@ class ProfileHandlers(BaseHandler):
             language = await i18n.get_user_language(user_id)
 
             cancel_text = i18n.get('telegram.action_cancelled', language)
-            keyboard = MenuKeyboards.main_menu(language)
+            keyboard = await main_menu_for(update.effective_user.id, language)
 
             # Clear pending data
             context.user_data.pop('pending_phone', None)
@@ -710,7 +711,7 @@ class ProfileHandlers(BaseHandler):
 
                 # Already registered, show main menu
                 complete_text = i18n.get('telegram.welcome', telegram_language_code)
-                keyboard = MenuKeyboards.main_menu(telegram_language_code)
+                keyboard = await main_menu_for(update.effective_user.id, telegram_language_code)
                 await maybe_remove_stale_reply_keyboard(update, context)
 
                 await update.message.reply_text(
@@ -866,7 +867,7 @@ class ProfileHandlers(BaseHandler):
 
                         # Registration complete
                         complete_text = i18n.get('telegram.registration_complete', language)
-                        keyboard = MenuKeyboards.main_menu(language)
+                        keyboard = await main_menu_for(update.effective_user.id, language)
 
                         await update.message.reply_text(
                             text=complete_text,
@@ -1266,7 +1267,7 @@ class ProfileHandlers(BaseHandler):
 
                         await update.message.reply_text(
                             i18n.get('telegram.phone.accounts_linked_success', language, name=name),
-                            reply_markup=MenuKeyboards.main_menu(language)
+                            reply_markup=await main_menu_for(update.effective_user.id, language)
                         )
 
                         logger.info(f"Account linking completed for user {user_id}")
@@ -1357,7 +1358,7 @@ class ProfileHandlers(BaseHandler):
 
                         await update.message.reply_text(
                             i18n.get('telegram.registration_complete', language),
-                            reply_markup=MenuKeyboards.main_menu(language)
+                            reply_markup=await main_menu_for(update.effective_user.id, language)
                         )
 
                         logger.info(f"Registration OTP verified for user {user_id}")
@@ -1425,7 +1426,7 @@ class ProfileHandlers(BaseHandler):
             language = await i18n.get_user_language(user_id)
 
             cancel_text = i18n.get('telegram.action_cancelled', language)
-            keyboard = MenuKeyboards.main_menu(language)
+            keyboard = await main_menu_for(update.effective_user.id, language)
 
             await update.message.reply_text(
                 text=i18n.get('telegram.action_cancelled_short', language),
@@ -1739,7 +1740,7 @@ class ProfileHandlers(BaseHandler):
                     else:
                         success_text = i18n.get('telegram.auth.failed', language)
 
-                keyboard = MenuKeyboards.main_menu(language)
+                keyboard = await main_menu_for(update.effective_user.id, language)
                 await update.message.reply_text(
                     text=success_text,
                     reply_markup=keyboard
@@ -1765,7 +1766,7 @@ class ProfileHandlers(BaseHandler):
             language = await i18n.get_user_language(user_id)
 
             cancel_text = i18n.get('telegram.action_cancelled', language)
-            keyboard = MenuKeyboards.main_menu(language)
+            keyboard = await main_menu_for(update.effective_user.id, language)
 
             # Handle both message and callback query
             if update.callback_query:
@@ -1807,7 +1808,7 @@ class ProfileHandlers(BaseHandler):
             )
 
             # Then show main menu
-            keyboard = MenuKeyboards.main_menu(language)
+            keyboard = await main_menu_for(update.effective_user.id, language)
             await update.message.reply_text(
                 text=cancel_text,
                 reply_markup=keyboard
@@ -2531,7 +2532,7 @@ class ProfileHandlers(BaseHandler):
             else:
                 success_text = i18n.get('telegram.address.save_failed', language)
 
-            keyboard = MenuKeyboards.main_menu(language)
+            keyboard = await main_menu_for(update.effective_user.id, language)
 
             if is_callback:
                 query = update.callback_query

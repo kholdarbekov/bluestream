@@ -4,6 +4,7 @@ Subscription management handlers with complete implementation
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 
+from eligibility import main_menu_for
 from i18n import i18n
 from keyboards import SubscriptionKeyboards, MenuKeyboards, ProductKeyboards
 from api_client import api_client
@@ -520,7 +521,7 @@ class SubscriptionHandlers(BaseHandler):
                 del context.user_data['subscription_creation']
 
             text = i18n.get('telegram.subscription.creation_cancelled', language)
-            keyboard = MenuKeyboards.main_menu(language)
+            keyboard = await main_menu_for(update.effective_user.id, language)
 
             await query.edit_message_text(text=text, reply_markup=keyboard)
             await query.answer()

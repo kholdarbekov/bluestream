@@ -159,6 +159,20 @@ def get_payment_methods():
         if cod_context["cod_restricted"]:
             available_methods = [method for method in available_methods if method["method"] != "cash"]
 
+        from business_app.services.corporate_contract_service import CorporateContractService
+
+        if CorporateContractService().get_business_account_balances(user):
+            available_methods.append(
+                {
+                    "method": "business_account",
+                    "name": "Business Account",
+                    "icon_url": None,
+                    "description": "Charge the active corporate prepayment balance",
+                    "is_active": True,
+                    "supported_currencies": ["UZS"],
+                }
+            )
+
         return success_response(
             data={
                 "available_methods": available_methods,

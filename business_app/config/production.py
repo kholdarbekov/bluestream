@@ -4,7 +4,7 @@ Production environment configuration
 
 import os
 from datetime import timedelta
-from .base import BaseConfig
+from .base import BaseConfig, decimal_safe_json_serializer
 from shared.constants import DISPLAY_TIMEZONE
 
 
@@ -45,6 +45,10 @@ class ProductionConfig(BaseConfig):
         "pool_recycle": 3600,  # Recycle connections every hour
         "max_overflow": 20,
         "pool_pre_ping": True,
+        # Decimal-tolerant JSON serializer (this override replaces the base dict
+        # wholesale, so it must be repeated here). Prevents the prod
+        # "Object of type Decimal is not JSON serializable" report crash.
+        "json_serializer": decimal_safe_json_serializer,
         "connect_args": {
             "sslmode": "prefer",  # Prefer SSL but allow fallback if not supported
             "connect_timeout": 10,

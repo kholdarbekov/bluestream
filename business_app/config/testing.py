@@ -4,7 +4,7 @@ Testing environment configuration
 
 import os
 from datetime import timedelta
-from .base import BaseConfig
+from .base import BaseConfig, decimal_safe_json_serializer
 
 
 class TestingConfig(BaseConfig):
@@ -22,6 +22,9 @@ class TestingConfig(BaseConfig):
     SQLALCHEMY_ENGINE_OPTIONS = {
         "pool_pre_ping": False,
         "pool_recycle": -1,
+        # Keep the Decimal-tolerant JSON serializer so JSON-column behavior under
+        # test matches production (this override replaces the base dict wholesale).
+        "json_serializer": decimal_safe_json_serializer,
     }
 
     # Redis Configuration - Use separate test database

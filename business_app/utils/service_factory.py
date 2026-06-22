@@ -351,6 +351,24 @@ class ServiceHealthChecker:
         return health_results
 
 
+def _is_loggable_teardown_exception(exception):
+    """Whether a teardown exception is worth logging as a request error.
+
+    Celery control-flow signals (Retry / Ignore / Reject) propagate through the
+    Flask app-context teardown when a task reschedules or aborts itself. They are
+    control flow, not failures, so logging them as "Request ended with
+    exception" is misleading noise (e.g. ``auto_assign_delivery_task``'s benign
+    900s no-driver back-off). Real exceptions still log.
+    """
+    if exception is None:
+        return False
+    try:
+        from celery.exceptions import Ignore, Reject, Retry
+    except ImportError:  # celery unavailable in some contexts — log normally
+        return True
+    return not isinstance(exception, (Retry, Ignore, Reject))
+
+
 # Flask integration
 def init_service_factory(app):
     """Initialize service factory with Flask app"""
@@ -358,7 +376,7 @@ def init_service_factory(app):
     @app.teardown_appcontext
     def cleanup_services(exception):
         """Clean up request-scoped services"""
-        if exception:
+        if _is_loggable_teardown_exception(exception):
             logger.warning(f"Request ended with exception: {exception}")
         ServiceFactory.clear_request_services()
 

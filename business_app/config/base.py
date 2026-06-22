@@ -2,8 +2,10 @@
 Base configuration settings for the Water Business Platform
 """
 
+import json
 import os
 from datetime import timedelta
+from decimal import Decimal
 
 from shared.constants import DISPLAY_TIMEZONE as _DISPLAY_TIMEZONE
 from shared import business_config
@@ -48,6 +50,26 @@ if use_fallback:
             return f"redis://:{password}@{host}:{port}/{db}"
         else:
             return f"redis://{host}:{port}/{db}"
+
+
+def decimal_safe_json_serializer(obj):
+    """JSON serializer for SQLAlchemy JSON columns that tolerates ``Decimal``.
+
+    SQLAlchemy's default ``json_serializer`` is plain ``json.dumps``, which
+    raises ``TypeError: Object of type Decimal is not JSON serializable`` on any
+    stray ``Decimal`` (e.g. an un-cast SQL aggregate that lands in an analytics
+    report payload — the prod ``generate_weekly_business_report`` crash).
+    Coercing Decimal -> float matches the project's money-as-float-in-JSON
+    convention (the MoneyFloat SSOT) and keeps every JSON-column write robust.
+    Genuinely unserializable types still raise so real bugs are not swallowed.
+    """
+
+    def _default(value):
+        if isinstance(value, Decimal):
+            return float(value)
+        raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+    return json.dumps(obj, default=_default)
 
 
 class BaseConfig:
@@ -138,6 +160,9 @@ class BaseConfig:
         "pool_recycle": 1800,  # Recycle connections every 30 minutes to prevent stale connections
         "max_overflow": 5,  # Allow up to 5 additional connections during peak load
         "pool_pre_ping": True,  # Validate connections before use (critical for detecting stale connections)
+        # Decimal-tolerant JSON serializer so JSON columns never crash on a stray
+        # Decimal (see decimal_safe_json_serializer above).
+        "json_serializer": decimal_safe_json_serializer,
     }
 
     # JWT Configuration

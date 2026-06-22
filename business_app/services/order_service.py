@@ -133,8 +133,12 @@ class OrderService:
         payment_method = None
         payment_method_str = order_data.get("payment_method")
         if payment_method_str:
-            from shared.enums import PaymentMethod
-
+            # PaymentMethod is imported at module level (top of file). Do NOT
+            # re-import it locally here: a local ``from shared.enums import
+            # PaymentMethod`` would make the name function-local for the whole
+            # method, so callers that omit ``payment_method`` (e.g. subscription
+            # billing, which skips this block) crashed with UnboundLocalError at
+            # the ``payment_method == PaymentMethod.CASH`` check below.
             # Loyalty points are spent only on rewards, never as a payment method —
             # 'loyalty_points'/'points' is intentionally not mapped (rejected upstream).
             payment_method_map = {

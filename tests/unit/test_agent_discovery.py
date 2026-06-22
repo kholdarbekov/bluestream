@@ -55,6 +55,32 @@ class TestBuildLinkHeader:
         for token in FORBIDDEN_TOKENS:
             assert token not in header
 
+    def test_header_value_is_http_safe(self):
+        # HTTP header values must be ISO-8859-1 (latin-1) encodable. A stray
+        # non-latin-1 character (e.g. a typographic em-dash U+2014 in a title)
+        # makes the whole response header illegal; gunicorn 23's strict parser
+        # rejects it and nginx returns 502 on EVERY storefront page. Guard the
+        # invariant at the source so a copy-pasted smart-punctuation character
+        # can never take the site down again.
+        header = build_link_header()
+        header.encode("latin-1")  # raises UnicodeEncodeError if a bad byte slips in
+        assert header.isascii(), "discovery Link header must stay ASCII-only to be HTTP-safe"
+
+    def test_source_titles_are_ascii(self):
+        # Defense-in-depth: the source data itself must stay ASCII so the header
+        # is clean before the runtime sanitizer ever runs.
+        for rel, _path, _type, title in PUBLIC_DISCOVERY_LINKS:
+            assert title.isascii(), f"non-ASCII char in title for rel={rel!r}: {title!r}"
+
+    def test_non_ascii_title_is_sanitized_not_fatal(self):
+        # Backstop: even if a future edit reintroduces a non-latin-1 character,
+        # build_link_header must degrade gracefully (sanitize) rather than emit
+        # an un-encodable header that 502s the storefront.
+        links = (("service-desc", "/x.json", "application/json", "A — B “q”"),)
+        header = build_link_header(links)
+        header.encode("latin-1")
+        assert header.isascii()
+
 
 @pytest.mark.unit
 class TestBuildApiCatalogLinkset:

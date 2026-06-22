@@ -37,10 +37,39 @@ PUBLIC_DISCOVERY_LINKS = (
         "service-desc",
         "/api/public/loyalty.json",
         "application/json",
-        "Loyalty program facts (Aqua Club tiers + earn rules + rewards) — Schema.org MemberProgram",
+        "Loyalty program facts (Aqua Club tiers + earn rules + rewards) - Schema.org MemberProgram",
     ),
     ("service-doc", "/llms.txt", "text/markdown", "LLM-friendly index of public pages"),
 )
+
+
+# Common typographic (non-ASCII) characters mapped to safe ASCII equivalents.
+# HTTP header values must be ISO-8859-1 (latin-1); a non-latin-1 byte makes the
+# whole header illegal and gunicorn 23's strict parser rejects the response with
+# a 502 on EVERY storefront page. A storefront SEO/discovery nicety must never be
+# able to take the site down, so titles are coerced to ASCII before emission.
+_TYPOGRAPHIC_TO_ASCII = {
+    "—": "-",  # em dash
+    "–": "-",  # en dash
+    "‘": "'",  # left single quote
+    "’": "'",  # right single quote / apostrophe
+    "“": "'",  # left double quote  -> single, to not break title="..."
+    "”": "'",  # right double quote -> single, to not break title="..."
+    "…": "...",  # horizontal ellipsis
+}
+
+
+def _http_safe_title(title):
+    """Coerce a Link-header ``title`` to an HTTP-safe ASCII string.
+
+    Maps common smart-punctuation to ASCII, then drops any remaining non-ASCII
+    byte (graceful degradation) so the rendered ``Link`` header is always
+    latin-1 encodable. Also drops the ``"`` that would otherwise terminate the
+    ``title="..."`` quoted-string early.
+    """
+    for uni, ascii_ in _TYPOGRAPHIC_TO_ASCII.items():
+        title = title.replace(uni, ascii_)
+    return title.encode("ascii", "ignore").decode("ascii").replace('"', "'")
 
 
 def build_link_header(links=PUBLIC_DISCOVERY_LINKS):
@@ -48,7 +77,8 @@ def build_link_header(links=PUBLIC_DISCOVERY_LINKS):
 
     Hrefs are emitted as root-relative references; per RFC 8288 a user agent
     resolves them against the request URL, so the header stays correct across
-    domains/schemes without baking in a host.
+    domains/schemes without baking in a host. Titles are ASCII-sanitised so the
+    header can never become un-encodable HTTP (see ``_http_safe_title``).
     """
     fields = []
     for rel, href, media_type, title in links:
@@ -56,7 +86,7 @@ def build_link_header(links=PUBLIC_DISCOVERY_LINKS):
         if media_type:
             field += f'; type="{media_type}"'
         if title:
-            field += f'; title="{title}"'
+            field += f'; title="{_http_safe_title(title)}"'
         fields.append(field)
     return ", ".join(fields)
 

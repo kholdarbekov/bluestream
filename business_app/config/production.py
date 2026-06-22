@@ -362,7 +362,11 @@ class ProductionConfig(BaseConfig):
                 strict_transport_security_preload=True,
                 content_security_policy=cls.CONTENT_SECURITY_POLICY,
                 referrer_policy="strict-origin-when-cross-origin",
-                feature_policy=cls.SECURITY_HEADERS.get("Permissions-Policy", ""),
+                # NOTE: No feature_policy here. Talisman's `feature_policy` kwarg emits a
+                # deprecated `Feature-Policy` header, and passing Permissions-Policy syntax
+                # ("geolocation=()") into it produced "Unrecognized feature" console errors
+                # in every browser. The valid Permissions-Policy header is set separately
+                # (SecurityHeadersMiddleware + nginx). See nginx/conf.d/security.conf.
                 # Removed content_security_policy_nonce_in to allow 'unsafe-inline' to work
             )
         except ImportError:

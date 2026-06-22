@@ -246,7 +246,7 @@ class SubscriptionConstructor {
             const price = product.pricing?.base_price || product.base_price || 0;
 
             // Get image from nested media structure
-            const imageUrl = product.media?.images?.[0] || product.image_url || '/static/images/product-placeholder.png';
+            const imageUrl = product.media?.images?.[0] || product.image_url || '/static/images/product-placeholder.svg';
 
             return `
                 <div class="product-card ${isSelected ? 'selected' : ''}" data-product-id="${product.id}">

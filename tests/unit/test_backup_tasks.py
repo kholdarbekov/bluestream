@@ -193,3 +193,70 @@ class TestBackupDatabaseTaskWiring:
         assert result["success"] is True
         assert result["remote"] is None
         assert not any(c.args[0][0] == "rclone" for c in run.call_args_list)
+
+
+@pytest.mark.unit
+class TestPushOffsite:
+    """`_push_offsite` ships a local backup to the rclone remote.
+
+    Offsite failure is FATAL by design (the caller retries → Sentry), but the
+    error MUST carry rclone's stderr so the root cause is visible.
+    """
+
+    def test_noop_returns_none_when_remote_unset(self, app):
+        with (
+            app.app_context(),
+            patch("business_app.tasks.backup_tasks.shutil.which") as which,
+            patch("business_app.tasks.backup_tasks.subprocess.run") as run,
+        ):
+            app.config["BACKUP_RCLONE_REMOTE"] = None
+            assert backup_tasks._push_offsite(Path("/var/backups/db-x.dump.gz"), "db") is None
+        run.assert_not_called()
+        which.assert_not_called()
+
+    def test_raises_when_rclone_binary_missing(self, app):
+        with (
+            app.app_context(),
+            patch("business_app.tasks.backup_tasks.shutil.which", return_value=None),
+        ):
+            app.config["BACKUP_RCLONE_REMOTE"] = "gdrive:aqua-element-backups"
+            with pytest.raises(RuntimeError, match="rclone binary"):
+                backup_tasks._push_offsite(Path("/var/backups/db-x.dump.gz"), "db")
+
+    def test_returns_remote_target_on_success(self, app):
+        completed = MagicMock(returncode=0, stderr="")
+        with (
+            app.app_context(),
+            patch("business_app.tasks.backup_tasks.shutil.which", return_value="/usr/bin/rclone"),
+            patch("business_app.tasks.backup_tasks.subprocess.run", return_value=completed),
+        ):
+            app.config["BACKUP_RCLONE_REMOTE"] = "gdrive:aqua-element-backups/"
+            target = backup_tasks._push_offsite(
+                Path("/var/backups/bluestream/db-x.dump.gz"), "db"
+            )
+        assert target == "gdrive:aqua-element-backups/db/db-x.dump.gz"
+
+    def test_failure_surfaces_rclone_stderr(self, app):
+        """Regression for the 2026-06 outage: a 7-day Google OAuth refresh-token
+        expiry (consent screen left in 'Testing' status) made `rclone copyto`
+        exit 1 with `invalid_grant`. The reason never reached Loki/Sentry because
+        ``str(CalledProcessError)`` drops stderr. The raised error must include it.
+        """
+        stderr = (
+            "Failed to copy: couldn't fetch token: oauth2: cannot fetch token: "
+            "400 Bad Request\ninvalid_grant: Token has been expired or revoked."
+        )
+        completed = MagicMock(returncode=1, stderr=stderr)
+        with (
+            app.app_context(),
+            patch("business_app.tasks.backup_tasks.shutil.which", return_value="/usr/bin/rclone"),
+            patch("business_app.tasks.backup_tasks.subprocess.run", return_value=completed),
+        ):
+            app.config["BACKUP_RCLONE_REMOTE"] = "gdrive:aqua-element-backups"
+            with pytest.raises(RuntimeError) as exc_info:
+                backup_tasks._push_offsite(
+                    Path("/var/backups/bluestream/db-x.dump.gz"), "db"
+                )
+        msg = str(exc_info.value)
+        assert "invalid_grant" in msg
+        assert "Token has been expired or revoked" in msg

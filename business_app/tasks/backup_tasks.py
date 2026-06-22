@@ -119,8 +119,9 @@ def _push_offsite(local_path: Path, remote_subdir: str) -> Optional[str]:
     """Copy a backup file to the configured rclone remote.
 
     Returns the remote path string on success, None if rclone isn't
-    configured. Raises CalledProcessError if rclone is configured but fails —
-    we want offsite-failure to surface as a hard error, not silent drop.
+    configured. Raises RuntimeError (with rclone's stderr) if rclone is
+    configured but fails — we want offsite-failure to surface as a hard error,
+    not a silent drop, and the stderr to be visible (not an opaque exit code).
     """
     remote = _rclone_remote()
     if not remote:
@@ -131,15 +132,26 @@ def _push_offsite(local_path: Path, remote_subdir: str) -> Optional[str]:
         raise RuntimeError("rclone binary missing")
 
     remote_target = f"{remote.rstrip('/')}/{remote_subdir.strip('/')}/{local_path.name}"
-    _shell_run(
+    result = _shell_run(
         [
             "rclone",
             "copyto",
             str(local_path),
             remote_target,
             "--s3-server-side-encryption=AES256",  # ignored if not S3
-        ]
+        ],
+        check=False,
     )
+    if result.returncode != 0:
+        # Offsite failure stays FATAL (caller retries → Sentry), but we surface
+        # rclone's stderr in the message. ``str(CalledProcessError)`` drops
+        # stderr, which once hid a Google OAuth refresh-token expiry (consent
+        # screen left in "Testing" status → token dies after 7 days, then every
+        # copy fails with `invalid_grant`) behind an opaque "exit status 1".
+        raise RuntimeError(
+            f"rclone copyto failed (exit {result.returncode}) for {remote_target}: "
+            f"{(result.stderr or '').strip()[:2000]}"
+        )
     return remote_target
 
 

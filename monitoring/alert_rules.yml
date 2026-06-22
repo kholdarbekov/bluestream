@@ -124,6 +124,36 @@ groups:
           summary: "Celery task {{ $labels.name }} stuck (p95 runtime > 30m)"
           description: "Task {{ $labels.name }} p95 runtime exceeded 30 minutes over a 15m window. Inspect worker for hung threads / blocking I/O."
 
+      # INF-008: nightly DB backup health. The backup itself (pg_dump) rarely
+      # fails — the usual culprit is the offsite copy to Google Drive (rclone).
+      # A 2026-06 outage went unnoticed for 4 days: the Google OAuth consent
+      # screen was in "Testing" status, so the refresh token expired after 7
+      # days and every `rclone copyto` failed with `invalid_grant`. These two
+      # alerts close that blind spot. `name="backup.database"` is the custom
+      # task name from @shared_task(name=...); metrics via danihodovic/celery-exporter.
+      - alert: DatabaseBackupFailing
+        expr: increase(celery_task_failed_total{name="backup.database"}[2h]) > 0
+        for: 5m
+        labels:
+          severity: critical
+          area: backups
+        annotations:
+          summary: "Nightly DB backup is failing"
+          description: "backup.database recorded task failures in the last 2h. Check celery_worker logs for the rclone stderr. Likely the offsite Google Drive copy — note a 'Testing'-status OAuth consent screen expires the refresh token after 7 days (re-publish to production + re-auth)."
+
+      # Catches the other failure mode: beat stops sending the task at all (dead
+      # celery_beat / schedule change), so it never even fails — it just goes
+      # silent. `or vector(0)` makes the rule fire when the series is absent too.
+      - alert: DatabaseBackupStale
+        expr: (sum(increase(celery_task_succeeded_total{name="backup.database"}[26h])) or vector(0)) == 0
+        for: 30m
+        labels:
+          severity: warning
+          area: backups
+        annotations:
+          summary: "No successful DB backup in 26h"
+          description: "backup.database has not succeeded in 26h (expected nightly at 02:30 Tashkent / 21:30 UTC). Check celery_beat schedule and celery_worker, and whether the rclone Google Drive token expired."
+
       # INF-003: business-critical alerts from the 2026-04 audit
       # Payment webhook failures: gateway callbacks dropping indicates lost revenue.
       - alert: PaymentWebhookFailureSpike

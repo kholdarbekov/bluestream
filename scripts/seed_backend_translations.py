@@ -786,6 +786,11 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Yetib keldi',
         'ru': 'Прибыл'
     },
+    'staff.notification.cash_session_reopened': {
+        'en': 'Your cash session #{session_id} was reopened by admin because the collected cash for order #{order_id} was corrected. Please re-submit when ready.',
+        'uz': 'Kassa sessiyangiz #{session_id} administrator tomonidan qayta ochildi: #{order_id} buyurtma bo\'yicha yig\'ilgan summa tuzatildi. Iltimos, qayta yuboring.',
+        'ru': 'Ваша кассовая сессия #{session_id} переоткрыта администратором: собранная сумма по заказу #{order_id} скорректирована. Пожалуйста, отправьте повторно.',
+    },
     'api.delivery.completion_processing': {
         'en': 'Delivery completion is being processed',
         'uz': 'Yetkazib berishni yakunlash jarayoni davom etmoqda',
@@ -6262,6 +6267,58 @@ ADMIN_UI_ORDER_TRANSLATIONS = {
         'Driver bottle session will be reopened',
         'Haydovchining idish sessiyasi qayta ochiladi',
         'Сессия по таре курьера будет переоткрыта',
+    ),
+    # ---- Collected-cash admin edit ----
+    'ui.orders.edit_collected_cash': _ui_tr(
+        'Edit collected cash',
+        "Yig'ilgan summani tahrirlash",
+        'Изменить собранную сумму',
+    ),
+    'ui.orders.collected_cash_confirm': _ui_tr(
+        'Confirm cash correction',
+        'Tuzatishni tasdiqlang',
+        'Подтвердите корректировку',
+    ),
+    'ui.orders.collected_cash_hint': _ui_tr(
+        'Enter the actual cash the driver collected. Any surplus over the order total becomes the customer\'s prepaid credit.',
+        'Haydovchi yig\'gan haqiqiy summani kiriting. Buyurtma summasidan ortig\'i mijozning oldindan to\'lovi bo\'ladi.',
+        'Введите фактически собранную курьером сумму. Излишек сверх суммы заказа станет предоплатой клиента.',
+    ),
+    'ui.orders.new_collected_amount': _ui_tr(
+        'Actual collected amount',
+        'Haqiqiy yig\'ilgan summa',
+        'Фактически собранная сумма',
+    ),
+    'ui.orders.collected_cash_reason': _ui_tr('Reason', 'Sabab', 'Причина'),
+    'ui.orders.collected_cash_amount_required': _ui_tr('Enter the collected amount', 'Summani kiriting', 'Введите сумму'),
+    'ui.orders.collected_cash_reason_required': _ui_tr('Reason (min 5 chars) is required', 'Sabab (kamida 5 belgi) kerak', 'Требуется причина (мин. 5 симв.)'),
+    'ui.orders.cash_session_will_reopen': _ui_tr('Driver session reopen', 'Haydovchi sessiyasi qayta ochiladi', 'Переоткрытие сессии курьера'),
+    'ui.orders.preview_impact': _ui_tr('Preview impact', "Ko'rib chiqish", 'Предпросмотр'),
+    'ui.orders.surplus_or_shortfall': _ui_tr(
+        'Surplus / shortfall',
+        'Ortiqcha / kamomad',
+        'Излишек / недостача',
+    ),
+    'ui.orders.customer_credit': _ui_tr(
+        'Customer credit change',
+        "Mijoz krediti o'zgarishi",
+        'Изменение кредита клиента',
+    ),
+    'ui.orders.apply_correction': _ui_tr('Apply correction', "Qo'llash", 'Применить'),
+    'ui.orders.collected_cash_updated': _ui_tr(
+        'Collected cash updated',
+        'Yig\'ilgan summa yangilandi',
+        'Собранная сумма обновлена',
+    ),
+    'ui.orders.collected_cash_failed': _ui_tr(
+        'Failed to update collected cash',
+        'Summani yangilab bo\'lmadi',
+        'Не удалось обновить сумму',
+    ),
+    'ui.orders.collected_cash_warnings': _ui_tr(
+        'Please note',
+        "E'tibor bering",
+        'Обратите внимание',
     ),
     'ui.orders.bottles': _ui_tr('bottles', 'idishlar', 'бутыли'),
     # Order Changes (history) section

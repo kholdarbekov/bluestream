@@ -2163,6 +2163,100 @@ def list_order_edit_history(order_id):
         return internal_error_response("Failed to fetch order edit history")
 
 
+@admin_bp.route("/orders/<int:order_id>/collected-cash/preview", methods=["POST"])
+@jwt_required()
+@validate_admin_action(["edit_collected_cash"])
+def preview_collected_cash_edit(order_id):
+    """Dry-run an admin correction of the cash collected for a delivered COD order."""
+    try:
+        from business_app.services.order_cash_edit_service import OrderCashEditService
+
+        data = request.get_json(silent=True) or {}
+        if data.get("new_amount") is None:
+            return validation_error_response("new_amount is required")
+
+        plan = OrderCashEditService().preview(order_id=order_id, new_amount=data.get("new_amount"))
+        return success_response(data=plan.to_summary())
+    except NotFoundError as exc:
+        return not_found_response(resource_type="Order", message=str(exc))
+    except ValidationError as exc:
+        return validation_error_response(str(exc))
+    except Exception:  # noqa: BLE001
+        current_app.logger.exception("collected-cash preview failed for order %s", order_id)
+        return internal_error_response("Failed to preview collected-cash edit")
+
+
+@admin_bp.route("/orders/<int:order_id>/collected-cash", methods=["POST"])
+@jwt_required()
+@validate_admin_action(["edit_collected_cash"])
+def apply_collected_cash_edit(order_id):
+    """Apply an admin correction of driver-collected cash and cascade atomically."""
+    try:
+        from business_app.services.order_cash_edit_service import OrderCashEditService
+
+        current_user_id = int(get_jwt_identity())
+        data = request.get_json(silent=True) or {}
+        if data.get("new_amount") is None:
+            return validation_error_response("new_amount is required")
+        reason = (data.get("reason") or "").strip()
+        if len(reason) < 5:
+            return validation_error_response("reason must be at least 5 characters")
+
+        result = OrderCashEditService().apply_edit(
+            order_id=order_id,
+            new_amount=data.get("new_amount"),
+            reason=reason,
+            actor_user_id=current_user_id,
+        )
+
+        # Post-commit, best-effort: tell the driver their cash session was reopened.
+        for task_name, args, _kwargs in result.post_commit_dispatch:
+            if task_name == "notify_driver_session_reopened":
+                try:
+                    from business_app.models.user import User as _User
+                    from business_app.services.notification_service import NotificationService as _NS
+                    from business_app.utils.translations import get_translation as _gt
+
+                    driver_user_id, session_id, edited_order_id = args
+                    driver = _User.query.get(driver_user_id)
+                    if driver is not None:
+                        lang = getattr(driver, "preferred_language", None) or "en"
+                        body = _gt(
+                            "staff.notification.cash_session_reopened",
+                            language=lang,
+                            session_id=session_id,
+                            order_id=edited_order_id,
+                        )
+                        if not body or body == "staff.notification.cash_session_reopened":
+                            body = (
+                                f"Your cash session #{session_id} was reopened by admin because the "
+                                f"collected cash for order #{edited_order_id} was corrected. "
+                                "Please re-submit when ready."
+                            )
+                        _NS().send_staff_telegram_message(driver, body, language=lang)
+                except Exception as notify_exc:  # noqa: BLE001
+                    current_app.logger.warning("cash-session reopen notification skipped: %s", notify_exc)
+
+        return success_response(
+            data={
+                "order_id": result.order_id,
+                "replacement_event_id": result.replacement_event_id,
+                "summary": result.summary,
+                "warnings": result.warnings,
+            },
+            message="Collected cash updated",
+        )
+    except ConflictError as exc:
+        return error_response(str(exc), status_code=409)
+    except NotFoundError as exc:
+        return not_found_response(resource_type="Order", message=str(exc))
+    except ValidationError as exc:
+        return validation_error_response(str(exc))
+    except Exception:  # noqa: BLE001
+        current_app.logger.exception("collected-cash edit failed for order %s", order_id)
+        return internal_error_response("Failed to edit collected cash")
+
+
 @admin_bp.route("/orders/<int:order_id>", methods=["GET"])
 @jwt_required()
 @validate_admin_action(["view_orders", "manage_orders"])
@@ -2368,6 +2462,12 @@ def get_order_details(order_id):
         from business_app.services.order_edit_service import OrderEditService
 
         order_data.update(OrderEditService().get_edit_metadata(order))
+
+        # Collected-cash edit feature: surface whether collected cash is correctable
+        # and the remaining time window so the admin UI can render the CTA.
+        from business_app.services.order_cash_edit_service import OrderCashEditService
+
+        order_data.update(OrderCashEditService().get_edit_metadata(order))
 
         return success_response(data={"order": order_data})
 

@@ -381,6 +381,16 @@ class AdminService {
     return response.data;
   }
 
+  async previewCollectedCashEdit(orderId, payload) {
+    const response = await api.post(`/admin/orders/${orderId}/collected-cash/preview`, payload);
+    return response.data;
+  }
+
+  async editCollectedCash(orderId, payload) {
+    const response = await api.post(`/admin/orders/${orderId}/collected-cash`, payload);
+    return response.data;
+  }
+
   async getOrderEditHistory(orderId) {
     const response = await api.get(`/admin/orders/${orderId}/edit-history`);
     return response.data;

@@ -607,20 +607,9 @@ class OrderEditService:
         }
 
     def _delivered_at(self, order: Order) -> Optional[datetime]:
-        delivery = order.delivery
-        if delivery is not None:
-            value = getattr(delivery, "actual_delivery", None) or getattr(delivery, "actual_delivery_time", None)
-            if value is not None:
-                if value.tzinfo is None:
-                    value = value.replace(tzinfo=timezone.utc)
-                return value
-        # Fallback to paid_at for cash orders (DELIVERED triggers is_paid).
-        if order.paid_at is not None:
-            value = order.paid_at
-            if value.tzinfo is None:
-                value = value.replace(tzinfo=timezone.utc)
-            return value
-        return None
+        from business_app.utils.order_timing import delivered_at_utc
+
+        return delivered_at_utc(order)
 
     def _compute_cascade_preview(self, order: Order, plan: OrderEditPlan) -> Dict[str, Any]:
         """Project per-cascade impacts for the preview screen — read-only."""

@@ -458,6 +458,10 @@ class BaseConfig:
     PHONE_OTP_LOCKOUT_DURATION = business_config.PHONE_OTP_LOCKOUT_DURATION
     OTP_CODE_LENGTH = business_config.OTP_CODE_LENGTH
 
+    # Post-delivery admin edit windows (hours)
+    ORDER_EDIT_WINDOW_HOURS = business_config.ORDER_EDIT_WINDOW_HOURS
+    CASH_EDIT_WINDOW_HOURS = business_config.CASH_EDIT_WINDOW_HOURS
+
     # CSRF Protection Configuration
     WTF_CSRF_ENABLED = True
     WTF_CSRF_TIME_LIMIT = int(os.environ.get("CSRF_TIME_LIMIT", 3600))  # 1 hour

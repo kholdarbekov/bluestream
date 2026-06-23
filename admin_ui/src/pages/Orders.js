@@ -47,6 +47,7 @@ import { useTranslation } from 'react-i18next';
 import { extractApiErrorMessages } from '../utils/apiError';
 import AsyncButton from '../components/common/AsyncButton';
 import EmptyState from '../components/common/EmptyState';
+import { usePermissions } from '../components/common/PermissionGuard';
 
 const { Option } = Select;
 const { RangePicker } = DatePicker;
@@ -169,11 +170,18 @@ const Orders = () => {
   // Per-order edit history fetched into the detail modal.
   const [editHistoryEntries, setEditHistoryEntries] = useState([]);
   const [editHistoryLoading, setEditHistoryLoading] = useState(false);
+  // Collected-cash edit modal (2-step flow): step 1 = form, step 2 = preview/confirm.
+  const [isCashEditModalVisible, setIsCashEditModalVisible] = useState(false);
+  const [cashEditStep, setCashEditStep] = useState(1);
+  const [cashEditPreview, setCashEditPreview] = useState(null);
+
+  const { isAdmin } = usePermissions();
 
   const [statusForm] = Form.useForm();
   const [createOrderForm] = Form.useForm();
   const [personalCardForm] = Form.useForm();
   const [editItemsForm] = Form.useForm();
+  const [cashEditForm] = Form.useForm();
   const watchedPaymentMethod = Form.useWatch('payment_method', createOrderForm);
   const watchedStatusValue = Form.useWatch('status', statusForm);
 
@@ -427,6 +435,67 @@ const Orders = () => {
       message.error(errors[0]);
     },
   });
+
+  const openCashEdit = () => {
+    cashEditForm.resetFields();
+    cashEditForm.setFieldsValue({ new_amount: Number(selectedOrder.amount_collected || 0), reason: '' });
+    setCashEditPreview(null);
+    setCashEditStep(1);
+    setIsCashEditModalVisible(true);
+  };
+
+  const handleCashEditPreview = async () => {
+    let values;
+    try {
+      values = await cashEditForm.validateFields();
+    } catch (e) {
+      return; // invalid form — antd shows inline field errors, nothing else to do
+    }
+    try {
+      const resp = await adminService.previewCollectedCashEdit(selectedOrder.id, {
+        new_amount: Number(values.new_amount),
+      });
+      setCashEditPreview(resp.data);
+      setCashEditStep(2);
+    } catch (err) {
+      message.error(
+        err?.response?.data?.message ||
+          t('ui.orders.collected_cash_failed', 'Failed to preview collected cash')
+      );
+    }
+  };
+
+  const cashEditMutation = useMutation({
+    mutationFn: ({ orderId, payload }) => adminService.editCollectedCash(orderId, payload),
+    onSuccess: async (resp) => {
+      message.success(t('ui.orders.collected_cash_updated', 'Collected cash updated'));
+      const warnings = resp?.data?.warnings || [];
+      if (warnings.length) {
+        Modal.warning({ title: t('ui.orders.collected_cash_warnings', 'Please note'), content: warnings.join('\n') });
+      }
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      try {
+        const refreshed = await adminService.getOrderDetails(selectedOrder.id);
+        if (refreshed.success && refreshed.data?.order) {
+          setSelectedOrder(refreshed.data.order);
+        }
+      } catch (_err) {
+        // best-effort refresh
+      }
+      setIsCashEditModalVisible(false);
+    },
+    onError: (err) => {
+      message.error(err?.response?.data?.message || t('ui.orders.collected_cash_failed', 'Failed to update collected cash'));
+    },
+  });
+
+  const confirmCashEdit = () => {
+    const values = cashEditForm.getFieldsValue();
+    cashEditMutation.mutate({
+      orderId: selectedOrder.id,
+      payload: { new_amount: Number(values.new_amount), reason: values.reason },
+    });
+  };
 
   const retryFiscalizationMutation = useMutation({
     mutationFn: (paymentId) => adminService.retryPaymentFiscalization(paymentId),
@@ -1000,6 +1069,18 @@ const Orders = () => {
                 {Number(selectedOrder.outstanding_amount || 0).toLocaleString()} UZS
               </Descriptions.Item>
             </Descriptions>
+            {isAdmin() && selectedOrder.is_collected_cash_editable ? (
+              <Button
+                icon={<EditOutlined />}
+                onClick={openCashEdit}
+                style={{ marginTop: 8 }}
+              >
+                {t('ui.orders.edit_collected_cash', 'Edit collected cash')}
+                {selectedOrder.collected_cash_edit_window_remaining_hours != null
+                  ? ` (${selectedOrder.collected_cash_edit_window_remaining_hours.toFixed(1)}h left)`
+                  : ''}
+              </Button>
+            ) : null}
 
             <Divider>{t('ui.orders.fiscalization', 'Fiscalization')}</Divider>
             <Descriptions column={2} bordered size="small">
@@ -2088,6 +2169,80 @@ const Orders = () => {
                   {t('ui.orders.confirm_apply', 'Confirm and apply')}
                 </AsyncButton>
               </Space>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        title={cashEditStep === 1
+          ? `${t('ui.orders.edit_collected_cash', 'Edit collected cash')} — ${selectedOrder?.order_number || ''}`
+          : `${t('ui.orders.collected_cash_confirm', 'Confirm cash correction')} — ${selectedOrder?.order_number || ''}`}
+        open={isCashEditModalVisible}
+        onCancel={() => setIsCashEditModalVisible(false)}
+        footer={null}
+        destroyOnClose
+      >
+        {cashEditStep === 1 ? (
+          <Form form={cashEditForm} layout="vertical">
+            <Alert type="info" showIcon style={{ marginBottom: 12 }}
+              message={t('ui.orders.collected_cash_hint',
+                'Enter the actual cash the driver collected. Any surplus over the order total becomes the customer\'s prepaid credit.')} />
+            <Descriptions column={2} size="small" bordered style={{ marginBottom: 12 }}>
+              <Descriptions.Item label={t('ui.orders.total_amount', 'Total Amount')}>
+                {Number(selectedOrder?.total_amount || 0).toLocaleString()} UZS
+              </Descriptions.Item>
+              <Descriptions.Item label={t('ui.orders.amount_collected', 'Collected')}>
+                {Number(selectedOrder?.amount_collected || 0).toLocaleString()} UZS
+              </Descriptions.Item>
+            </Descriptions>
+            <Form.Item name="new_amount" label={t('ui.orders.new_collected_amount', 'Actual collected amount')}
+              rules={[{ required: true, message: t('ui.orders.collected_cash_amount_required', 'Enter the collected amount') }]}>
+              <InputNumber min={0} style={{ width: '100%' }} addonAfter="UZS" />
+            </Form.Item>
+            <Form.Item name="reason" label={t('ui.orders.collected_cash_reason', 'Reason')}
+              rules={[{ required: true, min: 5, message: t('ui.orders.collected_cash_reason_required', 'Reason (min 5 chars) is required') }]}>
+              <Input.TextArea rows={2} />
+            </Form.Item>
+            <div style={{ textAlign: 'right' }}>
+              <Button onClick={() => setIsCashEditModalVisible(false)} style={{ marginRight: 8 }}>
+                {t('ui.common.cancel', 'Cancel')}
+              </Button>
+              <Button type="primary" onClick={handleCashEditPreview}>
+                {t('ui.orders.preview_impact', 'Preview impact')}
+              </Button>
+            </div>
+          </Form>
+        ) : (
+          <div>
+            <Descriptions column={1} size="small" bordered style={{ marginBottom: 12 }}>
+              <Descriptions.Item label={t('ui.orders.new_collected_amount', 'Actual collected amount')}>
+                {Number(cashEditPreview?.new_amount || 0).toLocaleString()} UZS
+              </Descriptions.Item>
+              <Descriptions.Item label={t('ui.orders.surplus_or_shortfall', 'Surplus / shortfall')}>
+                {Number(cashEditPreview?.surplus_or_shortfall || 0).toLocaleString()} UZS
+              </Descriptions.Item>
+              <Descriptions.Item label={t('ui.orders.customer_credit', 'Customer credit change')}>
+                {Number(cashEditPreview?.customer_credit_delta || 0).toLocaleString()} UZS
+              </Descriptions.Item>
+              <Descriptions.Item label={t('ui.orders.cash_session_will_reopen', 'Driver session reopen')}>
+                {cashEditPreview?.session_will_reopen ? t('ui.common.yes', 'Yes') : t('ui.common.no', 'No')}
+              </Descriptions.Item>
+            </Descriptions>
+            {(cashEditPreview?.blocking_reasons || []).map((r, i) => (
+              <Alert key={i} type="error" showIcon message={r} style={{ marginBottom: 6 }} />
+            ))}
+            {(cashEditPreview?.warnings || []).map((w, i) => (
+              <Alert key={i} type="warning" showIcon message={w} style={{ marginBottom: 6 }} />
+            ))}
+            <div style={{ textAlign: 'right' }}>
+              <Button onClick={() => setCashEditStep(1)} style={{ marginRight: 8 }}>
+                {t('ui.common.back', 'Back')}
+              </Button>
+              <Button type="primary" loading={cashEditMutation.isPending} onClick={confirmCashEdit}
+                disabled={(cashEditPreview?.blocking_reasons || []).length > 0}>
+                {t('ui.orders.apply_correction', 'Apply correction')}
+              </Button>
             </div>
           </div>
         )}

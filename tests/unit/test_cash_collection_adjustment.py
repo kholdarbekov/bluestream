@@ -476,3 +476,69 @@ class TestAdjustEventAmount:
                     adjusted_by_user_id=admin_user.id,
                     reason="Event does not exist",
                 )
+
+
+def test_adjust_default_still_rejects_open_session(
+    db, sample_user, delivery_driver, delivery_driver_profile, cod_order, cod_delivery
+):
+    service = CashCollectionService()
+    event = _seed_collection(
+        service=service, sample_user=sample_user, delivery_driver=delivery_driver,
+        cod_order=cod_order, cod_delivery=cod_delivery, amount="54000",
+    )
+    # Session is OPEN (no submit). Default guard must still reject — the live
+    # reconciliation endpoint relies on this.
+    with pytest.raises(ValidationError):
+        service.adjust_event_amount(
+            event.id, new_amount=Decimal("60000"), adjusted_by_user_id=delivery_driver.id,
+            reason="correction attempt",
+        )
+
+
+def test_adjust_allows_open_session_when_status_set_widened(
+    db, sample_user, delivery_driver, delivery_driver_profile, cod_order, cod_delivery
+):
+    service = CashCollectionService()
+    event = _seed_collection(
+        service=service, sample_user=sample_user, delivery_driver=delivery_driver,
+        cod_order=cod_order, cod_delivery=cod_delivery, amount="54000",
+    )
+    replacement = service.adjust_event_amount(
+        event.id, new_amount=Decimal("60000"), adjusted_by_user_id=delivery_driver.id,
+        reason="driver actually collected 60k",
+        allowed_session_statuses=frozenset({"open", "submitted", "partial", "mismatch", "overdue"}),
+    )
+    assert Decimal(str(replacement.amount)) == Decimal("60000")
+    # Original is voided; replacement is live.
+    original = CashCollectionEvent.query.get(event.id)
+    assert original.voided_at is not None
+
+
+def test_adjust_commit_false_does_not_persist_after_rollback(
+    db, sample_user, delivery_driver, delivery_driver_profile, cod_order, cod_delivery
+):
+    # NOTE: audit_logger uses a separate Session(db.engine) that issues its own
+    # commit(). With SQLite in-memory + SingletonThreadPool, that separate
+    # session shares the same underlying connection as the main session, so its
+    # commit() would flush the main session's pending work before we can roll it
+    # back — defeating the test intent. We mock audit_logger to prevent that
+    # accidental cross-session commit and isolate the commit=False behaviour.
+    # This affects audit calls in reverse_collection_event and post_collection
+    # (called with commit=False), which fire unconditionally in both methods.
+    from unittest.mock import patch
+    from business_app import db as _db
+    service = CashCollectionService()
+    event = _seed_collection(
+        service=service, sample_user=sample_user, delivery_driver=delivery_driver,
+        cod_order=cod_order, cod_delivery=cod_delivery, amount="54000",
+    )
+    with patch("business_app.services.cash_collection_service.audit_logger"):
+        replacement = service.adjust_event_amount(
+            event.id, new_amount=Decimal("60000"), adjusted_by_user_id=delivery_driver.id,
+            reason="commit false test", commit=False,
+            allowed_session_statuses=frozenset({"open", "submitted", "partial", "mismatch", "overdue"}),
+        )
+    replacement_id = replacement.id
+    _db.session.rollback()
+    # With commit=False the change was only flushed; rollback discards it.
+    assert CashCollectionEvent.query.get(replacement_id) is None

@@ -1534,6 +1534,8 @@ class CashCollectionService:
         new_amount: Any,
         adjusted_by_user_id: int,
         reason: str,
+        commit: bool = True,
+        allowed_session_statuses: Optional[frozenset] = None,
     ) -> CashCollectionEvent:
         """Admin correction for a recorded cash collection.
 
@@ -1559,7 +1561,12 @@ class CashCollectionService:
             session = DriverCashSession.query.get(event.driver_cash_session_id)
             if session:
                 status_value = getattr(session.status, "value", session.status)
-                if status_value not in self.ADJUSTABLE_SESSION_STATUSES:
+                allowed = (
+                    allowed_session_statuses
+                    if allowed_session_statuses is not None
+                    else self.ADJUSTABLE_SESSION_STATUSES
+                )
+                if status_value not in allowed:
                     raise ValidationError(f"Cannot adjust event on session with status '{status_value}'")
 
         original_amount = self._to_decimal(event.amount)
@@ -1640,7 +1647,8 @@ class CashCollectionService:
             },
         )
 
-        db.session.commit()
+        if commit:
+            db.session.commit()
         return replacement
 
     def _allocate_oldest_first(

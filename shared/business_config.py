@@ -60,6 +60,13 @@ OTP_CODE_LENGTH = _int("OTP_CODE_LENGTH", 6)
 PASSWORD_MIN_LENGTH = _int("PASSWORD_MIN_LENGTH", 8)
 MAX_LOGIN_ATTEMPTS = _int("MAX_LOGIN_ATTEMPTS", 5)
 
+# ─── Post-delivery admin edit windows (hours) ────────────────────────────
+# Mirrors ORDER_EDIT_WINDOW_HOURS;
+# CASH_EDIT_WINDOW_HOURS governs how long after delivery an ADMIN may correct
+# the driver-collected cash amount on a delivered COD order.
+ORDER_EDIT_WINDOW_HOURS = _int("ORDER_EDIT_WINDOW_HOURS", 72)
+CASH_EDIT_WINDOW_HOURS = _int("CASH_EDIT_WINDOW_HOURS", 72)
+
 # ─── COD custody thresholds ─────────────────────────────────────────────
 COD_CASH_WARNING_THRESHOLD_UZS = _int("COD_CASH_WARNING_THRESHOLD_UZS", 200000)
 COD_CASH_ESCALATION_THRESHOLD_UZS = _int("COD_CASH_ESCALATION_THRESHOLD_UZS", 400000)

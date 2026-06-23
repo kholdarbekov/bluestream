@@ -959,6 +959,20 @@
     "rule": "/api/v1/admin/orders/<int:order_id>"
   },
   {
+    "endpoint": "admin.apply_collected_cash_edit",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/orders/<int:order_id>/collected-cash"
+  },
+  {
+    "endpoint": "admin.preview_collected_cash_edit",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/orders/<int:order_id>/collected-cash/preview"
+  },
+  {
     "endpoint": "admin.apply_order_edit",
     "methods": [
       "POST"

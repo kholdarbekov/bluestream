@@ -1798,43 +1798,57 @@ class AuthService:
         if not telegram_user:
             raise NotFoundError(get_translation("api.auth.telegram_user_not_found"))
 
+        # Capture the OTP + its remaining TTL before verifying. verify_phone
+        # consumes the code on success; if the destructive merge below then
+        # fails, we restore the code so the customer's retry with the SAME
+        # (correct) code isn't rejected as invalid (prod incident 2026-06-23).
+        otp_key = f"sms_verification:{telegram_user_id}"
+        otp_ttl = self.redis_client.ttl(otp_key)
+
         success = self.verify_phone(telegram_user_id, otp)
         if not success:
             raise ValidationError(get_translation("api.auth.link_otp_invalid"))
 
-        web_user = User.query.get(web_user_id)
-        if not web_user:
-            raise NotFoundError(get_translation("api.auth.web_account_not_found"))
+        try:
+            web_user = User.query.get(web_user_id)
+            if not web_user:
+                raise NotFoundError(get_translation("api.auth.web_account_not_found"))
 
-        # Re-assert the invariants that held at staging time — the redis link
-        # state is stale/untrusted, and these guard the destructive merge below
-        # against account-takeover (e.g. web_user got a telegram_id, the phone
-        # changed, or the account was deactivated since the OTP was issued).
-        staged_phone = link_data.get("phone")
-        web_status = web_user.status.value if isinstance(web_user.status, UserStatus) else web_user.status
-        if (
-            not staged_phone
-            or web_user.phone != staged_phone
-            or web_user.telegram_id is not None
-            or web_status != UserStatus.ACTIVE.value
-        ):
-            # Drop the poisoned link intent so a retry can't re-enter this flow.
-            self.redis_client.delete(link_key)
-            raise ConflictError(get_translation("api.auth.phone_already_linked_to_telegram"))
+            # Re-assert the invariants that held at staging time — the redis link
+            # state is stale/untrusted, and these guard the destructive merge below
+            # against account-takeover (e.g. web_user got a telegram_id, the phone
+            # changed, or the account was deactivated since the OTP was issued).
+            staged_phone = link_data.get("phone")
+            web_status = web_user.status.value if isinstance(web_user.status, UserStatus) else web_user.status
+            if (
+                not staged_phone
+                or web_user.phone != staged_phone
+                or web_user.telegram_id is not None
+                or web_status != UserStatus.ACTIVE.value
+            ):
+                # Drop the poisoned link intent so a retry can't re-enter this flow.
+                self.redis_client.delete(link_key)
+                raise ConflictError(get_translation("api.auth.phone_already_linked_to_telegram"))
 
-        now_utc = datetime.now(timezone.utc)
-        telegram_user.is_verified = True
-        web_user.is_verified = True
-        web_user.phone_verified_at = now_utc
-        db.session.commit()
+            now_utc = datetime.now(timezone.utc)
+            telegram_user.is_verified = True
+            web_user.is_verified = True
+            web_user.phone_verified_at = now_utc
+            db.session.commit()
 
-        result = cross_platform_sync_service.auto_link_accounts(
-            primary_user=web_user,
-            secondary_user=telegram_user,
-            link_type="merge",
-        )
-        if not result.get("success"):
-            raise ValidationError(result.get("error", get_translation("api.auth.accounts_linking_failed")))
+            result = cross_platform_sync_service.auto_link_accounts(
+                primary_user=web_user,
+                secondary_user=telegram_user,
+                link_type="merge",
+            )
+            if not result.get("success"):
+                raise ValidationError(result.get("error", get_translation("api.auth.accounts_linking_failed")))
+        except Exception:
+            # The OTP was valid; only a downstream step failed. Restore the code
+            # (with its remaining TTL) so a retry doesn't hit a false "invalid OTP".
+            if isinstance(otp_ttl, int) and otp_ttl > 0:
+                self.redis_client.setex(otp_key, otp_ttl, otp)
+            raise
 
         self.redis_client.delete(link_key)
         return {

@@ -243,33 +243,49 @@ class CrossPlatformSyncService:
         logger.info(f"Merged cart from user {secondary_id} to user {primary_id}")
 
     def _merge_loyalty_membership(self, primary_id: int, secondary_id: int):
-        """Merge loyalty points from secondary to primary."""
+        """Merge a secondary user's loyalty membership into the primary user.
+
+        Balance is derived from the FIFO ``LoyaltyTransaction`` ledger (loyalty
+        SSOT — see ``LoyaltyPoints.calculate_current_balance``), so the merge
+        moves the secondary user's ledger lots onto the primary and RECOMPUTES
+        the cached balance. It must never sum the cached ``current_balance``
+        directly: once the lots move, that would double-count.
+        """
         from business_app.models.loyalty import LoyaltyPoints, LoyaltyTransaction
 
         secondary_points = LoyaltyPoints.query.filter_by(user_id=secondary_id).first()
         if not secondary_points:
-            return  # No loyalty points to merge
+            return  # No loyalty membership to merge
 
         primary_points = LoyaltyPoints.query.filter_by(user_id=primary_id).first()
 
+        # The ledger is the single source of truth for the balance — always move
+        # the secondary user's lots onto the primary so none are orphaned when
+        # the secondary user is deleted.
+        LoyaltyTransaction.query.filter_by(user_id=secondary_id).update({"user_id": primary_id})
+
         if primary_points:
-            # Add secondary's points to primary
-            primary_points.current_points += secondary_points.current_points
-            primary_points.lifetime_points += secondary_points.lifetime_points
-            primary_points.total_orders += secondary_points.total_orders
-            primary_points.total_spent += secondary_points.total_spent
+            # Roll up the lifetime aggregates (cumulative counters, not balances).
+            primary_points.total_earned = (primary_points.total_earned or 0) + (secondary_points.total_earned or 0)
+            primary_points.total_redeemed = (primary_points.total_redeemed or 0) + (
+                secondary_points.total_redeemed or 0
+            )
+            primary_points.total_expired = (primary_points.total_expired or 0) + (secondary_points.total_expired or 0)
 
-            # Transfer loyalty transactions to primary
-            LoyaltyTransaction.query.filter_by(user_id=secondary_id).update({"user_id": primary_id})
-
-            # Delete secondary points record
+            # Drop the now-empty secondary membership before recomputing.
             db.session.delete(secondary_points)
+            db.session.flush()
         else:
-            # Just reassign the points record to primary user
+            # Primary has no membership yet — reassign the secondary record.
             secondary_points.user_id = primary_id
+            primary_points = secondary_points
+            db.session.flush()
+
+        # Recompute the cached balance from the merged ledger (SSOT).
+        primary_points.calculate_current_balance()
 
         db.session.flush()
-        logger.info(f"Merged loyalty points from user {secondary_id} to user {primary_id}")
+        logger.info(f"Merged loyalty membership from user {secondary_id} to user {primary_id}")
 
     def _transfer_user_references(self, primary_id: int, secondary_id: int):
         """Transfer all foreign key references from secondary user to primary user."""

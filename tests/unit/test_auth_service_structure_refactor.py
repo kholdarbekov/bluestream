@@ -217,3 +217,109 @@ def test_verify_phone_link_and_merge_accounts_returns_tokens(auth_service, db, s
 
     assert result["linked"] is True
     assert result["tokens"]["access_token"] == "a"
+
+
+class _InMemoryRedis:
+    """Minimal Redis stand-in that honours get/setex/delete/ttl semantics so a
+    test can observe whether a key was really consumed (a MagicMock can't)."""
+
+    def __init__(self):
+        self._v = {}
+        self._ttl = {}
+
+    @staticmethod
+    def _b(v):
+        if isinstance(v, bytes):
+            return v
+        return str(v).encode()
+
+    def get(self, k):
+        return self._v.get(k)
+
+    def setex(self, k, ttl, v):
+        self._v[k] = self._b(v)
+        self._ttl[k] = int(ttl)
+        return True
+
+    def set(self, k, v):
+        self._v[k] = self._b(v)
+        return True
+
+    def delete(self, *keys):
+        n = 0
+        for k in keys:
+            if k in self._v:
+                del self._v[k]
+                n += 1
+            self._ttl.pop(k, None)
+        return n
+
+    def ttl(self, k):
+        return self._ttl.get(k, -2)
+
+    def exists(self, k):
+        return 1 if k in self._v else 0
+
+    def incr(self, k):
+        cur = int(self._v.get(k, b"0")) + 1
+        self._v[k] = self._b(cur)
+        return cur
+
+    def expire(self, k, ttl):
+        if k in self._v:
+            self._ttl[k] = int(ttl)
+        return True
+
+
+def test_link_flow_preserves_otp_when_merge_fails(db, sample_user):
+    """Prod incident 2026-06-23: the OTP was consumed by verify_phone BEFORE the
+    merge ran, so a merge failure also burned the (correct) code — the
+    customer's retry was then rejected as 'invalid OTP'. The valid code must
+    survive a failed merge so a retry works."""
+    import json
+
+    telegram_user = User(
+        telegram_id="909090909",
+        email="telegram_909090909@bot.internal",
+        phone=None,
+        password_hash=hash_password("TempPassword123!"),
+        first_name="Telegram",
+        last_name="User",
+        role=UserRole.CUSTOMER,
+        status=UserStatus.ACTIVE,
+        registration_source="telegram",
+    )
+    db.session.add(telegram_user)
+    db.session.commit()
+
+    otp = "654321"
+    link_key = f"phone_link:{telegram_user.telegram_id}"
+    otp_key = f"sms_verification:{telegram_user.id}"
+
+    fake = _InMemoryRedis()
+    fake.setex(
+        link_key,
+        600,
+        json.dumps(
+            {
+                "phone": sample_user.phone,
+                "web_user_id": sample_user.id,
+                "telegram_user_id": telegram_user.id,
+            }
+        ),
+    )
+    fake.setex(otp_key, 300, otp)
+
+    service = AuthService()
+    service.redis_client = fake
+
+    with patch(
+        "business_app.services.cross_platform_sync_service.cross_platform_sync_service.auto_link_accounts",
+        return_value={"success": False, "error": "transient merge failure"},
+    ):
+        with pytest.raises(ValidationError):
+            service.verify_phone_link_and_merge_accounts(telegram_user.telegram_id, otp)
+
+    stored = fake.get(otp_key)
+    assert stored is not None, "correct OTP was burned by the failed merge"
+    assert stored.decode() == otp

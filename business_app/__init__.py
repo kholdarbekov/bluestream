@@ -186,6 +186,7 @@ def setup_request_handlers(app):
             request.method in ("GET", "HEAD")
             and request.endpoint
             and request.endpoint.startswith("frontend.")
+            and not request.path.startswith("/api/")
             and url_lang == default_language
         ):
             parsed_url = urlsplit(request.url)
@@ -261,6 +262,7 @@ def setup_request_handlers(app):
             request.method in ("GET", "HEAD")
             and request.endpoint
             and request.endpoint.startswith("frontend.")
+            and not request.path.startswith("/api/")
             and request.endpoint not in frontend_lang_redirect_exclusions
             and not url_lang
             and lang != default_language

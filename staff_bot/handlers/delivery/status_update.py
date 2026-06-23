@@ -232,7 +232,23 @@ class StatusUpdateHandler(BaseHandler):
                 cash_due_amount = self._get_expected_cash_to_collect(delivery_info)
                 reserved_prepayment = float(delivery_info.get('cod_reserved_prepayment_amount') or 0)
 
-                if payment_method == 'cash' and cash_due_amount > 0:
+                # Detect unsuccessful-electronic orders: online payment method but
+                # payment not completed (pending/cancelled/failed) — driver pays cash
+                # at the door to settle the order (Task 5, plan 2026-06-22).
+                _electronic_methods = {'click', 'payme', 'card'}
+                _settled_statuses = {'completed', 'paid', 'partially_paid'}
+                payment_status_lower = str(delivery_info.get('payment_status') or '').lower()
+                is_unsettled_electronic = (
+                    payment_method in _electronic_methods
+                    and payment_status_lower not in _settled_statuses
+                )
+                if is_unsettled_electronic:
+                    # For an unsettled electronic order the full order amount is due
+                    # in cash; outstanding_amount / total_amount are equivalent here
+                    # (no partial cash collected yet) — use total_amount as the prompt.
+                    cash_due_amount = float(delivery_info.get('total_amount') or 0)
+
+                if (payment_method == 'cash' and cash_due_amount > 0) or is_unsettled_electronic:
                     keyboard = DeliveryKeyboards.cash_collection_options(
                         language, delivery_id, cash_due_amount
                     )

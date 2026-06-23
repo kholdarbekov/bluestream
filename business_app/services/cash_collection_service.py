@@ -1341,6 +1341,82 @@ class CashCollectionService:
         if source == CashCollectionSource.ADMIN_ADJUSTMENT and not recorded_by_user_id:
             raise ValidationError("recorded_by_user_id is required for admin adjustments")
 
+    _OFFLINE_SETTLEABLE_STATUSES = {
+        PaymentStatus.PENDING,
+        PaymentStatus.CANCELLED,
+        PaymentStatus.FAILED,
+    }
+
+    def convert_electronic_order_to_cash(
+        self,
+        order: Order,
+        *,
+        actor_user_id: Optional[int],
+        reason: str,
+    ) -> Payment:
+        """Convert an unsuccessful electronic (Click/Payme/Card) order to CASH so
+        it can be settled offline.  Releases any reserved marking codes, marks
+        fiscalization NOT_REQUIRED, flips payment+order method to CASH, and returns
+        the row-locked payment.  Idempotent: if the order is already CASH, returns
+        the locked payment unchanged.
+        """
+        payment = order.payment
+        if not payment:
+            raise NotFoundError("Order has no payment to settle")
+
+        if order.payment_method == PaymentMethod.CASH:
+            locked = Payment.query.with_for_update(of=Payment).get(payment.id)
+            if not locked:
+                raise NotFoundError("Payment not found")
+            return locked
+
+        _electronic_methods = {PaymentMethod.CLICK, PaymentMethod.PAYME, PaymentMethod.CARD}
+        if order.payment_method not in _electronic_methods:
+            raise ValidationError("Only electronic-method orders can be converted to cash")
+        if payment.status not in self._OFFLINE_SETTLEABLE_STATUSES:
+            raise ValidationError(
+                "Only orders with a pending, cancelled or failed electronic payment " "can be settled offline"
+            )
+
+        from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
+
+        fiscal_service = PaymentFiscalizationService()
+
+        # Release any marking codes reserved during PREPARE; already-released codes
+        # are caught and logged so we don't abort an otherwise valid settlement.
+        try:
+            fiscal_service.release_reserved_marking_codes(
+                payment,
+                reason=reason,
+                actor_user_id=actor_user_id,
+            )
+        except Exception as exc:
+            logger.error("Failed to release marking codes for order %s: %s", order.id, exc)
+
+        payment.payment_method = PaymentMethod.CASH
+        order.payment_method = PaymentMethod.CASH
+
+        # A cancelled/failed payment may carry a stale outstanding_amount projection
+        # (e.g. zero after the gateway cancelled it).  Re-derive it so the subsequent
+        # allocation can fully cover the balance.
+        payment.outstanding_amount = max(
+            Decimal("0.00"),
+            self._to_decimal(payment.amount) - self._to_decimal(payment.amount_collected),
+        )
+        db.session.flush()
+
+        # Now that the method is CASH, payment_requires_click_fiscalization returns
+        # False → queue_click_fiscalization sets status = NOT_REQUIRED.
+        try:
+            fiscal_service.queue_click_fiscalization(payment.id, actor_user_id=actor_user_id)
+        except Exception as exc:
+            logger.error("Failed to mark fiscalization not-required for order %s: %s", order.id, exc)
+
+        locked = Payment.query.with_for_update(of=Payment).get(payment.id)
+        if not locked:
+            raise NotFoundError("Payment not found")
+        return locked
+
     def _resolve_target_payment_for_personal_card_transfer(
         self,
         *,
@@ -1356,33 +1432,11 @@ class CashCollectionService:
 
         _electronic_methods = {PaymentMethod.CLICK, PaymentMethod.PAYME, PaymentMethod.CARD}
         if order.payment_method in _electronic_methods:
-            payment = order.payment
-            if not payment or payment.status != PaymentStatus.PENDING:
-                raise ValidationError(
-                    "Only orders with a pending electronic payment can be converted to a personal card payment"
-                )
-
-            # Release any marking codes reserved during Click PREPARE — fiscalization must not apply to personal card payments  # noqa: E501
-            from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
-
-            try:
-                PaymentFiscalizationService().release_reserved_marking_codes(
-                    payment,
-                    reason="converted_to_cash_personal_card",
-                    actor_user_id=actor_user_id,
-                )
-            except Exception as exc:
-                logger.error("Failed to release marking codes for order %s: %s", order.id, exc)
-
-            # Convert payment and order to CASH in-place
-            payment.payment_method = PaymentMethod.CASH
-            order.payment_method = PaymentMethod.CASH
-            db.session.flush()
-
-            locked_payment = Payment.query.with_for_update(of=Payment).get(payment.id)
-            if not locked_payment:
-                raise NotFoundError("Payment not found")
-            return locked_payment
+            return self.convert_electronic_order_to_cash(
+                order,
+                actor_user_id=actor_user_id,
+                reason="converted_to_cash_personal_card",
+            )
 
         if order.payment_method != PaymentMethod.CASH:
             raise ValidationError("Only COD orders can be targeted for personal card transfer collection")

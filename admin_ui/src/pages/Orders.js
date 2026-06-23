@@ -1482,7 +1482,7 @@ const Orders = () => {
                 ) : null}
                 {(selectedOrder.payment_method === 'cash' ||
                   (['click', 'payme', 'card'].includes(selectedOrder.payment_method) &&
-                   selectedOrder.payment_status === 'pending')) ? (
+                   ['pending', 'cancelled', 'failed'].includes(selectedOrder.payment_status))) ? (
                   <Button
                     icon={<DollarOutlined />}
                     disabled={['cancelled', 'returned'].includes(selectedOrder.status)}

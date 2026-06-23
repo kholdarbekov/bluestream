@@ -189,6 +189,25 @@ def reconcile_pending_payments():
             elif normalized_status in {"failed", PaymentStatus.FAILED.value}:
                 new_status = PaymentStatus.FAILED
             elif payment.created_at < timeout_threshold:
+                order = payment.order
+                order_status = (
+                    order.status.value
+                    if order and hasattr(order.status, "value")
+                    else (order.status if order else None)
+                )
+                # PAY-007 fix: once the order is confirmed / in fulfillment we must
+                # NOT auto-cancel its payment or release its marking codes — the
+                # customer may settle offline at/after delivery (personal card or
+                # cash). Leave it PENDING so the offline-settlement paths apply.
+                if order is not None and order_status != OrderStatus.PENDING.value:
+                    logger.info(
+                        "Skipping timeout auto-cancel for payment %s — order %s status=%s past PENDING",
+                        payment.id,
+                        getattr(order, "id", None),
+                        order_status,
+                    )
+                    counts["unchanged"] += 1
+                    continue
                 new_status = PaymentStatus.CANCELLED
                 logger.info("Auto-cancelling payment %s — gateway status unknown past timeout", payment.id)
 

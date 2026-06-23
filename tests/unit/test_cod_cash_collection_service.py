@@ -1141,6 +1141,72 @@ class TestCashCollectionService:
             assert refreshed_order.is_paid is True
             assert driver_session.expected_cash == Decimal("0.00")
 
+    def test_personal_card_transfer_settles_cancelled_click_payment(
+        self,
+        app,
+        db,
+        sample_user,
+        admin_user,
+        sample_order,
+    ):
+        """Admin can settle a CANCELLED Click payment via personal card transfer.
+
+        Covers the canonical prod scenario (order TG_000178_26 / payment 652):
+        the customer's Click payment timed out and was auto-cancelled, the order
+        was already delivered, and the customer later transferred the amount
+        directly to the owner's card.  The resulting payment must flip to CASH /
+        COMPLETED and the order must be marked paid.
+        """
+        from shared.enums import CashCollectionSource
+
+        with app.app_context():
+            # Arrange: a delivered Click order whose payment was timeout-cancelled.
+            # sample_order has no payment by default so we create one here.
+            sample_order.status = OrderStatus.DELIVERED
+            sample_order.payment_method = PaymentMethod.CLICK
+            payment = Payment(
+                order_id=sample_order.id,
+                user_id=sample_order.user_id,
+                payment_method=PaymentMethod.CLICK,
+                status=PaymentStatus.CANCELLED,
+                amount=Decimal("36000.00"),
+                amount_collected=Decimal("0.00"),
+                outstanding_amount=Decimal("36000.00"),
+                currency="UZS",
+                payment_id="click_cancelled_test_001",
+            )
+            db.session.add(payment)
+            db.session.commit()
+
+            order_id = sample_order.id
+            payment_id = payment.id
+            customer_id = sample_order.user_id
+
+            CashCollectionService().post_collection(
+                customer_id=customer_id,
+                amount=Decimal("36000.00"),
+                source=CashCollectionSource.PERSONAL_CARD_TRANSFER,
+                recorded_by_user_id=admin_user.id,
+                order_id=order_id,
+                notes="Customer transferred to owner card after Click timeout",
+            )
+
+            fresh_payment = Payment.query.get(payment_id)
+            fresh_order = Order.query.get(order_id)
+            assert fresh_payment.status == PaymentStatus.COMPLETED
+            assert fresh_payment.payment_method == PaymentMethod.CASH
+            assert fresh_order.is_paid is True
+            # Fully settled (re-derivation of a stale outstanding holds at zero).
+            assert fresh_payment.outstanding_amount == Decimal("0.00")
+            # Now a CASH sale → fiscalization must be flipped off the stuck
+            # 'pending' state to NOT_REQUIRED (no tax receipt for cash).
+            from business_app.models.payment import PaymentFiscalization
+            from shared.enums import FiscalizationStatus
+
+            fiscalization = PaymentFiscalization.query.filter_by(payment_id=payment_id).first()
+            assert fiscalization is not None
+            assert fiscalization.status == FiscalizationStatus.NOT_REQUIRED
+
 
 @pytest.mark.unit
 class TestDriverReconciliationService:

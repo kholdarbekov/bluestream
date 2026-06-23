@@ -70,6 +70,20 @@ class TestCheckDeliveryApi:
         r = isolated.get(f"/api/public/check-delivery?lat={IN_ZONE[0]}&lng={IN_ZONE[1]}")
         assert r.status_code == 200
 
+    def test_non_default_session_language_still_returns_json_200(self, app):
+        # Regression: this JSON endpoint lives on frontend_bp, so it was being
+        # caught by the HTML language redirect that 302s frontend.* GETs when the
+        # resolved language is non-default (from a Session cookie / user pref /
+        # Accept-Language). An agent or browser carrying a language cookie must
+        # still get JSON 200 here — never a 302 to ?lang=xx. (This was also the
+        # cause of a session-scoped-client ordering flake in the suite.)
+        c = app.test_client()
+        with c.session_transaction() as sess:
+            sess["language"] = "en"  # non-default (default is uz)
+        r = c.get(f"/api/public/check-delivery?lat={IN_ZONE[0]}&lng={IN_ZONE[1]}")
+        assert r.status_code == 200
+        assert r.get_json()["is_deliverable"] is True
+
 
 @pytest.mark.integration
 @pytest.mark.api

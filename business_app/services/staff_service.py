@@ -1177,11 +1177,37 @@ class StaffService:
         cash_collection_service = None
         pre_cod_debt_count = None
         is_cash_order = bool(delivery.order and delivery.order.payment_method == PaymentMethod.CASH)
-        if is_cash_order:
+
+        # Detect unsettled electronic orders: driver may collect cash at the door
+        # even when the customer's online payment never completed.
+        # _OFFLINE_SETTLEABLE_STATUSES is the canonical set; reuse it (DRY).
+        from business_app.services.cash_collection_service import CashCollectionService as _CCS
+
+        _electronic_methods = {PaymentMethod.CLICK, PaymentMethod.PAYME, PaymentMethod.CARD}
+        order = delivery.order
+        order_payment = order.payment if order else None
+        is_unsettled_electronic = bool(
+            order
+            and order.payment_method in _electronic_methods
+            and order_payment is not None
+            and order_payment.status in _CCS._OFFLINE_SETTLEABLE_STATUSES
+        )
+        _raw_cash = metadata.get("cash_collected") if metadata else None
+        try:
+            driver_collected_cash = Decimal(str(_raw_cash)) > Decimal("0.00") if _raw_cash is not None else False
+        except Exception:
+            # Non-numeric / unparseable value → treat as "no cash" (safe coercion)
+            driver_collected_cash = False
+        settle_electronic_as_cash = new_status == "delivered" and is_unsettled_electronic and driver_collected_cash
+
+        if is_cash_order or settle_electronic_as_cash:
             from business_app.services.cash_collection_service import CashCollectionService
 
             cash_collection_service = CashCollectionService()
-            pre_cod_debt_count = cash_collection_service.get_active_cod_debt_count(delivery.order.user_id)
+            if is_cash_order:
+                # Pre-count only for true CASH orders; we use it for the debt-limit
+                # breach notification below (which must not fire for just-converted orders).
+                pre_cod_debt_count = cash_collection_service.get_active_cod_debt_count(delivery.order.user_id)
 
         old_status_value = delivery.status.value if hasattr(delivery.status, "value") else delivery.status
 
@@ -1304,7 +1330,16 @@ class StaffService:
             # Cash collection runs in the same transaction as the status update so
             # a downstream failure rolls the delivery state back rather than
             # leaving the system half-applied.
-            if new_status == "delivered" and is_cash_order and cash_collection_service:
+            if new_status == "delivered" and (is_cash_order or settle_electronic_as_cash) and cash_collection_service:
+                # For unsuccessful electronic orders, convert to CASH first so the
+                # existing delivery_completion collection can post against a CASH payment.
+                if settle_electronic_as_cash:
+                    cash_collection_service.convert_electronic_order_to_cash(
+                        delivery.order,
+                        actor_user_id=staff_user_id,
+                        reason="cash_collected_at_delivery",
+                    )
+
                 cash_amount = metadata.get("cash_collected")
                 if cash_amount is None:
                     cash_amount = Decimal("0.00")
@@ -1329,10 +1364,13 @@ class StaffService:
                     commit=False,
                 )
 
-                post_cod_debt_count = cash_collection_service.get_active_cod_debt_count(delivery.order.user_id)
-                cod_debt_limit_breached = (
-                    pre_cod_debt_count is not None and pre_cod_debt_count < 2 and post_cod_debt_count >= 2
-                )
+                # Debt-limit breach notification only applies to true CASH orders
+                # (pre_cod_debt_count was captured only for those).
+                if is_cash_order:
+                    post_cod_debt_count = cash_collection_service.get_active_cod_debt_count(delivery.order.user_id)
+                    cod_debt_limit_breached = (
+                        pre_cod_debt_count is not None and pre_cod_debt_count < 2 and post_cod_debt_count >= 2
+                    )
 
             db.session.commit()
         except Exception:

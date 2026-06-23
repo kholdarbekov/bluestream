@@ -1048,3 +1048,109 @@ class TestReconciliationCatchesStrandedPending:
         _db.session.expire_all()
         payment_refreshed = Payment.query.get(payment.id)
         assert payment_refreshed.status == PaymentStatus.CANCELLED
+
+
+# --------------------------------------------------------------------------- #
+# 6. Reconcile prevention gate — PAY-007 fix (Task 1)
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.integration
+@pytest.mark.payment
+class TestReconcilePreventionGate:
+    """PAY-007 fix: timeout auto-cancel must be skipped for orders that are
+    already past PENDING (CONFIRMED / in-fulfillment / DELIVERED etc.).
+    """
+
+    def _stale_click_payment(self, db, order) -> Payment:
+        """Seed a PENDING Click payment aged past the timeout threshold."""
+        payment = _seed_click_payment(db, order)
+        payment.created_at = datetime.now(timezone.utc) - timedelta(hours=2)
+        db.session.commit()
+        return payment
+
+    def test_reconcile_skips_timeout_cancel_for_confirmed_order(
+        self, matrix_app, db, sample_order, fake_click_merchant, no_fiscalization,
+    ):
+        """PAY-007 gate: a PENDING payment whose order is CONFIRMED must NOT be
+        auto-cancelled by the reconcile task even after the timeout window.
+
+        Skipped on SQLite — same timezone-awareness limitation as the sibling
+        timeout test (see test_click_pending_past_timeout_with_unknown_status_auto_cancels).
+        """
+        if _db.engine.url.get_backend_name() == 'sqlite':
+            pytest.skip(
+                "SQLite drops timezone on DateTime round-trip; reconcile "
+                "timeout comparison requires tz-aware datetimes (Postgres only)."
+            )
+
+        sample_order.status = OrderStatus.CONFIRMED
+        db.session.commit()
+        payment = self._stale_click_payment(db, sample_order)
+
+        # Script an unrecognised status so the reconcile flows into the
+        # timeout branch rather than the completed/cancelled branch.
+        fake_click_merchant.script(
+            method='GET',
+            url_contains='',
+            json_body={
+                'payment_status': 0,
+                'error_code': 0,
+                'payment_id': 999_010,
+            },
+            label='click-status-unknown-confirmed-order',
+        )
+
+        from business_app.tasks.payment_tasks import reconcile_pending_payments
+        with matrix_app.app_context():
+            result = reconcile_pending_payments()
+
+        assert result['cancelled'] == 0, (
+            f"Gate should prevent cancel for CONFIRMED order; got counts={result}"
+        )
+        assert result['unchanged'] >= 1, result
+
+        _db.session.expire_all()
+        payment_refreshed = Payment.query.get(payment.id)
+        assert payment_refreshed.status == PaymentStatus.PENDING, (
+            "Payment must remain PENDING — order is in-fulfillment"
+        )
+
+    def test_reconcile_still_cancels_timeout_for_pending_order(
+        self, matrix_app, db, sample_order, fake_click_merchant, no_fiscalization,
+    ):
+        """PAY-007 gate: the existing auto-cancel behaviour is preserved when
+        the order itself is still PENDING (abandoned cart / no-show).
+
+        Skipped on SQLite — same timezone-awareness limitation.
+        """
+        if _db.engine.url.get_backend_name() == 'sqlite':
+            pytest.skip(
+                "SQLite drops timezone on DateTime round-trip; reconcile "
+                "timeout comparison requires tz-aware datetimes (Postgres only)."
+            )
+
+        # sample_order is already PENDING by default.
+        payment = self._stale_click_payment(db, sample_order)
+
+        fake_click_merchant.script(
+            method='GET',
+            url_contains='',
+            json_body={
+                'payment_status': 0,
+                'error_code': 0,
+                'payment_id': 999_011,
+            },
+            label='click-status-unknown-pending-order',
+        )
+
+        from business_app.tasks.payment_tasks import reconcile_pending_payments
+        with matrix_app.app_context():
+            result = reconcile_pending_payments()
+
+        assert result['cancelled'] >= 1, (
+            f"Abandoned-cart PENDING order should still be cancelled; got counts={result}"
+        )
+
+        _db.session.expire_all()
+        payment_refreshed = Payment.query.get(payment.id)
+        assert payment_refreshed.status == PaymentStatus.CANCELLED

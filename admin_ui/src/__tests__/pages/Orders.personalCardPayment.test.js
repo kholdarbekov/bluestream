@@ -133,6 +133,74 @@ describe('Orders personal card payment flow', () => {
     });
   });
 
+  it('shows Record Personal Card Payment button for delivered Click order with cancelled payment', async () => {
+    // Arrange: override getOrders + getOrderDetails with a DELIVERED Click order
+    // whose payment was timeout-cancelled (the canonical prod scenario: order 547)
+    adminService.getOrders.mockResolvedValue({
+      data: {
+        items: [
+          {
+            id: 547,
+            order_number: 'TG_000178_26',
+            user_id: 99,
+            status: 'delivered',
+            payment_method: 'click',
+            payment_status: 'cancelled',
+            total_amount: 36000,
+            outstanding_amount: 36000,
+            customer_name: 'Test Customer',
+            customer_email: 'test@example.com',
+            customer_phone: '+998901234567',
+            created_at: '2026-06-20T10:00:00+00:00',
+            items_summary: [],
+            items_count: 1,
+          },
+        ],
+      },
+      meta: { total: 1 },
+    });
+
+    adminService.getOrderDetails.mockResolvedValue({
+      success: true,
+      data: {
+        order: {
+          id: 547,
+          order_number: 'TG_000178_26',
+          user_id: 99,
+          status: 'delivered',
+          payment_method: 'click',
+          payment_status: 'cancelled',
+          total_amount: 36000,
+          amount_collected: 0,
+          outstanding_amount: 36000,
+          customer_name: 'Test Customer',
+          customer_email: 'test@example.com',
+          customer_phone: '+998901234567',
+          created_at: '2026-06-20T10:00:00+00:00',
+          items: [],
+        },
+      },
+    });
+
+    const user = userEvent.setup();
+    render(<Orders />, { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(adminService.getOrders).toHaveBeenCalled();
+    });
+
+    await user.click(await screen.findByText(/view_details|View Details/i));
+
+    await waitFor(() => {
+      expect(adminService.getOrderDetails).toHaveBeenCalledWith(547);
+    });
+
+    // The button must be visible for cancelled electronic payment
+    expect(
+      await screen.findByText(/record_personal_card_payment|Record Personal Card Payment/i)
+    ).toBeInTheDocument();
+  });
+
   it('submits personal card payment from order details and refreshes details', async () => {
     const user = userEvent.setup();
     render(<Orders />, { wrapper: createWrapper() });

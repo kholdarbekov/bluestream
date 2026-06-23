@@ -174,6 +174,11 @@ const Orders = () => {
   const [isCashEditModalVisible, setIsCashEditModalVisible] = useState(false);
   const [cashEditStep, setCashEditStep] = useState(1);
   const [cashEditPreview, setCashEditPreview] = useState(null);
+  // Snapshot the validated {new_amount, reason} at the step 1 → 2 transition.
+  // The Form unmounts when step 2 renders, so cashEditForm.getFieldsValue() in
+  // confirmCashEdit would return undefined fields (new_amount → NaN → JSON null).
+  // Same reason the order-edit flow keeps pendingEditPayload above.
+  const [pendingCashEdit, setPendingCashEdit] = useState(null);
 
   const { isAdmin } = usePermissions();
 
@@ -440,6 +445,7 @@ const Orders = () => {
     cashEditForm.resetFields();
     cashEditForm.setFieldsValue({ new_amount: Number(selectedOrder.amount_collected || 0), reason: '' });
     setCashEditPreview(null);
+    setPendingCashEdit(null);
     setCashEditStep(1);
     setIsCashEditModalVisible(true);
   };
@@ -451,9 +457,13 @@ const Orders = () => {
     } catch (e) {
       return; // invalid form — antd shows inline field errors, nothing else to do
     }
+    // Snapshot the validated values NOW, while the Form (step 1) is still
+    // mounted. confirmCashEdit reads this snapshot, not the unmounted form.
+    const snapshot = { new_amount: Number(values.new_amount), reason: values.reason };
+    setPendingCashEdit(snapshot);
     try {
       const resp = await adminService.previewCollectedCashEdit(selectedOrder.id, {
-        new_amount: Number(values.new_amount),
+        new_amount: snapshot.new_amount,
       });
       setCashEditPreview(resp.data);
       setCashEditStep(2);
@@ -490,10 +500,14 @@ const Orders = () => {
   });
 
   const confirmCashEdit = () => {
-    const values = cashEditForm.getFieldsValue();
+    if (!pendingCashEdit) {
+      message.error(t('ui.orders.edit_preview_missing', 'Preview the change before applying.'));
+      setCashEditStep(1);
+      return;
+    }
     cashEditMutation.mutate({
       orderId: selectedOrder.id,
-      payload: { new_amount: Number(values.new_amount), reason: values.reason },
+      payload: pendingCashEdit,
     });
   };
 

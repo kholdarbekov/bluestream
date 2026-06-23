@@ -190,28 +190,40 @@ describe('Orders collected cash edit flow', () => {
     // Check modal opened (step 1 form is visible)
     expect(await screen.findByText(/Preview impact/i)).toBeInTheDocument();
 
+    // Change the amount from the 54000 default to 60000 (the real scenario:
+    // driver collected more than the order total).
+    const amountInput = screen.getByRole('spinbutton');
+    await user.clear(amountInput);
+    await user.type(amountInput, '60000');
+
     // Fill in required reason field before previewing (textarea for reason)
     const reasonInputs = screen.getAllByRole('textbox');
     const reasonInput = reasonInputs[reasonInputs.length - 1];
     await user.clear(reasonInput);
     await user.type(reasonInput, 'driver collected extra cash from customer');
 
-    // Click preview
+    // Click preview — must carry the typed amount
     fireEvent.click(screen.getByText(/Preview impact/i));
 
     await waitFor(() => {
-      expect(adminService.previewCollectedCashEdit).toHaveBeenCalled();
+      expect(adminService.previewCollectedCashEdit).toHaveBeenCalledWith(620, { new_amount: 60000 });
     });
 
     // Confirm step 2 — Apply correction button should appear
     const applyBtn = await screen.findByText(/Apply correction/i);
     expect(applyBtn).toBeInTheDocument();
 
-    // Click Apply correction
+    // Click Apply correction — the APPLY payload must carry the SAME amount +
+    // reason captured at preview time. Regression guard for the step-2 form
+    // being unmounted (getFieldsValue() would otherwise yield new_amount: NaN
+    // → JSON null). The Form is gone in step 2, so values must be snapshotted.
     fireEvent.click(applyBtn);
 
     await waitFor(() => {
-      expect(adminService.editCollectedCash).toHaveBeenCalled();
+      expect(adminService.editCollectedCash).toHaveBeenCalledWith(620, {
+        new_amount: 60000,
+        reason: 'driver collected extra cash from customer',
+      });
     });
   });
 

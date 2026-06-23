@@ -132,44 +132,26 @@ class DeliveryService:
         return delivery
 
     def assign_delivery_driver(self, delivery_id: int, driver_id: int) -> Delivery:
-        """Assign delivery to a driver"""
-        delivery = Delivery.query.get(delivery_id)
-        if not delivery:
-            raise NotFoundError("Delivery not found")
+        """Assign delivery to a driver (auto-assign / admin single-assign entrypoint).
 
-        # Driver identity is the DeliveryPerson profile, not the (drift-prone)
-        # singular User.role — this matches how auto_assign_delivery_task selects
-        # candidates and the ARCH-006 canonical join.
-        driver_profile = DeliveryPerson.query.filter_by(user_id=driver_id, is_active=True).first()
-        if not driver_profile:
-            raise NotFoundError("Driver not found")
+        Thin wrapper over the canonical DeliveryAssignmentService.assign_driver
+        SSOT; keeps this path's post-commit side-effects (driver notify + route
+        reoptimization)."""
+        from business_app.services.delivery_assignment_service import DeliveryAssignmentService
+        from shared.enums import AssignmentSource
 
-        # Check if driver is available
-        if not self._is_driver_available(driver_id):
-            raise ValidationError("Driver is not available")
-
-        # ARCH-006: enforce assigned-person invariant before flipping status.
-        assert_delivery_person_for_status(
-            delivery,
-            DeliveryStatus.ASSIGNED,
-            delivery_person_id=driver_id,
+        result = DeliveryAssignmentService.assign_driver(
+            delivery_id,
+            driver_user_id=driver_id,
+            actor_id=driver_id,
+            source=AssignmentSource.AUTO,
+            note="Auto/admin assigned",
         )
 
-        # Assign driver. `delivery_person_id` is the real mapped FK column; it
-        # must be set before the status flips to ASSIGNED so the row satisfies
-        # ck_deliveries_person_required_after_assigned.
-        delivery.delivery_person_id = driver_id
-        delivery.status = DeliveryStatus.ASSIGNED
-        delivery.route_data = {**(delivery.route_data or {}), "assigned_at": datetime.now(timezone.utc).isoformat()}
-
-        db.session.commit()
-
-        # Notify driver
-        self._notify_driver(delivery)
-
-        # Re-optimize route now that a new delivery has joined the driver's set.
-        self._optimize_driver_route(driver_id, trigger="accept")
-
+        delivery = result.delivery
+        if result.changed:
+            self._notify_driver(delivery)
+            self._optimize_driver_route(driver_id, trigger="accept")
         return delivery
 
     def update_delivery_status(

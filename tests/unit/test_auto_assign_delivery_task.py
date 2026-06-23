@@ -105,3 +105,51 @@ class TestAutoAssignDeliveryTaskRetryFlow:
                 _run_task(mock_self, 42)
 
             mock_self.retry.assert_called_once()
+
+    def test_cod_blocked_driver_skipped_for_cash_order(self):
+        """A COD-blocked driver must be skipped when auto-assigning a CASH order.
+
+        Setup: one available driver who is COD-blocked; order payment_method=CASH.
+        Expected: no driver is found → task retries (no assignment made).
+        """
+        from shared.enums import PaymentMethod
+
+        # Build a realistic delivery mock: SCHEDULED status, CASH payment order.
+        delivery = MagicMock(name="delivery")
+        delivery.status = DeliveryStatus.SCHEDULED
+        order = MagicMock(name="order")
+        order.payment_method = PaymentMethod.CASH
+        delivery.order = order
+
+        # Build one available driver.
+        driver = MagicMock(name="driver")
+        driver.user_id = 99
+        driver.is_working_now = True
+
+        recon_path = "business_app.services.driver_reconciliation_service.DriverReconciliationService"
+
+        with (
+            patch(f"{TASKS_MODULE}.Delivery") as MockDelivery,
+            patch(f"{TASKS_MODULE}.DeliveryPerson") as MockPerson,
+            patch(f"{TASKS_MODULE}.DeliveryService"),
+            patch(recon_path) as MockRecon,
+        ):
+            MockDelivery.query.with_for_update.return_value.get.return_value = delivery
+            # Query returns the one driver; is_working_now=True so it enters available list.
+            MockPerson.query.filter.return_value.all.return_value = [driver]
+
+            # The driver is COD-blocked.
+            mock_recon_instance = MagicMock()
+            mock_recon_instance.is_driver_blocked_from_cod.return_value = True
+            MockRecon.return_value = mock_recon_instance
+
+            # Retry raises Retry on first call (no-driver path).
+            mock_self = _mock_self(Retry("Retry in 900s"))
+
+            with pytest.raises(Retry):
+                _run_task(mock_self, 42)
+
+            # The COD check was invoked for driver 99.
+            mock_recon_instance.is_driver_blocked_from_cod.assert_called_once_with(driver.user_id)
+            # self.retry was called with countdown (no-driver path), not exc (exception path).
+            mock_self.retry.assert_called_once_with(countdown=900)

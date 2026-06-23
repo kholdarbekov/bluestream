@@ -6,7 +6,7 @@ from typing import Dict, List
 from flask import current_app
 
 from business_app import db
-from business_app.models.delivery import Delivery, DeliveryPerson
+from business_app.models.delivery import Delivery
 from business_app.models.order import Order
 from business_app.models.product import Product
 from business_app.models.review import Review
@@ -389,20 +389,24 @@ class AdminBulkActionService:
                     continue
 
                 if action == "assign_driver":
-                    driver_id = parameters.get("driver_id")
-                    if not driver_id:
+                    driver_user_id = parameters.get("driver_id")
+                    if not driver_user_id:
                         failed_count += 1
                         errors.append({"delivery_id": delivery_id, "error": "driver_id required"})
                         continue
 
-                    driver = DeliveryPerson.query.get(driver_id)
-                    if not driver:
-                        failed_count += 1
-                        errors.append({"delivery_id": delivery_id, "error": "Driver not found"})
-                        continue
+                    from business_app.services.delivery_assignment_service import DeliveryAssignmentService
+                    from shared.enums import AssignmentSource
 
-                    delivery.delivery_person_id = driver_id
-                    delivery.status = DeliveryStatus.ASSIGNED
+                    DeliveryAssignmentService.assign_driver(
+                        delivery_id,
+                        driver_user_id=driver_user_id,
+                        actor_id=admin_id,
+                        source=AssignmentSource.ADMIN_BULK,
+                        note=reason or "Bulk-assigned by admin",
+                    )
+                    success_count += 1
+                    continue
 
                 elif action == "mark_in_transit":
                     DeliveryService().begin_delivery_in_transit(

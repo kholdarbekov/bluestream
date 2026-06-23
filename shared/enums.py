@@ -109,6 +109,16 @@ class DeliveryStatus(Enum):
     RETURNED = 'returned'
 
 
+class AssignmentSource(Enum):
+    """How a driver came to own a delivery — for audit/notes, not behavior gating
+    beyond what assign_driver's explicit flags express."""
+    BOT_SELF_ACCEPT = "bot_self_accept"
+    ADMIN_ASSIGN = "admin_assign"
+    ADMIN_BULK = "admin_bulk"
+    AUTO = "auto"
+    REASSIGN = "reassign"
+
+
 class SubscriptionStatus(Enum):
     """Subscription status enumeration"""
     ACTIVE = 'active'

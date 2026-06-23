@@ -20,7 +20,6 @@ from business_app.models.staff import StaffActivityLog
 from business_app.utils.exceptions import ValidationError, NotFoundError, ForbiddenError, ConflictError
 from business_app.utils.geo_validation import ensure_within_delivery_zone
 from business_app.utils.state_validators import (
-    assert_delivery_person_for_status,
     assert_order_address_for_status,
     assert_order_creator_for_source,
     assert_unassigned_for_pool_status,
@@ -890,137 +889,40 @@ class StaffService:
             NotFoundError: If delivery not found
             ValidationError: If delivery already assigned or person at max capacity
         """
-        # Lock the delivery row to prevent concurrent assignment
-        delivery = Delivery.query.with_for_update().get(delivery_id)
-        if not delivery:
-            raise NotFoundError("Delivery not found", error_code="STAFF_DELIVERY_NOT_FOUND")
+        from business_app.services.delivery_assignment_service import DeliveryAssignmentService
+        from shared.enums import AssignmentSource
 
-        # Only pool deliveries (scheduled/pending) are claimable. This guards
-        # against "accepting" a delivery that is already in progress, completed,
-        # or terminal (delivered/failed/cancelled/returned) — none of which
-        # should be silently reset to ASSIGNED.
-        if delivery.status not in StaffService.CLAIMABLE_DELIVERY_STATUSES:
-            raise ValidationError(
-                f"This delivery can no longer be accepted (status: {delivery.status.value})",
-                error_code="STAFF_DELIVERY_NOT_CLAIMABLE",
-            )
-
-        # A delivery already assigned to a *different* driver is taken. The same
-        # driver re-accepting their own still-claimable delivery (e.g. after a
-        # return-to-pool that left delivery_person_id populated) is allowed and
-        # idempotently re-confirms the assignment instead of being rejected
-        # against the driver themselves.
-        if delivery.delivery_person_id is not None and delivery.delivery_person_id != delivery_person_id:
-            raise ValidationError(
-                "This delivery has already been accepted by another driver", error_code="STAFF_DELIVERY_ALREADY_TAKEN"
-            )
-
-        order_payment_method = delivery.order.payment_method if delivery.order else None
-        if order_payment_method == PaymentMethod.CASH:
-            from business_app.services.driver_reconciliation_service import DriverReconciliationService
-
-            if DriverReconciliationService().is_driver_blocked_from_cod(delivery_person_id):
-                raise ValidationError(
-                    "Driver is blocked from new cash on delivery assignments until reconciliation issues are resolved",
-                    error_code="STAFF_DRIVER_COD_BLOCKED",
-                )
-
-        # NOTE: The historical concurrent-deliveries cap was removed when implicit
-        # route optimization was introduced — drivers may now claim as many
-        # deliveries as needed and the optimizer handles ordering. The
-        # `DeliveryPerson.max_concurrent_deliveries` column is preserved for a
-        # possible future per-driver admin override but is no longer enforced.
-        # The row lock is retained for DB-level serialization on the driver's
-        # profile row; `dp` is also still used below to gate
-        # `sync_active_delivery_counters`.
-        dp = DeliveryPerson.query.filter_by(user_id=delivery_person_id).with_for_update().first()
-
-        # Check bottle session — driver must have an effective session (own or joined)
-        # if the order contains returnable bottles; also validates capacity.
-        # Bind the order to that session immediately so every downstream
-        # transition (picked_up → delivered) can verify session continuity
-        # against a stable reference rather than a re-derived effective session.
-        if delivery.order:
-            from business_app.services.bottle_tracking_service import BottleTrackingService
-
-            _bottle_svc = BottleTrackingService()
-            _bottles_needed = _bottle_svc.calculate_bottles_for_order(delivery.order)
-            if _bottles_needed > 0:
-                _effective_session = _bottle_svc.get_effective_session(delivery_person_id)
-                if not _effective_session:
-                    raise ValidationError(
-                        "A bottle session is required to accept this order. "
-                        "Please start your own session or join a colleague's.",
-                        error_code="BOTTLE_SESSION_REQUIRED",
-                    )
-                _bottle_svc.assert_delivery_within_session_capacity(_effective_session, int(_bottles_needed))
-                _binding = _bottle_svc.bind_order_to_session(
-                    _effective_session.id,
-                    delivery.order.id,
-                    accepted_by_driver_id=delivery_person_id,
-                )
-                current_app.logger.info(
-                    "[BOTTLE] accept_order bound order=%s → session=%s binding=%s driver=%s",
-                    delivery.order.id,
-                    _effective_session.id,
-                    _binding.id,
-                    delivery_person_id,
-                )
-
-        # ARCH-006: enforce that delivery_person_id is set before status leaves SCHEDULED.
-        assert_delivery_person_for_status(
-            delivery,
-            DeliveryStatus.ASSIGNED,
-            delivery_person_id=delivery_person_id,
+        result = DeliveryAssignmentService.assign_driver(
+            delivery_id,
+            driver_user_id=delivery_person_id,
+            actor_id=delivery_person_id,
+            source=AssignmentSource.BOT_SELF_ACCEPT,
+            note="Accepted via staff bot",
+            require_session=True,
         )
+        delivery = result.delivery
+        history_id = result.history_id
 
-        # Assign the delivery person
-        old_status = delivery.status
-        delivery.delivery_person_id = delivery_person_id
-        delivery.status = DeliveryStatus.ASSIGNED
-        delivery.updated_at = datetime.now(timezone.utc)
+        # Post-commit side-effects specific to bot self-accept.
+        if result.changed and history_id is not None:
+            try:
+                from business_app.tasks.notification_tasks import send_delivery_update_task
 
-        # Create status history
-        history = DeliveryStatusHistory(
-            delivery_id=delivery.id,
-            old_status=old_status,
-            new_status=DeliveryStatus.ASSIGNED,
-            changed_by=delivery_person_id,
-            changed_at=datetime.now(timezone.utc),
-            notes="Accepted via staff bot",
-        )
-        db.session.add(history)
-        db.session.flush()
-        history_id = history.id
-
-        if dp:
-            StaffService.sync_active_delivery_counters([delivery_person_id])
-
-        db.session.commit()
-
-        # Notify customer that delivery has been assigned.
-        try:
-            from business_app.tasks.notification_tasks import send_delivery_update_task
-
-            send_delivery_update_task.delay(history_id)
-        except Exception as notify_exc:
-            current_app.logger.warning(
-                "Failed to enqueue assigned-delivery notification for delivery %s: %s",
-                delivery.id,
-                notify_exc,
+                send_delivery_update_task.delay(history_id)
+            except Exception as notify_exc:
+                current_app.logger.warning(
+                    "Failed to enqueue assigned-delivery notification for delivery %s: %s",
+                    delivery.id,
+                    notify_exc,
+                )
+            StaffService._log_activity(
+                user_id=delivery_person_id,
+                action=STAFF_ACTIONS["DELIVERY_ACCEPTED"],
+                entity_type="delivery",
+                entity_id=delivery.id,
+                metadata_={"order_id": delivery.order_id},
             )
-
-        # Log activity
-        StaffService._log_activity(
-            user_id=delivery_person_id,
-            action=STAFF_ACTIONS["DELIVERY_ACCEPTED"],
-            entity_type="delivery",
-            entity_id=delivery.id,
-            metadata_={"order_id": delivery.order_id},
-        )
-
         current_app.logger.info(f"Delivery {delivery_id} accepted by delivery person {delivery_person_id}")
-
         return delivery
 
     @staticmethod
@@ -1042,6 +944,7 @@ class StaffService:
           it has moved past it (e.g. OUT_FOR_DELIVERY/RETURNED), so the delivery
           actually surfaces in the pool (which requires the order to be in
           CONFIRMED/PREPARING),
+        - clears the order's bottle-session binding (so re-accept doesn't conflict),
         - records a DeliveryStatusHistory row attributed to ``actor_id``,
         - resyncs the previous driver's active-delivery counters.
 
@@ -1086,6 +989,15 @@ class StaffService:
             reason=reason,
         )
         db.session.add(history)
+
+        # The delivery no longer has a driver, so its order must not keep a stale
+        # bottle-session binding — otherwise the next driver to accept it hits a
+        # cross-session ConflictError in bind_order_to_session. The order rebinds
+        # when it is re-accepted/re-assigned.
+        if delivery.order:
+            from business_app.services.bottle_tracking_service import BottleTrackingService
+
+            BottleTrackingService().unbind_order(delivery.order.id)
 
         # The previous driver lost a delivery — refresh their cached workload.
         if old_driver_id:

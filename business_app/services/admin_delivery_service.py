@@ -175,57 +175,38 @@ class AdminDeliveryService:
 
     @staticmethod
     def reassign_delivery(delivery_id: int, new_person_id: int, actor_id: int) -> Delivery:
-        """Reassign a delivery to a different delivery person."""
-        delivery = Delivery.query.with_for_update().get(delivery_id)
+        """Reassign a delivery to a different delivery person (admin override).
+
+        Thin wrapper over the canonical DeliveryAssignmentService.assign_driver
+        SSOT (source=REASSIGN, allow_in_progress=True) so the bottle binding,
+        COD-block, capacity, counter sync, and history are handled once."""
+        from business_app.services.delivery_assignment_service import DeliveryAssignmentService
+        from shared.enums import AssignmentSource
+
+        delivery = Delivery.query.get(delivery_id)
         if not delivery:
             raise NotFoundError("Delivery not found")
-
-        old_person_id = delivery.delivery_person_id
-        if old_person_id == new_person_id:
+        if delivery.delivery_person_id == new_person_id:
             return delivery
 
-        new_profile = DeliveryPerson.query.filter_by(user_id=new_person_id).with_for_update().first()
+        old_person_id = delivery.delivery_person_id
+
+        new_profile = DeliveryPerson.query.filter_by(user_id=new_person_id).first()
         if not new_profile:
             raise NotFoundError("Delivery person not found")
-
         max_concurrent = new_profile.max_concurrent_deliveries or 3
-        active_delivery_count = StaffService.get_active_delivery_count(new_person_id)
-        if active_delivery_count >= max_concurrent:
+        if StaffService.get_active_delivery_count(new_person_id) >= max_concurrent:
             raise ValidationError(f"Delivery person has reached max concurrent deliveries ({max_concurrent})")
 
-        order_payment_method = delivery.order.payment_method if delivery.order else None
-        if order_payment_method == "cash" or getattr(order_payment_method, "value", None) == "cash":
-            from business_app.services.driver_reconciliation_service import DriverReconciliationService
-
-            if DriverReconciliationService().is_driver_blocked_from_cod(new_person_id):
-                raise ValidationError(
-                    "Delivery person is blocked from new cash on delivery assignments until reconciliation issues are resolved"  # noqa: E501
-                )
-
-        now = datetime.now(UTC)
-        old_status = delivery.status
-        delivery.delivery_person_id = new_person_id
-        # A pool-status delivery (scheduled/pending) gains a driver here, so it
-        # is no longer "in the pool" — promote it to ASSIGNED to keep the
-        # (status, driver) pair consistent and avoid stranding the row.
-        if old_status in (DeliveryStatus.SCHEDULED, DeliveryStatus.PENDING):
-            delivery.status = DeliveryStatus.ASSIGNED
-        delivery.updated_at = now
-
-        history = DeliveryStatusHistory(
-            delivery_id=delivery.id,
-            old_status=old_status,
-            new_status=delivery.status,
-            changed_by=actor_id,
-            changed_at=now,
-            notes=f"Reassigned from user {old_person_id} to user {new_person_id} by admin",
+        result = DeliveryAssignmentService.assign_driver(
+            delivery_id,
+            driver_user_id=new_person_id,
+            actor_id=actor_id,
+            source=AssignmentSource.REASSIGN,
+            note=f"Reassigned from user {old_person_id} to user {new_person_id} by admin",
+            allow_in_progress=True,
         )
-        db.session.add(history)
-        db.session.flush()
-        StaffService.sync_active_delivery_counters([old_person_id, new_person_id])
-        db.session.commit()
-
-        return delivery
+        return result.delivery
 
     @staticmethod
     def serialize_delivery(delivery: Delivery) -> Dict[str, Any]:

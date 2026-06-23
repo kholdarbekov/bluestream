@@ -37,7 +37,7 @@ from business_app.services.delivery_service import DeliveryService
 from business_app.tasks import notification_tasks
 from business_app.tasks.delivery_tasks import auto_assign_delivery_task
 from business_app.tasks.notification_tasks import notify_driver_assignment_task
-from business_app.utils.exceptions import NotFoundError
+from business_app.utils.exceptions import NotFoundError, ValidationError
 from shared.enums import DeliveryStatus, OrderStatus, UserRole, UserType
 
 
@@ -265,9 +265,12 @@ class TestAssignDeliveryDriverService:
             assert refreshed.route_data["prior"] == "keep-me"
             assert "assigned_at" in refreshed.route_data
 
-    def test_reassign_already_assigned_to_another_driver(self, app, db):
-        """Assigning an already-ASSIGNED delivery to a different driver must
-        update the person column to the new driver."""
+    def test_assign_rejects_reassigning_an_already_assigned_delivery(self, app, db):
+        """Since assignment was unified under DeliveryAssignmentService.assign_driver,
+        the auto/single-assign path (assign_delivery_driver) only claims a pool
+        delivery — it must NOT silently steal an already-ASSIGNED delivery from
+        another driver. Reassignment is the admin reassign path's job
+        (AdminDeliveryService.reassign_delivery, allow_in_progress=True)."""
         with app.app_context():
             driver_a = _make_driver(db, email="rA@x.com", phone="+998901111209")
             driver_b = _make_driver(db, email="rB@x.com", phone="+998901111210")
@@ -277,11 +280,13 @@ class TestAssignDeliveryDriverService:
             svc.assign_delivery_driver(delivery.id, driver_a.id)
             assert Delivery.query.get(delivery.id).delivery_person_id == driver_a.id
 
-            svc.assign_delivery_driver(delivery.id, driver_b.id)
+            with pytest.raises(ValidationError) as exc:
+                svc.assign_delivery_driver(delivery.id, driver_b.id)
+            assert exc.value.error_code == "STAFF_DELIVERY_NOT_CLAIMABLE"
 
+            # The original driver keeps the delivery.
             refreshed = Delivery.query.get(delivery.id)
-            assert refreshed.delivery_person_id == driver_b.id
-            assert refreshed.status == DeliveryStatus.ASSIGNED
+            assert refreshed.delivery_person_id == driver_a.id
 
     def test_assignment_enqueues_driver_notification(self, app, db):
         """The post-commit _notify_driver hook enqueues the driver-assignment

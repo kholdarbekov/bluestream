@@ -54,8 +54,17 @@ def auto_assign_delivery_task(self, delivery_id: int):
         min_distance = float("inf")
 
         import random
+        from business_app.services.driver_reconciliation_service import DriverReconciliationService
+        from shared.enums import PaymentMethod
+
+        order = delivery.order
+        order_pm = order.payment_method if order else None
+        is_cash = order_pm == PaymentMethod.CASH or getattr(order_pm, "value", None) == "cash"
+        recon = DriverReconciliationService() if is_cash else None
 
         for driver in available_drivers:
+            if is_cash and recon.is_driver_blocked_from_cod(driver.user_id):
+                continue
             if delivery_service._is_driver_available(driver.user_id):
                 # TODO: Replace with real GPS-based distance calculation when driver location tracking is implemented
                 distance = random.uniform(1.0, 10.0)

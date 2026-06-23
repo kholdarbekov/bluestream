@@ -693,10 +693,44 @@ def test_assert_progress_returns_none_for_order_without_bottles(db, sample_user,
 
 
 @pytest.mark.unit
-def test_assert_progress_strict_raises_when_no_binding(db, app, sample_user, sample_product):
-    """Strict mode: missing binding → BOTTLE_SESSION_REQUIRED."""
+def test_assert_progress_late_binds_when_no_binding_but_driver_has_open_session(
+    db, app, sample_user, sample_product
+):
+    """No binding exists (order assigned via admin/auto-assign, which never bind)
+    but the driver has an open session → late-bind the order onto that session
+    instead of raising. Reproduces prod TG_000183_26 / delivery 620 where
+    auto_assign_delivery_task assigned the order without a binding."""
+    driver = _make_driver(db, "+998901000120", "LateBind")
+    session = _open_session(db, driver)
+    order = _make_order_with_bottles(db, sample_user, sample_product, quantity=2)
+    delivery = _make_delivery(db, order, driver)
+
+    svc = BottleTrackingService()
+    # No bind_order_to_session call — mirrors auto_assign_delivery_task.
+    assert DriverBottleSessionOrder.query.filter_by(order_id=order.id).first() is None
+
+    with app.test_request_context():
+        app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = True
+        try:
+            got = svc.assert_driver_can_progress_delivery(delivery)
+        finally:
+            app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False
+
+    assert got is not None
+    assert got.id == session.id
+    binding = DriverBottleSessionOrder.query.filter_by(order_id=order.id).first()
+    assert binding is not None
+    assert binding.session_id == session.id
+
+
+@pytest.mark.unit
+def test_assert_progress_strict_raises_when_no_binding_and_no_open_session(
+    db, app, sample_user, sample_product
+):
+    """Strict mode: missing binding AND the driver has no open session — there is
+    nothing to bind onto, so BOTTLE_SESSION_REQUIRED (open a session first)."""
     driver = _make_driver(db, "+998901000101", "Strict1")
-    _open_session(db, driver)
+    # Intentionally NO open session.
     order = _make_order_with_bottles(db, sample_user, sample_product, quantity=2)
     delivery = _make_delivery(db, order, driver)
 
@@ -712,19 +746,93 @@ def test_assert_progress_strict_raises_when_no_binding(db, app, sample_user, sam
 
 
 @pytest.mark.unit
-def test_assert_progress_legacy_does_not_raise_when_no_binding(db, app, sample_user, sample_product):
-    """Legacy mode: missing binding → return None, no raise (regression on bug-AD_000205_26)."""
+def test_return_to_pool_clears_binding_so_next_driver_can_accept(db, app, sample_user, sample_product):
+    """return_delivery_to_pool removes the stale DriverBottleSessionOrder so a
+    different driver re-accepting the redispatched delivery does not hit
+    ConflictError ('already bound to session Y')."""
+    from business_app.services.staff_service import StaffService
+    driver_a = _make_driver(db, "+998901600001", "DriverA")
+    session_a = _open_session(db, driver_a)
+    order = _make_order_with_bottles(db, sample_user, sample_product, quantity=2)
+    delivery = _make_delivery(db, order, driver_a)
+    db.session.commit()
+
+    svc = BottleTrackingService()
+    svc.bind_order_to_session(session_a.id, order.id, accepted_by_driver_id=driver_a.id)
+    db.session.commit()
+
+    with app.test_request_context():
+        StaffService.return_delivery_to_pool(delivery.id, actor_id=driver_a.id, reason="failed")
+
+    assert DriverBottleSessionOrder.query.filter_by(order_id=order.id).first() is None
+
+
+@pytest.mark.unit
+def test_assert_progress_late_bind_respects_session_capacity(
+    db, app, sample_user, sample_product
+):
+    """Late-bind enforces session capacity exactly like accept time: if the
+    driver's open session can't cover the order's bottles, raise
+    BOTTLE_SESSION_CAPACITY_EXCEEDED and create no binding."""
+    driver = _make_driver(db, "+998901000123", "CapDriver")
+    session = _open_session(db, driver)
+    session.bottles_loaded = 1  # only 1 bottle available
+    db.session.flush()
+    order = _make_order_with_bottles(db, sample_user, sample_product, quantity=5)
+    delivery = _make_delivery(db, order, driver)
+
+    svc = BottleTrackingService()
+    with app.test_request_context():
+        app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = True
+        try:
+            with pytest.raises(ValidationError) as exc:
+                svc.assert_driver_can_progress_delivery(delivery)
+            assert exc.value.error_code == "BOTTLE_SESSION_CAPACITY_EXCEEDED"
+        finally:
+            app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False
+
+    assert DriverBottleSessionOrder.query.filter_by(order_id=order.id).first() is None
+
+
+@pytest.mark.unit
+def test_assert_progress_legacy_late_binds_when_no_binding_and_open_session(
+    db, app, sample_user, sample_product
+):
+    """Legacy mode mirrors strict for the (re)bind path: a never-bound order
+    late-binds onto the driver's open session (no raise). Only the hard error for
+    the no-open-session case is suppressed in legacy mode."""
     driver = _make_driver(db, "+998901000102", "Legacy1")
-    _open_session(db, driver)
+    session = _open_session(db, driver)
     order = _make_order_with_bottles(db, sample_user, sample_product, quantity=2)
     delivery = _make_delivery(db, order, driver)
 
     svc = BottleTrackingService()
     with app.test_request_context():
         app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False
-        # Must not raise — keeps in-flight orders unblocked during PR 1 measurement.
         result = svc.assert_driver_can_progress_delivery(delivery)
-        assert result is None
+
+    assert result is not None
+    assert result.id == session.id
+    assert (
+        DriverBottleSessionOrder.query.filter_by(order_id=order.id).first().session_id
+        == session.id
+    )
+
+
+@pytest.mark.unit
+def test_assert_progress_legacy_returns_none_when_no_binding_and_no_open_session(
+    db, app, sample_user, sample_product
+):
+    """Legacy mode: missing binding and no open session → return None, no raise
+    (keeps legacy/dev environments unblocked; strict mode raises here)."""
+    driver = _make_driver(db, "+998901000122", "Legacy2")
+    order = _make_order_with_bottles(db, sample_user, sample_product, quantity=2)
+    delivery = _make_delivery(db, order, driver)
+
+    svc = BottleTrackingService()
+    with app.test_request_context():
+        app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False
+        assert svc.assert_driver_can_progress_delivery(delivery) is None
 
 
 @pytest.mark.unit
@@ -790,6 +898,95 @@ def test_assert_progress_migrates_to_drivers_own_open_session(
     binding = DriverBottleSessionOrder.query.filter_by(order_id=order.id).first()
     assert binding.session_id == session_a.id
     assert binding.accepted_by_driver_id == driver_a.id
+
+
+def _make_driver_profile(db, driver, phone):
+    """Attach an active DeliveryPerson profile so assign_delivery_driver accepts
+    the driver (driver identity is the profile, not User.role)."""
+    from business_app.models.delivery import DeliveryPerson
+
+    profile = DeliveryPerson(
+        user_id=driver.id,
+        full_name="AssignDriver",
+        phone=phone,
+        is_active=True,
+        is_available=True,
+        working_hours_start="00:00",
+        working_hours_end="23:59",
+    )
+    db.session.add(profile)
+    db.session.flush()
+    return profile
+
+
+def _make_scheduled_unassigned_delivery(db, order):
+    """A SCHEDULED delivery with no driver — the auto-assign / admin entrypoint."""
+    from datetime import datetime, UTC, timedelta
+    from business_app.models.delivery import Delivery
+    from shared.enums import DeliveryStatus
+
+    delivery = Delivery(
+        order_id=order.id,
+        status=DeliveryStatus.SCHEDULED,
+        scheduled_date=datetime.now(UTC) + timedelta(hours=1),
+        scheduled_time_slot="09:00-12:00",
+    )
+    db.session.add(delivery)
+    db.session.flush()
+    return delivery
+
+
+@pytest.mark.unit
+def test_assign_delivery_driver_binds_order_to_open_session(db, app, sample_user, sample_product):
+    """DeliveryService.assign_delivery_driver (admin / auto_assign_delivery_task)
+    binds the order to the driver's open bottle session when one exists, mirroring
+    the bot-accept flow so non-bot assignment no longer leaves the order unbound
+    (the root cause of prod TG_000183_26 / delivery 620)."""
+    from business_app.models.delivery import Delivery, DeliveryPerson
+    from business_app.services.delivery_service import DeliveryService
+
+    driver = _make_driver(db, "+998901000130", "AssignBind")
+    _make_driver_profile(db, driver, "+998901000130")
+    session = _open_session(db, driver)
+    order = _make_order_with_bottles(db, sample_user, sample_product, quantity=2)
+    delivery = _make_scheduled_unassigned_delivery(db, order)
+    db.session.commit()
+
+    with app.test_request_context(), patch.object(
+        DeliveryService, "_notify_driver", lambda self, d: None
+    ), patch.object(DeliveryService, "_optimize_driver_route", lambda self, *a, **k: None):
+        DeliveryService().assign_delivery_driver(delivery.id, driver.id)
+
+    refreshed = Delivery.query.get(delivery.id)
+    assert refreshed.delivery_person_id == driver.id
+    binding = DriverBottleSessionOrder.query.filter_by(order_id=order.id).first()
+    assert binding is not None
+    assert binding.session_id == session.id
+
+
+@pytest.mark.unit
+def test_assign_delivery_driver_skips_binding_without_open_session(db, app, sample_user, sample_product):
+    """Best-effort: with no open session at assignment time, assignment still
+    succeeds and creates no binding — the progress guard late-binds later when the
+    driver opens a session."""
+    from business_app.models.delivery import Delivery
+    from business_app.services.delivery_service import DeliveryService
+
+    driver = _make_driver(db, "+998901000131", "AssignNoSession")
+    _make_driver_profile(db, driver, "+998901000131")
+    # No open session.
+    order = _make_order_with_bottles(db, sample_user, sample_product, quantity=2)
+    delivery = _make_scheduled_unassigned_delivery(db, order)
+    db.session.commit()
+
+    with app.test_request_context(), patch.object(
+        DeliveryService, "_notify_driver", lambda self, d: None
+    ), patch.object(DeliveryService, "_optimize_driver_route", lambda self, *a, **k: None):
+        DeliveryService().assign_delivery_driver(delivery.id, driver.id)
+
+    refreshed = Delivery.query.get(delivery.id)
+    assert refreshed.delivery_person_id == driver.id
+    assert DriverBottleSessionOrder.query.filter_by(order_id=order.id).first() is None
 
 
 @pytest.mark.unit
@@ -1098,6 +1295,30 @@ def test_admin_force_close_bypasses_open_bindings(db, sample_user, sample_produc
 # AD_000205_26 regression — accept under open session, close session, then
 # attempting any further transition must fail (under strict enforcement).
 # ---------------------------------------------------------------------------
+
+@pytest.mark.unit
+def test_assign_delivery_driver_blocks_cod_blocked_driver(db, app, sample_user, sample_product):
+    """Auto/admin assign now enforces the COD-block gate via the SSOT."""
+    from unittest.mock import patch
+    from business_app.models.delivery import Delivery
+    from business_app.services.delivery_service import DeliveryService
+    from business_app.models.order import Order
+    from shared.enums import PaymentMethod
+    driver = _make_driver(db, "+998901700001", "CODBlocked")
+    _make_driver_profile(db, driver, "+998901700001")
+    order = _make_order_with_bottles(db, sample_user, sample_product, quantity=1)
+    order.payment_method = PaymentMethod.CASH
+    db.session.flush()
+    delivery = _make_scheduled_unassigned_delivery(db, order)
+    db.session.commit()
+    with app.test_request_context(), \
+         patch("business_app.services.driver_reconciliation_service.DriverReconciliationService.is_driver_blocked_from_cod", return_value=True), \
+         patch.object(DeliveryService, "_notify_driver", lambda self, d: None), \
+         patch.object(DeliveryService, "_optimize_driver_route", lambda self, *a, **k: None):
+        with pytest.raises(ValidationError) as exc:
+            DeliveryService().assign_delivery_driver(delivery.id, driver.id)
+    assert exc.value.error_code == "STAFF_DRIVER_COD_BLOCKED"
+
 
 @pytest.mark.unit
 def test_regression_AD_000205_26_picked_up_blocked_after_session_close(

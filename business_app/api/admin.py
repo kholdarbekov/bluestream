@@ -58,7 +58,11 @@ from business_app.serializers.admin_serializers import (
     serialize_category_admin,
     InactiveCustomersQuerySchema,
 )
-from business_app.utils.service_factory import get_analytics_service
+from business_app.utils.service_factory import get_analytics_service, get_support_conversation_service
+from business_app.serializers.support_serializers import (
+    AdminSupportReplyRequest,
+    AdminStartConversationRequest,
+)
 from pydantic import ValidationError as PydanticValidationError
 
 # from business_app.services.file_storage_service import FileStorageService
@@ -12236,3 +12240,108 @@ def trigger_marking_code_task_run():
     except Exception as e:
         current_app.logger.error(f"Trigger marking-code task run error: {e}")
         return internal_error_response("Failed to enqueue marking-code task")
+
+
+@admin_bp.route("/support/conversations", methods=["GET"])
+@jwt_required()
+@validate_admin_action(["manage_support"])
+def list_support_conversations():
+    """List support conversations (most-recent first) with unread counts."""
+    try:
+        page = int(request.args.get("page", 1))
+        per_page = min(int(request.args.get("per_page", 20)), 100)
+        search = (request.args.get("search") or "").strip() or None
+        unread_only = (request.args.get("unread_only") or "false").lower() == "true"
+        result = get_support_conversation_service().list_conversations(
+            page=page, per_page=per_page, search=search, unread_only=unread_only
+        )
+        return success_response(data=result)
+    except Exception:  # noqa: BLE001
+        current_app.logger.exception("list support conversations failed")
+        return internal_error_response("Failed to list conversations")
+
+
+@admin_bp.route("/support/conversations/<int:conversation_id>/messages", methods=["GET"])
+@jwt_required()
+@validate_admin_action(["manage_support"])
+def get_support_thread(conversation_id):
+    """Get the chronological message thread for one conversation."""
+    try:
+        page = int(request.args.get("page", 1))
+        per_page = min(int(request.args.get("per_page", 50)), 100)
+        result = get_support_conversation_service().get_thread(conversation_id, page=page, per_page=per_page)
+        return success_response(data=result)
+    except NotFoundError as exc:
+        return not_found_response(resource_type="Conversation", message=str(exc))
+    except Exception:  # noqa: BLE001
+        current_app.logger.exception("get support thread failed for %s", conversation_id)
+        return internal_error_response("Failed to load conversation")
+
+
+@admin_bp.route("/support/conversations/<int:conversation_id>/read", methods=["POST"])
+@jwt_required()
+@validate_admin_action(["manage_support"])
+def mark_support_conversation_read(conversation_id):
+    """Mark all inbound messages in a conversation as read."""
+    try:
+        count = get_support_conversation_service().mark_read(conversation_id)
+        return success_response(data={"marked_read": count})
+    except NotFoundError as exc:
+        return not_found_response(resource_type="Conversation", message=str(exc))
+    except Exception:  # noqa: BLE001
+        current_app.logger.exception("mark support read failed for %s", conversation_id)
+        return internal_error_response("Failed to mark as read")
+
+
+@admin_bp.route("/support/conversations/<int:conversation_id>/reply", methods=["POST"])
+@jwt_required()
+@validate_admin_action(["manage_support"])
+def reply_support_conversation(conversation_id):
+    """Send an admin reply into an existing conversation (delivered via the customer bot)."""
+    try:
+        data = request.get_json(silent=True) or {}
+        payload = AdminSupportReplyRequest(**data)
+        admin_id = int(get_jwt_identity())
+        result = get_support_conversation_service().send_reply(conversation_id, admin_id, payload.content)
+        return success_response(
+            data={"message": result["message"].to_dict(), "delivery": result["delivery"]},
+            message="Message sent",
+        )
+    except PydanticValidationError as exc:
+        return validation_error_response(str(exc))
+    except NotFoundError as exc:
+        return not_found_response(resource_type="Conversation", message=str(exc))
+    except ValidationError as exc:
+        return validation_error_response(str(exc))
+    except Exception:  # noqa: BLE001
+        current_app.logger.exception("support reply failed for %s", conversation_id)
+        return internal_error_response("Failed to send message")
+
+
+@admin_bp.route("/support/conversations", methods=["POST"])
+@jwt_required()
+@validate_admin_action(["manage_support"])
+def start_support_conversation():
+    """Start (or reuse) a conversation with any Telegram-connected user and send the first message."""
+    try:
+        data = request.get_json(silent=True) or {}
+        payload = AdminStartConversationRequest(**data)
+        admin_id = int(get_jwt_identity())
+        result = get_support_conversation_service().send_message_to_user(payload.user_id, admin_id, payload.content)
+        return success_response(
+            data={
+                "message": result["message"].to_dict(),
+                "delivery": result["delivery"],
+                "conversation_id": result["message"].conversation_id,
+            },
+            message="Message sent",
+        )
+    except PydanticValidationError as exc:
+        return validation_error_response(str(exc))
+    except NotFoundError as exc:
+        return not_found_response(resource_type="User", message=str(exc))
+    except ValidationError as exc:
+        return validation_error_response(str(exc))
+    except Exception:  # noqa: BLE001
+        current_app.logger.exception("start support conversation failed")
+        return internal_error_response("Failed to send message")

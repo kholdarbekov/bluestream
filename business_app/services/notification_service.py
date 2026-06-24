@@ -3,6 +3,7 @@ Notification service for the Water Business Platform
 Handles SMS, Email, Telegram, and Push notifications
 """
 
+import html
 import json
 import os
 import re
@@ -3092,6 +3093,35 @@ class NotificationService:
         except ConfigurationError as exc:
             logger.warning(
                 "Staff Telegram notification skipped: user_id=%s reason=%s",
+                getattr(user, "id", None),
+                exc,
+            )
+            return {"success": False, "error": str(exc)}
+
+    def send_user_telegram_message(self, user: User, message: str, *, language: Optional[str] = None) -> Dict[str, Any]:
+        """Send a one-off free-text Telegram message to a customer via the customer bot token."""
+        if not message:
+            return {"success": False, "error": "Message content is required"}
+
+        safe = html.escape(message)
+        template = SimpleNamespace(
+            subject="Support message",
+            content=safe,
+            get_translated=lambda field_name, _language: ("Support message" if field_name == "subject" else safe),
+        )
+
+        try:
+            return self._send_telegram_notification(
+                user=user,
+                notification_type=NotificationType.SYSTEM_ALERT,
+                template_data={},
+                language=language or getattr(user, "preferred_language", "en") or "en",
+                template_override=template,
+                bot_token=self.telegram_bot_token,
+            )
+        except ConfigurationError as exc:
+            logger.warning(
+                "Customer Telegram message skipped: user_id=%s reason=%s",
                 getattr(user, "id", None),
                 exc,
             )

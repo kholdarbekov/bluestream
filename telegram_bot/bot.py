@@ -762,14 +762,32 @@ class WaterBusinessBot:
             if user_state.get('awaiting_input'):
                 # Handle contextual input
                 await self._handle_contextual_input(update, context, user_state, language)
-            # else:
-            #     # Handle general text input (could be search, commands, etc.)
-            #     logger.info(f"Handling general text input from user {user_id}: {text}")
-            #     await self._handle_general_input(update, context, text, language)
+            else:
+                # General free text with no active flow (not OTP, not a conversation
+                # state): silently capture it as a support message so an admin can
+                # reply from the admin UI. No auto-acknowledgement is sent.
+                await self._capture_support_message(update, context, text)
 
         except Exception as e:
             logger.error(f"Error handling text message: {e}")
             await update.message.reply_text(i18n.get('telegram.error_occurred', language))
+
+    async def _capture_support_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
+                                       text: str):
+        """Silently persist an unsolicited free-text message so an admin can reply
+        from the admin UI. No auto-acknowledgement is sent to the customer."""
+        try:
+            async with api_client as client:
+                user_token = await get_auth_token(update, context, client)
+                if user_token:
+                    await client.record_support_message(user_token, text)
+                else:
+                    logger.warning(
+                        "Support capture skipped: no auth token for user %s",
+                        update.effective_user.id,
+                    )
+        except Exception as exc:
+            logger.error(f"Failed to record support message: {exc}")
 
     async def _handle_otp_verification(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
                                        text: str, language: str):

@@ -34,6 +34,7 @@ API_BOUNDARY_SCORE_BUDGET = {
     "staff.py": 0,
     "staff_tryouts.py": 0,
     "subscriptions.py": 32,
+    "support.py": 0,
     "translations.py": 4,
 }
 BOUNDARY_PATTERNS = (

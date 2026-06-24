@@ -28,7 +28,8 @@ import {
   TagsOutlined,
   TeamOutlined,
   BankOutlined,
-  BarcodeOutlined
+  BarcodeOutlined,
+  MessageOutlined
 } from '@ant-design/icons';
 import { useAuthStore } from '../../stores/authStore';
 import { useRealTimeWithFallback } from '../../hooks/useRealTimeUpdates';
@@ -148,6 +149,11 @@ const AdminLayout = ({ children }) => {
       key: '/notifications',
       icon: <BellOutlined />,
       label: t('ui.nav.notifications')
+    },
+    {
+      key: '/support-inbox',
+      icon: <MessageOutlined />,
+      label: t('ui.nav.support_inbox', { defaultValue: 'Support Inbox' })
     },
     {
       key: '/analytics',

@@ -28,6 +28,7 @@ import Operators from './pages/Operators';
 import StaffManagement from './pages/StaffManagement';
 import Prepayments from './pages/Prepayments';
 import MarkingCodeOperations from './pages/MarkingCodeOperations';
+import SupportInbox from './pages/SupportInbox';
 import { useAuthStore } from './stores/authStore';
 import ProtectedRoute from './components/common/ProtectedRoute';
 
@@ -65,6 +66,7 @@ function App() {
                   <Route path="/loyalty/rewards" element={<LoyaltyRewards />} />
                   <Route path="/loyalty-programs" element={<Navigate to="/loyalty/programs" replace />} />
                   <Route path="/notifications" element={<Notifications />} />
+                  <Route path="/support-inbox" element={<SupportInbox />} />
                   <Route path="/analytics" element={<Analytics />} />
                   <Route path="/blog" element={<Blog />} />
                   <Route path="/translations" element={<Translations />} />

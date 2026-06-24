@@ -1229,6 +1229,32 @@ class AdminService {
     const response = await api.post('/admin/marking-code-task/run', payload);
     return response.data;
   }
+
+  // Support inbox
+  async getSupportConversations(params = {}) {
+    const response = await api.get('/admin/support/conversations', { params });
+    return response.data;
+  }
+
+  async getSupportThread(conversationId, params = {}) {
+    const response = await api.get(`/admin/support/conversations/${conversationId}/messages`, { params });
+    return response.data;
+  }
+
+  async markSupportRead(conversationId) {
+    const response = await api.post(`/admin/support/conversations/${conversationId}/read`);
+    return response.data;
+  }
+
+  async replySupportMessage(conversationId, content) {
+    const response = await api.post(`/admin/support/conversations/${conversationId}/reply`, { content });
+    return response.data;
+  }
+
+  async startSupportConversation(userId, content) {
+    const response = await api.post('/admin/support/conversations', { user_id: userId, content });
+    return response.data;
+  }
 }
 
 const adminService = new AdminService();

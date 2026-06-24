@@ -153,6 +153,13 @@ def get_notification_service():
     return ServiceFactory.get_service(NotificationService, "notification_service")
 
 
+def get_support_conversation_service():
+    """Get SupportConversationService instance"""
+    from business_app.services.support_conversation_service import SupportConversationService
+
+    return ServiceFactory.get_service(SupportConversationService, "support_conversation_service")
+
+
 def get_loyalty_service():
     """Get LoyaltyService instance"""
     from business_app.services.loyalty_service import LoyaltyService

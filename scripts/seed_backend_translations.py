@@ -6970,6 +6970,23 @@ ADMIN_UI_BACKFILL_TRANSLATIONS = {
     'ui.nav.translations': _ui_tr('Translations', 'Tarjimalar', 'Переводы'),
     'ui.nav.tryouts': _ui_tr('Tryouts', 'Sinovlar', 'Пробники'),
     'ui.nav.users': _ui_tr('Users', 'Foydalanuvchilar', 'Пользователи'),
+    'ui.nav.support_inbox': _ui_tr('Support Inbox', 'Qoʻllab-quvvatlash', 'Поддержка'),
+
+    # ---- ui.support.* ----
+    'ui.support.title': _ui_tr('Support Inbox', 'Qoʻllab-quvvatlash', 'Поддержка'),
+    'ui.support.conversations': _ui_tr('Conversations', 'Suhbatlar', 'Диалоги'),
+    'ui.support.no_conversations': _ui_tr('No conversations yet', 'Hozircha suhbatlar yoʻq', 'Пока нет диалогов'),
+    'ui.support.search_placeholder': _ui_tr('Search by name or phone', 'Ism yoki telefon boʻyicha qidirish', 'Поиск по имени или телефону'),
+    'ui.support.message_placeholder': _ui_tr('Type a message…', 'Xabar yozing…', 'Введите сообщение…'),
+    'ui.support.send': _ui_tr('Send', 'Yuborish', 'Отправить'),
+    'ui.support.new_message': _ui_tr('New message', 'Yangi xabar', 'Новое сообщение'),
+    'ui.support.select_user': _ui_tr('Select a Telegram-connected user', 'Telegramga ulangan foydalanuvchini tanlang', 'Выберите пользователя с Telegram'),
+    'ui.support.sent': _ui_tr('Message sent', 'Xabar yuborildi', 'Сообщение отправлено'),
+    'ui.support.send_failed': _ui_tr('Failed to send message', 'Xabar yuborilmadi', 'Не удалось отправить сообщение'),
+    'ui.support.delivery_failed': _ui_tr('Not delivered', 'Yetkazilmadi', 'Не доставлено'),
+    'ui.support.unread': _ui_tr('unread', 'oʻqilmagan', 'непрочитано'),
+    'ui.support.empty_thread': _ui_tr('No messages in this conversation', 'Bu suhbatda xabarlar yoʻq', 'В этом диалоге нет сообщений'),
+    'ui.support.select_conversation': _ui_tr('Select a conversation to view messages', 'Xabarlarni koʻrish uchun suhbatni tanlang', 'Выберите диалог, чтобы увидеть сообщения'),
 
     # ---- ui.orders.* ----
     'ui.orders.bottles_returned': _ui_tr('Bottles Returned', 'Qaytarilgan idishlar', 'Возвращено тары'),

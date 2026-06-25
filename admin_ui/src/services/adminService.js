@@ -679,6 +679,27 @@ class AdminService {
     return response.data;
   }
 
+  // Loyalty Consecutive-Strike Rule management
+  async getLoyaltyConsecutiveStrikeRules(params = {}) {
+    const response = await api.get('/admin/loyalty/consecutive-strike-rules', { params });
+    return response.data?.data || { consecutive_strike_rules: [], count: 0 };
+  }
+
+  async createLoyaltyConsecutiveStrikeRule(ruleData) {
+    const response = await api.post('/admin/loyalty/consecutive-strike-rules', ruleData);
+    return response.data?.data?.consecutive_strike_rule || response.data;
+  }
+
+  async updateLoyaltyConsecutiveStrikeRule(ruleId, ruleData) {
+    const response = await api.put(`/admin/loyalty/consecutive-strike-rules/${ruleId}`, ruleData);
+    return response.data?.data?.consecutive_strike_rule || response.data;
+  }
+
+  async deleteLoyaltyConsecutiveStrikeRule(ruleId) {
+    const response = await api.delete(`/admin/loyalty/consecutive-strike-rules/${ruleId}`);
+    return response.data;
+  }
+
   async getLoyaltyRewards(params = {}) {
     const response = await api.get('/admin/loyalty/rewards', { params });
     return normalizeAdminCollectionResponse(response.data);

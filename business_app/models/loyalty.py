@@ -316,6 +316,91 @@ class LoyaltyStreakRule(db.Model, TimestampMixin):
         return True
 
 
+loyalty_consec_rule_strikes = db.Table(
+    "loyalty_consec_rule_strikes",
+    Column(
+        "consecutive_strike_rule_id",
+        Integer,
+        ForeignKey("loyalty_consecutive_strike_rules.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "streak_rule_id",
+        Integer,
+        ForeignKey("loyalty_streak_rules.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+)
+
+
+@translatable("name")
+class LoyaltyConsecutiveStrikeRule(db.Model, TimestampMixin):
+    """Admin-configurable consecutive-strike bonus rule.
+
+    Composes one or more ``LoyaltyStreakRule`` ("order strike") rows and awards
+    ``bonus_points`` AquaCoins when each (``combine_mode='all'``) or any
+    (``combine_mode='any'``) attached strike has been achieved
+    ``required_consecutive`` times in a row, on each strike's own ``window_days``
+    cadence. Repeats every N; a skipped period resets that strike's run to 0.
+    Fully stateless / ledger-derived — no per-user counters.
+    """
+
+    __tablename__ = "loyalty_consecutive_strike_rules"
+
+    id = Column(Integer, primary_key=True)
+    program_id = Column(Integer, ForeignKey("loyalty_programs.id"), nullable=False, index=True)
+
+    name = Column(String(100), nullable=False)  # user-facing, translatable
+    required_consecutive = Column(Integer, nullable=False)
+    combine_mode = Column(String(8), nullable=False, default="all")  # 'all' | 'any'
+    bonus_points = Column(Integer, nullable=False)
+
+    is_active = Column(Boolean, default=True)
+    starts_at = Column(DateTime(timezone=True), nullable=True)
+    ends_at = Column(DateTime(timezone=True), nullable=True)
+    display_order = Column(Integer, default=0)
+
+    program = relationship("LoyaltyProgram")
+    strikes = relationship("LoyaltyStreakRule", secondary=loyalty_consec_rule_strikes)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "program_id": self.program_id,
+            "name": self.name,
+            "required_consecutive": self.required_consecutive,
+            "combine_mode": self.combine_mode,
+            "bonus_points": self.bonus_points,
+            "is_active": self.is_active,
+            "starts_at": self.starts_at.isoformat() if self.starts_at else None,
+            "ends_at": self.ends_at.isoformat() if self.ends_at else None,
+            "display_order": self.display_order,
+            "strikes": [
+                {
+                    "id": s.id,
+                    "name": s.name,
+                    "required_orders": s.required_orders,
+                    "window_days": s.window_days,
+                }
+                for s in self.strikes
+            ],
+            "strike_rule_ids": [s.id for s in self.strikes],
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+    def is_effective(self, now):
+        """True when active and ``now`` is within the optional [starts_at, ends_at]."""
+        from business_app.utils.timezone_utils import ensure_utc
+
+        if not self.is_active:
+            return False
+        if self.starts_at and now < ensure_utc(self.starts_at):
+            return False
+        if self.ends_at and now > ensure_utc(self.ends_at):
+            return False
+        return True
+
+
 class LoyaltyPoints(db.Model, TimestampMixin):
     """User loyalty points balance"""
 

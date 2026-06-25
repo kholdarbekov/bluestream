@@ -7357,6 +7357,248 @@ def delete_loyalty_streak_rule(rule_id):
         return internal_error_response("Failed to delete streak rule")
 
 
+def _resolve_strikes(program_id, strike_rule_ids):
+    """Load LoyaltyStreakRule rows by id, requiring all to exist and belong to
+    ``program_id``. Returns (rows, error_message)."""
+    from business_app.models.loyalty import LoyaltyStreakRule
+
+    ids = list(dict.fromkeys(strike_rule_ids or []))
+    if not ids:
+        return None, "At least one order-strike must be attached"
+    rows = LoyaltyStreakRule.query.filter(LoyaltyStreakRule.id.in_(ids)).all()
+    if len(rows) != len(ids):
+        return None, "One or more attached strikes do not exist"
+    if any(r.program_id != program_id for r in rows):
+        return None, "Attached strikes must belong to the same program"
+    return rows, None
+
+
+@admin_bp.route("/loyalty/consecutive-strike-rules", methods=["GET"])
+@jwt_required()
+@validate_admin_action(["view_loyalty", "manage_loyalty"])
+def get_loyalty_consecutive_strike_rules():
+    """List consecutive-strike rules (optionally filtered by program_id)."""
+    try:
+        from business_app.models.loyalty import LoyaltyConsecutiveStrikeRule
+
+        program_id = request.args.get("program_id", type=int)
+        query = LoyaltyConsecutiveStrikeRule.query
+        if program_id:
+            query = query.filter_by(program_id=program_id)
+        else:
+            default_program = LoyaltyProgram.query.filter_by(is_default=True, is_active=True).first()
+            if default_program:
+                query = query.filter_by(program_id=default_program.id)
+        rules = query.order_by(LoyaltyConsecutiveStrikeRule.display_order.asc()).all()
+        return success_response(
+            data={
+                "consecutive_strike_rules": [
+                    {**rule.to_dict(), "translations": {"name": rule.get_all_translations("name")}} for rule in rules
+                ],
+                "count": len(rules),
+            }
+        )
+    except Exception as e:
+        current_app.logger.error(f"Get consecutive-strike rules error: {e}")
+        return internal_error_response("Failed to get consecutive-strike rules")
+
+
+@admin_bp.route("/loyalty/consecutive-strike-rules", methods=["POST"])
+@jwt_required()
+@validate_admin_action(["manage_loyalty"])
+@validate_json(["name", "required_consecutive", "bonus_points", "strike_rule_ids"])
+def create_loyalty_consecutive_strike_rule():
+    """Create a consecutive-strike rule.
+
+    Body: name, required_consecutive (>= 1), combine_mode ('all'|'any'),
+    bonus_points (>= 1), strike_rule_ids[], program_id?, is_active?,
+    display_order?, starts_at?, ends_at?, translations?.
+    """
+    try:
+        from business_app.models.loyalty import LoyaltyConsecutiveStrikeRule
+        from datetime import datetime as _dt
+
+        data = request.get_json()
+
+        program_id = data.get("program_id")
+        if not program_id:
+            default_program = LoyaltyProgram.query.filter_by(is_default=True).first()
+            if not default_program:
+                return validation_error_response("No default loyalty program found")
+            program_id = default_program.id
+
+        try:
+            required_consecutive = int(data["required_consecutive"])
+            bonus_points = int(data["bonus_points"])
+        except (ValueError, TypeError):
+            return validation_error_response("required_consecutive and bonus_points must be numeric")
+        if required_consecutive < 1:
+            return validation_error_response("required_consecutive must be >= 1")
+        if bonus_points < 1:
+            return validation_error_response("bonus_points must be ≥ 1")
+        combine_mode = data.get("combine_mode", "all")
+        if combine_mode not in ("all", "any"):
+            return validation_error_response("combine_mode must be 'all' or 'any'")
+
+        # Parse optional effective-date window (mirrors streak-rule pattern)
+        starts_at = _dt.fromisoformat(data["starts_at"]) if data.get("starts_at") else None
+        ends_at = _dt.fromisoformat(data["ends_at"]) if data.get("ends_at") else None
+        if starts_at and ends_at and ends_at <= starts_at:
+            return validation_error_response("ends_at must be after starts_at")
+
+        strikes, err = _resolve_strikes(program_id, data["strike_rule_ids"])
+        if err:
+            return validation_error_response(err)
+
+        rule = LoyaltyConsecutiveStrikeRule(
+            program_id=program_id,
+            name=data["name"],
+            required_consecutive=required_consecutive,
+            combine_mode=combine_mode,
+            bonus_points=bonus_points,
+            is_active=data.get("is_active", True),
+            display_order=data.get("display_order", 0),
+            starts_at=starts_at,
+            ends_at=ends_at,
+        )
+        rule.strikes = strikes
+        db.session.add(rule)
+        db.session.commit()
+
+        if "translations" in data:
+            rule.set_translations(data["translations"])
+            db.session.commit()
+
+        current_app.logger.info(f"Consecutive-strike rule created: {rule.name} (ID: {rule.id})")
+        return success_response(
+            data={"consecutive_strike_rule": rule.to_dict()},
+            message="Consecutive-strike rule created successfully",
+            status_code=201,
+        )
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Create consecutive-strike rule error: {e}")
+        return internal_error_response("Failed to create consecutive-strike rule")
+
+
+@admin_bp.route("/loyalty/consecutive-strike-rules/<int:rule_id>", methods=["PUT"])
+@jwt_required()
+@validate_admin_action(["manage_loyalty"])
+def update_loyalty_consecutive_strike_rule(rule_id):
+    """Update a consecutive-strike rule (incl. re-attaching strikes)."""
+    try:
+        from business_app.models.loyalty import LoyaltyConsecutiveStrikeRule
+        from datetime import datetime as _dt
+
+        rule = LoyaltyConsecutiveStrikeRule.query.get(rule_id)
+        if not rule:
+            return not_found_response("Consecutive-strike rule not found")
+        data = request.get_json()
+
+        # ---- Phase 1: validate EVERYTHING before touching the model ----
+        try:
+            new_required = (
+                int(data["required_consecutive"])
+                if "required_consecutive" in data and data["required_consecutive"] is not None
+                else None
+            )
+            new_bonus = (
+                int(data["bonus_points"]) if "bonus_points" in data and data["bonus_points"] is not None else None
+            )
+        except (ValueError, TypeError):
+            return validation_error_response("required_consecutive and bonus_points must be numeric")
+        if new_required is not None and new_required < 1:
+            return validation_error_response("required_consecutive must be >= 1")
+        if new_bonus is not None and new_bonus < 1:
+            return validation_error_response("bonus_points must be ≥ 1")
+
+        new_display = None
+        if "display_order" in data and data["display_order"] is not None:
+            try:
+                new_display = int(data["display_order"])
+            except (ValueError, TypeError):
+                return validation_error_response("display_order must be numeric")
+
+        new_combine = None
+        if "combine_mode" in data and data["combine_mode"] is not None:
+            if data["combine_mode"] not in ("all", "any"):
+                return validation_error_response("combine_mode must be 'all' or 'any'")
+            new_combine = data["combine_mode"]
+
+        new_strikes = None
+        if "strike_rule_ids" in data:
+            strikes, err = _resolve_strikes(rule.program_id, data["strike_rule_ids"])
+            if err:
+                return validation_error_response(err)
+            new_strikes = strikes
+
+        # Parse optional effective-date window (mirrors streak-rule pattern)
+        new_starts_at = _UNSET = object()  # sentinel: field not present in request
+        new_ends_at = _UNSET
+        if "starts_at" in data:
+            new_starts_at = _dt.fromisoformat(data["starts_at"]) if data["starts_at"] else None
+        if "ends_at" in data:
+            new_ends_at = _dt.fromisoformat(data["ends_at"]) if data["ends_at"] else None
+        # Validate date ordering using the post-update effective values
+        eff_starts = new_starts_at if new_starts_at is not _UNSET else rule.starts_at
+        eff_ends = new_ends_at if new_ends_at is not _UNSET else rule.ends_at
+        if eff_starts and eff_ends and eff_ends <= eff_starts:
+            return validation_error_response("ends_at must be after starts_at")
+
+        # ---- Phase 2: apply only after all validation passed ----
+        if "name" in data and data["name"] is not None:
+            rule.name = str(data["name"])
+        if "is_active" in data and data["is_active"] is not None:
+            rule.is_active = bool(data["is_active"])
+        if new_display is not None:
+            rule.display_order = new_display
+        if new_required is not None:
+            rule.required_consecutive = new_required
+        if new_bonus is not None:
+            rule.bonus_points = new_bonus
+        if new_combine is not None:
+            rule.combine_mode = new_combine
+        if new_strikes is not None:
+            rule.strikes = new_strikes
+        if new_starts_at is not _UNSET:
+            rule.starts_at = new_starts_at
+        if new_ends_at is not _UNSET:
+            rule.ends_at = new_ends_at
+
+        db.session.commit()
+        if "translations" in data:
+            rule.set_translations(data["translations"])
+            db.session.commit()
+        return success_response(
+            data={"consecutive_strike_rule": rule.to_dict()},
+            message="Consecutive-strike rule updated",
+        )
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Update consecutive-strike rule error: {e}")
+        return internal_error_response("Failed to update consecutive-strike rule")
+
+
+@admin_bp.route("/loyalty/consecutive-strike-rules/<int:rule_id>", methods=["DELETE"])
+@jwt_required()
+@validate_admin_action(["manage_loyalty"])
+def delete_loyalty_consecutive_strike_rule(rule_id):
+    """Delete a consecutive-strike rule (hard delete -- no per-user state)."""
+    try:
+        from business_app.models.loyalty import LoyaltyConsecutiveStrikeRule
+
+        rule = LoyaltyConsecutiveStrikeRule.query.get(rule_id)
+        if not rule:
+            return not_found_response("Consecutive-strike rule not found")
+        db.session.delete(rule)
+        db.session.commit()
+        return success_response(message="Consecutive-strike rule deleted successfully")
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Delete consecutive-strike rule error: {e}")
+        return internal_error_response("Failed to delete consecutive-strike rule")
+
+
 @admin_bp.route("/loyalty/analytics", methods=["GET"])
 @jwt_required()
 @validate_admin_action(["view_loyalty", "view_reports"])

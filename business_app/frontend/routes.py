@@ -740,6 +740,7 @@ def get_public_loyalty_facts(languages=("uz", "ru", "en")):
     surprise reward is reported as a boolean only.
     """
     from business_app.models.loyalty import (
+        LoyaltyConsecutiveStrikeRule,
         LoyaltyProgram,
         LoyaltyReward,
         LoyaltyStreakRule,
@@ -791,6 +792,25 @@ def get_public_loyalty_facts(languages=("uz", "ru", "en")):
         if r.is_effective(now)
     ]
 
+    consec_rows = (
+        LoyaltyConsecutiveStrikeRule.query.filter_by(program_id=program.id, is_active=True)
+        .order_by(LoyaltyConsecutiveStrikeRule.display_order.asc())
+        .all()
+        if program
+        else []
+    )
+    consecutive_strike_rules = [
+        {
+            "name": i18n(r, "name"),
+            "required_consecutive": r.required_consecutive,
+            "combine_mode": r.combine_mode,
+            "bonus_points": r.bonus_points,
+            "strike_names": [{lang: s.get_translated("name", lang) for lang in languages} for s in r.strikes],
+        }
+        for r in consec_rows
+        if r.is_effective(now) and r.strikes
+    ]
+
     # Active rewards: expose only non-sensitive metadata (type, name, cost).
     # Defensive get_translated mirrors the public product feed.
     rewards = []
@@ -821,6 +841,7 @@ def get_public_loyalty_facts(languages=("uz", "ru", "en")):
         },
         "tiers": tiers,
         "streak_rules": streak_rules,
+        "consecutive_strike_rules": consecutive_strike_rules,
         "rewards": rewards,
     }
 
@@ -875,6 +896,17 @@ def get_loyalty_handbook_context():
         for r in facts["streak_rules"]
     ]
 
+    consecutive_strike_rules = [
+        {
+            "name": r["name"].get(lang) or r["name"].get("uz"),
+            "required_consecutive": r["required_consecutive"],
+            "combine_mode": r["combine_mode"],
+            "bonus_points": r["bonus_points"],
+            "strike_names": [s.get(lang) or s.get("uz") for s in r["strike_names"]],
+        }
+        for r in facts["consecutive_strike_rules"]
+    ]
+
     return {
         "uzs_per_point": uzs_per_point,
         "signup_bonus": prog["signup_bonus"],
@@ -884,6 +916,7 @@ def get_loyalty_handbook_context():
         "expiry_days": prog["expiry_days"],
         "min_redemption_points": prog["min_redemption_points"],
         "streak_rules": streak_rules,
+        "consecutive_strike_rules": consecutive_strike_rules,
         "surprise": {"enabled": prog["surprise_enabled"]},
         "tiers": tier_list,
         "max_multiplier": max_multiplier,
@@ -2063,6 +2096,7 @@ def public_loyalty_feed():
             for t in facts["tiers"]
         ],
         "streakBonuses": facts["streak_rules"],
+        "consecutiveStrikeBonuses": facts["consecutive_strike_rules"],
         "rewards": facts["rewards"],
         "supportedLanguages": ["uz", "ru", "en"],
         "orderChannels": {

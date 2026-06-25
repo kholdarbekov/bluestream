@@ -20,6 +20,7 @@
 {% set _ = faq.items.append({'q': 'loyalty_guide.faq.q5' | t, 'a': 'loyalty_guide.faq.a5' | t}) %}
 {% set _ = faq.items.append({'q': 'loyalty_guide.faq.q6' | t, 'a': 'loyalty_guide.faq.a6' | t}) %}
 {% set _ = faq.items.append({'q': 'loyalty_guide.faq.q7' | t, 'a': 'loyalty_guide.faq.a7' | t}) %}
+{% if handbook.consecutive_strike_rules %}{% set _ = faq.items.append({'q': 'loyalty_guide.faq.q9' | t, 'a': 'loyalty_guide.faq.a9' | t}) %}{% endif %}
 {% if handbook.surprise.enabled %}{% set _ = faq.items.append({'q': 'loyalty_guide.faq.q8' | t, 'a': 'loyalty_guide.faq.a8' | t}) %}{% endif %}
 
 {% block extra_meta %}
@@ -143,6 +144,29 @@
             <li>
               <strong>{{ rule.name }}</strong>
               <span>{{ 'loyalty_guide.earn.streak_line' | t(orders=rule.required_orders, days=rule.window_days, pts=pts(rule.bonus_points), unit=('loyalty_guide.unit.points' | t)) }}{% if rule.min_order_amount %} · {{ 'loyalty_guide.earn.streak_min' | t(uzs=pts(rule.min_order_amount|int), unit=('loyalty_guide.unit.uzs' | t)) }}{% endif %}</span>
+            </li>
+            {% endfor %}
+          </ul>
+        </article>
+        {% endif %}
+        {% if handbook.consecutive_strike_rules %}
+        <article class="lg-card">
+          <span class="lg-ico" aria-hidden="true"><i class="fas fa-trophy"></i></span>
+          <h3>{{ 'loyalty_guide.earn.consec_title' | t }}</h3>
+          <ul class="lg-streak-list">
+            {% for rule in handbook.consecutive_strike_rules %}
+            <li>
+              <strong>{{ rule.name }}</strong>
+              <span>
+                {% set joiner = ' ' ~ ('loyalty_guide.earn.consec_and' | t) ~ ' ' if rule.combine_mode == 'all' else ' ' ~ ('loyalty_guide.earn.consec_or' | t) ~ ' ' %}
+                {% set strikes_text = rule.strike_names | join(joiner) %}
+                {% if rule.combine_mode == 'all' %}
+                  {{ 'loyalty_guide.earn.consec_line_all' | t(strikes=strikes_text, n=rule.required_consecutive, pts=pts(rule.bonus_points), unit=('loyalty_guide.unit.points' | t)) }}
+                {% else %}
+                  {{ 'loyalty_guide.earn.consec_line_any' | t(strikes=strikes_text, n=rule.required_consecutive, pts=pts(rule.bonus_points), unit=('loyalty_guide.unit.points' | t)) }}
+                {% endif %}
+                · {{ 'loyalty_guide.earn.consec_repeat' | t(n=rule.required_consecutive) }}
+              </span>
             </li>
             {% endfor %}
           </ul>

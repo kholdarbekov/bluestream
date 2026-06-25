@@ -2,6 +2,22 @@
 import pytest
 
 
+@pytest.fixture
+def client(app):
+    """Fresh, function-scoped test client for the coverage-page assertions.
+
+    These tests assert *absolute* frontend behavior (``GET /coverage`` → 200,
+    Markdown content-negotiation). The default ``client`` fixture is
+    session-scoped, so a ``session['language']`` left by an earlier test in the
+    same xdist worker leaks in; the app's language ``before_request`` then
+    302-redirects ``/coverage`` to ``?lang=<non-default>`` and these asserts
+    fail order-dependently. A fresh client carries no leaked session cookie, so
+    the tests are deterministic regardless of suite ordering. (See the
+    session-scoped-client cookie-leak gotcha in the project test-suite notes.)
+    """
+    return app.test_client()
+
+
 @pytest.mark.integration
 @pytest.mark.api
 class TestCoveragePage:

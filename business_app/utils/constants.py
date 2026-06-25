@@ -127,6 +127,7 @@ class LoyaltyActionType(Enum):
     BIRTHDAY_BONUS = "birthday_bonus"
     WELCOME_BONUS = "welcome_bonus"
     STREAK_BONUS = "streak_bonus"
+    CONSECUTIVE_STREAK_BONUS = "consecutive_streak_bonus"
     SURPRICE_REWARD = "surprise_reward"
 
 

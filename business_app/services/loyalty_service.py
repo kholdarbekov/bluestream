@@ -14,6 +14,7 @@ from business_app.models.loyalty import (
     LoyaltyReward,
     LoyaltyProgram,
     LoyaltyStreakRule,
+    LoyaltyConsecutiveStrikeRule,
     ReferralProgram,
     LoyaltyTierConfig,
 )
@@ -312,6 +313,7 @@ class LoyaltyService:
             # Live per-rule streak progress — consumed by the customer loyalty page
             # (static/js/pages/loyalty.js fetches /loyalty/account).
             "streak_progress": self.get_streak_progress(user_id),
+            "consecutive_strike_progress": self.get_consecutive_strike_progress(user_id),
         }
 
     def get_loyalty_history_for_user(self, user_id: int, page: int, per_page: int) -> Dict[str, Any]:
@@ -763,6 +765,8 @@ class LoyaltyService:
         elif action_type == LoyaltyActionType.WELCOME_BONUS:
             transaction_type_enum = LoyaltyTransactionType.BONUS
         elif action_type == LoyaltyActionType.SURPRICE_REWARD:
+            transaction_type_enum = LoyaltyTransactionType.BONUS
+        elif action_type == LoyaltyActionType.CONSECUTIVE_STREAK_BONUS:
             transaction_type_enum = LoyaltyTransactionType.BONUS
 
         transaction = LoyaltyTransaction(
@@ -1327,6 +1331,7 @@ class LoyaltyService:
             "referral_code": self.get_user_referral_code(user_id),
             "referrals_count": self._get_referrals_count(user_id),
             "streak_progress": self.get_streak_progress(user_id),
+            "consecutive_strike_progress": self.get_consecutive_strike_progress(user_id),
         }
 
     # NOTE: LoyaltyService.get_loyalty_analytics was removed (loyalty SSOT, Phase 2).
@@ -1629,6 +1634,14 @@ class LoyaltyService:
         own ``window_days`` (cooldown), tracked via ``streak_rule_id`` in the
         award transaction's ``extra_data``.
         """
+        # Entity-eligibility gate (product-owner decision 2026-06-24): an
+        # ineligible entity user (entity with no active loyalty-eligible
+        # corporate contract) must earn NOTHING. Clean early-return — never
+        # raise — so the order/delivery flow that triggered this is unaffected.
+        user = User.query.get(user_id)
+        if not self.is_user_loyalty_eligible(user):
+            return
+
         program = (
             LoyaltyProgram.query.filter_by(is_default=True, is_active=True).first()
             or LoyaltyProgram.query.filter_by(is_active=True).first()
@@ -1657,7 +1670,11 @@ class LoyaltyService:
             )
             awarded = True
 
-        if awarded and commit:
+        # A new order-strike achievement is the only event that can advance a
+        # consecutive-strike run, so evaluate those rules in the same transaction.
+        consec_awarded = self.update_consecutive_strikes(user_id, commit=False)
+
+        if (awarded or consec_awarded) and commit:
             db.session.commit()
 
     def _streak_rule_in_cooldown(self, user_id: int, rule, now: datetime) -> bool:
@@ -1673,6 +1690,179 @@ class LoyaltyService:
             if ed.get("action_type") == LoyaltyActionType.STREAK_BONUS.value and ed.get("streak_rule_id") == rule.id:
                 return True
         return False
+
+    def _strike_achievement_times(self, user_id: int, strike_rule_id: int) -> List[datetime]:
+        """All UTC achievement timestamps for one order-strike rule, newest-first.
+
+        Reads the loyalty ledger directly (an achievement = a STREAK_BONUS award
+        carrying this ``streak_rule_id`` in ``extra_data``). Filtered in Python to
+        stay portable across the JSON ``extra_data`` column, mirroring
+        ``_streak_rule_in_cooldown``.
+        """
+        txns = LoyaltyTransaction.query.filter(LoyaltyTransaction.user_id == user_id).all()
+        times: List[datetime] = []
+        for t in txns:
+            ed = t.extra_data or {}
+            if (
+                ed.get("action_type") == LoyaltyActionType.STREAK_BONUS.value
+                and ed.get("streak_rule_id") == strike_rule_id
+                and t.created_at is not None
+            ):
+                times.append(ensure_utc(t.created_at))
+        times.sort(reverse=True)
+        return times
+
+    def _strike_consecutive_run(self, user_id: int, strike_rule, now: datetime):
+        """Current consecutive-achievement run for one strike, ending at the latest
+        achievement. Two adjacent achievements are "consecutive" iff their gap is
+        ``< 2 * window_days`` (no fully-skipped period). Returns
+        ``(run_length, earliest_run_timestamp)``; ``(0, None)`` if never achieved.
+        """
+        times = self._strike_achievement_times(user_id, strike_rule.id)
+        if not times:
+            return 0, None
+        limit = timedelta(days=2 * strike_rule.window_days)
+        run = [times[0]]
+        for prev in times[1:]:
+            if run[-1] - prev < limit:
+                run.append(prev)
+            else:
+                break
+        return len(run), run[-1]
+
+    def get_consecutive_strike_progress(self, user_id: int):
+        """Live progress toward each active, currently-effective consecutive-strike
+        rule for the default program. Computed from the ledger — no stored counter."""
+        from business_app.utils.helpers import get_current_language
+
+        program = (
+            LoyaltyProgram.query.filter_by(is_default=True, is_active=True).first()
+            or LoyaltyProgram.query.filter_by(is_active=True).first()
+        )
+        if not program:
+            return []
+        now = datetime.now(timezone.utc)
+        lang = get_current_language()
+        out = []
+        rules = (
+            LoyaltyConsecutiveStrikeRule.query.filter_by(program_id=program.id, is_active=True)
+            .order_by(LoyaltyConsecutiveStrikeRule.display_order.asc())
+            .all()
+        )
+        for rule in rules:
+            if not rule.is_effective(now) or not rule.strikes:
+                continue
+            n = rule.required_consecutive
+            per_strike = []
+            counts = []
+            for s in rule.strikes:
+                count, _ = self._strike_consecutive_run(user_id, s, now)
+                last_times = self._strike_achievement_times(user_id, s.id)
+                active = bool(last_times) and (now - last_times[0]) < timedelta(days=2 * s.window_days)
+                counts.append(count)
+                per_strike.append(
+                    {
+                        "strike_name": s.get_translated("name", lang),
+                        "current": min(count, n),
+                        "target": n,
+                        "window_days": s.window_days,
+                        "active": active,
+                    }
+                )
+            combined = max(counts) if rule.combine_mode == "any" else min(counts)
+            out.append(
+                {
+                    "name": rule.get_translated("name", lang),
+                    "required_consecutive": n,
+                    "combine_mode": rule.combine_mode,
+                    "bonus_points": rule.bonus_points,
+                    "combined_current": min(combined, n),
+                    "per_strike": per_strike,
+                }
+            )
+        return out
+
+    def _consecutive_awards_since(self, user_id: int, rule_id: int, since_dt: datetime) -> int:
+        """Number of meta-bonus awards already granted for this rule at or after
+        ``since_dt`` (the start of the current combined run). Drives idempotency
+        and 'repeat every N' with zero stored state."""
+        count = 0
+        for t in LoyaltyTransaction.query.filter(LoyaltyTransaction.user_id == user_id).all():
+            ed = t.extra_data or {}
+            if (
+                ed.get("action_type") == LoyaltyActionType.CONSECUTIVE_STREAK_BONUS.value
+                and ed.get("consecutive_strike_rule_id") == rule_id
+                and t.created_at is not None
+                and ensure_utc(t.created_at) >= since_dt
+            ):
+                count += 1
+        return count
+
+    def update_consecutive_strikes(self, user_id: int, commit: bool = True):
+        """Award every active, currently-effective consecutive-strike rule the user
+        now satisfies. ``combine_mode='all'`` needs every attached strike to reach
+        ``required_consecutive``; ``'any'`` needs one. Awards ``bonus_points`` per
+        completed multiple of N (repeat every N); idempotent via
+        ``_consecutive_awards_since``."""
+        # Entity-eligibility gate (product-owner decision 2026-06-24): an
+        # ineligible entity user earns NOTHING. Return False (this method's
+        # bool contract = "nothing awarded") — never raise.
+        user = User.query.get(user_id)
+        if not self.is_user_loyalty_eligible(user):
+            return False
+
+        program = (
+            LoyaltyProgram.query.filter_by(is_default=True, is_active=True).first()
+            or LoyaltyProgram.query.filter_by(is_active=True).first()
+        )
+        if not program:
+            return False
+
+        now = datetime.now(timezone.utc)
+        rules = LoyaltyConsecutiveStrikeRule.query.filter_by(program_id=program.id, is_active=True).all()
+        awarded = False
+
+        for rule in rules:
+            if not rule.is_effective(now) or not rule.strikes:
+                continue
+            # Skip mis-configured rules: award_points(0) raises ValidationError,
+            # which would abort the whole consecutive evaluation for this user.
+            if rule.bonus_points <= 0:
+                continue
+            runs = [self._strike_consecutive_run(user_id, s, now) for s in rule.strikes]
+            counts = [c for c, _ in runs]
+            starts = [rs for _, rs in runs if rs is not None]
+            n = rule.required_consecutive
+
+            if rule.combine_mode == "any":
+                combined = max(counts)
+                idx = counts.index(combined)
+                run_start = runs[idx][1]
+            else:  # 'all'
+                combined = min(counts)
+                # All attached strikes must be currently running; the binding run
+                # start is the latest-starting among them.
+                run_start = max(starts) if len(starts) == len(rule.strikes) else None
+
+            if combined < n or run_start is None:
+                continue
+
+            target_awards = combined // n
+            already = self._consecutive_awards_since(user_id, rule.id, run_start)
+            for milestone in range(already + 1, target_awards + 1):
+                self.award_points(
+                    user_id,
+                    rule.bonus_points,
+                    rule.name,
+                    LoyaltyActionType.CONSECUTIVE_STREAK_BONUS,
+                    extra_data={"consecutive_strike_rule_id": rule.id, "milestone": milestone},
+                    commit=False,
+                )
+                awarded = True
+
+        if awarded and commit:
+            db.session.commit()
+        return awarded
 
     @staticmethod
     def _parse_surprise_amounts(raw) -> List[int]:

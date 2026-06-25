@@ -7222,6 +7222,28 @@ LOYALTY_GUIDE_TRANSLATIONS = {
         'har bir buyurtma ≥ {uzs} {unit}',
         'каждый заказ ≥ {uzs} {unit}',
     ),
+    'loyalty_guide.earn.consec_title': _ui_tr(
+        'Consecutive Streaks', 'Ketma-ket seriyalar', 'Серии подряд'),
+    'loyalty_guide.earn.consec_and': _ui_tr('and', 'va', 'и'),
+    'loyalty_guide.earn.consec_or': _ui_tr('or', 'yoki', 'или'),
+    'loyalty_guide.earn.consec_line_all': _ui_tr(
+        'Achieve {strikes} {n} times in a row → +{pts} {unit}',
+        '{strikes} ni ketma-ket {n} marta bajaring → +{pts} {unit}',
+        'Выполните {strikes} {n} раз подряд → +{pts} {unit}'),
+    'loyalty_guide.earn.consec_line_any': _ui_tr(
+        'Achieve {strikes} {n} times in a row → +{pts} {unit}',
+        '{strikes} dan birini ketma-ket {n} marta bajaring → +{pts} {unit}',
+        'Выполните {strikes} {n} раз подряд → +{pts} {unit}'),
+    'loyalty_guide.earn.consec_repeat': _ui_tr(
+        'Repeats every {n}', 'Har {n} tadan keyin takrorlanadi', 'Повторяется каждые {n}'),
+    'loyalty_guide.faq.q9': _ui_tr(
+        'How do consecutive-streak rewards work?',
+        'Ketma-ket seriya mukofotlari qanday ishlaydi?',
+        'Как работают награды за серии подряд?'),
+    'loyalty_guide.faq.a9': _ui_tr(
+        'Keep achieving the same order goal in consecutive periods. Reach the required number of consecutive achievements and you earn bonus AquaCoins — then it repeats. Skipping a period resets the streak.',
+        'Bir xil buyurtma maqsadini ketma-ket davrlarda bajaring. Talab qilingan ketma-ket bajarishlar soniga yeting va bonus AquaCoins olasiz — keyin u takrorlanadi. Davrni o\'tkazib yuborsangiz seriya nolga tushadi.',
+        'Достигайте одной и той же цели по заказам в последовательные периоды. Наберите нужное число последовательных достижений и получите бонусные AquaCoins — затем всё повторяется. Пропуск периода сбрасывает серию.'),
     'loyalty_guide.earn.surprise_title': _ui_tr('Surprise rewards', 'Kutilmagan mukofotlar', 'Сюрприз-награды'),
     'loyalty_guide.earn.surprise_desc': _ui_tr(
         "Every now and then we surprise members who order with a little extra — a bonus of AquaCoins that lands in your balance when you least expect it. No schedule, no formula; that's what keeps it a surprise.",

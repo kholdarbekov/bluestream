@@ -50,9 +50,11 @@ const LoyaltyPrograms = () => {
   const [programModal, setProgramModal] = useState({ open: false, program: null });
   const [tierModal, setTierModal] = useState({ open: false, tier: null });
   const [streakModal, setStreakModal] = useState({ open: false, rule: null });
+  const [consecModal, setConsecModal] = useState({ open: false, rule: null });
   const [programForm] = Form.useForm();
   const [tierForm] = Form.useForm();
   const [streakForm] = Form.useForm();
+  const [consecForm] = Form.useForm();
 
   const programsQuery = useQuery({
     queryKey: ['loyalty-programs', pagination, searchText, statusFilter],
@@ -95,6 +97,14 @@ const LoyaltyPrograms = () => {
 
   const streakRules = streakRulesQuery.data?.streak_rules || [];
 
+  const consecRulesQuery = useQuery({
+    queryKey: ['loyalty-consecutive-strike-rules', selectedProgramId],
+    queryFn: () => adminService.getLoyaltyConsecutiveStrikeRules({ program_id: selectedProgramId }),
+    enabled: Boolean(selectedProgramId),
+    placeholderData: keepPreviousData,
+  });
+  const consecRules = consecRulesQuery.data?.consecutive_strike_rules || [];
+
   const invalidateLoyaltyQueries = () => {
     queryClient.invalidateQueries({
       queryKey: ['loyalty-programs'],
@@ -107,6 +117,9 @@ const LoyaltyPrograms = () => {
     });
     queryClient.invalidateQueries({
       queryKey: ['loyalty-streak-rules'],
+    });
+    queryClient.invalidateQueries({
+      queryKey: ['loyalty-consecutive-strike-rules'],
     });
   };
 
@@ -199,6 +212,34 @@ const LoyaltyPrograms = () => {
 
     onSuccess: () => {
       message.success(t('ui.loyalty.streak_delete_success', { defaultValue: 'Streak rule removed successfully' }));
+      invalidateLoyaltyQueries();
+    },
+  });
+
+  const createConsecRuleMutation = useMutation({
+    mutationFn: (values) => adminService.createLoyaltyConsecutiveStrikeRule(values),
+    onSuccess: () => {
+      message.success(t('ui.loyalty.consec_create_success', { defaultValue: 'Consecutive-strike rule created' }));
+      setConsecModal({ open: false, rule: null });
+      consecForm.resetFields();
+      invalidateLoyaltyQueries();
+    },
+  });
+
+  const updateConsecRuleMutation = useMutation({
+    mutationFn: ({ ruleId, values }) => adminService.updateLoyaltyConsecutiveStrikeRule(ruleId, values),
+    onSuccess: () => {
+      message.success(t('ui.loyalty.consec_update_success', { defaultValue: 'Consecutive-strike rule updated' }));
+      setConsecModal({ open: false, rule: null });
+      consecForm.resetFields();
+      invalidateLoyaltyQueries();
+    },
+  });
+
+  const deleteConsecRuleMutation = useMutation({
+    mutationFn: (ruleId) => adminService.deleteLoyaltyConsecutiveStrikeRule(ruleId),
+    onSuccess: () => {
+      message.success(t('ui.loyalty.consec_delete_success', { defaultValue: 'Consecutive-strike rule removed' }));
       invalidateLoyaltyQueries();
     },
   });
@@ -435,6 +476,80 @@ const LoyaltyPrograms = () => {
     },
   ]), [deleteStreakRuleMutation, streakForm, t]);
 
+  const consecRuleColumns = useMemo(() => ([
+    {
+      title: t('ui.loyalty.consec_name', { defaultValue: 'Name' }),
+      dataIndex: 'name',
+      key: 'name',
+    },
+    {
+      title: t('ui.loyalty.consec_required_consecutive', { defaultValue: 'Required Consecutive' }),
+      dataIndex: 'required_consecutive',
+      key: 'required_consecutive',
+      width: 170,
+    },
+    {
+      title: t('ui.loyalty.consec_combine_mode', { defaultValue: 'Combine Mode' }),
+      dataIndex: 'combine_mode',
+      key: 'combine_mode',
+      width: 130,
+      render: (value) => value === 'any' ? 'Any' : 'All',
+    },
+    {
+      title: t('ui.loyalty.consec_strikes', { defaultValue: 'Attached Strikes' }),
+      dataIndex: 'strikes',
+      key: 'strikes',
+      render: (strikes) => (strikes || []).map((s) => <Tag key={s.id}>{s.name}</Tag>),
+    },
+    {
+      title: t('ui.loyalty.streak_bonus_points', { defaultValue: 'Bonus AquaCoins' }),
+      dataIndex: 'bonus_points',
+      key: 'bonus_points',
+      width: 140,
+    },
+    {
+      title: t('ui.loyalty.status', { defaultValue: 'Status' }),
+      dataIndex: 'is_active',
+      key: 'is_active',
+      width: 120,
+      render: (value) => <Tag color={value ? 'green' : 'red'}>{value ? 'Active' : 'Inactive'}</Tag>,
+    },
+    {
+      title: t('ui.loyalty.actions', { defaultValue: 'Actions' }),
+      key: 'actions',
+      width: 120,
+      render: (_, record) => (
+        <Space>
+          <Button
+            type="text"
+            icon={<EditOutlined />}
+            onClick={() => {
+              setConsecModal({ open: true, rule: record });
+              consecForm.setFieldsValue({
+                ...record,
+                strike_rule_ids: record.strike_rule_ids,
+                name_ru: record.translations?.name?.ru,
+                name_uz: record.translations?.name?.uz,
+              });
+            }}
+          />
+          <Button
+            type="text"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => {
+              Modal.confirm({
+                title: t('ui.loyalty.delete_consec_confirm_title', { defaultValue: 'Delete consecutive-strike rule?' }),
+                content: t('ui.loyalty.delete_consec_confirm_message', { defaultValue: `Delete ${record.name}?` }),
+                onOk: () => deleteConsecRuleMutation.mutate(record.id),
+              });
+            }}
+          />
+        </Space>
+      ),
+    },
+  ]), [consecForm, deleteConsecRuleMutation, t]);
+
   return (
     <div>
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
@@ -664,6 +779,47 @@ const LoyaltyPrograms = () => {
                   />
                 </>
               )
+            },
+            {
+              key: 'consecutive_strikes',
+              label: t('ui.loyalty.tab_consecutive_strikes', { defaultValue: 'Consecutive Strikes' }),
+              children: (
+                <>
+                  <div className="table-actions">
+                    <Space wrap>
+                      <Select
+                        placeholder={t('ui.loyalty.program', { defaultValue: 'Program' })}
+                        style={{ width: 240 }}
+                        value={selectedProgramId}
+                        onChange={setSelectedProgramId}
+                        options={programs.map((program) => ({ value: program.id, label: program.name }))}
+                      />
+                    </Space>
+                    <Space>
+                      <Button
+                        type="primary"
+                        icon={<PlusOutlined />}
+                        disabled={!selectedProgramId}
+                        onClick={() => {
+                          setConsecModal({ open: true, rule: null });
+                          consecForm.resetFields();
+                          consecForm.setFieldsValue({ is_active: true, combine_mode: 'all' });
+                        }}
+                      >
+                        {t('ui.loyalty.create_consecutive_strike', { defaultValue: 'Add Consecutive Strike' })}
+                      </Button>
+                    </Space>
+                  </div>
+                  <Table
+                    rowKey="id"
+                    columns={consecRuleColumns}
+                    dataSource={consecRules}
+                    loading={consecRulesQuery.isLoading}
+                    locale={{ emptyText: <EmptyState description={t('ui.loyalty.no_consecutive_strikes', { defaultValue: 'No consecutive-strike rules configured' })} /> }}
+                    pagination={false}
+                  />
+                </>
+              ),
             }
           ]}
         />
@@ -913,6 +1069,101 @@ const LoyaltyPrograms = () => {
           </Form.Item>
         </Form>
       </Modal>
+      <Modal
+        open={consecModal.open}
+        title={consecModal.rule ? t('ui.loyalty.edit_consec_rule', { defaultValue: 'Edit Consecutive-Strike Rule' }) : t('ui.loyalty.create_consec_rule', { defaultValue: 'Add Consecutive-Strike Rule' })}
+        onCancel={() => setConsecModal({ open: false, rule: null })}
+        footer={null}
+        width={640}
+      >
+        <Form
+          form={consecForm}
+          layout="vertical"
+          onFinish={(values) => {
+            const payload = {
+              name: values.name,
+              required_consecutive: Number(values.required_consecutive),
+              combine_mode: values.combine_mode || 'all',
+              bonus_points: Number(values.bonus_points),
+              strike_rule_ids: values.strike_rule_ids || [],
+              is_active: values.is_active,
+              program_id: selectedProgramId,
+              translations: { name: { ru: values.name_ru || undefined, uz: values.name_uz || undefined } },
+            };
+            if (consecModal.rule) {
+              updateConsecRuleMutation.mutate({ ruleId: consecModal.rule.id, values: payload });
+              return;
+            }
+            createConsecRuleMutation.mutate(payload);
+          }}
+        >
+          <Row gutter={16}>
+            <Col span={24}>
+              <Form.Item name="name" label={t('ui.loyalty.consec_name', { defaultValue: 'Name' })} rules={[{ required: true }]}>
+                <Input id="name" />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="name_ru" label={t('ui.loyalty.name_ru', { defaultValue: 'Name (RU)' })}>
+                <Input />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="name_uz" label={t('ui.loyalty.name_uz', { defaultValue: 'Name (UZ)' })}>
+                <Input />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="required_consecutive" label={t('ui.loyalty.consec_required_consecutive', { defaultValue: 'Required Consecutive' })} rules={[{ required: true }]}>
+                <InputNumber id="required_consecutive" min={2} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="bonus_points" label={t('ui.loyalty.streak_bonus_points', { defaultValue: 'Bonus AquaCoins' })} rules={[{ required: true }]}>
+                <InputNumber id="bonus_points" min={0} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Form.Item name="combine_mode" label={t('ui.loyalty.consec_combine_mode', { defaultValue: 'Combine Mode' })}>
+            <Select
+              options={[
+                { value: 'all', label: t('ui.loyalty.combine_all', { defaultValue: 'All strikes (AND)' }) },
+                { value: 'any', label: t('ui.loyalty.combine_any', { defaultValue: 'Any strike (OR)' }) },
+              ]}
+            />
+          </Form.Item>
+
+          <Form.Item name="strike_rule_ids" label={t('ui.loyalty.consec_strikes', { defaultValue: 'Attached Strikes' })} rules={[{ required: true }]}>
+            <Select
+              mode="multiple"
+              options={streakRules.map((s) => ({ value: s.id, label: s.name }))}
+            />
+          </Form.Item>
+
+          <Form.Item name="is_active" label={t('ui.loyalty.active', { defaultValue: 'Active' })} valuePropName="checked">
+            <Switch />
+          </Form.Item>
+
+          <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
+            <Space>
+              <Button onClick={() => setConsecModal({ open: false, rule: null })}>
+                {t('ui.loyalty.cancel', { defaultValue: 'Cancel' })}
+              </Button>
+              <AsyncButton type="primary" htmlType="submit" loading={createConsecRuleMutation.isPending || updateConsecRuleMutation.isPending}>
+                {consecModal.rule ? t('ui.loyalty.update', { defaultValue: 'Update' }) : t('ui.loyalty.create', { defaultValue: 'Create' })}
+              </AsyncButton>
+            </Space>
+          </Form.Item>
+        </Form>
+      </Modal>
+
       <Modal
         open={streakModal.open}
         title={streakModal.rule ? t('ui.loyalty.edit_streak_rule', { defaultValue: 'Edit Streak Rule' }) : t('ui.loyalty.create_streak_rule', { defaultValue: 'Add Streak Rule' })}

@@ -616,6 +616,34 @@
     "rule": "/api/v1/admin/loyalty/analytics"
   },
   {
+    "endpoint": "admin.create_loyalty_consecutive_strike_rule",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/loyalty/consecutive-strike-rules"
+  },
+  {
+    "endpoint": "admin.get_loyalty_consecutive_strike_rules",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/loyalty/consecutive-strike-rules"
+  },
+  {
+    "endpoint": "admin.delete_loyalty_consecutive_strike_rule",
+    "methods": [
+      "DELETE"
+    ],
+    "rule": "/api/v1/admin/loyalty/consecutive-strike-rules/<int:rule_id>"
+  },
+  {
+    "endpoint": "admin.update_loyalty_consecutive_strike_rule",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/loyalty/consecutive-strike-rules/<int:rule_id>"
+  },
+  {
     "endpoint": "admin.get_loyalty_members",
     "methods": [
       "GET"

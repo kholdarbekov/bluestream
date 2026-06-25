@@ -1797,6 +1797,13 @@ class OrderService:
             if LoyaltyService().has_purchase_award(order.id):
                 return
 
+            # Entity-eligibility gate (product-owner decision 2026-06-24): an
+            # ineligible entity user (entity with no active loyalty-eligible
+            # corporate contract) earns NO purchase AquaCoins. Clean early-return
+            # so delivery/payment flow is never blocked.
+            if not LoyaltyService.is_user_loyalty_eligible(order.user):
+                return
+
             self._process_loyalty_points_for_order(order, commit=commit)
         except Exception:
             logger.exception("Failed to evaluate purchase AquaCoins for order %s", getattr(order, "id", "?"))

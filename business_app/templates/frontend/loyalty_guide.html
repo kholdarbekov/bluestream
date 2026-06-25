@@ -165,7 +165,6 @@
                 {% else %}
                   {{ 'loyalty_guide.earn.consec_line_any' | t(strikes=strikes_text, n=rule.required_consecutive, pts=pts(rule.bonus_points), unit=('loyalty_guide.unit.points' | t)) }}
                 {% endif %}
-                · {{ 'loyalty_guide.earn.consec_repeat' | t(n=rule.required_consecutive) }}
               </span>
             </li>
             {% endfor %}

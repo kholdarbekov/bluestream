@@ -7234,8 +7234,6 @@ LOYALTY_GUIDE_TRANSLATIONS = {
         'Achieve {strikes} {n} times in a row → +{pts} {unit}',
         '{strikes} dan birini ketma-ket {n} marta bajaring → +{pts} {unit}',
         'Выполните {strikes} {n} раз подряд → +{pts} {unit}'),
-    'loyalty_guide.earn.consec_repeat': _ui_tr(
-        'Repeats every {n}', 'Har {n} tadan keyin takrorlanadi', 'Повторяется каждые {n}'),
     'loyalty_guide.faq.q9': _ui_tr(
         'How do consecutive-streak rewards work?',
         'Ketma-ket seriya mukofotlari qanday ishlaydi?',

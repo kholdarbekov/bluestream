@@ -836,11 +836,17 @@ const LoyaltyPrograms = () => {
           form={programForm}
           layout="vertical"
           onFinish={(values) => {
+            const payload = {
+              ...values,
+              // Mirror `en` from the canonical name so any English surface
+              // resolves the program name instead of falling back (uz default).
+              translations: { name: { en: values.name } },
+            };
             if (programModal.program) {
-              updateProgramMutation.mutate({ programId: programModal.program.id, values });
+              updateProgramMutation.mutate({ programId: programModal.program.id, values: payload });
               return;
             }
-            createProgramMutation.mutate(values);
+            createProgramMutation.mutate(payload);
           }}
         >
           <Row gutter={16}>
@@ -1088,7 +1094,16 @@ const LoyaltyPrograms = () => {
               strike_rule_ids: values.strike_rule_ids || [],
               is_active: values.is_active,
               program_id: selectedProgramId,
-              translations: { name: { ru: values.name_ru || undefined, uz: values.name_uz || undefined } },
+              translations: {
+                name: {
+                  // Mirror `en` from the canonical name field so the public
+                  // /loyalty-guide page resolves English instead of falling
+                  // back to another language (DEFAULT_LANGUAGE is uz).
+                  en: values.name,
+                  ru: values.name_ru || undefined,
+                  uz: values.name_uz || undefined,
+                },
+              },
             };
             if (consecModal.rule) {
               updateConsecRuleMutation.mutate({ ruleId: consecModal.rule.id, values: payload });
@@ -1181,6 +1196,10 @@ const LoyaltyPrograms = () => {
               program_id: selectedProgramId,
               translations: {
                 name: {
+                  // Mirror `en` from the canonical name field so the public
+                  // /loyalty-guide page resolves English instead of falling
+                  // back to another language (DEFAULT_LANGUAGE is uz).
+                  en: values.name,
                   ru: values.name_ru || undefined,
                   uz: values.name_uz || undefined,
                 },

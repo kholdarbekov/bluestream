@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import LoyaltyPrograms from '../../pages/LoyaltyPrograms';
@@ -91,6 +91,8 @@ describe('LoyaltyPrograms — Consecutive Strikes tab', () => {
 
     // Fill in text/number fields
     fireEvent.change(dialog.querySelector('#name'), { target: { value: 'Champ' } });
+    fireEvent.change(within(dialog).getByLabelText('Name (RU)'), { target: { value: 'Чемп' } });
+    fireEvent.change(within(dialog).getByLabelText('Name (UZ)'), { target: { value: 'Chempion' } });
     fireEvent.change(dialog.querySelector('#required_consecutive'), { target: { value: '6' } });
     fireEvent.change(dialog.querySelector('#bonus_points'), { target: { value: '1000' } });
 
@@ -118,5 +120,10 @@ describe('LoyaltyPrograms — Consecutive Strikes tab', () => {
       combine_mode: 'all',
       strike_rule_ids: [7],
     });
+    // EN must be mirrored from the canonical name so the public /loyalty-guide
+    // page resolves English instead of falling back to the Uzbek translation.
+    expect(payload.translations.name).toEqual(
+      expect.objectContaining({ en: 'Champ', ru: 'Чемп', uz: 'Chempion' })
+    );
   });
 });

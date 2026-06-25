@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import LoyaltyPrograms from '../../pages/LoyaltyPrograms';
@@ -101,6 +101,34 @@ describe('LoyaltyPrograms page — Streak Rules tab', () => {
 
     expect(adminService.getLoyaltyStreakRules).toHaveBeenCalledWith(
       expect.objectContaining({ program_id: 1 })
+    );
+  });
+
+  it('creating a streak rule mirrors the EN name into translations (en/ru/uz)', async () => {
+    render(<LoyaltyPrograms />, { wrapper: createWrapper() });
+    await screen.findByText('Total Programs');
+    fireEvent.click(await screen.findByText('Streak Rules'));
+    await screen.findByText('3 in 30');
+
+    fireEvent.click(screen.getByRole('button', { name: /Add Streak Rule/ }));
+    const dialog = await screen.findByRole('dialog');
+
+    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: '5 in 30' } });
+    fireEvent.change(within(dialog).getByLabelText('Name (RU)'), { target: { value: '5 за 30' } });
+    fireEvent.change(within(dialog).getByLabelText('Name (UZ)'), { target: { value: '30 kunda 5' } });
+    fireEvent.change(within(dialog).getByLabelText('Required Orders'), { target: { value: '5' } });
+    fireEvent.change(within(dialog).getByLabelText('Window (days)'), { target: { value: '30' } });
+    fireEvent.change(within(dialog).getByLabelText('Bonus AquaCoins'), { target: { value: '500' } });
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Create$/ }));
+
+    await waitFor(() => expect(adminService.createLoyaltyStreakRule).toHaveBeenCalled());
+    const payload = adminService.createLoyaltyStreakRule.mock.calls[0][0];
+    expect(payload.name).toBe('5 in 30');
+    // EN mirrors the canonical name so the public /loyalty-guide page resolves
+    // English instead of falling back to the Uzbek translation.
+    expect(payload.translations.name).toEqual(
+      expect.objectContaining({ en: '5 in 30', ru: '5 за 30', uz: '30 kunda 5' })
     );
   });
 });

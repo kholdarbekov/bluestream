@@ -583,3 +583,132 @@ def test_apply_edit_rejects_non_admin(
         headers=auth_headers,
     )
     assert resp.status_code in (401, 403)
+
+
+# -------------------------------------------------------------------------
+# Bottle-balance gating (pre-delivery vs delivered)
+# -------------------------------------------------------------------------
+#
+# Business rule: the customer's returnable-bottle balance only moves when the
+# order is actually DELIVERED. The delivery flow credits the *live* (already
+# edited) order quantity, so a pre-delivery edit must make ZERO balance change;
+# otherwise the reduction is applied twice (once by the edit, once by the
+# smaller delivery credit).
+
+
+def _attach_returnable_address(db, sample_user, sample_product):
+    """Make the product track returnable bottles + give the customer an address.
+
+    Returns the created UserAddress.
+    """
+    from business_app.models.user import UserAddress
+
+    sample_product.tracks_returnable_bottles = True
+    sample_product.returnable_bottles_per_unit = Decimal("1.00")
+    address = UserAddress(
+        user_id=sample_user.id,
+        title="Home",
+        full_address="123 Test St",
+        city="Tashkent",
+    )
+    db.session.add(address)
+    db.session.flush()
+    return address
+
+
+def test_apply_edit_pre_delivery_does_not_touch_bottle_balance(
+    client, db, admin_auth_headers, sample_user, sample_product
+):
+    """Reducing item qty while OUT_FOR_DELIVERY must NOT mutate the bottle balance.
+
+    The delivery flow will later credit the already-reduced quantity, so any
+    adjustment here double-counts the reduction.
+    """
+    from business_app.models.bottle import BottleBalance, BottleLedger
+    from shared.enums import BottleLedgerEventType
+
+    address = _attach_returnable_address(db, sample_user, sample_product)
+    order = _seed_order_with_item(
+        sample_user, sample_product, status=OrderStatus.OUT_FOR_DELIVERY, quantity=4
+    )
+    order.delivery_address_id = address.id
+    db.session.commit()
+
+    payload = {
+        "items": [
+            {
+                "orderItemId": order.order_items[0].id,
+                "productId": sample_product.id,
+                "quantity": 2,
+            }
+        ],
+        "reason": "customer will receive only 2 bottles",
+    }
+    resp = client.post(
+        f"/api/v1/admin/orders/{order.id}/edit",
+        json=payload,
+        headers=admin_auth_headers,
+    )
+    assert resp.status_code == 200
+
+    adjustments = BottleLedger.query.filter_by(
+        user_id=sample_user.id,
+        address_id=address.id,
+        event_type=BottleLedgerEventType.ADMIN_ADJUSTMENT,
+    ).all()
+    assert adjustments == [], "pre-delivery edit must not write a bottle ADMIN_ADJUSTMENT"
+
+    balance = BottleBalance.query.filter_by(
+        user_id=sample_user.id, address_id=address.id
+    ).first()
+    assert balance is None, "pre-delivery edit must not create/modify a bottle balance"
+
+
+def test_apply_edit_delivered_adjusts_bottle_balance(
+    client, db, admin_auth_headers, sample_user, sample_product
+):
+    """Reducing item qty on a DELIVERED order DOES correct the bottle balance.
+
+    Regression guard for the legitimate post-delivery correction path: the
+    balance was already credited at delivery, so the edit must debit the delta.
+    """
+    from business_app.models.bottle import BottleBalance, BottleLedger
+    from shared.enums import BottleLedgerEventType
+
+    address = _attach_returnable_address(db, sample_user, sample_product)
+    order = _seed_paid_cash_delivered_order(sample_user, sample_product, quantity=4)
+    order.delivery_address_id = address.id
+    # Delivery already credited 4 bottles to the customer.
+    balance = BottleBalance(
+        user_id=sample_user.id, address_id=address.id, balance=Decimal("4.00")
+    )
+    db.session.add(balance)
+    db.session.commit()
+
+    payload = {
+        "items": [
+            {
+                "orderItemId": order.order_items[0].id,
+                "productId": sample_product.id,
+                "quantity": 2,
+            }
+        ],
+        "reason": "customer kept only 2 of 4 bottles after delivery",
+    }
+    resp = client.post(
+        f"/api/v1/admin/orders/{order.id}/edit",
+        json=payload,
+        headers=admin_auth_headers,
+    )
+    assert resp.status_code == 200
+
+    adjustments = BottleLedger.query.filter_by(
+        user_id=sample_user.id,
+        address_id=address.id,
+        event_type=BottleLedgerEventType.ADMIN_ADJUSTMENT,
+    ).all()
+    assert len(adjustments) == 1, "delivered edit must write exactly one bottle adjustment"
+    assert Decimal(str(adjustments[0].quantity)) == Decimal("-2")
+
+    db.session.refresh(balance)
+    assert Decimal(str(balance.balance)) == Decimal("2.00")

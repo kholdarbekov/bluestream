@@ -647,19 +647,22 @@ class OrderEditService:
             "diff": old_earned - new_earned_estimate,
         }
 
-        # Bottle / session side
+        # Bottle / session side — only meaningful once the order is DELIVERED.
+        # Pre-delivery edits make no balance change (the delivery flow credits
+        # the live quantity), so the preview must show no bottle impact either.
         bottle_changes: List[Dict[str, Any]] = []
         affected_session_id: Optional[int] = None
-        for change in plan.item_changes:
-            bottles_per_unit = Decimal(str(getattr(change.product, "returnable_bottles_per_unit", 0) or 0))
-            if bottles_per_unit == 0 or change.delta == 0:
-                continue
-            bottle_changes.append(
-                {
-                    "product_id": change.product_id,
-                    "delta_bottles": float(bottles_per_unit * Decimal(change.delta)),
-                }
-            )
+        if order.status == OrderStatus.DELIVERED:
+            for change in plan.item_changes:
+                bottles_per_unit = Decimal(str(getattr(change.product, "returnable_bottles_per_unit", 0) or 0))
+                if bottles_per_unit == 0 or change.delta == 0:
+                    continue
+                bottle_changes.append(
+                    {
+                        "product_id": change.product_id,
+                        "delta_bottles": float(bottles_per_unit * Decimal(change.delta)),
+                    }
+                )
         if bottle_changes:
             session_binding = DriverBottleSessionOrder.query.filter_by(order_id=order.id).first()
             if session_binding:
@@ -843,6 +846,19 @@ class OrderEditService:
         """
         if not order.delivery_address_id:
             plan.cascade_summary["bottle"] = {"adjustments": [], "skipped": "no_address"}
+            return
+
+        # The customer's bottle balance must only move when the order is
+        # actually DELIVERED. For pre-delivery edits (PENDING/CONFIRMED/
+        # PREPARING/OUT_FOR_DELIVERY) the delivery flow
+        # (OrderService._handle_status_change_actions → record_bottles_delivered)
+        # credits calculate_bottles_for_order(order), which reads the *live*
+        # (already-edited) item quantities. Adjusting here would double-count
+        # the delta. The session re-tally below was already guarded on this
+        # condition (see comment further down); the customer-balance write must
+        # share the same gate.
+        if order.status != OrderStatus.DELIVERED:
+            plan.cascade_summary["bottle"] = {"adjustments": [], "skipped": "not_delivered"}
             return
 
         adjustments: List[Dict[str, Any]] = []

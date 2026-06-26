@@ -3,6 +3,7 @@ Unit tests for OrderService aligned with current implementation.
 """
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -10,7 +11,7 @@ import pytest
 
 from business_app.models.delivery import Delivery
 from business_app.services.order_service import OrderService
-from shared.enums import DeliveryStatus, OrderStatus, PaymentMethod, PaymentStatus
+from shared.enums import DeliveryStatus, MarkingCodeStatus, OrderStatus, PaymentMethod, PaymentStatus
 from business_app.utils.exceptions import ConflictError, ValidationError
 
 
@@ -182,6 +183,74 @@ class TestOrderService:
         db.session.refresh(delivery)
         assert sample_order.status == OrderStatus.CANCELLED
         assert delivery.status == DeliveryStatus.CANCELLED
+
+    def test_update_order_status_to_cancelled_releases_reserved_marking_codes(
+        self, order_service, sample_order, sample_product, sample_user, db
+    ):
+        """Cancelling via update_order_status directly (admin status dropdown,
+        RETURNED transitions, bulk paths) must release reserved marking codes
+        back to the pool — not just cancel_order. Regression for the bug where
+        6 codes leaked into RESERVED forever after an admin status-dropdown
+        cancellation of a Click order (orders 423/424 on prod)."""
+        from business_app.models.order import OrderItem
+        from business_app.models.payment import Payment
+        from business_app.models.product import ProductFiscalProfile, ProductMarkingCode
+        from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
+
+        sample_order.status = OrderStatus.PENDING
+        sample_order.payment_method = PaymentMethod.CLICK
+        db.session.add(
+            ProductFiscalProfile(
+                product_id=sample_product.id,
+                spic="SPIC-19L",
+                package_code="PACK-19L",
+                units="1213733",
+                vat_percent=Decimal("12.00"),
+                fiscalization_enabled=True,
+                requires_marking_codes=True,
+            )
+        )
+        db.session.add(
+            OrderItem(
+                order_id=sample_order.id,
+                product_id=sample_product.id,
+                quantity=1,
+                unit_price=Decimal("15000.00"),
+                total_price=Decimal("15000.00"),
+            )
+        )
+        payment = Payment(
+            order_id=sample_order.id,
+            user_id=sample_order.user_id,
+            payment_method=PaymentMethod.CLICK,
+            amount=sample_order.total_amount,
+            currency="UZS",
+            status=PaymentStatus.PENDING,
+            payment_id="click-cancel-release",
+        )
+        marking_code = ProductMarkingCode(
+            product_id=sample_product.id,
+            code="MARK-CANCEL-001",
+            status=MarkingCodeStatus.AVAILABLE,
+        )
+        db.session.add_all([payment, marking_code])
+        db.session.commit()
+
+        PaymentFiscalizationService().reserve_required_marking_codes(payment)
+        db.session.commit()
+        db.session.refresh(marking_code)
+        assert marking_code.status == MarkingCodeStatus.RESERVED
+
+        order_service.update_order_status(
+            order_id=sample_order.id,
+            new_status=OrderStatus.CANCELLED,
+            updated_by=sample_user.id,
+            notes="Cancelled via admin status dropdown",
+        )
+
+        db.session.refresh(marking_code)
+        assert marking_code.status == MarkingCodeStatus.AVAILABLE
+        assert marking_code.order_id is None
 
     def test_cancel_order_cancels_pending_payment(self, order_service, sample_order, sample_payment, sample_user, db, monkeypatch):
         sample_order.payment_method = PaymentMethod.PAYME

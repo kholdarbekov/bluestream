@@ -1039,17 +1039,6 @@ class OrderService:
             actor_user_id=actor_id,
         )
 
-        if order.payment:
-            try:
-                from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
-
-                PaymentFiscalizationService().release_reserved_marking_codes(
-                    order.payment,
-                    reason=reason or "order_cancelled",
-                    actor_user_id=actor_id,
-                )
-            except Exception:
-                logger.exception("Failed to release reserved marking codes for order %s", order.id)
         db.session.commit()
 
         # Handle refund if payment was made
@@ -1059,9 +1048,10 @@ class OrderService:
             payment_service = PaymentService()
             payment_service.process_refund(order.payment.id, order.total_amount, reason)
 
-        # Note: the delivery is cancelled in cascade inside update_order_status
-        # (_handle_status_change_actions, CANCELLED branch) above, so every
-        # order-cancel path — including the admin status dropdown — cancels it.
+        # Note: reserved marking codes AND the linked delivery are both released
+        # in cascade inside update_order_status (_handle_status_change_actions,
+        # CANCELLED branch) above, so every order-cancel path — including the
+        # admin status dropdown's direct update_order_status call — frees them.
 
         return order
 
@@ -1653,6 +1643,28 @@ class OrderService:
                 )
                 released_reserved_prepayment = True
 
+            # Return any still-reserved (un-consumed) marking codes to the pool.
+            # Centralised here — like the delivery cascade below — so EVERY path
+            # that moves an order to CANCELLED/RETURNED frees the codes, not just
+            # cancel_order(). Without this, the admin status-dropdown's direct
+            # update_order_status call leaked reserved marking codes into
+            # RESERVED forever (codes 2283–2288 on prod). Already-USED codes are
+            # left untouched by release_reserved_marking_codes, so a fiscalised
+            # then RETURNED order keeps its receipts.
+            marking_codes_released = False
+            if order.payment:
+                try:
+                    from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
+
+                    released = PaymentFiscalizationService().release_reserved_marking_codes(
+                        order.payment,
+                        reason=f"order_{new_status.value}",
+                        actor_user_id=updated_by,
+                    )
+                    marking_codes_released = bool(released)
+                except Exception:
+                    logger.exception("Failed to release reserved marking codes for order %s", order.id)
+
             # Cascade an order cancellation onto its delivery so a cancelled
             # order never leaves a live/scheduled delivery behind. Centralised
             # here (not only in cancel_order) so EVERY path that moves an order
@@ -1663,7 +1675,9 @@ class OrderService:
             if new_status == OrderStatus.CANCELLED:
                 delivery_cancelled = self._cancel_delivery_for_cancelled_order(order)
 
-            if commit and (payment_synced or released_reserved_prepayment or delivery_cancelled):
+            if commit and (
+                payment_synced or released_reserved_prepayment or marking_codes_released or delivery_cancelled
+            ):
                 db.session.commit()
 
     def _cancel_delivery_for_cancelled_order(self, order: Order) -> bool:

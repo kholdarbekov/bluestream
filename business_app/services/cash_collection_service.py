@@ -215,6 +215,150 @@ class CashCollectionService:
 
         return payment
 
+    def estimate_settleable_credit_for_order(self, order: Order) -> Decimal:
+        """Read-only: how much customer cash credit could settle an *increase* to
+        this CASH order.
+
+        Sums available (unapplied) prepayment plus any over-collection captured
+        AT this order that is currently reserved against the customer's other
+        pending orders (reclaimable). Over-collection credit is cash-only-usable,
+        so non-cash orders return 0. Used by the order-edit preview/cascade to
+        report how much of an increase the customer has already paid.
+        """
+        if not order or order.payment_method != PaymentMethod.CASH:
+            return Decimal("0.00")
+        available = self.get_customer_prepaid_balance(order.user_id)
+        own_reserved = self._get_own_overcollection_reserved_amount(order.id)
+        return self._to_decimal(available + own_reserved)
+
+    def settle_payment_from_customer_credit(
+        self,
+        payment: Payment,
+        *,
+        actor_user_id: Optional[int] = None,
+        reclaim_own_overcollection: bool = True,
+    ) -> Payment:
+        """Settle a CASH payment's outstanding balance from the customer's own
+        cash credit, in priority order:
+
+          1. prepayment reserved against THIS order (consume → collected),
+          2. available (unapplied) prepayment credit,
+          3. over-collection captured at THIS order's own delivery that is
+             currently reserved against the customer's other pending orders —
+             reclaimed back and re-applied.
+
+        Used when an admin edits a paid order's total upward: the extra owed is
+        first covered by cash the customer already paid (e.g. a driver who
+        over-collected at the door). No-op for non-cash payments or payments
+        with nothing outstanding. Caller controls the transaction (no commit).
+        """
+        if not payment or payment.payment_method != PaymentMethod.CASH:
+            return payment
+        if self._to_decimal(payment.outstanding_amount) <= Decimal("0.00"):
+            return payment
+
+        # 1. This order's own reserved prepayment.
+        self.consume_reserved_prepayment_for_payment(payment, collected_by=actor_user_id)
+
+        # 2. Available (unapplied) prepayment credit.
+        if self._to_decimal(payment.outstanding_amount) > Decimal("0.00"):
+            self.apply_customer_prepaid_credit_to_payment(payment)
+
+        # 3. Reclaim this order's own over-collection reserved against the
+        #    customer's other pending orders, then re-apply.
+        if (
+            reclaim_own_overcollection
+            and payment.order_id
+            and self._to_decimal(payment.outstanding_amount) > Decimal("0.00")
+        ):
+            freed = self._reclaim_own_overcollection_reservations(
+                order_id=payment.order_id,
+                actor_user_id=actor_user_id,
+            )
+            if freed > Decimal("0.00"):
+                self.apply_customer_prepaid_credit_to_payment(payment)
+
+        return payment
+
+    @staticmethod
+    def _get_own_overcollection_reserved_amount(order_id: int) -> Decimal:
+        """Sum of still-active prepaid reservations funded by cash events that
+        were collected AT ``order_id`` (the order's own over-collection now held
+        against the customer's other pending orders)."""
+        return db.session.query(
+            func.coalesce(func.sum(CashCollectionAllocation.allocated_amount), Decimal("0.00"))
+        ).join(
+            CashCollectionEvent,
+            CashCollectionAllocation.cash_collection_event_id == CashCollectionEvent.id,
+        ).filter(
+            CashCollectionEvent.order_id == order_id,
+            CashCollectionEvent.voided_at.is_(None),
+            CashCollectionAllocation.allocation_mode == "prepaid_reservation",
+            CashCollectionAllocation.reversed_at.is_(None),
+        ).scalar() or Decimal(
+            "0.00"
+        )
+
+    def _reclaim_own_overcollection_reservations(
+        self,
+        *,
+        order_id: int,
+        actor_user_id: Optional[int] = None,
+    ) -> Decimal:
+        """Release prepaid reservations funded by ``order_id``'s own over-
+        collection (currently parked on the customer's other pending orders) so
+        the corrected order can consume its own surplus. Returns the freed total
+        (added back to the source events' unapplied balance)."""
+        own_event_ids = [
+            row.id
+            for row in CashCollectionEvent.query.with_entities(CashCollectionEvent.id)
+            .filter(
+                CashCollectionEvent.order_id == order_id,
+                CashCollectionEvent.voided_at.is_(None),
+            )
+            .all()
+        ]
+        if not own_event_ids:
+            return Decimal("0.00")
+
+        reservations = (
+            CashCollectionAllocation.query.filter(
+                CashCollectionAllocation.cash_collection_event_id.in_(own_event_ids),
+                CashCollectionAllocation.allocation_mode == "prepaid_reservation",
+                CashCollectionAllocation.reversed_at.is_(None),
+            )
+            .order_by(CashCollectionAllocation.allocated_at.asc(), CashCollectionAllocation.id.asc())
+            .with_for_update(of=CashCollectionAllocation)
+            .all()
+        )
+        if not reservations:
+            return Decimal("0.00")
+
+        now = datetime.now(UTC)
+        freed = Decimal("0.00")
+        affected_payments: Dict[int, Payment] = {}
+        for allocation in reservations:
+            amount = self._to_decimal(allocation.allocated_amount)
+            event = allocation.cash_collection_event
+            if event is not None:
+                event.unapplied_amount = self._to_decimal(event.unapplied_amount) + amount
+            allocation.reversed_at = now
+            allocation.reversed_by_user_id = actor_user_id
+            allocation.reversal_reason = f"Reclaimed over-collection for order #{order_id} after admin edit"
+            metadata = dict(allocation.allocation_metadata or {})
+            metadata["reservation_state"] = "released"
+            metadata["affects_payment_projection"] = False
+            allocation.allocation_metadata = metadata
+            freed += amount
+            if allocation.payment is not None:
+                affected_payments[allocation.payment.id] = allocation.payment
+
+        for affected_payment in affected_payments.values():
+            self._sync_reserved_prepayment_projection(affected_payment)
+
+        db.session.flush()
+        return self._to_decimal(freed)
+
     def reserve_customer_prepaid_credit_for_payment(
         self,
         payment: Payment,

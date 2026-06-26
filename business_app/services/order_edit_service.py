@@ -236,7 +236,7 @@ class OrderEditService:
             self._cascade_bottle(order, plan, actor_user_id)
             self._cascade_cash(order, plan, actor_user_id)
             self._cascade_loyalty(order, plan)
-            self._recompute_totals(order, plan)
+            self._recompute_totals(order, plan, actor_user_id)
 
             history = OrderEditHistory(
                 order_id=order.id,
@@ -634,9 +634,23 @@ class OrderEditService:
             payment_summary["action"] = "create_prepayment_credit"
             payment_summary["prepayment_amount"] = float(-total_delta)
         else:
-            # Any paid order with addition → admin collects delta in cash.
-            payment_summary["action"] = "manual_cash_collection_required"
+            # Any paid order with addition → settle from the customer's cash
+            # credit first (available prepayment + this order's own over-
+            # collection reserved elsewhere); only the uncovered remainder needs
+            # collecting. Credit is cash-only-usable, so card orders see zero
+            # coverage and keep the manual-collection action.
+            available_credit = self.cash_service.estimate_settleable_credit_for_order(order)
+            covered = min(available_credit, total_delta)
+            residual = total_delta - covered
             payment_summary["additional_charge"] = float(total_delta)
+            payment_summary["prepayment_credit_applied"] = float(covered)
+            payment_summary["additional_cash_required"] = float(residual)
+            if covered > Decimal("0.00") and residual <= Decimal("0.00"):
+                payment_summary["action"] = "covered_by_prepayment_credit"
+            elif covered > Decimal("0.00"):
+                payment_summary["action"] = "partially_covered_by_prepayment_credit"
+            else:
+                payment_summary["action"] = "manual_cash_collection_required"
 
         # Loyalty side (preview — recompute new earned)
         old_earned = int(order.loyalty_points_earned or 0)
@@ -1021,12 +1035,34 @@ class OrderEditService:
             cash_summary["event_id"] = getattr(event, "id", None)
             cash_summary["payment_method_original"] = order.payment_method.value if order.payment_method else None
         else:
-            cash_summary["action"] = "additional_cash_collection_required"
+            # Increase on a paid order. Before asking for more cash, net the
+            # increase against money the customer has ALREADY paid — available
+            # prepayment credit plus this order's own over-collection that was
+            # tentatively reserved elsewhere (e.g. a driver who over-collected
+            # at the door). Only the uncovered remainder needs collecting.
+            # Credit is cash-only-usable, so card orders see zero coverage and
+            # fall through to the manual-collection path unchanged.
+            available_credit = self.cash_service.estimate_settleable_credit_for_order(order)
+            covered = min(available_credit, total_delta)
+            residual = total_delta - covered
             cash_summary["amount"] = float(total_delta)
-            plan.warnings.append(
-                f"additional_cash_collection_required: customer owes {total_delta} extra — "
-                "use the Record Personal Card Payment / cash-collection flow to settle."
-            )
+            cash_summary["prepayment_credit_applied"] = float(covered)
+            cash_summary["additional_cash_required"] = float(residual)
+            if covered > Decimal("0.00") and residual <= Decimal("0.00"):
+                cash_summary["action"] = "covered_by_prepayment_credit"
+            elif covered > Decimal("0.00"):
+                cash_summary["action"] = "partially_covered_by_prepayment_credit"
+                plan.warnings.append(
+                    f"additional_cash_collection_required: customer owes {residual} extra "
+                    f"after applying {covered} prepayment credit — settle the remainder "
+                    "via the Record Personal Card Payment / cash-collection flow."
+                )
+            else:
+                cash_summary["action"] = "additional_cash_collection_required"
+                plan.warnings.append(
+                    f"additional_cash_collection_required: customer owes {total_delta} extra — "
+                    "use the Record Personal Card Payment / cash-collection flow to settle."
+                )
         plan.cascade_summary["cash"] = cash_summary
 
     def _cascade_loyalty(self, order: Order, plan: OrderEditPlan) -> None:
@@ -1104,7 +1140,7 @@ class OrderEditService:
         }
         plan.cascade_summary["loyalty"] = loyalty_summary
 
-    def _recompute_totals(self, order: Order, plan: OrderEditPlan) -> None:
+    def _recompute_totals(self, order: Order, plan: OrderEditPlan, actor_user_id: int) -> None:
         """Recompute order.subtotal and total_amount from current items.
 
         Also applies the clamped ``loyalty_points_used`` from the plan
@@ -1138,15 +1174,25 @@ class OrderEditService:
             return
 
         # Paid orders (cash post-delivery OR card-paid in any status):
-        #   - new_total > collected → customer owes the delta. Surface it
-        #     as outstanding so the Personal Card Payment / cash flow can
-        #     settle it. We do NOT re-charge the card gateway.
+        #   - new_total > collected → customer owes the delta. Re-price the
+        #     payment, then settle the increase from the customer's own cash
+        #     credit (available prepayment + this order's own over-collection
+        #     reserved elsewhere). Any uncovered remainder stays outstanding so
+        #     the cash flow can settle it. We do NOT re-charge the card gateway.
         #   - new_total <= collected → leave payment row at the original
         #     collected figure (audit trail). The prepayment cushion
         #     created in _cascade_cash carries the difference.
         if new_total > collected:
             payment.amount = new_total
-            payment.outstanding_amount = new_total - collected
+            db.session.flush()
+            # sync_payment_projection is the SSOT for outstanding/status/
+            # is_paid: re-derive them for the new amount (so a still-unpaid
+            # remainder no longer reads as a "paid" order with a positive
+            # outstanding — which otherwise mis-counts as live COD debt).
+            self.cash_service.sync_payment_projection(payment)
+            # Net the increase against cash the customer has already paid.
+            # No-op for card payments and when no credit is available.
+            self.cash_service.settle_payment_from_customer_credit(payment, actor_user_id=actor_user_id)
         # else: leave payment as-is.
 
         db.session.flush()

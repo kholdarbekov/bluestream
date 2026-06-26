@@ -712,3 +712,193 @@ def test_apply_edit_delivered_adjusts_bottle_balance(
 
     db.session.refresh(balance)
     assert Decimal(str(balance.balance)) == Decimal("2.00")
+
+
+# -------------------------------------------------------------------------
+# Delivered cash INCREASE settled from customer over-collection credit
+# (prod bug TG_000190_26: driver over-collected at the door, admin edits up)
+# -------------------------------------------------------------------------
+
+
+def _grant_unapplied_cash_credit(customer_id, amount, *, order_id=None, collector_user_id=None):
+    """Seed an unapplied (available) customer prepayment credit — the surplus
+    a driver leaves when they over-collect cash at delivery."""
+    from business_app.models.payment import CashCollectionEvent
+    from shared.enums import CashCollectionSource
+
+    event = CashCollectionEvent(
+        customer_id=customer_id,
+        collector_user_id=collector_user_id,
+        recorded_by_user_id=collector_user_id,
+        order_id=order_id,
+        amount=Decimal(str(amount)),
+        currency="UZS",
+        source=CashCollectionSource.DELIVERY_COMPLETION,
+        unapplied_amount=Decimal(str(amount)),
+    )
+    _db.session.add(event)
+    _db.session.commit()
+    return event
+
+
+def test_apply_edit_delivered_cash_increase_settled_from_overcollection_credit(
+    client, db, admin_auth_headers, sample_user, sample_product
+):
+    """Reported prod bug (TG_000190_26): the driver collected one extra bottle's
+    worth at the door (over-collection → customer prepayment credit). When the
+    admin edits the order up to match, the increase must be settled from that
+    credit so the order ends FULLY PAID, not showing a phantom outstanding."""
+    from business_app.services.cash_collection_service import CashCollectionService
+
+    order = _seed_paid_cash_delivered_order(sample_user, sample_product, quantity=4)
+    unit_price = Decimal(str(sample_product.base_price))
+    # Driver over-collected exactly one extra bottle at delivery, tied to this order.
+    _grant_unapplied_cash_credit(
+        sample_user.id, unit_price, order_id=order.id, collector_user_id=sample_user.id
+    )
+
+    payload = {
+        "items": [
+            {"orderItemId": order.order_items[0].id, "productId": sample_product.id, "quantity": 5}
+        ],
+        "reason": "customer took 1 extra bottle at the door; driver collected it",
+    }
+    resp = client.post(
+        f"/api/v1/admin/orders/{order.id}/edit", json=payload, headers=admin_auth_headers
+    )
+    assert resp.status_code == 200
+    cascade = resp.get_json()["data"]["cascade_summary"]
+    assert cascade["cash"]["action"] == "covered_by_prepayment_credit"
+
+    refreshed = Order.query.get(order.id)
+    pay = refreshed.payment
+    new_total = Decimal(str(refreshed.total_amount))
+    assert Decimal(str(pay.amount)) == new_total
+    assert Decimal(str(pay.amount_collected)) == new_total
+    assert Decimal(str(pay.outstanding_amount)) == Decimal("0.00")
+    assert pay.status == PaymentStatus.COMPLETED
+    assert refreshed.is_paid is True
+    # The over-collection credit was consumed by the increase.
+    assert CashCollectionService().get_customer_prepaid_balance(sample_user.id) == Decimal("0.00")
+
+
+def test_apply_edit_delivered_cash_increase_partial_credit_leaves_residual(
+    client, db, admin_auth_headers, sample_user, sample_product
+):
+    """When the available credit covers only part of the increase, the residual
+    stays outstanding and the order is correctly no longer fully paid."""
+    order = _seed_paid_cash_delivered_order(sample_user, sample_product, quantity=4)
+    unit_price = Decimal(str(sample_product.base_price))
+    # Credit covers one of the two extra bottles.
+    _grant_unapplied_cash_credit(
+        sample_user.id, unit_price, order_id=order.id, collector_user_id=sample_user.id
+    )
+
+    payload = {
+        "items": [
+            {"orderItemId": order.order_items[0].id, "productId": sample_product.id, "quantity": 6}
+        ],
+        "reason": "customer took 2 extra bottles; driver collected one bottle's worth",
+    }
+    resp = client.post(
+        f"/api/v1/admin/orders/{order.id}/edit", json=payload, headers=admin_auth_headers
+    )
+    assert resp.status_code == 200
+    cascade = resp.get_json()["data"]["cascade_summary"]
+    assert cascade["cash"]["action"] == "partially_covered_by_prepayment_credit"
+
+    refreshed = Order.query.get(order.id)
+    pay = refreshed.payment
+    assert Decimal(str(pay.outstanding_amount)) == unit_price  # one bottle still owed
+    assert pay.status == PaymentStatus.PARTIALLY_PAID
+    assert refreshed.is_paid is False
+
+
+def test_apply_edit_delivered_cash_increase_no_credit_marks_unpaid(
+    client, db, admin_auth_headers, sample_user, sample_product
+):
+    """Increase with no available credit: the full delta is outstanding AND the
+    order is flagged not-fully-paid (previously is_paid stayed True with a
+    positive outstanding — an inconsistency that wrongly counted as COD debt)."""
+    order = _seed_paid_cash_delivered_order(sample_user, sample_product, quantity=4)
+    unit_price = Decimal(str(sample_product.base_price))
+
+    payload = {
+        "items": [
+            {"orderItemId": order.order_items[0].id, "productId": sample_product.id, "quantity": 5}
+        ],
+        "reason": "customer took 1 extra bottle; cash to be collected later",
+    }
+    resp = client.post(
+        f"/api/v1/admin/orders/{order.id}/edit", json=payload, headers=admin_auth_headers
+    )
+    assert resp.status_code == 200
+    cascade = resp.get_json()["data"]["cascade_summary"]
+    assert cascade["cash"]["action"] == "additional_cash_collection_required"
+
+    refreshed = Order.query.get(order.id)
+    pay = refreshed.payment
+    assert Decimal(str(pay.outstanding_amount)) == unit_price
+    assert pay.status == PaymentStatus.PARTIALLY_PAID
+    assert refreshed.is_paid is False
+
+
+def test_apply_edit_delivered_cash_increase_reclaims_overcollection_reserved_elsewhere(
+    client, db, admin_auth_headers, sample_user, sample_product
+):
+    """Edge case (auto-release-and-reapply): the over-collection captured at
+    THIS order's delivery was tentatively reserved against the customer's other
+    pending order. Editing this order up reclaims that reservation and settles
+    this order fully."""
+    from business_app.services.cash_collection_service import CashCollectionService
+
+    cash_service = CashCollectionService()
+    order_a = _seed_paid_cash_delivered_order(sample_user, sample_product, quantity=4)
+    unit_price = Decimal(str(sample_product.base_price))
+
+    # Over-collection captured at order A's delivery.
+    _grant_unapplied_cash_credit(
+        sample_user.id, unit_price, order_id=order_a.id, collector_user_id=sample_user.id
+    )
+
+    # A pending cash order B with an outstanding balance.
+    order_b = _seed_order_with_item(
+        sample_user, sample_product, status=OrderStatus.CONFIRMED, is_paid=False, quantity=2
+    )
+    payment_b = Payment(
+        user_id=sample_user.id,
+        order_id=order_b.id,
+        amount=Decimal(str(order_b.total_amount)),
+        amount_collected=Decimal("0.00"),
+        outstanding_amount=Decimal(str(order_b.total_amount)),
+        payment_method=PaymentMethod.CASH,
+        status=PaymentStatus.PENDING,
+    )
+    _db.session.add(payment_b)
+    _db.session.commit()
+
+    # The surplus gets reserved against order B (so it is NOT "available").
+    cash_service.reserve_customer_prepaid_credit_for_payment(payment_b)
+    _db.session.commit()
+    assert cash_service.get_customer_prepaid_balance(sample_user.id) == Decimal("0.00")
+
+    payload = {
+        "items": [
+            {"orderItemId": order_a.order_items[0].id, "productId": sample_product.id, "quantity": 5}
+        ],
+        "reason": "reclaim this order's own over-collection to settle the extra bottle",
+    }
+    resp = client.post(
+        f"/api/v1/admin/orders/{order_a.id}/edit", json=payload, headers=admin_auth_headers
+    )
+    assert resp.status_code == 200
+    cascade = resp.get_json()["data"]["cascade_summary"]
+    assert cascade["cash"]["action"] == "covered_by_prepayment_credit"
+
+    refreshed_a = Order.query.get(order_a.id)
+    assert Decimal(str(refreshed_a.payment.outstanding_amount)) == Decimal("0.00")
+    assert refreshed_a.is_paid is True
+    # The reservation on order B was released as part of the reclaim.
+    db.session.refresh(payment_b)
+    reserved_b = Decimal(str((payment_b.provider_data or {}).get("cod_prepayment_reserved_amount", 0) or 0))
+    assert reserved_b == Decimal("0.00")

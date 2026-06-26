@@ -289,7 +289,16 @@ class OrderService:
                 if payment_method == PaymentMethod.CASH and payment:
                     from business_app.services.cash_collection_service import CashCollectionService
 
-                    CashCollectionService().reserve_customer_prepaid_credit_for_payment(
+                    cash_collection_service = CashCollectionService()
+                    cash_collection_service.reserve_customer_prepaid_credit_for_payment(
+                        payment,
+                        actor_user_id=user_id,
+                    )
+                    # If the customer's prepaid balance FULLY covers this order,
+                    # the cash is already in hand — settle it now so the order
+                    # reads as paid at creation instead of waiting for delivery.
+                    # Partial coverage stays a reservation (settled at delivery).
+                    cash_collection_service.settle_new_cod_order_from_prepaid(
                         payment,
                         actor_user_id=user_id,
                     )
@@ -1631,17 +1640,31 @@ class OrderService:
             if commit:
                 db.session.commit()
         elif new_status in {OrderStatus.CANCELLED, OrderStatus.RETURNED}:
-            payment_synced = self._sync_payment_status_for_terminal_order_state(order, new_status)
             released_reserved_prepayment = False
+            refunded_pre_delivery_settlement = False
             if order.payment_method == PaymentMethod.CASH:
                 from business_app.services.cash_collection_service import CashCollectionService
 
-                CashCollectionService().release_reserved_prepayment_for_order(
+                cash_collection_service = CashCollectionService()
+                # Refund any prepaid credit that was APPLIED at order creation
+                # (full prepaid coverage) FIRST, so the payment rolls back to
+                # unpaid and the terminal-state sync below then cancels it.
+                # No-op for delivered orders and for reservation-only orders.
+                refunded = cash_collection_service.release_pre_delivery_prepaid_settlement_for_order(
+                    order_id=order.id,
+                    actor_user_id=getattr(order, "updated_by", None),
+                    reason=f"Order moved to {new_status.value}",
+                )
+                refunded_pre_delivery_settlement = bool(refunded)
+                # Release any still-reserved (un-consumed) prepayment.
+                cash_collection_service.release_reserved_prepayment_for_order(
                     order_id=order.id,
                     actor_user_id=getattr(order, "updated_by", None),
                     reason=f"Order moved to {new_status.value}",
                 )
                 released_reserved_prepayment = True
+
+            payment_synced = self._sync_payment_status_for_terminal_order_state(order, new_status)
 
             # Return any still-reserved (un-consumed) marking codes to the pool.
             # Centralised here — like the delivery cascade below — so EVERY path
@@ -1676,7 +1699,11 @@ class OrderService:
                 delivery_cancelled = self._cancel_delivery_for_cancelled_order(order)
 
             if commit and (
-                payment_synced or released_reserved_prepayment or marking_codes_released or delivery_cancelled
+                payment_synced
+                or released_reserved_prepayment
+                or refunded_pre_delivery_settlement
+                or marking_codes_released
+                or delivery_cancelled
             ):
                 db.session.commit()
 

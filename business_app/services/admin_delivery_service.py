@@ -367,7 +367,16 @@ class AdminDeliveryService:
                 if delivery.order.payment_method == PaymentMethod.CASH:
                     from business_app.services.cash_collection_service import CashCollectionService
 
-                    CashCollectionService().release_reserved_prepayment_for_order(
+                    cash_collection_service = CashCollectionService()
+                    # Refund prepaid credit applied at order creation (full
+                    # coverage) for an order returned before it was ever
+                    # delivered; no-op for delivered-then-returned orders.
+                    cash_collection_service.release_pre_delivery_prepaid_settlement_for_order(
+                        order_id=delivery.order.id,
+                        actor_user_id=actor_id,
+                        reason="Order marked as returned via admin delivery workflow",
+                    )
+                    cash_collection_service.release_reserved_prepayment_for_order(
                         order_id=delivery.order.id,
                         actor_user_id=actor_id,
                         reason="Order marked as returned via admin delivery workflow",

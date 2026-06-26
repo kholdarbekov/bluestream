@@ -3,7 +3,7 @@ Delivery Status Update Handler for Staff Bot
 Handles status transitions, delivered flow, failed flow, and cash collection.
 """
 import logging
-from telegram import Update
+from telegram import Update, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 
 from staff_bot.handlers.base import BaseHandler
@@ -314,13 +314,7 @@ class StatusUpdateHandler(BaseHandler):
                         'flow_type': 'non_cash_delivered',
                         'awaiting_bottle_count': False,
                     }
-                    keyboard = DeliveryKeyboards.bottle_return_options(
-                        language, delivery_id, int(expected_bottles)
-                    )
-                    message = i18n.get(
-                        'staff.delivery.bottles_return_prompt', language,
-                        expected=int(expected_bottles),
-                    )
+                    keyboard, message = self._build_bottle_prompt(language, delivery_id, context)
                     await query.edit_message_text(
                         message, reply_markup=keyboard, parse_mode='HTML'
                     )
@@ -768,6 +762,31 @@ class StatusUpdateHandler(BaseHandler):
         delivery_info = context.user_data.get('current_delivery', {})
         return float(delivery_info.get('expected_returnable_bottles', 0))
 
+    def _get_suggested_return_count(self, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Suggested bottles-returned count = customer's current per-address balance.
+
+        This is the prompt's anchor and the value submitted when the driver taps
+        "All returned". Distinct from `_get_expected_bottles`, which only GATES
+        whether the prompt appears (based on this order's returnable quantity).
+        """
+        delivery_info = context.user_data.get('current_delivery', {})
+        return int(float(delivery_info.get('customer_bottle_balance', 0) or 0))
+
+    def _build_bottle_prompt(self, language: str, delivery_id: int, context: ContextTypes.DEFAULT_TYPE) -> tuple[InlineKeyboardMarkup, str]:
+        """Build (keyboard, message) for the bottle-return prompt, anchored on the
+        customer's current bottle balance."""
+        suggested = self._get_suggested_return_count(context)
+        keyboard = DeliveryKeyboards.bottle_return_options(language, delivery_id, suggested)
+        if suggested > 0:
+            message = i18n.get(
+                'staff.delivery.bottles_return_prompt', language, balance=suggested
+            )
+        else:
+            message = i18n.get(
+                'staff.delivery.bottles_return_prompt_no_balance', language
+            )
+        return keyboard, message
+
     async def _maybe_show_bottle_prompt_or_submit(
         self,
         update: Update,
@@ -790,13 +809,7 @@ class StatusUpdateHandler(BaseHandler):
             context.user_data['pending_delivery_cash_flow'] = flow
 
             language = await self._get_language(update, context)
-            keyboard = DeliveryKeyboards.bottle_return_options(
-                language, delivery_id, int(expected_bottles)
-            )
-            message = i18n.get(
-                'staff.delivery.bottles_return_prompt', language,
-                expected=int(expected_bottles),
-            )
+            keyboard, message = self._build_bottle_prompt(language, delivery_id, context)
             if update.callback_query:
                 await update.callback_query.edit_message_text(
                     message, reply_markup=keyboard, parse_mode='HTML'
@@ -823,8 +836,7 @@ class StatusUpdateHandler(BaseHandler):
         await query.answer()
         try:
             flow = context.user_data.get('pending_delivery_cash_flow') or {}
-            expected = self._get_expected_bottles(context)
-            flow['bottles_returned'] = int(expected)
+            flow['bottles_returned'] = self._get_suggested_return_count(context)
             context.user_data['pending_delivery_cash_flow'] = flow
 
             return await self._submit_delivery_completion(

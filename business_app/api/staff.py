@@ -285,6 +285,22 @@ def update_location(delivery_id):
     return success_response({"message": "Location updated"})
 
 
+def _customer_bottle_balance(order) -> float:
+    """Empties the customer currently holds at this delivery's address (0 if none).
+
+    Per-address balance for the exact (user, delivery-address) pair the delivery
+    writes to. Negative (over-credited) or missing balances read as 0.
+    """
+    if not order or not order.delivery_address_id:
+        return 0.0
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+
+    balance = BottleTrackingService.get_balance(order.user_id, order.delivery_address_id)
+    if not balance:
+        return 0.0
+    return max(0.0, float(balance.balance or 0))
+
+
 @staff_bp.route("/delivery/active", methods=["GET"])
 @handle_api_exception
 @jwt_required()
@@ -358,6 +374,8 @@ def get_active_deliveries():
                     if order
                     else 0
                 ),
+                # Empties the customer currently holds at this address (return anchor).
+                "customer_bottle_balance": _customer_bottle_balance(order),
             }
         )
 

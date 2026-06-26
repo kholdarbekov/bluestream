@@ -15,6 +15,7 @@ from decimal import Decimal
 import pytest
 from flask_jwt_extended import create_access_token
 
+from business_app.models.bottle import BottleBalance
 from business_app.models.delivery import Delivery, DeliveryPerson, DeliveryRoute
 from business_app.models.order import Order
 from business_app.models.user import User, UserAddress
@@ -357,3 +358,89 @@ class TestUpdateMyLocation:
         assert person.current_location_lat == 41.300
         assert person.current_location_lng == 69.250
         assert person.last_location_update is not None
+
+
+def _delivery_with_address(db, customer_id, driver_id, order_no, lat=41.30, lng=69.26):
+    """Create address + order + ASSIGNED delivery; return (delivery, address)."""
+    addr = UserAddress(
+        user_id=customer_id,
+        title="Stop",
+        full_address=f"Stop {order_no}",
+        street_address=f"Stop {order_no}",
+        latitude=lat,
+        longitude=lng,
+    )
+    db.session.add(addr)
+    db.session.flush()
+    order = Order(
+        user_id=customer_id,
+        order_number=order_no,
+        status=OrderStatus.CONFIRMED,
+        subtotal=Decimal("10000"),
+        total_amount=Decimal("10000"),
+        delivery_address_id=addr.id,
+        delivery_date=datetime.now(UTC) + timedelta(hours=2),
+        delivery_time_slot="09:00-12:00",
+    )
+    db.session.add(order)
+    db.session.flush()
+    delivery = Delivery(
+        order_id=order.id,
+        delivery_person_id=driver_id,
+        status=DeliveryStatus.ASSIGNED,
+        scheduled_date=datetime.now(UTC),
+        scheduled_time_slot="09:00-12:00",
+    )
+    db.session.add(delivery)
+    db.session.commit()
+    return delivery, addr
+
+
+@pytest.mark.unit
+@pytest.mark.delivery
+class TestActiveDeliveryBottleBalance:
+    @pytest.fixture(autouse=True)
+    def _patch_matrix(self, monkeypatch):
+        monkeypatch.setattr(
+            "business_app.services.maps_service.MapsService.get_distance_matrix",
+            _haversine_matrix,
+        )
+
+    def _item_for(self, resp, delivery_id):
+        assert resp.status_code == 200
+        items = resp.get_json()["data"]["items"]
+        return next(it for it in items if it["delivery_id"] == delivery_id)
+
+    def test_balance_reflected_for_delivery_address(self, app, client, db, driver, customer):
+        delivery, addr = _delivery_with_address(db, customer.id, driver.id, "ORD-bal")
+        db.session.add(BottleBalance(user_id=customer.id, address_id=addr.id, balance=Decimal("7")))
+        db.session.commit()
+
+        resp = client.get("/api/v1/staff/delivery/active", headers=_auth_headers(app, driver.id))
+        assert self._item_for(resp, delivery.id)["customer_bottle_balance"] == 7
+
+    def test_zero_when_no_balance_row(self, app, client, db, driver, customer):
+        delivery, _ = _delivery_with_address(db, customer.id, driver.id, "ORD-nobal")
+        resp = client.get("/api/v1/staff/delivery/active", headers=_auth_headers(app, driver.id))
+        assert self._item_for(resp, delivery.id)["customer_bottle_balance"] == 0
+
+    def test_negative_balance_floored_to_zero(self, app, client, db, driver, customer):
+        delivery, addr = _delivery_with_address(db, customer.id, driver.id, "ORD-neg")
+        db.session.add(BottleBalance(user_id=customer.id, address_id=addr.id, balance=Decimal("-3")))
+        db.session.commit()
+        resp = client.get("/api/v1/staff/delivery/active", headers=_auth_headers(app, driver.id))
+        assert self._item_for(resp, delivery.id)["customer_bottle_balance"] == 0
+
+    def test_balance_scoped_to_delivery_address_only(self, app, client, db, driver, customer):
+        delivery, _addr = _delivery_with_address(db, customer.id, driver.id, "ORD-scope")
+        other = UserAddress(
+            user_id=customer.id, title="Other", full_address="Other",
+            street_address="Other", latitude=41.31, longitude=69.27,
+        )
+        db.session.add(other)
+        db.session.flush()
+        db.session.add(BottleBalance(user_id=customer.id, address_id=other.id, balance=Decimal("9")))
+        db.session.commit()
+        resp = client.get("/api/v1/staff/delivery/active", headers=_auth_headers(app, driver.id))
+        # Balance lives under a different address → this delivery shows 0.
+        assert self._item_for(resp, delivery.id)["customer_bottle_balance"] == 0

@@ -983,6 +983,11 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Idish qaytarilmadi",
         "ru": "Тара не возвращена",
     },
+    "staff.delivery.bottles_zero_returned": {
+        "en": "0 bottles returned",
+        "uz": "0 ta idish qaytarildi",
+        "ru": "Возвращено 0 бутылок",
+    },
     "staff.delivery.enter_bottle_count": {
         "en": "Enter the number of bottles returned:",
         "uz": "Qaytarilgan idishlar sonini kiriting:",
@@ -1381,9 +1386,14 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "ru": "Активные долги по наложенным платежам",
     },
     "staff.delivery.bottles_return_prompt": {
-        "en": "How many bottles (18.9 L) did the customer return? Expected: {expected}",
-        "uz": "Mijoz nechta idish (18.9 L) qaytardi? Kutilgan: {expected}",
-        "ru": "Сколько бутылок (18.9 L) вернул клиент? Ожидалось: {expected}",
+        "en": "How many bottles (18.9 L) did the customer return? Customer currently holds: {balance}",
+        "uz": "Mijoz nechta idish (18.9 L) qaytardi? Mijozda hozir: {balance} ta",
+        "ru": "Сколько бутылок (18.9 L) вернул клиент? Сейчас у клиента: {balance}",
+    },
+    "staff.delivery.bottles_return_prompt_no_balance": {
+        "en": "How many bottles (18.9 L) did the customer return? No empties are on record for this customer yet.",
+        "uz": "Mijoz nechta idish (18.9 L) qaytardi? Mijozda hozircha qayd etilgan bo'sh idish yo'q.",
+        "ru": "Сколько бутылок (18.9 L) вернул клиент? Пока нет учтённой тары у клиента.",
     },
     "staff.delivery.cash_already_collected": {
         "en": "Cash already collected in full",

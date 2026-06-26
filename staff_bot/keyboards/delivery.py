@@ -275,21 +275,36 @@ class DeliveryKeyboards:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def bottle_return_options(language: str, delivery_id: int, expected_bottles: int) -> InlineKeyboardMarkup:
-        """Options for bottle return during delivery completion."""
+    def bottle_return_options(language: str, delivery_id: int, suggested_bottles: int) -> InlineKeyboardMarkup:
+        """Options for bottle return during delivery completion.
+
+        Anchored on the customer's current bottle balance (`suggested_bottles`):
+        - balance > 0  → "All N returned" / "Enter count" / "None returned"
+        - balance == 0 → "0 bottles returned" / "Enter count" (the "None returned"
+          row would duplicate the zero default, so it is dropped).
+        """
+        enter_btn = InlineKeyboardButton(
+            f"✏️ {i18n.get('staff.delivery.bottles_enter_count', language)}",
+            callback_data=f"staff_bottles_custom_{delivery_id}",
+        )
+        if suggested_bottles > 0:
+            return InlineKeyboardMarkup([
+                [InlineKeyboardButton(
+                    f"✅ {i18n.get('staff.delivery.bottles_all_returned', language, count=suggested_bottles)}",
+                    callback_data=f"staff_bottles_full_{delivery_id}",
+                )],
+                [enter_btn],
+                [InlineKeyboardButton(
+                    f"❌ {i18n.get('staff.delivery.bottles_none_returned', language)}",
+                    callback_data=f"staff_bottles_none_{delivery_id}",
+                )],
+            ])
         return InlineKeyboardMarkup([
             [InlineKeyboardButton(
-                f"✅ {i18n.get('staff.delivery.bottles_all_returned', language, count=expected_bottles)}",
-                callback_data=f"staff_bottles_full_{delivery_id}"
+                f"✅ {i18n.get('staff.delivery.bottles_zero_returned', language)}",
+                callback_data=f"staff_bottles_full_{delivery_id}",
             )],
-            [InlineKeyboardButton(
-                f"✏️ {i18n.get('staff.delivery.bottles_enter_count', language)}",
-                callback_data=f"staff_bottles_custom_{delivery_id}"
-            )],
-            [InlineKeyboardButton(
-                f"❌ {i18n.get('staff.delivery.bottles_none_returned', language)}",
-                callback_data=f"staff_bottles_none_{delivery_id}"
-            )],
+            [enter_btn],
         ])
 
     @staticmethod

@@ -514,6 +514,7 @@ class ActiveDeliveryHandler(BaseHandler):
                 'destination_lng': delivery.get('destination_longitude'),
                 # Returnable bottles
                 'expected_returnable_bottles': delivery.get('expected_returnable_bottles', 0),
+                'customer_bottle_balance': delivery.get('customer_bottle_balance', 0),
             }
 
             text = '\n'.join(lines)

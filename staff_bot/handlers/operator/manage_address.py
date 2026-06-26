@@ -133,7 +133,11 @@ class ManageAddressHandler(BaseHandler):
             )
             return ENTER_LABEL
 
-        context.user_data['new_address']['label'] = label
+        # Persist under 'title' — the key StaffService.add_client_address reads
+        # (and the GET serializer exposes). Storing under 'label' made the backend
+        # default every operator-created address to 'Home' and left the confirm
+        # screen's title blank.
+        context.user_data['new_address']['title'] = label
 
         await update.message.reply_text(
             i18n.get('staff.operator.enter_full_address', language),

@@ -523,6 +523,16 @@ class StaffBot:
         search_client_text_pattern = self._menu_text_pattern('staff.menu.search_client')
         create_order_text_pattern = self._menu_text_pattern('staff.menu.create_order')
 
+        # Reply-keyboard MAIN-MENU escape for conversation text states. A menu tap
+        # while typing (phone/name/address/note/qty) would otherwise be captured
+        # as that input by the state's own MessageHandler — which wins over the
+        # catch-all menu router. Prepended to each text-input state so a menu label
+        # ends the conversation and navigates, while non-menu text falls through.
+        main_menu_pattern = self._main_menu_text_pattern()
+        menu_escape = MessageHandler(
+            filters.Regex(main_menu_pattern) & ~filters.COMMAND, self._conv_menu_escape
+        )
+
         # Create User conversation
         create_user_conv = ConversationHandler(
             entry_points=[
@@ -535,12 +545,15 @@ class StaffBot:
             ],
             states={
                 ENTER_PHONE: [
+                    menu_escape,
                     MessageHandler(filters.TEXT & ~filters.COMMAND, create_user_handler.receive_phone)
                 ],
                 ENTER_FIRST_NAME: [
+                    menu_escape,
                     MessageHandler(filters.TEXT & ~filters.COMMAND, create_user_handler.receive_first_name)
                 ],
                 ENTER_LAST_NAME: [
+                    menu_escape,
                     MessageHandler(filters.TEXT & ~filters.COMMAND, create_user_handler.receive_last_name)
                 ],
                 CREATE_USER_LANG: [
@@ -573,6 +586,7 @@ class StaffBot:
             ],
             states={
                 SEARCH_INPUT: [
+                    menu_escape,
                     MessageHandler(filters.TEXT & ~filters.COMMAND, search_user_handler.receive_search_query)
                 ],
             },
@@ -600,6 +614,7 @@ class StaffBot:
             ],
             states={
                 ORDER_SELECT_CLIENT: [
+                    menu_escape,
                     MessageHandler(filters.TEXT & ~filters.COMMAND, create_order_handler.receive_client_search)
                 ],
                 ORDER_SELECT_ADDRESS: [
@@ -616,6 +631,7 @@ class StaffBot:
                     CallbackQueryHandler(create_order_handler.select_payment, pattern=r"^staff_op_pay_"),
                 ],
                 ORDER_ENTER_NOTES: [
+                    menu_escape,
                     MessageHandler(filters.TEXT & ~filters.COMMAND, create_order_handler.receive_notes),
                     CallbackQueryHandler(create_order_handler.skip_notes, pattern="^staff_op_skip_notes$"),
                 ],
@@ -642,15 +658,19 @@ class StaffBot:
             ],
             states={
                 ENTER_LABEL: [
+                    menu_escape,
                     MessageHandler(filters.TEXT & ~filters.COMMAND, manage_address_handler.receive_label)
                 ],
                 ENTER_ADDRESS: [
+                    menu_escape,
                     MessageHandler(filters.TEXT & ~filters.COMMAND, manage_address_handler.receive_address)
                 ],
                 ENTER_DISTRICT: [
+                    menu_escape,
                     MessageHandler(filters.TEXT & ~filters.COMMAND, manage_address_handler.receive_district)
                 ],
                 ADDR_ENTER_NOTES: [
+                    menu_escape,
                     MessageHandler(filters.TEXT & ~filters.COMMAND, manage_address_handler.receive_address_notes)
                 ],
                 CONFIRM_ADDRESS: [
@@ -675,12 +695,15 @@ class StaffBot:
             ],
             states={
                 ENTER_TRYOUT_PHONE: [
+                    menu_escape,
                     MessageHandler(filters.TEXT & ~filters.COMMAND, tryout_handler.receive_create_phone)
                 ],
                 ENTER_TRYOUT_NAME: [
+                    menu_escape,
                     MessageHandler(filters.TEXT & ~filters.COMMAND, tryout_handler.receive_create_name)
                 ],
                 ENTER_TRYOUT_ADDRESS: [
+                    menu_escape,
                     MessageHandler(filters.LOCATION, tryout_handler.receive_create_location),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, tryout_handler.receive_create_address)
                 ],
@@ -704,6 +727,7 @@ class StaffBot:
             ],
             states={
                 BOTTLE_COLLECTION_SEARCH_INPUT: [
+                    menu_escape,
                     MessageHandler(filters.TEXT & ~filters.COMMAND, bottle_collection_handler.receive_collection_search)
                 ],
             },
@@ -729,9 +753,11 @@ class StaffBot:
             ],
             states={
                 BOTTLES_LOADED_INPUT: [
+                    menu_escape,
                     MessageHandler(filters.TEXT & ~filters.COMMAND, bottle_collection_handler.receive_bottles_loaded)
                 ],
                 BOTTLE_SESSION_LOADED_QTY_INPUT: [
+                    menu_escape,
                     MessageHandler(filters.TEXT & ~filters.COMMAND, bottle_collection_handler.receive_bottles_loaded)
                 ],
             },
@@ -756,9 +782,11 @@ class StaffBot:
             ],
             states={
                 BOTTLES_RETURNED_WH_INPUT: [
+                    menu_escape,
                     MessageHandler(filters.TEXT & ~filters.COMMAND, bottle_collection_handler.receive_bottles_returned)
                 ],
                 BOTTLE_SESSION_RETURNED_QTY_INPUT: [
+                    menu_escape,
                     MessageHandler(filters.TEXT & ~filters.COMMAND, bottle_collection_handler.receive_bottles_returned)
                 ],
             },
@@ -785,6 +813,7 @@ class StaffBot:
                     CallbackQueryHandler(bottle_collection_handler.receive_transfer_driver_select, pattern=r"^staff_transfer_driver_\d+$"),
                 ],
                 BOTTLE_TRANSFER_QTY_INPUT: [
+                    menu_escape,
                     MessageHandler(filters.TEXT & ~filters.COMMAND, bottle_collection_handler.receive_transfer_quantity)
                 ],
             },
@@ -807,6 +836,7 @@ class StaffBot:
             ],
             states={
                 BOTTLE_TRANSFER_CONFIRM_QTY_INPUT: [
+                    menu_escape,
                     MessageHandler(filters.TEXT & ~filters.COMMAND, bottle_collection_handler.receive_transfer_custom_confirm)
                 ],
             },
@@ -867,27 +897,9 @@ class StaffBot:
                 await update.callback_query.answer()
             except Exception:
                 logger.debug("flow_cancel callback answer failed", exc_info=True)
-            for key in (
-                'pending_delivery_cash_flow',
-                'pending_reconciliation_flow',
-                'pending_cod_collection_flow',
-                'pending_bottle_collection_flow',
-                'tryout_pickup_task_id',
-                'tryout_pickup_products',
-                'tryout_pickup_state',
-            ):
-                context.user_data.pop(key, None)
-            # C-2: clear the Redis flow marker AND deliver any pool-insertion
-            # suggestions deferred while the user was mid-flow. Importing
-            # flow_state lazily here keeps the module-level imports of
-            # bot.py minimal — flow_state is configured at startup so the
-            # call is non-blocking when Redis is reachable.
-            from staff_bot.utils import flow_state as _flow_state
-            if update and update.effective_user:
-                language = context.user_data.get('language') if context else None
-                await _flow_state.clear_and_drain(
-                    update.effective_user.id, context.bot, language=language
-                )
+            # SSOT: clears every flow flag + the Redis mirror and drains any
+            # pool-insertion suggestions deferred while the user was mid-flow.
+            await self._clear_all_pending_flows(context, update)
             # Land on the cash hub — every current flow that uses these flags
             # is reachable from there, so it's the least-surprising parent.
             await status_update_handler.show_cash_hub(update, context)
@@ -932,9 +944,125 @@ class StaffBot:
         except Exception as e:
             logger.error(f"Failed to set bot commands: {e}")
 
+    def _menu_action_map(self, language: str) -> dict:
+        """Reply-keyboard MAIN-MENU label → action, for the labels that have no
+        dedicated handler and fall through to _handle_text_message. (Operator
+        labels Create Client / Search Client / Create Order are handled by their
+        own ConversationHandlers and are intentionally absent here.)"""
+        return {
+            i18n.get('staff.menu.new_orders', language): 'staff_new_orders_unified',
+            i18n.get('staff.menu.active_deliveries', language): 'staff_active_deliveries',
+            i18n.get('staff.menu.tryouts', language): 'staff_tryouts_hub',
+            i18n.get('staff.menu.cash', language): 'staff_cash_hub',
+            i18n.get('staff.menu.profile', language): 'staff_profile',
+            i18n.get('staff.menu.settings', language): 'staff_settings',
+            i18n.get('staff.menu.help', language): 'staff_help',
+        }
+
+    # Conversation working-dict keys cleared when a reply-keyboard menu tap
+    # abandons an operator/tryout conversation (see _conv_menu_escape).
+    _CONVERSATION_WORK_KEYS = (
+        'new_client', 'new_order', 'new_address', 'new_tryout', 'new_tryout_products',
+    )
+
+    def _main_menu_text_pattern(self) -> str:
+        """Regex matching any MAIN-MENU reply-keyboard nav label (the labels
+        routed by _handle_text_message), across languages, with optional emoji
+        prefix. Used to give ConversationHandler text states a menu escape hatch."""
+        keys = (
+            'staff.menu.new_orders', 'staff.menu.active_deliveries', 'staff.menu.tryouts',
+            'staff.menu.cash', 'staff.menu.profile', 'staff.menu.settings', 'staff.menu.help',
+        )
+        labels = []
+        for key in keys:
+            for lang_code in i18n.supported_languages:
+                label = i18n.get(key, lang_code).strip()
+                if label:
+                    labels.append(re.escape(label))
+        unique_labels = sorted(set(labels), key=len, reverse=True)
+        if not unique_labels:
+            return r"$a"  # never matches
+        return r"^\s*(?:\S+\s+)?(?:%s)\s*$" % "|".join(unique_labels)
+
+    async def _conv_menu_escape(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Reply-keyboard MAIN-MENU tap fired inside an operator/tryout conversation
+        text state. Abandon the conversation: clear its half-entered working data
+        and any flow flags, navigate to the tapped menu action, and END so the
+        stale state can't capture the driver's next text. Prepended to each
+        text-input state so non-menu text still reaches the real receive_* handler."""
+        language = await self._language_handler._get_language(update, context)
+        action = self._match_menu_action(update.message.text, language)
+        for key in self._CONVERSATION_WORK_KEYS:
+            context.user_data.pop(key, None)
+        await self._clear_all_pending_flows(context, update)
+        if action is not None:
+            await self._dispatch_menu_action(action, update, context)
+        return ConversationHandler.END
+
+    def _match_menu_action(self, text: str, language: str):
+        """Return the menu action for a reply-keyboard main-menu label tap, or None.
+
+        Matches the bare label and the emoji-prefixed variants the reply keyboard
+        actually emits (e.g. '💰 Cash'). All menu labels are non-numeric, so a
+        typed cash amount / bottle count / fine quantity can NEVER collide; the
+        only residual collision is a free-text note that literally equals a menu
+        label, which we accept as an intentional escape hatch.
+        """
+        if not text:
+            return None
+        menu_actions = self._menu_action_map(language)
+        text = text.strip()
+        candidates = [text]
+        for prefix_len in (2, 3, 4):
+            if len(text) > prefix_len:
+                candidates.append(text[prefix_len:].strip())
+        for candidate in candidates:
+            if candidate in menu_actions:
+                return menu_actions[candidate]
+        return None
+
+    async def _dispatch_menu_action(self, action: str, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Route a matched main-menu action to its handler."""
+        handler_map = {
+            'staff_new_orders_unified': self._route_new_orders,
+            'staff_tryouts_hub': self._delivery_handlers['tryouts'].show_hub,
+            'staff_cash_hub': self._delivery_handlers['status_update'].show_cash_hub,
+            'staff_active_deliveries': self._delivery_handlers['active_delivery'].show_active_deliveries,
+            'staff_profile': self._common_handlers['profile'].show_profile,
+            'staff_settings': None,  # Handled by language_handler menu below.
+            'staff_help': self._common_handlers['help'].show_help,
+        }
+        handler_func = handler_map.get(action)
+        if handler_func:
+            await handler_func(update, context)
+        elif action == 'staff_settings':
+            await self._language_handler.language_menu(update, context)
+
+    async def _clear_all_pending_flows(self, context: ContextTypes.DEFAULT_TYPE, update: Update = None):
+        """Drop every in-memory flow flag plus the Redis flow mirror, draining any
+        deferred pool-insertion suggestions. Delegates to the SSOT helper so the
+        flag set lives in exactly one place (staff_bot.utils.flow_state)."""
+        from staff_bot.utils import flow_state as _flow_state
+        await _flow_state.clear_pending_flows(context, update)
+
     async def _handle_text_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle text messages (reply keyboard button presses)"""
         if not context.user_data.get('authenticated'):
+            return
+
+        language = await self._language_handler._get_language(update, context)
+
+        # Reply-keyboard MAIN-MENU taps must always navigate, even mid-flow. The
+        # reply keyboard (MenuKeyboards.main_menu) is permanently visible and
+        # sends TEXT, so without this guard a tap on Cash / New Orders / etc.
+        # while any pending_*_flow is armed is swallowed as flow input — parsed
+        # as a cash amount ("Invalid cash amount", the reported bug) or, worse,
+        # consumed as a NOTE that finalizes a real transaction. Detect the tap
+        # FIRST, drop every in-progress flow, then route to the menu action.
+        menu_action = self._match_menu_action(update.message.text, language)
+        if menu_action is not None:
+            await self._clear_all_pending_flows(context, update)
+            await self._dispatch_menu_action(menu_action, update, context)
             return
 
         # Delivery COD collection and reconciliation inputs take precedence over menu text.
@@ -1002,53 +1130,9 @@ class StaffBot:
                 await tryout_handler.receive_pickup_quantities(update, context)
             return
 
-        text = update.message.text.strip()
-        language = await self._language_handler._get_language(update, context)
-
-        # Map reply keyboard text to actions
-        # These match the text in MenuKeyboards.main_menu()
-        menu_actions = {
-            i18n.get('staff.menu.new_orders', language): 'staff_new_orders_unified',
-            i18n.get('staff.menu.active_deliveries', language): 'staff_active_deliveries',
-            i18n.get('staff.menu.tryouts', language): 'staff_tryouts_hub',
-            i18n.get('staff.menu.cash', language): 'staff_cash_hub',
-            i18n.get('staff.menu.profile', language): 'staff_profile',
-            i18n.get('staff.menu.settings', language): 'staff_settings',
-            i18n.get('staff.menu.help', language): 'staff_help',
-        }
-
-        # Strip emoji prefix when matching
-        clean_text = text
-        for prefix_len in [2, 3, 4]:
-            stripped = text[prefix_len:].strip() if len(text) > prefix_len else text
-            if stripped in menu_actions:
-                clean_text = stripped
-                break
-
-        if clean_text in menu_actions:
-            action = menu_actions[clean_text]
-            # Route to actual handlers
-            handler_map = {
-                # Unified entry points
-                'staff_new_orders_unified': self._route_new_orders,
-                'staff_tryouts_hub': self._delivery_handlers['tryouts'].show_hub,
-                'staff_cash_hub': self._delivery_handlers['status_update'].show_cash_hub,
-                # Delivery
-                'staff_active_deliveries': self._delivery_handlers['active_delivery'].show_active_deliveries,
-                # Common
-                'staff_profile': self._common_handlers['profile'].show_profile,
-                'staff_settings': None,  # Handled by language_handler callback
-                'staff_help': self._common_handlers['help'].show_help,
-            }
-
-            handler_func = handler_map.get(action)
-            if handler_func:
-                await handler_func(update, context)
-            elif action == 'staff_settings':
-                await self._language_handler.language_menu(update, context)
-        else:
-            # Unknown text input
-            await main_menu_handler(update, context)
+        # Not a menu label (handled at the top) and no active flow consumed it →
+        # unknown free text: fall back to re-rendering the main menu.
+        await main_menu_handler(update, context)
 
     async def _help_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /help command"""

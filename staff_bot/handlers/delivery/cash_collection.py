@@ -194,13 +194,12 @@ class CashCollectionHandler(BaseHandler):
                 return
 
             statement = response.data or {}
-            context.user_data['pending_cod_collection_flow'] = {
-                'customer_id': customer_id,
-                'total_outstanding_amount': statement.get('total_outstanding_amount', 0),
-                'customer_name': self._debtor_name(statement),
-                'customer_phone': statement.get('phone') or '',
-            }
-
+            # NB: do NOT arm pending_cod_collection_flow here. This screen only
+            # offers inline buttons (Collect full / Collect custom / Back); the
+            # routing flag is armed in start_full_collection / start_custom_collection
+            # once the driver actually commits to a collection. Arming on mere
+            # display turned every reply-keyboard menu tap into "Invalid cash
+            # amount" and let a stray typed number start an unintended collection.
             await query.edit_message_text(
                 self._format_statement(statement, language),
                 reply_markup=DeliveryKeyboards.cod_statement_actions(
@@ -275,21 +274,30 @@ class CashCollectionHandler(BaseHandler):
         query = update.callback_query
         await query.answer()
         language = await self._get_language(update, context)
+        token = await self._get_auth_token(update, context)
+        if not token:
+            await self._handle_auth_error(update, language)
+            return
+
         customer_id = int(query.data.split('_')[-1])
-        # Merge into the flow set by show_customer_statement so the debtor
-        # identity (name/phone) carries into the custom-amount screens; drop any
-        # stale amount left over from a prior full-collection attempt.
-        flow = context.user_data.get('pending_cod_collection_flow') or {}
-        # Safety: if the cached identity belongs to a different customer (e.g. a
-        # stale inline button was tapped), discard it rather than risk showing
-        # the wrong debtor's name over this collection. An empty header is safe;
-        # a mismatched one is the exact human-factor error we're guarding.
-        if flow.get('customer_id') != customer_id:
-            flow.pop('customer_name', None)
-            flow.pop('customer_phone', None)
-        flow['customer_id'] = customer_id
-        flow.pop('amount', None)
-        flow.pop('pending_overpayment_amount', None)
+        # Re-fetch the statement so the debtor identity (name/phone) is fresh and
+        # always belongs to the tapped customer — symmetric with
+        # start_full_collection, and never relies on a flow armed by the (now
+        # display-only) statement screen. The routing flag is armed only here,
+        # at the moment the driver commits to entering an amount.
+        async with api_client as client:
+            response = await client.get_customer_cod_statement(token, customer_id)
+        if not response.success:
+            await self._handle_api_response_error(update, response, language)
+            return
+
+        statement = response.data or {}
+        flow = {
+            'customer_id': customer_id,
+            'total_outstanding_amount': float(statement.get('total_outstanding_amount') or 0),
+            'customer_name': self._debtor_name(statement),
+            'customer_phone': statement.get('phone') or '',
+        }
         context.user_data['pending_cod_collection_flow'] = flow
         await flow_state.mark_active(
             update.effective_user.id, 'pending_cod_collection_flow'
@@ -404,6 +412,7 @@ class CashCollectionHandler(BaseHandler):
                     amount=format_currency(pending_amount, language=language),
                 ),
             ),
+            reply_markup=CommonKeyboards.flow_cancel(language),
             parse_mode='HTML',
         )
         return COLLECTION_NOTE_INPUT
@@ -426,6 +435,7 @@ class CashCollectionHandler(BaseHandler):
                 self._flow_header(flow),
                 i18n.get('staff.delivery.cod_collection_amount_prompt', language),
             ),
+            reply_markup=CommonKeyboards.flow_cancel(language),
             parse_mode='HTML',
         )
         return COLLECTION_AMOUNT_INPUT
@@ -438,6 +448,7 @@ class CashCollectionHandler(BaseHandler):
         token = await self._get_auth_token(update, context)
         if not token:
             await self._handle_auth_error(update, language)
+            await self._clear_flow(context, update)
             return ConversationHandler.END
 
         flow = context.user_data.get('pending_cod_collection_flow') or {}
@@ -471,6 +482,9 @@ class CashCollectionHandler(BaseHandler):
 
             if not response.success:
                 await self._handle_api_response_error(update, response, language)
+                # Drop the flow so the next typed text isn't re-submitted as
+                # another collection note for the same (failed) collection.
+                await self._clear_flow(context, update)
                 return ConversationHandler.END
 
             async with api_client as client:
@@ -498,4 +512,5 @@ class CashCollectionHandler(BaseHandler):
         except Exception as exc:
             logger.error("Error recording standalone COD collection: %s", exc, exc_info=True)
             await self._handle_error(update, context)
+            await self._clear_flow(context, update)
             return ConversationHandler.END

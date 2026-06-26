@@ -53,6 +53,39 @@ QUEUE_MAX_LENGTH = 5
 
 _redis: Optional[redis_async.Redis] = None
 
+# SSOT for the `context.user_data` keys that, while present, make the bot's
+# catch-all text router treat the next text update as flow input. Consumed by
+# `StaffBot._clear_all_pending_flows`, `_handle_flow_cancel`, and every
+# navigation landing handler (main menu / cash hub) so leaving a flow — by any
+# route — never strands a flag that would mis-route the next text.
+PENDING_FLOW_USER_DATA_KEYS = (
+    'pending_delivery_cash_flow',
+    'pending_reconciliation_flow',
+    'pending_cod_collection_flow',
+    'pending_bottle_collection_flow',
+    'tryout_pickup_task_id',
+    'tryout_pickup_products',
+    'tryout_pickup_state',
+)
+
+
+async def clear_pending_flows(context, update=None) -> None:
+    """Drop every in-memory flow flag AND the Redis mirror, draining any deferred
+    pool-insertion suggestions.
+
+    Duck-typed on PTB's `context`/`update` to stay import-light. Best-effort:
+    safe to call when Redis is unconfigured (the drain degrades to a no-op).
+    """
+    user_data = getattr(context, 'user_data', None)
+    if user_data is None:
+        return
+    for key in PENDING_FLOW_USER_DATA_KEYS:
+        user_data.pop(key, None)
+    effective_user = getattr(update, 'effective_user', None) if update is not None else None
+    if effective_user is not None:
+        language = user_data.get('language')
+        await clear_and_drain(effective_user.id, getattr(context, 'bot', None), language=language)
+
 
 def configure(redis_client: Optional[redis_async.Redis]) -> None:
     """Install the Redis client used by this module.

@@ -34,6 +34,10 @@ class StatusUpdateHandler(BaseHandler):
     async def show_cash_hub(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show the cash sub-menu (Reconciliation / Collect COD)."""
         language = await self._get_language(update, context)
+        # The cash hub is a navigation destination, never a mid-flow step. Drop
+        # any stale flow flags so an inline-Back into the hub can't leave a flow
+        # armed to swallow the next text update.
+        await flow_state.clear_pending_flows(context, update)
         title = f"💰 <b>{i18n.get('staff.cash.hub_title', language)}</b>"
         keyboard = MenuKeyboards.cash_hub(language)
 
@@ -621,11 +625,18 @@ class StatusUpdateHandler(BaseHandler):
         await flow_state.mark_active(
             update.effective_user.id, 'pending_reconciliation_flow'
         )
-        await query.edit_message_text(
-            i18n.get('staff.delivery.enter_declared_cash', language),
-            reply_markup=CommonKeyboards.flow_cancel(language),
-            parse_mode='HTML',
-        )
+        try:
+            await query.edit_message_text(
+                i18n.get('staff.delivery.enter_declared_cash', language),
+                reply_markup=CommonKeyboards.flow_cancel(language),
+                parse_mode='HTML',
+            )
+        except Exception:
+            # F-2: a failed prompt render must not leave the flag set with no UI
+            # to drive it — the next text would be parsed as reconciliation cash.
+            context.user_data.pop('pending_reconciliation_flow', None)
+            await flow_state.clear_active(update.effective_user.id)
+            raise
         return RECONCILIATION_INPUT
 
     @require_auth

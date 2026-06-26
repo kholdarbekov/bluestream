@@ -33,6 +33,12 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     language = await _handler._get_language(update, context)
+    # Landing on the main menu abandons any in-progress flow. Drop stale flow
+    # flags (+ Redis mirror) so the next text update isn't mis-routed by the
+    # catch-all text router — a backstop for inline-Back navigation that bypasses
+    # the reply-keyboard menu-escape guard in bot._handle_text_message.
+    from staff_bot.utils import flow_state
+    await flow_state.clear_pending_flows(context, update)
     staff_roles = context.user_data.get('staff_roles', [])
 
     menu_text = i18n.get('staff.menu.title', language)

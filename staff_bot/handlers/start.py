@@ -26,6 +26,11 @@ class StartHandler(BaseHandler):
         user_id = update.effective_user.id
         logger.info(f"Staff bot /start from user {user_id}")
         context.user_data.pop('invite_token', None)
+        # /start is a hard reset to the top of the bot. Drop any in-progress flow
+        # flags so a driver who restarts mid-collection isn't left with a stale
+        # flow that mis-routes their next text update.
+        from staff_bot.utils import flow_state
+        await flow_state.clear_pending_flows(context, update)
 
         # Check if user is already authenticated
         if context.user_data.get('authenticated'):

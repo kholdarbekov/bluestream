@@ -202,43 +202,107 @@ def test_flow_header_is_empty_when_identity_missing():
     assert CashCollectionHandler._with_header("", "Enter amount:") == "Enter amount:"
 
 
-def _run_start_custom_collection(monkeypatch, flow, customer_id):
-    from staff_bot.handlers.delivery import cash_collection as mod  # noqa: F401
+class _StatementApiClient:
+    """Async-context-manager stand-in exposing get_customer_cod_statement."""
+
+    def __init__(self, responses):
+        self.client = MagicMock()
+        self.client.get_customer_cod_statement = AsyncMock(side_effect=list(responses))
+
+    async def __aenter__(self):
+        return self.client
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+def _statement_response(first="Aziz", last="Debtor", phone="+998900000999",
+                        outstanding=90000, debt_count=1):
+    return MagicMock(
+        success=True,
+        data={
+            "first_name": first,
+            "last_name": last,
+            "phone": phone,
+            "active_cod_debt_count": debt_count,
+            "total_outstanding_amount": outstanding,
+            "items": [{"order_number": "AD_000281_26", "outstanding_amount": outstanding}],
+        },
+    )
+
+
+def _run_show_customer_statement(monkeypatch, responses, customer_id=11):
+    from staff_bot.handlers.delivery import cash_collection as mod
+    from staff_bot.utils import flow_state
+
+    handler = CashCollectionHandler()
+    update, context = _make_update_context()
+    update.callback_query.data = f"staff_cod_customer_{customer_id}"
+    monkeypatch.setattr(handler, "_get_language", AsyncMock(return_value="en"))
+    monkeypatch.setattr(handler, "_get_auth_token", AsyncMock(return_value="token"))
+    monkeypatch.setattr(flow_state, "mark_active", AsyncMock())
+    monkeypatch.setattr(flow_state, "clear_and_drain", AsyncMock())
+    monkeypatch.setattr(mod, "api_client", _StatementApiClient(responses))
+    asyncio.run(handler.show_customer_statement(update, context))
+    return update, context
+
+
+def test_statement_view_does_not_arm_pending_cod_flow(monkeypatch):
+    """Viewing a debtor's statement must NOT arm pending_cod_collection_flow.
+
+    The statement screen offers only inline buttons; arming the routing flag
+    here turns every reply-keyboard menu tap into 'Invalid cash amount' (the
+    reported bug). Arming is deferred to start_full/custom_collection.
+    """
+    update, context = _run_show_customer_statement(monkeypatch, [_statement_response()])
+
+    assert not context.user_data.get("pending_cod_collection_flow")
+    update.callback_query.edit_message_text.assert_awaited()  # statement still rendered
+
+
+def _run_start_custom_collection(monkeypatch, customer_id, responses, pre_flow=None):
+    from staff_bot.handlers.delivery import cash_collection as mod
     from staff_bot.utils import flow_state
 
     handler = CashCollectionHandler()
     update, context = _make_update_context()
     update.callback_query.data = f"staff_cod_collect_custom_{customer_id}"
-    context.user_data["pending_cod_collection_flow"] = flow
+    if pre_flow is not None:
+        context.user_data["pending_cod_collection_flow"] = pre_flow
     monkeypatch.setattr(handler, "_get_language", AsyncMock(return_value="en"))
+    monkeypatch.setattr(handler, "_get_auth_token", AsyncMock(return_value="token"))
     monkeypatch.setattr(flow_state, "mark_active", AsyncMock())
+    monkeypatch.setattr(flow_state, "clear_and_drain", AsyncMock())
+    monkeypatch.setattr(mod, "api_client", _StatementApiClient(responses))
     asyncio.run(handler.start_custom_collection(update, context))
-    return context.user_data["pending_cod_collection_flow"]
+    return context.user_data.get("pending_cod_collection_flow")
 
 
-def test_custom_collection_preserves_identity_for_same_customer(monkeypatch):
+def test_custom_collection_builds_flow_from_fetched_statement(monkeypatch):
+    """start_custom_collection re-fetches the statement (like full collection)
+    and builds the flow with fresh identity — no dependency on a pre-armed flow."""
     saved = _run_start_custom_collection(
-        monkeypatch,
-        {"customer_id": 11, "customer_name": "Aziz Debtor", "customer_phone": "+998900000999"},
-        customer_id=11,
+        monkeypatch, customer_id=11, responses=[_statement_response()],
     )
     assert saved["customer_id"] == 11
     assert saved["customer_name"] == "Aziz Debtor"
     assert saved["customer_phone"] == "+998900000999"
+    # Custom amount not entered yet → flow must be in the amount-input state.
+    assert saved.get("amount") is None
 
 
-def test_custom_collection_drops_stale_identity_for_different_customer(monkeypatch):
-    """A stale inline button for a different customer must never carry the
-    previous debtor's name into this collection — drop it so the header is
-    empty rather than wrong."""
+def test_custom_collection_uses_fresh_identity_not_stale_pre_flow(monkeypatch):
+    """Even if a stale flow for a different customer lingers, the re-fetched
+    identity for the tapped customer is what's used (never the wrong debtor)."""
     saved = _run_start_custom_collection(
         monkeypatch,
-        {"customer_id": 99, "customer_name": "Wrong Person", "customer_phone": "+998900000000"},
         customer_id=11,
+        responses=[_statement_response(first="Aziz", last="Debtor")],
+        pre_flow={"customer_id": 99, "customer_name": "Wrong Person", "customer_phone": "+998000000000"},
     )
     assert saved["customer_id"] == 11
-    assert "customer_name" not in saved
-    assert "customer_phone" not in saved
+    assert saved["customer_name"] == "Aziz Debtor"
+    assert saved["customer_phone"] == "+998900000999"
 
 
 def test_bot_wiring_routes_collect_menu_to_list_and_search_is_gone():

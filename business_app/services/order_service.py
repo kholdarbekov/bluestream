@@ -343,8 +343,32 @@ class OrderService:
         # Send order confirmation notification
         # self._send_order_notification(order, 'order_created')
 
-        # Schedule automatic confirmation if enabled
-        # self._schedule_auto_confirmation(order.id)
+        # Instant COD confirmation for trusted customers: skip the PENDING
+        # verification gate when the customer has a delivery history. First-time
+        # COD customers stay PENDING and are confirmed by the
+        # auto_confirm_pending_orders celery task. Best-effort: ANY failure here
+        # (the trust lookup or the confirmation transition) must never fail order
+        # creation, which already committed above. On failure we roll back any
+        # uncommitted confirmation work and leave the order for the celery
+        # auto-confirm backstop. (A confirmation side-effect that commits before
+        # failing — e.g. DeliveryService.create_delivery's own commit — can leave
+        # the order legitimately CONFIRMED; that is a correct outcome, so the log
+        # below does not assert the order is still PENDING.)
+        if payment_method == PaymentMethod.CASH:
+            try:
+                if self._customer_has_delivered_order(user_id):
+                    self.update_order_status(
+                        order.id,
+                        OrderStatus.CONFIRMED,
+                        notes="Auto-confirmed - returning customer (COD)",
+                    )
+            except Exception:
+                db.session.rollback()
+                logger.exception(
+                    "Instant COD confirmation failed for order %s; any order still "
+                    "PENDING is picked up by the celery auto-confirm backstop",
+                    order.id,
+                )
 
         return order
 
@@ -643,6 +667,18 @@ class OrderService:
                 "monthly_spending_trend": monthly_spending,
             },
         }
+
+    def _customer_has_delivered_order(self, user_id: int) -> bool:
+        """True if the customer has at least one DELIVERED order.
+
+        Used to decide whether a new COD order may skip the PENDING
+        verification gate and confirm immediately. Cheap existence lookup
+        backed by the idx_orders_user_status (user_id, status) index.
+        """
+        return (
+            db.session.query(Order.id).filter(Order.user_id == user_id, Order.status == OrderStatus.DELIVERED).first()
+            is not None
+        )
 
     def submit_order_feedback_for_user(
         self,

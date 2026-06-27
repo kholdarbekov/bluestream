@@ -49,6 +49,22 @@ class ProductHandlers(BaseHandler):
         return 0.0
 
     @staticmethod
+    def _quantity_in_cart_payload(response: Any, product_id: int) -> Optional[int]:
+        """Return product_id's quantity from an API cart payload, or None if absent.
+
+        Works for either a GET /cart response or an add/update response — both
+        wrap the cart at data -> data -> cart -> cart_items.
+        """
+        try:
+            cart = (getattr(response, "data", None) or {}).get("data", {}).get("cart") or {}
+            for item in cart.get("cart_items", []):
+                if item.get("product_id") == product_id:
+                    return int(item.get("quantity", 0))
+        except Exception as e:
+            logger.error(f"Error parsing cart response: {e}")
+        return None
+
+    @staticmethod
     def _extract_product_image_url(product: Dict[str, Any]) -> str | None:
         """Extract primary product image URL across API schema variants."""
         media = product.get('media') or {}
@@ -626,26 +642,35 @@ class ProductHandlers(BaseHandler):
                 # don't immediately fall foul of the per-product purchase rule.
                 min_order_qty = int((product.get('inventory') or {}).get('min_order_quantity', 1) or 1)
 
-                # Add product to cart via API
-                add_response = await client.add_to_cart(
-                    user_token,
-                    product_id,
-                    quantity=min_order_qty,
+                # Idempotent entry point. POST /cart/items is an INCREMENT on the
+                # backend (cart_item.quantity += quantity), so tapping "Add to
+                # cart" repeatedly (e.g. add -> back to product -> add again)
+                # used to silently pile on min_order_qty each time and inflate the
+                # order total. Only add when the product isn't in the cart yet;
+                # otherwise just re-open the selector at the existing quantity and
+                # let the +/- and preset buttons (which SET) adjust from there.
+                cart_response = await client.get_cart(user_token)
+                existing_qty = (
+                    self._quantity_in_cart_payload(cart_response, product_id)
+                    if (cart_response and cart_response.success)
+                    else None
                 )
-                if not add_response.success:
-                    await self._handle_api_error(update, add_response.error, language)
-                    return
 
-                # Get actual quantity from cart response
-                current_qty = min_order_qty
-                try:
-                    cart_data = add_response.data.get('data', {}).get('cart', {})
-                    for item in cart_data.get('cart_items', []):
-                        if item.get('product_id') == product_id:
-                            current_qty = item.get('quantity', min_order_qty)
-                            break
-                except Exception as e:
-                    logger.error(f"Error parsing cart response: {e}")
+                if existing_qty:
+                    current_qty = existing_qty
+                else:
+                    add_response = await client.add_to_cart(
+                        user_token,
+                        product_id,
+                        quantity=min_order_qty,
+                    )
+                    if not add_response.success:
+                        await self._handle_api_error(update, add_response.error, language)
+                        return
+                    current_qty = (
+                        self._quantity_in_cart_payload(add_response, product_id)
+                        or min_order_qty
+                    )
 
             await self._render_quantity_step(update, context, product_id, product, current_qty, language)
             await query.answer()

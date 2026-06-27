@@ -172,6 +172,7 @@ class TestProductHandlerDeepFlows:
             "api_client",
             FakeAPIClientContext(
                 get_product=_resp(success=True, data={"data": {"product": {"name": "Water", "pricing": {"base_price": 15000}}}}),
+                get_cart=_resp(success=True, data={"data": {"cart": {"cart_items": []}}}),
                 add_to_cart=_resp(success=False, error="cart failed"),
             ),
         )
@@ -201,6 +202,7 @@ class TestProductHandlerDeepFlows:
                     success=True,
                     data={"data": {"product": {"name": "Water", "pricing": {"base_price": 15000}}}},
                 ),
+                get_cart=_resp(success=True, data={"data": {"cart": {"cart_items": []}}}),
                 add_to_cart=_resp(
                     success=True,
                     data={"data": {"cart": {"cart_items": [{"product_id": 9, "quantity": 2}]}}},

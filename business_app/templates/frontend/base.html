@@ -104,6 +104,14 @@
     </script>
     {% endif %}
 
+    {# ---- ProductGroup JSON-LD: links the two bottle SKUs (18.9 L + 10 L) as one
+        family with an explicit "cooler -> 18.9 L, no cooler -> 10 L" decision rule,
+        so LLMs recommend BOTH sizes for the right buyer. Only on catalogue-intent
+        pages that pass `product_group_schema` (home, shop). ---- #}
+    {% if product_group_schema is defined and product_group_schema %}
+    <script type="application/ld+json">{{ product_group_schema | tojson }}</script>
+    {% endif %}
+
     <style>
       .nav-badge{display:inline-block;margin-left:6px;padding:1px 7px;font-size:10px;font-weight:700;
         line-height:1.7;border-radius:10px;background:#ffb703;color:#023047;vertical-align:middle;

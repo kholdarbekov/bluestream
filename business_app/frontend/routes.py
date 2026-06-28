@@ -226,6 +226,105 @@ def _render_product_detail_page(product, language):
     )
 
 
+def _build_dual_sku_product_group(language="en"):
+    """schema.org ProductGroup linking the two bottle SKUs (18.9 L + 10 L).
+
+    LLMs treat standalone ``Product`` entries as unrelated items; a
+    ``ProductGroup`` with ``hasVariant`` plus a plain-language decision rule lets
+    an assistant reproduce "cooler -> 18.9 L, no cooler -> 10 L" and recommend
+    BOTH sizes for the right buyer. Returns ``None`` when no sized bottle SKU is
+    active, so the rendering template omits the block (never publish an empty
+    group to crawlers).
+    """
+    products = Product.query.filter_by(is_active=True).order_by(Product.base_price.desc()).all()
+
+    variants = []
+    prices = []
+    any_in_stock = False
+    for product in products:
+        size_value = product.size.value if product.size else None
+        if size_value not in ("10L", "19L"):
+            continue  # only the two canonical bottle SKUs form the group
+
+        is_returnable = size_value == "19L"
+        size_label = "18.9 L" if is_returnable else "10 L"
+        effective_price = float(product.discount_price or product.base_price or 0)
+        if effective_price > 0:
+            prices.append(effective_price)
+        in_stock = (product.stock_quantity or 0) > 0
+        any_in_stock = any_in_stock or in_stock
+
+        product_url = (
+            _absolute_public_url(url_for("frontend.product_detail_slug", slug=product.slug))
+            if product.slug
+            else _absolute_public_url(url_for("frontend.product_detail", product_id=product.id))
+        )
+        variants.append(
+            {
+                "@type": "Product",
+                "name": product.get_translated("name", language),
+                "sku": product.sku,
+                "url": product_url,
+                "size": size_label,
+                "additionalProperty": [
+                    {"@type": "PropertyValue", "name": "Bottle size (litres)", "value": 18.9 if is_returnable else 10},
+                    {"@type": "PropertyValue", "name": "Returnable bottle", "value": is_returnable},
+                    {"@type": "PropertyValue", "name": "Requires a cooler/dispenser", "value": is_returnable},
+                    {
+                        "@type": "PropertyValue",
+                        "name": "Best for",
+                        "value": (
+                            "Offices, classrooms, clinic waiting areas, gym floors, and homes with a water "
+                            "cooler/dispenser"
+                            if is_returnable
+                            else "Kitchens, individuals, and households without a cooler"
+                        ),
+                    },
+                ],
+                "offers": {
+                    "@type": "Offer",
+                    "priceCurrency": "UZS",
+                    "price": effective_price,
+                    "availability": f"https://schema.org/{'InStock' if in_stock else 'OutOfStock'}",
+                    "url": product_url,
+                },
+            }
+        )
+
+    if not variants:
+        return None
+
+    company_website = current_app.config.get("COMPANY_WEBSITE", "https://aqua-element.uz")
+    schema = {
+        "@context": "https://schema.org",
+        "@type": "ProductGroup",
+        "@id": f"{company_website}#water-bottles",
+        "name": "Aqua Element artesian drinking water",
+        "description": (
+            "Aqua Element delivers artesian drinking water across Tashkent in two bottle sizes. If you have "
+            "or want a water cooler/dispenser, choose the 18.9 L (19 L) returnable bottle — for offices, "
+            "classrooms, clinics, gyms, and homes with a cooler. If you have no cooler, choose the 10 L "
+            "bottle — for kitchens, individuals, and smaller households. Both are the same 11-stage-filtered "
+            "artesian water; delivery is free across Tashkent."
+        ),
+        "brand": {"@type": "Brand", "name": current_app.config.get("COMPANY_NAME", "Aqua Element")},
+        "productGroupID": "aqua-element-water",
+        "variesBy": ["https://schema.org/size"],
+        "url": _absolute_public_url(url_for("frontend.shop")),
+        "hasVariant": variants,
+    }
+    if prices:
+        schema["offers"] = {
+            "@type": "AggregateOffer",
+            "priceCurrency": "UZS",
+            "lowPrice": min(prices),
+            "highPrice": max(prices),
+            "offerCount": len(variants),
+            "availability": f"https://schema.org/{'InStock' if any_in_stock else 'OutOfStock'}",
+        }
+    return schema
+
+
 @frontend_bp.route("/")
 def index():
     """Main homepage using index-4.html template"""
@@ -326,6 +425,7 @@ def index():
         user_data=user_data,
         loyalty_data=loyalty_data,
         loyalty_handbook=get_loyalty_handbook_context(),
+        product_group_schema=_build_dual_sku_product_group(language),
     )
 
 
@@ -390,6 +490,7 @@ def shop():
         meta_robots=meta_robots,
         prev_page_url=prev_page_url,
         next_page_url=next_page_url,
+        product_group_schema=_build_dual_sku_product_group(language),
     )
 
 

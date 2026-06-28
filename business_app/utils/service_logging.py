@@ -8,6 +8,14 @@ from flask import g, has_request_context
 
 from business_app.utils.logging_config import performance_logger, security_logger, business_logger, database_logger
 from business_app.utils.monitoring import app_metrics
+from business_app.utils.exceptions import ValidationError, NotFoundError, UnauthorizedError, ForbiddenError
+
+# Routine client-facing rejections (4xx). These are expected business outcomes,
+# not faults — they must not be logged at ERROR with a traceback or they drown
+# the error dashboards/alerts in noise (e.g. admin order-form min-quantity /
+# min-amount rejections). Mirrors the WARNING classification in
+# business_app.utils.error_handlers.handle_api_exception.
+_EXPECTED_BUSINESS_EXCEPTIONS = (ValidationError, NotFoundError, UnauthorizedError, ForbiddenError)
 
 
 def log_service_call(
@@ -111,9 +119,16 @@ def log_service_call(
                     "error_message": str(e),
                 }
 
-                performance_logger.logger.error(
-                    f"log_service_call Failed {operation_name}: {e}", extra=error_data, exc_info=True
-                )
+                if isinstance(e, _EXPECTED_BUSINESS_EXCEPTIONS):
+                    # Expected business rejection — log at WARNING without a
+                    # traceback so it doesn't pollute error dashboards/alerts.
+                    performance_logger.logger.warning(
+                        f"log_service_call rejected {operation_name}: {e}", extra=error_data
+                    )
+                else:
+                    performance_logger.logger.error(
+                        f"log_service_call Failed {operation_name}: {e}", extra=error_data, exc_info=True
+                    )
 
                 # Track error metrics
                 if track_performance:

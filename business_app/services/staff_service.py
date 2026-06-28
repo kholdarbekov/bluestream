@@ -1148,7 +1148,12 @@ class StaffService:
         # on an order that carries returnable bottles, the driver's effective
         # session must still match the session the order was bound to at
         # accept time. Strict mode raises; legacy mode logs a warning.
-        if new_status in ("picked_up", "in_transit", "arrived", "delivered", "failed"):
+        # "failed" is deliberately excluded: a failed attempt delivers no
+        # bottles (nothing to tally), so it needs no session continuity — and
+        # the failed branch below releases the binding outright. Running the
+        # guard on "failed" would only re-bind the order moments before we
+        # unbind it (and could even block marking-failed under strict mode).
+        if new_status in ("picked_up", "in_transit", "arrived", "delivered"):
             from business_app.services.bottle_tracking_service import BottleTrackingService
 
             BottleTrackingService().assert_driver_can_progress_delivery(delivery)
@@ -1184,6 +1189,16 @@ class StaffService:
                 dp = DeliveryPerson.query.filter_by(user_id=delivery.delivery_person_id).first()
                 if dp:
                     dp.total_deliveries = (dp.total_deliveries or 0) + 1
+                # A failed attempt ends this trip for the order: release its
+                # bottle-session binding so it stops counting as an "open" order
+                # and the driver can close their session (the prod session-72
+                # lockup — BOTTLE_SESSION_HAS_OPEN_ORDERS — came from this gap).
+                # The order stays FAILED for operator re-dispatch and re-binds
+                # when re-accepted. Mirrors return_delivery_to_pool's unbind.
+                if delivery.order_id:
+                    from business_app.services.bottle_tracking_service import BottleTrackingService
+
+                    BottleTrackingService().unbind_order(delivery.order_id)
 
             # Create status history
             history = DeliveryStatusHistory(

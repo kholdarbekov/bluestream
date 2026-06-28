@@ -1372,3 +1372,51 @@ def test_regression_AD_000205_26_picked_up_blocked_after_session_close(
             assert exc.value.error_code == "BOTTLE_SESSION_REQUIRED"
         finally:
             app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False
+
+
+@pytest.mark.unit
+def test_failed_delivery_releases_session_binding_so_session_can_close(
+    db, app, sample_user, sample_product
+):
+    """Marking a delivery FAILED must release its bottle-session binding so the
+    driver can still close the session.
+
+    Reproduces the prod session-72 lockup (2026-06-26 & 2026-06-28): a failed
+    delivery left its order bound and non-terminal (out_for_delivery), so
+    close_bottle_session kept raising BOTTLE_SESSION_HAS_OPEN_ORDERS until an
+    operator re-dispatched it. The order stays FAILED for operator review; only
+    the bottle-session binding is released here.
+    """
+    from business_app.services.staff_service import StaffService
+    from business_app.models.bottle import DriverBottleSessionOrder
+
+    driver = _make_driver(db, "+998901000200", "FailGuy")
+    session = _open_session(db, driver)
+    order = _make_order_with_bottles(db, sample_user, sample_product, quantity=2)
+    delivery = _make_delivery(db, order, driver)  # ASSIGNED → 'failed' allowed
+    BottleTrackingService().bind_order_to_session(
+        session.id, order.id, accepted_by_driver_id=driver.id
+    )
+    db.session.commit()
+
+    svc = BottleTrackingService()
+    # Pre-condition: the bound, non-terminal order blocks the close.
+    assert svc._open_bindings_count_for_session(session.id) == 1
+
+    with app.test_request_context():
+        StaffService.update_delivery_status(
+            delivery.id,
+            new_status="failed",
+            staff_user_id=driver.id,
+            metadata={"fail_reason": "customer_unavailable"},
+        )
+
+    # The failed attempt released the binding → nothing blocks the close.
+    assert DriverBottleSessionOrder.query.filter_by(order_id=order.id).first() is None
+    assert svc._open_bindings_count_for_session(session.id) == 0
+
+    db.session.refresh(session)
+    closed = svc.close_bottle_session(
+        driver.id, bottles_returned_to_warehouse=session.bottles_loaded
+    )
+    assert closed.status == DriverBottleSessionStatus.CLOSED

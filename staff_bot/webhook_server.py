@@ -23,6 +23,48 @@ from shared.redis_keyspace import RedisKeyspace
 
 logger = logging.getLogger(__name__)
 
+try:  # telegram is always present in the bot runtime; guard keeps imports safe.
+    from telegram.error import Forbidden as _TelegramForbidden
+except Exception:  # pragma: no cover - defensive
+    _TelegramForbidden = ()
+
+# Substrings of benign "this recipient can't receive messages" Telegram errors.
+# These are operational facts (the user blocked the bot / deactivated their
+# account), not server faults — they belong at WARNING, not ERROR. A single
+# blocked driver otherwise emits an ERROR on every broadcast.
+_UNREACHABLE_RECIPIENT_MARKERS = (
+    "bot was blocked by the user",
+    "user is deactivated",
+    "chat not found",
+    "bots can't send messages to bots",
+    "have no rights to send",
+    "peer_id_invalid",
+)
+
+
+def _is_recipient_unreachable(exc: Exception) -> bool:
+    """True when ``exc`` means a specific recipient simply can't be messaged.
+
+    Such failures are expected at the edges (drivers block the bot, delete their
+    account, etc.) and must not be logged at ERROR or they drown the error feed.
+    """
+    if _TelegramForbidden and isinstance(exc, _TelegramForbidden):
+        return True
+    text = str(exc).lower()
+    return any(marker in text for marker in _UNREACHABLE_RECIPIENT_MARKERS)
+
+
+def _log_notify_failure(description: str, exc: Exception) -> None:
+    """Log a per-recipient notification failure at the right severity.
+
+    WARNING for benign unreachable recipients; ERROR (the genuine-fault level)
+    otherwise.
+    """
+    if _is_recipient_unreachable(exc):
+        logger.warning("%s (recipient unreachable): %s", description, exc)
+    else:
+        logger.error("%s: %s", description, exc)
+
 
 class _TokenBucket:
     """Per-endpoint token bucket rate limiter — dep-free, single-process.
@@ -405,7 +447,7 @@ class StaffWebhookServer:
                     sent_count += 1
                 except Exception as e:
                     failed_ids.append(int(tid) if isinstance(tid, (int, str)) else tid)
-                    logger.error(f"Failed to notify delivery person {tid}: {e}")
+                    _log_notify_failure(f"Failed to notify delivery person {tid}", e)
 
             # F-3: report partial success. The previous return shape was always
             # `success: True`, even when 0/N sends landed — the backend had no
@@ -511,7 +553,7 @@ class StaffWebhookServer:
                     sent += 1
                 except Exception as e:
                     failed.append({'telegram_id': old_telegram_id, 'role': 'old'})
-                    logger.error(f"Failed to notify old delivery person {old_telegram_id}: {e}")
+                    _log_notify_failure(f"Failed to notify old delivery person {old_telegram_id}", e)
 
             if new_telegram_id:
                 try:
@@ -522,7 +564,7 @@ class StaffWebhookServer:
                     sent += 1
                 except Exception as e:
                     failed.append({'telegram_id': new_telegram_id, 'role': 'new'})
-                    logger.error(f"Failed to notify new delivery person {new_telegram_id}: {e}")
+                    _log_notify_failure(f"Failed to notify new delivery person {new_telegram_id}", e)
 
             return web.json_response({
                 'success': not failed,

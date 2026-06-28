@@ -834,9 +834,17 @@ class ClickPaymentProviderService:
         try:
             data = response.json()
         except ValueError as exc:
+            # OFD data is a supplementary, best-effort fetch that the
+            # fiscalization caller tolerates (the receipt is still submitted;
+            # only the QR/receipt URL is skipped). Click's ofd_data endpoint
+            # intermittently answers 200 with a non-JSON body, so don't raise a
+            # hard ERROR for that known-tolerated case — it would trip false
+            # fiscalization alarms. A parse failure on any other (critical)
+            # endpoint stays ERROR.
+            parse_failure_level = "warning" if endpoint_label == "ofd_data" else "error"
             self._log_flow_step(
                 "merchant_request_json_parse_failed",
-                level="error",
+                level=parse_failure_level,
                 endpoint=endpoint_label or fallback_path,
                 method=method,
                 url=url,

@@ -530,6 +530,11 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Bu amal uchun sizda ruxsat yoq.",
         "ru": "У вас нет прав для этого действия.",
     },
+    "staff.error.api.account_deactivated": {
+        "en": "Your delivery account has been deactivated. Please contact your administrator.",
+        "uz": "Yetkazib berish hisobingiz faolsizlantirilgan. Iltimos, administrator bilan bog'laning.",
+        "ru": "Ваша учётная запись курьера деактивирована. Пожалуйста, свяжитесь с администратором.",
+    },
     "staff.error.api.not_found": {
         "en": "Requested data was not found.",
         "uz": "Sorangan malumot topilmadi.",
@@ -1489,6 +1494,11 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "Unknown order",
         "uz": "Noma'lum buyurtma",
         "ru": "Неизвестный заказ",
+    },
+    "staff.account_deactivated": {
+        "en": "Your delivery account has been deactivated. Please contact your administrator.",
+        "uz": "Yetkazib berish hisobingiz faolsizlantirilgan. Iltimos, administrator bilan bog'laning.",
+        "ru": "Ваша учётная запись курьера деактивирована. Пожалуйста, свяжитесь с администратором.",
     },
 }
 

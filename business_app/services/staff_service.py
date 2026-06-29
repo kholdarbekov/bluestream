@@ -107,6 +107,35 @@ class StaffService:
         return normalized
 
     @staticmethod
+    def assert_delivery_person_active(user: User) -> None:
+        """Raise if the user is a delivery person an admin has deactivated.
+
+        Keys off ``DeliveryPerson.is_active`` — the flag the admin "Delivery
+        Persons" page toggles. No-op for staff with no delivery-person record
+        (e.g. operators), so only drivers are gated by this control. Never reads
+        or writes ``User.status``, so a deactivated driver keeps full customer-bot
+        access.
+        """
+        delivery_person = DeliveryPerson.query.filter_by(user_id=user.id).first()
+        if delivery_person is not None and not delivery_person.is_active:
+            raise ForbiddenError(
+                "Your delivery account has been deactivated",
+                error_code="STAFF_ACCOUNT_DEACTIVATED",
+            )
+
+    @staticmethod
+    def assert_delivery_person_active_by_user_id(user_id) -> None:
+        """Resolve a user by id and assert their delivery-person account is active.
+
+        For callers that only hold a JWT identity (e.g. the staff refresh
+        endpoint) and should not reach into the model layer directly. No-op if
+        the user does not exist (the caller's own auth handles that case).
+        """
+        user = User.query.get(user_id)
+        if user is not None:
+            StaffService.assert_delivery_person_active(user)
+
+    @staticmethod
     def get_active_delivery_statuses() -> Tuple[DeliveryStatus, ...]:
         """Return statuses counted as active driver workload."""
         return StaffService.ACTIVE_DELIVERY_STATUSES
@@ -754,6 +783,9 @@ class StaffService:
         staff_roles_list = StaffService._extract_staff_roles(user)
         if not staff_roles_list:
             raise ForbiddenError("User does not have a staff role", error_code="STAFF_NO_ROLE")
+
+        # Block staff-bot access for delivery persons an admin has deactivated.
+        StaffService.assert_delivery_person_active(user)
 
         # Keep normalized staff_roles persisted so staff bot can use it as role source.
         if user.staff_roles != staff_roles_list:

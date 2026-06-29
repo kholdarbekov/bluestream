@@ -145,8 +145,12 @@ class StartHandler(BaseHandler):
                 error_code=getattr(response, 'error_code', None),
             )
             if response.status_code in (403, 404):
+                if getattr(response, 'error_code', None) == 'STAFF_ACCOUNT_DEACTIVATED':
+                    login_message = i18n.get('staff.account_deactivated', language)
+                else:
+                    login_message = i18n.get('staff.not_staff', language)
                 await update.message.reply_text(
-                    i18n.get('staff.not_staff', language),
+                    login_message,
                     reply_markup=ReplyKeyboardRemove()
                 )
             else:

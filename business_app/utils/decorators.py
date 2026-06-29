@@ -276,6 +276,9 @@ def require_staff_roles(*required_roles: str):
             if required_roles and not any(role in staff_roles for role in required_roles):
                 raise ForbiddenError("User does not have a staff role", error_code="STAFF_NO_ROLE")
 
+            # Block delivery persons an admin has deactivated (DeliveryPerson.is_active).
+            StaffService.assert_delivery_person_active(user)
+
             g.current_user_id = current_user_id
             g.current_user = user
             g.current_staff_roles = staff_roles

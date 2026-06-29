@@ -48,6 +48,7 @@ class BaseHandler:
         'STAFF_INVALID_INVITE_TOKEN': 'staff.error.api.invalid_invite',
         'STAFF_TELEGRAM_NOT_APPROVED': 'staff.error.api.forbidden',
         'STAFF_NO_ROLE': 'staff.error.api.forbidden',
+        'STAFF_ACCOUNT_DEACTIVATED': 'staff.error.api.account_deactivated',
         'STAFF_TELEGRAM_ALREADY_LINKED': 'staff.error.api.conflict',
         'STAFF_OPERATOR_ROLE_REQUIRED': 'staff.error.api.forbidden',
         'STAFF_SEARCH_QUERY_TOO_SHORT': 'staff.error.api.invalid_input',

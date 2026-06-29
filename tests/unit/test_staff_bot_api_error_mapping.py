@@ -28,3 +28,10 @@ def test_unknown_400_still_falls_back_to_generic_validation_key():
     """Sanity check: unmapped codes should NOT be silently mapped — they
     legitimately fall through to the status-code-based generic handler."""
     assert "TOTALLY_MADE_UP_CODE" not in BaseHandler.API_ERROR_CODE_KEY_MAP
+
+
+def test_account_deactivated_maps_to_specific_i18n_key():
+    assert (
+        BaseHandler.API_ERROR_CODE_KEY_MAP.get("STAFF_ACCOUNT_DEACTIVATED")
+        == "staff.error.api.account_deactivated"
+    )

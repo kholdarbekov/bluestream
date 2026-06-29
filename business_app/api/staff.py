@@ -57,6 +57,9 @@ def staff_refresh_token():
     if not refresh_token:
         raise ValidationError("Refresh token is required", error_code="STAFF_REFRESH_TOKEN_REQUIRED")
 
+    # Block delivery persons an admin has deactivated before minting a fresh token.
+    StaffService.assert_delivery_person_active_by_user_id(get_jwt_identity())
+
     from business_app.services.token_service import TokenService
 
     token_service = TokenService()

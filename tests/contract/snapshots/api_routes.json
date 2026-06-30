@@ -1771,6 +1771,13 @@
     "rule": "/api/v1/admin/users/<int:user_id>/addresses/<int:address_id>"
   },
   {
+    "endpoint": "admin.get_user_cart",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/users/<int:user_id>/cart"
+  },
+  {
     "endpoint": "admin.get_user_notification_settings",
     "methods": [
       "GET"

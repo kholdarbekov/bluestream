@@ -101,6 +101,8 @@ const Users = () => {
   const [userCodStatementLoading, setUserCodStatementLoading] = useState(false);
   const [userPrepaymentHistory, setUserPrepaymentHistory] = useState(null);
   const [userPrepaymentHistoryLoading, setUserPrepaymentHistoryLoading] = useState(false);
+  const [userCart, setUserCart] = useState(null);
+  const [userCartLoading, setUserCartLoading] = useState(false);
   const [isNotificationReasonModalVisible, setIsNotificationReasonModalVisible] = useState(false);
   const [pendingNotificationToggle, setPendingNotificationToggle] = useState(null);
   const [notificationReason, setNotificationReason] = useState('');
@@ -378,6 +380,23 @@ const Users = () => {
       setUserPrepaymentHistory(null);
     } finally {
       setUserPrepaymentHistoryLoading(false);
+    }
+  };
+
+  const fetchUserCart = async (user) => {
+    if (!user || user.role !== 'customer') {
+      setUserCart(null);
+      return;
+    }
+
+    setUserCartLoading(true);
+    try {
+      const response = await adminService.getUserCart(user.id);
+      setUserCart(response?.data || null);
+    } catch (_error) {
+      setUserCart(null);
+    } finally {
+      setUserCartLoading(false);
     }
   };
 
@@ -740,10 +759,12 @@ const Users = () => {
     setNotificationSettingsError('');
     setUserCodStatement(null);
     setUserPrepaymentHistory(null);
+    setUserCart(null);
     fetchUserAddresses(user.id);
     fetchUserNotificationSettings(user.id);
     fetchUserCodStatement(user);
     fetchUserPrepaymentHistory(user);
+    fetchUserCart(user);
   };
 
   const handleEditUser = (user) => {
@@ -1328,6 +1349,76 @@ const Users = () => {
                 ) : (
                   <div style={{ color: '#666' }}>
                     {t('ui.users.no_prepayment_history', 'No prepayment activity for this customer.')}
+                  </div>
+                )}
+              </Card>
+            )}
+
+            {selectedUser.role === 'customer' && (
+              <Card
+                title={t('ui.users.cart', 'Cart')}
+                size="small"
+                style={{ marginBottom: 12 }}
+              >
+                {userCartLoading ? (
+                  <div style={{ textAlign: 'center', padding: '12px 0' }}>
+                    {t('ui.common.loading', 'Loading...')}
+                  </div>
+                ) : (userCart && userCart.cart_items && userCart.cart_items.length > 0) ? (
+                  <>
+                    <Table
+                      dataSource={userCart.cart_items}
+                      rowKey="id"
+                      pagination={false}
+                      size="small"
+                      columns={[
+                        {
+                          title: t('ui.users.cart_product', 'Product'),
+                          key: 'product',
+                          render: (_value, record) => record.product?.name || `#${record.product_id}`,
+                        },
+                        {
+                          title: t('ui.users.cart_quantity', 'Quantity'),
+                          dataIndex: 'quantity',
+                          key: 'quantity',
+                        },
+                        {
+                          title: t('ui.users.cart_unit_price', 'Unit price'),
+                          dataIndex: 'unit_price',
+                          key: 'unit_price',
+                          render: (value) => `${(value || 0).toLocaleString()} UZS`,
+                        },
+                        {
+                          title: t('ui.users.cart_line_total', 'Line total'),
+                          dataIndex: 'total_price',
+                          key: 'total_price',
+                          render: (value) => `${(value || 0).toLocaleString()} UZS`,
+                        },
+                      ]}
+                    />
+                    <Row gutter={[16, 12]} style={{ marginTop: 12 }}>
+                      <Col xs={24} sm={8}>
+                        <strong>{t('ui.users.cart_item_count', 'Items')}:</strong>{' '}
+                        {userCart.item_count || 0}
+                      </Col>
+                      <Col xs={24} sm={8}>
+                        <strong>{t('ui.users.cart_subtotal', 'Subtotal')}:</strong>{' '}
+                        {(userCart.subtotal || 0).toLocaleString()} UZS
+                      </Col>
+                      <Col xs={24} sm={8}>
+                        <strong>{t('ui.users.cart_total', 'Estimated total')}:</strong>{' '}
+                        {(userCart.estimated_total || 0).toLocaleString()} UZS
+                      </Col>
+                    </Row>
+                    {userCart.updated_at && (
+                      <div style={{ color: '#666', fontSize: '12px', marginTop: 8 }}>
+                        {t('ui.users.cart_updated_at', 'Last updated')}: {formatLocaleDateTime(userCart.updated_at)}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div style={{ color: '#666' }}>
+                    {t('ui.users.cart_empty', 'Cart is empty.')}
                   </div>
                 )}
               </Card>

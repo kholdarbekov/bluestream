@@ -321,6 +321,11 @@ class AdminService {
     return response.data;
   }
 
+  async getUserCart(userId) {
+    const response = await api.get(`/admin/users/${userId}/cart`);
+    return response.data;
+  }
+
   async createUserAddress(userId, addressData) {
     const response = await api.post(`/admin/users/${userId}/addresses`, addressData);
     return response.data;

@@ -1152,6 +1152,36 @@ def get_user_details(user_id):
         return internal_error_response("Failed to get user details")
 
 
+@admin_bp.route("/users/<int:user_id>/cart", methods=["GET"])
+@jwt_required()
+@validate_admin_action(["view_users"])
+def get_user_cart(user_id):
+    """Get the contents of a user's shopping cart (read-only admin view)."""
+    try:
+        user = User.query.get(user_id)
+        if not user:
+            return not_found_response(resource_type="User")
+
+        from business_app.utils.service_factory import get_cart_service
+
+        cart = get_cart_service().get_cart_details(user_id)
+        if cart is None:
+            cart = {
+                "cart_items": [],
+                "item_count": 0,
+                "subtotal": 0,
+                "estimated_delivery_fee": 0,
+                "estimated_total": 0,
+                "updated_at": None,
+            }
+
+        return success_response(data=cart)
+
+    except Exception as e:
+        current_app.logger.error(f"Get user cart error: {e}")
+        return internal_error_response("Failed to get user cart")
+
+
 @admin_bp.route("/users/<int:user_id>/payment-methods", methods=["GET"])
 @jwt_required()
 @manager_or_higher_required

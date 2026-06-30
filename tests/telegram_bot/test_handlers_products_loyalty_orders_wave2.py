@@ -34,7 +34,7 @@ class TestProductHandlerWave2:
 
         await handler.cart_handler(update, context)
 
-        handler.show_cart.assert_awaited_once_with(update, context)
+        handler.show_cart.assert_awaited_once_with(update, context, edit_mode=False)
         handler._clear_cart.assert_not_awaited()
 
     async def test_cart_handler_dispatches_clear(self, monkeypatch):
@@ -134,7 +134,7 @@ class TestProductHandlerWave2:
         context = make_context()
         captured = {}
 
-        def _cart_actions(lang, cart_is_empty, meets_minimum):
+        def _cart_actions(lang, cart_is_empty, meets_minimum, edit_mode=False, cart_items=None, edit_return=None):
             captured["args"] = (lang, cart_is_empty, meets_minimum)
             return "cart-kbd"
 
@@ -162,7 +162,7 @@ class TestProductHandlerWave2:
         context = make_context()
         captured = {}
 
-        def _cart_actions(lang, cart_is_empty, meets_minimum):
+        def _cart_actions(lang, cart_is_empty, meets_minimum, edit_mode=False, cart_items=None, edit_return=None):
             captured["args"] = (lang, cart_is_empty, meets_minimum)
             return "cart-kbd"
 
@@ -583,25 +583,26 @@ class TestCheckoutRewardSelection:
         assert "checkout_choose_reward" in cbs2
         assert "checkout_remove_reward" in cbs2
 
-    async def test_choose_reward_lists_only_qualifying(self, monkeypatch):
+    async def test_choose_reward_lists_full_catalog_with_locks_and_balance(self, monkeypatch):
+        # Balance 0 + two rewards: both shown as locked text lines, zero buttons.
         handler = orders_module.OrderHandlers()
         update = DummyUpdate()
         update.callback_query = DummyCallbackQuery(data="checkout_choose_reward")
         context = make_context()
         context.user_data["selected_address_id"] = 5
-        context.user_data["selected_payment_method"] = "card"
 
         cart_data = {"data": {"cart": {"cart_items": [
             {"product": {"name": "Bottle", "current_price": 12000}, "quantity": 2},  # subtotal 24000
         ]}}}
-        rewards_data = {"data": {"rewards": [
-            {"id": 1, "name": "Affordable", "points_cost": 100, "reward_type": "discount",
-             "can_redeem": True, "min_order_value": 0},
-            {"id": 2, "name": "Below Min", "points_cost": 100, "reward_type": "discount",
-             "can_redeem": True, "min_order_value": 999999},
-            {"id": 3, "name": "Cant Afford", "points_cost": 100, "reward_type": "discount",
-             "can_redeem": False, "min_order_value": 0},
-        ]}}
+        rewards_data = {"data": {
+            "user_points_balance": 0,
+            "rewards": [
+                {"id": 1, "name": "Coin Locked", "points_cost": 100,
+                 "can_redeem": False, "points_needed": 100, "min_order_value": 0},
+                {"id": 2, "name": "Order Locked", "points_cost": 50,
+                 "can_redeem": True, "points_needed": 0, "min_order_value": 999999},
+            ],
+        }}
         captured = {}
 
         def _picker(rewards, language):
@@ -612,7 +613,59 @@ class TestCheckoutRewardSelection:
         monkeypatch.setattr(eligibility, "is_loyalty_eligible", AsyncMock(return_value=True))
         monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(orders_module, "get_auth_token", AsyncMock(return_value="jwt"))
-        monkeypatch.setattr(orders_module.OrderKeyboards, "checkout_reward_picker", staticmethod(_picker))
+        monkeypatch.setattr(
+            orders_module.OrderKeyboards, "checkout_reward_picker", staticmethod(_picker)
+        )
+        monkeypatch.setattr(orders_module, "api_client", FakeAPIClientContext(
+            get_cart=_resp(success=True, data=cart_data),
+            get_loyalty_rewards=_resp(success=True, data=rewards_data),
+        ))
+
+        await handler.checkout_choose_reward(update, context)
+
+        # No reward is tappable: picker gets an empty affordable list.
+        assert captured["rewards"] == []
+        text = update.callback_query.edit_message_text.await_args.kwargs["text"]
+        # Balance header present.
+        assert "telegram.loyalty.balance_header:en" in text
+        # Both rewards listed by name + cost.
+        assert "Coin Locked" in text and "Order Locked" in text
+        # Coin-shortfall lock line for reward 1, min-order lock line for reward 2.
+        assert "telegram.loyalty.lock_need_coins:en" in text
+        assert "telegram.loyalty.lock_add_order:en" in text
+
+    async def test_choose_reward_affordable_in_budget_is_a_button(self, monkeypatch):
+        handler = orders_module.OrderHandlers()
+        update = DummyUpdate()
+        update.callback_query = DummyCallbackQuery(data="checkout_choose_reward")
+        context = make_context()
+        context.user_data["selected_address_id"] = 5
+
+        cart_data = {"data": {"cart": {"cart_items": [
+            {"product": {"name": "Bottle", "current_price": 12000}, "quantity": 2},  # subtotal 24000
+        ]}}}
+        rewards_data = {"data": {
+            "user_points_balance": 500,
+            "rewards": [
+                {"id": 1, "name": "Affordable", "points_cost": 100,
+                 "can_redeem": True, "points_needed": 0, "min_order_value": 0},
+                {"id": 2, "name": "Order Locked", "points_cost": 50,
+                 "can_redeem": True, "points_needed": 0, "min_order_value": 999999},
+            ],
+        }}
+        captured = {}
+
+        def _picker(rewards, language):
+            captured["rewards"] = rewards
+            return "picker-kbd"
+
+        monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(eligibility, "is_loyalty_eligible", AsyncMock(return_value=True))
+        monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)
+        monkeypatch.setattr(orders_module, "get_auth_token", AsyncMock(return_value="jwt"))
+        monkeypatch.setattr(
+            orders_module.OrderKeyboards, "checkout_reward_picker", staticmethod(_picker)
+        )
         monkeypatch.setattr(orders_module, "api_client", FakeAPIClientContext(
             get_cart=_resp(success=True, data=cart_data),
             get_loyalty_rewards=_resp(success=True, data=rewards_data),
@@ -621,8 +674,11 @@ class TestCheckoutRewardSelection:
         await handler.checkout_choose_reward(update, context)
 
         ids = [r["id"] for r in captured["rewards"]]
-        assert ids == [1]  # only the affordable, in-budget reward is offered
-        update.callback_query.edit_message_text.assert_awaited_once()
+        assert ids == [1]  # only affordable + in-budget reward becomes a button
+        text = update.callback_query.edit_message_text.await_args.kwargs["text"]
+        assert "telegram.loyalty.balance_header:en" in text
+        # The min-order-locked reward still appears as a text lock line.
+        assert "telegram.loyalty.lock_add_order:en" in text
 
     async def test_apply_reward_stores_and_rerenders(self, monkeypatch):
         handler = orders_module.OrderHandlers()
@@ -868,3 +924,37 @@ class TestLoyaltyHandlerWave2:
             loyalty_module.LoyaltyHandlers._referral_deep_link(ctx2, "ABC123")
             == "https://t.me/aqua_element_bot?start=ref_ABC123"
         )
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+class TestBackToPayment:
+    def test_order_confirmation_keyboard_has_back_to_payment_both_branches(self, monkeypatch):
+        monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)
+
+        meets = orders_module.OrderKeyboards.order_confirmation(
+            "en", meets_minimum=True, has_reward=False
+        )
+        cbs = [b.callback_data for row in meets.inline_keyboard for b in row]
+        assert "back_to_payment" in cbs
+
+        below = orders_module.OrderKeyboards.order_confirmation(
+            "en", meets_minimum=False, has_reward=False
+        )
+        cbs2 = [b.callback_data for row in below.inline_keyboard for b in row]
+        assert "back_to_payment" in cbs2
+
+    async def test_back_to_payment_rerenders_picker_and_preserves_reward(self, monkeypatch):
+        handler = orders_module.OrderHandlers()
+        handler._show_payment_picker = AsyncMock()
+        update = DummyUpdate()
+        update.callback_query = DummyCallbackQuery(data="back_to_payment")
+        context = make_context()
+        context.user_data["selected_address_id"] = 42
+        context.user_data["selected_reward_id"] = 7
+
+        await handler.back_to_payment(update, context)
+
+        handler._show_payment_picker.assert_awaited_once_with(update, context, 42)
+        # The reward selection must survive the round-trip back to payment.
+        assert context.user_data["selected_reward_id"] == 7

@@ -290,13 +290,14 @@ class WaterBusinessBot:
             CallbackQueryHandler(order_handlers.checkout_choose_reward, pattern="^checkout_choose_reward$"),
             CallbackQueryHandler(order_handlers.checkout_apply_reward, pattern="^checkout_apply_reward_\\d+$"),
             CallbackQueryHandler(order_handlers.checkout_remove_reward, pattern="^checkout_remove_reward$"),
+            CallbackQueryHandler(order_handlers.back_to_payment, pattern="^back_to_payment$"),
             CallbackQueryHandler(order_handlers.checkout_handler, pattern="^checkout"),
             CallbackQueryHandler(order_handlers.address_handler, pattern="^address_"),
             CallbackQueryHandler(order_handlers.payment_handler, pattern="^payment_(cash|card|payme|click|uzcard|humo|business_account)$"),
             CallbackQueryHandler(order_handlers.confirm_order, pattern="^confirm_order"),
             CallbackQueryHandler(order_handlers.select_payment_cash, pattern="^select_payment_cash$"),
             CallbackQueryHandler(order_handlers.cancel_checkout, pattern="^cancel_order$"),
-            CallbackQueryHandler(order_handlers.checkout_handler, pattern="^edit_order$"),
+            CallbackQueryHandler(order_handlers.edit_cart, pattern="^edit_order$"),
             CallbackQueryHandler(order_handlers.back_to_order_confirm, pattern="^back_to_order_confirm$"),
             CallbackQueryHandler(order_handlers.track_order, pattern="^track_order_"),
             CallbackQueryHandler(order_handlers.orders_menu, pattern="^back_to_orders$"),
@@ -342,6 +343,13 @@ class WaterBusinessBot:
             # add_phone_number is now handled by phone_verification_handler ConversationHandler
             CallbackQueryHandler(profile_handlers.verify_phone_number, pattern="^verify_phone_number$"),
             CallbackQueryHandler(profile_handlers.edit_profile, pattern="^edit_profile$"),
+            # Profile field-edit sub-menu (Deliverable C)
+            CallbackQueryHandler(profile_handlers.edit_profile_name_prompt, pattern="^edit_profile_name$"),
+            CallbackQueryHandler(profile_handlers.edit_profile_birthday_start, pattern="^edit_profile_birthday$"),
+            CallbackQueryHandler(language_handler.language_menu, pattern="^edit_profile_language$"),
+            CallbackQueryHandler(profile_handlers.phone_verification_menu, pattern="^edit_profile_phone$"),
+            # cancel_action used by the name-edit prompt / birthday prompt -> return to profile
+            CallbackQueryHandler(profile_handlers.profile_menu, pattern="^cancel_action$"),
             CallbackQueryHandler(profile_handlers.manage_addresses, pattern="^manage_addresses$"),
             CallbackQueryHandler(profile_handlers.view_address, pattern="^view_address_"),
             CallbackQueryHandler(profile_handlers.select_edit_address, pattern="^select_edit_address$"),
@@ -865,6 +873,12 @@ class WaterBusinessBot:
         elif input_type == 'edit_address_instructions':
             # Handle address instructions editing
             await profile_handlers.handle_address_instructions_edit(update, context, text, user_state)
+        elif input_type == 'edit_profile_name':
+            # Handle profile name editing
+            await profile_handlers.handle_profile_name_edit(update, context, text, user_state)
+        elif input_type == 'edit_profile_birthday':
+            # Handle profile birthday editing (DD-MM-YYYY text entry)
+            await profile_handlers.handle_profile_birthday_edit(update, context, text, user_state)
         else:
             # Unknown state, clear it
             await self.user_repository.update_user_state(user_id, {})

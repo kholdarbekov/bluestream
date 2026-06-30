@@ -563,6 +563,9 @@ def create_app(config_class=None):
 
     # Initialize extensions with app
     db.init_app(app)
+    from business_app.utils.loyalty_award_dispatch import register_loyalty_award_dispatch
+
+    register_loyalty_award_dispatch(db)
     migrate.init_app(app, db, directory="business_app/migrations")
     jwt.init_app(app)
     cors.init_app(app, origins=app.config["CORS_ORIGINS"], supports_credentials=True)

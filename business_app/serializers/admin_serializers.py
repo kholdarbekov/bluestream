@@ -604,6 +604,7 @@ def serialize_user_admin(user, include_statistics: bool = False) -> Dict[str, An
             ),
             "company_name": getattr(user, "company_name", None),
             "tax_id": getattr(user, "tax_id", None),
+            "date_of_birth": user.date_of_birth.isoformat() if getattr(user, "date_of_birth", None) else None,
             "entity_subtype": (
                 getattr(user, "entity_subtype", None).value
                 if getattr(user, "entity_subtype", None) is not None

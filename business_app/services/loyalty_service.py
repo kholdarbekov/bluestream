@@ -793,11 +793,24 @@ class LoyaltyService:
         # Check for tier upgrade
         self._check_tier_upgrade(account)
 
+        # SSOT: park ONE pending notification on the session (drained exactly
+        # once by the after_commit listener in
+        # business_app/utils/loyalty_award_dispatch.py). This fires whether the
+        # caller commits here or via an outer transaction (commit=False).
+        from business_app.utils.loyalty_award_dispatch import PENDING_KEY
+
+        reason = action_type.value if hasattr(action_type, "value") else str(action_type)
+        db.session.info.setdefault(PENDING_KEY, []).append(
+            {
+                "user_id": user_id,
+                "points": points,
+                "reason": reason,
+                "balance": account.current_balance,
+            }
+        )
+
         if commit:
             db.session.commit()
-            # Send notification only after a successful commit so a rolled-back
-            # award does not push a stale push to the customer.
-            self._send_points_notification(user_id, points, "earned")
         else:
             db.session.flush()
 
@@ -2056,18 +2069,35 @@ class LoyaltyService:
                 return code
         return f"RWD{secrets.token_hex(8).upper()}"  # extremely unlikely fallback
 
-    def _send_points_notification(self, user_id: int, points: int, action: str, notification_type_str: str = None):
-        """Send points notification
+    def _send_points_notification(
+        self,
+        user_id: int,
+        points: int,
+        action: str,
+        notification_type_str: str = None,
+        reason: str = None,
+        balance: int = None,
+    ):
+        """Send points notification.
 
         Args:
             user_id: User to notify
             points: Number of points
             action: Action type (earned, redeemed, etc.)
             notification_type_str: String value of NotificationType enum to use
+            reason: AquaCoins accrual reason (LoyaltyActionType.value) for a
+                reason-specific customer message.
+            balance: New AquaCoins balance after the award.
         """
         from ..tasks.notification_tasks import send_loyalty_notification_task
 
-        send_loyalty_notification_task.delay(user_id, action, {"points": points}, notification_type_str)
+        data = {"points": points}
+        if reason is not None:
+            data["reason"] = reason
+        if balance is not None:
+            data["balance"] = balance
+
+        send_loyalty_notification_task.delay(user_id, action, data, notification_type_str)
 
     def _send_tier_upgrade_notification(self, user_id: int, new_tier: str):
         """Send tier upgrade notification"""
@@ -2399,8 +2429,10 @@ class LoyaltyService:
             return {"granted": 0}
 
         # Compare birthdays on the BUSINESS calendar, not UTC. date_of_birth is a
-        # timestamptz storing local midnight (so its UTC instant lands on the prior
-        # day for UTC+ zones); matching by UTC EXTRACT would fire a day early.
+        # timestamptz storing naive UTC midnight; converting to the business tz on
+        # read keeps the calendar day (00:00 UTC -> 05:00 Tashkent = same day).
+        # The tzinfo-None guard below also handles any pre-fix rows that were stored
+        # as tz-aware local midnight. Matching by raw UTC EXTRACT would fire a day early.
         business_tz = ZoneInfo(DISPLAY_TIMEZONE)
         today_local = datetime.now(business_tz)
 

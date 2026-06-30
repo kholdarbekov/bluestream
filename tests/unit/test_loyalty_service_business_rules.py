@@ -107,8 +107,6 @@ class TestLoyaltyServiceBusinessRules:
         monkeypatch,
     ):
         monkeypatch.setattr(loyalty_service, "_check_tier_upgrade", lambda _account: None)
-        notify = Mock()
-        monkeypatch.setattr(loyalty_service, "_send_points_notification", notify)
 
         tx = loyalty_service.award_points(
             user_id=loyalty_account.user_id,
@@ -122,7 +120,10 @@ class TestLoyaltyServiceBusinessRules:
         assert tx.transaction_type == LoyaltyTransactionType.BONUS
         assert loyalty_account.current_balance == 1250
         assert loyalty_account.total_earned == 1250
-        notify.assert_called_once()
+        # D1: award_points parks notifications on session.info for the
+        # after_commit listener (loyalty_award_dispatch.py) rather than calling
+        # _send_points_notification directly. Notification dispatch is tested
+        # separately; this test focuses on the account and transaction outcomes.
 
     def test_deduct_points_rejects_when_balance_insufficient(self, loyalty_service, loyalty_account, monkeypatch):
         monkeypatch.setattr(loyalty_service, "get_available_points", lambda _uid: 100)

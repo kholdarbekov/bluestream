@@ -8,7 +8,7 @@ from urllib.parse import urlparse, urlunparse
 from io import BytesIO
 import os
 import httpx
-from telegram import Update, constants
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, constants
 from telegram.ext import ContextTypes
 from telegram.helpers import escape_markdown
 
@@ -213,6 +213,21 @@ class ProductHandlers(BaseHandler):
             keyboard = ProductKeyboards.product_categories(
                 categories, language, quick_suggestions=quick_suggestions,
             )
+
+            # Breadcrumb back to the cart edit screen when the user reached the
+            # product menu via the order-confirmation 'Edit -> Add product' path
+            # (Deliverable B). 'edit_order' re-enters edit mode so 'Done' still
+            # routes back to the confirmation screen.
+            if context.user_data.get('cart_edit_return'):
+                rows = list(keyboard.inline_keyboard) + [
+                    [
+                        InlineKeyboardButton(
+                            i18n.get('telegram.cart.back_to_cart', language),
+                            callback_data='edit_order',
+                        )
+                    ]
+                ]
+                keyboard = InlineKeyboardMarkup(rows)
 
             if update.callback_query:
                 try:
@@ -756,9 +771,16 @@ class ProductHandlers(BaseHandler):
             action = query.data.split('_')[1]  # cart_{action}
 
             if action == 'view':
-                await self.show_cart(update, context)
+                # Edit-mode-aware: if the user is in the cart editing flow, stay
+                # in edit mode so a stray tap on a display cell doesn't eject them.
+                edit_mode = bool(context.user_data.get('cart_edit_return'))
+                await self.show_cart(update, context, edit_mode=edit_mode)
             elif action == 'clear':
                 await self._clear_cart(update, context)
+            elif action in ('inc', 'dec', 'rm'):
+                # Edit-mode per-item controls (Deliverable B):
+                #   cart_inc_{product_id} / cart_dec_{product_id} / cart_rm_{product_id}
+                await self._handle_cart_item_action(update, context, action, language)
             elif action == 'checkout':
                 # Cart-driven checkout — clear any lingering Quick Order
                 # flags so the cart flow starts from a clean state and
@@ -770,6 +792,73 @@ class ProductHandlers(BaseHandler):
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="cart_handler")
+
+    async def _handle_cart_item_action(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
+                                       action: str, language: str):
+        """Mutate a single cart line then re-render the edit-mode cart.
+
+        action is one of 'inc' | 'dec' | 'rm'. Callback shape is
+        cart_{action}_{product_id}. The +/- clamp mirrors quantity_handler:
+        new_qty is bounded to [min_order_qty, min(MAX_QUANTITY, stock)].
+        """
+        query = update.callback_query
+        parts = query.data.split('_')  # ['cart', action, product_id]
+        try:
+            product_id = int(parts[2])
+        except (IndexError, ValueError):
+            await query.answer(i18n.get('telegram.products.invalid_action', language))
+            return
+
+        async with api_client as client:
+            user_token = await get_auth_token(update, context, client)
+            if not user_token:
+                await self._handle_auth_error(update, language)
+                return
+
+            if action == 'rm':
+                remove_response = await client.remove_cart_item(user_token, product_id)
+                if not remove_response.success:
+                    await self._handle_api_error(update, remove_response.error, language)
+                    return
+            else:
+                # Read the current cart quantity for this product, and the
+                # product's purchase bounds, to clamp exactly like quantity_handler.
+                cart_response = await client.get_cart(user_token)
+                current_qty = (
+                    self._quantity_in_cart_payload(cart_response, product_id)
+                    if (cart_response and cart_response.success)
+                    else None
+                ) or 0
+
+                product_response = await client.get_product(user_token, product_id, language=language)
+                if not product_response.success:
+                    await self._handle_api_error(update, product_response.error, language)
+                    return
+                product = product_response.data['data']['product']
+                inventory = product.get('inventory') or {}
+                min_order_qty = int(inventory.get('min_order_quantity', 1) or 1)
+                stock_quantity = inventory.get('stock_quantity')
+                upper = ProductKeyboards.MAX_QUANTITY
+                if isinstance(stock_quantity, int) and stock_quantity > 0:
+                    upper = min(upper, stock_quantity)
+
+                if action == 'inc':
+                    new_qty = min(current_qty + 1, upper)
+                else:  # 'dec'
+                    new_qty = max(current_qty - 1, min_order_qty)
+
+                update_response = await client.update_cart_item(
+                    user_token,
+                    product_id,
+                    quantity=new_qty,
+                )
+                if not update_response.success:
+                    await self._handle_api_error(update, update_response.error, language)
+                    return
+
+        # Re-render in edit mode so controls + warnings refresh in place.
+        await self.show_cart(update, context, edit_mode=True)
+        await query.answer()
 
     async def search_products(self, update: Update, context: ContextTypes.DEFAULT_TYPE, search_term: str):
         """Handle product search"""
@@ -874,8 +963,12 @@ class ProductHandlers(BaseHandler):
 
         return "\n\n".join(details)
 
-    async def show_cart(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Show shopping cart contents"""
+    async def show_cart(self, update: Update, context: ContextTypes.DEFAULT_TYPE, edit_mode: bool = False):
+        """Show shopping cart contents.
+
+        edit_mode=True (Deliverable B) renders per-item +/- and remove controls
+        plus 'Add product' and 'Done' rows instead of the normal cart actions.
+        """
         # This loads cart from database
         user_id = update.effective_user.id
         language = await i18n.get_user_language(user_id)
@@ -978,7 +1071,14 @@ class ProductHandlers(BaseHandler):
 
             cart_text = "\n".join(lines)
 
-        keyboard = OrderKeyboards.cart_actions(language, cart_is_empty, meets_minimum)
+        keyboard = OrderKeyboards.cart_actions(
+            language,
+            cart_is_empty,
+            meets_minimum,
+            edit_mode=edit_mode,
+            cart_items=cart_items,
+            edit_return=context.user_data.get('cart_edit_return'),
+        )
 
         await self._edit_or_replace_callback_message(
             update.callback_query,

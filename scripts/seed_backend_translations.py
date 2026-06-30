@@ -5047,6 +5047,26 @@ BACKEND_TRANSLATIONS = {
         'uz': '✏️ Profilni tahrirlash',
         'ru': '✏️ Редактировать профиль'
     },
+    'telegram.profile.edit_field_name': {'en': '👤 Name', 'uz': '👤 Ism', 'ru': '👤 Имя'},
+    'telegram.profile.edit_field_birthday': {'en': '🎂 Birthday', 'uz': "🎂 Tug'ilgan kun", 'ru': '🎂 День рождения'},
+    'telegram.profile.edit_field_language': {'en': '🌐 Language', 'uz': '🌐 Til', 'ru': '🌐 Язык'},
+    'telegram.profile.edit_field_phone': {'en': '📱 Phone', 'uz': '📱 Telefon', 'ru': '📱 Телефон'},
+    'telegram.profile.edit_menu_title': {'en': 'What would you like to edit?', 'uz': "Qaysi ma'lumotni o'zgartirmoqchisiz?", 'ru': 'Что вы хотите изменить?'},
+    'telegram.profile.name_prompt': {'en': 'Enter your new first and last name:', 'uz': 'Yangi ism va familiyangizni kiriting:', 'ru': 'Введите новое имя и фамилию:'},
+    'telegram.profile.name_updated': {'en': '✅ Name updated', 'uz': '✅ Ism yangilandi', 'ru': '✅ Имя обновлено'},
+    'telegram.profile_birthday': {'en': '🎂 Birthday', 'uz': "🎂 Tug'ilgan kun", 'ru': '🎂 День рождения'},
+    'telegram.profile.birthday_prompt': {
+        'en': "Enter your birthday in DD-MM-YYYY format\n\nExample: 17-05-1990",
+        'uz': "Tug'ilgan kuningizni DD-MM-YYYY formatida kiriting\n\nMasalan: 17-05-1990",
+        'ru': "Введите дату рождения в формате DD-MM-YYYY\n\nПример: 17-05-1990",
+    },
+    'telegram.profile.birthday_invalid_format': {
+        'en': "Invalid format. Please enter your birthday as DD-MM-YYYY\n\nExample: 17-05-1990",
+        'uz': "Noto'g'ri format. Tug'ilgan kuningizni DD-MM-YYYY formatida kiriting\n\nMasalan: 17-05-1990",
+        'ru': "Неверный формат. Введите дату рождения в формате DD-MM-YYYY\n\nПример: 17-05-1990",
+    },
+    'telegram.profile.birthday_updated': {'en': '✅ Birthday updated', 'uz': "✅ Tug'ilgan kun yangilandi", 'ru': '✅ День рождения обновлён'},
+    'telegram.profile.birthday_update_failed': {'en': '❌ Could not update birthday', 'uz': "❌ Tug'ilgan kunni yangilab bo'lmadi", 'ru': '❌ Не удалось обновить день рождения'},
     'telegram.profile.addresses': {
         'en': '📍 Addresses',
         'uz': '📍 Manzillar',
@@ -5206,6 +5226,27 @@ BACKEND_TRANSLATIONS = {
         'en': 'Add more items to reach minimum order amount',
         'uz': 'Minimal buyurtma summasiga yetish uchun yana mahsulot qo\'shing',
         'ru': 'Добавьте товары, чтобы достичь минимальной суммы заказа'
+    },
+    # Cart edit-mode controls (Deliverable B — full cart editing)
+    'telegram.cart.remove': {
+        'en': '🗑 Remove',
+        'uz': '🗑 O\'chirish',
+        'ru': '🗑 Удалить'
+    },
+    'telegram.cart.add_product': {
+        'en': '➕ Add product',
+        'uz': '➕ Mahsulot qo\'shish',
+        'ru': '➕ Добавить товар'
+    },
+    'telegram.cart.back_to_cart': {
+        'en': '🛒 Back to cart',
+        'uz': '🛒 Savatchaga qaytish',
+        'ru': '🛒 Назад в корзину'
+    },
+    'telegram.cart.done': {
+        'en': '✅ Done',
+        'uz': '✅ Tayyor',
+        'ru': '✅ Готово'
     },
     'telegram.back_to_order': {
         'en': 'Back to Order',
@@ -5560,6 +5601,21 @@ BACKEND_TRANSLATIONS = {
         'en': 'Reward removed',
         'uz': 'Mukofot olib tashlandi',
         'ru': 'Награда убрана'
+    },
+    'telegram.loyalty.balance_header': {
+        'en': 'Your balance: {points} AquaCoins',
+        'uz': 'Sizning balansingiz: {points} AquaCoins',
+        'ru': 'Ваш баланс: {points} AquaCoins'
+    },
+    'telegram.loyalty.lock_need_coins': {
+        'en': 'need +{points} AquaCoins',
+        'uz': "yana +{points} AquaCoins kerak",
+        'ru': 'нужно ещё +{points} AquaCoins'
+    },
+    'telegram.loyalty.lock_add_order': {
+        'en': 'add +{amount} UZS to your order',
+        'uz': "buyurtmaga +{amount} so'm qo'shing",
+        'ru': 'добавьте +{amount} сум к заказу'
     },
     'telegram.loyalty.refer_friends': {
         'en': 'Invite friends',
@@ -7049,6 +7105,7 @@ ADMIN_UI_BACKFILL_TRANSLATIONS = {
     'ui.users.create_new_user': _ui_tr('Create New User', 'Yangi foydalanuvchi yaratish', 'Создать нового пользователя'),
     'ui.users.created': _ui_tr('Created', 'Yaratilgan', 'Создан'),
     'ui.users.default': _ui_tr('Default', 'Standart', 'По умолчанию'),
+    'ui.users.date_of_birth': _ui_tr('Date of Birth', "Tug'ilgan kun", 'День рождения'),
     'ui.users.delete': _ui_tr('Delete', 'O\'chirish', 'Удалить'),
     'ui.users.delete_address_confirm': _ui_tr('Are you sure you want to delete this address?', 'Ushbu manzilni o\'chirishni xohlaysizmi?', 'Вы уверены, что хотите удалить этот адрес?'),
     'ui.users.delivery_info': _ui_tr('Delivery Info', 'Yetkazib berish ma\'lumoti', 'Информация о доставке'),

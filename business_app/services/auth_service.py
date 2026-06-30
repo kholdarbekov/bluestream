@@ -1165,6 +1165,55 @@ class AuthService:
 
         return user
 
+    def _parse_validate_dob(self, value) -> datetime:
+        """Parse, validate, and return a naive UTC-midnight datetime for a date-of-birth value.
+
+        Raises ValidationError (field-keyed on ``date_of_birth``) for:
+        - unparseable format (expects ISO YYYY-MM-DD)
+        - future dates
+        - age outside [10, 100] years (birthday-month corrected)
+
+        Returns a **naive** ``datetime(year, month, day)`` (no tzinfo).  When written
+        to the ``date_of_birth`` ``timestamptz`` column in a UTC database session,
+        Postgres interprets the naive value as UTC midnight and stores it as
+        ``YYYY-MM-DDT00:00:00+00:00``.  Reading it back and slicing ``isoformat()[:10]``
+        therefore yields the exact date the user entered — no day shift.  The fix is
+        also idempotent under re-save: a tz-aware read-back string such as
+        ``2003-05-22T00:00:00+00:00`` parsed here still produces ``date(2003, 5, 22)``
+        and the same naive midnight, so admin re-submits never accumulate drift.
+
+        The future/age validation still uses the business-timezone "today" so that
+        users who are exactly on the age boundary are judged against the local
+        calendar.  ``LoyaltyService.grant_birthday_bonuses`` converts ``date_of_birth``
+        to the business timezone on read (00:00 UTC → 05:00 Tashkent = same calendar
+        day), so the birthday bonus fires on the correct day.
+        """
+        from zoneinfo import ZoneInfo
+        from shared.constants import DISPLAY_TIMEZONE
+
+        try:
+            parsed = datetime.fromisoformat(value).date()
+        except (ValueError, TypeError):
+            raise ValidationError(
+                get_translation("error.validation.failed"),
+                {"date_of_birth": ["Invalid date format; expected YYYY-MM-DD"]},
+            )
+
+        business_tz = ZoneInfo(DISPLAY_TIMEZONE)
+        today_local = datetime.now(business_tz).date()
+        if parsed > today_local:
+            raise ValidationError(
+                get_translation("error.validation.failed"),
+                {"date_of_birth": ["Date of birth cannot be in the future"]},
+            )
+        age = today_local.year - parsed.year - ((today_local.month, today_local.day) < (parsed.month, parsed.day))
+        if age < 10 or age > 100:
+            raise ValidationError(
+                get_translation("error.validation.failed"),
+                {"date_of_birth": ["Age must be between 10 and 100 years"]},
+            )
+        return datetime(parsed.year, parsed.month, parsed.day)
+
     def update_user_by_admin(
         self,
         user_id: int,
@@ -1179,6 +1228,7 @@ class AuthService:
         user_type: str = None,
         entity_subtype: Any = ...,
         cod_debt_check_exempt: Optional[bool] = None,
+        date_of_birth: Any = ...,
     ) -> User:
         """Update a user from the admin panel using the simplified two-type business model.
 
@@ -1329,6 +1379,15 @@ class AuthService:
         user.company_name = normalized_company_name
         user.tax_id = normalized_tax_id
         user.entity_subtype = EntitySubtype(new_subtype_value) if new_subtype_value else None
+
+        # Date of birth: sentinel `...` => leave unchanged; "" / None => clear;
+        # otherwise validate (no future, age 10-100) and store local-midnight
+        # timestamptz so birthday-bonus matching uses the business calendar.
+        if date_of_birth is not ...:
+            if date_of_birth:
+                user.date_of_birth = self._parse_validate_dob(date_of_birth)
+            else:
+                user.date_of_birth = None
 
         db.session.add(user)
         db.session.commit()
@@ -1582,10 +1641,7 @@ class AuthService:
         if "date_of_birth" in data:
             date_value = data["date_of_birth"]
             if date_value:
-                try:
-                    user.date_of_birth = datetime.fromisoformat(date_value)
-                except (ValueError, TypeError):
-                    pass
+                user.date_of_birth = self._parse_validate_dob(date_value)
             else:
                 user.date_of_birth = None
         if "gender" in data:

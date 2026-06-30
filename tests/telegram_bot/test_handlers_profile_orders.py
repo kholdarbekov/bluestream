@@ -65,6 +65,7 @@ class TestProfileHandlerFlows:
         )
         monkeypatch.setattr(profile_module, "BotUserRepository", lambda _db: user_repo)
         monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
+        monkeypatch.setattr(profile_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(profile_module, "main_menu_for", AsyncMock(return_value="menu-kbd"))
         monkeypatch.setattr(profile_module, "maybe_remove_stale_reply_keyboard", cleanup_mock)
 
@@ -75,6 +76,36 @@ class TestProfileHandlerFlows:
         update.message.reply_text.assert_awaited_once_with(
             text="telegram.welcome:en",
             reply_markup="menu-kbd",
+        )
+
+    async def test_start_registration_existing_user_uses_saved_language_not_telegram_code(self, monkeypatch):
+        # Stored preferred_language='ru' must win over effective_user.language_code='en'.
+        handler = profile_module.ProfileHandlers()
+        update = DummyUpdate(user_id=909)
+        update.effective_user.language_code = "en"
+        context = make_context()
+        cleanup_mock = AsyncMock(return_value=True)
+
+        user_repo = SimpleNamespace(
+            get_user_by_telegram_id=AsyncMock(
+                return_value={"id": 1, "phone": "+998901112233", "preferred_language": "ru"}
+            )
+        )
+        monkeypatch.setattr(profile_module, "BotUserRepository", lambda _db: user_repo)
+        monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
+        monkeypatch.setattr(
+            profile_module.i18n, "get_user_language", AsyncMock(return_value="ru")
+        )
+        monkeypatch.setattr(profile_module, "main_menu_for", AsyncMock(return_value="menu-kbd-ru"))
+        monkeypatch.setattr(profile_module, "maybe_remove_stale_reply_keyboard", cleanup_mock)
+
+        state = await handler.start_registration_new(update, context)
+
+        assert state == ConversationHandler.END
+        profile_module.main_menu_for.assert_awaited_once_with(909, "ru")
+        update.message.reply_text.assert_awaited_once_with(
+            text="telegram.welcome:ru",
+            reply_markup="menu-kbd-ru",
         )
 
     async def test_phone_verify_contact_rejects_other_users_contact(self, monkeypatch):

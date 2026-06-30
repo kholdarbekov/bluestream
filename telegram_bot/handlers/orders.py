@@ -18,6 +18,7 @@ from utils import user_middleware, format_price, MessageBuilder, get_auth_token
 from shared.constants import ORDER_STATUS_ICONS, DEFAULT_STATUS_ICON, DISPLAY_TIMEZONE
 from shared.business_config import MIN_ORDER_AMOUNT
 from handlers.base import BaseHandler
+from handlers.products import product_handlers
 
 logger = logging.getLogger('handlers')
 
@@ -706,6 +707,7 @@ class OrderHandlers(BaseHandler):
             context.user_data.pop('checkout_source', None)
             context.user_data.pop('quick_order_address_id', None)
             context.user_data.pop('selected_reward_id', None)
+            context.user_data.pop('cart_edit_return', None)
 
             await query.edit_message_text(
                 text=i18n.get('telegram.action_cancelled', language),
@@ -902,7 +904,9 @@ class OrderHandlers(BaseHandler):
                         reply_markup=keyboard
                     )
 
-                # Don't clear context data - needed for payment flow
+                # Don't clear context data - needed for payment flow.
+                # But the edit-cart return flag is no longer needed once order is placed.
+                context.user_data.pop('cart_edit_return', None)
                 logger.info(f"{provider_method} payment link sent for order {order['id']} to user {user_id}")
                 return
 
@@ -1186,9 +1190,42 @@ class OrderHandlers(BaseHandler):
     async def back_to_order_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle back button from payment screen to order confirmation"""
         try:
+            # The user is back at the confirmation screen — editing is done.
+            # Clear the flag so a subsequent cart tap renders normal (non-edit) mode.
+            context.user_data.pop('cart_edit_return', None)
             await self._show_order_confirmation(update, context)
         except Exception as e:
             await self._handle_error(update, exc=e, operation="back_to_order_confirm")
+
+    async def edit_cart(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Open the cart in edit mode from the order-confirmation 'Edit' button.
+
+        Repointed from checkout_handler (Deliverable B): instead of restarting
+        checkout, render the existing server-cart summary with per-item +/- and
+        remove controls. We stash where 'Done' should return to so the cart
+        keyboard can route back to the confirmation screen (which re-fetches the
+        live cart, so edits are reflected). selected_address_id / payment /
+        reward are NOT cleared here, so they survive the round-trip.
+        """
+        try:
+            context.user_data['cart_edit_return'] = 'order_confirm'
+            await product_handlers.show_cart(update, context, edit_mode=True)
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="edit_cart")
+
+    async def back_to_payment(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Back button from the confirmation card to the payment-method picker.
+
+        Re-renders the payment picker for the address already chosen this
+        checkout. The selected reward (selected_reward_id) is intentionally left
+        untouched so the user keeps it when they return to confirmation.
+        """
+        try:
+            await self._show_payment_picker(
+                update, context, context.user_data['selected_address_id']
+            )
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="back_to_payment")
 
     async def checkout_choose_reward(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show a picker of loyalty rewards that can be applied to this order.
@@ -1228,17 +1265,40 @@ class OrderHandlers(BaseHandler):
                     if rewards_response.success else []
                 )
 
-            # Offer only rewards that will actually apply to this order.
-            qualifying = [
-                r for r in rewards
-                if r.get('can_redeem') and float(r.get('min_order_value') or 0) <= float(subtotal)
-            ]
+            # Keep the FULL catalog: affordable + in-budget rewards become
+            # tappable buttons; everything else is listed as a locked text line
+            # explaining the shortfall (coins or min order value).
+            balance = (
+                (rewards_response.data or {}).get('data', {}).get('user_points_balance', 0)
+                if rewards_response.success else 0
+            )
+            points_unit = i18n.get('telegram.loyalty.points_unit', language)
 
+            affordable = []
             text = f"🎁 {i18n.get('telegram.loyalty.choose_reward_title', language)}\n\n"
-            if not qualifying:
-                text += i18n.get('telegram.loyalty.no_rewards_for_order', language)
+            text += i18n.get('telegram.loyalty.balance_header', language, points=balance) + "\n\n"
 
-            keyboard = OrderKeyboards.checkout_reward_picker(qualifying, language)
+            if not rewards:
+                text += i18n.get('telegram.loyalty.no_rewards_for_order', language)
+            else:
+                for reward in rewards:
+                    name = reward.get('name') or i18n.get('telegram.loyalty.reward_fallback', language)
+                    cost = reward.get('points_cost', 0)
+                    min_order = float(reward.get('min_order_value') or 0)
+                    meets_min = min_order <= float(subtotal)
+                    if reward.get('can_redeem') and meets_min:
+                        affordable.append(reward)
+                        text += f"🎁 {name} — {cost} {points_unit}\n"
+                    elif not reward.get('can_redeem'):
+                        shortfall = reward.get('points_needed') or max(0, cost - balance)
+                        lock = i18n.get('telegram.loyalty.lock_need_coins', language, points=shortfall)
+                        text += f"🔒 {name} — {cost} {points_unit} ({lock})\n"
+                    else:
+                        add_amount = int(min_order - float(subtotal))
+                        lock = i18n.get('telegram.loyalty.lock_add_order', language, amount=add_amount)
+                        text += f"🔒 {name} — {cost} {points_unit} ({lock})\n"
+
+            keyboard = OrderKeyboards.checkout_reward_picker(affordable, language)
             await query.edit_message_text(text=text, reply_markup=keyboard)
             await query.answer()
         except Exception as e:

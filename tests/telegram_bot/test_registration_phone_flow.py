@@ -149,6 +149,7 @@ class TestStrandedUserReprompt:
             get_user_by_telegram_id=AsyncMock(return_value={"id": 1, "phone": "+998901112233"})
         )
         monkeypatch.setattr(profile_module, "BotUserRepository", lambda _db: user_repo)
+        monkeypatch.setattr(profile_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
         monkeypatch.setattr(profile_module, "main_menu_for", AsyncMock(return_value="menu-kbd"))
         monkeypatch.setattr(profile_module, "maybe_remove_stale_reply_keyboard", cleanup_mock)

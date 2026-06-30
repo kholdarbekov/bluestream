@@ -24,6 +24,8 @@ class BotState(BaseModel):
     # Input awaiting type - determines which handler processes user input
     awaiting_input: Optional[Literal[
         'profile_edit',           # Editing user profile
+        'edit_profile_name',      # Editing profile first/last name
+        'edit_profile_birthday',  # Editing profile birthday (DD-MM-YYYY text entry)
         'address_location',       # Waiting for location share
         'address_title',          # Naming a new address
         'edit_address_title',     # Editing address name

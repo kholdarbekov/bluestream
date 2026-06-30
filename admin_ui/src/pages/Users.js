@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from 'react';
+import dayjs from 'dayjs';
 import { DEFAULT_PAGE_SIZE } from '../utils/constants';
 import {
   Table,
@@ -17,7 +18,8 @@ import {
   Col,
   Checkbox,
   Divider,
-  Tooltip
+  Tooltip,
+  DatePicker
 } from 'antd';
 import {
   SearchOutlined,
@@ -756,6 +758,7 @@ const Users = () => {
       entity_subtype: user.entity_subtype || undefined,
       company_name: user.company_name || '',
       tax_id: user.tax_id || '',
+      date_of_birth: user.date_of_birth ? dayjs(user.date_of_birth) : null,
       cod_debt_check_exempt: !!user.cod_debt_check_exempt
     });
   };
@@ -763,7 +766,10 @@ const Users = () => {
   const handleCreateOrEditSubmit = (values) => {
     const payload = {
       ...values,
-      user_type: values.user_type || (editingUser?.user_type || 'individual')
+      user_type: values.user_type || (editingUser?.user_type || 'individual'),
+      date_of_birth: values.date_of_birth
+        ? dayjs(values.date_of_birth).format('YYYY-MM-DD')
+        : null
     };
 
     if (payload.user_type !== 'entity') {
@@ -1444,6 +1450,12 @@ const Users = () => {
                       {selectedUser.updated_at ? formatLocaleDateTime(selectedUser.updated_at) : t('ui.users.na')}
                     </div>
                   </div>
+                  <div style={{ marginBottom: 8 }}>
+                    <strong>{t('ui.users.date_of_birth', 'Date of Birth')}:</strong>
+                    <div style={{ fontSize: '12px', marginTop: '2px' }}>
+                      {selectedUser.date_of_birth ? selectedUser.date_of_birth.slice(0, 10) : t('ui.users.na')}
+                    </div>
+                  </div>
                 </Col>
                 <Col xs={24} sm={12}>
                   <div style={{ marginBottom: 8 }}>
@@ -1853,6 +1865,17 @@ const Users = () => {
             ]}
           >
             <Input placeholder={t('ui.users.enter_email_optional', 'Enter email (optional)')} />
+          </Form.Item>
+
+          <Form.Item
+            name="date_of_birth"
+            label={t('ui.users.date_of_birth', 'Date of Birth')}
+          >
+            <DatePicker
+              style={{ width: '100%' }}
+              format="YYYY-MM-DD"
+              placeholder={t('ui.users.date_of_birth', 'Date of Birth')}
+            />
           </Form.Item>
 
           <Row gutter={16}>

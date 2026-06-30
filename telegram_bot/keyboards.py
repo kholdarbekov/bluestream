@@ -407,14 +407,55 @@ class OrderKeyboards:
     """Order-related keyboards"""
 
     @staticmethod
-    def cart_actions(language: str = 'en', cart_is_empty: bool = True, meets_minimum: bool = True) -> InlineKeyboardMarkup:
-        """Shopping cart action buttons
+    def cart_actions(language: str = 'en', cart_is_empty: bool = True,
+                     meets_minimum: bool = True, edit_mode: bool = False,
+                     cart_items: Optional[List[Dict]] = None,
+                     edit_return: Optional[str] = None) -> InlineKeyboardMarkup:
+        """Shopping cart action buttons.
 
         Args:
             language: Language code
             cart_is_empty: Whether cart has no items
             meets_minimum: Whether cart total meets minimum order amount
+            edit_mode: When True, render per-item +/- and remove controls plus an
+                'Add product' row and a 'Done' row (Deliverable B). The normal
+                checkout/clear/continue buttons are hidden in edit mode so the
+                screen stays focused on editing.
+            cart_items: The cart line-items (each {'product': {...}, 'quantity': N})
+                used to build per-item rows; only consulted when edit_mode is True.
+            edit_return: Where 'Done' routes. 'order_confirm' -> back to the order
+                confirmation screen; anything else -> back to the cart summary.
         """
+        if edit_mode and not cart_is_empty:
+            buttons: List[List[Dict[str, str]]] = []
+            for item in (cart_items or []):
+                product = item.get('product') or {}
+                product_id = product.get('id') or item.get('product_id')
+                quantity = item.get('quantity', 0)
+                name = product.get('name', '')
+                # Row 1: product name + quantity (display only, no-op tap reuses
+                # the cart-view callback so a stray tap is harmless).
+                buttons.append([
+                    {'text': f"{name} ×{quantity}", 'callback_data': 'cart_view'}
+                ])
+                # Row 2: [−] {qty} [+]  +  remove
+                buttons.append([
+                    {'text': '−', 'callback_data': f'cart_dec_{product_id}'},
+                    {'text': str(quantity), 'callback_data': 'cart_view'},
+                    {'text': '+', 'callback_data': f'cart_inc_{product_id}'},
+                    {'text': i18n.get('telegram.cart.remove', language),
+                     'callback_data': f'cart_rm_{product_id}'},
+                ])
+            buttons.append([
+                {'text': i18n.get('telegram.cart.add_product', language),
+                 'callback_data': 'menu_products'}
+            ])
+            done_cb = 'back_to_order_confirm' if edit_return == 'order_confirm' else 'back_to_cart'
+            buttons.append([
+                {'text': i18n.get('telegram.cart.done', language), 'callback_data': done_cb}
+            ])
+            return KeyboardBuilder.build_inline_keyboard(buttons)
+
         if cart_is_empty:
             buttons = [
                 [
@@ -582,6 +623,7 @@ class OrderKeyboards:
                 ])
 
         buttons.append([{'text': i18n.get('telegram.order.edit', language), 'callback_data': 'edit_order'}])
+        buttons.append([{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_payment'}])
 
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
@@ -865,6 +907,22 @@ class ProfileKeyboards:
             [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_main'}]
         ]
 
+        return KeyboardBuilder.build_inline_keyboard(buttons)
+
+    @staticmethod
+    def profile_edit_menu(language: str = 'en') -> InlineKeyboardMarkup:
+        """Profile field-edit sub-menu (Name / Birthday / Language / Phone)."""
+        buttons = [
+            [
+                {'text': i18n.get('telegram.profile.edit_field_name', language), 'callback_data': 'edit_profile_name'},
+                {'text': i18n.get('telegram.profile.edit_field_birthday', language), 'callback_data': 'edit_profile_birthday'}
+            ],
+            [
+                {'text': i18n.get('telegram.profile.edit_field_language', language), 'callback_data': 'edit_profile_language'},
+                {'text': i18n.get('telegram.profile.edit_field_phone', language), 'callback_data': 'edit_profile_phone'}
+            ],
+            [{'text': i18n.get('telegram.back', language), 'callback_data': 'menu_profile'}]
+        ]
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod

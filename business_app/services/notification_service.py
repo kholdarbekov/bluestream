@@ -531,7 +531,28 @@ class NotificationService:
         # Use provided notification type or default to LOYALTY_REWARD
         notif_type = notification_type if notification_type else NotificationType.LOYALTY_REWARD
 
-        return self.send_notification(user_id, notif_type, None, template_data)
+        user = User.query.get(user_id)
+        if not user:
+            raise NotificationError(get_translation("error.not_found"))
+
+        # Inject a per-language reason label for the reason-aware templates.
+        # Always inject (even when caller omits 'reason') so {reason_label}
+        # never leaks as a literal into Telegram templates.
+        if "reason_label" not in template_data:
+            reason = template_data.get("reason")
+            language = getattr(user, "preferred_language", None) or "uz"
+            template_data["reason_label"] = self._loyalty_reason_label(reason or "", language)
+
+        # Telegram-else-email applies ONLY to coin-award notifications
+        # (event_type == "earned"). Other loyalty events (tier_upgrade,
+        # points_expired, redeemed) keep the existing channel default so this
+        # change stays scoped to the spec (do not alter their behavior).
+        if event_type == "earned":
+            channels = self._resolve_loyalty_award_channels(user)
+        else:
+            channels = None
+
+        return self.send_notification(user_id, notif_type, channels, template_data)
 
     def update_notification_preferences(self, user_id: int, preferences: Dict[str, Any]) -> bool:
         """Update user's notification preferences"""
@@ -2553,10 +2574,80 @@ class NotificationService:
         """Normalize enum-or-string status values to plain strings."""
         return status.value if hasattr(status, "value") else str(status)
 
+    _LOYALTY_REASON_LABELS = {
+        "welcome_bonus": {
+            "uz": "Xush kelibsiz bonusi",
+            "ru": "Приветственный бонус",
+            "en": "Welcome bonus",
+        },
+        "birthday_bonus": {
+            "uz": "Tug'ilgan kun bonusi",
+            "ru": "Бонус на день рождения",
+            "en": "Birthday bonus",
+        },
+        "purchase": {
+            "uz": "Xarid",
+            "ru": "Покупка",
+            "en": "Purchase",
+        },
+        "referral": {
+            "uz": "Referal",
+            "ru": "Реферал",
+            "en": "Referral",
+        },
+        "streak_bonus": {
+            "uz": "Streak bonusi",
+            "ru": "Бонус за серию",
+            "en": "Streak bonus",
+        },
+        "consecutive_streak_bonus": {
+            "uz": "Ketma-ket streak bonusi",
+            "ru": "Бонус за последовательную серию",
+            "en": "Consecutive streak bonus",
+        },
+        "surprise_reward": {
+            "uz": "Kutilmagan mukofot",
+            "ru": "Сюрприз-награда",
+            "en": "Surprise reward",
+        },
+    }
+
+    _LOYALTY_REASON_FALLBACK = {
+        "uz": "AquaCoins mukofoti",
+        "ru": "Награда AquaCoins",
+        "en": "AquaCoins reward",
+    }
+
+    @staticmethod
+    def _loyalty_reason_label(reason: str, language: str) -> str:
+        """Localized human label for an AquaCoins accrual reason.
+
+        Covers every current LoyaltyActionType.value; unknown / future
+        reasons fall back to a generic 'AquaCoins reward' so a new bonus
+        type never produces a blank or broken message.
+        """
+        lang = language if language in ("uz", "ru", "en") else "uz"
+        labels = NotificationService._LOYALTY_REASON_LABELS.get(reason or "")
+        if labels:
+            return labels.get(lang) or labels.get("uz")
+        fallback = NotificationService._LOYALTY_REASON_FALLBACK
+        return fallback.get(lang) or fallback["uz"]
+
     @staticmethod
     def _user_has_connected_telegram(user: User) -> bool:
         """Return True when the customer has an active linked Telegram bot."""
         return bool(getattr(user, "telegram_id", None) and getattr(user, "is_bot_active", False))
+
+    def _resolve_loyalty_award_channels(self, user: User) -> List[NotificationChannel]:
+        """Channels for an AquaCoins award notification.
+
+        Business rule (local to this notification type, does NOT change the
+        global LOYALTY_REWARD default): Telegram when the customer has a
+        connected bot, otherwise email. Never both, never SMS.
+        """
+        if self._user_has_connected_telegram(user):
+            return [NotificationChannel.TELEGRAM]
+        return [NotificationChannel.EMAIL]
 
     def _should_force_delivery_status_telegram(self, status_value: str) -> bool:
         """Statuses that must include Telegram for connected users."""
@@ -3739,6 +3830,33 @@ Thank you for your purchase!"""
                 "content": """<h2>Обновление AquaCoins</h2>
 <p>Поздравляем! Вы заработали {points} AquaCoins.</p>
 <p>Посетите свой аккаунт, чтобы увидеть текущий баланс и доступные награды.</p>""",
+            },
+        },
+    },
+    # Loyalty reward - Telegram (reason-aware, balance included)
+    ("loyalty_reward", "telegram"): {
+        "name": "loyalty_reward_telegram",
+        "translations": {
+            "uz": {
+                "content": """🪙 <b>AquaCoins qo'shildi!</b>
+
+Sabab: {reason_label}
+Siz {points} AquaCoins qo'lga kiritdingiz.
+Joriy balans: {balance} AquaCoins""",
+            },
+            "ru": {
+                "content": """🪙 <b>AquaCoins начислены!</b>
+
+Причина: {reason_label}
+Вы заработали {points} AquaCoins.
+Текущий баланс: {balance} AquaCoins""",
+            },
+            "en": {
+                "content": """🪙 <b>AquaCoins earned!</b>
+
+Reason: {reason_label}
+You've earned {points} AquaCoins.
+Current balance: {balance} AquaCoins""",
             },
         },
     },

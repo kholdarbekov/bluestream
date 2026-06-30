@@ -9,7 +9,8 @@ from eligibility import main_menu_for
 from i18n import i18n
 from keyboards import LanguageKeyboards, MenuKeyboards
 from database import db_manager, BotUserRepository
-from utils import user_middleware
+from utils import user_middleware, get_auth_token
+from api_client import api_client
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,18 @@ class LanguageHandler:
 
             # Update user language in database
             await self.user_repo.update_user_language(user_id, language_code)
+
+            # Keep the backend's preferred_language in sync (best-effort: a backend
+            # failure must NOT break the bot-only language change).
+            try:
+                async with api_client as client:
+                    user_token = await get_auth_token(update, context, client)
+                    if user_token:
+                        await client.update_user_profile(
+                            user_token, {'preferred_language': language_code}
+                        )
+            except Exception as sync_exc:
+                logger.warning(f"Failed to sync language to backend for {user_id}: {sync_exc}")
 
             # Build comprehensive success message with language preview
             flag = i18n.get_language_flag(language_code)

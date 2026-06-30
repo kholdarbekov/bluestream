@@ -1446,6 +1446,12 @@ def update_user(user_id):
                 raw_subtype.strip() if isinstance(raw_subtype, str) and raw_subtype.strip() else None
             )
 
+        # date_of_birth: only forward when explicitly present (sentinel handling in
+        # the service distinguishes "not provided" from "cleared").
+        if "date_of_birth" in data:
+            raw_dob = data.get("date_of_birth")
+            update_kwargs["date_of_birth"] = raw_dob.strip() if isinstance(raw_dob, str) and raw_dob.strip() else None
+
         # Only forward the COD-exemption flag when the client explicitly sent
         # it; absence means "leave unchanged" (service treats None that way).
         if "cod_debt_check_exempt" in data:

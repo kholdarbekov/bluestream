@@ -119,11 +119,22 @@ class ProfileHandlers(BaseHandler):
             not_set_label = i18n.get('telegram.common.not_set', language)
             full_name = (f"{profile.get('first_name', '')} {profile.get('last_name', '')}" or not_set_label).strip()
 
+            dob_raw = profile.get('date_of_birth')
+            if isinstance(dob_raw, str) and dob_raw:
+                try:
+                    dob_parsed = datetime.strptime(dob_raw[:10], "%Y-%m-%d")
+                    dob_display = dob_parsed.strftime("%d-%m-%Y")
+                except ValueError:
+                    dob_display = dob_raw[:10]
+            else:
+                dob_display = not_set_label
+
             # Format profile information
             profile_text = f"{i18n.get('telegram.profile_title', language)}\n\n"
             profile_text += f"{i18n.get('telegram.profile_name', language)}: {full_name}\n"
             profile_text += f"{i18n.get('telegram.profile_phone', language)}: {profile.get('phone', not_set_label)}\n"
             profile_text += f"{i18n.get('telegram.profile_email', language)}: {profile.get('email', not_set_label)}\n"
+            profile_text += f"{i18n.get('telegram.profile_birthday', language)}: {dob_display}\n"
             profile_text += f"{i18n.get('telegram.profile_language', language)}: {language}"
 
             keyboard = ProfileKeyboards.profile_menu(language)
@@ -671,7 +682,6 @@ class ProfileHandlers(BaseHandler):
         """Start registration process"""
         try:
             user_id = update.effective_user.id
-            telegram_language_code = update.effective_user.language_code
 
             # Capture a referral deep-link param (t.me/<bot>?start=ref_CODE arrives
             # as "/start ref_CODE") so it can be applied on registration below.
@@ -709,9 +719,11 @@ class ProfileHandlers(BaseHandler):
 
                     return PHONE
 
-                # Already registered, show main menu
-                complete_text = i18n.get('telegram.welcome', telegram_language_code)
-                keyboard = await main_menu_for(update.effective_user.id, telegram_language_code)
+                # Already registered, show main menu — honour the user's saved
+                # language rather than the Telegram client locale.
+                language = existing_user.get('preferred_language') or await i18n.get_user_language(user_id)
+                complete_text = i18n.get('telegram.welcome', language)
+                keyboard = await main_menu_for(update.effective_user.id, language)
                 await maybe_remove_stale_reply_keyboard(update, context)
 
                 await update.message.reply_text(
@@ -1444,25 +1456,151 @@ class ProfileHandlers(BaseHandler):
             return ConversationHandler.END
 
     async def edit_profile(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle profile editing"""
+        """Show the profile field-edit sub-menu (Name / Birthday / Language / Phone)."""
         try:
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            edit_text = i18n.get('telegram.profile.edit_prompt', language)
+            # Clear any stale pending input state before showing the edit sub-menu.
+            await self.user_repo.update_user_state(user_id, {})
 
             await query.edit_message_text(
-                text=edit_text,
+                text=i18n.get('telegram.profile.edit_menu_title', language),
+                reply_markup=ProfileKeyboards.profile_edit_menu(language)
+            )
+            await query.answer()
+
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="edit_profile")
+
+    async def edit_profile_name_prompt(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Prompt for a new name and arm the contextual-input completer."""
+        try:
+            query = update.callback_query
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+
+            await query.edit_message_text(
+                text=i18n.get('telegram.profile.name_prompt', language),
                 reply_markup=MenuKeyboards.cancel_button(language)
             )
             await query.answer()
 
-            # Set user state for profile editing
-            await self.user_repo.update_user_state(user_id, {'awaiting_input': 'profile_edit'})
+            await self.user_repo.update_user_state(user_id, {'awaiting_input': 'edit_profile_name'})
 
         except Exception as e:
-            await self._handle_error(update, exc=e, operation="edit_profile")
+            await self._handle_error(update, exc=e, operation="edit_profile_name_prompt")
+
+    async def handle_profile_name_edit(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
+                                       text: str, user_state: Dict):
+        """Complete a profile name edit: split first-token/remainder and PUT to backend."""
+        language = 'en'
+        try:
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+            cleaned = text.strip()
+
+            if len(cleaned) < 2:
+                await update.message.reply_text(i18n.get('telegram.name.too_short', language))
+                return
+            if not any(c.isalpha() for c in cleaned):
+                await update.message.reply_text(i18n.get('telegram.name.invalid', language))
+                return
+
+            parts = cleaned.split()
+            first_name = parts[0]
+            last_name = ' '.join(parts[1:]) if len(parts) > 1 else ''
+
+            async with api_client as client:
+                user_token = await get_auth_token(update, context, client)
+                if not user_token:
+                    await self._handle_auth_error(update, language)
+                    return
+
+                response = await client.update_user_profile(
+                    user_token, {'first_name': first_name, 'last_name': last_name}
+                )
+
+            if response.success:
+                await update.message.reply_text(
+                    text=i18n.get('telegram.profile.name_updated', language),
+                    reply_markup=ProfileKeyboards.profile_edit_menu(language)
+                )
+                await self.user_repo.update_user_state(user_id, {})
+                logger.info(f"Profile name updated for user {user_id}: {first_name} {last_name}")
+            else:
+                await update.message.reply_text(
+                    i18n.get('telegram.error_occurred', language)
+                )
+                logger.warning(f"Failed to update profile name for {user_id}: {response.error}")
+
+        except Exception as e:
+            logger.error(f"Error handling profile name edit: {e}")
+            await update.message.reply_text(i18n.get('telegram.error_occurred', language))
+
+    async def edit_profile_birthday_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Prompt for a birthday in DD-MM-YYYY text format and arm the contextual-input completer."""
+        try:
+            query = update.callback_query
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+
+            await query.edit_message_text(
+                text=i18n.get('telegram.profile.birthday_prompt', language),
+                reply_markup=MenuKeyboards.cancel_button(language)
+            )
+            await query.answer()
+
+            await self.user_repo.update_user_state(user_id, {'awaiting_input': 'edit_profile_birthday'})
+
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="edit_profile_birthday_start")
+
+    async def handle_profile_birthday_edit(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
+                                           text: str, user_state: Dict):
+        """Complete a profile birthday edit: parse DD-MM-YYYY, convert to ISO, PUT to backend."""
+        language = 'en'
+        try:
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+
+            try:
+                parsed = datetime.strptime(text.strip(), "%d-%m-%Y")
+            except ValueError:
+                await update.message.reply_text(
+                    i18n.get('telegram.profile.birthday_invalid_format', language)
+                )
+                # Keep state so the user can retry
+                return
+
+            iso_date = parsed.strftime("%Y-%m-%d")
+
+            async with api_client as client:
+                user_token = await get_auth_token(update, context, client)
+                if not user_token:
+                    await self._handle_auth_error(update, language)
+                    return
+
+                response = await client.update_user_profile(user_token, {'date_of_birth': iso_date})
+
+            if response.success:
+                await update.message.reply_text(
+                    text=i18n.get('telegram.profile.birthday_updated', language),
+                    reply_markup=ProfileKeyboards.profile_edit_menu(language)
+                )
+                await self.user_repo.update_user_state(user_id, {})
+                logger.info(f"Profile birthday updated for user {user_id}: {iso_date}")
+            else:
+                await update.message.reply_text(
+                    i18n.get('telegram.profile.birthday_update_failed', language)
+                )
+                # Keep state so the user can retry after backend rejection (e.g. too young/old)
+                logger.warning(f"Failed to update birthday for {user_id}: {response.error}")
+
+        except Exception as e:
+            logger.error(f"Error handling profile birthday edit: {e}")
+            await update.message.reply_text(i18n.get('telegram.error_occurred', language))
 
     async def manage_addresses(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle address management"""

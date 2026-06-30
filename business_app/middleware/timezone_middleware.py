@@ -92,7 +92,12 @@ class TimezoneMiddleware:
             "preferred_delivery_time",
             "expires_at",
             "valid_until",
-            "date_of_birth",
+            # date_of_birth is intentionally excluded: it is a pure calendar date
+            # with no time component.  Running it through parse_user_datetime()
+            # interprets it as wall-clock midnight in the user's local timezone
+            # and converts to UTC, which shifts the calendar day backwards for
+            # timezones east of UTC (e.g. Asia/Tashkent +05:00 yields the
+            # previous day).  Date-only fields must never be tz-shifted.
             "last_login",
             "verified_at",
             "paid_at",

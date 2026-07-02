@@ -12013,6 +12013,39 @@ def resolve_cash_reconciliation_session(session_id):
         return internal_error_response("Failed to resolve reconciliation session")
 
 
+@admin_bp.route("/staff/cash-reconciliation/sessions/<int:session_id>/force-close", methods=["POST"])
+@jwt_required()
+@super_admin_required
+def force_close_cash_reconciliation_session(session_id):
+    """Admin-only force-close of a stuck active driver cash session."""
+    try:
+        actor_user_id = int(get_jwt_identity())
+        data = request.get_json() or {}
+        reason = (data.get("reason") or "").strip()
+        if not reason:
+            return validation_error_response("reason is required")
+
+        from business_app.services.driver_reconciliation_service import DriverReconciliationService
+
+        session = DriverReconciliationService().force_close_session(
+            session_id=session_id,
+            actor_user_id=actor_user_id,
+            reason=reason,
+            verified_cash=data.get("verified_cash"),
+        )
+        payload = DriverReconciliationService().get_session_detail(session.id)
+        return success_response(data=payload)
+    except NotFoundError:
+        return not_found_response("Driver cash session not found")
+    except ConflictError as e:
+        return error_response(str(e), status_code=409)
+    except ValidationError as e:
+        return validation_error_response(e.message)
+    except Exception as e:
+        current_app.logger.error(f"Force close cash reconciliation session error: {e}")
+        return internal_error_response("Failed to force-close reconciliation session")
+
+
 @admin_bp.route("/staff/cash-reconciliation/customers/<int:customer_id>/statement", methods=["GET"])
 @jwt_required()
 @manager_or_higher_required

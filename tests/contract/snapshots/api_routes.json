@@ -1316,6 +1316,13 @@
     "rule": "/api/v1/admin/staff/cash-reconciliation/sessions/<int:session_id>"
   },
   {
+    "endpoint": "admin.force_close_cash_reconciliation_session",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/staff/cash-reconciliation/sessions/<int:session_id>/force-close"
+  },
+  {
     "endpoint": "admin.resolve_cash_reconciliation_session",
     "methods": [
       "POST"

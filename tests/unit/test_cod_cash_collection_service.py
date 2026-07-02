@@ -27,7 +27,7 @@ from shared.enums import (
     UserRole,
     UserType,
 )
-from business_app.utils.exceptions import ValidationError
+from business_app.utils.exceptions import ConflictError, ValidationError
 from business_app.utils.password_security import hash_password
 
 
@@ -1813,6 +1813,292 @@ class TestDriverReconciliationService:
             # to the customer-bot's language settings.
             staff_kwargs = notification_instance.send_staff_telegram_message.call_args.kwargs
             assert staff_kwargs.get('language') == 'en'
+
+    def test_submit_closes_settled_session_when_expected_dropped_to_zero(
+        self,
+        app,
+        db,
+        sample_user,
+        delivery_driver,
+        delivery_driver_profile,
+        cod_order,
+        cod_delivery,
+    ):
+        """A PARTIAL session whose backing COD collection was later voided
+        (expected -> 0, declared stays positive) must be closeable via the
+        'hand off all expected cash' button instead of raising 'must be
+        positive'. Reproduces the prod screenshot (expected 0, declared 1000,
+        remaining 0, stuck on PARTIAL)."""
+        with app.app_context():
+            cash_service = CashCollectionService()
+            cash_service.ensure_cod_payment_for_order(cod_order)
+            db.session.commit()
+
+            event = cash_service.post_collection(
+                customer_id=sample_user.id,
+                amount=Decimal("2000.00"),
+                source="delivery_completion",
+                collector_user_id=delivery_driver.id,
+                recorded_by_user_id=delivery_driver.id,
+                order_id=cod_order.id,
+                delivery_id=cod_delivery.id,
+                notes="Collected on delivery.",
+            )
+            db.session.commit()
+
+            recon_service = DriverReconciliationService()
+            # Partial handoff of 1000 against the 2000 expected -> stays PARTIAL
+            # (no next session created, session stays active).
+            partial = recon_service.submit_session(
+                driver_user_id=delivery_driver.id,
+                declared_cash=Decimal("1000.00"),
+                submitted_by_user_id=delivery_driver.id,
+            )
+            assert partial.status == DriverCashSessionStatus.PARTIAL
+
+            # The backing COD collection is later voided (order cancelled / cash
+            # edit reversed), dropping expected_cash_on_hand to 0 while the 1000
+            # handoff stands. This is the trapped state.
+            voided = CashCollectionEvent.query.get(event.id)
+            voided.voided_at = datetime.now(UTC)
+            db.session.commit()
+
+            session = recon_service.get_open_session_for_driver(delivery_driver.id)
+            recon_service.refresh_expected_cash(session)
+            db.session.commit()
+            assert session.status == DriverCashSessionStatus.PARTIAL
+            assert session.expected_cash_on_hand == Decimal("0.00")
+            assert session.declared_cash == Decimal("1000.00")
+            unvoided_before = [h for h in session.handoffs if h.voided_at is None]
+            assert len(unvoided_before) == 1
+
+            closed = recon_service.submit_session(
+                driver_user_id=delivery_driver.id,
+                declared_cash=None,
+                submitted_by_user_id=delivery_driver.id,
+            )
+
+            assert closed.status == DriverCashSessionStatus.SUBMITTED
+            assert closed.declared_cash == Decimal("1000.00")
+            assert closed.declared_variance == Decimal("1000.00")
+            assert closed.blocked_from_cod is False
+            # No zero/negative handoff row inserted.
+            unvoided_after = [h for h in closed.handoffs if h.voided_at is None]
+            assert len(unvoided_after) == 1
+            assert getattr(closed, "_next_active_session", None) is not None
+
+    def test_submit_empty_session_raises_clear_error(
+        self,
+        app,
+        db,
+        delivery_driver,
+        delivery_driver_profile,
+    ):
+        """Submitting a fresh session with nothing collected and nothing handed
+        off is a no-op error with a clear message (not 'must be positive')."""
+        with app.app_context():
+            recon_service = DriverReconciliationService()
+            recon_service.get_or_create_session(driver_user_id=delivery_driver.id)
+
+            with pytest.raises(ValidationError) as exc:
+                recon_service.submit_session(
+                    driver_user_id=delivery_driver.id,
+                    declared_cash=None,
+                    submitted_by_user_id=delivery_driver.id,
+                )
+            assert "No cash to reconcile" in str(exc.value)
+
+    def test_force_closed_status_and_reason_column_roundtrip(
+        self,
+        app,
+        db,
+        delivery_driver,
+        delivery_driver_profile,
+    ):
+        """The new FORCE_CLOSED enum value + force_close_reason column persist
+        and serialize."""
+        with app.app_context():
+            recon_service = DriverReconciliationService()
+            session = recon_service.get_or_create_session(driver_user_id=delivery_driver.id)
+            session.status = DriverCashSessionStatus.FORCE_CLOSED
+            session.force_close_reason = "driver left the company"
+            db.session.commit()
+
+            fetched = DriverCashSession.query.get(session.id)
+            assert fetched.status == DriverCashSessionStatus.FORCE_CLOSED
+            assert fetched.to_dict()["force_close_reason"] == "driver left the company"
+
+    def test_force_close_from_partial_closes_and_unblocks(
+        self,
+        app,
+        db,
+        sample_user,
+        admin_user,
+        delivery_driver,
+        delivery_driver_profile,
+        cod_order,
+        cod_delivery,
+    ):
+        with app.app_context():
+            cash_service = CashCollectionService()
+            cash_service.ensure_cod_payment_for_order(cod_order)
+            db.session.commit()
+            cash_service.post_collection(
+                customer_id=sample_user.id,
+                amount=Decimal("10000.00"),
+                source="delivery_completion",
+                collector_user_id=delivery_driver.id,
+                recorded_by_user_id=delivery_driver.id,
+                order_id=cod_order.id,
+                delivery_id=cod_delivery.id,
+                notes="Collected on delivery.",
+            )
+            recon_service = DriverReconciliationService()
+            partial = recon_service.submit_session(
+                driver_user_id=delivery_driver.id,
+                declared_cash=Decimal("3000.00"),
+                submitted_by_user_id=delivery_driver.id,
+            )
+            assert partial.status == DriverCashSessionStatus.PARTIAL
+
+            closed = recon_service.force_close_session(
+                session_id=partial.id,
+                actor_user_id=admin_user.id,
+                reason="Driver stopped responding; closing session.",
+            )
+
+            assert closed.status == DriverCashSessionStatus.FORCE_CLOSED
+            assert closed.force_close_reason == "Driver stopped responding; closing session."
+            assert closed.session_ended_at is not None
+            assert closed.submitted_by_user_id == admin_user.id
+            assert closed.blocked_from_cod is False
+            assert closed.verified_cash is None
+
+    def test_force_close_records_verified_cash_variance(
+        self,
+        app,
+        db,
+        sample_user,
+        admin_user,
+        delivery_driver,
+        delivery_driver_profile,
+        cod_order,
+        cod_delivery,
+    ):
+        with app.app_context():
+            cash_service = CashCollectionService()
+            cash_service.ensure_cod_payment_for_order(cod_order)
+            db.session.commit()
+            cash_service.post_collection(
+                customer_id=sample_user.id,
+                amount=Decimal("10000.00"),
+                source="delivery_completion",
+                collector_user_id=delivery_driver.id,
+                recorded_by_user_id=delivery_driver.id,
+                order_id=cod_order.id,
+                delivery_id=cod_delivery.id,
+                notes="Collected on delivery.",
+            )
+            recon_service = DriverReconciliationService()
+            recon_service.get_or_create_session(driver_user_id=delivery_driver.id)
+            session = recon_service.get_open_session_for_driver(delivery_driver.id)
+
+            closed = recon_service.force_close_session(
+                session_id=session.id,
+                actor_user_id=admin_user.id,
+                reason="Counted cash at office and closing.",
+                verified_cash=Decimal("9000.00"),
+            )
+
+            assert closed.status == DriverCashSessionStatus.FORCE_CLOSED
+            assert closed.verified_cash == Decimal("9000.00")
+            assert closed.verified_variance == Decimal("-1000.00")
+            assert closed.verified_by_user_id == admin_user.id
+            assert closed.verified_at is not None
+
+    def test_force_close_rejects_blank_reason(
+        self,
+        app,
+        db,
+        admin_user,
+        delivery_driver,
+        delivery_driver_profile,
+    ):
+        with app.app_context():
+            recon_service = DriverReconciliationService()
+            session = recon_service.get_or_create_session(driver_user_id=delivery_driver.id)
+            with pytest.raises(ValidationError):
+                recon_service.force_close_session(
+                    session_id=session.id,
+                    actor_user_id=admin_user.id,
+                    reason="   ",
+                )
+
+    def test_force_close_rejects_already_closed_session(
+        self,
+        app,
+        db,
+        sample_user,
+        admin_user,
+        delivery_driver,
+        delivery_driver_profile,
+        cod_order,
+        cod_delivery,
+    ):
+        with app.app_context():
+            cash_service = CashCollectionService()
+            cash_service.ensure_cod_payment_for_order(cod_order)
+            db.session.commit()
+            cash_service.post_collection(
+                customer_id=sample_user.id,
+                amount=Decimal("10000.00"),
+                source="delivery_completion",
+                collector_user_id=delivery_driver.id,
+                recorded_by_user_id=delivery_driver.id,
+                order_id=cod_order.id,
+                delivery_id=cod_delivery.id,
+                notes="Collected on delivery.",
+            )
+            recon_service = DriverReconciliationService()
+            submitted = recon_service.submit_session(
+                driver_user_id=delivery_driver.id,
+                declared_cash=None,
+                submitted_by_user_id=delivery_driver.id,
+            )
+            assert submitted.status == DriverCashSessionStatus.SUBMITTED
+            with pytest.raises(ConflictError):
+                recon_service.force_close_session(
+                    session_id=submitted.id,
+                    actor_user_id=admin_user.id,
+                    reason="Trying to force close an already-submitted session.",
+                )
+
+    def test_reopen_from_force_closed_clears_reason(
+        self,
+        app,
+        db,
+        admin_user,
+        delivery_driver,
+        delivery_driver_profile,
+    ):
+        with app.app_context():
+            recon_service = DriverReconciliationService()
+            session = recon_service.get_or_create_session(driver_user_id=delivery_driver.id)
+            closed = recon_service.force_close_session(
+                session_id=session.id,
+                actor_user_id=admin_user.id,
+                reason="close for reopen test",
+                verified_cash=Decimal("0.00"),
+            )
+            assert closed.status == DriverCashSessionStatus.FORCE_CLOSED
+
+            reopened = recon_service.reopen_session(
+                session_id=closed.id,
+                actor_user_id=admin_user.id,
+                reason="reopen after force close",
+            )
+            assert reopened.status == DriverCashSessionStatus.OPEN
+            assert reopened.force_close_reason is None
 
 
 @pytest.mark.unit

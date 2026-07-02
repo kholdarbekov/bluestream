@@ -93,6 +93,7 @@ class DriverCashSessionStatus(Enum):
     MISMATCH = 'mismatch'
     OVERDUE = 'overdue'
     RESOLVED = 'resolved'
+    FORCE_CLOSED = 'force_closed'  # Admin override closing a stuck active session
 
 
 class DeliveryStatus(Enum):

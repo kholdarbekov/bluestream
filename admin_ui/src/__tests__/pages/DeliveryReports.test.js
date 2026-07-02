@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { message } from 'antd';
@@ -8,6 +8,19 @@ import DeliveryReports from '../../pages/DeliveryReports';
 import staffService from '../../services/staffService';
 
 vi.mock('../../services/staffService');
+vi.mock('../../components/common/PermissionGuard', async () => {
+  const actual = await vi.importActual('../../components/common/PermissionGuard');
+  return {
+    ...actual,
+    usePermissions: vi.fn(() => ({
+      getUserRole: () => 'admin',
+      isAdmin: () => true,
+      isManager: () => false,
+      isOperator: () => false,
+      hasPermission: () => true,
+    })),
+  };
+});
 vi.mock('../../services/api', () => ({
   __esModule: true,
   default: {
@@ -163,6 +176,7 @@ describe('DeliveryReports page', () => {
     });
     staffService.verifyCashReconciliationSession.mockResolvedValue({ data: { success: true } });
     staffService.resolveCashReconciliationSession.mockResolvedValue({ data: { success: true } });
+    staffService.forceCloseCashReconciliationSession.mockResolvedValue({ data: { data: {} } });
     staffService.getCustomerCodStatement.mockResolvedValue({
       data: {
         data: {
@@ -289,5 +303,63 @@ describe('DeliveryReports page', () => {
     expect(Number(payload.order_id)).toBe(456);
     expect(Number(payload.customer_id)).toBe(77);
     expect(payload.collector_user_id).toBeNull();
+  });
+
+  it('force-closes a stuck active session with the exact payload', async () => {
+    staffService.getCashReconciliation.mockResolvedValue({
+      data: {
+        data: {
+          grand_total_cash: 1000,
+          summary: { blocked_session_count: 0, mismatch_session_count: 0, overdue_session_count: 0 },
+          report: [
+            {
+              driver_id: 55,
+              driver_name: 'Stuck Driver',
+              phone: '+998901112233',
+              total_cash_collected: 1000,
+              blocked_session_count: 0,
+              mismatch_session_count: 0,
+              overdue_session_count: 0,
+            },
+          ],
+          sessions: [
+            {
+              id: 202,
+              driver_name: 'Stuck Driver',
+              session_started_at: '2026-06-23T08:00:00Z',
+              status: 'partial',
+              expected_cash: 0,
+              expected_cash_on_hand: 0,
+              declared_cash: 1000,
+              verified_cash: null,
+              declared_variance: 1000,
+              verified_variance: null,
+              blocked_from_cod: false,
+            },
+          ],
+        },
+      },
+    });
+
+    const user = userEvent.setup();
+    render(<DeliveryReports />, { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(staffService.getCashReconciliation).toHaveBeenCalled();
+    });
+
+    await user.click(await screen.findByText('Force Close'));
+
+    const dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByRole('textbox'), 'Driver left; closing session');
+    await user.click(within(dialog).getByRole('button', { name: /force close/i }));
+
+    await waitFor(() => {
+      expect(staffService.forceCloseCashReconciliationSession).toHaveBeenCalledTimes(1);
+    });
+    expect(staffService.forceCloseCashReconciliationSession).toHaveBeenCalledWith(202, {
+      reason: 'Driver left; closing session',
+      verified_cash: undefined,
+    });
   });
 });

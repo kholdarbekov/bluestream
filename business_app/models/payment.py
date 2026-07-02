@@ -458,6 +458,7 @@ class DriverCashSession(db.Model, TimestampMixin):
     reopened_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     reopened_reason = Column(String(255), nullable=True)
     reopen_count = Column(Integer, nullable=False, default=0, server_default=sa_text("0"))
+    force_close_reason = Column(Text, nullable=True)
 
     driver_user = relationship("User", foreign_keys=[driver_user_id], backref="driver_cash_sessions")
     reopened_by_user = relationship("User", foreign_keys=[reopened_by_user_id])
@@ -514,6 +515,7 @@ class DriverCashSession(db.Model, TimestampMixin):
             "reopened_by_user_id": self.reopened_by_user_id,
             "reopened_reason": self.reopened_reason,
             "reopen_count": self.reopen_count or 0,
+            "force_close_reason": self.force_close_reason,
         }
 
 

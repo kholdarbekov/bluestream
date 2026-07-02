@@ -27,6 +27,7 @@ import {
   EyeOutlined,
   FileTextOutlined,
   ReloadOutlined,
+  StopOutlined,
   ToolOutlined,
   UserOutlined,
   WarningOutlined,
@@ -57,6 +58,9 @@ const statusColor = (status, blocked) => {
   if (status === 'submitted') {
     return 'blue';
   }
+  if (status === 'force_closed') {
+    return 'red';
+  }
   return 'default';
 };
 
@@ -78,7 +82,7 @@ const RESOLVE_REASON_OPTIONS = [
 const DeliveryReports = () => {
   const { t } = useTranslation(['staff', 'common']);
   const queryClient = useQueryClient();
-  const { getUserRole } = usePermissions();
+  const { getUserRole, isAdmin } = usePermissions();
   const isSuperAdmin = getUserRole() === 'super_admin';
   const [period, setPeriod] = useState('day');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -88,6 +92,7 @@ const DeliveryReports = () => {
   const [detailOpen, setDetailOpen] = useState(false);
   const [verifyOpen, setVerifyOpen] = useState(false);
   const [resolveOpen, setResolveOpen] = useState(false);
+  const [forceCloseOpen, setForceCloseOpen] = useState(false);
   const [verifyMode, setVerifyMode] = useState('approve');
   const [customerStatementId, setCustomerStatementId] = useState(null);
   const [orderTimelineId, setOrderTimelineId] = useState(null);
@@ -96,6 +101,7 @@ const DeliveryReports = () => {
   const [adjustEvent, setAdjustEvent] = useState(null);
   const [verifyForm] = Form.useForm();
   const [resolveForm] = Form.useForm();
+  const [forceCloseForm] = Form.useForm();
   const [recordCollectionForm] = Form.useForm();
   const [adjustForm] = Form.useForm();
   const collectionSource = Form.useWatch('source', recordCollectionForm) || 'standalone_meeting';
@@ -202,6 +208,23 @@ const DeliveryReports = () => {
       message.success(t('staff:reconciliation_resolved', 'Reconciliation resolved'));
       setResolveOpen(false);
       resolveForm.resetFields();
+      refreshReportQueries();
+    },
+
+    onError: (error) => {
+      const backendMessage = error?.response?.data?.message;
+      message.error(backendMessage || t('common:error_occurred'));
+    },
+  });
+
+  const forceCloseMutation = useMutation({
+    mutationFn: ({ sessionId, payload }) =>
+      staffService.forceCloseCashReconciliationSession(sessionId, payload),
+
+    onSuccess: () => {
+      message.success(t('staff:reconciliation_force_closed', 'Session force-closed'));
+      setForceCloseOpen(false);
+      forceCloseForm.resetFields();
       refreshReportQueries();
     },
 
@@ -320,6 +343,15 @@ const DeliveryReports = () => {
     });
     setResolveOpen(true);
   };
+
+  const openForceCloseModal = (session) => {
+    setSelectedSessionId(session.id);
+    forceCloseForm.resetFields();
+    setForceCloseOpen(true);
+  };
+
+  const canForceCloseSession = (session) =>
+    isAdmin() && ['open', 'partial', 'overdue'].includes(session.status);
 
   const reportColumns = [
     {
@@ -451,6 +483,11 @@ const DeliveryReports = () => {
           {canResolveSession(record) ? (
             <Button icon={<ToolOutlined />} onClick={() => openResolveModal(record)}>
               {t('staff:resolve', 'Resolve')}
+            </Button>
+          ) : null}
+          {canForceCloseSession(record) ? (
+            <Button danger icon={<StopOutlined />} onClick={() => openForceCloseModal(record)}>
+              {t('staff:force_close', 'Force Close')}
             </Button>
           ) : null}
         </Space>
@@ -811,6 +848,9 @@ const DeliveryReports = () => {
               <Descriptions.Item label={t('staff:declared_variance', 'Declared Variance')}>{money(selectedSession.declared_variance)}</Descriptions.Item>
               <Descriptions.Item label={t('staff:verified_variance', 'Verified Variance')}>{money(selectedSession.verified_variance)}</Descriptions.Item>
               <Descriptions.Item label={t('staff:block_reason', 'Block Reason')}>{selectedSession.block_reason || '—'}</Descriptions.Item>
+              <Descriptions.Item label={t('staff:force_close_reason', 'Force Close Reason')}>
+                {selectedSession.force_close_reason || '—'}
+              </Descriptions.Item>
               <Descriptions.Item label={t('staff:event_count', 'Collection Events')}>{selectedSession.event_count || 0}</Descriptions.Item>
               <Descriptions.Item label={t('staff:warning_due_at', 'Warning Due')}>
                 {selectedSession.last_cash_activity_at ? (selectedSession.warning_due_at || '—') : '—'}
@@ -1013,6 +1053,50 @@ const DeliveryReports = () => {
             rules={[{ required: true, message: t('staff:resolution_notes_required', 'Resolution notes are required') }]}
           >
             <Input.TextArea rows={4} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={t('staff:force_close_session_title', 'Force Close Session')}
+        open={forceCloseOpen}
+        onCancel={() => setForceCloseOpen(false)}
+        onOk={() => forceCloseForm.submit()}
+        confirmLoading={forceCloseMutation.isPending}
+        okButtonProps={{ danger: true }}
+        okText={t('staff:force_close', 'Force Close')}
+      >
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message={t(
+            'staff:force_close_help',
+            'Force-closing settles this active session administratively and unblocks the driver from COD. Use for abandoned or stuck sessions the driver cannot close themselves.'
+          )}
+        />
+        <Form
+          form={forceCloseForm}
+          layout="vertical"
+          onFinish={(values) =>
+            forceCloseMutation.mutate({
+              sessionId: selectedSessionId,
+              payload: { reason: values.reason, verified_cash: values.verified_cash },
+            })
+          }
+        >
+          <Form.Item
+            name="reason"
+            label={t('staff:reason', 'Reason')}
+            rules={[{ required: true, message: t('staff:force_close_reason_required', 'A reason is required') }]}
+          >
+            <Input.TextArea rows={3} />
+          </Form.Item>
+          <Form.Item
+            name="verified_cash"
+            label={t('staff:verified_cash_optional', 'Verified cash counted (optional)')}
+          >
+            <InputNumber min={0} style={{ width: '100%' }} />
           </Form.Item>
         </Form>
       </Modal>

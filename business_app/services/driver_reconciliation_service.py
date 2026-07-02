@@ -51,12 +51,18 @@ class DriverReconciliationService:
         DriverCashSessionStatus.PARTIAL.value,
         DriverCashSessionStatus.OVERDUE.value,
     }
+    FORCE_CLOSE_ALLOWED_STATUSES = {
+        DriverCashSessionStatus.OPEN.value,
+        DriverCashSessionStatus.PARTIAL.value,
+        DriverCashSessionStatus.OVERDUE.value,
+    }
     REOPEN_ALLOWED_STATUSES = {
         DriverCashSessionStatus.SUBMITTED.value,
         DriverCashSessionStatus.VERIFIED.value,
         DriverCashSessionStatus.MISMATCH.value,
         DriverCashSessionStatus.RESOLVED.value,
         DriverCashSessionStatus.OVERDUE.value,
+        DriverCashSessionStatus.FORCE_CLOSED.value,
     }
 
     @staticmethod
@@ -388,28 +394,41 @@ class DriverReconciliationService:
         else:
             target_amount = self._to_decimal(declared_cash)
 
-        if target_amount <= Decimal("0.00"):
-            raise ValidationError("Handoff amount must be positive")
-
         recorder_id = submitted_by_user_id or driver_user_id
-        handoff = DriverCashHandoff(
-            driver_cash_session_id=session.id,
-            amount=target_amount,
-            occurred_at=now,
-            recorded_by_user_id=recorder_id,
-            notes=notes,
-        )
-        db.session.add(handoff)
-        if notes:
-            session.notes = notes
-        db.session.flush()
+        handoff = None
+
+        if target_amount <= Decimal("0.00"):
+            # Nothing left to hand off. The "settle everything" button
+            # (declared_cash is None) on a session that already carries handoffs
+            # means "finalize me" — close it without recording an empty handoff.
+            # A discrete manual amount, or a session with no prior handoffs, is
+            # still an error (you cannot record a zero/negative handoff, and an
+            # empty session has nothing to reconcile).
+            if declared_cash is not None or prior_declared <= Decimal("0.00"):
+                if declared_cash is None:
+                    raise ValidationError("No cash to reconcile")
+                raise ValidationError("Handoff amount must be positive")
+        else:
+            handoff = DriverCashHandoff(
+                driver_cash_session_id=session.id,
+                amount=target_amount,
+                occurred_at=now,
+                recorded_by_user_id=recorder_id,
+                notes=notes,
+            )
+            db.session.add(handoff)
+            if notes:
+                session.notes = notes
+            db.session.flush()
 
         # Recompute declared_cash / variance from the now-current handoff set.
         self.refresh_expected_cash(session)
         cumulative_declared = self._to_decimal(session.declared_cash)
 
         next_session: Optional[DriverCashSession] = None
-        closes_session = cumulative_declared >= expected_on_hand and expected_on_hand > Decimal("0.00")
+        closes_session = cumulative_declared >= expected_on_hand and (
+            expected_on_hand > Decimal("0.00") or cumulative_declared > Decimal("0.00")
+        )
 
         if closes_session:
             session.status = DriverCashSessionStatus.SUBMITTED
@@ -444,8 +463,8 @@ class DriverReconciliationService:
             additional_data={
                 "driver_user_id": driver_user_id,
                 "session_started_at": (session.session_started_at.isoformat() if session.session_started_at else None),
-                "handoff_id": handoff.id,
-                "handoff_amount": float(target_amount),
+                "handoff_id": handoff.id if handoff else None,
+                "handoff_amount": float(target_amount) if handoff else 0.0,
                 "expected_cash": float(session.expected_cash or 0),
                 "expected_cash_on_hand": float(expected_on_hand),
                 "cumulative_declared_cash": float(cumulative_declared),
@@ -574,6 +593,78 @@ class DriverReconciliationService:
         db.session.commit()
         return session
 
+    def force_close_session(
+        self,
+        *,
+        session_id: int,
+        actor_user_id: int,
+        reason: str,
+        verified_cash: Optional[Any] = None,
+    ) -> DriverCashSession:
+        """Admin-only force-close of a stuck ACTIVE cash session.
+
+        For an abandoned or unclosable OPEN/PARTIAL/OVERDUE session (e.g. the
+        backing COD collections were voided, trapping a positive declared
+        balance). Transitions straight to FORCE_CLOSED with a mandatory reason.
+        The admin may optionally record the cash they physically counted, which
+        stamps verified_cash / verified_variance the same way verify_session
+        does. Existing handoffs and declared_cash are left intact.
+        """
+        session = DriverCashSession.query.get(session_id)
+        if not session:
+            raise NotFoundError("Driver cash session not found")
+
+        status = self._status_value(session.status)
+        if status not in self.FORCE_CLOSE_ALLOWED_STATUSES:
+            raise ConflictError(
+                f"Session is {status}, cannot force close",
+                error_code="CASH_SESSION_NOT_FORCE_CLOSEABLE",
+            )
+        if not reason or not reason.strip():
+            raise ValidationError("A reason is required for force-closing a session")
+
+        now = self._now_utc()
+        self.refresh_expected_cash(session)
+
+        if verified_cash is not None:
+            session.verified_cash = self._to_decimal(verified_cash)
+            session.verified_variance = self._to_decimal(session.verified_cash) - self._to_decimal(
+                session.expected_cash_on_hand
+            )
+            session.verified_at = now
+            session.verified_by_user_id = actor_user_id
+
+        session.status = DriverCashSessionStatus.FORCE_CLOSED
+        session.force_close_reason = reason.strip()
+        session.session_ended_at = now
+        session.submitted_at = now
+        session.submitted_by_user_id = actor_user_id
+        session.blocked_from_cod = False
+        session.block_reason = None
+        session.risk_flags = self._build_risk_flags(session)
+
+        audit_logger.log_event(
+            event_type=AuditEventType.PAYMENT_PROCESSED,
+            action="driver_cash_session_force_closed",
+            severity=AuditSeverity.HIGH,
+            resource_type="driver_cash_session",
+            resource_id=str(session.id),
+            additional_data={
+                "driver_user_id": session.driver_user_id,
+                "actor_user_id": actor_user_id,
+                "previous_status": status,
+                "reason": session.force_close_reason,
+                "expected_cash_on_hand": float(session.expected_cash_on_hand or 0),
+                "declared_cash": float(session.declared_cash or 0),
+                "declared_variance": float(session.declared_variance or 0),
+                "verified_cash": (float(session.verified_cash) if session.verified_cash is not None else None),
+                "verified_variance": float(session.verified_variance or 0),
+            },
+        )
+
+        db.session.commit()
+        return session
+
     def reopen_session(
         self,
         *,
@@ -637,6 +728,7 @@ class DriverReconciliationService:
         session.verified_by_user_id = None
         session.verification_notes = None
         session.verification_reason_code = None
+        session.force_close_reason = None
         # Unblock driver: the prior block was tied to the now-stale variance.
         if session.blocked_from_cod:
             session.blocked_from_cod = False

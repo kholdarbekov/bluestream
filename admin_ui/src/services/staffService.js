@@ -153,6 +153,15 @@ class StaffServiceClass {
   }
 
   /**
+   * Admin-only: force-close a stuck active driver cash session.
+   * @param {number} sessionId
+   * @param {{ reason: string, verified_cash?: number }} payload
+   */
+  forceCloseCashReconciliationSession(sessionId, payload) {
+    return api.post(`/admin/staff/cash-reconciliation/sessions/${sessionId}/force-close`, payload);
+  }
+
+  /**
    * Admin correction for a recorded cash collection event amount.
    * Super-admin only. Voids the original event and creates a replacement
    * with the corrected amount; surplus auto-routes to customer prepayment,

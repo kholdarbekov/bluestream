@@ -804,21 +804,28 @@ class BottleTrackingService:
 
         Computes and persists the discrepancy.
         Raises NotFoundError if no open session exists.
-        Raises ValidationError if undelivered orders are still bound to the
-        session — admins must force-close in that case.
+
+        A driver may close at any time. Any still-undelivered order bound to the
+        session is released here (its binding deleted) rather than blocking the
+        close; it re-binds to the driver's next open session on the next forward
+        transition (late-bind guard), or an admin delivers it unbound.
         """
         session = self._get_open_session_or_raise(driver_user_id)
 
         if bottles_returned_to_warehouse < 0:
             raise ValidationError("bottles_returned_to_warehouse cannot be negative")
 
-        open_bindings = self._open_bindings_count_for_session(session.id)
-        if open_bindings > 0:
-            raise ValidationError(
-                f"Cannot close session {session.id}: {open_bindings} undelivered "
-                "order(s) still bound. Deliver or cancel them first, or use the "
-                "admin force-close path.",
-                error_code="BOTTLE_SESSION_HAS_OPEN_ORDERS",
+        # Release still-undelivered orders instead of blocking the close. Deleting
+        # the binding (vs. leaving it on the now-closed session) matters: the delivery
+        # tally credits binding.session_id with no open-session check, so a stale
+        # binding would corrupt this sealed session's counters if later delivered.
+        released = self._release_open_bindings_for_session(session.id)
+        if released:
+            logger.info(
+                "[BOTTLE] close_bottle_session released %s carried order binding(s) for session=%s: %s",
+                len(released),
+                session.id,
+                released,
             )
 
         session.bottles_returned_to_warehouse = bottles_returned_to_warehouse
@@ -857,6 +864,19 @@ class BottleTrackingService:
             raise ConflictError(f"Session is already {session.status.value}, cannot force close")
         if not reason or not reason.strip():
             raise ValidationError("A reason is required for force-closing a session")
+
+        # Mirror the normal-close release: an abandoned session's still-undelivered
+        # orders must not stay bound to this sealed session (a later delivery would
+        # corrupt its counters — see _release_open_bindings_for_session). They
+        # re-bind to whichever session physically carries them next.
+        released = self._release_open_bindings_for_session(session.id)
+        if released:
+            logger.info(
+                "[BOTTLE] admin_force_close_session released %s carried order binding(s) for session=%s: %s",
+                len(released),
+                session.id,
+                released,
+            )
 
         session.bottles_returned_to_warehouse = max(0, bottles_returned_to_warehouse)
         session.status = DriverBottleSessionStatus.FORCE_CLOSED
@@ -1401,14 +1421,39 @@ class BottleTrackingService:
         return None
 
     @staticmethod
-    def _open_bindings_count_for_session(session_id: int) -> int:
-        """Count bindings on this session whose order is not in a terminal status."""
+    def _open_bindings_query_for_session(session_id: int):
+        """Bindings on this session whose order is not in a terminal status."""
         return (
             DriverBottleSessionOrder.query.join(Order, DriverBottleSessionOrder.order_id == Order.id)
             .filter(DriverBottleSessionOrder.session_id == session_id)
             .filter(Order.status.notin_([OrderStatus.DELIVERED, OrderStatus.CANCELLED, OrderStatus.RETURNED]))
-            .count()
         )
+
+    @staticmethod
+    def _open_bindings_count_for_session(session_id: int) -> int:
+        """Count bindings on this session whose order is not in a terminal status."""
+        return BottleTrackingService._open_bindings_query_for_session(session_id).count()
+
+    def _release_open_bindings_for_session(self, session_id: int) -> list:
+        """Release (unbind) every non-terminal order bound to this session so it can
+        close. Terminal (delivered/cancelled/returned) bindings are KEPT for the
+        historical tally. Returns the released order ids.
+
+        Deleting the binding — rather than leaving it on the now-closed session — is
+        deliberate: the delivery-time tally credits ``binding.session_id`` with no
+        open-session check, so a stale binding would corrupt this sealed session's
+        counters if the order were later delivered. Each released order re-binds to
+        the driver's next open session via the late-bind guard when next progressed.
+        """
+        order_ids = [
+            row[0]
+            for row in self._open_bindings_query_for_session(session_id)
+            .with_entities(DriverBottleSessionOrder.order_id)
+            .all()
+        ]
+        for order_id in order_ids:
+            self.unbind_order(order_id)
+        return order_ids
 
     def update_session_delivery_tally(
         self,

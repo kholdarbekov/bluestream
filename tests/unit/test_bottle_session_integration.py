@@ -1114,11 +1114,11 @@ def test_rebind_order_to_session_moves_binding_in_place(db, sample_user, sample_
 
 
 @pytest.mark.unit
-def test_new_session_close_blocked_until_carried_order_terminal(
+def test_new_session_close_releases_carried_binding(
     db, app, sample_user, sample_product
 ):
-    """After a carried order migrates onto session B, B cannot be closed until
-    that order reaches a terminal status (it now counts as B's open binding)."""
+    """After a carried order migrates onto session B, closing B RELEASES that
+    binding too — carried orders never lock a session (a driver closes anytime)."""
     driver = _make_driver(db, "+998901000109", "CarryClose")
     session_a = _open_session(db, driver)
     order = _make_order_with_bottles(db, sample_user, sample_product, quantity=2)
@@ -1138,11 +1138,12 @@ def test_new_session_close_blocked_until_carried_order_terminal(
         finally:
             app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False
     db.session.commit()
+    assert DriverBottleSessionOrder.query.filter_by(order_id=order.id).first().session_id == session_b.id
 
-    # Order is still non-terminal (OUT_FOR_DELIVERY) → B's close is blocked.
-    with pytest.raises(ValidationError) as exc:
-        svc.close_bottle_session(driver.id, bottles_returned_to_warehouse=session_b.bottles_loaded)
-    assert exc.value.error_code == "BOTTLE_SESSION_HAS_OPEN_ORDERS"
+    # Order is still non-terminal (OUT_FOR_DELIVERY) → B's close releases it and closes.
+    closed = svc.close_bottle_session(driver.id, bottles_returned_to_warehouse=session_b.bottles_loaded)
+    assert closed.status == DriverBottleSessionStatus.CLOSED
+    assert DriverBottleSessionOrder.query.filter_by(order_id=order.id).first() is None
 
 
 @pytest.mark.unit
@@ -1209,15 +1210,19 @@ def test_carry_over_end_to_end_tally_credits_new_session(
 
 
 # ---------------------------------------------------------------------------
-# close_bottle_session — refuses to close when bound undelivered orders exist
+# close_bottle_session — releases bound undelivered orders so it can close anytime
 # ---------------------------------------------------------------------------
 
 @pytest.mark.unit
-def test_close_session_blocked_when_undelivered_orders_bound(
+def test_close_session_releases_undelivered_bindings(
     db, sample_user, sample_product
 ):
-    """close_bottle_session raises BOTTLE_SESSION_HAS_OPEN_ORDERS when bindings exist."""
-    driver = _make_driver(db, "+998901000200", "CloseBlocked")
+    """A driver can close anytime: a bound, non-terminal order is RELEASED (its
+    binding deleted) rather than blocking the close. The order itself stays
+    non-terminal and re-binds to the driver's next session when next progressed."""
+    from shared.enums import OrderStatus
+
+    driver = _make_driver(db, "+998901000200", "CloseRelease")
     session = _open_session(db, driver)
     order = _make_order_with_bottles(db, sample_user, sample_product, quantity=2)
 
@@ -1225,9 +1230,79 @@ def test_close_session_blocked_when_undelivered_orders_bound(
     svc.bind_order_to_session(session.id, order.id, accepted_by_driver_id=driver.id)
     db.session.commit()
 
-    with pytest.raises(ValidationError) as exc:
-        svc.close_bottle_session(driver.id, bottles_returned_to_warehouse=session.bottles_loaded)
-    assert exc.value.error_code == "BOTTLE_SESSION_HAS_OPEN_ORDERS"
+    closed = svc.close_bottle_session(driver.id, bottles_returned_to_warehouse=session.bottles_loaded)
+
+    assert closed.status == DriverBottleSessionStatus.CLOSED
+    # The non-terminal binding was released, so nothing blocks the close.
+    assert DriverBottleSessionOrder.query.filter_by(order_id=order.id).first() is None
+    assert svc._open_bindings_count_for_session(session.id) == 0
+    # Releasing must NOT mark the order delivered — it stays for later completion.
+    db.session.refresh(order)
+    assert order.status == OrderStatus.OUT_FOR_DELIVERY
+
+
+@pytest.mark.unit
+def test_close_session_keeps_terminal_bindings_releases_open_ones(
+    db, sample_user, sample_product
+):
+    """A mixed session keeps DELIVERED bindings (historical tally) and releases only
+    the non-terminal ones; the delivered tally is untouched by the release."""
+    from shared.enums import OrderStatus
+
+    driver = _make_driver(db, "+998901000210", "MixedClose")
+    session = _open_session(db, driver)
+    delivered_order = _make_order_with_bottles(db, sample_user, sample_product, quantity=2)
+    open_order = _make_order_with_bottles(db, sample_user, sample_product, quantity=3)
+
+    svc = BottleTrackingService()
+    svc.bind_order_to_session(session.id, delivered_order.id, accepted_by_driver_id=driver.id)
+    svc.bind_order_to_session(session.id, open_order.id, accepted_by_driver_id=driver.id)
+    delivered_order.status = OrderStatus.DELIVERED
+    session.bottles_delivered = 2
+    db.session.commit()
+
+    closed = svc.close_bottle_session(driver.id, bottles_returned_to_warehouse=session.bottles_loaded)
+
+    assert closed.status == DriverBottleSessionStatus.CLOSED
+    # Delivered binding retained for the historical tally; open one released.
+    assert DriverBottleSessionOrder.query.filter_by(order_id=delivered_order.id).first() is not None
+    assert DriverBottleSessionOrder.query.filter_by(order_id=open_order.id).first() is None
+    # The release does not disturb the sealed delivery tally.
+    db.session.refresh(closed)
+    assert closed.bottles_delivered == 2
+
+
+@pytest.mark.unit
+def test_close_then_new_session_rebinds_released_order(
+    db, app, sample_user, sample_product
+):
+    """Full Rule-2 loop from a real close_bottle_session: release at close, then the
+    order late-binds onto the driver's NEXT open session when they next progress it."""
+    driver = _make_driver(db, "+998901000211", "RebindLoop")
+    session_a = _open_session(db, driver)
+    order = _make_order_with_bottles(db, sample_user, sample_product, quantity=2)
+    delivery = _make_delivery(db, order, driver)
+
+    svc = BottleTrackingService()
+    svc.bind_order_to_session(session_a.id, order.id, accepted_by_driver_id=driver.id)
+    db.session.commit()
+
+    svc.close_bottle_session(driver.id, bottles_returned_to_warehouse=session_a.bottles_loaded)
+    assert DriverBottleSessionOrder.query.filter_by(order_id=order.id).first() is None
+
+    session_b = _open_session(db, driver)
+    db.session.commit()
+
+    with app.test_request_context():
+        app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = True
+        try:
+            result = svc.assert_driver_can_progress_delivery(delivery)
+        finally:
+            app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False
+
+    assert result is not None and result.id == session_b.id
+    binding = DriverBottleSessionOrder.query.filter_by(order_id=order.id).first()
+    assert binding is not None and binding.session_id == session_b.id
 
 
 @pytest.mark.unit
@@ -1271,8 +1346,10 @@ def test_close_session_allowed_when_orders_cancelled(
 
 
 @pytest.mark.unit
-def test_admin_force_close_bypasses_open_bindings(db, sample_user, sample_product):
-    """admin_force_close_session ignores the open-binding precondition."""
+def test_admin_force_close_releases_open_bindings(db, sample_user, sample_product):
+    """admin_force_close_session ignores the open-binding precondition AND mirrors the
+    normal-close release, so an abandoned session's non-terminal orders are not left
+    bound to a sealed session (which would corrupt its counters if later delivered)."""
     driver = _make_driver(db, "+998901000203", "ForceCloseDriver")
     admin = _make_driver(db, "+998901000204", "AdminUser")
     session = _open_session(db, driver)
@@ -1289,6 +1366,8 @@ def test_admin_force_close_bypasses_open_bindings(db, sample_user, sample_produc
         reason="Driver went home with bottles",
     )
     assert closed.status == DriverBottleSessionStatus.FORCE_CLOSED
+    # Non-terminal binding released on force-close too.
+    assert DriverBottleSessionOrder.query.filter_by(order_id=order.id).first() is None
 
 
 # ---------------------------------------------------------------------------
@@ -1349,10 +1428,10 @@ def test_regression_AD_000205_26_picked_up_blocked_after_session_close(
         session.id, order.id, accepted_by_driver_id=driver.id
     )
 
-    # Step 3: close the session under the driver's feet. Skip the close-precondition
-    # because we want to simulate the pre-fix world where the driver could have
-    # walked off and admin had no warning — equivalent to admin_force_close from
-    # the binding's perspective.
+    # Step 3: close the session under the driver's feet. Set the status directly
+    # (rather than via close_bottle_session, which would release the binding) so the
+    # order stays bound to a now-closed session — the state that forces the driver to
+    # open a new session before they can progress it.
     session.status = DriverBottleSessionStatus.CLOSED
     db.session.flush()
     db.session.commit()

@@ -1134,15 +1134,26 @@ class CashCollectionService:
         return items
 
     def get_order_payment_timeline(self, order_id: int) -> Dict[str, Any]:
-        order = Order.query.options(joinedload(Order.payment)).get(order_id)
+        order = Order.query.options(
+            joinedload(Order.payment),
+            joinedload(Order.user),
+        ).get(order_id)
         if not order:
             raise NotFoundError("Order not found")
+
+        customer = order.user
+        customer_identity = {
+            "customer_id": order.user_id,
+            "customer_name": customer.full_name if customer else None,
+            "customer_phone": customer.phone if customer else None,
+        }
 
         payment = order.payment
         if not payment:
             return {
                 "order_id": order_id,
                 "order_number": order.order_number,
+                **customer_identity,
                 "timeline": [],
             }
 
@@ -1191,6 +1202,7 @@ class CashCollectionService:
             "order_id": order_id,
             "order_number": order.order_number,
             "payment_id": payment.id,
+            **customer_identity,
             "amount": float(payment_projection["amount"]),
             "amount_collected": float(payment_projection["amount_collected"]),
             "outstanding_amount": float(payment_projection["outstanding_amount"]),

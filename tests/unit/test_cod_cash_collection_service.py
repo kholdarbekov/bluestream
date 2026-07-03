@@ -175,6 +175,62 @@ class TestCashCollectionService:
             assert statement['last_name'] == 'Debtor'
             assert statement['phone'] == '+998900000777'
 
+    def test_get_session_detail_enriches_events_with_customer_order_and_settlement(
+        self, app, db, delivery_driver, delivery_driver_profile
+    ):
+        """Session-detail events must name the customer/order and, for each
+        settled order, whether it is now fully or partially paid — the admin
+        modal renders a per-event settlement breakdown from this."""
+        with app.app_context():
+            cash = CashCollectionService()
+            recon = DriverReconciliationService()
+
+            # Debtor A: fully settled (collect the whole outstanding).
+            debtor_full = _make_cod_debtor(
+                db, cash, email='full@example.com', phone='+998900000111',
+                name='Fulla', amount='45000.00',
+            )
+            # Debtor B: partially settled (collect less than outstanding).
+            debtor_part = _make_cod_debtor(
+                db, cash, email='part@example.com', phone='+998900000222',
+                name='Parta', amount='90000.00',
+            )
+            db.session.commit()
+
+            ev_full = cash.post_collection(
+                customer_id=debtor_full.id, amount=Decimal("45000.00"),
+                source="standalone_meeting", collector_user_id=delivery_driver.id,
+                recorded_by_user_id=delivery_driver.id,
+                notes="Full standalone settlement",
+            )
+            session_id = ev_full.driver_cash_session_id
+            cash.post_collection(
+                customer_id=debtor_part.id, amount=Decimal("30000.00"),
+                source="standalone_meeting", collector_user_id=delivery_driver.id,
+                recorded_by_user_id=delivery_driver.id,
+                driver_cash_session_id=session_id,
+                notes="Partial standalone settlement",
+            )
+            db.session.commit()
+
+            payload = recon.get_session_detail(session_id)
+            events = {e["customer_phone"]: e for e in payload["events"]}
+
+            full = events["+998900000111"]
+            assert full["customer_name"] == "Fulla Debtor"
+            assert len(full["allocations"]) == 1
+            alloc_full = full["allocations"][0]
+            assert alloc_full["order_number"] is not None
+            assert alloc_full["allocated_amount"] == 45000.0
+            assert alloc_full["settlement"] == "fully"
+            assert alloc_full["reversed"] is False
+
+            part = events["+998900000222"]
+            assert part["customer_name"] == "Parta Debtor"
+            alloc_part = part["allocations"][0]
+            assert alloc_part["allocated_amount"] == 30000.0
+            assert alloc_part["settlement"] == "partial"
+
     def test_active_cod_for_update_query_locks_without_outer_join(self, app, sample_user):
         with app.app_context():
             service = CashCollectionService()
@@ -254,6 +310,26 @@ class TestCashCollectionService:
             assert timeline["outstanding_amount"] == 0.0
             assert timeline["timeline"][0]["amount_collected"] == float(sample_order.total_amount)
             assert timeline["timeline"][0]["outstanding_amount"] == 0.0
+
+    def test_get_order_payment_timeline_includes_customer_identity(
+        self, app, db
+    ):
+        """The payment-timeline payload must name the customer so the admin
+        modal header can show who the order belongs to."""
+        with app.app_context():
+            cash = CashCollectionService()
+            debtor = _make_cod_debtor(
+                db, cash, email='tl.identity@example.com', phone='+998900000333',
+                name='Timeline', amount='60000.00',
+            )
+            db.session.commit()
+            order = Order.query.filter_by(user_id=debtor.id).first()
+
+            timeline = cash.get_order_payment_timeline(order.id)
+
+            assert timeline['customer_id'] == debtor.id
+            assert timeline['customer_name'] == 'Timeline Debtor'
+            assert timeline['customer_phone'] == '+998900000333'
 
     def test_customer_reaches_cod_debt_cap_with_two_open_delivered_cod_orders(
         self,

@@ -12,7 +12,13 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import joinedload
 
 from business_app import db
-from business_app.models.payment import CashCollectionEvent, DriverCashHandoff, DriverCashSession
+from business_app.models.payment import (
+    CashCollectionAllocation,
+    CashCollectionEvent,
+    DriverCashHandoff,
+    DriverCashSession,
+    Payment,
+)
 from business_app.models.user import User
 from business_app.utils.audit_logger import AuditEventType, AuditSeverity, audit_logger
 from business_app.utils.constants import (
@@ -228,7 +234,7 @@ class DriverReconciliationService:
         if include_events and "delivery_count" not in stats:
             payload["delivery_count"] = len({event.delivery_id for event in events if event.delivery_id})
         if include_events:
-            payload["events"] = [event.to_dict() for event in events]
+            payload["events"] = [self._serialize_collection_event(event) for event in events]
             payload["handoffs"] = [
                 handoff.to_dict() for handoff in (session.handoffs or []) if handoff.voided_at is None
             ]
@@ -236,6 +242,47 @@ class DriverReconciliationService:
                 handoff.to_dict() for handoff in (session.handoffs or []) if handoff.voided_at is not None
             ]
         return payload
+
+    def _serialize_collection_event(self, event: CashCollectionEvent) -> Dict[str, Any]:
+        """Enrich a collection event with customer/order identity and a
+        per-order settlement breakdown for the admin session-detail modal."""
+        data = event.to_dict()
+        customer = event.customer
+        data["customer_name"] = customer.full_name if customer else None
+        data["customer_phone"] = customer.phone if customer else None
+        data["order_number"] = event.order.order_number if event.order else None
+
+        allocations: List[Dict[str, Any]] = []
+        for alloc in event.allocations or []:
+            payment = alloc.payment
+            outstanding = None
+            payment_status = None
+            settlement = None
+            if payment is not None:
+                outstanding = self._to_decimal(payment.outstanding_amount)
+                payment_status = payment.status.value if hasattr(payment.status, "value") else payment.status
+                settlement = "fully" if outstanding <= Decimal("0.00") else "partial"
+
+            order_number = None
+            if alloc.order is not None:
+                order_number = alloc.order.order_number
+            elif payment is not None and payment.order is not None:
+                order_number = payment.order.order_number
+
+            allocations.append(
+                {
+                    "order_id": alloc.order_id,
+                    "order_number": order_number,
+                    "allocated_amount": float(alloc.allocated_amount or 0),
+                    "allocation_mode": alloc.allocation_mode,
+                    "reversed": alloc.reversed_at is not None,
+                    "payment_status": payment_status,
+                    "payment_outstanding_amount": (float(outstanding) if outstanding is not None else None),
+                    "settlement": settlement,
+                }
+            )
+        data["allocations"] = allocations
+        return data
 
     def _assert_session_transition(self, session: DriverCashSession, *, operation: str) -> None:
         status = self._status_value(session.status)
@@ -1021,7 +1068,15 @@ class DriverReconciliationService:
     def get_session_detail(self, session_id: int) -> Dict[str, Any]:
         session = DriverCashSession.query.options(
             joinedload(DriverCashSession.driver_user),
-            joinedload(DriverCashSession.cash_collection_events),
+            joinedload(DriverCashSession.cash_collection_events).joinedload(CashCollectionEvent.customer),
+            joinedload(DriverCashSession.cash_collection_events).joinedload(CashCollectionEvent.order),
+            joinedload(DriverCashSession.cash_collection_events)
+            .joinedload(CashCollectionEvent.allocations)
+            .joinedload(CashCollectionAllocation.order),
+            joinedload(DriverCashSession.cash_collection_events)
+            .joinedload(CashCollectionEvent.allocations)
+            .joinedload(CashCollectionAllocation.payment)
+            .joinedload(Payment.order),
         ).get(session_id)
         if not session:
             raise NotFoundError("Driver cash session not found")

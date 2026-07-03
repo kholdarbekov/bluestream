@@ -161,6 +161,7 @@ describe('DeliveryReports page', () => {
           driver_name: 'Driver One',
           status: 'submitted',
           session_started_at: '2026-03-06T08:00:00Z',
+          session_ended_at: '2026-03-06T11:30:00Z',
           expected_cash: 100000,
           expected_cash_on_hand: 100000,
           declared_cash: 100000,
@@ -169,8 +170,33 @@ describe('DeliveryReports page', () => {
           verified_variance: null,
           block_reason: null,
           blocked_from_cod: false,
-          event_count: 0,
-          events: [],
+          event_count: 1,
+          events: [
+            {
+              id: 9001,
+              occurred_at: '2026-03-06T09:00:00Z',
+              source: 'standalone_meeting',
+              amount: 30000,
+              notes: 'part',
+              customer_id: 77,
+              customer_name: 'Ali Buyer',
+              customer_phone: '+998901234500',
+              order_id: null,
+              order_number: null,
+              allocations: [
+                {
+                  order_id: 456,
+                  order_number: 'ORD-TEST-456',
+                  allocated_amount: 30000,
+                  allocation_mode: 'auto',
+                  reversed: false,
+                  payment_status: 'partially_paid',
+                  payment_outstanding_amount: 15000,
+                  settlement: 'partial',
+                },
+              ],
+            },
+          ],
         },
       },
     });
@@ -180,19 +206,33 @@ describe('DeliveryReports page', () => {
     staffService.getCustomerCodStatement.mockResolvedValue({
       data: {
         data: {
+          first_name: 'Ali',
+          last_name: 'Buyer',
+          phone: '+998901234500',
           active_cod_debt_count: 0,
           total_outstanding_amount: 18000,
           items: [
-            {
-              order_id: 456,
-              order_number: 'ORD-TEST-456',
-              outstanding_amount: 18000,
-            },
+            { order_id: 456, order_number: 'ORD-TEST-456', outstanding_amount: 18000, payment_id: 5 },
           ],
         },
       },
     });
-    staffService.getOrderPaymentTimeline.mockResolvedValue({ data: { data: { timeline: [] } } });
+    staffService.getOrderPaymentTimeline.mockResolvedValue({
+      data: {
+        data: {
+          order_number: 'ORD-TEST-456',
+          status: 'partially_paid',
+          amount: 30000,
+          amount_collected: 15000,
+          outstanding_amount: 15000,
+          payment_id: 5,
+          customer_id: 77,
+          customer_name: 'Ali Buyer',
+          customer_phone: '+998901234500',
+          timeline: [],
+        },
+      },
+    });
     staffService.getCodCollectionUsersWithOpenDebts.mockResolvedValue({
       data: {
         data: {
@@ -361,5 +401,137 @@ describe('DeliveryReports page', () => {
       reason: 'Driver left; closing session',
       verified_cash: undefined,
     });
+  });
+
+  it('renders session timestamps in Tashkent time (DD-MM-YYYY HH:mm:ss)', async () => {
+    const user = userEvent.setup();
+    render(<DeliveryReports />, { wrapper: createWrapper() });
+
+    await waitFor(() => expect(staffService.getCashReconciliation).toHaveBeenCalled());
+
+    const viewButtons = await screen.findAllByText('View');
+    await user.click(viewButtons[0]);
+
+    // Scoped to the modal: the session-list table (behind the modal) renders the
+    // same session's session_started_at with the same formatter, so an unscoped
+    // screen.findByText would match both the background table row and the modal.
+    const dialog = await screen.findByRole('dialog');
+    // 2026-03-06T08:00:00Z + 5h -> 06-03-2026 13:00:00
+    expect(await within(dialog).findByText('06-03-2026 13:00:00')).toBeInTheDocument();
+    // 2026-03-06T11:30:00Z + 5h -> 06-03-2026 16:30:00
+    expect(within(dialog).getByText('06-03-2026 16:30:00')).toBeInTheDocument();
+  });
+
+  it('shows the customer on each collection event and a settlement breakdown on expand', async () => {
+    const user = userEvent.setup();
+    render(<DeliveryReports />, { wrapper: createWrapper() });
+
+    await waitFor(() => expect(staffService.getCashReconciliation).toHaveBeenCalled());
+    await user.click((await screen.findAllByText('View'))[0]);
+
+    // Customer column shows name + phone
+    expect(await screen.findByText('Ali Buyer')).toBeInTheDocument();
+    expect(screen.getByText('+998901234500')).toBeInTheDocument();
+
+    // Expand the event row -> settlement breakdown appears
+    const expandButton = document.querySelector('.ant-table-row-expand-icon');
+    expect(expandButton).toBeTruthy();
+    await user.click(expandButton);
+
+    expect(await screen.findByText('ORD-TEST-456')).toBeInTheDocument();
+    expect(screen.getByText(/Partially paid/)).toBeInTheDocument();
+    expect(screen.getByText('Payment Timeline')).toBeInTheDocument();
+  });
+
+  it('renders a Reversed tag for a reversed settlement allocation', async () => {
+    staffService.getCashReconciliationSession.mockResolvedValue({
+      data: {
+        data: {
+          id: 101,
+          driver_name: 'Driver One',
+          status: 'submitted',
+          session_started_at: '2026-03-06T08:00:00Z',
+          session_ended_at: '2026-03-06T11:30:00Z',
+          expected_cash: 100000,
+          expected_cash_on_hand: 100000,
+          declared_cash: 100000,
+          verified_cash: null,
+          declared_variance: 0,
+          verified_variance: null,
+          block_reason: null,
+          blocked_from_cod: false,
+          event_count: 1,
+          events: [
+            {
+              id: 9002,
+              occurred_at: '2026-03-06T09:00:00Z',
+              source: 'standalone_meeting',
+              amount: 12000,
+              notes: 'reversed part',
+              customer_id: 77,
+              customer_name: 'Ali Buyer',
+              customer_phone: '+998901234500',
+              order_id: null,
+              order_number: null,
+              allocations: [
+                {
+                  order_id: 999,
+                  order_number: 'ORD-REV-999',
+                  allocated_amount: 12000,
+                  allocation_mode: 'auto',
+                  reversed: true,
+                  payment_status: 'partially_paid',
+                  payment_outstanding_amount: 12000,
+                  settlement: 'partial',
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+
+    const user = userEvent.setup();
+    render(<DeliveryReports />, { wrapper: createWrapper() });
+
+    await waitFor(() => expect(staffService.getCashReconciliation).toHaveBeenCalled());
+    await user.click((await screen.findAllByText('View'))[0]);
+
+    // Expand the event row -> settlement breakdown appears
+    const expandButton = document.querySelector('.ant-table-row-expand-icon');
+    expect(expandButton).toBeTruthy();
+    await user.click(expandButton);
+
+    expect(await screen.findByText('ORD-REV-999')).toBeInTheDocument();
+    expect(await screen.findByText('Reversed')).toBeInTheDocument();
+  });
+
+  it('shows customer identity in the Customer Statement and Payment Timeline modals', async () => {
+    const user = userEvent.setup();
+    render(<DeliveryReports />, { wrapper: createWrapper() });
+
+    await waitFor(() => expect(staffService.getCashReconciliation).toHaveBeenCalled());
+    await user.click((await screen.findAllByText('View'))[0]);
+
+    // Customer Statement (event Actions button; event has customer_id 77)
+    await user.click(await screen.findByText('Customer Statement'));
+    await screen.findByText('Customer COD Statement');
+    const statementDialog = screen
+      .getAllByRole('dialog')
+      .find((d) => within(d).queryByText('Customer COD Statement'));
+    expect(statementDialog).toBeTruthy();
+    expect(within(statementDialog).getByText(/\+998901234500/)).toBeInTheDocument();
+    expect(within(statementDialog).getByText('Ali Buyer')).toBeInTheDocument();
+
+    // Payment Timeline (expand the event row, click the per-order link)
+    await user.click(document.querySelector('.ant-table-row-expand-icon'));
+    await user.click(await screen.findByText('Payment Timeline'));
+    await screen.findByText('Order Payment Timeline');
+    const timelineDialog = screen
+      .getAllByRole('dialog')
+      .find((d) => within(d).queryByText('Order Payment Timeline'));
+    expect(timelineDialog).toBeTruthy();
+    expect(within(timelineDialog).getByText('Ali Buyer')).toBeInTheDocument();
+    expect(within(timelineDialog).getByText(/\+998901234500/)).toBeInTheDocument();
   });
 });

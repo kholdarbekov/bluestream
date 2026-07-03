@@ -36,6 +36,7 @@ import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tansta
 import { useTranslation } from 'react-i18next';
 import staffService from '../services/staffService';
 import { usePermissions } from '../components/common/PermissionGuard';
+import { formatDateTimeSeconds } from '../utils/dateUtils';
 
 const ADJUSTABLE_SESSION_STATUSES = new Set(['submitted', 'partial', 'mismatch', 'overdue']);
 
@@ -402,6 +403,7 @@ const DeliveryReports = () => {
       title: t('staff:session_started_at', 'Started'),
       dataIndex: 'session_started_at',
       key: 'session_started_at',
+      render: (value) => (value ? formatDateTimeSeconds(value) : '—'),
     },
     {
       title: t('staff:session_age_days', 'Age'),
@@ -442,7 +444,7 @@ const DeliveryReports = () => {
       title: t('staff:warning_due_at', 'Warning Due'),
       dataIndex: 'warning_due_at',
       key: 'warning_due_at',
-      render: (value, record) => (record.last_cash_activity_at ? (value || '—') : '—'),
+      render: (value, record) => (record.last_cash_activity_at ? (value ? formatDateTimeSeconds(value) : '—') : '—'),
     },
     {
       title: t('staff:declared_cash', 'Declared Cash'),
@@ -500,12 +502,28 @@ const DeliveryReports = () => {
       title: t('staff:occurred_at', 'Occurred'),
       dataIndex: 'occurred_at',
       key: 'occurred_at',
+      render: (value) => (value ? formatDateTimeSeconds(value) : '—'),
     },
     {
       title: t('staff:source', 'Source'),
       dataIndex: 'source',
       key: 'source',
       render: (value) => <Tag>{value}</Tag>,
+    },
+    {
+      title: t('staff:customer', 'Customer'),
+      key: 'customer',
+      render: (_, record) =>
+        record.customer_name || record.customer_phone ? (
+          <Space direction="vertical" size={0}>
+            <Text>{record.customer_name || '—'}</Text>
+            {record.customer_phone ? (
+              <Text type="secondary" style={{ fontSize: 12 }}>{record.customer_phone}</Text>
+            ) : null}
+          </Space>
+        ) : (
+          '—'
+        ),
     },
     {
       title: t('staff:amount', 'Amount'),
@@ -581,6 +599,49 @@ const DeliveryReports = () => {
     },
   ];
 
+  const renderSettlementBreakdown = (record) => {
+    const allocations = record.allocations || [];
+    const columns = [
+      { title: t('staff:order_number', 'Order'), dataIndex: 'order_number', key: 'order_number',
+        render: (value) => value || '—' },
+      { title: t('staff:allocated', 'Allocated'), dataIndex: 'allocated_amount', key: 'allocated_amount',
+        render: (value) => money(value) },
+      {
+        title: t('staff:result', 'Result'),
+        key: 'result',
+        render: (_, alloc) => (
+          <Space size={4} wrap>
+            {alloc.settlement === 'fully' ? (
+              <Tag color="green">{t('staff:fully_paid', '✓ Fully paid')}</Tag>
+            ) : (
+              <Tag color="orange">{t('staff:partially_paid', '◐ Partially paid')}</Tag>
+            )}
+            {alloc.reversed ? <Tag color="red">{t('staff:reversed', 'Reversed')}</Tag> : null}
+          </Space>
+        ),
+      },
+      {
+        title: t('staff:actions', 'Actions'),
+        key: 'actions',
+        render: (_, alloc) =>
+          alloc.order_id ? (
+            <Button size="small" icon={<FileTextOutlined />} onClick={() => setOrderTimelineId(alloc.order_id)}>
+              {t('staff:payment_timeline', 'Payment Timeline')}
+            </Button>
+          ) : null,
+      },
+    ];
+    return (
+      <Table
+        columns={columns}
+        dataSource={allocations}
+        rowKey={(row, index) => `${row.order_id ?? 'na'}-${index}`}
+        pagination={false}
+        size="small"
+      />
+    );
+  };
+
   const statementColumns = [
     {
       title: t('staff:order_number', 'Order'),
@@ -623,6 +684,7 @@ const DeliveryReports = () => {
       title: t('staff:timestamp', 'Timestamp'),
       dataIndex: 'timestamp',
       key: 'timestamp',
+      render: (value) => (value ? formatDateTimeSeconds(value) : '—'),
     },
     {
       title: t('staff:amount', 'Amount'),
@@ -813,7 +875,7 @@ const DeliveryReports = () => {
         open={detailOpen}
         onCancel={() => setDetailOpen(false)}
         footer={null}
-        width={1100}
+        width={1360}
       >
         {sessionDetailQuery.isLoading ? (
           <Text>{t('common:loading', 'Loading...')}</Text>
@@ -827,10 +889,10 @@ const DeliveryReports = () => {
                 </Tag>
               </Descriptions.Item>
               <Descriptions.Item label={t('staff:session_started_at', 'Started')}>
-                {selectedSession.session_started_at || '—'}
+                {selectedSession.session_started_at ? formatDateTimeSeconds(selectedSession.session_started_at) : '—'}
               </Descriptions.Item>
               <Descriptions.Item label={t('staff:session_ended_at', 'Ended')}>
-                {selectedSession.session_ended_at || '—'}
+                {selectedSession.session_ended_at ? formatDateTimeSeconds(selectedSession.session_ended_at) : '—'}
               </Descriptions.Item>
               <Descriptions.Item label={t('staff:session_age_days', 'Session Age')}>
                 {selectedSession.session_age_days == null ? '—' : `${selectedSession.session_age_days}d`}
@@ -853,10 +915,12 @@ const DeliveryReports = () => {
               </Descriptions.Item>
               <Descriptions.Item label={t('staff:event_count', 'Collection Events')}>{selectedSession.event_count || 0}</Descriptions.Item>
               <Descriptions.Item label={t('staff:warning_due_at', 'Warning Due')}>
-                {selectedSession.last_cash_activity_at ? (selectedSession.warning_due_at || '—') : '—'}
+                {selectedSession.last_cash_activity_at
+                  ? (selectedSession.warning_due_at ? formatDateTimeSeconds(selectedSession.warning_due_at) : '—')
+                  : '—'}
               </Descriptions.Item>
               <Descriptions.Item label={t('staff:last_cash_activity_at', 'Last Cash Activity')}>
-                {selectedSession.last_cash_activity_at || '—'}
+                {selectedSession.last_cash_activity_at ? formatDateTimeSeconds(selectedSession.last_cash_activity_at) : '—'}
               </Descriptions.Item>
               <Descriptions.Item label={t('staff:risk_flags', 'Risk Flags')}>
                 <Space wrap>
@@ -884,6 +948,7 @@ const DeliveryReports = () => {
                   title: t('staff:handoff_occurred_at', 'When'),
                   dataIndex: 'occurred_at',
                   key: 'occurred_at',
+                  render: (value) => (value ? formatDateTimeSeconds(value) : '—'),
                 },
                 {
                   title: t('staff:handoff_amount', 'Amount'),
@@ -911,7 +976,10 @@ const DeliveryReports = () => {
               dataSource={selectedSession.events || []}
               rowKey="id"
               pagination={false}
-              scroll={{ x: 900 }}
+              expandable={{
+                expandedRowRender: renderSettlementBreakdown,
+                rowExpandable: (record) => (record.allocations?.length ?? 0) > 0,
+              }}
             />
           </>
         ) : null}
@@ -1112,6 +1180,14 @@ const DeliveryReports = () => {
           <Text>{t('common:loading', 'Loading...')}</Text>
         ) : customerStatement ? (
           <>
+            <Descriptions bordered column={2} size="small" style={{ marginBottom: 16 }}>
+              <Descriptions.Item label={t('staff:customer', 'Customer')}>
+                {`${customerStatement.first_name || ''} ${customerStatement.last_name || ''}`.trim() || '—'}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('staff:customer_phone', 'Phone')}>
+                {customerStatement.phone || '—'}
+              </Descriptions.Item>
+            </Descriptions>
             <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
               <Col span={8}>
                 <Statistic title={t('staff:active_cod_debts', 'Active COD Debts')} value={customerStatement.active_cod_debt_count || 0} />
@@ -1147,6 +1223,12 @@ const DeliveryReports = () => {
           <>
             <Descriptions bordered column={2} size="small" style={{ marginBottom: 16 }}>
               <Descriptions.Item label={t('staff:order_number', 'Order')}>{orderTimeline.order_number}</Descriptions.Item>
+              <Descriptions.Item label={t('staff:customer', 'Customer')}>
+                {orderTimeline.customer_name || '—'}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('staff:customer_phone', 'Phone')}>
+                {orderTimeline.customer_phone || '—'}
+              </Descriptions.Item>
               <Descriptions.Item label={t('staff:status', 'Status')}>
                 <Tag>{orderTimeline.status}</Tag>
               </Descriptions.Item>

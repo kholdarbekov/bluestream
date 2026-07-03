@@ -53,6 +53,11 @@ export const formatLocaleDateTime = (date) => {
   return toTashkent(date).format('DD/MM/YYYY, HH:mm');
 };
 
+export const formatDateTimeSeconds = (date) => {
+  if (!date) return '-';
+  return toTashkent(date).format('DD-MM-YYYY HH:mm:ss');
+};
+
 export const nowTashkent = (format = 'DD/MM/YYYY, HH:mm') => {
   return dayjs().utcOffset(OFFSET_MINUTES).format(format);
 };

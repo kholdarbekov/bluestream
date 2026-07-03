@@ -39,6 +39,9 @@ class CashCollectionService:
 
     COD_ACTIVE_DEBT_LIMIT = 2
 
+    # Terminal, non-collectible order states.
+    _TERMINAL_ORDER_STATUSES = frozenset({OrderStatus.CANCELLED, OrderStatus.RETURNED})
+
     @staticmethod
     def _to_decimal(value: Any) -> Decimal:
         if value is None:
@@ -836,13 +839,16 @@ class CashCollectionService:
         total_net_outstanding = Decimal("0.00")
         for payment in payments:
             outstanding_amount = self._to_decimal(payment.outstanding_amount)
-            total_outstanding += outstanding_amount
             reserved_amount = self._to_decimal(
                 (payment.provider_data or {}).get("cod_prepayment_reserved_amount", 0) or 0
             )
             net_outstanding = max(Decimal("0.00"), outstanding_amount - reserved_amount)
-            total_reserved += reserved_amount
-            total_net_outstanding += net_outstanding
+            # Cancelled/returned orders aren't collectible debt; keep them in
+            # `items` for display but out of the totals.
+            if payment.order is not None and payment.order.status not in self._TERMINAL_ORDER_STATUSES:
+                total_outstanding += outstanding_amount
+                total_reserved += reserved_amount
+                total_net_outstanding += net_outstanding
             items.append(
                 {
                     "payment_id": payment.id,
@@ -1217,6 +1223,20 @@ class CashCollectionService:
         collected_at: Optional[datetime] = None,
         collected_by: Optional[int] = None,
     ) -> Payment:
+        # Don't re-project a cancelled payment whose ORDER is terminal (keyed on
+        # order status so an offline-settled cancel on a DELIVERED order still projects).
+        order = payment.order
+        if (
+            payment.status == PaymentStatus.CANCELLED
+            and order is not None
+            and order.status in self._TERMINAL_ORDER_STATUSES
+        ):
+            payment.outstanding_amount = max(
+                Decimal("0.00"),
+                self._to_decimal(payment.amount) - self._to_decimal(payment.amount_collected),
+            )
+            return payment
+
         amount = self._to_decimal(payment.amount)
         amount_collected = max(Decimal("0.00"), self._to_decimal(payment.amount_collected))
         amount_collected = min(amount, amount_collected)

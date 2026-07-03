@@ -235,7 +235,17 @@ class CashCollectionHandler(BaseHandler):
             return
 
         statement = response.data or {}
-        total_outstanding = float(statement.get('total_outstanding_amount') or 0)
+        # Collect only DELIVERED debt, not the headline total (which also counts
+        # pending orders); fall back to the total if no items are present.
+        items = statement.get('items') or []
+        if items:
+            total_outstanding = sum(
+                float(item.get('outstanding_amount') or 0)
+                for item in items
+                if item.get('order_status') == 'delivered'
+            )
+        else:
+            total_outstanding = float(statement.get('total_outstanding_amount') or 0)
         if total_outstanding <= 0:
             await query.answer(i18n.get('staff.delivery.no_cod_debt', language), show_alert=True)
             return

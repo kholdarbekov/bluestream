@@ -2555,3 +2555,95 @@ class TestCashCollectionGroceryUnitsMirror:
                 ).count()
                 == 0
             )
+
+
+def _add_cash_order(db, user, *, status, amount, pay_status, collected="0.00"):
+    """Attach an extra CASH order+payment (any status) to `user`.
+
+    Used to model non-collectible debt (cancelled / not-yet-delivered orders)
+    whose Payment row may still carry a stale outstanding_amount.
+    """
+    order = Order(
+        user_id=user.id,
+        order_number=f"ORD-{status.value.upper()}-{uuid4().hex[:8]}",
+        status=status,
+        subtotal=Decimal(amount),
+        delivery_fee=Decimal("0.00"),
+        discount_amount=Decimal("0.00"),
+        loyalty_discount=Decimal("0.00"),
+        total_amount=Decimal(amount),
+        payment_method=PaymentMethod.CASH,
+        created_at=datetime.now(UTC),
+    )
+    db.session.add(order)
+    db.session.flush()
+    payment = Payment(
+        order_id=order.id,
+        user_id=user.id,
+        payment_id=f"pay-{uuid4().hex[:12]}",
+        payment_method=PaymentMethod.CASH,
+        amount=Decimal(amount),
+        amount_collected=Decimal(collected),
+        outstanding_amount=Decimal(amount) - Decimal(collected),
+        currency="UZS",
+        status=pay_status,
+        created_at=datetime.now(UTC),
+    )
+    db.session.add(payment)
+    db.session.flush()
+    return order, payment
+
+
+@pytest.mark.unit
+class TestCodStatementExcludesCancelledReturnedDebt:
+    """get_customer_cod_statement totals drop cancelled/returned orders (not
+    collectible) but keep pending orders; `items` still lists every order."""
+
+    @pytest.mark.parametrize("order_status", [OrderStatus.CANCELLED, OrderStatus.RETURNED])
+    def test_terminal_order_outstanding_excluded_from_totals(self, app, db, order_status):
+        with app.app_context():
+            service = CashCollectionService()
+            debtor = _make_cod_debtor(
+                db, service,
+                email=f'rc2.{order_status.value}@example.com',
+                phone='+998900000155',
+                name='RcTwoExcl',
+                amount='63000.00',
+            )
+            # A terminal order whose payment still shows outstanding.
+            _add_cash_order(
+                db, debtor, status=order_status,
+                amount='90000.00', pay_status=PaymentStatus.CANCELLED,
+            )
+            db.session.commit()
+
+            statement = service.get_customer_cod_statement(debtor.id)
+
+            # Only the delivered debt counts; the terminal order is dropped.
+            assert statement['total_outstanding_amount'] == 63000.0
+            assert statement['gross_outstanding_amount'] == 63000.0
+            assert statement['net_outstanding_amount'] == 63000.0
+            # Display still lists every payment (including the excluded one).
+            assert len(statement['items']) == 2
+
+    def test_pending_pipeline_order_still_counted_in_totals(self, app, db):
+        # Pending orders stay in the totals for the admin reserved/net modal;
+        # only the collect-all consumer filters to delivered.
+        with app.app_context():
+            service = CashCollectionService()
+            debtor = _make_cod_debtor(
+                db, service,
+                email='rc2.pending@example.com',
+                phone='+998900000156',
+                name='RcTwoPending',
+                amount='63000.00',
+            )
+            _add_cash_order(
+                db, debtor, status=OrderStatus.CONFIRMED,
+                amount='144000.00', pay_status=PaymentStatus.PENDING,
+            )
+            db.session.commit()
+
+            statement = service.get_customer_cod_statement(debtor.id)
+
+            assert statement['total_outstanding_amount'] == 207000.0

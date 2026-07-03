@@ -94,6 +94,9 @@ fi
 # processes ("node down: Not properly terminated" in xdist output) and
 # surfaces as confusing intermittent failures unrelated to the code change.
 # Wall time at -n 4 is ~4 min versus ~3 min at -n 8 — cheap insurance.
+# Bot tests call api_client via BUSINESS_APP_URL, which .env points at the live
+# business_app. Override it to an unroutable host so an unmocked bot call fails
+# fast instead of writing to prod.
 exec docker run --rm \
     --network "${network}" \
     "${env_file_arg[@]}" \
@@ -102,5 +105,6 @@ exec docker run --rm \
     -e REDIS_URL="${test_redis_url}" \
     -e FLASK_ENV=testing \
     -e TESTING=true \
+    -e BUSINESS_APP_URL="http://api-must-be-mocked.invalid" \
     "${image}" \
     sh -c "python -c 'import xdist' 2>/dev/null || pip install -q pytest-xdist==3.6.1 pytest-timeout==2.3.1 >&2; pytest tests/ --no-cov --no-header --dist=worksteal -n 4"

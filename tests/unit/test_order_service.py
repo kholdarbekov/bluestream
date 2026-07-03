@@ -275,3 +275,62 @@ class TestOrderService:
 
         assert cancelled.status == OrderStatus.CANCELLED
         assert sample_payment.status == PaymentStatus.CANCELLED
+
+
+@pytest.mark.unit
+@pytest.mark.order
+class TestCancelZeroesPhantomOutstanding:
+    """Cancelling a not-yet-delivered COD order zeroes its payment's
+    outstanding_amount, and a later projection resync must not resurrect it."""
+
+    def _confirmed_cod_order_with_payment(self, db, order, service):
+        order.status = OrderStatus.CONFIRMED
+        order.payment_method = PaymentMethod.CASH
+        db.session.commit()
+        payment = service.ensure_cod_payment_for_order(order)
+        db.session.commit()
+        return payment
+
+    def test_cancel_zeroes_uncollected_cod_outstanding(self, order_service, sample_order, sample_user, db):
+        from business_app.services.cash_collection_service import CashCollectionService
+
+        cash = CashCollectionService()
+        payment = self._confirmed_cod_order_with_payment(db, sample_order, cash)
+        assert payment.outstanding_amount == sample_order.total_amount
+
+        order_service.update_order_status(
+            order_id=sample_order.id,
+            new_status=OrderStatus.CANCELLED,
+            updated_by=sample_user.id,
+            notes="Cancelled before delivery",
+        )
+        db.session.refresh(payment)
+
+        assert payment.status == PaymentStatus.CANCELLED
+        assert payment.outstanding_amount == Decimal("0.00")
+
+    def test_cancelled_payment_not_resurrected_by_projection_resync(self, order_service, sample_order, sample_user, db):
+        from business_app.services.cash_collection_service import CashCollectionService
+
+        cash = CashCollectionService()
+        payment = self._confirmed_cod_order_with_payment(db, sample_order, cash)
+
+        order_service.update_order_status(
+            order_id=sample_order.id,
+            new_status=OrderStatus.CANCELLED,
+            updated_by=sample_user.id,
+            notes="Cancelled before delivery",
+        )
+        db.session.refresh(payment)
+
+        # A later, unrelated projection resync must keep the payment terminal:
+        # it must NOT flip a cancelled payment back to PENDING/COMPLETED nor
+        # re-inflate outstanding from the original order amount.
+        cash.sync_payment_projection(payment)
+        db.session.commit()
+        db.session.refresh(payment)
+        db.session.refresh(sample_order)
+
+        assert payment.status == PaymentStatus.CANCELLED
+        assert payment.outstanding_amount == Decimal("0.00")
+        assert sample_order.is_paid is False

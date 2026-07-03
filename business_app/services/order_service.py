@@ -1824,6 +1824,11 @@ class OrderService:
         payment.failure_reason = (
             payment.failure_reason or f"Payment cancelled because order moved to {new_status.value}"
         )
+        # Cancelled/returned-before-delivery owes nothing: reduce amount to what
+        # was collected so outstanding stays 0 through any later re-projection.
+        collected = payment.amount_collected or Decimal("0.00")
+        payment.amount = collected
+        payment.outstanding_amount = Decimal("0.00")
         order.is_paid = False
         order.paid_at = None
         return True

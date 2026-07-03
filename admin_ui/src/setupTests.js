@@ -88,5 +88,15 @@ Object.defineProperty(window, 'matchMedia', {
   }))
 });
 
+// jsdom implements getComputedStyle(element) but throws
+// "Not implemented: window.getComputedStyle(elt, pseudoElt)" for the
+// pseudo-element (2-arg) form that antd's rc-util scrollbar measurement calls,
+// flooding the test output with non-fatal error stacks that read like a failure.
+// Preserve the real single-arg behavior and drop the unsupported pseudo-element arg.
+const _getComputedStyle = window.getComputedStyle;
+window.getComputedStyle = function getComputedStyle(element) {
+  return _getComputedStyle.call(window, element);
+};
+
 import.meta.env.VITE_API_URL = 'http://localhost:5000/api';
 import.meta.env.VITE_WEBSOCKET_URL = 'ws://localhost:5000/ws';

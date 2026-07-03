@@ -109,6 +109,32 @@ class EmailTemplateService:
             "en": "Reward Redeemed - {company_name}",
             "ru": "Награда получена - {company_name}",
         },
+        # Admin analytics report emails
+        "daily_report": {
+            "uz": "Kunlik hisobot {report_date} - {company_name}",
+            "en": "Daily Report {report_date} - {company_name}",
+            "ru": "Ежедневный отчёт {report_date} - {company_name}",
+        },
+        "weekly_business_report": {
+            "uz": "Haftalik biznes hisoboti ({week_ending}) - {company_name}",
+            "en": "Weekly Business Report ({week_ending}) - {company_name}",
+            "ru": "Еженедельный бизнес-отчёт ({week_ending}) - {company_name}",
+        },
+        "churn_alert": {
+            "uz": "Mijozlar ketishi xavfi: {high_risk_count} ta yuqori xavf - {company_name}",
+            "en": "Customer Churn Alert: {high_risk_count} high-risk - {company_name}",
+            "ru": "Отток клиентов: {high_risk_count} в зоне высокого риска - {company_name}",
+        },
+        "demand_forecast": {
+            "uz": "Talab prognozi ({forecast_period}) - {company_name}",
+            "en": "Demand Forecast ({forecast_period}) - {company_name}",
+            "ru": "Прогноз спроса ({forecast_period}) - {company_name}",
+        },
+        "kpi_alert": {
+            "uz": "KPI ogohlantirishi {date} - {company_name}",
+            "en": "KPI Alert {date} - {company_name}",
+            "ru": "KPI оповещение {date} - {company_name}",
+        },
     }
 
     SUPPORTED_LANGUAGES = ["uz", "en", "ru"]

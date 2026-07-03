@@ -1,0 +1,36 @@
+{% extends "emails/base.html" %}
+
+{% block title %}KPI ogohlantirishi - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>KPI ogohlantirishi</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Biznes KPI ogohlantirishi</h2>
+
+<div class="info-box">
+    <p>Sana: <strong>{{ date }}</strong></p>
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Bugungi buyurtmalar</th>
+        <td>{{ today_orders }}</td>
+    </tr>
+    <tr>
+        <th>Bugungi daromad</th>
+        <td>{{ today_revenue }} so'm</td>
+    </tr>
+</table>
+
+{% if alerts %}
+<hr class="divider">
+<h2>Ogohlantirishlar</h2>
+{% for alert in alerts %}
+<div class="warning-box">
+    <p>{{ alert }}</p>
+</div>
+{% endfor %}
+{% endif %}
+{% endblock %}

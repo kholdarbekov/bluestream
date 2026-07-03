@@ -1768,6 +1768,9 @@ def get_orders():
 
         # Build query
         query = Order.query
+        # `orders` has two FKs to `users` (user_id customer + created_by_staff_id),
+        # so every join(User) must pin the customer onclause and join at most once.
+        joined_user = False
 
         # Apply filters
         if status:
@@ -1779,7 +1782,7 @@ def get_orders():
 
         if search:
             search_term = f"%{search}%"
-            query = query.join(User).filter(
+            query = query.join(User, Order.user_id == User.id).filter(
                 or_(
                     Order.order_number.ilike(search_term),
                     User.first_name.ilike(search_term),
@@ -1787,6 +1790,7 @@ def get_orders():
                     User.phone.ilike(search_term),
                 )
             )
+            joined_user = True
 
         if start_date:
             try:
@@ -1814,7 +1818,9 @@ def get_orders():
             order_field = Order.total_amount
         elif sort_by == "customer":
             order_field = User.first_name
-            query = query.join(User)
+            if not joined_user:
+                query = query.join(User, Order.user_id == User.id)
+                joined_user = True
         else:
             order_field = Order.created_at
 
@@ -1838,11 +1844,7 @@ def get_orders():
         # Serialize orders with statistics
         orders_data = []
         for order in pagination.items:
-            current_app.logger.info(
-                f"Order: {order}, status: {order.status}, staus.type: {type(order.status)}, status.value: {order.status.value}, status.value.type: {type(order.status.value)}"  # noqa: E501
-            )
             order_data = serialize_order_admin(order)
-            current_app.logger.info(f"order_data: {order_data}")
             order_stats = order_statistics.get(order.id, {})
             order_data.update(
                 {
@@ -4575,7 +4577,8 @@ def get_payments():
         # Search
         if search:
             search_term = f"%{search}%"
-            query = query.join(User).filter(
+            # `payments` has two FKs to `users` (user_id + collected_by) -> pin the customer onclause
+            query = query.join(User, Payment.user_id == User.id).filter(
                 or_(
                     Payment.payment_id.ilike(search_term),
                     Payment.provider_transaction_id.ilike(search_term),
@@ -4613,8 +4616,10 @@ def get_payments():
                 "subscription_id": payment.subscription_id,
                 "amount": float(payment.amount),
                 "currency": payment.currency,
-                "payment_method": payment.payment_method,
-                "status": payment.status,
+                "payment_method": (
+                    payment.payment_method.value if hasattr(payment.payment_method, "value") else payment.payment_method
+                ),
+                "status": (payment.status.value if hasattr(payment.status, "value") else payment.status),
                 "provider_transaction_id": payment.provider_transaction_id,
                 "description": payment.description,
                 "failure_reason": payment.failure_reason,

@@ -951,7 +951,7 @@ def test_send_sms_notification_is_disabled_for_delivery_updates(db, sample_user)
 
     assert result['success'] is True
     assert result['skipped'] is True
-    assert result['reason'] == 'delivery_sms_disabled'
+    assert result['reason'] == 'sms_disabled_for_type'
     service.eskiz_client.send_sms.assert_not_called()
 
 
@@ -967,6 +967,42 @@ def test_send_sms_notification_is_disabled_for_delivery_reminders(db, sample_use
     )
 
     assert result['skipped'] is True
+    service.eskiz_client.send_sms.assert_not_called()
+
+
+def test_send_sms_notification_is_disabled_for_order_status_update(db, sample_user):
+    """Order status updates are Telegram-first — SMS is short-circuited by the
+    no-SMS backstop before the (nonexistent) SMS-template lookup, so no per-order
+    'SMS template not found' WARNING is emitted."""
+    service = NotificationService()
+    service.eskiz_client = Mock()
+
+    result = service._send_sms_notification(
+        sample_user,
+        NotificationType.ORDER_STATUS_UPDATE,
+        {'order_number': 'AD_000342_26', 'status': 'Confirmed'},
+        'uz',
+    )
+
+    assert result['success'] is True
+    assert result['skipped'] is True
+    assert result['reason'] == 'sms_disabled_for_type'
+    service.eskiz_client.send_sms.assert_not_called()
+
+
+def test_send_sms_notification_is_disabled_for_order_update(db, sample_user):
+    service = NotificationService()
+    service.eskiz_client = Mock()
+
+    result = service._send_sms_notification(
+        sample_user,
+        NotificationType.ORDER_UPDATE,
+        {'order_number': 'AD_000342_26'},
+        'uz',
+    )
+
+    assert result['skipped'] is True
+    assert result['reason'] == 'sms_disabled_for_type'
     service.eskiz_client.send_sms.assert_not_called()
 
 

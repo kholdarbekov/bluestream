@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from business_app.models.user import UserAddress
 from business_app.utils.error_handlers import handle_api_exception
+from business_app.utils.exceptions import NotFoundError
 from business_app.utils.api_responses import (
     success_response,
     error_response,
@@ -322,8 +323,14 @@ def geocode_address():
                     "formatted_address": result.get("formatted_address", address),
                 }
             )
-        else:
-            return error_response(message=get_translation("api.addresses.error.geocode_not_found"), status_code=404)
+        # Defensive: providers signal no-match by raising NotFoundError, but keep
+        # this branch in case a provider ever returns an empty/partial result.
+        return error_response(message=get_translation("api.addresses.error.geocode_not_found"), status_code=404)
+    except NotFoundError:
+        # Expected bad user input (address the geocoder can't resolve) — not a
+        # server fault. Log at INFO and return a clean 404, not ERROR/503.
+        current_app.logger.info(f"Geocode: address not found for user {user_id}: address={address!r}")
+        return error_response(message=get_translation("api.addresses.error.geocode_not_found"), status_code=404)
     except Exception as e:
         current_app.logger.error(f"Geocoding failed for user {user_id}: {e}")
         return error_response(

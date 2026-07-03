@@ -259,7 +259,7 @@ class ProductionConfig(BaseConfig):
             "SENTRY_DSN",
             "AWS_ACCESS_KEY_ID",
             "AWS_SECRET_ACCESS_KEY",
-            "SENDGRID_API_KEY",
+            "BREVO_API_KEY",
         ]
 
         missing_services = []
@@ -281,7 +281,7 @@ class ProductionConfig(BaseConfig):
             "DATABASE_URL",
             "REDIS_URL",
             "SENTRY_DSN",
-            "SENDGRID_API_KEY",
+            "BREVO_API_KEY",
         ]
 
         missing_vars = [v for v in required_vars if not os.environ.get(v)]

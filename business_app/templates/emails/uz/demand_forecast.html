@@ -1,0 +1,33 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Talab prognozi - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Talab prognozi</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Inventarni rejalashtirish uchun talab prognozi</h2>
+
+<div class="info-box">
+    <p>Prognoz davri: <strong>{{ forecast_period }}</strong></p>
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Bashorat qilingan buyurtmalar</th>
+        <td>{{ total_predicted_orders }}</td>
+    </tr>
+    <tr>
+        <th>Kunlik o'rtacha</th>
+        <td>{{ daily_average }}</td>
+    </tr>
+    <tr>
+        <th>Model aniqligi</th>
+        <td>{{ model_accuracy }}</td>
+    </tr>
+</table>
+
+<hr class="divider">
+<p>Zaxira va yetkazib berishni rejalashtirishda ushbu prognozdan foydalaning.</p>
+{% endblock %}

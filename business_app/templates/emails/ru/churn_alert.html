@@ -1,0 +1,35 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Отток клиентов - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Отток клиентов</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Оповещение об оттоке клиентов</h2>
+
+<div class="warning-box">
+    <p>Клиенты высокого риска: <strong>{{ high_risk_count }}</strong></p>
+    <p>Всего в зоне риска: <strong>{{ total_at_risk }}</strong></p>
+</div>
+
+{% if top_customers %}
+<h2>Клиенты с наибольшим риском</h2>
+<table class="details-table">
+    <tr>
+        <th>Клиент</th>
+        <th>Вероятность оттока</th>
+    </tr>
+    {% for c in top_customers %}
+    <tr>
+        <td>{{ c.user_name or c.email or c.user_id }}</td>
+        <td>{{ ((c.churn_probability or 0) * 100) | round(1) }}%</td>
+    </tr>
+    {% endfor %}
+</table>
+{% endif %}
+
+<hr class="divider">
+<p>Рекомендуем принять меры по удержанию этих клиентов.</p>
+{% endblock %}

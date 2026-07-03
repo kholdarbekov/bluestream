@@ -1,0 +1,33 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Прогноз спроса - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Прогноз спроса</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Прогноз спроса для планирования запасов</h2>
+
+<div class="info-box">
+    <p>Период прогноза: <strong>{{ forecast_period }}</strong></p>
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Прогноз заказов</th>
+        <td>{{ total_predicted_orders }}</td>
+    </tr>
+    <tr>
+        <th>Среднесуточно</th>
+        <td>{{ daily_average }}</td>
+    </tr>
+    <tr>
+        <th>Точность модели</th>
+        <td>{{ model_accuracy }}</td>
+    </tr>
+</table>
+
+<hr class="divider">
+<p>Используйте этот прогноз для планирования запасов и мощностей доставки.</p>
+{% endblock %}

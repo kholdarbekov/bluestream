@@ -1,0 +1,33 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Demand Forecast - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Demand Forecast</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Demand Forecast for Inventory Planning</h2>
+
+<div class="info-box">
+    <p>Forecast period: <strong>{{ forecast_period }}</strong></p>
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Predicted orders</th>
+        <td>{{ total_predicted_orders }}</td>
+    </tr>
+    <tr>
+        <th>Daily average</th>
+        <td>{{ daily_average }}</td>
+    </tr>
+    <tr>
+        <th>Model accuracy</th>
+        <td>{{ model_accuracy }}</td>
+    </tr>
+</table>
+
+<hr class="divider">
+<p>Use this forecast to plan stock levels and delivery capacity.</p>
+{% endblock %}

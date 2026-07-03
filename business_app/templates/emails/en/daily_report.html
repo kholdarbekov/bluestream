@@ -1,0 +1,34 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Daily Report - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Daily Report</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Daily Activity Report</h2>
+
+<div class="info-box">
+    <p>Report date: <strong>{{ report_date }}</strong></p>
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Total orders</th>
+        <td>{{ total_orders }}</td>
+    </tr>
+    <tr class="total-row">
+        <th>Total revenue</th>
+        <td>{{ total_revenue }} UZS</td>
+    </tr>
+    <tr>
+        <th>New customers</th>
+        <td>{{ new_customers }}</td>
+    </tr>
+</table>
+
+<hr class="divider">
+
+<p>This report was generated automatically. Use the admin dashboard for the full breakdown.</p>
+{% endblock %}

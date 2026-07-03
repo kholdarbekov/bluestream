@@ -9,7 +9,12 @@ from typing import Dict, Any, List, Tuple
 from flask import current_app
 
 from business_app.utils.distance_matrix import get_distance_matrix as _get_distance_matrix
-from business_app.utils.exceptions import ExternalServiceError, ConfigurationError, ProviderUnavailableError
+from business_app.utils.exceptions import (
+    ConfigurationError,
+    ExternalServiceError,
+    NotFoundError,
+    ProviderUnavailableError,
+)
 from business_app.utils.helpers import calculate_distance
 from business_app.utils.http_client import RetryConfig, request_with_retry
 
@@ -60,6 +65,10 @@ class MapsService:
                 return self._yandex_geocode(full_address)
             else:  # OpenStreetMap
                 return self._osm_geocode(full_address)
+        except NotFoundError:
+            # Expected "no match for this address" — let it propagate as a 404,
+            # don't re-wrap it into a 503 ExternalServiceError.
+            raise
         except Exception as e:
             raise ExternalServiceError(f"Geocoding failed: {e}")
 
@@ -206,7 +215,7 @@ class MapsService:
 
         data = response.json()
         if data["status"] != "OK" or not data["results"]:
-            raise ExternalServiceError("Address not found")
+            raise NotFoundError("Address not found")
 
         result = data["results"][0]
         location = result["geometry"]["location"]
@@ -342,7 +351,7 @@ class MapsService:
         collection = data["response"]["GeoObjectCollection"]
 
         if not collection["featureMember"]:
-            raise ExternalServiceError("Address not found")
+            raise NotFoundError("Address not found")
 
         geo_object = collection["featureMember"][0]["GeoObject"]
         coords = geo_object["Point"]["pos"].split()
@@ -470,7 +479,7 @@ class MapsService:
 
         data = response.json()
         if not data:
-            raise ExternalServiceError("Address not found")
+            raise NotFoundError("Address not found")
 
         result = data[0]
 

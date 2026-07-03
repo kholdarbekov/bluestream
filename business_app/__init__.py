@@ -402,7 +402,8 @@ def setup_jwt_handlers(app):
 
     @jwt.expired_token_loader
     def expired_token_callback(jwt_header, jwt_payload):
-        app.logger.warning(f'JWT Expired Token: user_id={jwt_payload.get("user_id")}, exp={jwt_payload.get("exp")}')
+        # Routine session expiry (validly-signed token past exp) — expected, not a warning.
+        app.logger.info(f'JWT Expired Token: user_id={jwt_payload.get("user_id")}, exp={jwt_payload.get("exp")}')
         return jsonify({"error": "Token Expired", "message": "The token has expired."}), 401
 
     @jwt.invalid_token_loader
@@ -414,7 +415,9 @@ def setup_jwt_handlers(app):
     def missing_token_callback(error):
         from flask import request
 
-        app.logger.warning(
+        # Anonymous request with no token at all (e.g. browser probing /auth/profile
+        # before login) — expected, not a warning.
+        app.logger.info(
             "JWT Missing Token: %s | cookies=%s, has_auth_header=%s, has_csrf_header=%s, has_csrf_cookie=%s",
             error,
             list(request.cookies.keys()),

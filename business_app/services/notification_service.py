@@ -2951,20 +2951,24 @@ class NotificationService:
             language,
         )
 
-        # Business rule: delivery updates/reminders never go out over SMS — they
-        # are Telegram-or-email only. This backstop guarantees no delivery SMS
-        # leaves the system regardless of caller or stored channel preferences.
+        # Business rule: delivery AND order-status/update notifications never go
+        # out over SMS — they are Telegram-first (else email). This backstop is the
+        # single SSOT chokepoint that guarantees no SMS leaves the system for these
+        # types regardless of caller or stored channel preferences, and short-circuits
+        # before the (nonexistent) SMS-template lookup so no per-order WARNING fires.
         notification_type_value = self._status_value(notification_type)
         if notification_type_value in (
             NotificationType.DELIVERY_UPDATE.value,
             NotificationType.DELIVERY_REMINDER.value,
+            NotificationType.ORDER_STATUS_UPDATE.value,
+            NotificationType.ORDER_UPDATE.value,
         ):
             logger.info(
-                "SMS suppressed for delivery notification: user_id=%s notification_type=%s",
+                "SMS suppressed (Telegram-first notification type): user_id=%s notification_type=%s",
                 getattr(user, "id", None),
                 notification_type_value,
             )
-            return {"success": True, "skipped": True, "reason": "delivery_sms_disabled"}
+            return {"success": True, "skipped": True, "reason": "sms_disabled_for_type"}
 
         if not self.eskiz_client:
             logger.error(f"_send_sms_notification error Eskiz SMS not configured")  # noqa: F541

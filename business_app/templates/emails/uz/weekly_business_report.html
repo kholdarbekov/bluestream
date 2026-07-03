@@ -1,0 +1,44 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Haftalik biznes hisoboti - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Haftalik biznes hisoboti</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Haftalik biznes ko'rsatkichlari</h2>
+
+<div class="info-box">
+    <p>Hafta tugashi: <strong>{{ week_ending }}</strong></p>
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Buyurtmalar soni</th>
+        <td>{{ total_orders }}</td>
+    </tr>
+    <tr class="total-row">
+        <th>Umumiy daromad</th>
+        <td>{{ total_revenue }} so'm</td>
+    </tr>
+    <tr>
+        <th>Daromad o'sishi</th>
+        <td>{{ revenue_growth }}%</td>
+    </tr>
+    <tr>
+        <th>Yangi mijozlar</th>
+        <td>{{ customer_acquisition }}</td>
+    </tr>
+</table>
+
+{% if key_insights %}
+<hr class="divider">
+<h2>Asosiy xulosalar</h2>
+<ul>
+    {% for insight in key_insights %}
+    <li>{{ insight }}</li>
+    {% endfor %}
+</ul>
+{% endif %}
+{% endblock %}

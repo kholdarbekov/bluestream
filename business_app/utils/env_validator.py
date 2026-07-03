@@ -125,7 +125,7 @@ class EnvironmentValidator:
         """Validate production-specific requirements"""
         required_vars = [
             "SENTRY_DSN",
-            "SENDGRID_API_KEY",
+            "BREVO_API_KEY",
             "AWS_ACCESS_KEY_ID",
             "AWS_SECRET_ACCESS_KEY",
             "AWS_S3_BUCKET",
@@ -156,7 +156,7 @@ class EnvironmentValidator:
 
     def _validate_staging_requirements(self):
         """Validate staging-specific requirements"""
-        recommended_vars = ["SENTRY_DSN", "SENDGRID_API_KEY", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]
+        recommended_vars = ["SENTRY_DSN", "BREVO_API_KEY", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]
 
         for var in recommended_vars:
             if not os.environ.get(var):
@@ -176,11 +176,11 @@ class EnvironmentValidator:
 
     def _validate_external_services(self):
         """Validate external service configurations"""
-        # Email service
-        sendgrid_key = os.environ.get("SENDGRID_API_KEY")
-        if sendgrid_key:
-            if not sendgrid_key.startswith("SG."):
-                self.warnings.append("SENDGRID_API_KEY format appears invalid")
+        # Email service (Brevo/Sendinblue — SendGrid is retired and no longer sent through)
+        brevo_key = os.environ.get("BREVO_API_KEY")
+        if brevo_key:
+            if not brevo_key.startswith("xkeysib-"):
+                self.warnings.append("BREVO_API_KEY format appears invalid")
 
         # Payment gateways
         payme_merchant = os.environ.get("PAYME_MERCHANT_ID")
@@ -259,8 +259,8 @@ class EnvironmentValidator:
             if not os.environ.get("SENTRY_DSN"):
                 suggestions.append("Set up error tracking with Sentry: https://sentry.io")
 
-            if not os.environ.get("SENDGRID_API_KEY"):
-                suggestions.append("Configure email service with SendGrid: https://sendgrid.com")
+            if not os.environ.get("BREVO_API_KEY"):
+                suggestions.append("Configure email service with Brevo: https://www.brevo.com")
 
         return suggestions
 

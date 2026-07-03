@@ -1,0 +1,36 @@
+{% extends "emails/base.html" %}
+
+{% block title %}KPI оповещение - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>KPI оповещение</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Оповещение по бизнес-KPI</h2>
+
+<div class="info-box">
+    <p>Дата: <strong>{{ date }}</strong></p>
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Заказов сегодня</th>
+        <td>{{ today_orders }}</td>
+    </tr>
+    <tr>
+        <th>Выручка сегодня</th>
+        <td>{{ today_revenue }} сум</td>
+    </tr>
+</table>
+
+{% if alerts %}
+<hr class="divider">
+<h2>Оповещения</h2>
+{% for alert in alerts %}
+<div class="warning-box">
+    <p>{{ alert }}</p>
+</div>
+{% endfor %}
+{% endif %}
+{% endblock %}

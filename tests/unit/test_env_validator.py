@@ -78,7 +78,7 @@ class TestEnvironmentValidator:
         assert validator.validate_specific_var("DEBUG", "maybe")[0] is False
 
     def test_suggest_fixes_includes_expected_guidance(self, monkeypatch):
-        _unset(monkeypatch, ["SECRET_KEY", "JWT_SECRET_KEY", "SENTRY_DSN", "SENDGRID_API_KEY"])
+        _unset(monkeypatch, ["SECRET_KEY", "JWT_SECRET_KEY", "SENTRY_DSN", "BREVO_API_KEY"])
         validator = EnvironmentValidator("production")
 
         suggestions = validator.suggest_fixes()
@@ -86,7 +86,35 @@ class TestEnvironmentValidator:
         assert any("Generate SECRET_KEY" in s for s in suggestions)
         assert any("Generate JWT_SECRET_KEY" in s for s in suggestions)
         assert any("Sentry" in s for s in suggestions)
-        assert any("SendGrid" in s for s in suggestions)
+        assert any("Brevo" in s for s in suggestions)
+
+    def test_external_services_does_not_warn_on_dead_sendgrid_key(self, monkeypatch):
+        """SendGrid is retired (email is 100% Brevo); a bad-format SENDGRID_API_KEY
+        must not produce the phantom 'SENDGRID_API_KEY format appears invalid' warning."""
+        monkeypatch.setenv("SENDGRID_API_KEY", "totally-not-sg-format")
+        monkeypatch.setenv("BREVO_API_KEY", "xkeysib-validlookingkey")
+
+        validator = EnvironmentValidator("development")
+        _is_valid, _errors, warnings = validator.validate_all()
+
+        assert not any("SENDGRID_API_KEY" in w for w in warnings)
+
+    def test_external_services_warns_on_invalid_brevo_format(self, monkeypatch):
+        monkeypatch.setenv("BREVO_API_KEY", "not-a-brevo-key")
+
+        validator = EnvironmentValidator("development")
+        _is_valid, _errors, warnings = validator.validate_all()
+
+        assert any("BREVO_API_KEY format appears invalid" in w for w in warnings)
+
+    def test_production_requires_brevo_not_sendgrid(self, monkeypatch):
+        _unset(monkeypatch, ["BREVO_API_KEY", "SENDGRID_API_KEY"])
+
+        validator = EnvironmentValidator("production")
+        _is_valid, errors, _warnings = validator.validate_all()
+
+        assert any("BREVO_API_KEY is required for production" in e for e in errors)
+        assert not any("SENDGRID_API_KEY is required" in e for e in errors)
 
 
 @pytest.mark.unit

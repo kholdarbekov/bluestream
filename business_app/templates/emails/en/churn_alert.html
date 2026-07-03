@@ -1,0 +1,35 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Customer Churn Alert - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Customer Churn Alert</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Customer Churn Alert</h2>
+
+<div class="warning-box">
+    <p>High-risk customers: <strong>{{ high_risk_count }}</strong></p>
+    <p>Total at risk: <strong>{{ total_at_risk }}</strong></p>
+</div>
+
+{% if top_customers %}
+<h2>Top at-risk customers</h2>
+<table class="details-table">
+    <tr>
+        <th>Customer</th>
+        <th>Churn probability</th>
+    </tr>
+    {% for c in top_customers %}
+    <tr>
+        <td>{{ c.user_name or c.email or c.user_id }}</td>
+        <td>{{ ((c.churn_probability or 0) * 100) | round(1) }}%</td>
+    </tr>
+    {% endfor %}
+</table>
+{% endif %}
+
+<hr class="divider">
+<p>We recommend proactive retention outreach to these customers.</p>
+{% endblock %}

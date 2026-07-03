@@ -1,0 +1,44 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Еженедельный бизнес-отчёт - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Еженедельный бизнес-отчёт</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Еженедельные бизнес-показатели</h2>
+
+<div class="info-box">
+    <p>Конец недели: <strong>{{ week_ending }}</strong></p>
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Количество заказов</th>
+        <td>{{ total_orders }}</td>
+    </tr>
+    <tr class="total-row">
+        <th>Общая выручка</th>
+        <td>{{ total_revenue }} сум</td>
+    </tr>
+    <tr>
+        <th>Рост выручки</th>
+        <td>{{ revenue_growth }}%</td>
+    </tr>
+    <tr>
+        <th>Новые клиенты</th>
+        <td>{{ customer_acquisition }}</td>
+    </tr>
+</table>
+
+{% if key_insights %}
+<hr class="divider">
+<h2>Ключевые выводы</h2>
+<ul>
+    {% for insight in key_insights %}
+    <li>{{ insight }}</li>
+    {% endfor %}
+</ul>
+{% endif %}
+{% endblock %}

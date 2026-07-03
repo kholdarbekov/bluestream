@@ -80,75 +80,74 @@ def notify_staff_new_order(self, order_id: int, order_info: dict = None):
         order_info: Pre-built order info dict (order_number, district, etc.)
     """
     try:
-        from business_app import create_app, db
+        # Celery's ContextTask already runs this task inside app.app_context()
+        # (see tasks/celery_app.py); do NOT build a second app with create_app()
+        # here — it re-ran env validation per order and was pure overhead.
+        from business_app import db
         from business_app.models.delivery import DeliveryPerson
         from business_app.models.user import User
 
-        app = create_app()
-        with app.app_context():
-            # Get all active delivery persons who haven't muted notifications
-            delivery_persons = (
-                db.session.query(User.telegram_id)
-                .join(DeliveryPerson, DeliveryPerson.user_id == User.id)
-                .filter(
-                    DeliveryPerson.notifications_muted == False, User.telegram_id.isnot(None), User.status == "active"
-                )
-                .all()
-            )
+        # Get all active delivery persons who haven't muted notifications
+        delivery_persons = (
+            db.session.query(User.telegram_id)
+            .join(DeliveryPerson, DeliveryPerson.user_id == User.id)
+            .filter(DeliveryPerson.notifications_muted == False, User.telegram_id.isnot(None), User.status == "active")
+            .all()
+        )
 
-            telegram_ids = [dp.telegram_id for dp in delivery_persons if dp.telegram_id]
+        telegram_ids = [dp.telegram_id for dp in delivery_persons if dp.telegram_id]
 
-            if not telegram_ids:
-                logger.info(f"No delivery persons to notify for order {order_id}")
+        if not telegram_ids:
+            logger.info(f"No delivery persons to notify for order {order_id}")
+            return
+
+        # Build order info if not provided. We need delivery_id so the
+        # bot can render Accept/Decline buttons that route through the
+        # standard accept flow.
+        if not order_info:
+            from business_app.models.order import Order
+            from business_app.models.delivery import Delivery
+            from business_app.utils.address_helpers import get_address_line
+
+            order = Order.query.get(order_id)
+            if not order:
+                logger.warning(f"Order {order_id} not found for notification")
                 return
 
-            # Build order info if not provided. We need delivery_id so the
-            # bot can render Accept/Decline buttons that route through the
-            # standard accept flow.
-            if not order_info:
-                from business_app.models.order import Order
-                from business_app.models.delivery import Delivery
-                from business_app.utils.address_helpers import get_address_line
+            delivery = Delivery.query.filter_by(order_id=order_id).first()
+            addr = order.delivery_address
 
-                order = Order.query.get(order_id)
-                if not order:
-                    logger.warning(f"Order {order_id} not found for notification")
-                    return
-
-                delivery = Delivery.query.filter_by(order_id=order_id).first()
-                addr = order.delivery_address
-
-                customer_name = f"{order.user.first_name} {order.user.last_name or ''}".strip() if order.user else ""
-                items = [
-                    {
-                        "product_name": oi.product.name if oi.product else "",
-                        "quantity": oi.quantity,
-                    }
-                    for oi in (order.order_items or [])
-                ]
-
-                order_info = {
-                    "order_id": order_id,
-                    "delivery_id": delivery.id if delivery else None,
-                    "order_number": order.order_number,
-                    "customer_name": customer_name,
-                    "total_amount": float(order.total_amount) if order.total_amount else 0,
-                    "payment_method": order.payment_method.value if order.payment_method else "cash",
-                    "item_count": len(order.order_items) if order.order_items else 0,
-                    "items": items,
-                    "district": addr.district if addr else "",
-                    "address": get_address_line(addr),
-                    "time_slot": order.delivery_time_slot or "",
+            customer_name = f"{order.user.first_name} {order.user.last_name or ''}".strip() if order.user else ""
+            items = [
+                {
+                    "product_name": oi.product.name if oi.product else "",
+                    "quantity": oi.quantity,
                 }
+                for oi in (order.order_items or [])
+            ]
 
-            data = {
-                "event_id": f"new_order:{self.request.id}",
+            order_info = {
                 "order_id": order_id,
-                "delivery_person_telegram_ids": telegram_ids,
-                "order_info": order_info,
+                "delivery_id": delivery.id if delivery else None,
+                "order_number": order.order_number,
+                "customer_name": customer_name,
+                "total_amount": float(order.total_amount) if order.total_amount else 0,
+                "payment_method": order.payment_method.value if order.payment_method else "cash",
+                "item_count": len(order.order_items) if order.order_items else 0,
+                "items": items,
+                "district": addr.district if addr else "",
+                "address": get_address_line(addr),
+                "time_slot": order.delivery_time_slot or "",
             }
 
-            _send_staff_webhook("/internal/new-order", data)
+        data = {
+            "event_id": f"new_order:{self.request.id}",
+            "order_id": order_id,
+            "delivery_person_telegram_ids": telegram_ids,
+            "order_info": order_info,
+        }
+
+        _send_staff_webhook("/internal/new-order", data)
 
     except Exception as e:
         logger.error(f"Error in notify_staff_new_order: {e}")

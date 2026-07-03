@@ -1271,7 +1271,8 @@ class AnalyticsService:
             # How many are still active
             active_users = (
                 db.session.query(func.count(func.distinct(Order.user_id)))
-                .join(User)
+                # `orders` has two FKs to `users` (user_id + created_by_staff_id) -> pin the customer onclause
+                .join(User, Order.user_id == User.id)
                 .filter(User.created_at.between(period_start, period_end), Order.created_at >= period_end)
                 .scalar()
                 or 0

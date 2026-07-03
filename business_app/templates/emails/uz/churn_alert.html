@@ -1,0 +1,35 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Mijozlar ketishi xavfi - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Mijozlar ketishi xavfi</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Mijozlar ketishi bo'yicha ogohlantirish</h2>
+
+<div class="warning-box">
+    <p>Yuqori xavfli mijozlar: <strong>{{ high_risk_count }}</strong></p>
+    <p>Jami xavf ostida: <strong>{{ total_at_risk }}</strong></p>
+</div>
+
+{% if top_customers %}
+<h2>Eng yuqori xavfli mijozlar</h2>
+<table class="details-table">
+    <tr>
+        <th>Mijoz</th>
+        <th>Ketish ehtimoli</th>
+    </tr>
+    {% for c in top_customers %}
+    <tr>
+        <td>{{ c.user_name or c.email or c.user_id }}</td>
+        <td>{{ ((c.churn_probability or 0) * 100) | round(1) }}%</td>
+    </tr>
+    {% endfor %}
+</table>
+{% endif %}
+
+<hr class="divider">
+<p>Ushbu mijozlarni ushlab qolish uchun choralar ko'rishni tavsiya qilamiz.</p>
+{% endblock %}

@@ -1,0 +1,34 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Ежедневный отчёт - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Ежедневный отчёт</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Отчёт о ежедневной активности</h2>
+
+<div class="info-box">
+    <p>Дата отчёта: <strong>{{ report_date }}</strong></p>
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Количество заказов</th>
+        <td>{{ total_orders }}</td>
+    </tr>
+    <tr class="total-row">
+        <th>Общая выручка</th>
+        <td>{{ total_revenue }} сум</td>
+    </tr>
+    <tr>
+        <th>Новые клиенты</th>
+        <td>{{ new_customers }}</td>
+    </tr>
+</table>
+
+<hr class="divider">
+
+<p>Этот отчёт сформирован автоматически. Полную аналитику смотрите в панели управления.</p>
+{% endblock %}

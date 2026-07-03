@@ -2,6 +2,7 @@
 
 # Superpowers brainstorming visual-companion scratch dir
 .superpowers/
+superpowers/
 
 *.pyc
 __pycache__/

@@ -21,7 +21,7 @@ def clean_env(monkeypatch):
     for var in (
         'SECRET_KEY', 'JWT_SECRET_KEY',
         'DATABASE_URL', 'REDIS_URL',
-        'SENTRY_DSN', 'SENDGRID_API_KEY',
+        'SENTRY_DSN', 'BREVO_API_KEY',
     ):
         monkeypatch.delenv(var, raising=False)
     yield monkeypatch
@@ -33,7 +33,7 @@ def _seed_happy_path(monkeypatch):
     monkeypatch.setenv('DATABASE_URL', 'postgresql://user:pw@db.internal/bluestream')
     monkeypatch.setenv('REDIS_URL', 'redis://:pw@redis.internal:6379/0')
     monkeypatch.setenv('SENTRY_DSN', 'https://abc@sentry.io/123')
-    monkeypatch.setenv('SENDGRID_API_KEY', 'SG.xxxxxxxx')
+    monkeypatch.setenv('BREVO_API_KEY', 'xkeysib-xxxxxxxx')
 
 
 def test_required_env_vars_happy_path(clean_env):

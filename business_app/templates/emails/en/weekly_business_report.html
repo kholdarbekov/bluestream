@@ -1,0 +1,44 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Weekly Business Report - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Weekly Business Report</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Weekly Business Metrics</h2>
+
+<div class="info-box">
+    <p>Week ending: <strong>{{ week_ending }}</strong></p>
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Total orders</th>
+        <td>{{ total_orders }}</td>
+    </tr>
+    <tr class="total-row">
+        <th>Total revenue</th>
+        <td>{{ total_revenue }} UZS</td>
+    </tr>
+    <tr>
+        <th>Revenue growth</th>
+        <td>{{ revenue_growth }}%</td>
+    </tr>
+    <tr>
+        <th>New customers</th>
+        <td>{{ customer_acquisition }}</td>
+    </tr>
+</table>
+
+{% if key_insights %}
+<hr class="divider">
+<h2>Key insights</h2>
+<ul>
+    {% for insight in key_insights %}
+    <li>{{ insight }}</li>
+    {% endfor %}
+</ul>
+{% endif %}
+{% endblock %}

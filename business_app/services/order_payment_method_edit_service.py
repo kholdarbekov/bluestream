@@ -7,6 +7,7 @@ allowed; a completed online PSP is terminal. Mirrors OrderCashEditService.
 
 import logging
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
 from business_app import db
@@ -17,7 +18,13 @@ from business_app.services.corporate_contract_service import CorporateContractSe
 from business_app.utils.audit_logger import AuditEventType, AuditSeverity, audit_logger
 from business_app.utils.exceptions import NotFoundError, ValidationError
 from business_app.utils.transactions import atomic_transaction
-from shared.enums import CashCollectionSource, OrderStatus, PaymentMethod, PaymentStatus
+from shared.enums import (
+    CashCollectionSource,
+    FiscalizationStatus,
+    OrderStatus,
+    PaymentMethod,
+    PaymentStatus,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +83,7 @@ class PaymentMethodEditResult:
     money_action: str
     warnings: List[str] = field(default_factory=list)
     post_commit_dispatch: List[Tuple[str, Tuple, Dict]] = field(default_factory=list)
+    payment_link: Optional[Dict[str, Any]] = None
 
 
 class OrderPaymentMethodEditService:
@@ -183,7 +191,10 @@ class OrderPaymentMethodEditService:
             return self._settle_as_business_account(
                 order=order, plan=plan, reason=reason, actor_user_id=actor_user_id
             )
-        # Transitions OUT of business_account (T3/T4) land in a later task.
+        if target == "cash":
+            return self._unwind_to_cash(order=order, plan=plan, reason=reason, actor_user_id=actor_user_id)
+        if target == "click":
+            return self._unwind_to_click(order=order, plan=plan, reason=reason, actor_user_id=actor_user_id)
         raise ValidationError(f"transition_not_implemented: {plan.transition}")
 
     def _settle_as_business_account(
@@ -323,3 +334,144 @@ class OrderPaymentMethodEditService:
             )
         except Exception as exc:  # pragma: no cover - defensive
             logger.error("Failed to release marking codes for order %s: %s", order.id, exc)
+
+    # ---- apply (out of business_account: T3 cash, T4 click) ----
+    def _marking_codes_consumed_warnings(self, payment) -> List[str]:
+        """Flag (not auto-reverse) a BA payment that already consumed marking codes.
+
+        Consumption completed iff the payment's fiscalization row reached
+        COMPLETED (set by PaymentFiscalizationService.consume_marking_codes_for_
+        business_account); un-using already-USED codes is out of scope here.
+        """
+        fiscalization = getattr(payment, "fiscalization", None) if payment is not None else None
+        if (
+            payment is not None
+            and getattr(payment, "consume_marking_codes", False)
+            and fiscalization is not None
+            and fiscalization.status == FiscalizationStatus.COMPLETED
+        ):
+            return ["business_account_marking_codes_consumed_manual_review"]
+        return []
+
+    def _unwind_to_cash(
+        self, *, order: Order, plan: PaymentMethodEditPlan, reason: str, actor_user_id: int
+    ) -> PaymentMethodEditResult:
+        from business_app.services.cash_collection_service import CashCollectionService
+        from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
+
+        payment = order.payment
+        warnings = list(plan.warnings) + self._marking_codes_consumed_warnings(payment)
+
+        with atomic_transaction():
+            # 1. Return prepaid units to availability first (idempotent; no-op if
+            #    this order never reserved/consumed any).
+            self.corporate_service.reverse_order_prepayment(
+                order.id, reason=reason, actor_user_id=actor_user_id
+            )
+
+            # 2. Flip method and reset the payment to a fresh COD obligation.
+            #    ensure_cod_payment_for_order requires order.payment_method ==
+            #    CASH already, and does NOT reset a COMPLETED payment back to
+            #    PENDING itself — the explicit reset here is what establishes
+            #    the new-method obligation before the projection sync.
+            order.payment_method = PaymentMethod.CASH
+            if payment is not None:
+                payment.payment_method = PaymentMethod.CASH
+                payment.status = PaymentStatus.PENDING
+                payment.amount_collected = Decimal("0.00")
+                payment.outstanding_amount = order.total_amount
+                payment.paid_at = None
+            order.is_paid = False
+            db.session.flush()
+
+            cash_service = CashCollectionService()
+            payment = cash_service.ensure_cod_payment_for_order(order, actor_user_id=actor_user_id)
+            cash_service.sync_payment_projection(payment)
+
+            # 3. CASH never requires Click fiscalization; mark it NOT_REQUIRED
+            #    rather than leaving a stale fiscalization row behind. Never let
+            #    a fiscal hiccup abort an otherwise valid unwind.
+            try:
+                PaymentFiscalizationService().queue_click_fiscalization(
+                    payment.id, actor_user_id=actor_user_id
+                )
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.error("Failed to mark fiscalization NOT_REQUIRED for order %s: %s", order.id, exc)
+
+        audit_logger.log_event(
+            event_type=AuditEventType.PAYMENT_PROCESSED,
+            action="order_payment_method_changed",
+            severity=AuditSeverity.HIGH,
+            resource_type="order",
+            resource_id=str(order.id),
+            additional_data={
+                "actor_user_id": actor_user_id,
+                "from_method": "business_account",
+                "to_method": "cash",
+                "money_action": "cod_obligation_created",
+                "reason": reason,
+            },
+        )
+
+        return PaymentMethodEditResult(
+            order_id=order.id,
+            new_method="cash",
+            corporate_action="reversed_prepayment",
+            money_action="cod_obligation_created",
+            warnings=warnings,
+        )
+
+    def _unwind_to_click(
+        self, *, order: Order, plan: PaymentMethodEditPlan, reason: str, actor_user_id: int
+    ) -> PaymentMethodEditResult:
+        from business_app.services.payment_service import PaymentService
+
+        payment = order.payment
+        warnings = list(plan.warnings) + self._marking_codes_consumed_warnings(payment)
+        payment_link: Optional[Dict[str, Any]] = None
+
+        with atomic_transaction():
+            # 1. Return prepaid units to availability first.
+            self.corporate_service.reverse_order_prepayment(
+                order.id, reason=reason, actor_user_id=actor_user_id
+            )
+
+            # 2. Flip method and reset the payment to a fresh online obligation.
+            order.payment_method = PaymentMethod.CLICK
+            if payment is not None:
+                payment.payment_method = PaymentMethod.CLICK
+                payment.status = PaymentStatus.PENDING
+                payment.amount_collected = Decimal("0.00")
+                payment.outstanding_amount = order.total_amount
+                payment.consume_marking_codes = True
+                payment.paid_at = None
+            order.is_paid = False
+            db.session.flush()
+
+            # 3. Capture a fresh payment link for the customer to pay online.
+            if payment is not None:
+                payment_link = PaymentService().create_payment_link(payment.id)
+
+        audit_logger.log_event(
+            event_type=AuditEventType.PAYMENT_PROCESSED,
+            action="order_payment_method_changed",
+            severity=AuditSeverity.HIGH,
+            resource_type="order",
+            resource_id=str(order.id),
+            additional_data={
+                "actor_user_id": actor_user_id,
+                "from_method": "business_account",
+                "to_method": "click",
+                "money_action": "online_payment_link_created",
+                "reason": reason,
+            },
+        )
+
+        return PaymentMethodEditResult(
+            order_id=order.id,
+            new_method="click",
+            corporate_action="reversed_prepayment",
+            money_action="online_payment_link_created",
+            warnings=warnings,
+            payment_link=payment_link,
+        )

@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -19,6 +20,7 @@ from business_app.models.payment import (
     CashCollectionAllocation,
     CashCollectionEvent,
     Payment,
+    PaymentFiscalization,
 )
 from business_app.models.product import ProductMarkingCode
 from business_app.models.user import User
@@ -29,6 +31,7 @@ from shared.enums import (
     CashCollectionSource,
     CorporateContractTrackingMode,
     EntitySubtype,
+    FiscalizationStatus,
     MarkingCodeLedgerEventType,
     MarkingCodeStatus,
     OrderStatus,
@@ -468,3 +471,197 @@ def test_apply_rejects_short_reason(db, workplace_user, sample_product, covered_
         OrderPaymentMethodEditService().apply_edit(
             order_id=order.id, new_method="business_account", reason="no", actor_user_id=1
         )
+
+
+# --------------------------------------------------------------------------- #
+# apply_edit — out of business_account (T3 cash, T4 click)
+# --------------------------------------------------------------------------- #
+
+
+def _seed_business_account_settled_order(
+    db, user, product, contract, price_row, account, balance, *, consumed_marking_codes=False
+):
+    """Delivered business_account order: units reserved+consumed, payment
+    COMPLETED via BA (mirrors order-627 shape after T1 settlement)."""
+    balance.consumed_units = Decimal("4.00")
+    order = _make_order(user, OrderStatus.DELIVERED, PaymentMethod.BUSINESS_ACCOUNT, total=_COLLECTED)
+    item = _add_contract_item(order, product, contract, price_row, quantity=4)
+
+    reserve = CorporatePrepaymentLedger(
+        contract_id=contract.id,
+        account_id=account.id,
+        balance_id=balance.id,
+        product_id=product.id,
+        order_id=order.id,
+        order_item_id=item.id,
+        event_type=CorporatePrepaymentEventType.RESERVE,
+        units=Decimal("4.00"),
+        idempotency_key=f"reserve:order_item:{item.id}",
+    )
+    db.session.add(reserve)
+    db.session.flush()
+    consume = CorporatePrepaymentLedger(
+        contract_id=contract.id,
+        account_id=account.id,
+        balance_id=balance.id,
+        product_id=product.id,
+        order_id=order.id,
+        order_item_id=item.id,
+        event_type=CorporatePrepaymentEventType.CONSUME,
+        units=Decimal("4.00"),
+        idempotency_key=f"consume:reserve:{reserve.id}",
+    )
+    db.session.add(consume)
+
+    payment = Payment(
+        order_id=order.id,
+        user_id=user.id,
+        payment_method=PaymentMethod.BUSINESS_ACCOUNT,
+        amount=_COLLECTED,
+        amount_collected=_COLLECTED,
+        outstanding_amount=Decimal("0.00"),
+        currency="UZS",
+        status=PaymentStatus.COMPLETED,
+        paid_at=datetime.now(timezone.utc),
+        consume_marking_codes=consumed_marking_codes,
+        payment_id=f"pay-{uuid4().hex[:10]}",
+    )
+    db.session.add(payment)
+    db.session.flush()
+
+    if consumed_marking_codes:
+        code = ProductMarkingCode(
+            product_id=product.id,
+            order_id=order.id,
+            code=f"MC-{uuid4().hex}",
+            status=MarkingCodeStatus.USED,
+        )
+        db.session.add(code)
+        db.session.flush()
+        db.session.add(
+            OrderItemMarkingCodeAllocation(
+                order_item_id=item.id,
+                order_id=order.id,
+                payment_id=payment.id,
+                product_marking_code_id=code.id,
+                action=MarkingCodeLedgerEventType.USED,
+            )
+        )
+        db.session.add(
+            PaymentFiscalization(
+                payment_id=payment.id,
+                status=FiscalizationStatus.COMPLETED,
+                provider_name="business_account",
+                completed_at=datetime.now(timezone.utc),
+            )
+        )
+
+    db.session.commit()
+    return order
+
+
+def _reversal_rows(order_id):
+    return CorporatePrepaymentLedger.query.filter(
+        CorporatePrepaymentLedger.order_id == order_id,
+        CorporatePrepaymentLedger.event_type == CorporatePrepaymentEventType.ADJUSTMENT,
+        CorporatePrepaymentLedger.idempotency_key.like("reverse:%"),
+    ).all()
+
+
+def test_apply_t3_business_account_to_cash_returns_units_and_resets_payment(
+    db, workplace_user, sample_product, covered_contract, delivery_driver
+):
+    contract, price_row, account, balance = covered_contract
+    order = _seed_business_account_settled_order(
+        db, workplace_user, sample_product, contract, price_row, account, balance
+    )
+
+    result = OrderPaymentMethodEditService().apply_edit(
+        order_id=order.id,
+        new_method="cash",
+        reason="reclassify BA order to cash",
+        actor_user_id=delivery_driver.id,
+    )
+
+    db.session.expire_all()
+    order = Order.query.get(order.id)
+    balance = CorporatePrepaymentBalance.query.get(balance.id)
+
+    # units returned to availability: consumed_units decreased, reversal ledger exists
+    assert balance.consumed_units == Decimal("0.00")
+    assert len(_reversal_rows(order.id)) == 1
+
+    assert order.payment_method == PaymentMethod.CASH
+    assert order.is_paid is False
+    payment = order.payment
+    assert payment.payment_method == PaymentMethod.CASH
+    assert payment.status == PaymentStatus.PENDING
+    assert payment.amount_collected == Decimal("0.00")
+    assert payment.outstanding_amount == order.total_amount
+    assert payment.paid_at is None
+
+    assert result.corporate_action == "reversed_prepayment"
+    assert result.money_action == "cod_obligation_created"
+    assert "business_account_marking_codes_consumed_manual_review" not in result.warnings
+
+
+def test_apply_t3_flags_consumed_marking_codes_for_manual_review(
+    db, workplace_user, sample_product, covered_contract, delivery_driver
+):
+    contract, price_row, account, balance = covered_contract
+    order = _seed_business_account_settled_order(
+        db, workplace_user, sample_product, contract, price_row, account, balance, consumed_marking_codes=True
+    )
+
+    result = OrderPaymentMethodEditService().apply_edit(
+        order_id=order.id,
+        new_method="cash",
+        reason="reclassify BA order with consumed codes",
+        actor_user_id=delivery_driver.id,
+    )
+
+    assert "business_account_marking_codes_consumed_manual_review" in result.warnings
+    # out of scope: codes are NOT auto-un-used
+    assert ProductMarkingCode.query.filter_by(order_id=order.id).first().status == MarkingCodeStatus.USED
+
+
+def test_apply_t4_business_account_to_click_returns_units_and_creates_link(
+    db, workplace_user, sample_product, covered_contract, delivery_driver
+):
+    contract, price_row, account, balance = covered_contract
+    order = _seed_business_account_settled_order(
+        db, workplace_user, sample_product, contract, price_row, account, balance, consumed_marking_codes=True
+    )
+
+    fake_link = {"payment_url": "https://click.example/pay/abc", "reference": "abc", "expires_at": "2099-01-01T00:00:00"}
+    with patch(
+        "business_app.services.payment_service.PaymentService.create_payment_link", return_value=fake_link
+    ) as mocked_link:
+        result = OrderPaymentMethodEditService().apply_edit(
+            order_id=order.id,
+            new_method="click",
+            reason="reclassify BA order to click",
+            actor_user_id=delivery_driver.id,
+        )
+
+    db.session.expire_all()
+    order = Order.query.get(order.id)
+    balance = CorporatePrepaymentBalance.query.get(balance.id)
+
+    assert balance.consumed_units == Decimal("0.00")
+    assert len(_reversal_rows(order.id)) == 1
+
+    assert order.payment_method == PaymentMethod.CLICK
+    assert order.is_paid is False
+    payment = order.payment
+    assert payment.payment_method == PaymentMethod.CLICK
+    assert payment.status == PaymentStatus.PENDING
+    assert payment.amount_collected == Decimal("0.00")
+    assert payment.outstanding_amount == order.total_amount
+    assert payment.paid_at is None
+
+    mocked_link.assert_called_once_with(payment.id)
+    assert result.corporate_action == "reversed_prepayment"
+    assert result.money_action == "online_payment_link_created"
+    assert result.payment_link == fake_link
+    assert "business_account_marking_codes_consumed_manual_review" in result.warnings

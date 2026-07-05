@@ -649,6 +649,21 @@ class OrderHandlers(BaseHandler):
             payment_payload.get('available_methods', []),
             language,
         )
+
+        # Pre-select the business-account default (Plan 3): if the API flags a
+        # default method for this cart, seed it so the customer sees it chosen.
+        # A manual tap still overrides via payment_handler.
+        default_method = next(
+            (
+                str(m.get('method'))
+                for m in payment_payload.get('available_methods', [])
+                if m.get('is_default')
+            ),
+            None,
+        )
+        if default_method:
+            context.user_data['selected_payment_method'] = default_method
+
         if not payment_methods:
             await self._handle_api_error(
                 update,

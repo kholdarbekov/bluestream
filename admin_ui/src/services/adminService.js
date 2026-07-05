@@ -396,6 +396,16 @@ class AdminService {
     return response.data;
   }
 
+  async previewOrderPaymentMethod(orderId, payload) {
+    const response = await api.post(`/admin/orders/${orderId}/payment-method/preview`, payload);
+    return response.data;
+  }
+
+  async submitOrderPaymentMethod(orderId, payload) {
+    const response = await api.post(`/admin/orders/${orderId}/payment-method`, payload);
+    return response.data;
+  }
+
   async getOrderEditHistory(orderId) {
     const response = await api.get(`/admin/orders/${orderId}/edit-history`);
     return response.data;

@@ -179,6 +179,15 @@ const Orders = () => {
   // confirmCashEdit would return undefined fields (new_amount → NaN → JSON null).
   // Same reason the order-edit flow keeps pendingEditPayload above.
   const [pendingCashEdit, setPendingCashEdit] = useState(null);
+  // Payment-method edit modal (2-step flow): step 1 = form, step 2 = preview/confirm.
+  const [isPaymentMethodModalVisible, setIsPaymentMethodModalVisible] = useState(false);
+  const [paymentMethodStep, setPaymentMethodStep] = useState(1);
+  const [paymentMethodPreviewData, setPaymentMethodPreviewData] = useState(null);
+  const [paymentMethodPreviewLoading, setPaymentMethodPreviewLoading] = useState(false);
+  // Snapshot the validated {new_method, reason} at the step 1 → 2 transition,
+  // same reason pendingEditPayload/pendingCashEdit exist: the Form unmounts
+  // when step 2 renders.
+  const [pendingPaymentMethodPayload, setPendingPaymentMethodPayload] = useState(null);
 
   const { isAdmin } = usePermissions();
 
@@ -187,6 +196,7 @@ const Orders = () => {
   const [personalCardForm] = Form.useForm();
   const [editItemsForm] = Form.useForm();
   const [cashEditForm] = Form.useForm();
+  const [paymentMethodForm] = Form.useForm();
   const watchedPaymentMethod = Form.useWatch('payment_method', createOrderForm);
   const watchedStatusValue = Form.useWatch('status', statusForm);
 
@@ -508,6 +518,123 @@ const Orders = () => {
     cashEditMutation.mutate({
       orderId: selectedOrder.id,
       payload: pendingCashEdit,
+    });
+  };
+
+  const handleOpenPaymentMethodEdit = () => {
+    if (!selectedOrder) return;
+    paymentMethodForm.resetFields();
+    paymentMethodForm.setFieldsValue({
+      new_method: (selectedOrder.allowed_target_methods || [])[0],
+      reason: '',
+    });
+    setPaymentMethodPreviewData(null);
+    setPendingPaymentMethodPayload(null);
+    setPaymentMethodStep(1);
+    setIsPaymentMethodModalVisible(true);
+  };
+
+  const handleClosePaymentMethodEdit = () => {
+    setIsPaymentMethodModalVisible(false);
+    setPaymentMethodStep(1);
+    setPaymentMethodPreviewData(null);
+    setPendingPaymentMethodPayload(null);
+    paymentMethodForm.resetFields();
+  };
+
+  const handlePaymentMethodPreview = async () => {
+    if (!selectedOrder?.id) return;
+    try {
+      const values = await paymentMethodForm.validateFields();
+      setPaymentMethodPreviewLoading(true);
+      const payload = { new_method: values.new_method, reason: values.reason };
+      const response = await adminService.previewOrderPaymentMethod(selectedOrder.id, {
+        new_method: payload.new_method,
+      });
+      setPaymentMethodPreviewData(response?.data || null);
+      // Cache the validated payload so handlePaymentMethodConfirm doesn't depend
+      // on the Form component (which unmounts when step 2 renders).
+      setPendingPaymentMethodPayload(payload);
+      setPaymentMethodStep(2);
+    } catch (error) {
+      if (error?.errorFields) {
+        // antd Form validation — let the form surface the issue.
+        return;
+      }
+      const errors = extractApiErrorMessages(
+        error,
+        t('ui.orders.payment_method_preview_failed', 'Failed to preview payment-method change'),
+      );
+      message.error(errors[0]);
+    } finally {
+      setPaymentMethodPreviewLoading(false);
+    }
+  };
+
+  const submitPaymentMethodMutation = useMutation({
+    mutationFn: ({ orderId, payload }) => adminService.submitOrderPaymentMethod(orderId, payload),
+    onSuccess: async (response) => {
+      const warnings = response?.data?.warnings || [];
+      const paymentLink = response?.data?.payment_link;
+      message.success(t('ui.orders.payment_method_updated_success', 'Payment method updated successfully'));
+      if (warnings.length) {
+        Modal.warning({
+          title: t('ui.orders.payment_method_warnings_title', 'Payment method updated with warnings'),
+          content: (
+            <ul style={{ margin: 0, paddingLeft: 18 }}>
+              {warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          ),
+        });
+      }
+      if (paymentLink?.payment_url) {
+        message.info(
+          <span>
+            {t('ui.orders.payment_method_link_ready', 'New payment link created: ')}
+            <a href={paymentLink.payment_url} target="_blank" rel="noreferrer">
+              {paymentLink.payment_url}
+            </a>
+          </span>,
+        );
+      }
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      // Refresh the detail modal payload so the new method/eligibility show up.
+      if (selectedOrder?.id) {
+        try {
+          const refreshed = await adminService.getOrderDetails(selectedOrder.id);
+          if (refreshed.success && refreshed.data?.order) {
+            setSelectedOrder(refreshed.data.order);
+          }
+        } catch (_err) {
+          // best-effort refresh
+        }
+      }
+      setIsPaymentMethodModalVisible(false);
+      setPaymentMethodStep(1);
+      setPaymentMethodPreviewData(null);
+      setPendingPaymentMethodPayload(null);
+      paymentMethodForm.resetFields();
+    },
+    onError: (error) => {
+      const errors = extractApiErrorMessages(
+        error,
+        t('ui.orders.payment_method_update_failed', 'Failed to update payment method'),
+      );
+      message.error(errors[0]);
+    },
+  });
+
+  const handlePaymentMethodConfirm = () => {
+    if (!pendingPaymentMethodPayload) {
+      message.error(t('ui.orders.edit_preview_missing', 'Preview the change before applying.'));
+      setPaymentMethodStep(1);
+      return;
+    }
+    submitPaymentMethodMutation.mutate({
+      orderId: selectedOrder.id,
+      payload: pendingPaymentMethodPayload,
     });
   };
 
@@ -1059,6 +1186,17 @@ const Orders = () => {
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.orders.payment_method', 'Payment Method')}>
                 {selectedOrder.payment_method || '—'}
+                {isAdmin() && selectedOrder.is_payment_method_editable ? (
+                  <Button
+                    type="link"
+                    size="small"
+                    icon={<EditOutlined />}
+                    onClick={handleOpenPaymentMethodEdit}
+                    style={{ marginLeft: 8, padding: 0 }}
+                  >
+                    {t('ui.orders.edit_payment_method', 'Change')}
+                  </Button>
+                ) : null}
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.orders.payment_provider', 'Payment Provider')}>
                 {selectedOrder.payment_provider || '—'}
@@ -2257,6 +2395,132 @@ const Orders = () => {
                 disabled={(cashEditPreview?.blocking_reasons || []).length > 0}>
                 {t('ui.orders.apply_correction', 'Apply correction')}
               </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        title={
+          paymentMethodStep === 1
+            ? `${t('ui.orders.edit_payment_method', 'Change')} — ${selectedOrder?.order_number || ''}`
+            : `${t('ui.orders.payment_method_preview_title', 'Confirm Payment Method Change')} — ${selectedOrder?.order_number || ''}`
+        }
+        open={isPaymentMethodModalVisible}
+        onCancel={handleClosePaymentMethodEdit}
+        footer={null}
+        destroyOnClose
+      >
+        {paymentMethodStep === 1 ? (
+          <Form form={paymentMethodForm} layout="vertical">
+            <Alert
+              type="info"
+              showIcon
+              style={{ marginBottom: 16 }}
+              message={t(
+                'ui.orders.payment_method_edit_hint',
+                'Changing the payment method reconciles the corporate ledger and money side automatically. Preview the impact before applying.',
+              )}
+            />
+            <Form.Item
+              name="new_method"
+              label={t('ui.orders.new_payment_method', 'New payment method')}
+              rules={[{ required: true, message: t('ui.orders.payment_method_required', 'Please select a payment method') }]}
+            >
+              <Select placeholder={t('ui.orders.select_payment_method', 'Select a payment method')}>
+                {(selectedOrder?.allowed_target_methods || []).map((method) => (
+                  <Option key={method} value={method}>
+                    {t(`ui.orders.payment_${method}`, method)}
+                  </Option>
+                ))}
+              </Select>
+            </Form.Item>
+            <Form.Item
+              name="reason"
+              label={t('ui.orders.edit_reason', 'Reason')}
+              rules={[
+                { required: true, message: t('ui.orders.reason_required', 'Reason is required') },
+                { min: 5, message: t('ui.orders.payment_method_reason_min_length', 'Reason must be at least 5 characters') },
+              ]}
+            >
+              <Input.TextArea
+                rows={2}
+                placeholder={t(
+                  'ui.orders.payment_method_reason_placeholder',
+                  'Example: customer requested switch to corporate billing',
+                )}
+              />
+            </Form.Item>
+
+            <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
+              <Space>
+                <Button onClick={handleClosePaymentMethodEdit}>{t('ui.common.cancel', 'Cancel')}</Button>
+                <AsyncButton type="primary" loading={paymentMethodPreviewLoading} onClick={handlePaymentMethodPreview}>
+                  {t('ui.orders.preview_impacts', 'Preview impacts')}
+                </AsyncButton>
+              </Space>
+            </Form.Item>
+          </Form>
+        ) : (
+          <div>
+            {(paymentMethodPreviewData?.blocking_reasons || []).length ? (
+              <Alert
+                type="error"
+                showIcon
+                style={{ marginBottom: 16 }}
+                message={t('ui.orders.edit_blocked', 'This edit cannot proceed')}
+                description={
+                  <ul style={{ margin: 0, paddingLeft: 18 }}>
+                    {paymentMethodPreviewData.blocking_reasons.map((reason) => (
+                      <li key={reason}>{reason}</li>
+                    ))}
+                  </ul>
+                }
+              />
+            ) : null}
+
+            {(paymentMethodPreviewData?.warnings || []).length ? (
+              <Alert
+                type="warning"
+                showIcon
+                style={{ marginBottom: 16 }}
+                message={t('ui.orders.edit_warnings', 'Warnings')}
+                description={
+                  <ul style={{ margin: 0, paddingLeft: 18 }}>
+                    {paymentMethodPreviewData.warnings.map((warning) => (
+                      <li key={warning}>{warning}</li>
+                    ))}
+                  </ul>
+                }
+              />
+            ) : null}
+
+            <Descriptions column={2} bordered size="small" style={{ marginBottom: 16 }}>
+              <Descriptions.Item label={t('ui.orders.current_payment_method', 'Current method')}>
+                {paymentMethodPreviewData?.current_method || '—'}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('ui.orders.new_payment_method', 'New payment method')}>
+                <strong>{paymentMethodPreviewData?.new_method || '—'}</strong>
+              </Descriptions.Item>
+              <Descriptions.Item label={t('ui.orders.order_delivered', 'Order delivered')} span={2}>
+                {paymentMethodPreviewData?.is_delivered ? t('ui.common.yes', 'Yes') : t('ui.common.no', 'No')}
+              </Descriptions.Item>
+            </Descriptions>
+
+            <div style={{ marginTop: 16, textAlign: 'right' }}>
+              <Space>
+                <Button onClick={() => setPaymentMethodStep(1)}>
+                  {t('ui.orders.back_to_edit', 'Back to edit')}
+                </Button>
+                <AsyncButton
+                  type="primary"
+                  loading={submitPaymentMethodMutation.isPending}
+                  disabled={(paymentMethodPreviewData?.blocking_reasons || []).length > 0}
+                  onClick={handlePaymentMethodConfirm}
+                >
+                  {t('ui.orders.confirm_apply', 'Confirm and apply')}
+                </AsyncButton>
+              </Space>
             </div>
           </div>
         )}

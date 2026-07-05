@@ -428,7 +428,9 @@ class SubscriptionService:
         }
 
         try:
-            order = order_service.create_order(subscription.user_id, order_data)
+            order = order_service.create_order(
+                subscription.user_id, order_data, apply_payment_method_default=False
+            )
 
             # Process payment if not trial
             if subscription.status != SubscriptionStatus.TRIAL:

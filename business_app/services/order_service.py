@@ -66,7 +66,14 @@ class OrderService:
 
     @log_service_call(operation_type="order", track_performance=True)
     @log_business_event(event_type="created", entity_type="order")
-    def create_order(self, user_id: int, order_data: Dict[str, Any], *, bypass_cod_check: bool = False) -> Order:
+    def create_order(
+        self,
+        user_id: int,
+        order_data: Dict[str, Any],
+        *,
+        bypass_cod_check: bool = False,
+        apply_payment_method_default: bool = True,
+    ) -> Order:
         """
         Create a new order
 
@@ -77,6 +84,11 @@ class OrderService:
                 for the PSP-failure rescue path (see
                 ``rescue_order_after_psp_failure``). Never expose this to the
                 normal create_order API path.
+            apply_payment_method_default: When False, skip the qualifying-
+                workplace business_account default resolver. Subscription
+                billing opts out via this flag because it owns payment
+                creation separately (create_payment), and letting the
+                resolver settle the order here would corrupt that flow.
 
         Returns:
             Created Order object
@@ -174,7 +186,7 @@ class OrderService:
         # did NOT specify a method. Explicit choices (incl. explicit cash) are
         # always respected; non-qualifying unspecified orders keep the existing
         # behavior (payment_method stays None).
-        if payment_method is None and not payment_method_str:
+        if apply_payment_method_default and payment_method is None and not payment_method_str:
             from business_app.services.corporate_contract_service import CorporateContractService
 
             if CorporateContractService().order_qualifies_for_business_account(user, order_items):

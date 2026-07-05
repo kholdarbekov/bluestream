@@ -195,3 +195,50 @@ def test_explicit_cash_on_qualifying_order_is_respected_and_not_reserved(
         ).count()
         == 0
     )
+
+
+@pytest.mark.integration
+@pytest.mark.order
+def test_qualifying_order_with_default_suppressed_stays_none(
+    app, db, workplace_user, sample_product, mock_inventory_service, workplace_address, covered_contract
+):
+    """Callers that opt out (e.g. subscription billing) must NOT get the
+    business_account default applied, even on an otherwise-qualifying order."""
+    mock_inventory_service.check_multiple_products_availability.return_value = [
+        SimpleNamespace(
+            product_id=sample_product.id,
+            requested_quantity=2,
+            available_quantity=100,
+            reserved_quantity=0,
+            is_available=True,
+            reason="Available",
+        )
+    ]
+    mock_inventory_service.reserve_inventory.return_value = {"success": True, "expires_at": None}
+
+    service = OrderService(inventory_service=mock_inventory_service)
+    order_data = {
+        "items": [{"product_id": sample_product.id, "quantity": 2}],
+        "delivery_address": {
+            "delivery_address_id": workplace_address.id,
+            "street": workplace_address.street_address,
+            "latitude": workplace_address.latitude,
+            "longitude": workplace_address.longitude,
+        },
+        # Intentionally NO "payment_method".
+    }
+
+    with patch(
+        "business_app.services.payment_service.PaymentService.initialize_order_payment",
+        return_value=None,
+    ):
+        order = service.create_order(workplace_user.id, order_data, apply_payment_method_default=False)
+
+    db.session.refresh(order)
+    assert order.payment_method is None
+    assert (
+        CorporatePrepaymentLedger.query.filter_by(
+            order_id=order.id, event_type=CorporatePrepaymentEventType.RESERVE
+        ).count()
+        == 0
+    )

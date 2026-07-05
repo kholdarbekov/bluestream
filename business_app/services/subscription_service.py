@@ -125,6 +125,36 @@ class SubscriptionService:
             subscription_data.get("delivery_day_of_month"),
         )
 
+        # Default qualifying workplace-entity subscriptions to business-account
+        # settlement when no explicit method was supplied.
+        payment_method = subscription_data.get("payment_method")
+        if payment_method is None:
+            from business_app.services.corporate_contract_service import CorporateContractService
+            from decimal import Decimal as _Decimal
+
+            corporate_service = CorporateContractService()
+            qualification_items = []
+            for _item in items:
+                resolution = corporate_service.resolve_contract_pricing_for_user_product(
+                    user_id=user_id,
+                    product_id=_item["product_id"],
+                    fallback_price=_Decimal("0.00"),
+                )
+                qualification_items.append(
+                    {
+                        "product_id": _item["product_id"],
+                        "contract_id": resolution["contract"].id if resolution["contract"] else None,
+                        "contract_product_price_id": (
+                            resolution["contract_price_row"].id if resolution["contract_price_row"] else None
+                        ),
+                        "quantity": _item["quantity"],
+                    }
+                )
+            if corporate_service.order_qualifies_for_business_account(user, qualification_items):
+                payment_method = PaymentMethod.BUSINESS_ACCOUNT
+            else:
+                payment_method = PaymentMethod.CASH
+
         # Create subscription
         subscription = Subscription(
             user_id=user_id,
@@ -137,7 +167,7 @@ class SubscriptionService:
             delivery_day_of_month=subscription_data.get("delivery_day_of_month"),
             delivery_time_slot_id=subscription_data.get("delivery_time_slot_id"),
             delivery_address_id=subscription_data.get("delivery_address_id"),
-            payment_method=subscription_data.get("payment_method", PaymentMethod.CASH),
+            payment_method=payment_method,
             auto_payment=subscription_data.get("auto_payment", False),
             auto_renew=subscription_data.get("auto_renew", True),
             discount_percentage=discount_percentage,
@@ -425,6 +455,11 @@ class SubscriptionService:
             },
             "delivery_instructions": address.delivery_instructions if address else None,
             "notes": f"Subscription order #{subscription.id}",
+            "payment_method": (
+                subscription.payment_method.value
+                if hasattr(subscription.payment_method, "value")
+                else subscription.payment_method
+            ),
         }
 
         try:

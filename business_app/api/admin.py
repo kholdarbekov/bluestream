@@ -2311,6 +2311,73 @@ def apply_collected_cash_edit(order_id):
         return internal_error_response("Failed to edit collected cash")
 
 
+@admin_bp.route("/orders/<int:order_id>/payment-method/preview", methods=["POST"])
+@jwt_required()
+@validate_admin_action(["edit_order_payment_method"])
+def preview_order_payment_method_edit(order_id):
+    """Dry-run an admin payment-method change (Admin-only)."""
+    try:
+        from business_app.services.order_payment_method_edit_service import OrderPaymentMethodEditService
+
+        data = request.get_json(silent=True) or {}
+        if not data.get("new_method"):
+            return validation_error_response("new_method is required")
+        plan = OrderPaymentMethodEditService().preview(order_id=order_id, new_method=data.get("new_method"))
+        return success_response(data=plan.to_summary())
+    except NotFoundError as exc:
+        return not_found_response(resource_type="Order", message=str(exc))
+    except ValidationError as exc:
+        return validation_error_response(str(exc))
+    except Exception:  # noqa: BLE001
+        current_app.logger.exception("payment-method preview failed for order %s", order_id)
+        return internal_error_response("Failed to preview payment-method edit")
+
+
+@admin_bp.route("/orders/<int:order_id>/payment-method", methods=["POST"])
+@jwt_required()
+@validate_admin_action(["edit_order_payment_method"])
+def apply_order_payment_method_edit(order_id):
+    """Apply an admin payment-method change and reconcile atomically (Admin-only)."""
+    try:
+        from business_app.services.order_payment_method_edit_service import OrderPaymentMethodEditService
+
+        current_user_id = int(get_jwt_identity())
+        data = request.get_json(silent=True) or {}
+        if not data.get("new_method"):
+            return validation_error_response("new_method is required")
+        reason = (data.get("reason") or "").strip()
+        if len(reason) < 5:
+            return validation_error_response("reason must be at least 5 characters")
+
+        result = OrderPaymentMethodEditService().apply_edit(
+            order_id=order_id,
+            new_method=data.get("new_method"),
+            reason=reason,
+            actor_user_id=current_user_id,
+        )
+
+        response_data = {
+            "order_id": result.order_id,
+            "new_method": result.new_method,
+            "corporate_action": result.corporate_action,
+            "money_action": result.money_action,
+            "warnings": result.warnings,
+        }
+        if result.payment_link:
+            response_data["payment_link"] = result.payment_link
+
+        return success_response(data=response_data, message="Payment method updated")
+    except ConflictError as exc:
+        return error_response(str(exc), status_code=409)
+    except NotFoundError as exc:
+        return not_found_response(resource_type="Order", message=str(exc))
+    except ValidationError as exc:
+        return validation_error_response(str(exc))
+    except Exception:  # noqa: BLE001
+        current_app.logger.exception("payment-method edit failed for order %s", order_id)
+        return internal_error_response("Failed to edit payment method")
+
+
 @admin_bp.route("/orders/<int:order_id>", methods=["GET"])
 @jwt_required()
 @validate_admin_action(["view_orders", "manage_orders"])

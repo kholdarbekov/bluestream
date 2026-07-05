@@ -222,6 +222,10 @@ def validate_admin_action(required_permissions: List[str] = None):
                 elif role_value == UserRole.OPERATOR.value:
                     user_permissions = ["view_orders", "update_orders", "view_products"]
 
+                # "edit_collected_cash" and "edit_order_payment_method" are intentionally
+                # Admin-only: they are not granted to MANAGER/OPERATOR above, so only the
+                # ADMIN "all" wildcard satisfies them.
+
                 # Check if user has required permissions
                 has_permission = "all" in user_permissions or any(
                     perm in user_permissions for perm in required_permissions

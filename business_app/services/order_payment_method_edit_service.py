@@ -148,6 +148,13 @@ class OrderPaymentMethodEditService:
                 order.user, self._order_items_as_dicts(order)
             ):
                 blocking.append("not_business_account_eligible")
+            # Round-trip guard: blocks re-entry INTO business_account once this
+            # order's corporate settlement has been reversed. Known limitation
+            # (out of scope): it does not prevent a cash->business_account flip
+            # (which creates a customer prepaid credit) immediately followed by
+            # business_account->cash — that leaves the earlier credit floating
+            # alongside a fresh COD obligation until a downstream auto-apply
+            # nets them. Repeated back-and-forth flips are not handled here.
             reversed_exists = CorporatePrepaymentLedger.query.filter(
                 CorporatePrepaymentLedger.order_id == order.id,
                 CorporatePrepaymentLedger.idempotency_key.like("reverse:%"),
@@ -244,6 +251,13 @@ class OrderPaymentMethodEditService:
             #    re-notify the customer (a "payment successful" SMS/email/Telegram
             #    webhook). The Celery enqueue would also run pre-commit and go
             #    uncompensated on rollback.
+            #
+            # Commit boundary: initialize_order_payment's BUSINESS_ACCOUNT branch
+            # commits the session UNCONDITIONALLY (it ignores commit=False — see
+            # payment_service.py:299). It is therefore the terminal DB write of
+            # this transaction and MUST remain the last DB-mutating step; do not
+            # add DB writes after it, or they would land in a separate
+            # transaction and escape rollback on failure.
             PaymentService().initialize_order_payment(
                 order.id,
                 actor_user_id=actor_user_id,
@@ -386,7 +400,6 @@ class OrderPaymentMethodEditService:
 
             cash_service = CashCollectionService()
             payment = cash_service.ensure_cod_payment_for_order(order, actor_user_id=actor_user_id)
-            cash_service.sync_payment_projection(payment)
 
             # 3. CASH never requires Click fiscalization; mark it NOT_REQUIRED
             #    rather than leaving a stale fiscalization row behind. Never let

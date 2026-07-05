@@ -656,6 +656,57 @@ class CashCollectionService:
 
         return self._to_decimal(refunded_total)
 
+    def reverse_allocation_to_payment(
+        self,
+        allocation_id: int,
+        *,
+        reversed_by_user_id: int,
+        reason: str,
+        commit: bool = True,
+    ) -> CashCollectionAllocation:
+        """Reverse ONE allocation, turning its collected cash into customer
+        prepaid credit. Unlike ``reverse_collection_event`` this touches only
+        this allocation — never ``event.amount`` or ``driver_cash_session_id``
+        — so it cannot disturb other orders paid by the same event or driver
+        cash session totals.
+        """
+        allocation = (
+            CashCollectionAllocation.query
+            .options(joinedload(CashCollectionAllocation.cash_collection_event),
+                     joinedload(CashCollectionAllocation.payment))
+            .with_for_update(of=CashCollectionAllocation)
+            .get(allocation_id)
+        )
+        if not allocation or allocation.reversed_at:
+            raise ValidationError("Allocation not found or already reversed")
+        event = allocation.cash_collection_event
+        if event.voided_at:
+            raise ValidationError("Parent cash collection event is voided")
+
+        amount = self._to_decimal(allocation.allocated_amount)
+        now = datetime.now(UTC)
+        affects_projection = self._allocation_affects_payment_projection(allocation)
+
+        allocation.reversed_at = now
+        allocation.reversed_by_user_id = reversed_by_user_id
+        allocation.reversal_reason = reason
+        metadata = dict(allocation.allocation_metadata or {})
+        metadata["affects_payment_projection"] = False
+        allocation.allocation_metadata = metadata
+
+        event.unapplied_amount = self._to_decimal(event.unapplied_amount) + amount  # -> customer prepaid credit
+
+        payment = allocation.payment
+        if affects_projection and payment is not None:
+            payment.amount_collected = self._to_decimal(payment.amount_collected) - amount
+            self.sync_payment_projection(payment)
+
+        if commit:
+            db.session.commit()
+        else:
+            db.session.flush()
+        return allocation
+
     RESERVABLE_ORDER_STATUSES = frozenset(
         {
             OrderStatus.PENDING,

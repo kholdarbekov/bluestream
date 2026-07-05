@@ -6203,6 +6203,63 @@ ADMIN_UI_ORDER_TRANSLATIONS = {
     'ui.orders.payment_method': _ui_tr('Payment Method', "To'lov usuli", 'Способ оплаты'),
     'ui.orders.payment_method_required': _ui_tr('Please select a payment method'),
     'ui.orders.payment_method_unavailable': _ui_tr('Selected payment method is not available for this user'),
+    # --- Payment-method edit feature (admin modal + method-select labels) ---
+    'ui.orders.payment_cash': _ui_tr('Cash', 'Naqd pul', 'Наличные'),
+    'ui.orders.payment_card': _ui_tr('Card', 'Karta', 'Карта'),
+    'ui.orders.payment_click': _ui_tr('Click', 'Click', 'Click'),
+    'ui.orders.payment_payme': _ui_tr('Payme', 'Payme', 'Payme'),
+    'ui.orders.edit_payment_method': _ui_tr('Change', "O'zgartirish", 'Изменить'),
+    'ui.orders.current_payment_method': _ui_tr('Current method', 'Joriy usul', 'Текущий способ'),
+    'ui.orders.new_payment_method': _ui_tr('New payment method', "Yangi to'lov usuli", 'Новый способ оплаты'),
+    'ui.orders.order_delivered': _ui_tr('Order delivered', 'Buyurtma yetkazildi', 'Заказ доставлен'),
+    'ui.orders.payment_method_preview_title': _ui_tr(
+        'Confirm Payment Method Change',
+        "To'lov usuli o'zgarishini tasdiqlash",
+        'Подтверждение изменения способа оплаты',
+    ),
+    'ui.orders.payment_method_edit_hint': _ui_tr(
+        'Changing the payment method reconciles the corporate ledger and money side automatically. '
+        'Preview the impact before applying.',
+        "To'lov usulini o'zgartirish korporativ hisob-kitob va pul harakatini avtomatik moslashtiradi. "
+        "Qo'llashdan oldin ta'sirini ko'rib chiqing.",
+        'Изменение способа оплаты автоматически согласует корпоративный баланс и денежную часть. '
+        'Просмотрите последствия перед применением.',
+    ),
+    'ui.orders.payment_method_reason_min_length': _ui_tr(
+        'Reason must be at least 5 characters',
+        "Sabab kamida 5 ta belgidan iborat bo'lishi kerak",
+        'Причина должна содержать не менее 5 символов',
+    ),
+    'ui.orders.payment_method_reason_placeholder': _ui_tr(
+        'Example: customer requested switch to corporate billing',
+        "Masalan: mijoz korporativ to'lovga o'tishni so'radi",
+        'Например: клиент попросил перейти на корпоративную оплату',
+    ),
+    'ui.orders.payment_method_preview_failed': _ui_tr(
+        'Failed to preview payment-method change',
+        "To'lov usuli o'zgarishini ko'rib chiqishda xatolik yuz berdi",
+        'Не удалось предварительно просмотреть изменение способа оплаты',
+    ),
+    'ui.orders.payment_method_updated_success': _ui_tr(
+        'Payment method updated successfully',
+        "To'lov usuli muvaffaqiyatli yangilandi",
+        'Способ оплаты успешно обновлён',
+    ),
+    'ui.orders.payment_method_warnings_title': _ui_tr(
+        'Payment method updated with warnings',
+        "To'lov usuli ogohlantirishlar bilan yangilandi",
+        'Способ оплаты обновлён с предупреждениями',
+    ),
+    'ui.orders.payment_method_update_failed': _ui_tr(
+        'Failed to update payment method',
+        "To'lov usulini yangilashda xatolik yuz berdi",
+        'Не удалось обновить способ оплаты',
+    ),
+    'ui.orders.payment_method_link_ready': _ui_tr(
+        'New payment link created: ',
+        "Yangi to'lov havolasi yaratildi: ",
+        'Создана новая ссылка на оплату: ',
+    ),
     'ui.orders.payment_provider': _ui_tr('Payment Provider', "To'lov provayderi", 'Провайдер оплаты'),
     'ui.orders.payment_status': _ui_tr('Payment Status', "To'lov holati", 'Статус оплаты'),
     'ui.orders.payment_summary': _ui_tr('Payment Summary', "To'lov xulosasi", 'Сводка оплаты'),

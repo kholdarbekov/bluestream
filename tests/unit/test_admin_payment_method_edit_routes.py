@@ -224,3 +224,16 @@ def test_preview_not_found_for_unknown_order(app, client, db, admin_user):
         headers=_headers(app, admin_user.id),
     )
     assert r.status_code == 404
+
+
+def test_order_details_includes_payment_method_edit_metadata(app, client, db, admin_user, qualifying_order):
+    r = client.get(
+        f"/api/v1/admin/orders/{qualifying_order.id}",
+        headers=_headers(app, admin_user.id),
+    )
+    assert r.status_code == 200
+    order = r.get_json()["data"]["order"]
+    assert "is_payment_method_editable" in order
+    assert "allowed_target_methods" in order
+    assert order["is_payment_method_editable"] is True
+    assert "business_account" in order["allowed_target_methods"]

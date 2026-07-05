@@ -2590,6 +2590,12 @@ def get_order_details(order_id):
 
         order_data.update(OrderCashEditService().get_edit_metadata(order))
 
+        # Payment-method edit feature: surface whether the order's payment method
+        # is editable and the allowed target methods so the admin UI can render the CTA.
+        from business_app.services.order_payment_method_edit_service import OrderPaymentMethodEditService
+
+        order_data.update(OrderPaymentMethodEditService().get_edit_metadata(order))
+
         return success_response(data={"order": order_data})
 
     except Exception as e:

@@ -1861,6 +1861,15 @@ class StaffService:
                 order_items=order_items,
             )
 
+        # Default qualifying workplace phone orders to business-account settlement
+        # when the operator did not specify a method. Explicit choices respected.
+        if payment_method is None and not payment_method_str:
+            if corporate_service.order_qualifies_for_business_account(
+                user=client,
+                order_items=order_items,
+            ):
+                payment_method = PaymentMethod.BUSINESS_ACCOUNT
+
         # ARCH-006: phone orders open as CONFIRMED, so the address + staff
         # creator invariants must hold before insert.
         assert_order_creator_for_source(

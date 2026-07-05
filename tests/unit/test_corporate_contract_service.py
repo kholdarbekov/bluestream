@@ -18,7 +18,14 @@ from business_app.models.order import Order, OrderItem
 from business_app.models.product import Product, ProductCategory
 from business_app.models.user import User
 from business_app.services.corporate_contract_service import CorporateContractService
-from shared.enums import CorporateContractTrackingMode, EntitySubtype, OrderStatus, UserRole, UserType
+from shared.enums import (
+    CorporateContractTrackingMode,
+    EntitySubtype,
+    OrderStatus,
+    PaymentMethod,
+    UserRole,
+    UserType,
+)
 from business_app.utils.exceptions import ValidationError
 from business_app.utils.password_security import hash_password
 
@@ -83,6 +90,7 @@ def _create_order_with_item(
     *,
     contract_id: int | None = None,
     contract_product_price_id: int | None = None,
+    payment_method: PaymentMethod = PaymentMethod.BUSINESS_ACCOUNT,
 ) -> Order:
     total = unit_price * Decimal(str(quantity))
     order = Order(
@@ -92,6 +100,7 @@ def _create_order_with_item(
         subtotal=total,
         delivery_fee=Decimal("0.00"),
         total_amount=total,
+        payment_method=payment_method,
         order_source="web",
     )
     db.session.add(order)
@@ -801,6 +810,7 @@ def test_reserve_for_order_uses_stored_order_item_contract_linkage(db, sample_us
         subtotal=Decimal("48000.00"),
         delivery_fee=Decimal("0.00"),
         total_amount=Decimal("48000.00"),
+        payment_method=PaymentMethod.BUSINESS_ACCOUNT,
         order_source="web",
     )
     db.session.add(order)
@@ -869,6 +879,7 @@ def _setup_units_grocery_order_with_consume(
         subtotal=Decimal("0.00"),
         delivery_fee=Decimal("0.00"),
         total_amount=Decimal("0.00"),
+        payment_method=PaymentMethod.BUSINESS_ACCOUNT,
         order_source="admin",
     )
     db.session.add(order)
@@ -1184,3 +1195,45 @@ def test_get_ledger_enriches_money_mode_entries_with_order_product_names(db, sam
     assert entry["product_id"] is None
     assert entry["product_name"] is None
     assert entry["order_product_names"] == ["Ledger Aqua 10L", "Ledger Cups"]
+
+
+def test_reserve_for_order_skipped_for_non_business_account_payment(db, sample_user):
+    """Cash orders keep contract linkage but must NOT draw down prepaid units."""
+    # _create_contract_and_account creates a UNITS contract by default (the model
+    # default tracking_mode). It does NOT accept a tracking_mode kwarg.
+    contract, account = _create_contract_and_account(sample_user.id)
+    product = _create_product("Cash Bottles", Decimal("20000.00"))
+    price_row = _create_contract_price(contract.id, product.id, Decimal("18000.00"))
+    db.session.add(
+        CorporatePrepaymentBalance(
+            account_id=account.id,
+            product_id=product.id,
+            prepaid_units=Decimal("10.00"),
+            reserved_units=Decimal("0.00"),
+            consumed_units=Decimal("0.00"),
+            is_active=True,
+        )
+    )
+    db.session.commit()
+
+    order = _create_order_with_item(
+        sample_user.id,
+        product.id,
+        3,
+        Decimal("18000.00"),
+        contract_id=contract.id,
+        contract_product_price_id=price_row.id,
+        payment_method=PaymentMethod.CASH,
+    )
+
+    entries = CorporateContractService().reserve_for_order(order.id)
+
+    assert entries == []
+    balance = _get_product_balance(account.id, product.id)
+    assert balance.reserved_units == Decimal("0.00")
+    assert (
+        CorporatePrepaymentLedger.query.filter_by(
+            order_id=order.id, event_type=CorporatePrepaymentEventType.RESERVE
+        ).count()
+        == 0
+    )

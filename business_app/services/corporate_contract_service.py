@@ -22,7 +22,7 @@ from business_app.models.order import Order, OrderItem
 from business_app.models.product import Product
 from business_app.models.user import User
 from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
-from shared.enums import UserType
+from shared.enums import PaymentMethod, UserType
 from business_app.utils.exceptions import NotFoundError, ValidationError
 from business_app.utils.translations import get_translation
 from shared.enums import CorporateContractTrackingMode
@@ -1162,6 +1162,14 @@ class CorporateContractService:
         ).get(order_id)
         if not order:
             raise NotFoundError("Order not found")
+        # Prepayment settlement (reserve → consume → release) applies ONLY to
+        # business-account orders. Cash/card orders keep their contract pricing
+        # but must never draw down prepaid units. Gating here covers every create
+        # path without threading payment_method through call sites.
+        order_method = order.payment_method
+        order_method_value = order_method.value if hasattr(order_method, "value") else order_method
+        if order_method_value != PaymentMethod.BUSINESS_ACCOUNT.value:
+            return []
         # Grocery-store users with an active AMOUNT-mode contract skip
         # per-product unit reservation; money debt is posted at delivery via
         # charge_on_delivery. Legacy grocery-store users still on a UNITS-mode

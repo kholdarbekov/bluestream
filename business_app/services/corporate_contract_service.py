@@ -131,6 +131,24 @@ class CorporateContractService:
                 validation_errors=shortage_errors,
             )
 
+    def order_qualifies_for_business_account(
+        self,
+        user: User,
+        order_items: List[Dict[str, Any]],
+    ) -> bool:
+        """Non-raising mirror of ``validate_business_account_order``.
+
+        Returns True only for a valid business-account order (workplace entity,
+        every line contract-covered, sufficient prepaid units or a debt-allowing
+        contract). Used by the default-payment-method resolver so the default and
+        the hard validator can never diverge.
+        """
+        try:
+            self.validate_business_account_order(user=user, order_items=order_items)
+            return True
+        except ValidationError:
+            return False
+
     @staticmethod
     def _format_units(value: Any) -> str:
         units = Decimal(str(value or 0))

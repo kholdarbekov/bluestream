@@ -309,3 +309,32 @@ def test_order_627_apply_twice_is_idempotent(db, workplace_user, sample_product,
     db.session.expire_all()
     assert cash.get_customer_prepaid_balance(workplace_user.id) == COLLECTED
     assert _consume_rows(order.id) == 1
+
+
+def test_order_627_reclassification_does_not_notify_customer(
+    db, workplace_user, sample_product, driver
+):
+    """An admin payment-method reclassification of an already-delivered/paid
+    order must NOT fire a customer 'payment successful' notification — nothing
+    new was paid, the customer already has their delivery."""
+    from unittest.mock import patch
+
+    order, contract, balance = _seed_order_627(db, workplace_user, sample_product, driver)
+
+    with patch(
+        "business_app.tasks.notification_tasks.send_payment_confirmation_task.delay"
+    ) as mock_notify:
+        OrderPaymentMethodEditService().apply_edit(
+            order_id=order.id,
+            new_method="business_account",
+            reason="reclassify order 627 to business account",
+            actor_user_id=driver.id,
+        )
+
+    mock_notify.assert_not_called()
+
+    # ...and the settlement still landed correctly.
+    db.session.expire_all()
+    order = Order.query.get(order.id)
+    assert order.payment_method == PaymentMethod.BUSINESS_ACCOUNT
+    assert order.is_paid is True

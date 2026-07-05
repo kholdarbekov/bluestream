@@ -227,11 +227,17 @@ class OrderPaymentMethodEditService:
 
             # 4. Settle the payment as business_account (marks it COMPLETED,
             #    normalises the prepaid projection, consumes marking codes iff
-            #    the payment carries the flag).
+            #    the payment carries the flag). trigger_notifications=False: this
+            #    is an admin payment-method reclassification of an already
+            #    delivered/paid order — nothing new was "paid", so we must not
+            #    re-notify the customer (a "payment successful" SMS/email/Telegram
+            #    webhook). The Celery enqueue would also run pre-commit and go
+            #    uncompensated on rollback.
             PaymentService().initialize_order_payment(
                 order.id,
                 actor_user_id=actor_user_id,
                 metadata={"consume_marking_codes": bool(getattr(payment, "consume_marking_codes", False))},
+                trigger_notifications=False,
                 commit=False,
             )
 

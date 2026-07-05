@@ -559,6 +559,62 @@ class AdminService {
     return response.data;
   }
 
+  // Subscription management
+  async getSubscriptions(params = {}) {
+    const response = await api.get('/admin/subscriptions', { params });
+    return normalizeAdminCollectionResponse(response.data);
+  }
+
+  async getSubscription(subscriptionId) {
+    const response = await api.get(`/admin/subscriptions/${subscriptionId}`);
+    return response.data?.data?.subscription || {};
+  }
+
+  async createSubscription(payload) {
+    const response = await api.post('/admin/subscriptions', payload);
+    return response.data?.data?.subscription || response.data;
+  }
+
+  async updateSubscription(subscriptionId, payload) {
+    const response = await api.put(`/admin/subscriptions/${subscriptionId}`, payload);
+    return response.data?.data?.subscription || response.data;
+  }
+
+  async pauseSubscription(subscriptionId, payload = {}) {
+    const response = await api.post(`/admin/subscriptions/${subscriptionId}/pause`, payload);
+    return response.data;
+  }
+
+  async resumeSubscription(subscriptionId, payload = {}) {
+    const response = await api.post(`/admin/subscriptions/${subscriptionId}/resume`, payload);
+    return response.data;
+  }
+
+  async cancelSubscription(subscriptionId, payload = {}) {
+    const response = await api.post(`/admin/subscriptions/${subscriptionId}/cancel`, payload);
+    return response.data;
+  }
+
+  async processSubscriptionBilling(subscriptionId) {
+    const response = await api.post(`/admin/subscriptions/${subscriptionId}/billing/process`, {});
+    return response.data;
+  }
+
+  async addSubscriptionItem(subscriptionId, payload) {
+    const response = await api.post(`/admin/subscriptions/${subscriptionId}/items`, payload);
+    return response.data;
+  }
+
+  async updateSubscriptionItem(subscriptionId, itemId, payload) {
+    const response = await api.put(`/admin/subscriptions/${subscriptionId}/items/${itemId}`, payload);
+    return response.data;
+  }
+
+  async removeSubscriptionItem(subscriptionId, itemId) {
+    const response = await api.delete(`/admin/subscriptions/${subscriptionId}/items/${itemId}`);
+    return response.data;
+  }
+
   // Delivery management
   async getDeliveryPersonnel(params = {}) {
     const response = await api.get('/admin/delivery-personnel', { params });

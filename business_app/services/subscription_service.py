@@ -24,6 +24,19 @@ from business_app import db
 class SubscriptionService:
     """Service for managing subscriptions"""
 
+    # Fields an admin may set only behind an explicit override flag.
+    _ADMIN_OVERRIDE_FIELDS = {
+        "billing_amount": "manual_billing_amount",
+        "next_billing_date": "manual_billing_dates",
+        "last_billing_date": "manual_billing_dates",
+    }
+
+    # Never editable through admin_update_subscription: status transitions go
+    # through the lifecycle actions (pause/resume/cancel) and identity columns
+    # are immutable. Enforced at the service boundary (defense-in-depth — the
+    # serializer omits these too, but the service must own its invariant).
+    _ADMIN_PROTECTED_FIELDS = {"status", "id", "user_id", "subscription_number"}
+
     @staticmethod
     def user_has_subscription_using_address(user_id: int, address_id: int) -> bool:
         """Check whether ``user_id`` has any subscription bound to ``address_id``.
@@ -1143,6 +1156,421 @@ class SubscriptionService:
             raise ValidationError("api.subscriptions.error.only_active_retry")
         if subscription.failed_billing_attempts == 0:
             raise ValidationError("api.subscriptions.error.no_failed_billing_to_retry")
+        return subscription
+
+    def _get_subscription_or_raise(self, subscription_id: int) -> Subscription:
+        """Load a subscription by id without an ownership filter (admin scope)."""
+        subscription = Subscription.query.get(subscription_id)
+        if not subscription:
+            raise NotFoundError("Subscription not found")
+        return subscription
+
+    @staticmethod
+    def _ensure_utc(value: Any) -> Any:
+        """Make a naive datetime tz-aware (UTC); pass through anything else."""
+        if isinstance(value, datetime) and value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
+
+    def admin_create_subscription(self, validated_data: Any, actor_user_id: int) -> Dict[str, Any]:
+        """Admin: create a subscription for any user.
+
+        Reuses ``create_subscription`` (which validates items, enforces the
+        frequency invariant, computes dates and commits), then attaches an
+        audit-log row stamped with the acting admin. Validates that the
+        delivery address belongs to the target user (``create_subscription``
+        does not).
+        """
+        user = User.query.get(validated_data.user_id)
+        if not user:
+            raise NotFoundError("User not found")
+
+        address = UserAddress.query.filter_by(
+            id=validated_data.delivery_address_id,
+            user_id=validated_data.user_id,
+        ).first()
+        if not address:
+            raise NotFoundError("Delivery address not found for this user")
+
+        if validated_data.delivery_time_slot_id:
+            time_slot = DeliveryTimeSlot.query.get(validated_data.delivery_time_slot_id)
+            if not time_slot or not time_slot.is_active:
+                raise NotFoundError("Delivery time slot not found or inactive")
+
+        try:
+            payment_method = PaymentMethod(validated_data.payment_method)
+        except ValueError as exc:
+            raise ValidationError("Invalid payment method") from exc
+
+        subscription_data = {
+            "user_id": validated_data.user_id,
+            "name": validated_data.name,
+            "description": validated_data.description or "",
+            "billing_cycle": validated_data.billing_cycle,
+            "delivery_frequency": validated_data.delivery_frequency,
+            "delivery_day_of_week": validated_data.delivery_day_of_week,
+            "delivery_day_of_month": validated_data.delivery_day_of_month,
+            "delivery_time_slot_id": validated_data.delivery_time_slot_id,
+            "delivery_address_id": validated_data.delivery_address_id,
+            "payment_method": payment_method,
+            "auto_payment": validated_data.auto_payment,
+            "auto_renew": validated_data.auto_renew,
+            "discount_percentage": validated_data.discount_percentage,
+            "start_date": (
+                self._ensure_utc(validated_data.start_date) if validated_data.start_date else datetime.now(UTC)
+            ),
+            "end_date": self._ensure_utc(validated_data.end_date) if validated_data.end_date else None,
+        }
+
+        result = self.create_subscription(subscription_data, validated_data.items)
+
+        # create_subscription commits and returns to_dict(); attach audit + any
+        # loyalty multiplier override, keyed off the unique subscription number.
+        subscription = Subscription.query.filter_by(subscription_number=result["subscription_number"]).first()
+        if subscription is not None:
+            if getattr(validated_data, "loyalty_points_multiplier", None) is not None:
+                subscription.loyalty_points_multiplier = validated_data.loyalty_points_multiplier
+            db.session.add(
+                SubscriptionLog(
+                    subscription_id=subscription.id,
+                    action="created",
+                    details="Created by admin",
+                    user_id=actor_user_id,
+                )
+            )
+            db.session.commit()
+
+        return result
+
+    def admin_update_subscription(
+        self,
+        subscription_id: int,
+        update_data: Dict[str, Any],
+        actor_user_id: int,
+        overrides: Optional[Dict[str, bool]] = None,
+    ) -> Subscription:
+        """Admin: update subscription fields with optional warned overrides.
+
+        By default only ACTIVE/PAUSED subscriptions are editable and the
+        override-gated fields (billing_amount, next/last_billing_date) are
+        dropped. ``overrides`` re-enables them:
+        ``edit_any_status`` / ``manual_billing_amount`` / ``manual_billing_dates``.
+        """
+        overrides = overrides or {}
+        subscription = self._get_subscription_or_raise(subscription_id)
+
+        if not overrides.get("edit_any_status") and subscription.status not in [
+            SubscriptionStatus.ACTIVE,
+            SubscriptionStatus.PAUSED,
+        ]:
+            raise ValidationError(
+                "Cannot edit a cancelled or expired subscription without the edit-any-status override"
+            )
+
+        status_override_used = bool(
+            overrides.get("edit_any_status")
+            and subscription.status not in [SubscriptionStatus.ACTIVE, SubscriptionStatus.PAUSED]
+        )
+
+        # Drop override-gated fields whose flag is not set.
+        data = dict(update_data)
+        for field, flag in self._ADMIN_OVERRIDE_FIELDS.items():
+            if field in data and not overrides.get(flag):
+                data.pop(field)
+
+        # Never editable through this method (status changes go via lifecycle actions).
+        for field in self._ADMIN_PROTECTED_FIELDS:
+            data.pop(field, None)
+
+        # Frequency invariant on the effective (post-update) pair.
+        if "billing_cycle" in data or "delivery_frequency" in data:
+            eff_billing = data.get("billing_cycle", subscription.billing_cycle)
+            eff_delivery = data.get("delivery_frequency", subscription.delivery_frequency)
+            try:
+                eff_billing = SubscriptionFrequency(eff_billing.value if hasattr(eff_billing, "value") else eff_billing)
+                eff_delivery = SubscriptionFrequency(
+                    eff_delivery.value if hasattr(eff_delivery, "value") else eff_delivery
+                )
+            except ValueError as exc:
+                raise ValidationError("Invalid frequency value") from exc
+            self._validate_billing_frequency(eff_billing, eff_delivery)
+
+        changes: Dict[str, Any] = {}
+        override_changes: Dict[str, Any] = {}
+        if status_override_used:
+            override_changes["edit_any_status"] = {"status_at_edit": self._serialize_for_log(subscription.status)}
+        for field, new_value in data.items():
+            if not hasattr(subscription, field):
+                continue
+            old_value = getattr(subscription, field)
+
+            if field == "delivery_address_id":
+                address = UserAddress.query.filter_by(id=new_value, user_id=subscription.user_id).first()
+                if not address:
+                    raise NotFoundError("Delivery address not found for this user")
+
+            if field == "delivery_time_slot_id" and new_value is not None:
+                time_slot = DeliveryTimeSlot.query.get(new_value)
+                if not time_slot or not time_slot.is_active:
+                    raise NotFoundError("Delivery time slot not found or inactive")
+
+            if field == "payment_method":
+                try:
+                    new_value = PaymentMethod(new_value)
+                except ValueError as exc:
+                    raise ValidationError("Invalid payment method") from exc
+
+            if field in ("billing_cycle", "delivery_frequency"):
+                try:
+                    new_value = SubscriptionFrequency(new_value.value if hasattr(new_value, "value") else new_value)
+                except ValueError as exc:
+                    raise ValidationError("Invalid frequency value") from exc
+
+            new_value = self._ensure_utc(new_value)
+
+            setattr(subscription, field, new_value)
+            entry = {"old": self._serialize_for_log(old_value), "new": self._serialize_for_log(new_value)}
+            changes[field] = entry
+            if field in self._ADMIN_OVERRIDE_FIELDS:
+                override_changes[field] = entry
+
+        subscription.updated_at = datetime.now(UTC)
+        if changes:
+            db.session.add(
+                SubscriptionLog(
+                    subscription_id=subscription_id,
+                    action="updated",
+                    details="Updated fields: " + ", ".join(changes.keys()),
+                    user_id=actor_user_id,
+                    extra_data={"changes": changes},
+                )
+            )
+        if override_changes:
+            db.session.add(
+                SubscriptionLog(
+                    subscription_id=subscription_id,
+                    action="admin_override",
+                    details="Admin override applied: " + ", ".join(override_changes.keys()),
+                    user_id=actor_user_id,
+                    extra_data={"overrides": override_changes},
+                )
+            )
+        db.session.commit()
+        return subscription
+
+    def admin_add_item(
+        self,
+        subscription_id: int,
+        product_id: int,
+        quantity: int,
+        special_instructions: Optional[str],
+        actor_user_id: int,
+    ) -> Dict[str, Any]:
+        """Admin: add an item to a subscription (re-derives billing_amount)."""
+        subscription = self._get_subscription_or_raise(subscription_id)
+        if subscription.status not in [SubscriptionStatus.ACTIVE, SubscriptionStatus.PAUSED]:
+            raise ValidationError("Cannot modify a cancelled or expired subscription")
+
+        product = Product.query.filter_by(id=product_id, is_active=True).first()
+        if not product:
+            raise NotFoundError("Product not found or inactive")
+
+        existing = SubscriptionItem.query.filter_by(subscription_id=subscription_id, product_id=product_id).first()
+        if existing:
+            raise ConflictError("This product is already in the subscription")
+
+        item = SubscriptionItem(
+            subscription_id=subscription_id,
+            product_id=product_id,
+            quantity=quantity,
+            unit_price=product.calculate_price(),
+            special_instructions=special_instructions,
+        )
+        item.calculate_total()
+        db.session.add(item)
+        db.session.flush()
+
+        subscription.billing_amount = subscription.get_total_value()
+        subscription.updated_at = datetime.now(UTC)
+        db.session.add(
+            SubscriptionLog(
+                subscription_id=subscription_id,
+                action="item_added",
+                details=f"Added {quantity} x {product.name}",
+                user_id=actor_user_id,
+            )
+        )
+        db.session.commit()
+        return {"item": item, "billing_amount": subscription.billing_amount}
+
+    def admin_update_item(
+        self,
+        subscription_id: int,
+        item_id: int,
+        quantity: int,
+        special_instructions: Optional[str],
+        actor_user_id: int,
+    ) -> Dict[str, Any]:
+        """Admin: update a subscription item (re-derives billing_amount)."""
+        subscription = self._get_subscription_or_raise(subscription_id)
+        if subscription.status not in [SubscriptionStatus.ACTIVE, SubscriptionStatus.PAUSED]:
+            raise ValidationError("Cannot modify a cancelled or expired subscription")
+
+        item = SubscriptionItem.query.filter_by(id=item_id, subscription_id=subscription_id).first()
+        if not item:
+            raise NotFoundError("Subscription item not found")
+
+        old_quantity = item.quantity
+        item.quantity = quantity
+        if special_instructions is not None:
+            item.special_instructions = special_instructions
+        item.calculate_total()
+        db.session.flush()
+
+        subscription.billing_amount = subscription.get_total_value()
+        subscription.updated_at = datetime.now(UTC)
+        product_name = item.product.name if item.product else "item"
+        db.session.add(
+            SubscriptionLog(
+                subscription_id=subscription_id,
+                action="item_updated",
+                details=f"Updated {product_name}: qty {old_quantity} -> {quantity}",
+                user_id=actor_user_id,
+            )
+        )
+        db.session.commit()
+        return {"item": item, "billing_amount": subscription.billing_amount}
+
+    def admin_remove_item(
+        self,
+        subscription_id: int,
+        item_id: int,
+        actor_user_id: int,
+    ) -> Subscription:
+        """Admin: remove a subscription item (cannot remove the last one)."""
+        subscription = self._get_subscription_or_raise(subscription_id)
+        if subscription.status not in [SubscriptionStatus.ACTIVE, SubscriptionStatus.PAUSED]:
+            raise ValidationError("Cannot modify a cancelled or expired subscription")
+
+        item = SubscriptionItem.query.filter_by(id=item_id, subscription_id=subscription_id).first()
+        if not item:
+            raise NotFoundError("Subscription item not found")
+
+        remaining = (
+            SubscriptionItem.query.filter_by(subscription_id=subscription_id)
+            .filter(SubscriptionItem.id != item_id)
+            .count()
+        )
+        if remaining == 0:
+            raise ValidationError("Cannot remove the last item in a subscription")
+
+        product_name = item.product.name if item.product else "item"
+        db.session.delete(item)
+        db.session.flush()
+
+        subscription.billing_amount = subscription.get_total_value()
+        subscription.updated_at = datetime.now(UTC)
+        db.session.add(
+            SubscriptionLog(
+                subscription_id=subscription_id,
+                action="item_removed",
+                details=f"Removed {product_name}",
+                user_id=actor_user_id,
+            )
+        )
+        db.session.commit()
+        return subscription
+
+    def admin_pause_subscription(
+        self,
+        subscription_id: int,
+        actor_user_id: int,
+        reason: str,
+        resume_date: Optional[datetime] = None,
+    ) -> Subscription:
+        """Admin: pause an ACTIVE subscription (audit-logged)."""
+        subscription = self._get_subscription_or_raise(subscription_id)
+        if subscription.status != SubscriptionStatus.ACTIVE:
+            raise ValidationError("Only active subscriptions can be paused")
+
+        if resume_date is not None:
+            resume_date = self._ensure_utc(resume_date)
+            if resume_date <= datetime.now(UTC):
+                raise ValidationError("Resume date must be in the future")
+
+        subscription.pause(reason=reason, resume_date=resume_date)
+        db.session.add(
+            SubscriptionLog(
+                subscription_id=subscription_id,
+                action="paused",
+                details=f"Paused by admin: {reason}",
+                user_id=actor_user_id,
+            )
+        )
+        db.session.commit()
+        return subscription
+
+    def admin_resume_subscription(self, subscription_id: int, actor_user_id: int) -> Subscription:
+        """Admin: resume a PAUSED subscription; advances next_billing_date via the
+        correct service helper (the model's own helper is broken for enums)."""
+        subscription = self._get_subscription_or_raise(subscription_id)
+        if subscription.status != SubscriptionStatus.PAUSED:
+            raise ValidationError("Only paused subscriptions can be resumed")
+
+        subscription.status = SubscriptionStatus.ACTIVE
+        subscription.paused_at = None
+        subscription.pause_reason = None
+        subscription.pause_end_date = None
+        subscription.resume_date = None
+        subscription.next_billing_date = self._calculate_next_billing_date(
+            datetime.now(UTC), subscription.billing_cycle
+        )
+        subscription.updated_at = datetime.now(UTC)
+        db.session.add(
+            SubscriptionLog(
+                subscription_id=subscription_id,
+                action="resumed",
+                details="Resumed by admin",
+                user_id=actor_user_id,
+            )
+        )
+        db.session.commit()
+        return subscription
+
+    def admin_cancel_subscription(
+        self,
+        subscription_id: int,
+        actor_user_id: int,
+        reason: str,
+        immediate: bool = True,
+    ) -> Subscription:
+        """Admin: cancel a subscription (immediate soft-cancel by default)."""
+        subscription = self._get_subscription_or_raise(subscription_id)
+        if subscription.status == SubscriptionStatus.CANCELLED:
+            raise ValidationError("Subscription is already cancelled")
+
+        if immediate:
+            subscription.cancel(reason=reason)
+            subscription.end_date = datetime.now(UTC)
+            action = "cancelled"
+            details = f"Cancelled by admin: {reason}"
+        else:
+            subscription.auto_renew = False
+            subscription.end_date = subscription.next_billing_date
+            action = "cancellation_scheduled"
+            when = subscription.end_date.strftime("%Y-%m-%d") if subscription.end_date else "end of cycle"
+            details = f"Cancellation scheduled by admin for {when}: {reason}"
+
+        subscription.updated_at = datetime.now(UTC)
+        db.session.add(
+            SubscriptionLog(
+                subscription_id=subscription_id,
+                action=action,
+                details=details,
+                user_id=actor_user_id,
+            )
+        )
+        db.session.commit()
         return subscription
 
     def _get_user_subscription_or_raise(self, subscription_id: int, user_id: int) -> Subscription:

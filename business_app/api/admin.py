@@ -105,8 +105,16 @@ from business_app.utils.api_responses import (
     validation_error_response,
     internal_error_response,
     forbidden_response,
+    conflict_response,
 )
 from business_app.utils.bot_webhook import trigger_translation_reload
+from business_app.utils.pydantic_helpers import validate_json_with_model
+from business_app.serializers.subscription_serializers import (
+    AdminCreateSubscriptionRequest,
+    AdminUpdateSubscriptionRequest,
+    AdminAddSubscriptionItemRequest,
+    AdminUpdateSubscriptionItemRequest,
+)
 
 admin_bp = Blueprint("admin", __name__)
 
@@ -4185,6 +4193,7 @@ def get_subscriptions():
         search = request.args.get("search", "").strip()
         status = request.args.get("status")  # active, paused, cancelled, expired
         user_id = request.args.get("user_id", type=int)
+        billing_cycle = request.args.get("billing_cycle")  # daily|weekly|biweekly|monthly
         sort_by = request.args.get("sort_by", "created_at")  # created_at, next_billing_date, billing_amount
 
         # Build query
@@ -4196,6 +4205,9 @@ def get_subscriptions():
 
         if user_id:
             query = query.filter_by(user_id=user_id)
+
+        if billing_cycle:
+            query = query.filter_by(billing_cycle=billing_cycle)
 
         if search:
             search_term = f"%{search}%"
@@ -4229,7 +4241,7 @@ def get_subscriptions():
                 "user_id": sub.user_id,
                 "user_name": f"{sub.user.first_name} {sub.user.last_name or ''}".strip(),
                 "user_email": sub.user.email,
-                "status": sub.status,
+                "status": sub.status.value if hasattr(sub.status, "value") else sub.status,
                 "name": sub.name,
                 "description": sub.description,
                 "billing_cycle": (
@@ -4281,7 +4293,7 @@ def get_subscription(subscription_id):
                     "product_name": item.product.name if item.product else None,
                     "quantity": item.quantity,
                     "unit_price": float(item.unit_price),
-                    "subtotal": float(item.subtotal),
+                    "subtotal": float(item.total_price),
                 }
             )
 
@@ -4293,7 +4305,7 @@ def get_subscription(subscription_id):
             {
                 "id": o.id,
                 "order_number": o.order_number,
-                "status": o.status,
+                "status": o.status.value if hasattr(o.status, "value") else o.status,
                 "total_amount": float(o.total_amount),
                 "created_at": o.created_at.isoformat() if o.created_at else None,
             }
@@ -4321,7 +4333,7 @@ def get_subscription(subscription_id):
                 "email": subscription.user.email,
                 "phone": subscription.user.phone,
             },
-            "status": subscription.status,
+            "status": subscription.status.value if hasattr(subscription.status, "value") else subscription.status,
             "name": subscription.name,
             "description": subscription.description,
             "billing_cycle": (
@@ -4339,12 +4351,19 @@ def get_subscription(subscription_id):
             ),
             "delivery_day_of_week": subscription.delivery_day_of_week,
             "delivery_day_of_month": subscription.delivery_day_of_month,
-            "delivery_time_slot": subscription.delivery_time_slot,
+            "delivery_time_slot_id": subscription.delivery_time_slot_id,
+            "delivery_time_slot": (
+                subscription.delivery_time_slot.to_dict() if subscription.delivery_time_slot else None
+            ),
             "delivery_address_id": subscription.delivery_address_id,
             "start_date": subscription.start_date.isoformat() if subscription.start_date else None,
             "end_date": subscription.end_date.isoformat() if subscription.end_date else None,
             "auto_renew": subscription.auto_renew,
-            "payment_method": subscription.payment_method,
+            "payment_method": (
+                subscription.payment_method.value
+                if hasattr(subscription.payment_method, "value")
+                else subscription.payment_method
+            ),
             "auto_payment": subscription.auto_payment,
             "paused_at": subscription.paused_at.isoformat() if subscription.paused_at else None,
             "pause_reason": subscription.pause_reason,
@@ -4371,6 +4390,202 @@ def get_subscription(subscription_id):
         return internal_error_response("Failed to get subscription")
 
 
+@admin_bp.route("/subscriptions", methods=["POST"])
+@jwt_required()
+@validate_admin_action(["manage_orders"])
+@validate_json_with_model(AdminCreateSubscriptionRequest)
+def create_subscription_admin():
+    """Create a subscription for any user (admin action)."""
+    try:
+        validated = request.validated_json
+        result = SubscriptionService().admin_create_subscription(
+            validated_data=validated, actor_user_id=g.current_user_id
+        )
+        current_app.logger.info(f"Subscription created by admin for user {validated.user_id}")
+        return created_response(data={"subscription": result}, message="Subscription created successfully")
+    except NotFoundError as e:
+        _rollback_db_session()
+        return not_found_response(getattr(e, "message", str(e)))
+    except ConflictError as e:
+        _rollback_db_session()
+        return conflict_response(getattr(e, "message", str(e)))
+    except ValidationError as e:
+        _rollback_db_session()
+        return validation_error_response(getattr(e, "message", str(e)))
+    except Exception as e:
+        _rollback_db_session()
+        current_app.logger.error(f"Create subscription (admin) error: {e}")
+        return internal_error_response("Failed to create subscription")
+
+
+@admin_bp.route("/subscriptions/<int:subscription_id>", methods=["PUT"])
+@jwt_required()
+@validate_admin_action(["manage_orders"])
+@validate_json_with_model(AdminUpdateSubscriptionRequest)
+def update_subscription_admin(subscription_id):
+    """Update subscription fields (admin action, with warned overrides)."""
+    try:
+        validated = request.validated_json
+        overrides = {
+            "edit_any_status": validated.override_edit_any_status,
+            "manual_billing_amount": validated.override_manual_billing_amount,
+            "manual_billing_dates": validated.override_manual_billing_dates,
+        }
+        update_data = validated.model_dump(
+            exclude_none=True,
+            exclude={
+                "override_edit_any_status",
+                "override_manual_billing_amount",
+                "override_manual_billing_dates",
+            },
+        )
+        subscription = SubscriptionService().admin_update_subscription(
+            subscription_id=subscription_id,
+            update_data=update_data,
+            actor_user_id=g.current_user_id,
+            overrides=overrides,
+        )
+        current_app.logger.info(f"Subscription {subscription_id} updated by admin")
+        return success_response(
+            data={
+                "subscription": {
+                    "id": subscription.id,
+                    "subscription_number": subscription.subscription_number,
+                    "status": (
+                        subscription.status.value if hasattr(subscription.status, "value") else subscription.status
+                    ),
+                    "billing_amount": float(subscription.billing_amount),
+                    "next_billing_date": (
+                        subscription.next_billing_date.isoformat() if subscription.next_billing_date else None
+                    ),
+                }
+            },
+            message="Subscription updated successfully",
+        )
+    except NotFoundError as e:
+        _rollback_db_session()
+        return not_found_response(getattr(e, "message", str(e)))
+    except ValidationError as e:
+        _rollback_db_session()
+        return validation_error_response(getattr(e, "message", str(e)))
+    except Exception as e:
+        _rollback_db_session()
+        current_app.logger.error(f"Update subscription (admin) error: {e}")
+        return internal_error_response("Failed to update subscription")
+
+
+@admin_bp.route("/subscriptions/<int:subscription_id>/items", methods=["POST"])
+@jwt_required()
+@validate_admin_action(["manage_orders"])
+@validate_json_with_model(AdminAddSubscriptionItemRequest)
+def add_subscription_item_admin(subscription_id):
+    """Add an item to a subscription (admin action)."""
+    try:
+        v = request.validated_json
+        result = SubscriptionService().admin_add_item(
+            subscription_id=subscription_id,
+            product_id=v.product_id,
+            quantity=v.quantity,
+            special_instructions=v.special_instructions,
+            actor_user_id=g.current_user_id,
+        )
+        item = result["item"]
+        return created_response(
+            data={
+                "item": {
+                    "id": item.id,
+                    "product_id": item.product_id,
+                    "quantity": item.quantity,
+                    "unit_price": float(item.unit_price),
+                    "total_price": float(item.total_price),
+                    "special_instructions": item.special_instructions,
+                },
+                "billing_amount": float(result["billing_amount"]),
+            },
+            message="Item added successfully",
+        )
+    except NotFoundError as e:
+        _rollback_db_session()
+        return not_found_response(getattr(e, "message", str(e)))
+    except ConflictError as e:
+        _rollback_db_session()
+        return conflict_response(getattr(e, "message", str(e)))
+    except ValidationError as e:
+        _rollback_db_session()
+        return validation_error_response(getattr(e, "message", str(e)))
+    except Exception as e:
+        _rollback_db_session()
+        current_app.logger.error(f"Add subscription item (admin) error: {e}")
+        return internal_error_response("Failed to add item")
+
+
+@admin_bp.route("/subscriptions/<int:subscription_id>/items/<int:item_id>", methods=["PUT"])
+@jwt_required()
+@validate_admin_action(["manage_orders"])
+@validate_json_with_model(AdminUpdateSubscriptionItemRequest)
+def update_subscription_item_admin(subscription_id, item_id):
+    """Update a subscription item (admin action)."""
+    try:
+        v = request.validated_json
+        result = SubscriptionService().admin_update_item(
+            subscription_id=subscription_id,
+            item_id=item_id,
+            quantity=v.quantity,
+            special_instructions=v.special_instructions,
+            actor_user_id=g.current_user_id,
+        )
+        item = result["item"]
+        return success_response(
+            data={
+                "item": {
+                    "id": item.id,
+                    "product_id": item.product_id,
+                    "quantity": item.quantity,
+                    "unit_price": float(item.unit_price),
+                    "total_price": float(item.total_price),
+                    "special_instructions": item.special_instructions,
+                },
+                "billing_amount": float(result["billing_amount"]),
+            },
+            message="Item updated successfully",
+        )
+    except NotFoundError as e:
+        _rollback_db_session()
+        return not_found_response(getattr(e, "message", str(e)))
+    except ValidationError as e:
+        _rollback_db_session()
+        return validation_error_response(getattr(e, "message", str(e)))
+    except Exception as e:
+        _rollback_db_session()
+        current_app.logger.error(f"Update subscription item (admin) error: {e}")
+        return internal_error_response("Failed to update item")
+
+
+@admin_bp.route("/subscriptions/<int:subscription_id>/items/<int:item_id>", methods=["DELETE"])
+@jwt_required()
+@validate_admin_action(["manage_orders"])
+def remove_subscription_item_admin(subscription_id, item_id):
+    """Remove a subscription item (admin action)."""
+    try:
+        subscription = SubscriptionService().admin_remove_item(
+            subscription_id=subscription_id, item_id=item_id, actor_user_id=g.current_user_id
+        )
+        return success_response(
+            data={"billing_amount": float(subscription.billing_amount)},
+            message="Item removed successfully",
+        )
+    except NotFoundError as e:
+        _rollback_db_session()
+        return not_found_response(getattr(e, "message", str(e)))
+    except ValidationError as e:
+        _rollback_db_session()
+        return validation_error_response(getattr(e, "message", str(e)))
+    except Exception as e:
+        _rollback_db_session()
+        current_app.logger.error(f"Remove subscription item (admin) error: {e}")
+        return internal_error_response("Failed to remove item")
+
+
 @admin_bp.route("/subscriptions/<int:subscription_id>/pause", methods=["POST"])
 @jwt_required()
 @validate_admin_action(["manage_orders"])
@@ -4391,10 +4606,10 @@ def pause_subscription_admin(subscription_id):
             except:  # noqa: E722
                 return validation_error_response("Invalid resume_date format. Use ISO format.")
 
-        # Pause subscription (service handles user_id validation, we pass None for admin override)
-        paused_sub = subscription_service.pause_subscription(
+        # Pause subscription (audit-logged with the acting admin)
+        paused_sub = subscription_service.admin_pause_subscription(
             subscription_id=subscription_id,
-            user_id=None,  # Admin can pause any subscription
+            actor_user_id=g.current_user_id,
             reason=pause_reason,
             resume_date=resume_dt,
         )
@@ -4402,7 +4617,10 @@ def pause_subscription_admin(subscription_id):
         current_app.logger.info(f"Subscription paused by admin: {subscription_id}")
 
         return success_response(
-            data={"subscription_number": paused_sub.subscription_number, "status": paused_sub.status},
+            data={
+                "subscription_number": paused_sub.subscription_number,
+                "status": paused_sub.status.value if hasattr(paused_sub.status, "value") else paused_sub.status,
+            },
             message="Subscription paused successfully",
         )
 
@@ -4419,15 +4637,18 @@ def resume_subscription_admin(subscription_id):
     try:
         subscription_service = SubscriptionService()
 
-        # Resume subscription
-        resumed_sub = subscription_service.resume_subscription(
-            subscription_id=subscription_id, user_id=None  # Admin can resume any subscription
+        # Resume subscription (audit-logged with the acting admin)
+        resumed_sub = subscription_service.admin_resume_subscription(
+            subscription_id=subscription_id, actor_user_id=g.current_user_id
         )
 
         current_app.logger.info(f"Subscription resumed by admin: {subscription_id}")
 
         return success_response(
-            data={"subscription_number": resumed_sub.subscription_number, "status": resumed_sub.status},
+            data={
+                "subscription_number": resumed_sub.subscription_number,
+                "status": resumed_sub.status.value if hasattr(resumed_sub.status, "value") else resumed_sub.status,
+            },
             message="Subscription resumed successfully",
         )
 
@@ -4447,17 +4668,23 @@ def cancel_subscription_admin(subscription_id):
 
         subscription_service = SubscriptionService()
 
-        # Cancel subscription
-        cancelled_sub = subscription_service.cancel_subscription(
+        # Cancel subscription (audit-logged with the acting admin)
+        cancelled_sub = subscription_service.admin_cancel_subscription(
             subscription_id=subscription_id,
-            user_id=None,  # Admin can cancel any subscription
+            actor_user_id=g.current_user_id,
             reason=cancellation_reason,
+            immediate=True,
         )
 
         current_app.logger.info(f"Subscription cancelled by admin: {subscription_id}")
 
         return success_response(
-            data={"subscription_number": cancelled_sub.subscription_number, "status": cancelled_sub.status},
+            data={
+                "subscription_number": cancelled_sub.subscription_number,
+                "status": (
+                    cancelled_sub.status.value if hasattr(cancelled_sub.status, "value") else cancelled_sub.status
+                ),
+            },
             message="Subscription cancelled successfully",
         )
 

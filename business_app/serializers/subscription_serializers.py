@@ -509,3 +509,80 @@ def serialize_subscription_log(log) -> Dict[str, Any]:
         }
     except Exception:
         return {"id": log.id, "action": log.action, "details": log.details, "created_at": log.created_at.isoformat()}
+
+
+# ---------------------------------------------------------------------------
+# Admin request schemas (admin can create/edit any user's subscription).
+# Snake_case in, snake_case admin responses out (see business_app/api/admin.py).
+# ---------------------------------------------------------------------------
+
+
+class AdminCreateSubscriptionRequest(BaseModel):
+    """Admin: create a subscription for any user."""
+
+    user_id: int = Field(..., gt=0)
+    name: str = Field(..., min_length=3, max_length=100)
+    description: Optional[str] = Field(None, max_length=500)
+    billing_cycle: str  # SubscriptionFrequency value
+    delivery_frequency: str  # SubscriptionFrequency value
+    delivery_day_of_week: Optional[int] = Field(None, ge=0, le=6)
+    delivery_day_of_month: Optional[int] = Field(None, ge=1, le=31)
+    delivery_time_slot_id: Optional[int] = Field(None, gt=0)
+    delivery_address_id: int = Field(..., gt=0)
+    payment_method: str
+    auto_payment: bool = Field(default=True)
+    auto_renew: bool = Field(default=True)
+    discount_percentage: float = Field(default=0.0, ge=0.0, le=100.0)
+    loyalty_points_multiplier: Optional[float] = Field(None, ge=0.0)
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    items: List[Dict[str, Any]] = Field(..., min_length=1)
+
+
+class AdminUpdateSubscriptionRequest(BaseModel):
+    """Admin: update subscription fields, with optional warned overrides.
+
+    All content fields are optional. The ``override_*`` flags gate the
+    dangerous fields: billing_amount / billing dates are only applied when
+    their flag is set, and a cancelled/expired subscription can only be
+    edited when ``override_edit_any_status`` is true (see the service).
+    """
+
+    name: Optional[str] = Field(None, min_length=3, max_length=100)
+    description: Optional[str] = Field(None, max_length=500)
+    billing_cycle: Optional[str] = None
+    delivery_frequency: Optional[str] = None
+    delivery_day_of_week: Optional[int] = Field(None, ge=0, le=6)
+    delivery_day_of_month: Optional[int] = Field(None, ge=1, le=31)
+    delivery_time_slot_id: Optional[int] = Field(None, gt=0)
+    delivery_address_id: Optional[int] = Field(None, gt=0)
+    payment_method: Optional[str] = None
+    auto_payment: Optional[bool] = None
+    auto_renew: Optional[bool] = None
+    discount_percentage: Optional[float] = Field(None, ge=0.0, le=100.0)
+    loyalty_points_multiplier: Optional[float] = Field(None, ge=0.0)
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    # Override-gated fields:
+    billing_amount: Optional[float] = Field(None, ge=0.0)
+    next_billing_date: Optional[datetime] = None
+    last_billing_date: Optional[datetime] = None
+    # Override flags:
+    override_edit_any_status: bool = Field(default=False)
+    override_manual_billing_amount: bool = Field(default=False)
+    override_manual_billing_dates: bool = Field(default=False)
+
+
+class AdminAddSubscriptionItemRequest(BaseModel):
+    """Admin: add an item to a subscription."""
+
+    product_id: int = Field(..., gt=0)
+    quantity: int = Field(..., gt=0)
+    special_instructions: Optional[str] = Field(None, max_length=200)
+
+
+class AdminUpdateSubscriptionItemRequest(BaseModel):
+    """Admin: update a subscription item."""
+
+    quantity: int = Field(..., gt=0)
+    special_instructions: Optional[str] = Field(None, max_length=200)

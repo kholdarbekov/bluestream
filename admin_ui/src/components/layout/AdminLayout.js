@@ -29,7 +29,8 @@ import {
   TeamOutlined,
   BankOutlined,
   BarcodeOutlined,
-  MessageOutlined
+  MessageOutlined,
+  SyncOutlined
 } from '@ant-design/icons';
 import { useAuthStore } from '../../stores/authStore';
 import { useRealTimeWithFallback } from '../../hooks/useRealTimeUpdates';
@@ -77,6 +78,11 @@ const AdminLayout = ({ children }) => {
       key: '/orders',
       icon: <ShoppingCartOutlined />,
       label: t('ui.nav.orders')
+    },
+    {
+      key: '/subscriptions',
+      icon: <SyncOutlined />,
+      label: t('ui.nav.subscriptions', 'Subscriptions')
     },
     {
       key: '/corporate-contracts',

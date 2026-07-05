@@ -1442,6 +1442,13 @@
     "rule": "/api/v1/admin/staff/users/<int:user_id>/roles"
   },
   {
+    "endpoint": "admin.create_subscription_admin",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/subscriptions"
+  },
+  {
     "endpoint": "admin.get_subscriptions",
     "methods": [
       "GET"
@@ -1452,6 +1459,13 @@
     "endpoint": "admin.get_subscription",
     "methods": [
       "GET"
+    ],
+    "rule": "/api/v1/admin/subscriptions/<int:subscription_id>"
+  },
+  {
+    "endpoint": "admin.update_subscription_admin",
+    "methods": [
+      "PUT"
     ],
     "rule": "/api/v1/admin/subscriptions/<int:subscription_id>"
   },
@@ -1468,6 +1482,27 @@
       "POST"
     ],
     "rule": "/api/v1/admin/subscriptions/<int:subscription_id>/cancel"
+  },
+  {
+    "endpoint": "admin.add_subscription_item_admin",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/subscriptions/<int:subscription_id>/items"
+  },
+  {
+    "endpoint": "admin.remove_subscription_item_admin",
+    "methods": [
+      "DELETE"
+    ],
+    "rule": "/api/v1/admin/subscriptions/<int:subscription_id>/items/<int:item_id>"
+  },
+  {
+    "endpoint": "admin.update_subscription_item_admin",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/subscriptions/<int:subscription_id>/items/<int:item_id>"
   },
   {
     "endpoint": "admin.pause_subscription_admin",

@@ -29,6 +29,7 @@ import StaffManagement from './pages/StaffManagement';
 import Prepayments from './pages/Prepayments';
 import MarkingCodeOperations from './pages/MarkingCodeOperations';
 import SupportInbox from './pages/SupportInbox';
+import Subscriptions from './pages/Subscriptions';
 import { useAuthStore } from './stores/authStore';
 import ProtectedRoute from './components/common/ProtectedRoute';
 
@@ -52,6 +53,7 @@ function App() {
                   <Route path="/dashboard" element={<Dashboard />} />
                   <Route path="/users" element={<Users />} />
                   <Route path="/orders" element={<Orders />} />
+                  <Route path="/subscriptions" element={<Subscriptions />} />
                   <Route path="/corporate-contracts" element={<CorporateContracts />} />
                   <Route path="/products" element={<Products />} />
                   <Route path="/product-categories" element={<ProductCategories />} />

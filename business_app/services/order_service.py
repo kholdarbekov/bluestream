@@ -169,6 +169,17 @@ class OrderService:
                     order_items=order_items,
                 )
 
+        # Requirement: workplace-entity orders whose lines are ALL contract-covered
+        # default to business-account settlement (prepaid units) when the caller
+        # did NOT specify a method. Explicit choices (incl. explicit cash) are
+        # always respected; non-qualifying unspecified orders keep the existing
+        # behavior (payment_method stays None).
+        if payment_method is None and not payment_method_str:
+            from business_app.services.corporate_contract_service import CorporateContractService
+
+            if CorporateContractService().order_qualifies_for_business_account(user, order_items):
+                payment_method = PaymentMethod.BUSINESS_ACCOUNT
+
         # Create order
         order_source = order_data.get("order_source", "web")
         created_by_staff_id = order_data.get("created_by_staff_id")

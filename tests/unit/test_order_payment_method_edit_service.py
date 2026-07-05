@@ -189,9 +189,17 @@ def test_business_account_order_allows_cash_and_click_targets(db, sample_user):
 # 6. target business_account but cart not qualifying → blocking "not_business_account_eligible".
 def test_target_business_account_not_qualifying_blocked(db, sample_user):
     order = _make_order(sample_user, OrderStatus.DELIVERED, PaymentMethod.CASH)
-    plan = OrderPaymentMethodEditService().preview(order_id=order.id, new_method="business_account")
+    svc = OrderPaymentMethodEditService()
+    plan = svc.preview(order_id=order.id, new_method="business_account")
     assert not plan.is_editable
     assert "not_business_account_eligible" in plan.blocking_reasons
+
+    # get_edit_metadata must not diverge from preview: a target that preview
+    # blocks (here the only allowed target, business_account) must be filtered
+    # out of the offered methods, and the order reported as not editable.
+    metadata = svc.get_edit_metadata(order)
+    assert "business_account" not in metadata["allowed_target_methods"]
+    assert metadata["is_payment_method_editable"] is False
 
 
 # 7. round-trip guard: order with a reverse:* ledger row + target business_account
@@ -214,6 +222,12 @@ def test_roundtrip_guard_blocks_target_business_account(db, workplace_user, samp
     db.session.add(ledger_row)
     db.session.commit()
 
-    plan = OrderPaymentMethodEditService().preview(order_id=order.id, new_method="business_account")
+    svc = OrderPaymentMethodEditService()
+    plan = svc.preview(order_id=order.id, new_method="business_account")
     assert not plan.is_editable
     assert "corporate_settlement_previously_reversed" in plan.blocking_reasons
+
+    # The round-trip guard must also exclude business_account from the metadata
+    # dropdown, matching the preview block.
+    metadata = svc.get_edit_metadata(order)
+    assert "business_account" not in metadata["allowed_target_methods"]

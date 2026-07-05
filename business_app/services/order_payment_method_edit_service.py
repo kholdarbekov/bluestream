@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from business_app.models.corporate import CorporatePrepaymentLedger
 from business_app.models.order import Order
 from business_app.services.corporate_contract_service import CorporateContractService
-from business_app.utils.exceptions import NotFoundError, ValidationError
+from business_app.utils.exceptions import NotFoundError
 from shared.enums import OrderStatus, PaymentStatus
 
 
@@ -90,13 +90,20 @@ class OrderPaymentMethodEditService:
         return sorted({to for (frm, to) in ALLOWED_TRANSITIONS if frm == current})
 
     def get_edit_metadata(self, order: Order) -> Dict[str, Any]:
+        # Derive metadata straight from preview so the admin dropdown can never
+        # diverge from what apply_edit will actually accept: a target is offered
+        # iff preview(new_method=target) has no blocking reasons (this folds in
+        # the status/terminal-PSP short-circuit AND the business_account
+        # eligibility + round-trip guards that live only in preview).
         current = _method_value(order.payment_method)
-        status_ok = order.status not in {OrderStatus.CANCELLED, OrderStatus.RETURNED}
-        terminal_psp = current in _ONLINE and getattr(order.payment, "status", None) == PaymentStatus.COMPLETED
-        editable = bool(status_ok and not terminal_psp and self._allowed_targets(current))
+        editable_targets = [
+            target
+            for target in self._allowed_targets(current)
+            if self.preview(order_id=order.id, new_method=target).is_editable
+        ]
         return {
-            "is_payment_method_editable": editable,
-            "allowed_target_methods": self._allowed_targets(current) if editable else [],
+            "is_payment_method_editable": bool(editable_targets),
+            "allowed_target_methods": editable_targets,
         }
 
     def preview(self, *, order_id: int, new_method: str) -> PaymentMethodEditPlan:

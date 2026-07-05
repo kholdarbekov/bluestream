@@ -1376,6 +1376,126 @@ class CorporateContractService:
         db.session.flush()
         return ledger_entries
 
+    def reverse_order_prepayment(
+        self,
+        order_id: int,
+        reason: Optional[str] = None,
+        actor_user_id: Optional[int] = None,
+    ) -> List[CorporatePrepaymentLedger]:
+        """Return an order's prepayment settlement to availability.
+
+        For each RESERVE row of the order: if it was CONSUMEd, post an
+        ADJUSTMENT that decrements ``consumed_units`` (raising available_units);
+        if it is still an open reserve, decrement ``reserved_units``. Idempotent:
+        one reversal per reserve/consume row (guarded by a ``reverse:*`` key).
+        No-op when the order has no reserve entries (e.g. cash orders, grocery).
+
+        Used by the payment-method edit when moving OUT of business_account.
+        """
+        reserve_entries = self._get_order_reserve_entries(order_id)
+        if not reserve_entries:
+            return []
+
+        ledger_entries: List[CorporatePrepaymentLedger] = []
+        for reserve_entry in reserve_entries:
+            consume_row = CorporatePrepaymentLedger.query.filter_by(
+                idempotency_key=f"consume:reserve:{reserve_entry.id}"
+            ).first()
+
+            if consume_row is not None:
+                idempotency_key = f"reverse:consume:{consume_row.id}"
+                if CorporatePrepaymentLedger.query.filter_by(idempotency_key=idempotency_key).first():
+                    continue
+                balance = (
+                    CorporatePrepaymentBalance.query.filter_by(id=consume_row.balance_id)
+                    .with_for_update()
+                    .first()
+                )
+                if not balance:
+                    raise NotFoundError("Corporate prepayment balance not found")
+                units = Decimal(str(consume_row.units or 0))
+                balance.consumed_units = max(
+                    Decimal("0.00"), Decimal(str(balance.consumed_units or 0)) - units
+                )
+                ledger_entries.append(
+                    self._add_reversal_ledger(
+                        source=consume_row,
+                        units=units,
+                        order_id=order_id,
+                        actor_user_id=actor_user_id,
+                        idempotency_key=idempotency_key,
+                        notes=reason or "Reversed consumed units on payment-method change",
+                        metadata_key="reversal_of_consume_entry_id",
+                    )
+                )
+                continue
+
+            # No consume: reverse the still-open reserve (mirror release_for_order).
+            idempotency_key = f"reverse:reserve:{reserve_entry.id}"
+            if CorporatePrepaymentLedger.query.filter_by(idempotency_key=idempotency_key).first():
+                continue
+            already_released = CorporatePrepaymentLedger.query.filter_by(
+                idempotency_key=f"release:reserve:{reserve_entry.id}"
+            ).first()
+            if already_released:
+                continue
+            balance = (
+                CorporatePrepaymentBalance.query.filter_by(id=reserve_entry.balance_id)
+                .with_for_update()
+                .first()
+            )
+            if not balance:
+                raise NotFoundError("Corporate prepayment balance not found")
+            units = Decimal(str(reserve_entry.units or 0))
+            balance.reserved_units = max(
+                Decimal("0.00"), Decimal(str(balance.reserved_units or 0)) - units
+            )
+            ledger_entries.append(
+                self._add_reversal_ledger(
+                    source=reserve_entry,
+                    units=units,
+                    order_id=order_id,
+                    actor_user_id=actor_user_id,
+                    idempotency_key=idempotency_key,
+                    notes=reason or "Reversed reserved units on payment-method change",
+                    metadata_key="reversal_of_reserve_entry_id",
+                )
+            )
+
+        db.session.flush()
+        return ledger_entries
+
+    def _add_reversal_ledger(
+        self,
+        *,
+        source: CorporatePrepaymentLedger,
+        units: Decimal,
+        order_id: int,
+        actor_user_id: Optional[int],
+        idempotency_key: str,
+        notes: str,
+        metadata_key: str,
+    ) -> CorporatePrepaymentLedger:
+        entry = CorporatePrepaymentLedger(
+            contract_id=source.contract_id,
+            account_id=source.account_id,
+            balance_id=source.balance_id,
+            product_id=source.product_id,
+            order_id=order_id,
+            order_item_id=source.order_item_id,
+            actor_user_id=actor_user_id,
+            event_type=CorporatePrepaymentEventType.ADJUSTMENT,
+            units=units,
+            unit_price_snapshot=source.unit_price_snapshot,
+            amount=source.amount,
+            currency=source.currency,
+            notes=notes,
+            idempotency_key=idempotency_key,
+            entry_metadata={metadata_key: source.id, "kind": "payment_method_reversal"},
+        )
+        db.session.add(entry)
+        return entry
+
     def get_active_amount_contract_for_user(
         self,
         user_id: int,

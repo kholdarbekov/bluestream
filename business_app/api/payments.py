@@ -169,6 +169,7 @@ def get_payment_methods():
                     "icon_url": None,
                     "description": "Charge the active corporate prepayment balance",
                     "is_active": True,
+                    "is_default": True,
                     "supported_currencies": ["UZS"],
                 }
             )

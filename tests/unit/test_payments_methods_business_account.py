@@ -127,3 +127,21 @@ def test_workplace_without_balance_does_not_see_business_account(client, app, db
     wp = _make_workplace_or_grocery_user(EntitySubtype.WORKPLACE)
     # No contract — no active balances.
     assert "business_account" not in _methods(client, app, wp)
+
+
+def test_business_account_entry_is_flagged_default(client, app, db):
+    wp = _make_workplace_or_grocery_user(EntitySubtype.WORKPLACE)
+    _make_active_contract(wp.id)
+    with app.app_context():
+        token = create_access_token(identity=str(wp.id))
+    resp = client.get(
+        "/api/v1/payments/methods",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    methods = resp.get_json()["data"]["available_methods"]
+    ba = [m for m in methods if m["method"] == "business_account"]
+    assert len(ba) == 1
+    assert ba[0].get("is_default") is True
+    # No non-business_account entry claims the default.
+    assert all(not m.get("is_default") for m in methods if m["method"] != "business_account")

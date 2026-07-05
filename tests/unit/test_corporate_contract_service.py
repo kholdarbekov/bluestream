@@ -879,7 +879,7 @@ def _setup_units_grocery_order_with_consume(
         subtotal=Decimal("0.00"),
         delivery_fee=Decimal("0.00"),
         total_amount=Decimal("0.00"),
-        payment_method=PaymentMethod.BUSINESS_ACCOUNT,
+        payment_method=PaymentMethod.CASH,
         order_source="admin",
     )
     db.session.add(order)

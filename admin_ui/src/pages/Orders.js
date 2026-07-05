@@ -688,7 +688,11 @@ const Orders = () => {
       setUserPaymentMethods(availableMethods);
       setPaymentRestrictions(paymentPayload.payment_restrictions || null);
       createOrderForm.setFieldsValue({
-        payment_method: availableMethods[0]?.method,
+        payment_method: (
+          availableMethods.find((m) => m.is_default)
+          || availableMethods.find((m) => m.method === 'business_account')
+          || availableMethods[0]
+        )?.method,
         consume_marking_codes: false,
       });
     } catch (error) {

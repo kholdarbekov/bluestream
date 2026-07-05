@@ -1162,13 +1162,16 @@ class CorporateContractService:
         ).get(order_id)
         if not order:
             raise NotFoundError("Order not found")
-        # Prepayment settlement (reserve → consume → release) applies ONLY to
-        # business-account orders. Cash/card orders keep their contract pricing
-        # but must never draw down prepaid units. Gating here covers every create
-        # path without threading payment_method through call sites.
+        # Prepayment settlement (reserve → consume → release) is gated on payment
+        # method ONLY for workplace (non-grocery) entities: a workplace cash/card
+        # order must not draw down prepaid units. Grocery-store users are exempt —
+        # their AMOUNT contracts already early-return below, and legacy grocery
+        # UNITS-mode contracts intentionally fund prepaid units from cash on
+        # delivery (reserve → consume → topup_from_cash_collection).
+        order_user = order.user
         order_method = order.payment_method
         order_method_value = order_method.value if hasattr(order_method, "value") else order_method
-        if order_method_value != PaymentMethod.BUSINESS_ACCOUNT.value:
+        if not (order_user and order_user.is_grocery_store) and order_method_value != PaymentMethod.BUSINESS_ACCOUNT.value:
             return []
         # Grocery-store users with an active AMOUNT-mode contract skip
         # per-product unit reservation; money debt is posted at delivery via

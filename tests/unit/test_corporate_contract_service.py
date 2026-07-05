@@ -1237,3 +1237,40 @@ def test_reserve_for_order_skipped_for_non_business_account_payment(db, sample_u
         ).count()
         == 0
     )
+
+
+def test_reserve_for_order_still_runs_for_grocery_units_cash_order(db, sample_user):
+    """Legacy grocery-store UNITS contracts fund prepaid units from cash on
+    delivery, so a CASH grocery order MUST still reserve (the payment-method
+    gate is scoped to non-grocery entities only)."""
+    sample_user.user_type = UserType.ENTITY.value
+    sample_user.entity_subtype = EntitySubtype.GROCERY_STORE
+    db.session.commit()
+    assert sample_user.is_grocery_store
+
+    contract, account = _create_contract_and_account(sample_user.id)
+    product = _create_product("Grocery Cash Bottles", Decimal("20000.00"))
+    price_row = _create_contract_price(contract.id, product.id, Decimal("18000.00"))
+    db.session.commit()
+
+    order = _create_order_with_item(
+        sample_user.id,
+        product.id,
+        3,
+        Decimal("18000.00"),
+        contract_id=contract.id,
+        contract_product_price_id=price_row.id,
+        payment_method=PaymentMethod.CASH,
+    )
+
+    entries = CorporateContractService().reserve_for_order(order.id)
+
+    assert len(entries) == 1
+    balance = _get_product_balance(account.id, product.id)
+    assert Decimal(str(balance.reserved_units)) == Decimal("3.00")
+    assert (
+        CorporatePrepaymentLedger.query.filter_by(
+            order_id=order.id, event_type=CorporatePrepaymentEventType.RESERVE
+        ).count()
+        == 1
+    )

@@ -1898,7 +1898,9 @@ def create_order_for_user():
         user_id = data.get("user_id")
         items = data.get("items", [])
         delivery_address_id = data.get("delivery_address_id")
-        payment_method = data.get("payment_method", "cash")
+        # No hardcoded default: create_order resolves an unspecified method
+        # (business_account for qualifying workplace orders, else None).
+        payment_method = data.get("payment_method")
         delivery_notes = data.get("delivery_notes", "")
         consume_marking_codes = bool(data.get("consume_marking_codes", False))
 

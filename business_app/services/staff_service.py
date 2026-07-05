@@ -2078,6 +2078,7 @@ class StaffService:
                     "method": PaymentMethod.BUSINESS_ACCOUNT.value,
                     "name": "Business Account",
                     "description": "Charge the active corporate prepayment balance",
+                    "is_default": True,
                 }
             )
 

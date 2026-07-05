@@ -318,6 +318,13 @@ class CreateOrderHandler(BaseHandler):
             method.get('method') for method in available_methods if method.get('method')
         ]
 
+        default_method = next(
+            (m.get('method') for m in available_methods if m.get('is_default')),
+            None,
+        )
+        if default_method:
+            context.user_data['new_order']['payment_method'] = default_method
+
         text = self._format_cart_summary(context, language)
         if restrictions.get('cod_restricted'):
             text += (

@@ -238,3 +238,18 @@ def test_workplace_methods_include_business_account_when_balance_exists(db):
     # Workplace with no contracts: no BUSINESS_ACCOUNT, no error.
     assert PaymentMethod.BUSINESS_ACCOUNT.value not in method_values
     assert methods["entity_subtype"] == EntitySubtype.WORKPLACE.value
+
+
+def test_business_account_entry_flagged_is_default_when_eligible(db):
+    """An eligible workplace user (active contract, not grocery) gets BUSINESS_ACCOUNT
+    flagged is_default=True, so operator/admin pickers can pre-select it."""
+    user = _make_workplace_user()
+    _make_amount_contract(user.id)
+
+    methods = StaffService.get_client_payment_methods(user.id)
+    business_account_entries = [
+        m for m in methods["available_methods"] if m["method"] == PaymentMethod.BUSINESS_ACCOUNT.value
+    ]
+
+    assert len(business_account_entries) == 1
+    assert business_account_entries[0]["is_default"] is True

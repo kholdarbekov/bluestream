@@ -14,13 +14,23 @@ from business_app.models.corporate import (
     CorporatePrepaymentEventType,
     CorporatePrepaymentLedger,
 )
-from business_app.models.order import Order, OrderItem
-from business_app.models.payment import Payment
+from business_app.models.order import Order, OrderItem, OrderItemMarkingCodeAllocation
+from business_app.models.payment import (
+    CashCollectionAllocation,
+    CashCollectionEvent,
+    Payment,
+)
+from business_app.models.product import ProductMarkingCode
 from business_app.models.user import User
+from business_app.services.cash_collection_service import CashCollectionService
 from business_app.services.order_payment_method_edit_service import OrderPaymentMethodEditService
+from business_app.utils.exceptions import ValidationError
 from shared.enums import (
+    CashCollectionSource,
     CorporateContractTrackingMode,
     EntitySubtype,
+    MarkingCodeLedgerEventType,
+    MarkingCodeStatus,
     OrderStatus,
     PaymentMethod,
     PaymentStatus,
@@ -231,3 +241,230 @@ def test_roundtrip_guard_blocks_target_business_account(db, workplace_user, samp
     # dropdown, matching the preview block.
     metadata = svc.get_edit_metadata(order)
     assert "business_account" not in metadata["allowed_target_methods"]
+
+
+# --------------------------------------------------------------------------- #
+# apply_edit — into business_account (T1 cash, T2 online)
+# --------------------------------------------------------------------------- #
+
+_COLLECTED = Decimal("72000.00")  # 4 units * 18 000
+
+
+def _consume_rows(order_id):
+    return CorporatePrepaymentLedger.query.filter_by(
+        order_id=order_id, event_type=CorporatePrepaymentEventType.CONSUME
+    ).count()
+
+
+def _seed_cash_collected_order(db, user, product, contract, price_row, account, balance, driver):
+    """Delivered cash order, 72 000 collected on delivery AND units already
+    reserved+consumed (the order-627 shape)."""
+    balance.consumed_units = Decimal("4.00")  # this order's units already drawn
+    order = _make_order(user, OrderStatus.DELIVERED, PaymentMethod.CASH, total=_COLLECTED)
+    item = _add_contract_item(order, product, contract, price_row, quantity=4)
+
+    reserve = CorporatePrepaymentLedger(
+        contract_id=contract.id,
+        account_id=account.id,
+        balance_id=balance.id,
+        product_id=product.id,
+        order_id=order.id,
+        order_item_id=item.id,
+        event_type=CorporatePrepaymentEventType.RESERVE,
+        units=Decimal("4.00"),
+        idempotency_key=f"reserve:order_item:{item.id}",
+    )
+    db.session.add(reserve)
+    db.session.flush()
+    consume = CorporatePrepaymentLedger(
+        contract_id=contract.id,
+        account_id=account.id,
+        balance_id=balance.id,
+        product_id=product.id,
+        order_id=order.id,
+        order_item_id=item.id,
+        event_type=CorporatePrepaymentEventType.CONSUME,
+        units=Decimal("4.00"),
+        idempotency_key=f"consume:reserve:{reserve.id}",
+    )
+    db.session.add(consume)
+
+    payment = Payment(
+        order_id=order.id,
+        user_id=user.id,
+        payment_method=PaymentMethod.CASH,
+        amount=_COLLECTED,
+        amount_collected=_COLLECTED,
+        outstanding_amount=Decimal("0.00"),
+        currency="UZS",
+        status=PaymentStatus.COMPLETED,
+        collected_by=driver.id,
+        payment_id=f"pay-{uuid4().hex[:10]}",
+    )
+    db.session.add(payment)
+    db.session.flush()
+    event = CashCollectionEvent(
+        customer_id=user.id,
+        collector_user_id=driver.id,
+        recorded_by_user_id=driver.id,
+        order_id=order.id,
+        amount=_COLLECTED,
+        currency="UZS",
+        source=CashCollectionSource.DELIVERY_COMPLETION,
+        unapplied_amount=Decimal("0.00"),
+        occurred_at=datetime.now(timezone.utc),
+    )
+    db.session.add(event)
+    db.session.flush()
+    db.session.add(
+        CashCollectionAllocation(
+            cash_collection_event_id=event.id,
+            payment_id=payment.id,
+            order_id=order.id,
+            allocated_amount=_COLLECTED,
+            allocation_order=1,
+            allocation_mode="auto",
+            allocation_metadata={"affects_payment_projection": True},
+        )
+    )
+    db.session.commit()
+    return order
+
+
+def test_apply_t1_cash_collected_credits_customer(
+    db, workplace_user, sample_product, covered_contract, delivery_driver
+):
+    contract, price_row, account, balance = covered_contract
+    order = _seed_cash_collected_order(
+        db, workplace_user, sample_product, contract, price_row, account, balance, delivery_driver
+    )
+    cash = CashCollectionService()
+    assert cash.get_customer_prepaid_balance(workplace_user.id) == Decimal("0.00")
+
+    result = OrderPaymentMethodEditService().apply_edit(
+        order_id=order.id,
+        new_method="business_account",
+        reason="reclassify to business account",
+        actor_user_id=delivery_driver.id,
+    )
+
+    db.session.expire_all()
+    order = Order.query.get(order.id)
+    assert order.payment_method == PaymentMethod.BUSINESS_ACCOUNT
+    assert order.is_paid is True
+    assert order.payment.status == PaymentStatus.COMPLETED
+    assert order.payment.payment_method == PaymentMethod.BUSINESS_ACCOUNT
+    # units consumed exactly once (idempotent no double-consume)
+    assert _consume_rows(order.id) == 1
+    # collected cash becomes customer prepaid credit
+    assert cash.get_customer_prepaid_balance(workplace_user.id) == _COLLECTED
+    assert result.money_action == "cash_credited"
+    assert result.corporate_action == "settled_business_account"
+
+
+def test_apply_t1_cash_not_collected_no_credit(
+    db, workplace_user, sample_product, covered_contract, delivery_driver
+):
+    contract, price_row, account, balance = covered_contract
+    order = _make_order(workplace_user, OrderStatus.DELIVERED, PaymentMethod.CASH, total=_COLLECTED)
+    _add_contract_item(order, sample_product, contract, price_row, quantity=4)
+    payment = Payment(
+        order_id=order.id,
+        user_id=workplace_user.id,
+        payment_method=PaymentMethod.CASH,
+        amount=_COLLECTED,
+        amount_collected=Decimal("0.00"),
+        outstanding_amount=_COLLECTED,
+        currency="UZS",
+        status=PaymentStatus.PENDING,
+        payment_id=f"pay-{uuid4().hex[:10]}",
+    )
+    db.session.add(payment)
+    db.session.commit()
+
+    cash = CashCollectionService()
+    result = OrderPaymentMethodEditService().apply_edit(
+        order_id=order.id,
+        new_method="business_account",
+        reason="reclassify uncollected cod",
+        actor_user_id=delivery_driver.id,
+    )
+
+    db.session.expire_all()
+    order = Order.query.get(order.id)
+    assert order.payment_method == PaymentMethod.BUSINESS_ACCOUNT
+    assert order.is_paid is True
+    assert order.payment.payment_method == PaymentMethod.BUSINESS_ACCOUNT
+    assert order.payment.status == PaymentStatus.COMPLETED
+    # a clean cash order draws down units on settlement (reserve + consume rows)
+    assert _consume_rows(order.id) == 1
+    # no cash was collected → no customer credit created
+    assert cash.get_customer_prepaid_balance(workplace_user.id) == Decimal("0.00")
+    assert result.money_action == "cod_cancelled"
+
+
+def test_apply_t2_click_releases_reserved_marking_codes(
+    db, workplace_user, sample_product, covered_contract, delivery_driver
+):
+    contract, price_row, account, balance = covered_contract
+    order = _make_order(workplace_user, OrderStatus.DELIVERED, PaymentMethod.CLICK, total=_COLLECTED)
+    item = _add_contract_item(order, sample_product, contract, price_row, quantity=4)
+    payment = Payment(
+        order_id=order.id,
+        user_id=workplace_user.id,
+        payment_method=PaymentMethod.CLICK,
+        amount=_COLLECTED,
+        currency="UZS",
+        status=PaymentStatus.PENDING,
+        consume_marking_codes=True,
+        payment_id=f"pay-{uuid4().hex[:10]}",
+    )
+    db.session.add(payment)
+    db.session.flush()
+
+    code = ProductMarkingCode(
+        product_id=sample_product.id,
+        order_id=order.id,
+        code=f"MC-{uuid4().hex}",
+        status=MarkingCodeStatus.RESERVED,
+        reserved_at=datetime.now(timezone.utc),
+    )
+    db.session.add(code)
+    db.session.flush()
+    db.session.add(
+        OrderItemMarkingCodeAllocation(
+            order_item_id=item.id,
+            order_id=order.id,
+            payment_id=payment.id,
+            product_marking_code_id=code.id,
+            action=MarkingCodeLedgerEventType.RESERVED,
+        )
+    )
+    db.session.commit()
+
+    result = OrderPaymentMethodEditService().apply_edit(
+        order_id=order.id,
+        new_method="business_account",
+        reason="reclassify pending click order",
+        actor_user_id=delivery_driver.id,
+    )
+
+    db.session.expire_all()
+    order = Order.query.get(order.id)
+    assert order.payment_method == PaymentMethod.BUSINESS_ACCOUNT
+    assert order.is_paid is True
+    assert order.payment.payment_method == PaymentMethod.BUSINESS_ACCOUNT
+    assert order.payment.status == PaymentStatus.COMPLETED
+    # the pending online payment's reserved marking code is released back to stock
+    assert ProductMarkingCode.query.get(code.id).status == MarkingCodeStatus.AVAILABLE
+    assert result.money_action == "online_cancelled"
+
+
+def test_apply_rejects_short_reason(db, workplace_user, sample_product, covered_contract):
+    contract, price_row, account, balance = covered_contract
+    order = _make_order(workplace_user, OrderStatus.DELIVERED, PaymentMethod.CASH)
+    _add_contract_item(order, sample_product, contract, price_row)
+    with pytest.raises(ValidationError):
+        OrderPaymentMethodEditService().apply_edit(
+            order_id=order.id, new_method="business_account", reason="no", actor_user_id=1
+        )

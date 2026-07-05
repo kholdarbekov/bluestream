@@ -5,14 +5,21 @@ corporate prepayment ledger and the money side. Only four transitions are
 allowed; a completed online PSP is terminal. Mirrors OrderCashEditService.
 """
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
+from business_app import db
 from business_app.models.corporate import CorporatePrepaymentLedger
 from business_app.models.order import Order
+from business_app.models.payment import CashCollectionAllocation, CashCollectionEvent
 from business_app.services.corporate_contract_service import CorporateContractService
-from business_app.utils.exceptions import NotFoundError
-from shared.enums import OrderStatus, PaymentStatus
+from business_app.utils.audit_logger import AuditEventType, AuditSeverity, audit_logger
+from business_app.utils.exceptions import NotFoundError, ValidationError
+from business_app.utils.transactions import atomic_transaction
+from shared.enums import CashCollectionSource, OrderStatus, PaymentMethod, PaymentStatus
+
+logger = logging.getLogger(__name__)
 
 
 def _method_value(method) -> Optional[str]:
@@ -154,3 +161,159 @@ class OrderPaymentMethodEditService:
             blocking_reasons=blocking,
             warnings=warnings,
         )
+
+    # ---- apply (transactional) ----
+    def apply_edit(
+        self, *, order_id: int, new_method: str, reason: str, actor_user_id: int
+    ) -> PaymentMethodEditResult:
+        reason = (reason or "").strip()
+        if len(reason) < 5:
+            raise ValidationError("reason must be at least 5 characters")
+
+        order = Order.query.with_for_update().get(order_id)
+        if not order:
+            raise NotFoundError("Order not found")
+
+        plan = self.preview(order_id=order_id, new_method=new_method)
+        if plan.blocking_reasons:
+            raise ValidationError("; ".join(plan.blocking_reasons))
+
+        target = _NORMALIZE.get(plan.new_method, plan.new_method)
+        if target == "business_account":
+            return self._settle_as_business_account(
+                order=order, plan=plan, reason=reason, actor_user_id=actor_user_id
+            )
+        # Transitions OUT of business_account (T3/T4) land in a later task.
+        raise ValidationError(f"transition_not_implemented: {plan.transition}")
+
+    def _settle_as_business_account(
+        self, *, order: Order, plan: PaymentMethodEditPlan, reason: str, actor_user_id: int
+    ) -> PaymentMethodEditResult:
+        from business_app.services.payment_service import PaymentService
+
+        current = plan.current_method
+        payment = order.payment
+
+        with atomic_transaction():
+            # 1. Flip method FIRST (payment + order). Critical precondition: while
+            #    the payment still reads CASH a freed-cash auto-allocation could
+            #    re-apply to this same order, and the corporate reserve/consume
+            #    gate only opens once the method is business_account.
+            if payment is not None:
+                payment.payment_method = PaymentMethod.BUSINESS_ACCOUNT
+            order.payment_method = PaymentMethod.BUSINESS_ACCOUNT
+            db.session.flush()
+
+            # 2. Reverse / release whatever the superseded method left behind.
+            if current == "cash":
+                money_action = self._reverse_collected_cash(
+                    order=order, payment=payment, reason=reason, actor_user_id=actor_user_id
+                )
+            else:  # click / payme (T2)
+                self._release_online_reservation(
+                    order=order, payment=payment, reason=reason, actor_user_id=actor_user_id
+                )
+                money_action = "online_cancelled"
+
+            # 3. Corporate settle. Idempotent: an order whose units are already
+            #    reserved+consumed no-ops here; a clean order creates the rows.
+            self.corporate_service.reserve_for_order(order.id, actor_user_id=actor_user_id)
+            if order.status == OrderStatus.DELIVERED:
+                self.corporate_service.consume_for_order(
+                    order.id,
+                    delivery_id=order.delivery.id if order.delivery else None,
+                    actor_user_id=actor_user_id,
+                )
+
+            # 4. Settle the payment as business_account (marks it COMPLETED,
+            #    normalises the prepaid projection, consumes marking codes iff
+            #    the payment carries the flag).
+            PaymentService().initialize_order_payment(
+                order.id,
+                actor_user_id=actor_user_id,
+                metadata={"consume_marking_codes": bool(getattr(payment, "consume_marking_codes", False))},
+                commit=False,
+            )
+
+        audit_logger.log_event(
+            event_type=AuditEventType.PAYMENT_PROCESSED,
+            action="order_payment_method_changed",
+            severity=AuditSeverity.HIGH,
+            resource_type="order",
+            resource_id=str(order.id),
+            additional_data={
+                "actor_user_id": actor_user_id,
+                "from_method": current,
+                "to_method": "business_account",
+                "money_action": money_action,
+                "reason": reason,
+            },
+        )
+
+        return PaymentMethodEditResult(
+            order_id=order.id,
+            new_method="business_account",
+            corporate_action="settled_business_account",
+            money_action=money_action,
+            warnings=list(plan.warnings),
+        )
+
+    def _reverse_collected_cash(
+        self, *, order: Order, payment, reason: str, actor_user_id: int
+    ) -> str:
+        """Turn this order's collected COD cash into unapplied customer credit.
+
+        Reverses every live allocation this order's payment received from a
+        non-voided DELIVERY_COMPLETION event, so the collected amount becomes the
+        customer's prepaid balance without touching the driver cash session or
+        other orders paid by the same event. If nothing was collected (uncollected
+        COD) the pending obligation is simply superseded by the business_account
+        settlement — no credit is created.
+        """
+        from business_app.services.cash_collection_service import CashCollectionService
+
+        if payment is None:
+            return "cod_cancelled"
+
+        allocations = (
+            CashCollectionAllocation.query.join(
+                CashCollectionEvent,
+                CashCollectionAllocation.cash_collection_event_id == CashCollectionEvent.id,
+            )
+            .filter(
+                CashCollectionAllocation.payment_id == payment.id,
+                CashCollectionAllocation.reversed_at.is_(None),
+                CashCollectionEvent.source == CashCollectionSource.DELIVERY_COMPLETION,
+                CashCollectionEvent.voided_at.is_(None),
+            )
+            .all()
+        )
+        if not allocations:
+            return "cod_cancelled"
+
+        cash_service = CashCollectionService()
+        for allocation in allocations:
+            cash_service.reverse_allocation_to_payment(
+                allocation.id,
+                reversed_by_user_id=actor_user_id,
+                reason=reason,
+                commit=False,
+            )
+        return "cash_credited"
+
+    def _release_online_reservation(
+        self, *, order: Order, payment, reason: str, actor_user_id: int
+    ) -> None:
+        if payment is None:
+            return
+        from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
+
+        # release_reserved_marking_codes is a no-op when nothing is reserved, but
+        # mirror convert_electronic_order_to_cash and never let a fiscal hiccup
+        # abort an otherwise valid settlement.
+        try:
+            PaymentFiscalizationService().release_reserved_marking_codes(
+                payment, reason=reason, actor_user_id=actor_user_id
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.error("Failed to release marking codes for order %s: %s", order.id, exc)

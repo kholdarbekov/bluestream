@@ -57,7 +57,7 @@ class CreatePhoneOrderRequest(BaseModel):
     client_id: int
     items: List[Dict[str, Any]] = Field(..., min_length=1)
     delivery_address_id: int
-    payment_method: Optional[str] = "cash"
+    payment_method: Optional[str] = None
     delivery_notes: Optional[str] = None
     delivery_fee: Optional[float] = 0
 

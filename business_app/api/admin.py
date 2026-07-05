@@ -1887,7 +1887,9 @@ def create_order_for_user():
     - delivery_address_id: ID of delivery address
 
     Optional fields:
-    - payment_method: cash, payme, click, business_account (default: cash)
+    - payment_method: cash, payme, click, business_account (no hardcoded default;
+      unspecified resolves via create_order — business_account for qualifying
+      workplace orders, otherwise None)
     - delivery_notes: Special delivery instructions
     - consume_marking_codes: only applies to business_account orders; default false
     """

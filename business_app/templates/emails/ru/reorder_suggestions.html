@@ -1,0 +1,37 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Предложения по дозаказу - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Предложения по дозаказу</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Товары ниже минимального запаса</h2>
+
+<div class="warning-box">
+    <p>Требуется дозаказ для {{ total_products }} товар(ов).</p>
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Товар</th>
+        <th>Артикул</th>
+        <th>Текущий остаток</th>
+        <th>Мин. уровень</th>
+        <th>Рекомендуемое кол-во</th>
+    </tr>
+    {% for product in products_to_reorder %}
+    <tr>
+        <td>{{ product.product_name }}</td>
+        <td>{{ product.sku or "N/A" }}</td>
+        <td>{{ product.current_stock }}</td>
+        <td>{{ product.min_stock_level }}</td>
+        <td>{{ product.suggested_quantity }}</td>
+    </tr>
+    {% endfor %}
+</table>
+
+<hr class="divider">
+<p>Это только предложения -- заказы поставщикам автоматически не размещаются.</p>
+{% endblock %}

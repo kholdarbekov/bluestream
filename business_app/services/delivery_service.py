@@ -511,6 +511,47 @@ class DeliveryService:
             ],
         }
 
+    @staticmethod
+    def compute_driver_metrics(deliveries: List[Delivery]) -> Dict[str, Any]:
+        """Aggregate delivery performance metrics for a set of deliveries.
+
+        Extracted from `generate_driver_performance_report` (delivery_tasks.py)
+        so both the per-driver report task and
+        `AnalyticsService._get_driver_performance_metrics` (fleet-wide
+        aggregation) compute success rate / avg delivery time / rating the
+        same way instead of duplicating the logic.
+        """
+        total_deliveries = len(deliveries)
+        successful_deliveries = len([d for d in deliveries if d.status == DeliveryStatus.DELIVERED])
+        failed_deliveries = len([d for d in deliveries if d.status == DeliveryStatus.FAILED])
+
+        completed_deliveries = [d for d in deliveries if d.delivered_at and d.status == DeliveryStatus.DELIVERED]
+        avg_delivery_time = 0
+
+        if completed_deliveries:
+            total_time = sum(
+                (d.actual_delivery_time - d.scheduled_date).total_seconds()
+                for d in completed_deliveries
+                if d.actual_delivery_time
+            )
+            avg_delivery_time = total_time / len(completed_deliveries) / 60  # in minutes
+
+        total_distance = sum(d.distance_km for d in deliveries if d.distance_km)
+
+        ratings = [d.customer_rating for d in deliveries if d.customer_rating]
+        avg_rating = sum(ratings) / len(ratings) if ratings else 0
+
+        return {
+            "total_deliveries": total_deliveries,
+            "successful_deliveries": successful_deliveries,
+            "failed_deliveries": failed_deliveries,
+            "success_rate": round((successful_deliveries / total_deliveries * 100) if total_deliveries > 0 else 0, 2),
+            "average_delivery_time_minutes": round(avg_delivery_time, 2),
+            "total_distance_km": round(total_distance, 2),
+            "average_rating": round(avg_rating, 2),
+            "total_attempts": sum(d.delivery_attempts for d in deliveries),
+        }
+
     def get_delivery_metrics(self, start_date: datetime = None, end_date: datetime = None) -> Dict[str, Any]:
         """Get delivery performance metrics"""
         query = Delivery.query

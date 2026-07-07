@@ -6,9 +6,8 @@ This file contains Pydantic models for analytics-related data serialization
 from datetime import datetime, date, UTC
 from typing import Dict, Any, Optional, List, Union
 from enum import Enum
-from decimal import Decimal
 
-from pydantic import BaseModel, Field, field_validator, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict
 from pydantic.alias_generators import to_camel
 
 from business_app.serializers.types import MoneyFloat
@@ -47,8 +46,8 @@ class DashboardMetricSchema(BaseModel):
     """Dashboard metric schema"""
 
     name: str
-    value: Union[int, float, Decimal]
-    previous_value: Optional[Union[int, float, Decimal]] = None
+    value: MoneyFloat
+    previous_value: Optional[MoneyFloat] = None
     change_percentage: Optional[float] = None
     change_direction: str = Field(default="neutral")  # up, down, neutral
     format_type: str = Field(default="number")  # number, currency, percentage
@@ -56,29 +55,15 @@ class DashboardMetricSchema(BaseModel):
     color: Optional[str] = None
     description: Optional[str] = None
 
-    @field_validator("value", "previous_value")
-    @classmethod
-    def validate_numeric_values(cls, v):
-        if isinstance(v, Decimal):
-            return float(v)
-        return v
-
 
 class ChartDataPointSchema(BaseModel):
     """Chart data point schema"""
 
     label: str
-    value: Union[int, float, Decimal]
+    value: MoneyFloat
     date: Optional[Union[datetime, date, str]] = None
     category: Optional[str] = None
     color: Optional[str] = None
-
-    @field_validator("value")
-    @classmethod
-    def validate_value(cls, v):
-        if isinstance(v, Decimal):
-            return float(v)
-        return v
 
 
 class ChartSchema(BaseModel):
@@ -87,19 +72,12 @@ class ChartSchema(BaseModel):
     title: str
     chart_type: ChartType
     data: List[ChartDataPointSchema]
-    total: Optional[Union[int, float]] = None
+    total: Optional[MoneyFloat] = None
     format_type: str = Field(default="number")
     currency: str = Field(default="UZS")
     x_axis_label: Optional[str] = None
     y_axis_label: Optional[str] = None
     colors: List[str] = Field(default_factory=list)
-
-    @field_validator("total")
-    @classmethod
-    def validate_total(cls, v):
-        if isinstance(v, Decimal):
-            return float(v)
-        return v
 
 
 class SalesAnalyticsSchema(BaseModel):
@@ -440,7 +418,9 @@ def serialize_dashboard_metrics(metrics_data: Dict[str, Any]) -> List[Dict[str, 
 
         # Calculate change percentage
         if revenue_metric.previous_value and revenue_metric.previous_value > 0:
-            change = ((revenue_metric.value - revenue_metric.previous_value) / revenue_metric.previous_value) * 100
+            change = float(
+                ((revenue_metric.value - revenue_metric.previous_value) / revenue_metric.previous_value) * 100
+            )
             revenue_metric.change_percentage = round(change, 2)
             revenue_metric.change_direction = "up" if change > 0 else "down" if change < 0 else "neutral"
 
@@ -460,7 +440,7 @@ def serialize_dashboard_metrics(metrics_data: Dict[str, Any]) -> List[Dict[str, 
         )
 
         if orders_metric.previous_value and orders_metric.previous_value > 0:
-            change = ((orders_metric.value - orders_metric.previous_value) / orders_metric.previous_value) * 100
+            change = float(((orders_metric.value - orders_metric.previous_value) / orders_metric.previous_value) * 100)
             orders_metric.change_percentage = round(change, 2)
             orders_metric.change_direction = "up" if change > 0 else "down" if change < 0 else "neutral"
 
@@ -480,9 +460,9 @@ def serialize_dashboard_metrics(metrics_data: Dict[str, Any]) -> List[Dict[str, 
         )
 
         if customers_metric.previous_value and customers_metric.previous_value > 0:
-            change = (
-                (customers_metric.value - customers_metric.previous_value) / customers_metric.previous_value
-            ) * 100
+            change = float(
+                ((customers_metric.value - customers_metric.previous_value) / customers_metric.previous_value) * 100
+            )
             customers_metric.change_percentage = round(change, 2)
             customers_metric.change_direction = "up" if change > 0 else "down" if change < 0 else "neutral"
 
@@ -502,7 +482,7 @@ def serialize_dashboard_metrics(metrics_data: Dict[str, Any]) -> List[Dict[str, 
         )
 
         if conversion_metric.previous_value is not None:
-            change = conversion_metric.value - conversion_metric.previous_value
+            change = float(conversion_metric.value - conversion_metric.previous_value)
             conversion_metric.change_percentage = round(change, 2)
             conversion_metric.change_direction = "up" if change > 0 else "down" if change < 0 else "neutral"
 

@@ -1,0 +1,37 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Reorder Suggestions - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Reorder Suggestions</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Products Below Minimum Stock</h2>
+
+<div class="warning-box">
+    <p>{{ total_products }} product(s) need reordering.</p>
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Product</th>
+        <th>SKU</th>
+        <th>Current stock</th>
+        <th>Min level</th>
+        <th>Suggested qty</th>
+    </tr>
+    {% for product in products_to_reorder %}
+    <tr>
+        <td>{{ product.product_name }}</td>
+        <td>{{ product.sku or "N/A" }}</td>
+        <td>{{ product.current_stock }}</td>
+        <td>{{ product.min_stock_level }}</td>
+        <td>{{ product.suggested_quantity }}</td>
+    </tr>
+    {% endfor %}
+</table>
+
+<hr class="divider">
+<p>These are suggestions only -- no purchase orders have been placed automatically.</p>
+{% endblock %}

@@ -9,7 +9,7 @@ import business_app.models.subscription as subscription_models
 import business_app.models.user as user_models
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from datetime import datetime, timedelta
+from datetime import datetime
 
 try:
     from datetime import UTC
@@ -641,81 +641,9 @@ def get_payment_statistics():
         current_user_id = get_jwt_identity()
         period = request.args.get("period", "year")  # month, quarter, year, all
 
-        # Calculate date range
-        now = datetime.now(UTC)
-        if period == "month":
-            start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        elif period == "quarter":
-            quarter_start_month = ((now.month - 1) // 3) * 3 + 1
-            start_date = now.replace(month=quarter_start_month, day=1, hour=0, minute=0, second=0, microsecond=0)
-        elif period == "year":
-            start_date = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
-        else:  # all time
-            start_date = None
+        result = get_payment_service().get_user_payment_statistics(current_user_id, period=period)
 
-        # Base query
-        query = Payment.query.filter_by(user_id=current_user_id)
-        if start_date:
-            query = query.filter(Payment.created_at >= start_date)
-
-        payments = query.all()
-
-        # Calculate statistics
-        total_payments = len(payments)
-        successful_payments = len([p for p in payments if p.status == PaymentStatus.COMPLETED])
-        failed_payments = len([p for p in payments if p.status == PaymentStatus.FAILED])
-        total_amount = sum(p.amount for p in payments if p.status == PaymentStatus.COMPLETED)
-
-        # Payment methods breakdown
-        method_stats = {}
-        for method in PaymentMethodType:
-            method_payments = [p for p in payments if p.payment_method == method]
-            method_stats[method.value] = {
-                "count": len(method_payments),
-                "total_amount": sum(p.amount for p in method_payments if p.status == PaymentStatus.COMPLETED),
-                "success_rate": (
-                    (
-                        len([p for p in method_payments if p.status == PaymentStatus.COMPLETED])
-                        / len(method_payments)
-                        * 100
-                    )
-                    if method_payments
-                    else 0
-                ),
-            }
-
-        # Monthly spending trend
-        monthly_spending = {}
-        for i in range(12):
-            month_start = (now.replace(day=1) - timedelta(days=32 * i)).replace(day=1)
-            month_end = (
-                month_start.replace(month=month_start.month % 12 + 1)
-                if month_start.month < 12
-                else month_start.replace(year=month_start.year + 1, month=1)
-            )
-
-            month_payments = [
-                p for p in payments if month_start <= p.created_at < month_end and p.status == PaymentStatus.COMPLETED
-            ]
-            month_total = sum(p.amount for p in month_payments)
-
-            monthly_spending[month_start.strftime("%Y-%m")] = month_total
-
-        return success_response(
-            data={
-                "period": period,
-                "statistics": {
-                    "total_payments": total_payments,
-                    "successful_payments": successful_payments,
-                    "failed_payments": failed_payments,
-                    "success_rate": round((successful_payments / total_payments * 100), 2) if total_payments > 0 else 0,
-                    "total_amount": total_amount,
-                    "average_payment": round(total_amount / successful_payments, 2) if successful_payments > 0 else 0,
-                    "payment_methods": method_stats,
-                    "monthly_spending_trend": monthly_spending,
-                },
-            }
-        )
+        return success_response(data=result)
 
     except Exception as e:
         current_app.logger.error(f"Get payment statistics error: {e}")

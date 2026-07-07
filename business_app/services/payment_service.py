@@ -4,7 +4,7 @@ Supports Payme, Click, Cash, and Loyalty Points payments
 """
 
 from decimal import Decimal
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, List
 from flask import current_app
 import redis
@@ -15,6 +15,7 @@ from business_app.models.payment import Payment, PaymentTransaction, CreditCard
 from business_app.utils.exceptions import PaymentError, ProviderUnavailableError, ValidationError, NotFoundError
 from business_app.utils.constants import (
     PaymeErrors,
+    PaymentMethodType,
 )
 from shared.enums import (
     OrderStatus,
@@ -23,6 +24,7 @@ from shared.enums import (
     FiscalizationStatus,
 )
 from business_app.utils.helpers import generate_random_string
+from business_app.utils.timezone_utils import ensure_utc
 from business_app.utils.payment_projection import (
     get_payment_projection,
     is_settled_prepayment,
@@ -672,6 +674,83 @@ class PaymentService:
 
         self.update_payment_status(payment)
         return self.get_payment_status(payment_id)
+
+    def get_user_payment_statistics(self, user_id: int, period: str = "year") -> Dict[str, Any]:
+        """Get aggregated payment statistics for a user.
+
+        Extracted verbatim from the previous inline implementation in
+        ``api/payments.py::get_payment_statistics`` (ARCH: service-layer-first).
+        """
+        now = datetime.now(timezone.utc)
+        if period == "month":
+            start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        elif period == "quarter":
+            quarter_start_month = ((now.month - 1) // 3) * 3 + 1
+            start_date = now.replace(month=quarter_start_month, day=1, hour=0, minute=0, second=0, microsecond=0)
+        elif period == "year":
+            start_date = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        else:  # all time
+            start_date = None
+
+        query = Payment.query.filter_by(user_id=user_id)
+        if start_date:
+            query = query.filter(Payment.created_at >= start_date)
+
+        payments = query.all()
+
+        total_payments = len(payments)
+        successful_payments = len([p for p in payments if p.status == PaymentStatus.COMPLETED])
+        failed_payments = len([p for p in payments if p.status == PaymentStatus.FAILED])
+        total_amount = sum(p.amount for p in payments if p.status == PaymentStatus.COMPLETED)
+
+        method_stats = {}
+        for method in PaymentMethodType:
+            method_payments = [p for p in payments if p.payment_method == method]
+            method_stats[method.value] = {
+                "count": len(method_payments),
+                "total_amount": sum(p.amount for p in method_payments if p.status == PaymentStatus.COMPLETED),
+                "success_rate": (
+                    (
+                        len([p for p in method_payments if p.status == PaymentStatus.COMPLETED])
+                        / len(method_payments)
+                        * 100
+                    )
+                    if method_payments
+                    else 0
+                ),
+            }
+
+        monthly_spending = {}
+        for i in range(12):
+            month_start = (now.replace(day=1) - timedelta(days=32 * i)).replace(day=1)
+            month_end = (
+                month_start.replace(month=month_start.month % 12 + 1)
+                if month_start.month < 12
+                else month_start.replace(year=month_start.year + 1, month=1)
+            )
+
+            month_payments = [
+                p
+                for p in payments
+                if month_start <= ensure_utc(p.created_at) < month_end and p.status == PaymentStatus.COMPLETED
+            ]
+            month_total = sum(p.amount for p in month_payments)
+
+            monthly_spending[month_start.strftime("%Y-%m")] = month_total
+
+        return {
+            "period": period,
+            "statistics": {
+                "total_payments": total_payments,
+                "successful_payments": successful_payments,
+                "failed_payments": failed_payments,
+                "success_rate": round((successful_payments / total_payments * 100), 2) if total_payments > 0 else 0,
+                "total_amount": total_amount,
+                "average_payment": round(total_amount / successful_payments, 2) if successful_payments > 0 else 0,
+                "payment_methods": method_stats,
+                "monthly_spending_trend": monthly_spending,
+            },
+        }
 
     def verify_payment(self, payment_id: int, verification_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Compatibility wrapper used by background verification tasks."""

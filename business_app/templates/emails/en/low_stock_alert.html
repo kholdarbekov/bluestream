@@ -1,0 +1,41 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Low Stock Alert - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Low Stock Alert</h1>
+{% endblock %}
+
+{% block content %}
+<h2>{{ product_name }}</h2>
+
+<div class="{{ 'warning-box' if is_out_of_stock else 'info-box' }}">
+    {% if is_out_of_stock %}
+    <p>This product is out of stock.</p>
+    {% else %}
+    <p>This product is running low on stock.</p>
+    {% endif %}
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>SKU</th>
+        <td>{{ sku or "N/A" }}</td>
+    </tr>
+    <tr>
+        <th>Current stock</th>
+        <td>{{ current_stock }}</td>
+    </tr>
+    <tr>
+        <th>Available quantity</th>
+        <td>{{ available_quantity }}</td>
+    </tr>
+    <tr>
+        <th>Minimum level</th>
+        <td>{{ min_stock_level }}</td>
+    </tr>
+</table>
+
+<hr class="divider">
+<p>Please review inventory and reorder if necessary.</p>
+{% endblock %}

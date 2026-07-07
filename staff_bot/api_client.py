@@ -2,6 +2,9 @@
 API client for communicating with the business application (staff endpoints)
 """
 import httpx
+import hashlib
+import hmac
+import json
 import logging
 from typing import Dict, Any, Optional
 from dataclasses import dataclass
@@ -159,7 +162,8 @@ class StaffAPIClient:
         self, method: str, endpoint: str,
         token: str = None, data: Dict = None,
         params: Dict = None,
-        headers: Dict = None
+        headers: Dict = None,
+        sign: bool = False
     ) -> APIResponse:
         """Make HTTP request with retry logic and circuit breaker."""
         if not self._circuit_breaker.allow_request():
@@ -171,6 +175,23 @@ class StaffAPIClient:
         if headers:
             request_headers.update(headers)
 
+        # Signed requests (currently: staff login) must send exactly the
+        # bytes we sign — httpx `json=` serializes internally, so we can't
+        # guarantee byte-equality with it. Pre-serialize the body ourselves
+        # and send it via `content=` so the signed bytes == the bytes on the
+        # wire == backend's `request.get_data()`.
+        signed_body = None
+        if sign and data is not None:
+            secret = getattr(getattr(config, "security", None), "webhook_secret", None)
+            if secret:
+                signed_body = json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+                request_headers['Content-Type'] = 'application/json'
+                request_headers['X-Bot-Webhook-Signature'] = hmac.new(
+                    secret.encode("utf-8"), signed_body, hashlib.sha256
+                ).hexdigest()
+            else:
+                logger.error("sign=True but config.security.webhook_secret is unset; login will 401")
+
         total_attempts = max(1, self.max_retries)
         client = self._client
         owns_client = False
@@ -181,13 +202,22 @@ class StaffAPIClient:
         try:
             for attempt in range(total_attempts):
                 try:
-                    response = await client.request(
-                        method=method,
-                        url=endpoint,
-                        json=data,
-                        params=params,
-                        headers=request_headers
-                    )
+                    if signed_body is not None:
+                        response = await client.request(
+                            method=method,
+                            url=endpoint,
+                            content=signed_body,
+                            params=params,
+                            headers=request_headers
+                        )
+                    else:
+                        response = await client.request(
+                            method=method,
+                            url=endpoint,
+                            json=data,
+                            params=params,
+                            headers=request_headers
+                        )
 
                     self._circuit_breaker.record_success()
 
@@ -324,7 +354,8 @@ class StaffAPIClient:
         return await self._make_request(
             'POST',
             f'{config.business_api.auth_endpoint}/login',
-            data=payload
+            data=payload,
+            sign=True
         )
 
     async def refresh_token(self, refresh_token: str) -> APIResponse:

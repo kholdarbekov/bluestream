@@ -29,6 +29,7 @@ import {
   UserAddOutlined,
 } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import dayjs from 'dayjs';
 
 import adminService from '../services/adminService';
@@ -138,6 +139,7 @@ const toTryoutFormValues = (tryout) => ({
 });
 
 const Tryouts = () => {
+  const { t } = useTranslation('tryouts');
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState();
@@ -236,7 +238,7 @@ const Tryouts = () => {
     mutationFn: (payload) => tryoutService.createTryout(payload),
 
     onSuccess: () => {
-      message.success('Try-out created');
+      message.success(t('toast_created', { defaultValue: 'Try-out created' }));
       closeTryoutModal();
       refreshTryouts();
     },
@@ -246,7 +248,7 @@ const Tryouts = () => {
     mutationFn: ({ taskId, assignedDriverUserId }) => tryoutService.assignTask(taskId, assignedDriverUserId),
 
     onSuccess: () => {
-      message.success('Task assigned');
+      message.success(t('toast_task_assigned', { defaultValue: 'Task assigned' }));
       setAssignOpen(false);
       assignForm.resetFields();
       refreshTryouts();
@@ -260,13 +262,13 @@ const Tryouts = () => {
       const action = conversion?.action;
       const user = conversion?.user;
       if (action === 'created_user' && user) {
-        message.success(`Try-out converted and created user #${user.id}`);
+        message.success(t('toast_converted_created_user', { id: user.id, defaultValue: 'Try-out converted and created user #{{id}}' }));
       } else if (action === 'linked_existing_user' && user) {
-        message.success(`Try-out converted and linked existing user #${user.id}`);
+        message.success(t('toast_converted_linked_user', { id: user.id, defaultValue: 'Try-out converted and linked existing user #{{id}}' }));
       } else if (action === 'already_converted' && user) {
-        message.success(`Try-out already linked to user #${user.id}`);
+        message.success(t('toast_already_linked', { id: user.id, defaultValue: 'Try-out already linked to user #{{id}}' }));
       } else {
-        message.success('Try-out converted to customer');
+        message.success(t('toast_converted', { defaultValue: 'Try-out converted to customer' }));
       }
       refreshTryouts();
       if (selectedTryout?.id === updatedTryout?.id) {
@@ -279,7 +281,7 @@ const Tryouts = () => {
     mutationFn: ({ tryoutId, payload }) => tryoutService.adjustBottles(tryoutId, payload),
 
     onSuccess: () => {
-      message.success('Bottle adjustment saved');
+      message.success(t('toast_adjustment_saved', { defaultValue: 'Bottle adjustment saved' }));
       setAdjustOpen(false);
       adjustForm.resetFields();
       refreshTryouts();
@@ -293,7 +295,7 @@ const Tryouts = () => {
     mutationFn: ({ tryoutId, payload }) => tryoutService.updateTryout(tryoutId, payload),
 
     onSuccess: (updatedTryout) => {
-      message.success('Try-out updated');
+      message.success(t('toast_updated', { defaultValue: 'Try-out updated' }));
       closeTryoutModal();
       setSelectedTryout(updatedTryout);
       refreshTryouts();
@@ -367,23 +369,27 @@ const Tryouts = () => {
 
   const columns = [
     {
-      title: 'Try-out',
+      title: t('col_tryout', { defaultValue: 'Try-out' }),
       dataIndex: 'tryout_number',
       key: 'tryout_number',
       render: (value) => <Text strong code>{value}</Text>,
     },
     {
-      title: 'Contact',
+      title: t('col_contact', { defaultValue: 'Contact' }),
       dataIndex: 'trial_contact',
       key: 'trial_contact',
       render: (contact, record) => (
         <div>
-          <div>{contact?.full_name || 'Unknown'}</div>
+          <div>{contact?.full_name || t('unknown_contact', { defaultValue: 'Unknown' })}</div>
           <small style={{ color: '#666' }}>{contact?.phone || '-'}</small>
           {record?.converted_user ? (
             <div>
               <small style={{ color: '#2f855a' }}>
-                Linked user: {record.converted_user.full_name || 'User'} ({record.converted_user.phone || '-'})
+                {t('linked_user', {
+                  name: record.converted_user.full_name || t('user_fallback', { defaultValue: 'User' }),
+                  phone: record.converted_user.phone || '-',
+                  defaultValue: 'Linked user: {{name}} ({{phone}})',
+                })}
               </small>
             </div>
           ) : null}
@@ -391,44 +397,44 @@ const Tryouts = () => {
       ),
     },
     {
-      title: 'Status',
+      title: t('status', { defaultValue: 'Status' }),
       dataIndex: 'status',
       key: 'status',
       // eslint-disable-next-line security/detect-object-injection
       render: (value) => <Tag color={STATUS_COLORS[value] || 'default'}>{value}</Tag>,
     },
     {
-      title: 'Outcome',
+      title: t('outcome', { defaultValue: 'Outcome' }),
       dataIndex: 'outcome',
       key: 'outcome',
       // eslint-disable-next-line security/detect-object-injection
       render: (value) => <Tag color={OUTCOME_COLORS[value] || 'default'}>{value}</Tag>,
     },
     {
-      title: 'Outstanding Bottles',
+      title: t('outstanding_bottles', { defaultValue: 'Outstanding Bottles' }),
       dataIndex: 'outstanding_bottles_total',
       key: 'outstanding_bottles_total',
       render: (value) => value ?? 0,
     },
     {
-      title: 'Pickup State',
+      title: t('pickup_state', { defaultValue: 'Pickup State' }),
       dataIndex: 'pickup_state',
       key: 'pickup_state',
       // eslint-disable-next-line security/detect-object-injection
       render: (value) => <Tag color={PICKUP_STATE_COLORS[value] || 'default'}>{value}</Tag>,
     },
     {
-      title: 'Due',
+      title: t('due', { defaultValue: 'Due' }),
       dataIndex: 'return_due_at',
       key: 'return_due_at',
       render: (value) => formatDate(value),
     },
     {
-      title: 'Actions',
+      title: t('actions', { defaultValue: 'Actions' }),
       key: 'actions',
       render: (_, record) => (
         <Space>
-          <Button icon={<EyeOutlined />} onClick={() => openDetails(record)}>View</Button>
+          <Button icon={<EyeOutlined />} onClick={() => openDetails(record)}>{t('view', { defaultValue: 'View' })}</Button>
           <Button
             icon={<SwapOutlined />}
             onClick={() => {
@@ -436,17 +442,17 @@ const Tryouts = () => {
               setAssignOpen(true);
             }}
           >
-            Assign
+            {t('assign', { defaultValue: 'Assign' })}
           </Button>
           <Button onClick={() => openEdit(record)}>
-            Edit
+            {t('edit', { defaultValue: 'Edit' })}
           </Button>
           <AsyncButton
             icon={<UserAddOutlined />}
             disabled={record.outcome === 'converted'}
             onClick={() => convertMutation.mutateAsync(record.id)}
           >
-            Convert
+            {t('convert', { defaultValue: 'Convert' })}
           </AsyncButton>
         </Space>
       ),
@@ -465,34 +471,34 @@ const Tryouts = () => {
             <Row justify="space-between" align="middle" gutter={[16, 16]}>
               <Col>
                 <Typography.Title level={3} style={{ margin: 0 }}>
-                  Try-outs
+                  {t('page_title', { defaultValue: 'Try-outs' })}
                 </Typography.Title>
                 <Text type="secondary">
-                  Free product handoffs and returnable bottle recovery
+                  {t('page_subtitle', { defaultValue: 'Free product handoffs and returnable bottle recovery' })}
                 </Text>
               </Col>
               <Col>
                 <Space>
                   <Button icon={<DownloadOutlined />} onClick={handleExport}>
-                    Export CSV
+                    {t('export_csv', { defaultValue: 'Export CSV' })}
                   </Button>
                   <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-                    Create Try-out
+                    {t('create_tryout', { defaultValue: 'Create Try-out' })}
                   </Button>
                 </Space>
               </Col>
             </Row>
           </Card>
         </Col>
-        <Col span={4}><Card><Statistic title="Active" value={summary.active_tryouts || 0} /></Card></Col>
-        <Col span={4}><Card><Statistic title="Outstanding Bottles" value={summary.outstanding_bottles_total || 0} precision={2} /></Card></Col>
-        <Col span={4}><Card><Statistic title="Due Soon" value={summary.due_soon_count || 0} /></Card></Col>
-        <Col span={4}><Card><Statistic title="Overdue" value={summary.overdue_count || 0} /></Card></Col>
-        <Col span={4}><Card><Statistic title="Converted" value={summary.converted_count || 0} /></Card></Col>
+        <Col span={4}><Card><Statistic title={t('active', { defaultValue: 'Active' })} value={summary.active_tryouts || 0} /></Card></Col>
+        <Col span={4}><Card><Statistic title={t('outstanding_bottles', { defaultValue: 'Outstanding Bottles' })} value={summary.outstanding_bottles_total || 0} precision={2} /></Card></Col>
+        <Col span={4}><Card><Statistic title={t('due_soon', { defaultValue: 'Due Soon' })} value={summary.due_soon_count || 0} /></Card></Col>
+        <Col span={4}><Card><Statistic title={t('overdue', { defaultValue: 'Overdue' })} value={summary.overdue_count || 0} /></Card></Col>
+        <Col span={4}><Card><Statistic title={t('converted', { defaultValue: 'Converted' })} value={summary.converted_count || 0} /></Card></Col>
         <Col span={4}>
           <Card>
             <Statistic
-              title="Collection Rate"
+              title={t('collection_rate', { defaultValue: 'Collection Rate' })}
               value={summary.collection_rate || 0}
               precision={1}
               suffix="%"
@@ -503,30 +509,30 @@ const Tryouts = () => {
 
       <Card style={{ marginBottom: 16 }}>
         <Row gutter={[16, 16]}>
-          <Col span={6}><Input placeholder="Search try-out / phone / name" value={search} onChange={(e) => setSearch(e.target.value)} /></Col>
+          <Col span={6}><Input placeholder={t('search_placeholder', { defaultValue: 'Search try-out / phone / name' })} value={search} onChange={(e) => setSearch(e.target.value)} /></Col>
           <Col span={4}>
-            <Select allowClear placeholder="Status" style={{ width: '100%' }} value={status} onChange={setStatus}>
+            <Select allowClear placeholder={t('status', { defaultValue: 'Status' })} style={{ width: '100%' }} value={status} onChange={setStatus}>
               {['draft', 'scheduled', 'active', 'closed', 'cancelled'].map((value) => (
                 <Select.Option key={value} value={value}>{value}</Select.Option>
               ))}
             </Select>
           </Col>
           <Col span={4}>
-            <Select allowClear placeholder="Outcome" style={{ width: '100%' }} value={outcome} onChange={setOutcome}>
+            <Select allowClear placeholder={t('outcome', { defaultValue: 'Outcome' })} style={{ width: '100%' }} value={outcome} onChange={setOutcome}>
               {['pending', 'converted', 'declined'].map((value) => (
                 <Select.Option key={value} value={value}>{value}</Select.Option>
               ))}
             </Select>
           </Col>
           <Col span={4}>
-            <Select allowClear placeholder="Pickup State" style={{ width: '100%' }} value={pickupState} onChange={setPickupState}>
+            <Select allowClear placeholder={t('pickup_state', { defaultValue: 'Pickup State' })} style={{ width: '100%' }} value={pickupState} onChange={setPickupState}>
               {['no_returnables', 'not_due', 'due_soon', 'overdue', 'partial', 'returned'].map((value) => (
                 <Select.Option key={value} value={value}>{value}</Select.Option>
               ))}
             </Select>
           </Col>
         <Col span={6}>
-            <Select allowClear placeholder="Driver" style={{ width: '100%' }} value={driverId} onChange={setDriverId}>
+            <Select allowClear placeholder={t('driver', { defaultValue: 'Driver' })} style={{ width: '100%' }} value={driverId} onChange={setDriverId}>
               {drivers.map((driver) => (
                 <Select.Option key={driver.user_id || driver.id} value={driver.user_id || driver.id}>
                   {driver.full_name || driver.name || driver.phone}
@@ -534,8 +540,8 @@ const Tryouts = () => {
               ))}
             </Select>
           </Col>
-          <Col span={4}><RangePicker style={{ width: '100%' }} value={dateRange} onChange={setDateRange} placeholder={['Created from', 'Created to']} /></Col>
-          <Col span={4}><RangePicker style={{ width: '100%' }} value={dueDateRange} onChange={setDueDateRange} placeholder={['Due from', 'Due to']} /></Col>
+          <Col span={4}><RangePicker style={{ width: '100%' }} value={dateRange} onChange={setDateRange} placeholder={[t('created_from', { defaultValue: 'Created from' }), t('created_to', { defaultValue: 'Created to' })]} /></Col>
+          <Col span={4}><RangePicker style={{ width: '100%' }} value={dueDateRange} onChange={setDueDateRange} placeholder={[t('due_from', { defaultValue: 'Due from' }), t('due_to', { defaultValue: 'Due to' })]} /></Col>
         </Row>
       </Card>
 
@@ -555,27 +561,27 @@ const Tryouts = () => {
       </Card>
 
       <Drawer
-        title={selectedTryout?.tryout_number || 'Try-out'}
+        title={selectedTryout?.tryout_number || t('tryout_fallback', { defaultValue: 'Try-out' })}
         open={detailOpen}
         width={760}
         onClose={() => setDetailOpen(false)}
         extra={(
             <Space>
               <Button onClick={() => openEdit(selectedTryout)}>
-                Edit
+                {t('edit', { defaultValue: 'Edit' })}
               </Button>
               <Button onClick={() => {
                 setAdjustTarget(selectedTryout);
                 setAdjustOpen(true);
             }}>
-              Adjust Bottles
+              {t('adjust_bottles', { defaultValue: 'Adjust Bottles' })}
             </Button>
             <AsyncButton
               type="primary"
               disabled={selectedTryout?.outcome === 'converted'}
               onClick={() => convertMutation.mutateAsync(selectedTryout?.id)}
             >
-              Convert
+              {t('convert', { defaultValue: 'Convert' })}
             </AsyncButton>
           </Space>
         )}
@@ -585,79 +591,79 @@ const Tryouts = () => {
             items={[
               {
                 key: 'overview',
-                label: 'Overview',
+                label: t('tab_overview', { defaultValue: 'Overview' }),
                 children: (
                   <Descriptions bordered column={2}>
-                    <Descriptions.Item label="Contact">{selectedTryout.trial_contact?.full_name}</Descriptions.Item>
-                    <Descriptions.Item label="Phone">{selectedTryout.trial_contact?.phone}</Descriptions.Item>
-                    <Descriptions.Item label="Status">{selectedTryout.status}</Descriptions.Item>
-                    <Descriptions.Item label="Outcome">{selectedTryout.outcome}</Descriptions.Item>
-                    <Descriptions.Item label="Due">{formatDate(selectedTryout.return_due_at)}</Descriptions.Item>
-                    <Descriptions.Item label="Pickup State">{selectedTryout.pickup_state}</Descriptions.Item>
-                    <Descriptions.Item label="Address" span={2}>{selectedTryout.address_snapshot?.full_address}</Descriptions.Item>
-                    <Descriptions.Item label="Coordinates" span={2}>
+                    <Descriptions.Item label={t('col_contact', { defaultValue: 'Contact' })}>{selectedTryout.trial_contact?.full_name}</Descriptions.Item>
+                    <Descriptions.Item label={t('phone', { defaultValue: 'Phone' })}>{selectedTryout.trial_contact?.phone}</Descriptions.Item>
+                    <Descriptions.Item label={t('status', { defaultValue: 'Status' })}>{selectedTryout.status}</Descriptions.Item>
+                    <Descriptions.Item label={t('outcome', { defaultValue: 'Outcome' })}>{selectedTryout.outcome}</Descriptions.Item>
+                    <Descriptions.Item label={t('due', { defaultValue: 'Due' })}>{formatDate(selectedTryout.return_due_at)}</Descriptions.Item>
+                    <Descriptions.Item label={t('pickup_state', { defaultValue: 'Pickup State' })}>{selectedTryout.pickup_state}</Descriptions.Item>
+                    <Descriptions.Item label={t('address', { defaultValue: 'Address' })} span={2}>{selectedTryout.address_snapshot?.full_address}</Descriptions.Item>
+                    <Descriptions.Item label={t('coordinates', { defaultValue: 'Coordinates' })} span={2}>
                       {selectedTryout.address_snapshot?.latitude != null && selectedTryout.address_snapshot?.longitude != null
                         ? `${selectedTryout.address_snapshot.latitude}, ${selectedTryout.address_snapshot.longitude}`
                         : '-'}
                     </Descriptions.Item>
-                    <Descriptions.Item label="Converted User" span={2}>
+                    <Descriptions.Item label={t('converted_user', { defaultValue: 'Converted User' })} span={2}>
                       {selectedTryout.converted_user
-                        ? `#${selectedTryout.converted_user.id} ${selectedTryout.converted_user.full_name || 'User'} (${selectedTryout.converted_user.phone || '-'})`
+                        ? `#${selectedTryout.converted_user.id} ${selectedTryout.converted_user.full_name || t('user_fallback', { defaultValue: 'User' })} (${selectedTryout.converted_user.phone || '-'})`
                         : '-'}
                     </Descriptions.Item>
-                    <Descriptions.Item label="Notes" span={2}>{selectedTryout.notes || '-'}</Descriptions.Item>
+                    <Descriptions.Item label={t('notes', { defaultValue: 'Notes' })} span={2}>{selectedTryout.notes || '-'}</Descriptions.Item>
                   </Descriptions>
                 ),
               },
               {
                 key: 'products',
-                label: 'Products',
+                label: t('tab_products', { defaultValue: 'Products' }),
                 children: (
                   <Table
                     rowKey="id"
                     pagination={false}
                     dataSource={selectedTryout.items || []}
                     columns={[
-                      { title: 'Product', dataIndex: 'product_name', key: 'product_name' },
-                      { title: 'Quantity', dataIndex: 'quantity', key: 'quantity' },
-                      { title: 'Price Snapshot', dataIndex: 'unit_price_snapshot', key: 'unit_price_snapshot' },
-                      { title: 'Returnable Bottles Due', dataIndex: 'returnable_bottles_due', key: 'returnable_bottles_due' },
+                      { title: t('product', { defaultValue: 'Product' }), dataIndex: 'product_name', key: 'product_name' },
+                      { title: t('quantity', { defaultValue: 'Quantity' }), dataIndex: 'quantity', key: 'quantity' },
+                      { title: t('price_snapshot', { defaultValue: 'Price Snapshot' }), dataIndex: 'unit_price_snapshot', key: 'unit_price_snapshot' },
+                      { title: t('returnable_bottles_due', { defaultValue: 'Returnable Bottles Due' }), dataIndex: 'returnable_bottles_due', key: 'returnable_bottles_due' },
                     ]}
                   />
                 ),
               },
               {
                 key: 'tasks',
-                label: 'Tasks',
+                label: t('tab_tasks', { defaultValue: 'Tasks' }),
                 children: (
                   <Table
                     rowKey="id"
                     pagination={false}
                     dataSource={selectedTryout.tasks || []}
                     columns={[
-                      { title: 'Type', dataIndex: 'task_type', key: 'task_type' },
-                      { title: 'Status', dataIndex: 'status', key: 'status' },
-                      { title: 'Driver', dataIndex: 'assigned_driver_name', key: 'assigned_driver_name' },
-                      { title: 'Due', dataIndex: 'due_at', key: 'due_at', render: (value) => formatDateTimeShort(value) },
-                      { title: 'Completed', dataIndex: 'completed_at', key: 'completed_at', render: (value) => formatDateTimeShort(value) },
+                      { title: t('type', { defaultValue: 'Type' }), dataIndex: 'task_type', key: 'task_type' },
+                      { title: t('status', { defaultValue: 'Status' }), dataIndex: 'status', key: 'status' },
+                      { title: t('driver', { defaultValue: 'Driver' }), dataIndex: 'assigned_driver_name', key: 'assigned_driver_name' },
+                      { title: t('due', { defaultValue: 'Due' }), dataIndex: 'due_at', key: 'due_at', render: (value) => formatDateTimeShort(value) },
+                      { title: t('completed', { defaultValue: 'Completed' }), dataIndex: 'completed_at', key: 'completed_at', render: (value) => formatDateTimeShort(value) },
                     ]}
                   />
                 ),
               },
               {
                 key: 'timeline',
-                label: 'Timeline',
+                label: t('tab_timeline', { defaultValue: 'Timeline' }),
                 children: (
                   <Table
                     rowKey="id"
                     pagination={false}
                     dataSource={selectedTryout.ledger || []}
                     columns={[
-                      { title: 'Event', dataIndex: 'event_type', key: 'event_type' },
-                      { title: 'Product', dataIndex: 'product_name', key: 'product_name' },
-                      { title: 'Units', dataIndex: 'units', key: 'units' },
-                      { title: 'Occurred', dataIndex: 'occurred_at', key: 'occurred_at', render: (value) => formatDateTimeShort(value) },
-                      { title: 'Notes', dataIndex: 'notes', key: 'notes' },
+                      { title: t('event', { defaultValue: 'Event' }), dataIndex: 'event_type', key: 'event_type' },
+                      { title: t('product', { defaultValue: 'Product' }), dataIndex: 'product_name', key: 'product_name' },
+                      { title: t('units_col', { defaultValue: 'Units' }), dataIndex: 'units', key: 'units' },
+                      { title: t('occurred', { defaultValue: 'Occurred' }), dataIndex: 'occurred_at', key: 'occurred_at', render: (value) => formatDateTimeShort(value) },
+                      { title: t('notes', { defaultValue: 'Notes' }), dataIndex: 'notes', key: 'notes' },
                     ]}
                   />
                 ),
@@ -668,7 +674,7 @@ const Tryouts = () => {
       </Drawer>
 
       <Modal
-        title={isEditingTryout ? 'Edit Try-out' : 'Create Try-out'}
+        title={isEditingTryout ? t('edit_tryout_title', { defaultValue: 'Edit Try-out' }) : t('create_tryout', { defaultValue: 'Create Try-out' })}
         open={isTryoutModalOpen}
         forceRender
         onCancel={closeTryoutModal}
@@ -685,7 +691,7 @@ const Tryouts = () => {
           <Form.Item name="longitude" hidden><Input /></Form.Item>
           <div style={{ marginBottom: 16 }}>
             <label style={{ display: 'block', marginBottom: 8, fontWeight: 500 }}>
-              Select Location on Map
+              {t('select_location', { defaultValue: 'Select Location on Map' })}
             </label>
             <AddressMapPicker
               value={tryoutCoordinates}
@@ -696,28 +702,28 @@ const Tryouts = () => {
             />
           </div>
           <Row gutter={16}>
-            <Col span={8}><Form.Item name="first_name" label="First Name" rules={[{ required: true }]}><Input /></Form.Item></Col>
-            <Col span={8}><Form.Item name="last_name" label="Last Name"><Input /></Form.Item></Col>
-            <Col span={8}><Form.Item name="phone" label="Phone" rules={[{ required: true }]}><Input /></Form.Item></Col>
+            <Col span={8}><Form.Item name="first_name" label={t('first_name', { defaultValue: 'First Name' })} rules={[{ required: true }]}><Input /></Form.Item></Col>
+            <Col span={8}><Form.Item name="last_name" label={t('last_name', { defaultValue: 'Last Name' })}><Input /></Form.Item></Col>
+            <Col span={8}><Form.Item name="phone" label={t('phone', { defaultValue: 'Phone' })} rules={[{ required: true }]}><Input /></Form.Item></Col>
           </Row>
           <Row gutter={16}>
-            <Col span={8}><Form.Item name="company_name" label="Company"><Input /></Form.Item></Col>
-            <Col span={8}><Form.Item name="preferred_language" label="Language"><Select options={[{ value: 'uz', label: 'Uzbek' }, { value: 'ru', label: 'Russian' }, { value: 'en', label: 'English' }]} /></Form.Item></Col>
-            <Col span={8}><Form.Item name="assigned_driver_user_id" label="Assign Driver"><Select allowClear options={drivers.map((driver) => ({ value: driver.user_id || driver.id, label: driver.full_name || driver.name || driver.phone }))} /></Form.Item></Col>
+            <Col span={8}><Form.Item name="company_name" label={t('company', { defaultValue: 'Company' })}><Input /></Form.Item></Col>
+            <Col span={8}><Form.Item name="preferred_language" label={t('language', { defaultValue: 'Language' })}><Select options={[{ value: 'uz', label: t('lang_uz', { defaultValue: 'Uzbek' }) }, { value: 'ru', label: t('lang_ru', { defaultValue: 'Russian' }) }, { value: 'en', label: t('lang_en', { defaultValue: 'English' }) }]} /></Form.Item></Col>
+            <Col span={8}><Form.Item name="assigned_driver_user_id" label={t('assign_driver', { defaultValue: 'Assign Driver' })}><Select allowClear options={drivers.map((driver) => ({ value: driver.user_id || driver.id, label: driver.full_name || driver.name || driver.phone }))} /></Form.Item></Col>
           </Row>
           <Row gutter={16}>
-            <Col span={12}><Form.Item name="full_address" label="Full Address" rules={[{ required: true }]}><Input.TextArea rows={2} /></Form.Item></Col>
-            <Col span={6}><Form.Item name="district" label="District"><Input /></Form.Item></Col>
-            <Col span={6}><Form.Item name="city" label="City"><Input /></Form.Item></Col>
+            <Col span={12}><Form.Item name="full_address" label={t('full_address', { defaultValue: 'Full Address' })} rules={[{ required: true }]}><Input.TextArea rows={2} /></Form.Item></Col>
+            <Col span={6}><Form.Item name="district" label={t('district', { defaultValue: 'District' })}><Input /></Form.Item></Col>
+            <Col span={6}><Form.Item name="city" label={t('city', { defaultValue: 'City' })}><Input /></Form.Item></Col>
           </Row>
           <Row gutter={16}>
-            <Col span={8}><Form.Item name="address_label" label="Address Label"><Input /></Form.Item></Col>
-            <Col span={8}><Form.Item name="return_due_at" label="Return Due"><DatePicker showTime style={{ width: '100%' }} /></Form.Item></Col>
-            <Col span={8}><Form.Item name="complete_handoff" label="Complete Handoff Now" valuePropName="checked"><Switch disabled={Boolean(tryoutFormTarget?.handoff_completed_at)} /></Form.Item></Col>
+            <Col span={8}><Form.Item name="address_label" label={t('address_label', { defaultValue: 'Address Label' })}><Input /></Form.Item></Col>
+            <Col span={8}><Form.Item name="return_due_at" label={t('return_due', { defaultValue: 'Return Due' })}><DatePicker showTime style={{ width: '100%' }} /></Form.Item></Col>
+            <Col span={8}><Form.Item name="complete_handoff" label={t('complete_handoff', { defaultValue: 'Complete Handoff Now' })} valuePropName="checked"><Switch disabled={Boolean(tryoutFormTarget?.handoff_completed_at)} /></Form.Item></Col>
           </Row>
           <Row gutter={16}>
-            <Col span={12}><Form.Item name="contact_notes" label="Contact Notes"><Input.TextArea rows={2} /></Form.Item></Col>
-            <Col span={12}><Form.Item name="delivery_notes" label="Delivery Notes"><Input.TextArea rows={2} /></Form.Item></Col>
+            <Col span={12}><Form.Item name="contact_notes" label={t('contact_notes', { defaultValue: 'Contact Notes' })}><Input.TextArea rows={2} /></Form.Item></Col>
+            <Col span={12}><Form.Item name="delivery_notes" label={t('delivery_notes', { defaultValue: 'Delivery Notes' })}><Input.TextArea rows={2} /></Form.Item></Col>
           </Row>
           <Form.List name="items">
             {(fields, { add, remove }) => (
@@ -728,7 +734,7 @@ const Tryouts = () => {
                       <Form.Item
                         {...field}
                         name={[field.name, 'product_id']}
-                        label={field.name === 0 ? 'Product' : ''}
+                        label={field.name === 0 ? t('product', { defaultValue: 'Product' }) : ''}
                         rules={[{ required: true }]}
                       >
                         <Select
@@ -743,37 +749,37 @@ const Tryouts = () => {
                       </Form.Item>
                     </Col>
                     <Col span={6}>
-                      <Form.Item {...field} name={[field.name, 'quantity']} label={field.name === 0 ? 'Qty' : ''} rules={[{ required: true }]}>
+                      <Form.Item {...field} name={[field.name, 'quantity']} label={field.name === 0 ? t('qty', { defaultValue: 'Qty' }) : ''} rules={[{ required: true }]}>
                         <InputNumber min={1} style={{ width: '100%' }} disabled={Boolean(tryoutFormTarget?.handoff_completed_at)} />
                       </Form.Item>
                     </Col>
                     <Col span={2} style={{ display: 'flex', alignItems: 'center' }}>
-                      <Button danger disabled={Boolean(tryoutFormTarget?.handoff_completed_at)} onClick={() => remove(field.name)}>Remove</Button>
+                      <Button danger disabled={Boolean(tryoutFormTarget?.handoff_completed_at)} onClick={() => remove(field.name)}>{t('remove', { defaultValue: 'Remove' })}</Button>
                     </Col>
                   </Row>
                 ))}
-                <Button disabled={Boolean(tryoutFormTarget?.handoff_completed_at)} onClick={() => add({ quantity: 1 })}>Add Product</Button>
+                <Button disabled={Boolean(tryoutFormTarget?.handoff_completed_at)} onClick={() => add({ quantity: 1 })}>{t('add_product', { defaultValue: 'Add Product' })}</Button>
                 {tryoutFormTarget?.handoff_completed_at ? (
                   <div style={{ marginTop: 8 }}>
-                    <Text type="secondary">Products cannot be edited after handoff completion.</Text>
+                    <Text type="secondary">{t('products_locked', { defaultValue: 'Products cannot be edited after handoff completion.' })}</Text>
                   </div>
                 ) : null}
               </>
             )}
           </Form.List>
           <Row gutter={16} style={{ marginTop: 16 }}>
-            <Col span={12}><Form.Item name="notes" label="Notes"><Input.TextArea rows={2} /></Form.Item></Col>
-            <Col span={12}><Form.Item name="internal_notes" label="Internal Notes"><Input.TextArea rows={2} /></Form.Item></Col>
+            <Col span={12}><Form.Item name="notes" label={t('notes', { defaultValue: 'Notes' })}><Input.TextArea rows={2} /></Form.Item></Col>
+            <Col span={12}><Form.Item name="internal_notes" label={t('internal_notes', { defaultValue: 'Internal Notes' })}><Input.TextArea rows={2} /></Form.Item></Col>
           </Row>
           {isEditingTryout ? (
             <Row gutter={16}>
               <Col span={12}>
-                <Form.Item name="status" label="Status">
+                <Form.Item name="status" label={t('status', { defaultValue: 'Status' })}>
                   <Select options={['draft', 'scheduled', 'active', 'closed', 'cancelled'].map((value) => ({ value, label: value }))} />
                 </Form.Item>
               </Col>
               <Col span={12}>
-                <Form.Item name="outcome" label="Outcome">
+                <Form.Item name="outcome" label={t('outcome', { defaultValue: 'Outcome' })}>
                   <Select options={['pending', 'converted', 'declined'].map((value) => ({ value, label: value }))} />
                 </Form.Item>
               </Col>
@@ -781,9 +787,9 @@ const Tryouts = () => {
           ) : null}
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
-              <Button onClick={closeTryoutModal}>Cancel</Button>
+              <Button onClick={closeTryoutModal}>{t('cancel', { defaultValue: 'Cancel' })}</Button>
               <Button type="primary" htmlType="submit" loading={createMutation.isPending || updateMutation.isPending}>
-                {isEditingTryout ? 'Save' : 'Create'}
+                {isEditingTryout ? t('save', { defaultValue: 'Save' }) : t('create', { defaultValue: 'Create' })}
               </Button>
             </Space>
           </Form.Item>
@@ -791,7 +797,7 @@ const Tryouts = () => {
       </Modal>
 
       <Modal
-        title="Assign Try-out Task"
+        title={t('assign_task_title', { defaultValue: 'Assign Try-out Task' })}
         open={assignOpen}
         forceRender
         onCancel={() => setAssignOpen(false)}
@@ -802,7 +808,7 @@ const Tryouts = () => {
           layout="vertical"
           onFinish={(values) => assignMutation.mutate(values)}
         >
-          <Form.Item name="taskId" label="Task" rules={[{ required: true }]}>
+          <Form.Item name="taskId" label={t('task', { defaultValue: 'Task' })} rules={[{ required: true }]}>
             <Select
               options={activeTaskOptions.map((task) => ({
                 value: task.id,
@@ -810,20 +816,20 @@ const Tryouts = () => {
               }))}
             />
           </Form.Item>
-          <Form.Item name="assignedDriverUserId" label="Driver" rules={[{ required: true }]}>
+          <Form.Item name="assignedDriverUserId" label={t('driver', { defaultValue: 'Driver' })} rules={[{ required: true }]}>
             <Select options={drivers.map((driver) => ({ value: driver.user_id || driver.id, label: driver.full_name || driver.name || driver.phone }))} />
           </Form.Item>
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
-              <Button onClick={() => setAssignOpen(false)}>Cancel</Button>
-              <Button type="primary" htmlType="submit" loading={assignMutation.isPending}>Assign</Button>
+              <Button onClick={() => setAssignOpen(false)}>{t('cancel', { defaultValue: 'Cancel' })}</Button>
+              <Button type="primary" htmlType="submit" loading={assignMutation.isPending}>{t('assign', { defaultValue: 'Assign' })}</Button>
             </Space>
           </Form.Item>
         </Form>
       </Modal>
 
       <Modal
-        title="Adjust Bottle Ledger"
+        title={t('adjust_ledger_title', { defaultValue: 'Adjust Bottle Ledger' })}
         open={adjustOpen}
         forceRender
         onCancel={() => setAdjustOpen(false)}
@@ -837,7 +843,7 @@ const Tryouts = () => {
             payload: values,
           })}
         >
-          <Form.Item name="product_id" label="Product" rules={[{ required: true }]}>
+          <Form.Item name="product_id" label={t('product', { defaultValue: 'Product' })} rules={[{ required: true }]}>
             <Select
               options={(adjustTarget?.items || []).map((item) => ({
                 value: item.product_id,
@@ -845,14 +851,14 @@ const Tryouts = () => {
               }))}
             />
           </Form.Item>
-          <Form.Item name="units" label="Units (+/-)" rules={[{ required: true }]}>
+          <Form.Item name="units" label={t('units', { defaultValue: 'Units (+/-)' })} rules={[{ required: true }]}>
             <InputNumber style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item name="notes" label="Notes"><Input.TextArea rows={2} /></Form.Item>
+          <Form.Item name="notes" label={t('notes', { defaultValue: 'Notes' })}><Input.TextArea rows={2} /></Form.Item>
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
-              <Button onClick={() => setAdjustOpen(false)}>Cancel</Button>
-              <Button type="primary" htmlType="submit" loading={adjustMutation.isPending}>Save</Button>
+              <Button onClick={() => setAdjustOpen(false)}>{t('cancel', { defaultValue: 'Cancel' })}</Button>
+              <Button type="primary" htmlType="submit" loading={adjustMutation.isPending}>{t('save', { defaultValue: 'Save' })}</Button>
             </Space>
           </Form.Item>
         </Form>

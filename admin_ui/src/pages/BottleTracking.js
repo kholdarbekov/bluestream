@@ -32,9 +32,11 @@ import {
   WarningOutlined,
 } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 
 import adminService from '../services/adminService';
 import { formatDate, formatDateTimeShort } from '../utils/dateUtils';
+import { formatMoney } from '../utils/formatMoney';
 
 const { Text } = Typography;
 
@@ -49,6 +51,7 @@ const EVENT_TYPE_COLORS = {
   initial_balance: 'geekblue',
 };
 
+// Default (English) labels — also used as the t() defaultValue fallback.
 const EVENT_TYPE_LABELS = {
   delivery: 'Delivery',
   return_on_delivery: 'Return (Delivery)',
@@ -67,52 +70,50 @@ const FINE_STATUS_COLORS = {
   waived: 'default',
 };
 
-const formatCurrency = (amount) => {
-  if (amount == null) return '—';
-  return Number(amount).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-};
-
 // --- Dashboard Tab ---
-const DashboardStats = ({ stats, loading }) => (
-  <Row gutter={[16, 16]}>
-    <Col xs={12} sm={6}>
-      <Card>
-        <Statistic
-          title="Total Bottles Out"
-          value={stats?.total_bottles_out ?? 0}
-          prefix={<ExclamationCircleOutlined />}
-        />
-      </Card>
-    </Col>
-    <Col xs={12} sm={6}>
-      <Card>
-        <Statistic
-          title="Customers with Balance"
-          value={stats?.customers_with_balance ?? 0}
-        />
-      </Card>
-    </Col>
-    <Col xs={12} sm={6}>
-      <Card>
-        <Statistic
-          title="Active Fines"
-          value={stats?.active_fines ?? 0}
-          prefix={<WarningOutlined />}
-          valueStyle={stats?.active_fines > 0 ? { color: '#cf1322' } : undefined}
-        />
-      </Card>
-    </Col>
-    <Col xs={12} sm={6}>
-      <Card>
-        <Statistic
-          title="Total Fine Amount"
-          value={formatCurrency(stats?.total_fine_amount ?? 0)}
-          prefix={<DollarOutlined />}
-        />
-      </Card>
-    </Col>
-  </Row>
-);
+const DashboardStats = ({ stats, loading }) => {
+  const { t } = useTranslation('bottle_tracking');
+  return (
+    <Row gutter={[16, 16]}>
+      <Col xs={12} sm={6}>
+        <Card>
+          <Statistic
+            title={t('total_bottles_out', { defaultValue: 'Total Bottles Out' })}
+            value={stats?.total_bottles_out ?? 0}
+            prefix={<ExclamationCircleOutlined />}
+          />
+        </Card>
+      </Col>
+      <Col xs={12} sm={6}>
+        <Card>
+          <Statistic
+            title={t('customers_with_balance', { defaultValue: 'Customers with Balance' })}
+            value={stats?.customers_with_balance ?? 0}
+          />
+        </Card>
+      </Col>
+      <Col xs={12} sm={6}>
+        <Card>
+          <Statistic
+            title={t('active_fines', { defaultValue: 'Active Fines' })}
+            value={stats?.active_fines ?? 0}
+            prefix={<WarningOutlined />}
+            valueStyle={stats?.active_fines > 0 ? { color: '#cf1322' } : undefined}
+          />
+        </Card>
+      </Col>
+      <Col xs={12} sm={6}>
+        <Card>
+          <Statistic
+            title={t('total_fine_amount', { defaultValue: 'Total Fine Amount' })}
+            value={formatMoney(stats?.total_fine_amount ?? 0)}
+            prefix={<DollarOutlined />}
+          />
+        </Card>
+      </Col>
+    </Row>
+  );
+};
 
 // --- Reusable customer + address picker ---
 const formatCustomerLabel = (user) => {
@@ -125,6 +126,7 @@ const formatCustomerLabel = (user) => {
 };
 
 const CustomerAddressFields = ({ form, userFieldName = 'user_id', addressFieldName = 'address_id' }) => {
+  const { t } = useTranslation('bottle_tracking');
   const [searchTerm, setSearchTerm] = useState('');
   const debounceRef = useRef();
 
@@ -173,25 +175,25 @@ const CustomerAddressFields = ({ form, userFieldName = 'user_id', addressFieldNa
 
   return (
     <>
-      <Form.Item name={userFieldName} label="Customer" rules={[{ required: true, message: 'Select a customer' }]}>
+      <Form.Item name={userFieldName} label={t('customer', { defaultValue: 'Customer' })} rules={[{ required: true, message: t('select_customer_required', { defaultValue: 'Select a customer' }) }]}>
         <Select
           showSearch
-          placeholder="Search by phone, name, or company"
+          placeholder={t('search_customer_placeholder', { defaultValue: 'Search by phone, name, or company' })}
           filterOption={false}
           onSearch={handleSearch}
           loading={usersFetching}
           options={userOptions}
           onChange={() => form.setFieldValue(addressFieldName, undefined)}
-          notFoundContent={searchTerm.length < 2 ? 'Type at least 2 characters' : (usersFetching ? 'Searching…' : 'No matches')}
+          notFoundContent={searchTerm.length < 2 ? t('type_at_least_2_chars', { defaultValue: 'Type at least 2 characters' }) : (usersFetching ? t('searching', { defaultValue: 'Searching…' }) : t('no_matches', { defaultValue: 'No matches' }))}
         />
       </Form.Item>
-      <Form.Item name={addressFieldName} label="Address" rules={[{ required: true, message: 'Select an address' }]}>
+      <Form.Item name={addressFieldName} label={t('address', { defaultValue: 'Address' })} rules={[{ required: true, message: t('select_address_required', { defaultValue: 'Select an address' }) }]}>
         <Select
-          placeholder={selectedUserId ? 'Select an address' : 'Select customer first'}
+          placeholder={selectedUserId ? t('select_address_required', { defaultValue: 'Select an address' }) : t('select_customer_first', { defaultValue: 'Select customer first' })}
           disabled={!selectedUserId}
           loading={addressesFetching}
           options={addressOptions}
-          notFoundContent={!selectedUserId ? 'Select customer first' : 'No addresses'}
+          notFoundContent={!selectedUserId ? t('select_customer_first', { defaultValue: 'Select customer first' }) : t('no_addresses', { defaultValue: 'No addresses' })}
         />
       </Form.Item>
     </>
@@ -200,6 +202,10 @@ const CustomerAddressFields = ({ form, userFieldName = 'user_id', addressFieldNa
 
 // --- Main Component ---
 const BottleTracking = () => {
+  const { t } = useTranslation('bottle_tracking');
+  // eslint-disable-next-line security/detect-object-injection
+  const eventTypeLabel = (val) => t(`event_${val}`, { defaultValue: EVENT_TYPE_LABELS[val] || val });
+
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState('balances');
 
@@ -392,50 +398,50 @@ const BottleTracking = () => {
     mutationFn: (data) => adminService.createBottleAdjustment(data),
 
     onSuccess: () => {
-      message.success('Balance adjusted');
+      message.success(t('balance_adjusted', { defaultValue: 'Balance adjusted' }));
       setAdjustmentOpen(false);
       adjustmentForm.resetFields();
       refreshAll();
     },
 
-    onError: (err) => message.error(err?.response?.data?.error || 'Failed to adjust balance'),
+    onError: (err) => message.error(err?.response?.data?.error || t('adjust_failed', { defaultValue: 'Failed to adjust balance' })),
   });
 
   const initialBalanceMutation = useMutation({
     mutationFn: (data) => adminService.setBottleInitialBalance(data),
 
     onSuccess: () => {
-      message.success('Initial balance set');
+      message.success(t('initial_balance_set', { defaultValue: 'Initial balance set' }));
       setInitialBalanceOpen(false);
       initialBalanceForm.resetFields();
       refreshAll();
     },
 
-    onError: (err) => message.error(err?.response?.data?.error || 'Failed to set initial balance'),
+    onError: (err) => message.error(err?.response?.data?.error || t('initial_balance_failed', { defaultValue: 'Failed to set initial balance' })),
   });
 
   const fineCreateMutation = useMutation({
     mutationFn: (data) => adminService.createBottleFine(data),
 
     onSuccess: () => {
-      message.success('Fine created');
+      message.success(t('fine_created', { defaultValue: 'Fine created' }));
       setFineCreateOpen(false);
       fineForm.resetFields();
       refreshAll();
     },
 
-    onError: (err) => message.error(err?.response?.data?.error || 'Failed to create fine'),
+    onError: (err) => message.error(err?.response?.data?.error || t('fine_create_failed', { defaultValue: 'Failed to create fine' })),
   });
 
   const fineUpdateMutation = useMutation({
     mutationFn: ({ fineId, data }) => adminService.updateBottleFine(fineId, data),
 
     onSuccess: () => {
-      message.success('Fine updated');
+      message.success(t('fine_updated_msg', { defaultValue: 'Fine updated' }));
       refreshAll();
     },
 
-    onError: (err) => message.error(err?.response?.data?.error || 'Failed to update fine'),
+    onError: (err) => message.error(err?.response?.data?.error || t('fine_update_failed', { defaultValue: 'Failed to update fine' })),
   });
 
   const reconcileMutation = useMutation({
@@ -444,21 +450,21 @@ const BottleTracking = () => {
     onSuccess: (res) => {
       const diff = res?.data?.difference;
       if (diff && diff !== 0) {
-        message.warning(`Reconciled — balance corrected by ${diff}`);
+        message.warning(t('reconciled_corrected', { diff, defaultValue: 'Reconciled — balance corrected by {{diff}}' }));
       } else {
-        message.success('Balance is consistent');
+        message.success(t('balance_consistent', { defaultValue: 'Balance is consistent' }));
       }
       refreshAll();
     },
 
-    onError: (err) => message.error(err?.response?.data?.error || 'Reconciliation failed'),
+    onError: (err) => message.error(err?.response?.data?.error || t('reconcile_failed', { defaultValue: 'Reconciliation failed' })),
   });
 
   const forceCloseMutation = useMutation({
     mutationFn: ({ sessionId, data }) => adminService.forceCloseBottleSession(sessionId, data),
 
     onSuccess: () => {
-      message.success('Session force-closed');
+      message.success(t('session_force_closed', { defaultValue: 'Session force-closed' }));
       setForceCloseOpen(false);
       setForceCloseTarget(null);
       forceCloseForm.resetFields();
@@ -467,14 +473,14 @@ const BottleTracking = () => {
       });
     },
 
-    onError: (err) => message.error(err?.response?.data?.error || 'Failed to force-close session'),
+    onError: (err) => message.error(err?.response?.data?.error || t('force_close_failed', { defaultValue: 'Failed to force-close session' })),
   });
 
   const resolveTransferMutation = useMutation({
     mutationFn: ({ transferId, data }) => adminService.resolveBottleTransferDispute(transferId, data),
 
     onSuccess: () => {
-      message.success('Transfer dispute resolved');
+      message.success(t('transfer_resolved', { defaultValue: 'Transfer dispute resolved' }));
       setResolveOpen(false);
       setResolveTarget(null);
       resolveForm.resetFields();
@@ -486,13 +492,13 @@ const BottleTracking = () => {
       });
     },
 
-    onError: (err) => message.error(err?.response?.data?.error || 'Failed to resolve dispute'),
+    onError: (err) => message.error(err?.response?.data?.error || t('resolve_failed', { defaultValue: 'Failed to resolve dispute' })),
   });
 
   // --- Balance columns ---
   const balanceColumns = [
     {
-      title: 'Customer',
+      title: t('customer', { defaultValue: 'Customer' }),
       key: 'customer',
       render: (_, record) => (
         <Space direction="vertical" size={0}>
@@ -502,12 +508,12 @@ const BottleTracking = () => {
       ),
     },
     {
-      title: 'Address',
+      title: t('address', { defaultValue: 'Address' }),
       key: 'address',
       render: (_, record) => record.address_title || record.address_label || `Address #${record.address_id}`,
     },
     {
-      title: 'Balance',
+      title: t('balance', { defaultValue: 'Balance' }),
       dataIndex: 'balance',
       key: 'balance',
       sorter: (a, b) => (a.balance || 0) - (b.balance || 0),
@@ -521,19 +527,19 @@ const BottleTracking = () => {
       },
     },
     {
-      title: 'Last Delivery',
+      title: t('last_delivery', { defaultValue: 'Last Delivery' }),
       dataIndex: 'last_delivery_at',
       key: 'last_delivery_at',
       render: (val) => (val ? formatDateTimeShort(val) : '—'),
     },
     {
-      title: 'Last Return',
+      title: t('last_return', { defaultValue: 'Last Return' }),
       dataIndex: 'last_return_at',
       key: 'last_return_at',
       render: (val) => (val ? formatDateTimeShort(val) : '—'),
     },
     {
-      title: 'Actions',
+      title: t('actions', { defaultValue: 'Actions' }),
       key: 'actions',
       render: (_, record) => (
         <Space>
@@ -545,7 +551,7 @@ const BottleTracking = () => {
               setLedgerDrawerOpen(true);
             }}
           >
-            Ledger
+            {t('ledger_button', { defaultValue: 'Ledger' })}
           </Button>
           <Button
             size="small"
@@ -558,7 +564,7 @@ const BottleTracking = () => {
               setAdjustmentOpen(true);
             }}
           >
-            Adjust
+            {t('adjust_button', { defaultValue: 'Adjust' })}
           </Button>
           <Button
             size="small"
@@ -566,7 +572,7 @@ const BottleTracking = () => {
             loading={reconcileMutation.isPending}
             onClick={() => reconcileMutation.mutate({ userId: record.user_id, addressId: record.address_id })}
           >
-            Reconcile
+            {t('reconcile_button', { defaultValue: 'Reconcile' })}
           </Button>
         </Space>
       ),
@@ -576,36 +582,35 @@ const BottleTracking = () => {
   // --- Ledger columns ---
   const ledgerColumns = [
     {
-      title: 'Date',
+      title: t('date', { defaultValue: 'Date' }),
       dataIndex: 'occurred_at',
       key: 'occurred_at',
       render: (val) => (val ? formatDateTimeShort(val) : '—'),
       width: 160,
     },
     {
-      title: 'Customer',
+      title: t('customer', { defaultValue: 'Customer' }),
       key: 'customer',
       render: (_, record) => record.customer_name || record.user_name || `User #${record.user_id}`,
     },
     {
-      title: 'Address',
+      title: t('address', { defaultValue: 'Address' }),
       key: 'address',
       render: (_, record) => record.address_title || `Address #${record.address_id}`,
     },
     {
-      title: 'Event',
+      title: t('event', { defaultValue: 'Event' }),
       dataIndex: 'event_type',
       key: 'event_type',
       render: (val) => (
         // eslint-disable-next-line security/detect-object-injection
         <Tag color={EVENT_TYPE_COLORS[val] || 'default'}>
-          {/* eslint-disable-next-line security/detect-object-injection */}
-          {EVENT_TYPE_LABELS[val] || val}
+          {eventTypeLabel(val)}
         </Tag>
       ),
     },
     {
-      title: 'Quantity',
+      title: t('quantity', { defaultValue: 'Quantity' }),
       dataIndex: 'quantity',
       key: 'quantity',
       render: (val) => {
@@ -615,18 +620,18 @@ const BottleTracking = () => {
       },
     },
     {
-      title: 'Balance After',
+      title: t('balance_after', { defaultValue: 'Balance After' }),
       dataIndex: 'balance_after',
       key: 'balance_after',
       render: (val) => Number(val) || 0,
     },
     {
-      title: 'Actor',
+      title: t('actor', { defaultValue: 'Actor' }),
       key: 'actor',
       render: (_, record) => record.actor_name || record.actor_user_name || '—',
     },
     {
-      title: 'Notes',
+      title: t('notes', { defaultValue: 'Notes' }),
       dataIndex: 'notes',
       key: 'notes',
       ellipsis: true,
@@ -636,23 +641,23 @@ const BottleTracking = () => {
   // --- Fine columns ---
   const fineColumns = [
     {
-      title: 'Customer',
+      title: t('customer', { defaultValue: 'Customer' }),
       key: 'customer',
       render: (_, record) => record.customer_name || record.user_name || `User #${record.user_id}`,
     },
     {
-      title: 'Quantity',
+      title: t('quantity', { defaultValue: 'Quantity' }),
       dataIndex: 'quantity',
       key: 'quantity',
     },
     {
-      title: 'Fine Amount',
+      title: t('fine_amount', { defaultValue: 'Fine Amount' }),
       dataIndex: 'fine_amount',
       key: 'fine_amount',
-      render: (val) => formatCurrency(val),
+      render: (val) => formatMoney(val),
     },
     {
-      title: 'Status',
+      title: t('status', { defaultValue: 'Status' }),
       dataIndex: 'status',
       key: 'status',
       render: (val) => (
@@ -663,24 +668,24 @@ const BottleTracking = () => {
       ),
     },
     {
-      title: 'Issued By',
+      title: t('issued_by', { defaultValue: 'Issued By' }),
       key: 'issued_by',
       render: (_, record) => record.issued_by_name || '—',
     },
     {
-      title: 'Issued At',
+      title: t('issued_at', { defaultValue: 'Issued At' }),
       dataIndex: 'issued_at',
       key: 'issued_at',
       render: (val) => (val ? formatDate(val) : '—'),
     },
     {
-      title: 'Notes',
+      title: t('notes', { defaultValue: 'Notes' }),
       dataIndex: 'notes',
       key: 'notes',
       ellipsis: true,
     },
     {
-      title: 'Actions',
+      title: t('actions', { defaultValue: 'Actions' }),
       key: 'actions',
       render: (_, record) => {
         if (record.status === 'paid' || record.status === 'waived') return null;
@@ -692,7 +697,7 @@ const BottleTracking = () => {
               onClick={() => fineUpdateMutation.mutate({ fineId: record.id, data: { action: 'mark_paid' } })}
               loading={fineUpdateMutation.isPending}
             >
-              Mark Paid
+              {t('mark_paid', { defaultValue: 'Mark Paid' })}
             </Button>
             <Button
               size="small"
@@ -700,7 +705,7 @@ const BottleTracking = () => {
               onClick={() => fineUpdateMutation.mutate({ fineId: record.id, data: { action: 'waive', notes: 'Waived by admin' } })}
               loading={fineUpdateMutation.isPending}
             >
-              Waive
+              {t('waive', { defaultValue: 'Waive' })}
             </Button>
           </Space>
         );
@@ -711,25 +716,24 @@ const BottleTracking = () => {
   // --- Address ledger columns (drawer) ---
   const addressLedgerColumns = [
     {
-      title: 'Date',
+      title: t('date', { defaultValue: 'Date' }),
       dataIndex: 'occurred_at',
       key: 'occurred_at',
       render: (val) => (val ? formatDateTimeShort(val) : '—'),
     },
     {
-      title: 'Event',
+      title: t('event', { defaultValue: 'Event' }),
       dataIndex: 'event_type',
       key: 'event_type',
       render: (val) => (
         // eslint-disable-next-line security/detect-object-injection
         <Tag color={EVENT_TYPE_COLORS[val] || 'default'}>
-          {/* eslint-disable-next-line security/detect-object-injection */}
-          {EVENT_TYPE_LABELS[val] || val}
+          {eventTypeLabel(val)}
         </Tag>
       ),
     },
     {
-      title: 'Qty',
+      title: t('qty', { defaultValue: 'Qty' }),
       dataIndex: 'quantity',
       key: 'quantity',
       render: (val) => {
@@ -739,11 +743,11 @@ const BottleTracking = () => {
       },
     },
     {
-      title: 'Balance After',
+      title: t('balance_after', { defaultValue: 'Balance After' }),
       dataIndex: 'balance_after',
       key: 'balance_after',
     },
-    { title: 'Notes', dataIndex: 'notes', key: 'notes', ellipsis: true },
+    { title: t('notes', { defaultValue: 'Notes' }), dataIndex: 'notes', key: 'notes', ellipsis: true },
   ];
 
   const addressLedgerEntries = addressLedgerData?.data?.items || addressLedgerData?.data || [];
@@ -752,12 +756,12 @@ const BottleTracking = () => {
   const tabItems = [
     {
       key: 'balances',
-      label: 'Balances',
+      label: t('tab_balances', { defaultValue: 'Balances' }),
       children: (
         <>
           <Space style={{ marginBottom: 16 }} wrap>
             <Input.Search
-              placeholder="Search customer..."
+              placeholder={t('search_customer_balance_placeholder', { defaultValue: 'Search customer...' })}
               allowClear
               style={{ width: 250 }}
               onSearch={(val) => {
@@ -766,7 +770,7 @@ const BottleTracking = () => {
               }}
             />
             <InputNumber
-              placeholder="Min balance"
+              placeholder={t('min_balance_placeholder', { defaultValue: 'Min balance' })}
               min={1}
               style={{ width: 130 }}
               onChange={(val) => {
@@ -775,10 +779,10 @@ const BottleTracking = () => {
               }}
             />
             <Button icon={<PlusOutlined />} onClick={() => setInitialBalanceOpen(true)}>
-              Set Initial Balance
+              {t('set_initial_balance', { defaultValue: 'Set Initial Balance' })}
             </Button>
             <Button icon={<EditOutlined />} onClick={() => setAdjustmentOpen(true)}>
-              Adjust Balance
+              {t('adjust_balance', { defaultValue: 'Adjust Balance' })}
             </Button>
           </Space>
           <Table
@@ -800,19 +804,19 @@ const BottleTracking = () => {
     },
     {
       key: 'ledger',
-      label: 'Ledger',
+      label: t('tab_ledger', { defaultValue: 'Ledger' }),
       children: (
         <>
           <Space style={{ marginBottom: 16 }} wrap>
             <Select
-              placeholder="Event type"
+              placeholder={t('event_type_placeholder', { defaultValue: 'Event type' })}
               allowClear
               style={{ width: 200 }}
               onChange={(val) => {
                 setLedgerEventType(val);
                 setLedgerPagination((p) => ({ ...p, page: 1 }));
               }}
-              options={Object.entries(EVENT_TYPE_LABELS).map(([value, label]) => ({ value, label }))}
+              options={Object.keys(EVENT_TYPE_LABELS).map((value) => ({ value, label: eventTypeLabel(value) }))}
             />
           </Space>
           <Table
@@ -834,12 +838,12 @@ const BottleTracking = () => {
     },
     {
       key: 'fines',
-      label: 'Fines',
+      label: t('tab_fines', { defaultValue: 'Fines' }),
       children: (
         <>
           <Space style={{ marginBottom: 16 }} wrap>
             <Select
-              placeholder="Status"
+              placeholder={t('status_placeholder', { defaultValue: 'Status' })}
               allowClear
               style={{ width: 150 }}
               onChange={(val) => {
@@ -847,14 +851,14 @@ const BottleTracking = () => {
                 setFinePagination((p) => ({ ...p, page: 1 }));
               }}
               options={[
-                { value: 'pending', label: 'Pending' },
-                { value: 'invoiced', label: 'Invoiced' },
-                { value: 'paid', label: 'Paid' },
-                { value: 'waived', label: 'Waived' },
+                { value: 'pending', label: t('fine_status_pending', { defaultValue: 'Pending' }) },
+                { value: 'invoiced', label: t('fine_status_invoiced', { defaultValue: 'Invoiced' }) },
+                { value: 'paid', label: t('fine_status_paid', { defaultValue: 'Paid' }) },
+                { value: 'waived', label: t('fine_status_waived', { defaultValue: 'Waived' }) },
               ]}
             />
             <Button icon={<PlusOutlined />} onClick={() => setFineCreateOpen(true)}>
-              Create Fine
+              {t('create_fine', { defaultValue: 'Create Fine' })}
             </Button>
           </Space>
           <Table
@@ -876,50 +880,56 @@ const BottleTracking = () => {
     },
     {
       key: 'sessions',
-      label: 'Driver Sessions',
+      label: t('tab_sessions', { defaultValue: 'Driver Sessions' }),
       children: (
         <>
           <Space wrap style={{ marginBottom: 12 }}>
             <Select
               allowClear
-              placeholder="Status"
+              placeholder={t('status_placeholder', { defaultValue: 'Status' })}
               style={{ width: 140 }}
               value={sessionStatusFilter}
-              onChange={setSessionStatusFilter}
+              onChange={(val) => {
+                setSessionStatusFilter(val);
+                setSessionPagination((p) => ({ ...p, page: 1 }));
+              }}
               options={[
-                { value: 'open', label: 'Open' },
-                { value: 'closed', label: 'Closed' },
-                { value: 'force_closed', label: 'Force Closed' },
-                { value: 'cancelled', label: 'Cancelled' },
+                { value: 'open', label: t('session_status_open', { defaultValue: 'Open' }) },
+                { value: 'closed', label: t('session_status_closed', { defaultValue: 'Closed' }) },
+                { value: 'force_closed', label: t('session_status_force_closed', { defaultValue: 'Force Closed' }) },
+                { value: 'cancelled', label: t('session_status_cancelled', { defaultValue: 'Cancelled' }) },
               ]}
             />
             <Button
               type={sessionOnlyDiscrepancies ? 'primary' : 'default'}
               icon={<WarningOutlined />}
-              onClick={() => setSessionOnlyDiscrepancies((v) => !v)}
+              onClick={() => {
+                setSessionOnlyDiscrepancies((v) => !v);
+                setSessionPagination((p) => ({ ...p, page: 1 }));
+              }}
             >
-              Discrepancies only
+              {t('discrepancies_only', { defaultValue: 'Discrepancies only' })}
             </Button>
           </Space>
           <Table
             columns={[
-              { title: 'Driver', dataIndex: 'driver_name', key: 'driver_name', render: (v, r) => v || r.driver_user_id },
-              { title: 'Started', dataIndex: 'started_at', key: 'started_at', render: (v) => v ? formatDateTimeShort(v) : '—' },
-              { title: 'Closed', dataIndex: 'closed_at', key: 'closed_at', render: (v) => v ? formatDateTimeShort(v) : '—' },
-              { title: 'Loaded', dataIndex: 'bottles_loaded', key: 'bottles_loaded', align: 'right' },
-              { title: 'Delivered', dataIndex: 'bottles_delivered', key: 'bottles_delivered', align: 'right' },
-              { title: 'Collected', dataIndex: 'bottles_collected_from_customers', key: 'bottles_collected_from_customers', align: 'right' },
-              { title: 'On Truck', dataIndex: 'current_inventory', key: 'current_inventory', align: 'right' },
-              { title: 'Returned', dataIndex: 'bottles_returned_to_warehouse', key: 'bottles_returned_to_warehouse', align: 'right', render: (v) => v ?? '—' },
+              { title: t('driver', { defaultValue: 'Driver' }), dataIndex: 'driver_name', key: 'driver_name', render: (v, r) => v || r.driver_user_id },
+              { title: t('started', { defaultValue: 'Started' }), dataIndex: 'started_at', key: 'started_at', render: (v) => v ? formatDateTimeShort(v) : '—' },
+              { title: t('closed', { defaultValue: 'Closed' }), dataIndex: 'closed_at', key: 'closed_at', render: (v) => v ? formatDateTimeShort(v) : '—' },
+              { title: t('loaded', { defaultValue: 'Loaded' }), dataIndex: 'bottles_loaded', key: 'bottles_loaded', align: 'right' },
+              { title: t('delivered', { defaultValue: 'Delivered' }), dataIndex: 'bottles_delivered', key: 'bottles_delivered', align: 'right' },
+              { title: t('collected', { defaultValue: 'Collected' }), dataIndex: 'bottles_collected_from_customers', key: 'bottles_collected_from_customers', align: 'right' },
+              { title: t('on_truck', { defaultValue: 'On Truck' }), dataIndex: 'current_inventory', key: 'current_inventory', align: 'right' },
+              { title: t('returned', { defaultValue: 'Returned' }), dataIndex: 'bottles_returned_to_warehouse', key: 'bottles_returned_to_warehouse', align: 'right', render: (v) => v ?? '—' },
               {
-                title: 'Discrepancy', dataIndex: 'discrepancy', key: 'discrepancy', align: 'right',
+                title: t('discrepancy', { defaultValue: 'Discrepancy' }), dataIndex: 'discrepancy', key: 'discrepancy', align: 'right',
                 render: (v) => {
                   if (v == null) return '—';
                   return <Tag color={v === 0 ? 'green' : 'red'}>{v === 0 ? '✓ 0' : v}</Tag>;
                 },
               },
               {
-                title: 'Status', dataIndex: 'status', key: 'status',
+                title: t('status', { defaultValue: 'Status' }), dataIndex: 'status', key: 'status',
                 render: (v) => {
                   const colors = { open: 'blue', closed: 'green', force_closed: 'red', cancelled: 'default' };
                   // eslint-disable-next-line security/detect-object-injection
@@ -927,15 +937,15 @@ const BottleTracking = () => {
                 },
               },
               {
-                title: 'Actions', key: 'actions',
+                title: t('actions', { defaultValue: 'Actions' }), key: 'actions',
                 render: (_, record) => (
                   <Space>
                     <Button size="small" icon={<EyeOutlined />} onClick={() => { setSessionDetailTarget(record.id); setSessionDetailOpen(true); }}>
-                      Detail
+                      {t('detail', { defaultValue: 'Detail' })}
                     </Button>
                     {record.status === 'open' && (
                       <Button size="small" danger icon={<ExclamationCircleOutlined />} onClick={() => { setForceCloseTarget(record); setForceCloseOpen(true); }}>
-                        Force Close
+                        {t('force_close', { defaultValue: 'Force Close' })}
                       </Button>
                     )}
                   </Space>
@@ -960,33 +970,36 @@ const BottleTracking = () => {
     },
     {
       key: 'transfers',
-      label: 'Bottle Transfers',
+      label: t('tab_transfers', { defaultValue: 'Bottle Transfers' }),
       children: (
         <>
           <Space wrap style={{ marginBottom: 12 }}>
             <Select
               allowClear
-              placeholder="Status"
+              placeholder={t('status_placeholder', { defaultValue: 'Status' })}
               style={{ width: 150 }}
               value={transferStatusFilter}
-              onChange={setTransferStatusFilter}
+              onChange={(val) => {
+                setTransferStatusFilter(val);
+                setTransferPagination((p) => ({ ...p, page: 1 }));
+              }}
               options={[
-                { value: 'pending', label: 'Pending' },
-                { value: 'confirmed', label: 'Confirmed' },
-                { value: 'disputed', label: 'Disputed' },
-                { value: 'resolved', label: 'Resolved' },
+                { value: 'pending', label: t('transfer_status_pending', { defaultValue: 'Pending' }) },
+                { value: 'confirmed', label: t('transfer_status_confirmed', { defaultValue: 'Confirmed' }) },
+                { value: 'disputed', label: t('transfer_status_disputed', { defaultValue: 'Disputed' }) },
+                { value: 'resolved', label: t('transfer_status_resolved', { defaultValue: 'Resolved' }) },
               ]}
             />
           </Space>
           <Table
             columns={[
-              { title: 'Sender', dataIndex: 'sender_name', key: 'sender_name', render: (v, r) => v || r.sender_driver_id },
-              { title: 'Receiver', dataIndex: 'receiver_name', key: 'receiver_name', render: (v, r) => v || r.receiver_driver_id },
-              { title: 'Declared', dataIndex: 'declared_quantity', key: 'declared_quantity', align: 'right' },
-              { title: 'Confirmed', dataIndex: 'confirmed_quantity', key: 'confirmed_quantity', align: 'right', render: (v) => v ?? '—' },
-              { title: 'Sent At', dataIndex: 'sent_at', key: 'sent_at', render: (v) => v ? formatDateTimeShort(v) : '—' },
+              { title: t('sender', { defaultValue: 'Sender' }), dataIndex: 'sender_name', key: 'sender_name', render: (v, r) => v || r.sender_driver_id },
+              { title: t('receiver', { defaultValue: 'Receiver' }), dataIndex: 'receiver_name', key: 'receiver_name', render: (v, r) => v || r.receiver_driver_id },
+              { title: t('declared', { defaultValue: 'Declared' }), dataIndex: 'declared_quantity', key: 'declared_quantity', align: 'right' },
+              { title: t('confirmed', { defaultValue: 'Confirmed' }), dataIndex: 'confirmed_quantity', key: 'confirmed_quantity', align: 'right', render: (v) => v ?? '—' },
+              { title: t('sent_at', { defaultValue: 'Sent At' }), dataIndex: 'sent_at', key: 'sent_at', render: (v) => v ? formatDateTimeShort(v) : '—' },
               {
-                title: 'Status', dataIndex: 'status', key: 'status',
+                title: t('status', { defaultValue: 'Status' }), dataIndex: 'status', key: 'status',
                 render: (v) => {
                   const colors = { pending: 'blue', confirmed: 'green', disputed: 'red', resolved: 'default' };
                   // eslint-disable-next-line security/detect-object-injection
@@ -994,10 +1007,10 @@ const BottleTracking = () => {
                 },
               },
               {
-                title: 'Actions', key: 'actions',
+                title: t('actions', { defaultValue: 'Actions' }), key: 'actions',
                 render: (_, record) => record.status === 'disputed' ? (
                   <Button size="small" icon={<EditOutlined />} onClick={() => { setResolveTarget(record); setResolveOpen(true); }}>
-                    Resolve
+                    {t('resolve', { defaultValue: 'Resolve' })}
                   </Button>
                 ) : null,
               },
@@ -1023,10 +1036,10 @@ const BottleTracking = () => {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <Typography.Title level={3} style={{ margin: 0 }}>
-          Bottle Tracking
+          {t('page_title', { defaultValue: 'Bottle Tracking' })}
         </Typography.Title>
         <Button icon={<ReloadOutlined />} onClick={refreshAll}>
-          Refresh
+          {t('refresh', { defaultValue: 'Refresh' })}
         </Button>
       </div>
 
@@ -1038,7 +1051,7 @@ const BottleTracking = () => {
 
       {/* Adjustment Modal */}
       <Modal
-        title="Adjust Bottle Balance"
+        title={t('adjust_balance_title', { defaultValue: 'Adjust Bottle Balance' })}
         open={adjustmentOpen}
         onCancel={() => { setAdjustmentOpen(false); adjustmentForm.resetFields(); }}
         onOk={() => adjustmentForm.submit()}
@@ -1052,12 +1065,12 @@ const BottleTracking = () => {
           <CustomerAddressFields form={adjustmentForm} />
           <Form.Item
             name="adjustment"
-            label="Adjustment (positive = add bottles to customer, negative = remove)"
+            label={t('adjustment_label', { defaultValue: 'Adjustment (positive = add bottles to customer, negative = remove)' })}
             rules={[{ required: true }]}
           >
             <InputNumber style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item name="notes" label="Notes" rules={[{ required: true }]}>
+          <Form.Item name="notes" label={t('notes', { defaultValue: 'Notes' })} rules={[{ required: true }]}>
             <Input.TextArea rows={2} />
           </Form.Item>
         </Form>
@@ -1065,7 +1078,7 @@ const BottleTracking = () => {
 
       {/* Initial Balance Modal */}
       <Modal
-        title="Set Initial Bottle Balance"
+        title={t('set_initial_balance_title', { defaultValue: 'Set Initial Bottle Balance' })}
         open={initialBalanceOpen}
         onCancel={() => { setInitialBalanceOpen(false); initialBalanceForm.resetFields(); }}
         onOk={() => initialBalanceForm.submit()}
@@ -1077,10 +1090,10 @@ const BottleTracking = () => {
           onFinish={(values) => initialBalanceMutation.mutate(values)}
         >
           <CustomerAddressFields form={initialBalanceForm} />
-          <Form.Item name="quantity" label="Bottle Quantity" rules={[{ required: true }]}>
+          <Form.Item name="quantity" label={t('bottle_quantity_label', { defaultValue: 'Bottle Quantity' })} rules={[{ required: true }]}>
             <InputNumber style={{ width: '100%' }} min={0} />
           </Form.Item>
-          <Form.Item name="notes" label="Notes">
+          <Form.Item name="notes" label={t('notes', { defaultValue: 'Notes' })}>
             <Input.TextArea rows={2} />
           </Form.Item>
         </Form>
@@ -1088,7 +1101,7 @@ const BottleTracking = () => {
 
       {/* Create Fine Modal */}
       <Modal
-        title="Create Bottle Fine"
+        title={t('create_fine_title', { defaultValue: 'Create Bottle Fine' })}
         open={fineCreateOpen}
         onCancel={() => { setFineCreateOpen(false); fineForm.resetFields(); }}
         onOk={() => fineForm.submit()}
@@ -1100,13 +1113,13 @@ const BottleTracking = () => {
           onFinish={(values) => fineCreateMutation.mutate(values)}
         >
           <CustomerAddressFields form={fineForm} />
-          <Form.Item name="quantity" label="Bottles to Fine For" rules={[{ required: true }]}>
+          <Form.Item name="quantity" label={t('bottles_to_fine_label', { defaultValue: 'Bottles to Fine For' })} rules={[{ required: true }]}>
             <InputNumber style={{ width: '100%' }} min={1} />
           </Form.Item>
-          <Form.Item name="fine_amount" label="Fine Amount" rules={[{ required: true }]}>
+          <Form.Item name="fine_amount" label={t('fine_amount', { defaultValue: 'Fine Amount' })} rules={[{ required: true }]}>
             <InputNumber style={{ width: '100%' }} min={0} />
           </Form.Item>
-          <Form.Item name="notes" label="Notes">
+          <Form.Item name="notes" label={t('notes', { defaultValue: 'Notes' })}>
             <Input.TextArea rows={2} />
           </Form.Item>
         </Form>
@@ -1114,15 +1127,15 @@ const BottleTracking = () => {
 
       {/* Address Ledger Drawer */}
       <Drawer
-        title="Address Bottle Ledger"
+        title={t('address_ledger_title', { defaultValue: 'Address Bottle Ledger' })}
         open={ledgerDrawerOpen}
         onClose={() => { setLedgerDrawerOpen(false); setLedgerDrawerTarget(null); }}
         width={700}
       >
         {ledgerDrawerTarget && (
           <Descriptions column={2} size="small" style={{ marginBottom: 16 }}>
-            <Descriptions.Item label="User ID">{ledgerDrawerTarget.user_id}</Descriptions.Item>
-            <Descriptions.Item label="Address ID">{ledgerDrawerTarget.address_id}</Descriptions.Item>
+            <Descriptions.Item label={t('user_id_label', { defaultValue: 'User ID' })}>{ledgerDrawerTarget.user_id}</Descriptions.Item>
+            <Descriptions.Item label={t('address_id_label', { defaultValue: 'Address ID' })}>{ledgerDrawerTarget.address_id}</Descriptions.Item>
           </Descriptions>
         )}
         <Table
@@ -1137,7 +1150,7 @@ const BottleTracking = () => {
 
       {/* Session Detail Drawer */}
       <Drawer
-        title="Session Detail"
+        title={t('session_detail_title', { defaultValue: 'Session Detail' })}
         open={sessionDetailOpen}
         onClose={() => { setSessionDetailOpen(false); setSessionDetailTarget(null); }}
         width={600}
@@ -1145,33 +1158,33 @@ const BottleTracking = () => {
         {sessionDetail && (
           <>
             <Descriptions column={2} size="small" bordered style={{ marginBottom: 16 }}>
-              <Descriptions.Item label="Driver">{sessionDetail.driver_name || sessionDetail.driver_user_id}</Descriptions.Item>
-              <Descriptions.Item label="Status">
+              <Descriptions.Item label={t('driver', { defaultValue: 'Driver' })}>{sessionDetail.driver_name || sessionDetail.driver_user_id}</Descriptions.Item>
+              <Descriptions.Item label={t('status', { defaultValue: 'Status' })}>
                 <Tag color={{ open: 'blue', closed: 'green', force_closed: 'red', cancelled: 'default' }[sessionDetail.status] || 'default'}>
                   {(sessionDetail.status || '').toUpperCase()}
                 </Tag>
               </Descriptions.Item>
-              <Descriptions.Item label="Started">{sessionDetail.started_at ? formatDateTimeShort(sessionDetail.started_at) : '—'}</Descriptions.Item>
-              <Descriptions.Item label="Closed">{sessionDetail.closed_at ? formatDateTimeShort(sessionDetail.closed_at) : '—'}</Descriptions.Item>
-              <Descriptions.Item label="Loaded">{sessionDetail.bottles_loaded}</Descriptions.Item>
-              <Descriptions.Item label="Delivered">{sessionDetail.bottles_delivered}</Descriptions.Item>
-              <Descriptions.Item label="Collected">{sessionDetail.bottles_collected_from_customers}</Descriptions.Item>
-              <Descriptions.Item label="Transferred Out">{sessionDetail.bottles_transferred_out}</Descriptions.Item>
-              <Descriptions.Item label="Transferred In">{sessionDetail.bottles_transferred_in}</Descriptions.Item>
-              <Descriptions.Item label="Returned to WH">{sessionDetail.bottles_returned_to_warehouse ?? '—'}</Descriptions.Item>
-              <Descriptions.Item label="Discrepancy">
+              <Descriptions.Item label={t('started', { defaultValue: 'Started' })}>{sessionDetail.started_at ? formatDateTimeShort(sessionDetail.started_at) : '—'}</Descriptions.Item>
+              <Descriptions.Item label={t('closed', { defaultValue: 'Closed' })}>{sessionDetail.closed_at ? formatDateTimeShort(sessionDetail.closed_at) : '—'}</Descriptions.Item>
+              <Descriptions.Item label={t('loaded', { defaultValue: 'Loaded' })}>{sessionDetail.bottles_loaded}</Descriptions.Item>
+              <Descriptions.Item label={t('delivered', { defaultValue: 'Delivered' })}>{sessionDetail.bottles_delivered}</Descriptions.Item>
+              <Descriptions.Item label={t('collected', { defaultValue: 'Collected' })}>{sessionDetail.bottles_collected_from_customers}</Descriptions.Item>
+              <Descriptions.Item label={t('transferred_out', { defaultValue: 'Transferred Out' })}>{sessionDetail.bottles_transferred_out}</Descriptions.Item>
+              <Descriptions.Item label={t('transferred_in', { defaultValue: 'Transferred In' })}>{sessionDetail.bottles_transferred_in}</Descriptions.Item>
+              <Descriptions.Item label={t('returned_to_wh', { defaultValue: 'Returned to WH' })}>{sessionDetail.bottles_returned_to_warehouse ?? '—'}</Descriptions.Item>
+              <Descriptions.Item label={t('discrepancy', { defaultValue: 'Discrepancy' })}>
                 {sessionDetail.discrepancy != null
                   ? <Tag color={sessionDetail.discrepancy === 0 ? 'green' : 'red'}>{sessionDetail.discrepancy}</Tag>
                   : '—'}
               </Descriptions.Item>
               {sessionDetail.force_close_reason && (
-                <Descriptions.Item label="Force Close Reason" span={2}>{sessionDetail.force_close_reason}</Descriptions.Item>
+                <Descriptions.Item label={t('force_close_reason_label', { defaultValue: 'Force Close Reason' })} span={2}>{sessionDetail.force_close_reason}</Descriptions.Item>
               )}
             </Descriptions>
             {sessionDetail.members?.length > 0 && (
               <>
                 <Text strong style={{ display: 'block', marginBottom: 8 }}>
-                  Co-Drivers ({sessionDetail.members.length})
+                  {t('co_drivers_heading', { count: sessionDetail.members.length, defaultValue: 'Co-Drivers ({{count}})' })}
                 </Text>
                 <Table
                   style={{ marginBottom: 16 }}
@@ -1180,9 +1193,9 @@ const BottleTracking = () => {
                   dataSource={sessionDetail.members}
                   rowKey={(r) => r.membership_id || r.member_driver_id}
                   columns={[
-                    { title: 'Driver', dataIndex: 'member_name', render: (v, r) => v || `Driver #${r.member_driver_id}` },
+                    { title: t('driver', { defaultValue: 'Driver' }), dataIndex: 'member_name', render: (v, r) => v || `Driver #${r.member_driver_id}` },
                     {
-                      title: 'Status',
+                      title: t('status', { defaultValue: 'Status' }),
                       dataIndex: 'status',
                       render: (v) => (
                         // eslint-disable-next-line security/detect-object-injection
@@ -1191,15 +1204,15 @@ const BottleTracking = () => {
                         </Tag>
                       ),
                     },
-                    { title: 'Joined', dataIndex: 'joined_at', render: (v) => v ? formatDateTimeShort(v) : '—' },
-                    { title: 'Left', dataIndex: 'left_at', render: (v) => v ? formatDateTimeShort(v) : '—' },
+                    { title: t('joined', { defaultValue: 'Joined' }), dataIndex: 'joined_at', render: (v) => v ? formatDateTimeShort(v) : '—' },
+                    { title: t('left', { defaultValue: 'Left' }), dataIndex: 'left_at', render: (v) => v ? formatDateTimeShort(v) : '—' },
                   ]}
                 />
               </>
             )}
             {sessionDetail.orders?.length > 0 && (
               <>
-                <Text strong>Bound Orders ({sessionDetail.orders.length})</Text>
+                <Text strong>{t('bound_orders_heading', { count: sessionDetail.orders.length, defaultValue: 'Bound Orders ({{count}})' })}</Text>
                 <Table
                   style={{ marginTop: 8 }}
                   size="small"
@@ -1207,24 +1220,24 @@ const BottleTracking = () => {
                   dataSource={sessionDetail.orders}
                   rowKey="order_id"
                   columns={[
-                    { title: 'Order #', dataIndex: 'order_number', render: (v) => v ?? '—' },
-                    { title: 'Customer', dataIndex: 'customer_name', render: (v) => v ?? '—' },
+                    { title: t('order_number', { defaultValue: 'Order #' }), dataIndex: 'order_number', render: (v) => v ?? '—' },
+                    { title: t('customer', { defaultValue: 'Customer' }), dataIndex: 'customer_name', render: (v) => v ?? '—' },
                     {
-                      title: 'Items',
+                      title: t('items', { defaultValue: 'Items' }),
                       dataIndex: 'items',
                       render: (items) =>
                         items?.length
                           ? items.map((i) => `${i.product_name} ×${i.quantity}`).join(', ')
                           : '—',
                     },
-                    { title: 'Total', dataIndex: 'total_amount', render: (v) => v != null ? formatCurrency(v) : '—' },
-                    { title: 'Status', dataIndex: 'status', render: (v) => v ? <Tag>{v}</Tag> : '—' },
+                    { title: t('total', { defaultValue: 'Total' }), dataIndex: 'total_amount', render: (v) => formatMoney(v) },
+                    { title: t('status', { defaultValue: 'Status' }), dataIndex: 'status', render: (v) => v ? <Tag>{v}</Tag> : '—' },
                     {
-                      title: 'Accepted By',
+                      title: t('accepted_by', { defaultValue: 'Accepted By' }),
                       dataIndex: 'accepted_by_driver_name',
                       render: (v, r) => v || (r.accepted_by_driver_id ? `Driver #${r.accepted_by_driver_id}` : '—'),
                     },
-                    { title: 'Added At', dataIndex: 'added_at', render: (v) => v ? formatDateTimeShort(v) : '—' },
+                    { title: t('added_at', { defaultValue: 'Added At' }), dataIndex: 'added_at', render: (v) => v ? formatDateTimeShort(v) : '—' },
                   ]}
                 />
               </>
@@ -1235,44 +1248,44 @@ const BottleTracking = () => {
 
       {/* Force Close Session Modal */}
       <Modal
-        title="Force Close Session"
+        title={t('force_close_title', { defaultValue: 'Force Close Session' })}
         open={forceCloseOpen}
         onCancel={() => { setForceCloseOpen(false); setForceCloseTarget(null); forceCloseForm.resetFields(); }}
         onOk={() => forceCloseForm.submit()}
         confirmLoading={forceCloseMutation.isPending}
         okButtonProps={{ danger: true }}
-        okText="Force Close"
+        okText={t('force_close', { defaultValue: 'Force Close' })}
       >
         <p style={{ marginBottom: 16 }}>
-          Driver: <strong>{forceCloseTarget?.driver_name || forceCloseTarget?.driver_user_id}</strong>
-          {' '}| Loaded: <strong>{forceCloseTarget?.bottles_loaded}</strong>
+          {t('driver_prefix', { defaultValue: 'Driver:' })} <strong>{forceCloseTarget?.driver_name || forceCloseTarget?.driver_user_id}</strong>
+          {' '}{t('loaded_prefix', { defaultValue: '| Loaded:' })} <strong>{forceCloseTarget?.bottles_loaded}</strong>
         </p>
         <Form
           form={forceCloseForm}
           layout="vertical"
           onFinish={(values) => forceCloseMutation.mutate({ sessionId: forceCloseTarget.id, data: values })}
         >
-          <Form.Item name="bottles_returned_to_warehouse" label="Bottles returned to warehouse (if known)" initialValue={0}>
+          <Form.Item name="bottles_returned_to_warehouse" label={t('bottles_returned_wh_label', { defaultValue: 'Bottles returned to warehouse (if known)' })} initialValue={0}>
             <InputNumber style={{ width: '100%' }} min={0} />
           </Form.Item>
-          <Form.Item name="reason" label="Reason (required)" rules={[{ required: true, message: 'Please enter a reason' }]}>
-            <Input.TextArea rows={3} placeholder="Why is this session being force-closed?" />
+          <Form.Item name="reason" label={t('reason_label', { defaultValue: 'Reason (required)' })} rules={[{ required: true, message: t('reason_required_msg', { defaultValue: 'Please enter a reason' }) }]}>
+            <Input.TextArea rows={3} placeholder={t('reason_placeholder', { defaultValue: 'Why is this session being force-closed?' })} />
           </Form.Item>
         </Form>
       </Modal>
 
       {/* Resolve Transfer Dispute Modal */}
       <Modal
-        title="Resolve Transfer Dispute"
+        title={t('resolve_dispute_title', { defaultValue: 'Resolve Transfer Dispute' })}
         open={resolveOpen}
         onCancel={() => { setResolveOpen(false); setResolveTarget(null); resolveForm.resetFields(); }}
         onOk={() => resolveForm.submit()}
         confirmLoading={resolveTransferMutation.isPending}
-        okText="Resolve"
+        okText={t('resolve', { defaultValue: 'Resolve' })}
       >
         {resolveTarget && (
           <p style={{ marginBottom: 16 }}>
-            Sender declared <strong>{resolveTarget.declared_quantity}</strong>, receiver confirmed <strong>{resolveTarget.confirmed_quantity}</strong>.
+            {t('sender_declared_prefix', { defaultValue: 'Sender declared' })} <strong>{resolveTarget.declared_quantity}</strong>{t('receiver_confirmed_infix', { defaultValue: ', receiver confirmed' })} <strong>{resolveTarget.confirmed_quantity}</strong>.
           </p>
         )}
         <Form
@@ -1280,10 +1293,10 @@ const BottleTracking = () => {
           layout="vertical"
           onFinish={(values) => resolveTransferMutation.mutate({ transferId: resolveTarget.id, data: values })}
         >
-          <Form.Item name="resolved_quantity" label="Resolved Quantity" rules={[{ required: true }]}>
+          <Form.Item name="resolved_quantity" label={t('resolved_quantity_label', { defaultValue: 'Resolved Quantity' })} rules={[{ required: true }]}>
             <InputNumber style={{ width: '100%' }} min={0} />
           </Form.Item>
-          <Form.Item name="resolution_notes" label="Resolution Notes (required)" rules={[{ required: true, message: 'Please explain the resolution' }]}>
+          <Form.Item name="resolution_notes" label={t('resolution_notes_label', { defaultValue: 'Resolution Notes (required)' })} rules={[{ required: true, message: t('resolution_notes_required_msg', { defaultValue: 'Please explain the resolution' }) }]}>
             <Input.TextArea rows={3} />
           </Form.Item>
         </Form>

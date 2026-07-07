@@ -9,7 +9,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from business_app.services.staff_service import StaffService
 from business_app.utils.service_factory import get_corporate_contract_service
 from business_app.utils.address_helpers import get_address_label, get_address_line
-from business_app.utils.decorators import require_staff_roles
+from business_app.utils.decorators import require_staff_roles, verify_webhook_signature
 from business_app.utils.error_handlers import handle_api_exception
 from business_app.utils.api_responses import success_response
 from business_app.utils.exceptions import ValidationError
@@ -20,6 +20,7 @@ staff_bp = Blueprint("staff", __name__)
 
 
 @staff_bp.route("/auth/login", methods=["POST"])
+@verify_webhook_signature(secret_config_key="WEBHOOK_SECRET")
 @handle_api_exception
 def staff_login():
     """Staff login: pre-bound telegram_id or one-time invite-token binding."""

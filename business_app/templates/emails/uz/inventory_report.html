@@ -1,0 +1,77 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Inventar hisoboti - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Inventar hisoboti</h1>
+{% endblock %}
+
+{% block content %}
+<h2>{{ report_type | capitalize }} inventar hisoboti</h2>
+
+<div class="info-box">
+    <p>Yaratildi: <strong>{{ generated_at }}</strong></p>
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Jami mahsulotlar</th>
+        <td>{{ total_products }}</td>
+    </tr>
+    <tr>
+        <th>Kam zaxiradagi mahsulotlar</th>
+        <td>{{ low_stock_count }}</td>
+    </tr>
+    <tr>
+        <th>Tugagan mahsulotlar</th>
+        <td>{{ out_of_stock_count }}</td>
+    </tr>
+    <tr class="total-row">
+        <th>Jami inventar qiymati</th>
+        <td>{{ total_inventory_value }} so'm</td>
+    </tr>
+</table>
+
+{% if out_of_stock_products %}
+<hr class="divider">
+<h2>Tugagan mahsulotlar</h2>
+<table class="details-table">
+    <tr>
+        <th>Mahsulot</th>
+        <th>SKU</th>
+        <th>Zaxira</th>
+    </tr>
+    {% for product in out_of_stock_products %}
+    <tr>
+        <td>{{ product.name }}</td>
+        <td>{{ product.sku or "N/A" }}</td>
+        <td>{{ product.stock }}</td>
+    </tr>
+    {% endfor %}
+</table>
+{% endif %}
+
+{% if low_stock_products %}
+<hr class="divider">
+<h2>Kam zaxiradagi mahsulotlar</h2>
+<table class="details-table">
+    <tr>
+        <th>Mahsulot</th>
+        <th>SKU</th>
+        <th>Zaxira</th>
+        <th>Minimal daraja</th>
+    </tr>
+    {% for product in low_stock_products %}
+    <tr>
+        <td>{{ product.name }}</td>
+        <td>{{ product.sku or "N/A" }}</td>
+        <td>{{ product.stock }}</td>
+        <td>{{ product.min_level }}</td>
+    </tr>
+    {% endfor %}
+</table>
+{% endif %}
+
+<hr class="divider">
+<p>Ushbu hisobot avtomatik ravishda yaratildi. To'liq ma'lumot uchun admin panelidan foydalaning.</p>
+{% endblock %}

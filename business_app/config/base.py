@@ -219,6 +219,13 @@ class BaseConfig:
         # with the Flask session key.
         return get_secret("bot_webhook_secret", "BOT_WEBHOOK_SECRET", required=True)
 
+    @property
+    def WEBHOOK_SECRET(self):
+        """Staff-bot ↔ backend shared secret (distinct from BOT_WEBHOOK_SECRET,
+        which is the customer-bot trust boundary). Used to verify signatures on
+        the staff login endpoint."""
+        return get_secret("webhook_secret", "WEBHOOK_SECRET", required=True)
+
     # Maps Configuration
     MAPS_PROVIDER = os.environ.get("MAPS_PROVIDER", "google")  # 'google', 'yandex', 'osm'
     GOOGLE_MAPS_API_KEY = get_secret("google_maps_api_key", "GOOGLE_MAPS_API_KEY", required=False)

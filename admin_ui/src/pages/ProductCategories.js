@@ -31,12 +31,14 @@ import {
   SortAscendingOutlined
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import adminService from '../services/adminService';
 import { formatLocalDate } from '../utils/dateUtils';
 
 const { TextArea } = Input;
 
 const ProductCategories = () => {
+  const { t } = useTranslation('product_categories');
   const [searchText, setSearchText] = useState('');
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [isDetailModalVisible, setIsDetailModalVisible] = useState(false);
@@ -66,7 +68,7 @@ const ProductCategories = () => {
     mutationFn: (categoryData) => adminService.createCategory(categoryData),
 
     onSuccess: () => {
-      message.success('Category created successfully');
+      message.success(t('created_toast', { defaultValue: 'Category created successfully' }));
       queryClient.invalidateQueries({
         queryKey: ['categories'],
       });
@@ -75,7 +77,7 @@ const ProductCategories = () => {
     },
 
     onError: (error) => {
-      const errorMessage = error.response?.data?.message || 'Failed to create category';
+      const errorMessage = error.response?.data?.message || t('create_failed', { defaultValue: 'Failed to create category' });
       message.error(errorMessage);
     },
   });
@@ -85,7 +87,7 @@ const ProductCategories = () => {
     mutationFn: ({ categoryId, categoryData }) => adminService.updateCategory(categoryId, categoryData),
 
     onSuccess: () => {
-      message.success('Category updated successfully');
+      message.success(t('updated_toast', { defaultValue: 'Category updated successfully' }));
       queryClient.invalidateQueries({
         queryKey: ['categories'],
       });
@@ -94,7 +96,7 @@ const ProductCategories = () => {
     },
 
     onError: (error) => {
-      const errorMessage = error.response?.data?.message || 'Failed to update category';
+      const errorMessage = error.response?.data?.message || t('update_failed', { defaultValue: 'Failed to update category' });
       message.error(errorMessage);
     },
   });
@@ -104,28 +106,28 @@ const ProductCategories = () => {
     mutationFn: ({ categoryId, force }) => adminService.deleteCategory(categoryId, force),
 
     onSuccess: () => {
-      message.success('Category deleted successfully');
+      message.success(t('deleted_toast', { defaultValue: 'Category deleted successfully' }));
       queryClient.invalidateQueries({
         queryKey: ['categories'],
       });
     },
 
     onError: (error) => {
-      const errorMessage = error.response?.data?.message || 'Failed to delete category';
+      const errorMessage = error.response?.data?.message || t('delete_failed', { defaultValue: 'Failed to delete category' });
       message.error(errorMessage);
     },
   });
 
   const columns = [
     {
-      title: 'ID',
+      title: t('id', { defaultValue: 'ID' }),
       dataIndex: 'id',
       key: 'id',
       width: 70,
       sorter: (a, b) => a.id - b.id
     },
     {
-      title: 'Name',
+      title: t('name', { defaultValue: 'Name' }),
       dataIndex: 'name',
       key: 'name',
       render: (text, record) => (
@@ -139,7 +141,7 @@ const ProductCategories = () => {
       sorter: (a, b) => a.name.localeCompare(b.name)
     },
     {
-      title: 'Sort Order',
+      title: t('sort_order', { defaultValue: 'Sort Order' }),
       dataIndex: 'sort_order',
       key: 'sort_order',
       width: 100,
@@ -147,38 +149,38 @@ const ProductCategories = () => {
       sorter: (a, b) => a.sort_order - b.sort_order
     },
     {
-      title: 'Products',
+      title: t('products', { defaultValue: 'Products' }),
       dataIndex: 'product_count',
       key: 'product_count',
       width: 100,
       align: 'center',
       render: (count) => (
         <Tag color={count > 0 ? 'blue' : 'default'}>
-          {count} {count === 1 ? 'product' : 'products'}
+          {count} {count === 1 ? t('product_singular', { defaultValue: 'product' }) : t('product_plural', { defaultValue: 'products' })}
         </Tag>
       ),
       sorter: (a, b) => a.product_count - b.product_count
     },
     {
-      title: 'Status',
+      title: t('status', { defaultValue: 'Status' }),
       dataIndex: 'is_active',
       key: 'is_active',
       width: 100,
       render: (is_active) => (
         <Tag color={is_active ? 'green' : 'red'}>
-          {is_active ? 'Active' : 'Inactive'}
+          {is_active ? t('active', { defaultValue: 'Active' }) : t('inactive', { defaultValue: 'Inactive' })}
         </Tag>
       )
     },
     {
-      title: 'Created',
+      title: t('created', { defaultValue: 'Created' }),
       dataIndex: 'created_at',
       key: 'created_at',
       width: 120,
       render: (date) => formatLocalDate(date)
     },
     {
-      title: 'Actions',
+      title: t('actions', { defaultValue: 'Actions' }),
       key: 'actions',
       width: 100,
       render: (_, record) => (
@@ -187,14 +189,14 @@ const ProductCategories = () => {
             items: [
               {
                 key: 'view',
-                label: 'View Details',
+                label: t('view_details', { defaultValue: 'View Details' }),
                 icon: <EyeOutlined />,
                 // eslint-disable-next-line no-use-before-define
                 onClick: () => handleViewCategory(record)
               },
               {
                 key: 'edit',
-                label: 'Edit Category',
+                label: t('edit_category', { defaultValue: 'Edit Category' }),
                 icon: <EditOutlined />,
                 // eslint-disable-next-line no-use-before-define
                 onClick: () => handleEditCategory(record)
@@ -204,7 +206,7 @@ const ProductCategories = () => {
               },
               {
                 key: 'delete',
-                label: 'Delete Category',
+                label: t('delete_category', { defaultValue: 'Delete Category' }),
                 icon: <DeleteOutlined />,
                 danger: true,
                 // eslint-disable-next-line no-use-before-define
@@ -250,12 +252,15 @@ const ProductCategories = () => {
     const hasProducts = category.product_count > 0;
 
     Modal.confirm({
-      title: 'Delete Category?',
+      title: t('delete_category_title', { defaultValue: 'Delete Category?' }),
       content: hasProducts
-        ? `This category has ${category.product_count} product(s). The category will be deactivated instead of deleted.`
-        : `Are you sure you want to delete "${category.name}"?`,
+        ? t('delete_category_has_products', {
+          count: category.product_count,
+          defaultValue: 'This category has {{count}} product(s). The category will be deactivated instead of deleted.',
+        })
+        : t('delete_category_confirm', { name: category.name, defaultValue: 'Are you sure you want to delete "{{name}}"?' }),
       icon: <WarningOutlined />,
-      okText: hasProducts ? 'Deactivate' : 'Delete',
+      okText: hasProducts ? t('deactivate', { defaultValue: 'Deactivate' }) : t('delete', { defaultValue: 'Delete' }),
       okType: 'danger',
       onOk: () => {
         deleteCategoryMutation.mutate({
@@ -331,7 +336,7 @@ const ProductCategories = () => {
         <Col xs={24} sm={8}>
           <Card>
             <Statistic
-              title="Total Categories"
+              title={t('total_categories', { defaultValue: 'Total Categories' })}
               value={totalCategories}
               prefix={<TagsOutlined />}
             />
@@ -340,7 +345,7 @@ const ProductCategories = () => {
         <Col xs={24} sm={8}>
           <Card>
             <Statistic
-              title="Active Categories"
+              title={t('active_categories', { defaultValue: 'Active Categories' })}
               value={activeCategories}
               valueStyle={{ color: '#52c41a' }}
               prefix={<TagsOutlined />}
@@ -350,7 +355,7 @@ const ProductCategories = () => {
         <Col xs={24} sm={8}>
           <Card>
             <Statistic
-              title="Total Products"
+              title={t('total_products', { defaultValue: 'Total Products' })}
               value={totalProducts}
               prefix={<SortAscendingOutlined />}
             />
@@ -363,7 +368,7 @@ const ProductCategories = () => {
         <div className="table-actions">
           <Space wrap>
             <Input.Search
-              placeholder="Search categories..."
+              placeholder={t('search_placeholder', { defaultValue: 'Search categories...' })}
               allowClear
               onSearch={handleSearch}
               style={{ width: 250 }}
@@ -377,7 +382,7 @@ const ProductCategories = () => {
               icon={<PlusOutlined />}
               onClick={() => setIsCreateModalVisible(true)}
             >
-              Add Category
+              {t('add_category', { defaultValue: 'Add Category' })}
             </Button>
           </Space>
         </div>
@@ -395,7 +400,7 @@ const ProductCategories = () => {
             showSizeChanger: true,
             showQuickJumper: true,
             showTotal: (total, range) =>
-              `${range[0]}-${range[1]} of ${total} categories`
+              t('showing_range', { from: range[0], to: range[1], total, defaultValue: '{{from}}-{{to}} of {{total}} categories' })
           }}
           onChange={handleTableChange}
           className="admin-table"
@@ -404,7 +409,7 @@ const ProductCategories = () => {
 
       {/* Category Details Modal */}
       <Modal
-        title={`Category Details - ${selectedCategory?.name}`}
+        title={t('category_details_title', { name: selectedCategory?.name, defaultValue: 'Category Details - {{name}}' })}
         open={isDetailModalVisible}
         onCancel={() => setIsDetailModalVisible(false)}
         footer={null}
@@ -415,12 +420,12 @@ const ProductCategories = () => {
             <Row gutter={16}>
               <Col span={24}>
                 <h3>{selectedCategory.name}</h3>
-                <p><strong>ID:</strong> {selectedCategory.id}</p>
-                <p><strong>Sort Order:</strong> {selectedCategory.sort_order}</p>
-                <p><strong>Products:</strong> {selectedCategory.product_count}</p>
-                <p><strong>Status:</strong>
+                <p><strong>{t('id_label', { defaultValue: 'ID:' })}</strong> {selectedCategory.id}</p>
+                <p><strong>{t('sort_order_label', { defaultValue: 'Sort Order:' })}</strong> {selectedCategory.sort_order}</p>
+                <p><strong>{t('products_label', { defaultValue: 'Products:' })}</strong> {selectedCategory.product_count}</p>
+                <p><strong>{t('status_label', { defaultValue: 'Status:' })}</strong>
                   <Tag color={selectedCategory.is_active ? 'green' : 'red'} style={{ marginLeft: 8 }}>
-                    {selectedCategory.is_active ? 'Active' : 'Inactive'}
+                    {selectedCategory.is_active ? t('active', { defaultValue: 'Active' }) : t('inactive', { defaultValue: 'Inactive' })}
                   </Tag>
                 </p>
               </Col>
@@ -428,14 +433,14 @@ const ProductCategories = () => {
 
             {selectedCategory.description && (
               <>
-                <Divider>Description</Divider>
+                <Divider>{t('description', { defaultValue: 'Description' })}</Divider>
                 <p>{selectedCategory.description}</p>
               </>
             )}
 
             {selectedCategory.icon_url && (
               <>
-                <Divider>Icon</Divider>
+                <Divider>{t('icon', { defaultValue: 'Icon' })}</Divider>
                 <img src={selectedCategory.icon_url} alt={selectedCategory.name} style={{ maxWidth: '100px' }} />
               </>
             )}
@@ -449,10 +454,10 @@ const ProductCategories = () => {
                     handleEditCategory(selectedCategory);
                   }}
                 >
-                  Edit Category
+                  {t('edit_category', { defaultValue: 'Edit Category' })}
                 </Button>
                 <Button onClick={() => setIsDetailModalVisible(false)}>
-                  Close
+                  {t('close', { defaultValue: 'Close' })}
                 </Button>
               </Space>
             </div>
@@ -462,7 +467,7 @@ const ProductCategories = () => {
 
       {/* Create Category Modal */}
       <Modal
-        title="Add New Category"
+        title={t('add_new_category', { defaultValue: 'Add New Category' })}
         open={isCreateModalVisible}
         onCancel={() => setIsCreateModalVisible(false)}
         footer={null}
@@ -478,24 +483,24 @@ const ProductCategories = () => {
             items={[
               {
                 key: 'uz',
-                label: 'Uzbek (Default)',
+                label: t('tab_uzbek', { defaultValue: 'Uzbek (Default)' }),
                 children: (
                   <>
                     <Form.Item
                       name="name"
-                      label="Category Name (Uzbek)"
-                      rules={[{ required: true, message: 'Please enter category name' }]}
+                      label={t('name_uz', { defaultValue: 'Category Name (Uzbek)' })}
+                      rules={[{ required: true, message: t('name_required', { defaultValue: 'Please enter category name' }) }]}
                     >
-                      <Input placeholder="Enter category name" />
+                      <Input placeholder={t('name_placeholder', { defaultValue: 'Enter category name' })} />
                     </Form.Item>
 
                     <Form.Item
                       name="description"
-                      label="Description (Uzbek)"
+                      label={t('description_uz', { defaultValue: 'Description (Uzbek)' })}
                     >
                       <TextArea
                         rows={3}
-                        placeholder="Enter category description..."
+                        placeholder={t('description_placeholder', { defaultValue: 'Enter category description...' })}
                       />
                     </Form.Item>
                   </>
@@ -503,23 +508,23 @@ const ProductCategories = () => {
               },
               {
                 key: 'ru',
-                label: 'Russian',
+                label: t('tab_russian', { defaultValue: 'Russian' }),
                 children: (
                   <>
                     <Form.Item
                       name="name_ru"
-                      label="Category Name (Russian)"
+                      label={t('name_ru', { defaultValue: 'Category Name (Russian)' })}
                     >
-                      <Input placeholder="Enter Russian category name" />
+                      <Input placeholder={t('name_ru_placeholder', { defaultValue: 'Enter Russian category name' })} />
                     </Form.Item>
 
                     <Form.Item
                       name="description_ru"
-                      label="Description (Russian)"
+                      label={t('description_ru', { defaultValue: 'Description (Russian)' })}
                     >
                       <TextArea
                         rows={3}
-                        placeholder="Enter Russian description..."
+                        placeholder={t('description_ru_placeholder', { defaultValue: 'Enter Russian description...' })}
                       />
                     </Form.Item>
                   </>
@@ -527,23 +532,23 @@ const ProductCategories = () => {
               },
               {
                 key: 'en',
-                label: 'English',
+                label: t('tab_english', { defaultValue: 'English' }),
                 children: (
                   <>
                     <Form.Item
                       name="name_en"
-                      label="Category Name (English)"
+                      label={t('name_en', { defaultValue: 'Category Name (English)' })}
                     >
-                      <Input placeholder="Enter English category name" />
+                      <Input placeholder={t('name_en_placeholder', { defaultValue: 'Enter English category name' })} />
                     </Form.Item>
 
                     <Form.Item
                       name="description_en"
-                      label="Description (English)"
+                      label={t('description_en', { defaultValue: 'Description (English)' })}
                     >
                       <TextArea
                         rows={3}
-                        placeholder="Enter English description..."
+                        placeholder={t('description_en_placeholder', { defaultValue: 'Enter English description...' })}
                       />
                     </Form.Item>
                   </>
@@ -556,7 +561,7 @@ const ProductCategories = () => {
             <Col span={12}>
               <Form.Item
                 name="sort_order"
-                label="Sort Order"
+                label={t('sort_order', { defaultValue: 'Sort Order' })}
                 initialValue={0}
               >
                 <InputNumber
@@ -569,7 +574,7 @@ const ProductCategories = () => {
             <Col span={12}>
               <Form.Item
                 name="is_active"
-                label="Active"
+                label={t('active', { defaultValue: 'Active' })}
                 valuePropName="checked"
                 initialValue={true}
               >
@@ -580,22 +585,22 @@ const ProductCategories = () => {
 
           <Form.Item
             name="icon_url"
-            label="Icon URL (optional)"
+            label={t('icon_url', { defaultValue: 'Icon URL (optional)' })}
           >
-            <Input placeholder="Enter icon URL..." />
+            <Input placeholder={t('icon_url_placeholder', { defaultValue: 'Enter icon URL...' })} />
           </Form.Item>
 
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
               <Button onClick={() => setIsCreateModalVisible(false)}>
-                Cancel
+                {t('cancel', { defaultValue: 'Cancel' })}
               </Button>
               <Button
                 type="primary"
                 htmlType="submit"
                 loading={createCategoryMutation.isPending}
               >
-                Create Category
+                {t('create_category', { defaultValue: 'Create Category' })}
               </Button>
             </Space>
           </Form.Item>
@@ -604,7 +609,7 @@ const ProductCategories = () => {
 
       {/* Edit Category Modal */}
       <Modal
-        title={`Edit Category - ${selectedCategory?.name}`}
+        title={t('edit_category_title', { name: selectedCategory?.name, defaultValue: 'Edit Category - {{name}}' })}
         open={isEditModalVisible}
         onCancel={() => setIsEditModalVisible(false)}
         footer={null}
@@ -620,24 +625,24 @@ const ProductCategories = () => {
             items={[
               {
                 key: 'uz',
-                label: 'Uzbek (Default)',
+                label: t('tab_uzbek', { defaultValue: 'Uzbek (Default)' }),
                 children: (
                   <>
                     <Form.Item
                       name="name"
-                      label="Category Name (Uzbek)"
-                      rules={[{ required: true, message: 'Please enter category name' }]}
+                      label={t('name_uz', { defaultValue: 'Category Name (Uzbek)' })}
+                      rules={[{ required: true, message: t('name_required', { defaultValue: 'Please enter category name' }) }]}
                     >
-                      <Input placeholder="Enter category name" />
+                      <Input placeholder={t('name_placeholder', { defaultValue: 'Enter category name' })} />
                     </Form.Item>
 
                     <Form.Item
                       name="description"
-                      label="Description (Uzbek)"
+                      label={t('description_uz', { defaultValue: 'Description (Uzbek)' })}
                     >
                       <TextArea
                         rows={3}
-                        placeholder="Enter category description..."
+                        placeholder={t('description_placeholder', { defaultValue: 'Enter category description...' })}
                       />
                     </Form.Item>
                   </>
@@ -645,23 +650,23 @@ const ProductCategories = () => {
               },
               {
                 key: 'ru',
-                label: 'Russian',
+                label: t('tab_russian', { defaultValue: 'Russian' }),
                 children: (
                   <>
                     <Form.Item
                       name="name_ru"
-                      label="Category Name (Russian)"
+                      label={t('name_ru', { defaultValue: 'Category Name (Russian)' })}
                     >
-                      <Input placeholder="Enter Russian category name" />
+                      <Input placeholder={t('name_ru_placeholder', { defaultValue: 'Enter Russian category name' })} />
                     </Form.Item>
 
                     <Form.Item
                       name="description_ru"
-                      label="Description (Russian)"
+                      label={t('description_ru', { defaultValue: 'Description (Russian)' })}
                     >
                       <TextArea
                         rows={3}
-                        placeholder="Enter Russian description..."
+                        placeholder={t('description_ru_placeholder', { defaultValue: 'Enter Russian description...' })}
                       />
                     </Form.Item>
                   </>
@@ -669,23 +674,23 @@ const ProductCategories = () => {
               },
               {
                 key: 'en',
-                label: 'English',
+                label: t('tab_english', { defaultValue: 'English' }),
                 children: (
                   <>
                     <Form.Item
                       name="name_en"
-                      label="Category Name (English)"
+                      label={t('name_en', { defaultValue: 'Category Name (English)' })}
                     >
-                      <Input placeholder="Enter English category name" />
+                      <Input placeholder={t('name_en_placeholder', { defaultValue: 'Enter English category name' })} />
                     </Form.Item>
 
                     <Form.Item
                       name="description_en"
-                      label="Description (English)"
+                      label={t('description_en', { defaultValue: 'Description (English)' })}
                     >
                       <TextArea
                         rows={3}
-                        placeholder="Enter English description..."
+                        placeholder={t('description_en_placeholder', { defaultValue: 'Enter English description...' })}
                       />
                     </Form.Item>
                   </>
@@ -698,7 +703,7 @@ const ProductCategories = () => {
             <Col span={12}>
               <Form.Item
                 name="sort_order"
-                label="Sort Order"
+                label={t('sort_order', { defaultValue: 'Sort Order' })}
               >
                 <InputNumber
                   placeholder="0"
@@ -710,7 +715,7 @@ const ProductCategories = () => {
             <Col span={12}>
               <Form.Item
                 name="is_active"
-                label="Active"
+                label={t('active', { defaultValue: 'Active' })}
                 valuePropName="checked"
               >
                 <Switch />
@@ -720,22 +725,22 @@ const ProductCategories = () => {
 
           <Form.Item
             name="icon_url"
-            label="Icon URL (optional)"
+            label={t('icon_url', { defaultValue: 'Icon URL (optional)' })}
           >
-            <Input placeholder="Enter icon URL..." />
+            <Input placeholder={t('icon_url_placeholder', { defaultValue: 'Enter icon URL...' })} />
           </Form.Item>
 
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
               <Button onClick={() => setIsEditModalVisible(false)}>
-                Cancel
+                {t('cancel', { defaultValue: 'Cancel' })}
               </Button>
               <Button
                 type="primary"
                 htmlType="submit"
                 loading={updateCategoryMutation.isPending}
               >
-                Update Category
+                {t('update_category', { defaultValue: 'Update Category' })}
               </Button>
             </Space>
           </Form.Item>

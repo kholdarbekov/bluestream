@@ -1022,6 +1022,20 @@
     "rule": "/api/v1/admin/orders/<int:order_id>/edit-preview"
   },
   {
+    "endpoint": "admin.apply_order_payment_method_edit",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/orders/<int:order_id>/payment-method"
+  },
+  {
+    "endpoint": "admin.preview_order_payment_method_edit",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/orders/<int:order_id>/payment-method/preview"
+  },
+  {
     "endpoint": "admin.update_order_status",
     "methods": [
       "PUT"

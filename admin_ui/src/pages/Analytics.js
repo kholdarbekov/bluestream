@@ -36,6 +36,7 @@ import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import dayjs from 'dayjs';
 import { formatDate } from '../utils/dateUtils';
+import { formatMoneyUZS } from '../utils/formatMoney';
 import LineChart from '../components/charts/LineChart';
 import BarChart from '../components/charts/BarChart';
 import PieChart from '../components/charts/PieChart';
@@ -288,7 +289,7 @@ const Analytics = () => {
     if (topProduct) {
       items.push({
         title: t('ui.analytics.top_products'),
-        description: `${topProduct.name} generated ${topProduct.sales.toFixed(2)} in revenue.`
+        description: `${topProduct.name} generated ${formatMoneyUZS(topProduct.sales)} in revenue.`
       });
     }
 
@@ -422,7 +423,7 @@ const Analytics = () => {
       dataIndex: 'total_spent',
       key: 'total_spent',
       width: 120,
-      render: (amount) => `${amount?.toFixed(2) || '0.00'} UZS`
+      render: (amount) => formatMoneyUZS(amount ?? 0)
     }
   ];
 
@@ -466,7 +467,7 @@ const Analytics = () => {
       dataIndex: 'total_spent',
       key: 'total_spent',
       width: 140,
-      render: (v) => `${Number(v || 0).toFixed(2)} UZS`
+      render: (v) => formatMoneyUZS(v ?? 0)
     },
     {
       title: t('ui.analytics.last_order'),

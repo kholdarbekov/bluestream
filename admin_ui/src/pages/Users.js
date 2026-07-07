@@ -47,6 +47,7 @@ import api from '../services/api';
 import useResponsive from '../hooks/useResponsive';
 import AddressMapPicker from '../components/AddressMapPicker';
 import { formatLocalDate, formatLocaleDateTime } from '../utils/dateUtils';
+import exportUtils from '../utils/exportUtils';
 
 const { Option } = Select;
 const USER_TYPE_OPTIONS = [
@@ -133,6 +134,17 @@ const Users = () => {
 
     placeholderData: keepPreviousData,
   });
+
+  const handleExportUsers = async () => {
+    const result = await exportUtils.exportUsers({
+      search: searchText,
+      status: statusFilter,
+      registration_method: registrationMethodFilter
+    });
+    if (!result.success) {
+      message.error(result.message);
+    }
+  };
 
   // Update user status mutation
   const updateUserMutation = useMutation({
@@ -948,6 +960,7 @@ const Users = () => {
             >
               <Button
                 icon={<ExportOutlined />}
+                onClick={handleExportUsers}
                 style={{
                   minHeight: responsive.isTouchDevice ? '40px' : '32px'
                 }}

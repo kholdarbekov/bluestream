@@ -1,0 +1,41 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Предупреждение о низком запасе - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Предупреждение о низком запасе</h1>
+{% endblock %}
+
+{% block content %}
+<h2>{{ product_name }}</h2>
+
+<div class="{{ 'warning-box' if is_out_of_stock else 'info-box' }}">
+    {% if is_out_of_stock %}
+    <p>Этот товар закончился на складе.</p>
+    {% else %}
+    <p>Запас этого товара подходит к концу.</p>
+    {% endif %}
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Артикул</th>
+        <td>{{ sku or "N/A" }}</td>
+    </tr>
+    <tr>
+        <th>Текущий остаток</th>
+        <td>{{ current_stock }}</td>
+    </tr>
+    <tr>
+        <th>Доступное количество</th>
+        <td>{{ available_quantity }}</td>
+    </tr>
+    <tr>
+        <th>Минимальный уровень</th>
+        <td>{{ min_stock_level }}</td>
+    </tr>
+</table>
+
+<hr class="divider">
+<p>Пожалуйста, проверьте запасы и при необходимости оформите дозаказ.</p>
+{% endblock %}

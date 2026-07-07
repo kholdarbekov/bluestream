@@ -100,37 +100,6 @@ def cleanup_orphaned_data_task(self):
         raise
 
 
-@shared_task(bind=True, autoretry_for=(Exception,), retry_kwargs={"max_retries": 2, "countdown": 300})
-def full_session_cleanup_task(self, batch_size=1000):
-    """
-    Comprehensive session and user cleanup task
-
-    Args:
-        batch_size: Batch size for processing
-
-    Returns:
-        Dictionary with comprehensive cleanup results
-    """
-    try:
-        logger.info(f"Starting comprehensive session cleanup task with batch size {batch_size}")
-
-        service = SessionCleanupService()
-        results = service.full_cleanup(batch_size)
-
-        # Update task progress
-        if current_task:
-            current_task.update_state(
-                state="SUCCESS", meta={"results": results, "completed_at": datetime.now(timezone.utc).isoformat()}
-            )
-
-        logger.info(f"Comprehensive cleanup task completed: {results}")
-        return results
-
-    except Exception as e:
-        logger.error(f"Comprehensive cleanup task failed: {e}")
-        raise
-
-
 @shared_task(bind=True)
 def session_cleanup_health_check(self):
     """
@@ -191,42 +160,3 @@ def session_cleanup_health_check(self):
     except Exception as e:
         logger.error(f"Session cleanup health check failed: {e}")
         raise
-
-
-# Periodic task registration (if using Celery Beat)
-# These can be configured in celerybeat-schedule.py or similar configuration
-
-
-def register_periodic_tasks():
-    """
-    Register periodic session cleanup tasks
-    This should be called from celery configuration
-    """
-    from celery.schedules import crontab
-    from business_app.tasks.celery_app import celery
-
-    # Daily session cleanup at 2 AM
-    celery.conf.beat_schedule.update(
-        {
-            "cleanup-expired-sessions-daily": {
-                "task": "business_app.tasks.session_tasks.cleanup_expired_sessions_task",
-                "schedule": crontab(hour=2, minute=0),
-                "args": (1000,),  # batch_size
-            },
-            "cleanup-inactive-users-weekly": {
-                "task": "business_app.tasks.session_tasks.cleanup_inactive_users_task",
-                "schedule": crontab(hour=3, minute=0, day_of_week=1),  # Monday at 3 AM
-                "args": (500,),  # batch_size
-            },
-            "cleanup-orphaned-data-weekly": {
-                "task": "business_app.tasks.session_tasks.cleanup_orphaned_data_task",
-                "schedule": crontab(hour=4, minute=0, day_of_week=1),  # Monday at 4 AM
-            },
-            "session-cleanup-health-check": {
-                "task": "business_app.tasks.session_tasks.session_cleanup_health_check",
-                "schedule": crontab(minute=0),  # Every hour
-            },
-        }
-    )
-
-    logger.info("Registered periodic session cleanup tasks")

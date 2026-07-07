@@ -41,6 +41,7 @@ import {
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { formatDate, formatDateTimeShort } from '../utils/dateUtils';
+import { formatMoney } from '../utils/formatMoney';
 import adminService from '../services/adminService';
 import api from '../services/api';
 import { useTranslation } from 'react-i18next';
@@ -430,14 +431,14 @@ const Orders = () => {
         message.info(
           t(
             'ui.orders.edit_prepayment_created',
-            `Prepayment credit of ${Number(summary.cash.amount || 0).toLocaleString()} UZS recorded for the customer.`,
+            `Prepayment credit of ${formatMoney(summary.cash.amount)} UZS recorded for the customer.`,
           ),
         );
       } else if (cashAction === 'additional_cash_collection_required') {
         message.info(
           t(
             'ui.orders.edit_collect_extra_cash',
-            `Collect ${Number(summary.cash.amount || 0).toLocaleString()} UZS extra via Personal Card Payment.`,
+            `Collect ${formatMoney(summary.cash.amount)} UZS extra via Personal Card Payment.`,
           ),
         );
       }
@@ -928,7 +929,7 @@ const Orders = () => {
       dataIndex: 'total_amount',
       key: 'total_amount',
       width: 130,
-      render: (amount) => <span style={{ fontWeight: 600, color: '#52c41a' }}>{Number(amount || 0).toLocaleString()} UZS</span>,
+      render: (amount) => <span style={{ fontWeight: 600, color: '#52c41a' }}>{formatMoney(amount)} UZS</span>,
     },
     {
       title: t('ui.orders.status', 'Status'),
@@ -1181,7 +1182,7 @@ const Orders = () => {
                 {selectedOrder.customer_phone || '—'}
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.orders.total_amount', 'Total Amount')}>
-                <span style={{ fontWeight: 600, color: '#52c41a' }}>{Number(selectedOrder.total_amount || 0).toLocaleString()} UZS</span>
+                <span style={{ fontWeight: 600, color: '#52c41a' }}>{formatMoney(selectedOrder.total_amount)} UZS</span>
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.orders.payment_status', 'Payment Status')}>
                 <Tag color={paymentStatusColor(selectedOrder.payment_status)}>
@@ -1216,13 +1217,13 @@ const Orders = () => {
             <Divider>{t('ui.orders.payment_summary', 'Payment Summary')}</Divider>
             <Descriptions column={3} bordered size="small">
               <Descriptions.Item label={t('ui.orders.total_amount', 'Total Amount')}>
-                {Number(selectedOrder.total_amount || 0).toLocaleString()} UZS
+                {formatMoney(selectedOrder.total_amount)} UZS
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.orders.amount_collected', 'Collected')}>
-                {Number(selectedOrder.amount_collected || 0).toLocaleString()} UZS
+                {formatMoney(selectedOrder.amount_collected)} UZS
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.orders.outstanding_amount', 'Outstanding')}>
-                {Number(selectedOrder.outstanding_amount || 0).toLocaleString()} UZS
+                {formatMoney(selectedOrder.outstanding_amount)} UZS
               </Descriptions.Item>
             </Descriptions>
             {isAdmin() && selectedOrder.is_collected_cash_editable ? (
@@ -1562,7 +1563,7 @@ const Orders = () => {
                     render: (price, record) =>
                       record.standalone
                         ? <span style={{ color: '#52c41a', fontWeight: 600 }}>{t('ui.orders.free', 'Free')}</span>
-                        : `${Number(price || 0).toLocaleString()} UZS`,
+                        : `${formatMoney(price)} UZS`,
                   },
                   {
                     title: t('ui.orders.total_price', 'Total'),
@@ -1573,14 +1574,14 @@ const Orders = () => {
                     render: (price, record) =>
                       record.standalone
                         ? <span style={{ fontWeight: 600, color: '#52c41a' }}>{t('ui.orders.free', 'Free')}</span>
-                        : <span style={{ fontWeight: 600 }}>{Number(price || 0).toLocaleString()} UZS</span>,
+                        : <span style={{ fontWeight: 600 }}>{formatMoney(price)} UZS</span>,
                   },
                 ]}
                 footer={() => (
                   <div style={{ textAlign: 'right' }}>
                     <strong>{t('ui.orders.order_total', 'Order Total')}: </strong>
                     <span style={{ fontSize: 16, color: '#52c41a', fontWeight: 600 }}>
-                      {Number(selectedOrder.total_amount || 0).toLocaleString()} UZS
+                      {formatMoney(selectedOrder.total_amount)} UZS
                     </span>
                   </div>
                 )}
@@ -1601,10 +1602,10 @@ const Orders = () => {
                     <div style={{ padding: 8 }}>
                       <Descriptions size="small" column={2} bordered>
                         <Descriptions.Item label={t('ui.orders.totals_before', 'Totals before')}>
-                          {Number(record.diff?.totals_before?.total_amount || 0).toLocaleString()} UZS
+                          {formatMoney(record.diff?.totals_before?.total_amount)} UZS
                         </Descriptions.Item>
                         <Descriptions.Item label={t('ui.orders.totals_after', 'Totals after')}>
-                          {Number(record.diff?.totals_after?.total_amount || 0).toLocaleString()} UZS
+                          {formatMoney(record.diff?.totals_after?.total_amount)} UZS
                         </Descriptions.Item>
                       </Descriptions>
                       <div style={{ marginTop: 8 }}>
@@ -1697,7 +1698,7 @@ const Orders = () => {
                     {
                       title: t('ui.orders.timeline_amount', 'Amount'),
                       key: 'amount',
-                      render: (_, record) => `${Number(record.allocated_amount ?? record.amount ?? 0).toLocaleString()} UZS`,
+                      render: (_, record) => `${formatMoney(record.allocated_amount ?? record.amount)} UZS`,
                     },
                     {
                       title: t('ui.orders.timeline_notes', 'Notes'),
@@ -1945,7 +1946,7 @@ const Orders = () => {
                             const effectivePrice = getEffectiveProductPrice(product);
                             return (
                               <Option key={product.id} value={product.id}>
-                                {product.name} - {Number(effectivePrice || 0).toLocaleString()} UZS
+                                {product.name} - {formatMoney(effectivePrice)} UZS
                                 {product.pricing_source === 'contract' ? ' (Contract)' : ''}
                               </Option>
                             );
@@ -2066,7 +2067,7 @@ const Orders = () => {
             <Input value={selectedOrder?.order_number} disabled />
           </Form.Item>
           <Form.Item label={t('ui.orders.outstanding_amount', 'Outstanding')}>
-            <Input value={`${Number(selectedOrder?.outstanding_amount || 0).toLocaleString()} UZS`} disabled />
+            <Input value={`${formatMoney(selectedOrder?.outstanding_amount)} UZS`} disabled />
           </Form.Item>
           <Form.Item name="amount" label={t('ui.orders.amount', 'Amount')} rules={[{ required: true, message: t('ui.orders.amount_required', 'Amount is required') }]}>
             <Input type="number" min={0} />
@@ -2122,7 +2123,7 @@ const Orders = () => {
                               const effectivePrice = getEffectiveProductPrice(product);
                               return (
                                 <Option key={product.id} value={product.id}>
-                                  {product.name} - {Number(effectivePrice || 0).toLocaleString()} UZS
+                                  {product.name} - {formatMoney(effectivePrice)} UZS
                                 </Option>
                               );
                             })}
@@ -2221,18 +2222,18 @@ const Orders = () => {
 
             <Descriptions column={2} bordered size="small" style={{ marginBottom: 16 }}>
               <Descriptions.Item label={t('ui.orders.total_before', 'Total before')}>
-                {Number(editPreviewData?.totals_before?.total_amount || 0).toLocaleString()} UZS
+                {formatMoney(editPreviewData?.totals_before?.total_amount)} UZS
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.orders.total_after', 'Total after')}>
                 <strong>
-                  {Number(editPreviewData?.totals_after?.total_amount || 0).toLocaleString()} UZS
+                  {formatMoney(editPreviewData?.totals_after?.total_amount)} UZS
                 </strong>
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.orders.subtotal_before', 'Subtotal before')}>
-                {Number(editPreviewData?.totals_before?.subtotal || 0).toLocaleString()} UZS
+                {formatMoney(editPreviewData?.totals_before?.subtotal)} UZS
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.orders.subtotal_after', 'Subtotal after')}>
-                {Number(editPreviewData?.totals_after?.subtotal || 0).toLocaleString()} UZS
+                {formatMoney(editPreviewData?.totals_after?.subtotal)} UZS
               </Descriptions.Item>
             </Descriptions>
 
@@ -2251,13 +2252,13 @@ const Orders = () => {
                         : '';
                     return t(
                       'ui.orders.payment_prepayment',
-                      `Prepayment credit of ${Number(amount || 0).toLocaleString()} UZS will be recorded${cardSuffix}`,
+                      `Prepayment credit of ${formatMoney(amount)} UZS will be recorded${cardSuffix}`,
                     );
                   }
                   if (action === 'manual_cash_collection_required') {
                     return t(
                       'ui.orders.payment_extra_cash',
-                      `Collect ${Number(amount || 0).toLocaleString()} UZS extra in CASH via Personal Card Payment (card will not be re-charged)`,
+                      `Collect ${formatMoney(amount)} UZS extra in CASH via Personal Card Payment (card will not be re-charged)`,
                     );
                   }
                   if (action === 'totals_only') {
@@ -2346,10 +2347,10 @@ const Orders = () => {
                 'Enter the actual cash the driver collected. Any surplus over the order total becomes the customer\'s prepaid credit.')} />
             <Descriptions column={2} size="small" bordered style={{ marginBottom: 12 }}>
               <Descriptions.Item label={t('ui.orders.total_amount', 'Total Amount')}>
-                {Number(selectedOrder?.total_amount || 0).toLocaleString()} UZS
+                {formatMoney(selectedOrder?.total_amount)} UZS
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.orders.amount_collected', 'Collected')}>
-                {Number(selectedOrder?.amount_collected || 0).toLocaleString()} UZS
+                {formatMoney(selectedOrder?.amount_collected)} UZS
               </Descriptions.Item>
             </Descriptions>
             <Form.Item name="new_amount" label={t('ui.orders.new_collected_amount', 'Actual collected amount')}
@@ -2373,13 +2374,13 @@ const Orders = () => {
           <div>
             <Descriptions column={1} size="small" bordered style={{ marginBottom: 12 }}>
               <Descriptions.Item label={t('ui.orders.new_collected_amount', 'Actual collected amount')}>
-                {Number(cashEditPreview?.new_amount || 0).toLocaleString()} UZS
+                {formatMoney(cashEditPreview?.new_amount)} UZS
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.orders.surplus_or_shortfall', 'Surplus / shortfall')}>
-                {Number(cashEditPreview?.surplus_or_shortfall || 0).toLocaleString()} UZS
+                {formatMoney(cashEditPreview?.surplus_or_shortfall)} UZS
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.orders.customer_credit', 'Customer credit change')}>
-                {Number(cashEditPreview?.customer_credit_delta || 0).toLocaleString()} UZS
+                {formatMoney(cashEditPreview?.customer_credit_delta)} UZS
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.orders.cash_session_will_reopen', 'Driver session reopen')}>
                 {cashEditPreview?.session_will_reopen ? t('ui.common.yes', 'Yes') : t('ui.common.no', 'No')}

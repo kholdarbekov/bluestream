@@ -5,7 +5,6 @@ Provides business intelligence, reporting, and predictive analytics
 
 from datetime import datetime, timedelta, UTC
 from typing import Dict, Any, List
-from decimal import Decimal
 from flask import current_app
 from sqlalchemy import func, case
 import pandas as pd
@@ -20,6 +19,7 @@ from business_app.models.delivery import Delivery
 from business_app.models.product import Product
 from business_app.models.analytics import UserBehavior
 from business_app.models.order import OrderItem
+from business_app.utils.timezone_utils import ensure_utc
 from shared.enums import OrderStatus, DeliveryStatus, UserStatus, UserType, EntitySubtype
 from shared import business_config
 from business_app import db
@@ -760,14 +760,19 @@ class AnalyticsService:
         factors = {"days_since_last_order": 0, "order_frequency": 0, "avg_order_value": 0, "delivery_issues": 0}
 
         # Days since last order
+        # ensure_utc() normalizes both operands before subtracting -- Postgres
+        # always returns timezone-aware datetimes for these DateTime(timezone=True)
+        # columns, but SQLite (used by the test suite) silently drops tzinfo on
+        # read, which would otherwise raise "can't subtract offset-naive and
+        # offset-aware datetimes" here.
         if stats.get("last_order_date"):
-            days_since_last = (datetime.now(UTC) - stats["last_order_date"]).days
+            days_since_last = (datetime.now(UTC) - ensure_utc(stats["last_order_date"])).days
             factors["days_since_last_order"] = min(days_since_last / 30, 1.0)
         else:
             factors["days_since_last_order"] = 1.0
 
         # Order frequency
-        user_age_months = max(1, (datetime.now(UTC) - user_created_at).days / 30)
+        user_age_months = max(1, (datetime.now(UTC) - ensure_utc(user_created_at)).days / 30)
         order_frequency = stats.get("order_count", 0) / user_age_months
         factors["order_frequency"] = max(0, 1 - (order_frequency / 4))
 
@@ -785,7 +790,15 @@ class AnalyticsService:
         # Weighted average of factors
         weights = {"days_since_last_order": 0.4, "order_frequency": 0.3, "avg_order_value": 0.2, "delivery_issues": 0.1}
 
-        probability = sum(factors[factor] * Decimal(str(weights[factor])) for factor in factors)
+        # factors[factor] can be a plain float/int (days_since_last_order,
+        # order_frequency, delivery_issues) or a Decimal (avg_order_value,
+        # derived from a Numeric column average on Postgres) depending on
+        # which branch above set it. Coerce to float before combining with
+        # the float weight -- Decimal doesn't support mixed-type arithmetic
+        # with float in either operand position, so a bare
+        # `factors[factor] * weights[factor]` still TypeErrors whenever
+        # avg_order_value resolves to a Decimal.
+        probability = sum(float(factors[factor]) * weights[factor] for factor in factors)
         return min(max(probability, 0.0), 1.0)
 
     def _calculate_user_churn_probability_optimized(self, user_id: int) -> float:
@@ -1444,8 +1457,48 @@ class AnalyticsService:
         return {"total_routes": 0, "average_stops_per_route": 0, "average_delivery_time": 0}
 
     def _get_driver_performance_metrics(self, start_date: datetime, end_date: datetime) -> Dict[str, Any]:
-        """Get driver performance metrics - placeholder"""
-        return {"total_drivers": 0, "average_deliveries_per_driver": 0, "top_performers": []}
+        """Get driver performance metrics, aggregated per driver for the period.
+
+        Reuses `DeliveryService.compute_driver_metrics` (shared with the
+        `generate_driver_performance_report` Celery task) so per-driver
+        metrics are computed the same way in both places.
+        """
+        from business_app.services.delivery_service import DeliveryService
+
+        deliveries = Delivery.query.filter(
+            Delivery.created_at.between(start_date, end_date),
+            Delivery.delivery_person_id.isnot(None),
+        ).all()
+
+        deliveries_by_driver: Dict[int, List[Delivery]] = {}
+        for delivery in deliveries:
+            deliveries_by_driver.setdefault(delivery.delivery_person_id, []).append(delivery)
+
+        total_drivers = len(deliveries_by_driver)
+        if total_drivers == 0:
+            return {"total_drivers": 0, "average_deliveries_per_driver": 0, "top_performers": []}
+
+        drivers_by_id = {user.id: user for user in User.query.filter(User.id.in_(deliveries_by_driver.keys())).all()}
+
+        performers = []
+        for driver_id, driver_deliveries in deliveries_by_driver.items():
+            metrics = DeliveryService.compute_driver_metrics(driver_deliveries)
+            driver = drivers_by_id.get(driver_id)
+            performers.append(
+                {
+                    "driver_id": driver_id,
+                    "driver_name": driver.full_name if driver else None,
+                    **metrics,
+                }
+            )
+
+        performers.sort(key=lambda p: p["successful_deliveries"], reverse=True)
+
+        return {
+            "total_drivers": total_drivers,
+            "average_deliveries_per_driver": round(len(deliveries) / total_drivers, 2),
+            "top_performers": performers[:5],
+        }
 
     def _get_delivery_geographic_patterns(self, start_date: datetime, end_date: datetime) -> Dict[str, Any]:
         """Get delivery geographic patterns"""

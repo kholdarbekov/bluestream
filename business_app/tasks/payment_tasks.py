@@ -254,13 +254,6 @@ def reconcile_pending_payments():
     return counts
 
 
-@shared_task(time_limit=300, soft_time_limit=270)
-def process_pending_payments():
-    """Deprecated alias kept for in-flight beat schedules. Delegates to reconcile_pending_payments."""
-    logger.info("process_pending_payments is deprecated; delegating to reconcile_pending_payments")
-    return reconcile_pending_payments()
-
-
 @shared_task(bind=True, max_retries=3, time_limit=300, soft_time_limit=270)
 def process_refund(self, payment_id: int, amount: int, reason: str = None):
     """Process payment refund"""
@@ -508,71 +501,6 @@ def send_cod_reconciliation_reminders(self):
 
 # NOTE: process_loyalty_points_payment task removed — loyalty points are spent
 # only on rewards (LoyaltyReward.points_cost), never as a direct payment method.
-
-
-@shared_task(time_limit=300, soft_time_limit=270)
-def generate_payment_analytics_report():
-    """Generate daily payment analytics report"""
-    try:
-        logger.info("Generating payment analytics report")
-
-        end_date = datetime.now(timezone.utc)
-        start_date = end_date - timedelta(days=1)
-
-        # Payment volume metrics
-        total_payments = Payment.query.filter(Payment.created_at.between(start_date, end_date)).count()
-
-        successful_payments = Payment.query.filter(
-            Payment.created_at.between(start_date, end_date), Payment.status == PaymentStatus.COMPLETED
-        ).count()
-
-        failed_payments = Payment.query.filter(
-            Payment.created_at.between(start_date, end_date), Payment.status == PaymentStatus.FAILED
-        ).count()
-
-        # Payment method breakdown
-        from sqlalchemy import func
-
-        method_breakdown = (
-            db.session.query(Payment.payment_method, func.count(Payment.id), func.sum(Payment.amount))
-            .filter(Payment.created_at.between(start_date, end_date), Payment.status == PaymentStatus.COMPLETED)
-            .group_by(Payment.payment_method)
-            .all()
-        )
-
-        # Total revenue
-        total_revenue = (
-            db.session.query(func.sum(Payment.amount))
-            .filter(Payment.created_at.between(start_date, end_date), Payment.status == PaymentStatus.COMPLETED)
-            .scalar()
-            or 0
-        )
-
-        report = {
-            "date": start_date.date().isoformat(),
-            "total_payments": total_payments,
-            "successful_payments": successful_payments,
-            "failed_payments": failed_payments,
-            "success_rate": (successful_payments / total_payments * 100) if total_payments > 0 else 0,
-            "total_revenue": float(total_revenue),
-            "payment_methods": [
-                {"method": method.value, "count": count, "revenue": float(revenue)}
-                for method, count, revenue in method_breakdown
-            ],
-        }
-
-        # Store report in database or send to analytics service
-        from business_app.services.analytics_service import AnalyticsService
-
-        analytics_service = AnalyticsService()
-        analytics_service.store_payment_analytics_report(report)
-
-        logger.info("Payment analytics report generated successfully")
-        return report
-
-    except Exception as e:
-        logger.error(f"Error generating payment analytics report: {e}")
-        return {"error": str(e)}
 
 
 @shared_task(bind=True, max_retries=3, time_limit=300, soft_time_limit=270)

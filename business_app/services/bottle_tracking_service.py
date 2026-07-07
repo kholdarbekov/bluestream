@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from flask import current_app
 from sqlalchemy import func, or_
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import joinedload
 
 from business_app import db
@@ -61,17 +62,29 @@ class BottleTrackingService:
 
     @staticmethod
     def get_or_create_balance(user_id: int, address_id: int) -> BottleBalance:
-        """Get existing balance or create a new zero-balance record."""
-        balance = BottleBalance.query.filter_by(user_id=user_id, address_id=address_id).first()
-        if not balance:
-            balance = BottleBalance(
-                user_id=user_id,
-                address_id=address_id,
-                balance=Decimal("0.00"),
-            )
-            db.session.add(balance)
-            db.session.flush()
-        return balance
+        """Get the balance row LOCKED FOR UPDATE, or create a zero row then lock it.
+
+        Locking serialises concurrent read-modify-write on the same (user_id, address_id)
+        pair — matching cash_collection_service's pattern — so concurrent
+        deliveries/returns/adjustments cannot lose updates. The
+        uq_bottle_balance_user_address constraint makes the create race safe via
+        ON CONFLICT DO NOTHING + re-select. Runs inside the caller's transaction;
+        does NOT commit.
+        """
+        balance = BottleBalance.query.filter_by(user_id=user_id, address_id=address_id).with_for_update().first()
+        if balance is not None:
+            return balance
+
+        # Row doesn't exist yet — insert tolerating a concurrent insert, then
+        # re-select FOR UPDATE so we hold the lock on whichever row won.
+        insert_stmt = (
+            pg_insert(BottleBalance.__table__)
+            .values(user_id=user_id, address_id=address_id, balance=Decimal("0.00"))
+            .on_conflict_do_nothing(index_elements=["user_id", "address_id"])
+        )
+        db.session.execute(insert_stmt)
+        db.session.flush()
+        return BottleBalance.query.filter_by(user_id=user_id, address_id=address_id).with_for_update().first()
 
     def _update_balance(
         self,

@@ -1,0 +1,41 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Kam zaxira ogohlantirishi - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Kam zaxira ogohlantirishi</h1>
+{% endblock %}
+
+{% block content %}
+<h2>{{ product_name }}</h2>
+
+<div class="{{ 'warning-box' if is_out_of_stock else 'info-box' }}">
+    {% if is_out_of_stock %}
+    <p>Ushbu mahsulot zaxirasi tugagan.</p>
+    {% else %}
+    <p>Ushbu mahsulot zaxirasi kamaymoqda.</p>
+    {% endif %}
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>SKU</th>
+        <td>{{ sku or "N/A" }}</td>
+    </tr>
+    <tr>
+        <th>Joriy zaxira</th>
+        <td>{{ current_stock }}</td>
+    </tr>
+    <tr>
+        <th>Mavjud miqdor</th>
+        <td>{{ available_quantity }}</td>
+    </tr>
+    <tr>
+        <th>Minimal daraja</th>
+        <td>{{ min_stock_level }}</td>
+    </tr>
+</table>
+
+<hr class="divider">
+<p>Iltimos, zaxirani tekshiring va zarur bo'lsa qayta buyurtma bering.</p>
+{% endblock %}

@@ -92,8 +92,8 @@ transliterate==1.10.2
 # Web Server
 gunicorn==23.0.0
 gevent==25.5.1
-uvloop
-asyncpg
+uvloop==0.22.1
+asyncpg==0.31.0
 
 # Monitoring and Health Checks
 psutil==7.0.0
@@ -128,9 +128,9 @@ markdownify==1.2.2
 # Scheduling
 APScheduler==3.11.0
 
-debugpy
+debugpy==1.8.21
 eskiz_sms==0.2.4
 python-magic==0.4.27
 
-flask-talisman
-python-json-logger
+flask-talisman==1.1.0
+python-json-logger==4.1.0

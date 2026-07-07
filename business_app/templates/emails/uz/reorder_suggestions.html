@@ -1,0 +1,37 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Qayta buyurtma takliflari - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Qayta buyurtma takliflari</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Minimal zaxiradan past mahsulotlar</h2>
+
+<div class="warning-box">
+    <p>{{ total_products }} ta mahsulot qayta buyurtma qilinishi kerak.</p>
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Mahsulot</th>
+        <th>SKU</th>
+        <th>Joriy zaxira</th>
+        <th>Minimal daraja</th>
+        <th>Tavsiya etilgan miqdor</th>
+    </tr>
+    {% for product in products_to_reorder %}
+    <tr>
+        <td>{{ product.product_name }}</td>
+        <td>{{ product.sku or "N/A" }}</td>
+        <td>{{ product.current_stock }}</td>
+        <td>{{ product.min_stock_level }}</td>
+        <td>{{ product.suggested_quantity }}</td>
+    </tr>
+    {% endfor %}
+</table>
+
+<hr class="divider">
+<p>Bu faqat takliflar -- hech qanday xarid buyurtmasi avtomatik ravishda berilmagan.</p>
+{% endblock %}

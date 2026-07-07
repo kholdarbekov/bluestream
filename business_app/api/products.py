@@ -14,6 +14,7 @@ from business_app.utils.service_factory import get_product_service, get_review_s
 from business_app.utils.helpers import get_current_language
 from business_app.utils.translations import get_translation
 from business_app.utils.exceptions import ValidationError, NotFoundError, ConflictError, ForbiddenError
+from business_app.utils.request_helpers import parse_bool_arg
 
 # Import proper serializers
 from business_app.serializers.product_serializers import (
@@ -90,11 +91,11 @@ def get_products():
         search = request.args.get("search", "").strip()
         sort_by = request.args.get("sort_by", "name")  # name, price, rating, popularity
         sort_order = request.args.get("sort_order", "asc")  # asc, desc
-        is_featured = request.args.get("is_featured", type=bool)
+        is_featured = parse_bool_arg("is_featured")
         min_price = request.args.get("min_price", type=float)
         max_price = request.args.get("max_price", type=float)
         language = get_current_language()
-        in_stock_only = request.args.get("in_stock_only", type=bool, default=False)
+        in_stock_only = parse_bool_arg("in_stock_only", default=False)
 
         # Get current user for personalized pricing
         current_user = None

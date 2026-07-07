@@ -899,9 +899,6 @@ class ProfileKeyboards:
                 {'text': i18n.get('telegram.profile.notifications', language), 'callback_data': 'notification_settings'}
             ],
             [
-                {'text': i18n.get('telegram.profile.payment_methods', language), 'callback_data': 'payment_methods'}
-            ],
-            [
                 {'text': i18n.get('telegram.profile.my_bottles', language), 'callback_data': 'my_bottles'}
             ],
             [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_main'}]
@@ -1191,15 +1188,6 @@ class PaymentKeyboards:
     """Payment-related keyboards for Telegram Payments integration"""
 
     @staticmethod
-    def payment_pending(order_id: int, language: str = 'en') -> InlineKeyboardMarkup:
-        """Shown while waiting for payment completion"""
-        buttons = [
-            [{'text': i18n.get('telegram.payment.cancel', language),
-              'callback_data': f'payment_cancel_{order_id}'}]
-        ]
-        return KeyboardBuilder.build_inline_keyboard(buttons)
-
-    @staticmethod
     def payment_success(order_id: int, language: str = 'en') -> InlineKeyboardMarkup:
         """Shown after successful payment"""
         buttons = [
@@ -1224,11 +1212,6 @@ class PaymentKeyboards:
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod
-    def payment_cancelled(order_id: int, language: str = 'en') -> InlineKeyboardMarkup:
-        """Shown when user cancels payment - same as failed but different context"""
-        return PaymentKeyboards.payment_failed(order_id, language)
-
-    @staticmethod
     def payment_link(payment_url: str, language: str = 'en') -> InlineKeyboardMarkup:
         """Payment link with Pay button and Back button"""
         buttons = [
@@ -1242,24 +1225,3 @@ class PaymentKeyboards:
             )]
         ]
         return InlineKeyboardMarkup(buttons)
-
-
-class AdminKeyboards:
-    """Admin panel keyboards"""
-
-    @staticmethod
-    def admin_menu(language: str = 'en') -> InlineKeyboardMarkup:
-        """Admin panel main menu"""
-        buttons = [
-            [
-                {'text': i18n.get('telegram.admin.orders', language), 'callback_data': 'admin_orders'},
-                {'text': i18n.get('telegram.admin.analytics', language), 'callback_data': 'admin_analytics'}
-            ],
-            [
-                {'text': i18n.get('telegram.admin.users', language), 'callback_data': 'admin_users'},
-                {'text': i18n.get('telegram.admin.products', language), 'callback_data': 'admin_products'}
-            ],
-            [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_main'}]
-        ]
-
-        return KeyboardBuilder.build_inline_keyboard(buttons)

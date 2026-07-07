@@ -47,6 +47,44 @@ PAYLOADS = {
         "today_orders": 5,
         "today_revenue": 250000,
     },
+    # Mirrors business_app/tasks/inventory_tasks.py sends (task C3).
+    "low_stock_alert": {
+        "product_id": 42,
+        "product_name": "19L Aqua Element",
+        "sku": "AE-19L-001",
+        "current_stock": 3,
+        "available_quantity": 3,
+        "min_stock_level": 10,
+        "is_out_of_stock": False,
+    },
+    "inventory_report": {
+        "report_type": "daily",
+        "generated_at": "2026-07-01T06:00:00+00:00",
+        "total_products": 25,
+        "low_stock_count": 1,
+        "out_of_stock_count": 1,
+        "total_inventory_value": 12500000.0,
+        "low_stock_products": [
+            {"id": 1, "name": "19L Aqua Element", "sku": "AE-19L-001", "stock": 5, "min_level": 10}
+        ],
+        "out_of_stock_products": [{"id": 2, "name": "0.5L Aqua Element", "sku": "AE-05L-001", "stock": 0}],
+    },
+    "reorder_suggestions": {
+        "products_to_reorder": [
+            {
+                "product_id": 1,
+                "product_name": "19L Aqua Element",
+                "sku": "AE-19L-001",
+                "current_stock": 5,
+                "available_quantity": 5,
+                "min_stock_level": 10,
+                "max_stock_level": 200,
+                "suggested_quantity": 195,
+            }
+        ],
+        "total_products": 1,
+        "generated_at": "2026-07-01T06:30:00+00:00",
+    },
 }
 
 # Unique per-language header text — proves the correct language file rendered.
@@ -60,6 +98,17 @@ MARKERS = {
     "churn_alert": {"uz": "Mijozlar ketishi", "en": "Customer Churn", "ru": "Отток клиентов"},
     "demand_forecast": {"uz": "Talab prognozi", "en": "Demand Forecast", "ru": "Прогноз спроса"},
     "kpi_alert": {"uz": "KPI", "en": "KPI", "ru": "KPI"},
+    "low_stock_alert": {
+        "uz": "Kam zaxira ogohlantirishi",
+        "en": "Low Stock Alert",
+        "ru": "Предупреждение о низком запасе",
+    },
+    "inventory_report": {"uz": "Inventar hisoboti", "en": "Inventory Report", "ru": "Отчёт по инвентарю"},
+    "reorder_suggestions": {
+        "uz": "Qayta buyurtma takliflari",
+        "en": "Reorder Suggestions",
+        "ru": "Предложения по дозаказу",
+    },
 }
 
 # A scalar value from each payload that must appear verbatim in the body.
@@ -69,6 +118,9 @@ SCALAR = {
     "churn_alert": "3",
     "demand_forecast": "900",
     "kpi_alert": "5",
+    "low_stock_alert": "AE-19L-001",
+    "inventory_report": "19L Aqua Element",
+    "reorder_suggestions": "195",
 }
 
 _CASES = [(rt, lang) for rt in PAYLOADS for lang in ("uz", "en", "ru")]

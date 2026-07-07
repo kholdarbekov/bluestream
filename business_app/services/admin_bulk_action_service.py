@@ -13,7 +13,8 @@ from business_app.models.review import Review
 from business_app.models.subscription import Subscription
 from business_app.models.user import User
 from business_app.services.delivery_service import DeliveryService
-from shared.enums import DeliveryStatus, OrderStatus, SubscriptionStatus, UserRole, UserStatus
+from shared.enums import OrderStatus, SubscriptionStatus, UserRole, UserStatus
+from shared.status_transitions import is_valid_order_transition
 
 
 class AdminBulkActionService:
@@ -170,9 +171,12 @@ class AdminBulkActionService:
                         continue
 
                 elif action == "confirm":
-                    if order.status == OrderStatus.PENDING:
-                        order.status = OrderStatus.CONFIRMED
-                        order.confirmed_at = datetime.now(UTC)
+                    if is_valid_order_transition(order.status, OrderStatus.CONFIRMED):
+                        from business_app.services.order_service import OrderService
+
+                        OrderService().update_order_status(
+                            order.id, OrderStatus.CONFIRMED, updated_by=admin_id, notes=reason
+                        )
                     else:
                         failed_count += 1
                         errors.append(
@@ -191,9 +195,12 @@ class AdminBulkActionService:
                         continue
 
                 elif action == "mark_delivered":
-                    if order.status in [OrderStatus.PREPARING, OrderStatus.OUT_FOR_DELIVERY]:
-                        order.status = OrderStatus.DELIVERED
-                        order.delivered_at = datetime.now(UTC)
+                    if is_valid_order_transition(order.status, OrderStatus.DELIVERED):
+                        from business_app.services.order_service import OrderService
+
+                        OrderService().update_order_status(
+                            order.id, OrderStatus.DELIVERED, updated_by=admin_id, notes=reason
+                        )
                     else:
                         failed_count += 1
                         errors.append(
@@ -418,8 +425,13 @@ class AdminBulkActionService:
                     continue
 
                 elif action == "mark_delivered":
-                    delivery.status = DeliveryStatus.DELIVERED
-                    delivery.delivered_at = datetime.now(UTC)
+                    from business_app.services.order_service import OrderService
+
+                    OrderService().update_order_status(
+                        delivery.order_id, OrderStatus.DELIVERED, updated_by=admin_id, notes=reason
+                    )
+                    success_count += 1
+                    continue
 
                 db.session.commit()
                 success_count += 1

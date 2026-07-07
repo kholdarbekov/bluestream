@@ -1,0 +1,77 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Inventory Report - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Inventory Report</h1>
+{% endblock %}
+
+{% block content %}
+<h2>{{ report_type | capitalize }} Inventory Report</h2>
+
+<div class="info-box">
+    <p>Generated: <strong>{{ generated_at }}</strong></p>
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Total products</th>
+        <td>{{ total_products }}</td>
+    </tr>
+    <tr>
+        <th>Low stock products</th>
+        <td>{{ low_stock_count }}</td>
+    </tr>
+    <tr>
+        <th>Out of stock products</th>
+        <td>{{ out_of_stock_count }}</td>
+    </tr>
+    <tr class="total-row">
+        <th>Total inventory value</th>
+        <td>{{ total_inventory_value }} UZS</td>
+    </tr>
+</table>
+
+{% if out_of_stock_products %}
+<hr class="divider">
+<h2>Out of stock</h2>
+<table class="details-table">
+    <tr>
+        <th>Product</th>
+        <th>SKU</th>
+        <th>Stock</th>
+    </tr>
+    {% for product in out_of_stock_products %}
+    <tr>
+        <td>{{ product.name }}</td>
+        <td>{{ product.sku or "N/A" }}</td>
+        <td>{{ product.stock }}</td>
+    </tr>
+    {% endfor %}
+</table>
+{% endif %}
+
+{% if low_stock_products %}
+<hr class="divider">
+<h2>Low stock</h2>
+<table class="details-table">
+    <tr>
+        <th>Product</th>
+        <th>SKU</th>
+        <th>Stock</th>
+        <th>Min level</th>
+    </tr>
+    {% for product in low_stock_products %}
+    <tr>
+        <td>{{ product.name }}</td>
+        <td>{{ product.sku or "N/A" }}</td>
+        <td>{{ product.stock }}</td>
+        <td>{{ product.min_level }}</td>
+    </tr>
+    {% endfor %}
+</table>
+{% endif %}
+
+<hr class="divider">
+<p>This report was generated automatically. Use the admin dashboard for the full breakdown.</p>
+{% endblock %}

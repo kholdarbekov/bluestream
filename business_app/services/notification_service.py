@@ -3864,6 +3864,39 @@ Current balance: {balance} AquaCoins""",
             },
         },
     },
+    # Delivery delay alert - Email (sent to admins/managers by
+    # monitor_delivery_delays; default channel routing for this ad-hoc
+    # notification type falls back to email since it has no NotificationType
+    # enum member / preference mapping).
+    ("delivery_delay_alert", "email"): {
+        "name": "delivery_delay_alert_email",
+        "translations": {
+            "uz": {
+                "subject": "Yetkazib berish kechikmoqda - {{company_name}}",
+                "content": """<h2>Yetkazib berish kechikmoqda</h2>
+<p>#{order_number} buyurtma (yetkazib berish #{delivery_id}) kutilgan vaqtdan {delay_minutes} daqiqa kechikmoqda.</p>
+<p><strong>Haydovchi:</strong> {driver_name}</p>
+<p><strong>Mijoz telefoni:</strong> {customer_phone}</p>
+<p>Iltimos, holatni tekshiring va zarur bo'lsa mijoz bilan bog'laning.</p>""",
+            },
+            "en": {
+                "subject": "Delivery Delay Alert - {{company_name}}",
+                "content": """<h2>Delivery Delay Alert</h2>
+<p>Order #{order_number} (delivery #{delivery_id}) is {delay_minutes} minutes overdue.</p>
+<p><strong>Driver:</strong> {driver_name}</p>
+<p><strong>Customer phone:</strong> {customer_phone}</p>
+<p>Please review the delivery status and contact the customer if needed.</p>""",
+            },
+            "ru": {
+                "subject": "Задержка доставки - {{company_name}}",
+                "content": """<h2>Задержка доставки</h2>
+<p>Заказ #{order_number} (доставка #{delivery_id}) просрочен на {delay_minutes} минут.</p>
+<p><strong>Водитель:</strong> {driver_name}</p>
+<p><strong>Телефон клиента:</strong> {customer_phone}</p>
+<p>Пожалуйста, проверьте статус доставки и при необходимости свяжитесь с клиентом.</p>""",
+            },
+        },
+    },
 }
 
 

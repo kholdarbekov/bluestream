@@ -13,6 +13,25 @@ vi.mock('../../components/AddressMapPicker', () => ({
   default: () => <div data-testid="address-map-picker">Map</div>,
 }));
 
+// This page was hardcoded English before i18n was added; without an initialized
+// i18next instance the real hook can't interpolate {{token}} placeholders in
+// defaultValue strings (e.g. the "Linked user: {{name}} ({{phone}})" text), so
+// mock a minimal t() that mirrors real i18next's interpolation behavior.
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key, opts) => {
+      let value = (opts && opts.defaultValue) || key;
+      if (opts) {
+        value = value.replace(/\{\{(\w+)\}\}/g, (_, token) => (
+          // eslint-disable-next-line security/detect-object-injection
+          opts[token] !== undefined ? String(opts[token]) : `{{${token}}}`
+        ));
+      }
+      return value;
+    },
+  }),
+}));
+
 vi.mock('../../services/adminService', () => ({
   __esModule: true,
   default: {

@@ -551,7 +551,7 @@ class InventoryService:
     def _send_low_stock_alert(self, product: Product):
         """Send low stock alert for a product"""
         try:
-            from business_app.tasks.notification_tasks import send_low_stock_alert_task
+            from business_app.tasks.inventory_tasks import send_low_stock_alert_task
 
             send_low_stock_alert_task.delay(product.id)
         except Exception:

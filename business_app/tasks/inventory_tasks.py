@@ -6,13 +6,14 @@ import logging
 from datetime import datetime, timezone
 
 from celery import shared_task
-from flask import current_app
 
 from business_app.services.inventory_service import get_inventory_service
 from business_app.models.product import Product
+from business_app.models.user import User
 from business_app.services.notification_service import NotificationService
 from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
 from business_app.utils.helpers import get_current_language
+from shared.enums import UserRole, UserStatus
 
 logger = logging.getLogger(__name__)
 
@@ -80,41 +81,24 @@ def send_low_stock_alert_task(self, product_id: int):
             "is_out_of_stock": inventory_status["is_out_of_stock"],
         }
 
-        # Send notification to administrators
+        # Send notification to administrators/managers across their preferred
+        # channels (email/telegram/etc, per NotificationService.send_notification
+        # -- the only real dispatch entry point; there is no raw
+        # recipient_email/chat_id API on NotificationService).
         notification_service = NotificationService()
+        admin_users = User.query.filter(
+            User.role.in_([UserRole.ADMIN, UserRole.MANAGER]), User.status == UserStatus.ACTIVE
+        ).all()
 
-        # Send email to administrators
-        admin_emails = current_app.config.get("ADMIN_EMAILS", [])
-        for email in admin_emails:
+        for admin in admin_users:
             try:
-                notification_service.send_email_notification(
-                    recipient_email=email,
-                    template="low_stock_alert",
+                notification_service.send_notification(
+                    admin.id,
+                    "low_stock_alert",
                     template_data=notification_data,
-                    subject=f"Low Stock Alert: {product.get_translated('name', language)}",
                 )
             except Exception as e:
-                logger.error(f"Failed to send low stock email to {email}: {e}")
-
-        # Send Telegram notification if configured
-        try:
-            telegram_chat_id = current_app.config.get("ADMIN_TELEGRAM_CHAT_ID")
-            if telegram_chat_id:
-                message = (
-                    f"🚨 LOW STOCK ALERT\n\n"
-                    f"Product: {product.get_translated('name', language)}\n"
-                    f"SKU: {product.sku or 'N/A'}\n"
-                    f"Current Stock: {inventory_status['current_stock']}\n"
-                    f"Available: {inventory_status['available_quantity']}\n"
-                    f"Minimum Level: {inventory_status['min_stock_level']}\n"
-                )
-
-                if inventory_status["is_out_of_stock"]:
-                    message += "\n❌ PRODUCT IS OUT OF STOCK"
-
-                notification_service.send_telegram_notification(chat_id=telegram_chat_id, message=message)
-        except Exception as e:
-            logger.error(f"Failed to send low stock Telegram notification: {e}")
+                logger.error(f"Failed to send low stock alert to admin {admin.id}: {e}")
 
         # Log the alert
         audit_logger.log_event(
@@ -195,21 +179,26 @@ def generate_inventory_report_task(self, report_type: str = "daily"):
             "out_of_stock_products": out_of_stock_products[:10],  # Top 10
         }
 
-        # Send report to administrators
-        admin_emails = current_app.config.get("ADMIN_EMAILS", [])
-        if admin_emails:
+        # Send report to administrators/managers via the real notification
+        # dispatch API (NotificationService.send_notification) -- see
+        # send_low_stock_alert_task above for why this replaced the
+        # nonexistent send_email_notification/ADMIN_EMAILS path.
+        admin_users = User.query.filter(
+            User.role.in_([UserRole.ADMIN, UserRole.MANAGER]), User.status == UserStatus.ACTIVE
+        ).all()
+
+        if admin_users:
             notification_service = NotificationService()
 
-            for email in admin_emails:
+            for admin in admin_users:
                 try:
-                    notification_service.send_email_notification(
-                        recipient_email=email,
-                        template="inventory_report",
+                    notification_service.send_notification(
+                        admin.id,
+                        "inventory_report",
                         template_data=report_data,
-                        subject=f"Inventory Report - {report_type.title()}",
                     )
                 except Exception as e:
-                    logger.error(f"Failed to send inventory report to {email}: {e}")
+                    logger.error(f"Failed to send inventory report to admin {admin.id}: {e}")
 
         # Log report generation
         audit_logger.log_event(
@@ -289,9 +278,15 @@ def auto_reorder_products_task(self):
                 continue
 
         if products_to_reorder:
-            # Send reorder suggestions to administrators
-            admin_emails = current_app.config.get("ADMIN_EMAILS", [])
-            if admin_emails:
+            # Send reorder suggestions to administrators/managers via the
+            # real notification dispatch API -- see send_low_stock_alert_task
+            # above for why this replaced the nonexistent
+            # send_email_notification/ADMIN_EMAILS path.
+            admin_users = User.query.filter(
+                User.role.in_([UserRole.ADMIN, UserRole.MANAGER]), User.status == UserStatus.ACTIVE
+            ).all()
+
+            if admin_users:
                 notification_service = NotificationService()
 
                 report_data = {
@@ -300,16 +295,15 @@ def auto_reorder_products_task(self):
                     "generated_at": datetime.now(timezone.utc).isoformat(),
                 }
 
-                for email in admin_emails:
+                for admin in admin_users:
                     try:
-                        notification_service.send_email_notification(
-                            recipient_email=email,
-                            template="reorder_suggestions",
+                        notification_service.send_notification(
+                            admin.id,
+                            "reorder_suggestions",
                             template_data=report_data,
-                            subject=f"Reorder Suggestions - {len(products_to_reorder)} Products",
                         )
                     except Exception as e:
-                        logger.error(f"Failed to send reorder suggestions to {email}: {e}")
+                        logger.error(f"Failed to send reorder suggestions to admin {admin.id}: {e}")
 
             # Log reorder suggestions
             audit_logger.log_event(

@@ -23,6 +23,7 @@ from business_app.utils.decorators import (
     rate_limit,
     rate_limit_by_telegram_id,
     log_request,
+    verify_webhook_signature,
 )
 from business_app.middleware import jwt_required_with_refresh
 from business_app.utils.validators import phone_validator
@@ -848,6 +849,7 @@ def verify_email():
 
 @auth_bp.route("/verify-phone", methods=["POST"])
 @auth_bp.route("/verify-otp", methods=["POST"])  # Alias for backwards compatibility
+@jwt_required()
 @rate_limit(30, 3600)
 @validate_json(["otp"])
 @handle_exceptions
@@ -872,10 +874,6 @@ def verify_phone():
             otp:
               type: string
               example: "123456"
-            user_id:
-              type: integer
-              description: Required when using /verify-otp endpoint without JWT
-              example: 1
     responses:
       200:
         description: Phone verified and updated successfully
@@ -886,13 +884,10 @@ def verify_phone():
     """
     data = request.get_json()
 
-    # Support both JWT-based and user_id-based verification
-    if "/verify-otp" in request.path and "user_id" in data:
-        # Legacy verify-otp endpoint behavior
-        user_id = data["user_id"]
-    else:
-        # JWT-based verification
-        user_id = get_jwt_identity()
+    # Identity always comes from the authenticated token — no body-supplied
+    # user_id (removed IDOR: the legacy /verify-otp alias used to trust a
+    # client-supplied user_id with no auth).
+    user_id = get_jwt_identity()
 
     try:
         auth_service = get_auth_service()
@@ -1705,6 +1700,7 @@ def cancel_phone_change():
 
 
 @auth_bp.route("/telegram-login", methods=["POST"])
+@verify_webhook_signature()
 @rate_limit_by_telegram_id(100, 3600)  # 100 per hour PER TELEGRAM USER (not shared IP)
 @validate_json(["telegram_id"])
 @handle_exceptions

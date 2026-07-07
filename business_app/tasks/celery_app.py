@@ -105,6 +105,13 @@ def make_celery(app=None):
             "task": "business_app.tasks.delivery_tasks.send_delivery_reminders",
             "schedule": crontab(minute="*/30"),
         },
+        # Alert admins on ETA-overdue in-flight deliveries (>30 min late)
+        # every ~30 minutes, offset from delivery-reminders.
+        "monitor-delivery-delays": {
+            "task": "business_app.tasks.delivery_tasks.monitor_delivery_delays",
+            "schedule": crontab(minute="15,45"),
+            "options": {"time_limit": 600},
+        },
         # Surface "stranded" deliveries (pool status while still assigned to a
         # driver) every 15 minutes via metric + warning log.
         "monitor-stranded-deliveries": {
@@ -133,6 +140,12 @@ def make_celery(app=None):
             "task": "business_app.tasks.analytics_tasks.generate_daily_analytics_report",
             "schedule": crontab(hour=23, minute=0),
         },
+        # Day-over-day order/revenue/delivery-failure anomaly alerts to admins.
+        "monitor-business-kpis": {
+            "task": "business_app.tasks.analytics_tasks.monitor_business_kpis",
+            "schedule": crontab(hour=23, minute=30),
+            "options": {"time_limit": 3600},
+        },
         # Clean up old notifications weekly
         "cleanup-old-notifications": {
             "task": "business_app.tasks.notification_tasks.cleanup_old_notifications",
@@ -142,6 +155,13 @@ def make_celery(app=None):
         "auto-confirm-orders": {
             "task": "business_app.tasks.order_tasks.auto_confirm_pending_orders",
             "schedule": crontab(minute="*/10"),
+        },
+        # Scan for unusual order patterns (>3 orders/user/hour, oversized
+        # orders, zero-item orders) hourly and alert admins on high-severity hits.
+        "monitor-order-anomalies": {
+            "task": "business_app.tasks.order_tasks.monitor_order_anomalies",
+            "schedule": crontab(minute=5),
+            "options": {"time_limit": 600},
         },
         # Send subscription renewal reminders
         "subscription-renewal-reminders": {
@@ -158,10 +178,35 @@ def make_celery(app=None):
             "task": "business_app.tasks.payment_tasks.retry_failed_payments",
             "schedule": crontab(hour=12, minute=0),  # Daily at noon
         },
+        # Delete PaymentTransaction rows older than 1 year (growth-prevention).
+        # Weekly is enough since these are pure audit-trail rows, not live state.
+        "cleanup-old-payment-records": {
+            "task": "business_app.tasks.payment_tasks.cleanup_old_payment_records",
+            "schedule": crontab(hour=3, minute=20, day_of_week=0),  # Sunday at 3:20 AM
+            "options": {"time_limit": 300},
+        },
         # Generate weekly business reports
         "weekly-business-report": {
             "task": "business_app.tasks.analytics_tasks.generate_weekly_business_report",
             "schedule": crontab(hour=8, minute=0, day_of_week=1),  # Monday at 8 AM
+        },
+        # Weekly demand forecast (sklearn linear-regression over historical
+        # order counts) emailed to admins/ops for inventory planning.
+        "generate-demand-forecast": {
+            "task": "business_app.tasks.analytics_tasks.generate_demand_forecast",
+            "schedule": crontab(hour=8, minute=30, day_of_week=1),  # Monday at 8:30 AM
+            "options": {"time_limit": 3600},
+        },
+        # Weekly churn-risk report emailed to admins/ops. Previously held back
+        # -- AnalyticsService._calculate_churn_from_stats mixed a plain float
+        # with a Decimal (weighted-sum TypeError) and separately subtracted a
+        # timezone-aware "now" from a possibly-naive stored datetime; both are
+        # fixed (float coercion + ensure_utc()) -- see
+        # tests/unit/test_admin_report_tasks_wiring.py.
+        "generate-churn-prediction-report": {
+            "task": "business_app.tasks.analytics_tasks.generate_churn_prediction_report",
+            "schedule": crontab(hour=8, minute=45, day_of_week=1),  # Monday at 8:45 AM
+            "options": {"time_limit": 3600},
         },
         # Update customer segments monthly
         "update-customer-segments": {
@@ -182,16 +227,71 @@ def make_celery(app=None):
                 "preserve_critical": os.getenv("AUDIT_LOG_PRESERVE_CRITICAL", "true").lower() == "true",
             },
         },
+        # Read-only audit-log storage/growth statistics, right after the
+        # weekly cleanup so the numbers reflect the just-trimmed table.
+        # The task itself carries no time_limit, so set one here.
+        "audit-log-statistics": {
+            "task": "business_app.tasks.audit_tasks.get_audit_log_statistics_task",
+            "schedule": crontab(hour=3, minute=30, day_of_week=0),  # Sunday at 3:30 AM
+            "options": {"time_limit": 300},
+        },
         # Clean up expired sessions daily at 4 AM
         "cleanup-expired-sessions": {
             "task": "business_app.tasks.session_tasks.cleanup_expired_sessions_task",
             "schedule": crontab(hour=4, minute=0),  # Daily at 4 AM
             "kwargs": {"batch_size": 1000},
         },
+        # Mark users inactive after a year of no login + deactivate their
+        # sessions (growth-prevention). Weekly is enough since inactivity is
+        # judged against a 1-year threshold.
+        "cleanup-inactive-users": {
+            "task": "business_app.tasks.session_tasks.cleanup_inactive_users_task",
+            "schedule": crontab(hour=3, minute=45, day_of_week=0),  # Sunday at 3:45 AM
+            "options": {"time_limit": 600},
+        },
+        # Remove orphaned sessions/tokens (sessions for deleted users, expired
+        # password-reset/verification tokens) daily just before the expired-
+        # sessions sweep.
+        "cleanup-orphaned-data": {
+            "task": "business_app.tasks.session_tasks.cleanup_orphaned_data_task",
+            "schedule": crontab(hour=3, minute=10),  # Daily at 3:10 AM
+            "options": {"time_limit": 600},
+        },
+        # Read-only threshold check over session/user cleanup backlog, run
+        # shortly after the expired-sessions cleanup so it reports a fresh
+        # picture of what that sweep left behind.
+        "session-cleanup-health-check": {
+            "task": "business_app.tasks.session_tasks.session_cleanup_health_check",
+            "schedule": crontab(hour=4, minute=15),  # Daily at 4:15 AM
+            "options": {"time_limit": 120},
+        },
         # Scan due-soon and overdue try-out bottle returns daily.
         "process-tryout-reminders": {
             "task": "tryouts.process_due_reminders",
             "schedule": crontab(hour=9, minute=30),
+        },
+        # Safety-net sweep for expired inventory reservations. Redis TTL
+        # already expires each reservation key on its own (~30 min default),
+        # so this is a daily backstop for any keys that slipped through
+        # without a TTL, not the primary expiry mechanism.
+        "cleanup-expired-inventory-reservations": {
+            "task": "business_app.tasks.inventory_tasks.cleanup_expired_inventory_reservations",
+            "schedule": crontab(hour=1, minute=10),  # Daily at 1:10 AM
+            "options": {"time_limit": 600},
+        },
+        # Daily low-stock/out-of-stock/inventory-value report emailed to admins.
+        "generate-inventory-report": {
+            "task": "business_app.tasks.inventory_tasks.generate_inventory_report_task",
+            "schedule": crontab(hour=6, minute=0),  # Daily at 6:00 AM
+            "options": {"time_limit": 600},
+        },
+        # Daily below-min-stock scan emailing reorder SUGGESTIONS to admins
+        # (does NOT place any order automatically). Runs just after the
+        # inventory report so both reflect the same morning snapshot.
+        "auto-reorder-products": {
+            "task": "business_app.tasks.inventory_tasks.auto_reorder_products_task",
+            "schedule": crontab(hour=6, minute=30),  # Daily at 6:30 AM
+            "options": {"time_limit": 600},
         },
         # INF-008: nightly Postgres backup. 02:30 UTC = 07:30 Tashkent —
         # off-peak. pg_dump → gzip → optional rclone offsite copy.
@@ -315,7 +415,6 @@ celery.conf.worker_disable_rate_limits = False
 # Per-task rate limits — prevents flooding external services (SMS, email, Telegram API)
 celery.conf.task_annotations = {
     # Bulk/promotional notifications — strictest limits
-    "business_app.tasks.notification_tasks.send_bulk_promotional_notification": {"rate_limit": "5/m"},
     "business_app.tasks.notification_tasks.send_bulk_notification_task": {"rate_limit": "10/m"},
     "business_app.tasks.notification_tasks.send_emergency_notification": {"rate_limit": "10/m"},
     # Individual notification sends

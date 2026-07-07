@@ -135,6 +135,22 @@ class EmailTemplateService:
             "en": "KPI Alert {date} - {company_name}",
             "ru": "KPI оповещение {date} - {company_name}",
         },
+        # Admin inventory management emails
+        "low_stock_alert": {
+            "uz": "Kam zaxira ogohlantirishi: {product_name} - {company_name}",
+            "en": "Low Stock Alert: {product_name} - {company_name}",
+            "ru": "Предупреждение о низком запасе: {product_name} - {company_name}",
+        },
+        "inventory_report": {
+            "uz": "Inventar hisoboti ({report_type}) - {company_name}",
+            "en": "Inventory Report ({report_type}) - {company_name}",
+            "ru": "Отчёт по инвентарю ({report_type}) - {company_name}",
+        },
+        "reorder_suggestions": {
+            "uz": "Qayta buyurtma takliflari: {total_products} ta mahsulot - {company_name}",
+            "en": "Reorder Suggestions: {total_products} products - {company_name}",
+            "ru": "Предложения по дозаказу: {total_products} товаров - {company_name}",
+        },
     }
 
     SUPPORTED_LANGUAGES = ["uz", "en", "ru"]

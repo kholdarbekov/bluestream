@@ -183,19 +183,3 @@ class TestNotificationTasks:
             channels = mock_service.send_notification.call_args.args[2]
             assert NotificationChannel.SMS not in channels
             assert NotificationChannel.TELEGRAM in channels
-
-    def test_send_daily_delivery_reminders_uses_email_not_sms(self, app):
-        with (
-            app.app_context(),
-            patch.object(notification_tasks.Delivery, "query") as mock_query,
-            patch("business_app.tasks.notification_tasks.NotificationService") as mock_service_cls,
-        ):
-            mock_delivery = MagicMock()
-            mock_query.filter.return_value.all.return_value = [mock_delivery]
-            mock_service = mock_service_cls.return_value
-
-            notification_tasks.send_daily_delivery_reminders.run()
-
-            channels = mock_service.send_notification.call_args.args[2]
-            assert NotificationChannel.SMS not in channels
-            assert channels == [NotificationChannel.EMAIL]

@@ -12,7 +12,6 @@ from typing import Dict, Any
 from business_app.models.delivery import Delivery, DeliveryPerson
 from business_app.models.user import User
 from business_app.services.delivery_service import DeliveryService
-from business_app.services.analytics_service import AnalyticsService
 from business_app.services.notification_service import NotificationService
 from business_app.services.maps_service import MapsService
 from shared.enums import DeliveryStatus, UserRole, OrderStatus
@@ -111,43 +110,6 @@ def auto_assign_delivery_task(self, delivery_id: int):
             raise exc
 
 
-@shared_task(time_limit=600, soft_time_limit=540)
-def cleanup_completed_deliveries():
-    """Clean up old completed delivery records"""
-    try:
-        logger.info("Cleaning up old completed deliveries")
-
-        # Archive deliveries completed more than 1 year ago
-        cutoff_date = datetime.now(timezone.utc) - timedelta(days=365)
-
-        old_deliveries = Delivery.query.filter(
-            Delivery.delivered_at < cutoff_date, Delivery.status == DeliveryStatus.DELIVERED
-        ).all()
-
-        archived_count = 0
-
-        for delivery in old_deliveries:
-            # Move to archive table or update status (assuming you have an is_archived field)
-            # delivery.is_archived = True
-            # delivery.archived_at = datetime.now(timezone.utc)
-
-            # For now, just update a field to mark as archived
-            delivery.route_data = delivery.route_data or {}
-            delivery.route_data["archived"] = True
-            delivery.route_data["archived_at"] = datetime.now(timezone.utc).isoformat()
-            archived_count += 1
-
-        db.session.commit()
-
-        logger.info(f"Archived {archived_count} old delivery records")
-        return {"archived_count": archived_count}
-
-    except Exception as e:
-        logger.error(f"Failed to clean up completed deliveries: {e}")
-        db.session.rollback()
-        return {"error": str(e)}
-
-
 @shared_task(bind=True, max_retries=3, time_limit=600, soft_time_limit=540)
 def generate_driver_performance_report(self, driver_id: int, start_date: str, end_date: str):
     """Generate performance report for a specific driver"""
@@ -165,45 +127,15 @@ def generate_driver_performance_report(self, driver_id: int, start_date: str, en
         if not deliveries:
             return {"success": False, "error": "No deliveries found for this period"}
 
-        # Calculate metrics
-        total_deliveries = len(deliveries)
-        successful_deliveries = len([d for d in deliveries if d.status == DeliveryStatus.DELIVERED])
-        failed_deliveries = len([d for d in deliveries if d.status == DeliveryStatus.FAILED])
-
-        # Average delivery time
-        completed_deliveries = [d for d in deliveries if d.delivered_at and d.status == DeliveryStatus.DELIVERED]
-        avg_delivery_time = 0
-
-        if completed_deliveries:
-            total_time = sum(
-                (d.actual_delivery_time - d.scheduled_date).total_seconds()
-                for d in completed_deliveries
-                if d.actual_delivery_time
-            )
-            avg_delivery_time = total_time / len(completed_deliveries) / 60  # in minutes
-
-        # Distance traveled
-        total_distance = sum(d.distance_km for d in deliveries if d.distance_km)
-
-        # Customer ratings average
-        ratings = [d.customer_rating for d in deliveries if d.customer_rating]
-        avg_rating = sum(ratings) / len(ratings) if ratings else 0
+        # Calculate metrics via the shared helper (also used by
+        # AnalyticsService._get_driver_performance_metrics for fleet-wide
+        # aggregation) so both stay consistent.
+        metrics = DeliveryService.compute_driver_metrics(deliveries)
 
         report = {
             "driver_id": driver_id,
             "period": {"start_date": start_date, "end_date": end_date},
-            "metrics": {
-                "total_deliveries": total_deliveries,
-                "successful_deliveries": successful_deliveries,
-                "failed_deliveries": failed_deliveries,
-                "success_rate": round(
-                    (successful_deliveries / total_deliveries * 100) if total_deliveries > 0 else 0, 2
-                ),
-                "average_delivery_time_minutes": round(avg_delivery_time, 2),
-                "total_distance_km": round(total_distance, 2),
-                "average_rating": round(avg_rating, 2),
-                "total_attempts": sum(d.delivery_attempts for d in deliveries),
-            },
+            "metrics": metrics,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -216,7 +148,7 @@ def generate_driver_performance_report(self, driver_id: int, start_date: str, en
                 "performance_report",
                 template_data={
                     "report_period": f"{start_date} to {end_date}",
-                    "total_deliveries": total_deliveries,
+                    "total_deliveries": metrics["total_deliveries"],
                     "success_rate": report["metrics"]["success_rate"],
                     "avg_rating": report["metrics"]["average_rating"],
                 },
@@ -284,62 +216,6 @@ def monitor_delivery_delays():
     except Exception as e:
         logger.error(f"Failed to monitor delivery delays: {e}")
         return {"error": str(e)}
-
-
-@shared_task(bind=True, max_retries=2, time_limit=600, soft_time_limit=540)
-def update_delivery_zones_task(self):
-    """Update delivery zones based on demand and performance"""
-    try:
-        logger.info("Updating delivery zones")
-
-        # Analyze delivery patterns from last 30 days
-        end_date = datetime.now(timezone.utc)
-        start_date = end_date - timedelta(days=30)
-
-        from sqlalchemy import func
-
-        # Get delivery density by area (using rounded coordinates as zones)
-        delivery_density = (
-            db.session.query(
-                func.round(func.avg(Delivery.order.delivery_latitude), 3).label("avg_lat"),
-                func.round(func.avg(Delivery.order.delivery_longitude), 3).label("avg_lng"),
-                func.count(Delivery.id).label("delivery_count"),
-                func.avg(func.extract("epoch", Delivery.actual_delivery_time - Delivery.created_at)).label("avg_time"),
-                func.avg(Delivery.distance_km).label("avg_distance"),
-            )
-            .filter(Delivery.created_at.between(start_date, end_date), Delivery.status == DeliveryStatus.DELIVERED)
-            .group_by(func.round(Delivery.order.delivery_latitude, 2), func.round(Delivery.order.delivery_longitude, 2))
-            .having(func.count(Delivery.id) >= 5)
-            .all()
-        )  # Minimum 5 deliveries to consider
-
-        zone_updates = []
-
-        for avg_lat, avg_lng, count, avg_time, avg_distance in delivery_density:
-            avg_time_hours = (avg_time / 3600) if avg_time else 0
-
-            zone_data = {
-                "center_lat": float(avg_lat),
-                "center_lng": float(avg_lng),
-                "delivery_count": count,
-                "avg_delivery_time_hours": round(avg_time_hours, 2),
-                "avg_distance_km": round(avg_distance, 2) if avg_distance else 0,
-                "recommended_fee": 5000 if avg_time_hours > 2 else 3000,  # Higher fee for longer delivery times
-                "zone_priority": "high" if count > 20 else "medium" if count > 10 else "low",
-            }
-
-            zone_updates.append(zone_data)
-
-        # Store zone recommendations
-        analytics_service = AnalyticsService()
-        analytics_service.store_delivery_zone_analysis(zone_updates)
-
-        logger.info(f"Updated delivery zones analysis for {len(zone_updates)} areas")
-        return {"updated_zones": len(zone_updates), "zone_data": zone_updates}
-
-    except Exception as exc:
-        logger.error(f"Failed to update delivery zones: {exc}")
-        raise self.retry(exc=exc)
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=30, time_limit=300, soft_time_limit=270)
@@ -697,106 +573,6 @@ def calculate_delivery_eta_task(self, delivery_id: int):
         raise self.retry(exc=exc)
 
 
-@shared_task(time_limit=600, soft_time_limit=540)
-def process_delivery_analytics():
-    """Process delivery analytics and generate insights"""
-    try:
-        logger.info("Processing delivery analytics")
-
-        from business_app.utils.helpers import get_analytics_date_range
-
-        start_date, end_date = get_analytics_date_range(days=1)
-
-        from sqlalchemy import func
-
-        delivery_service = DeliveryService()
-        # Basic delivery metrics
-        analytics_data = delivery_service.get_delivery_metrics(start_date, end_date)
-
-        # Average delivery time by zone
-        zone_metrics = (
-            db.session.query(
-                Delivery.delivery_zone,
-                func.avg(func.extract("epoch", Delivery.delivered_at - Delivery.created_at)).label("avg_time"),
-                func.count(Delivery.id).label("delivery_count"),
-            )
-            .filter(Delivery.created_at.between(start_date, end_date), Delivery.status == DeliveryStatus.DELIVERED)
-            .group_by(Delivery.delivery_zone)
-            .all()
-        )
-
-        analytics_data["zone_metrics"] = [
-            {
-                "zone": zone,
-                "average_time_hours": round((avg_time / 3600) if avg_time else 0, 2),
-                "delivery_count": count,
-            }
-            for zone, avg_time, count in zone_metrics
-        ]
-
-        # Driver performance
-        driver_metrics = (
-            db.session.query(
-                Delivery.driver_id,
-                func.count(Delivery.id).label("delivery_count"),
-                func.avg(func.extract("epoch", Delivery.delivered_at - Delivery.picked_up_at)).label(
-                    "avg_delivery_time"
-                ),
-            )
-            .filter(
-                Delivery.created_at.between(start_date, end_date),
-                Delivery.status == DeliveryStatus.DELIVERED,
-                Delivery.driver_id.isnot(None),
-            )
-            .group_by(Delivery.driver_id)
-            .all()
-        )
-
-        analytics_data["driver_performance"] = [
-            {
-                "driver_id": driver_id,
-                "delivery_count": count,
-                "avg_delivery_time_hours": round((avg_time / 3600) if avg_time else 0, 2),
-                "avg_rating": round(avg_rating, 2) if avg_rating else 0,
-            }
-            for driver_id, count, avg_time, avg_rating in driver_metrics
-        ]
-
-        # Geographic delivery distribution
-        geographic_metrics = (
-            db.session.query(
-                func.round(Delivery.order.delivery_latitude, 2).label("lat_zone"),
-                func.round(Delivery.order.delivery_longitude, 2).label("lng_zone"),
-                func.count(Delivery.id).label("delivery_count"),
-                func.avg(Delivery.distance_km).label("avg_distance"),
-            )
-            .filter(Delivery.created_at.between(start_date, end_date), Delivery.status == DeliveryStatus.DELIVERED)
-            .group_by("lat_zone", "lng_zone")
-            .all()
-        )
-
-        analytics_data["geographic_metrics"] = [
-            {
-                "lat_zone": float(lat_zone),
-                "lng_zone": float(lng_zone),
-                "delivery_count": count,
-                "avg_distance_km": round(avg_distance, 2) if avg_distance else 0,
-            }
-            for lat_zone, lng_zone, count, avg_distance in geographic_metrics
-        ]
-
-        # Store analytics data
-        analytics_service = AnalyticsService()
-        analytics_service.store_delivery_analytics(analytics_data)
-
-        logger.info("Delivery analytics processed successfully")
-        return analytics_data
-
-    except Exception as e:
-        logger.error(f"Failed to process delivery analytics: {e}")
-        return {"error": str(e)}
-
-
 @shared_task(bind=True, max_retries=2, time_limit=600, soft_time_limit=540)
 def handle_delivery_exception_task(self, delivery_id: int, exception_type: str, details: Dict[str, Any]):
     """Handle delivery exceptions (delays, issues, etc.)"""
@@ -1042,188 +818,4 @@ def request_delivery_feedback_task(delivery_id: int):
 
     except Exception as e:
         logger.error(f"Failed to request delivery feedback: {e}")
-        return {"error": str(e)}
-
-
-@shared_task(time_limit=600, soft_time_limit=540)
-def generate_delivery_heatmap_data():
-    """Generate delivery heatmap data for admin dashboard"""
-    try:
-        logger.info("Generating delivery heatmap data")
-
-        # Get delivery data from last 7 days
-        end_date = datetime.now(timezone.utc)
-        start_date = end_date - timedelta(days=7)
-
-        from sqlalchemy import func
-
-        # Get delivery coordinates with density
-        heatmap_data = (
-            db.session.query(
-                Delivery.order.delivery_latitude.label("lat"),
-                Delivery.order.delivery_longitude.label("lng"),
-                func.count(Delivery.id).label("intensity"),
-                func.avg(func.extract("epoch", Delivery.actual_delivery_time - Delivery.created_at)).label("avg_time"),
-            )
-            .filter(
-                Delivery.created_at.between(start_date, end_date),
-                Delivery.status == DeliveryStatus.DELIVERED,
-                Delivery.order.delivery_latitude.isnot(None),
-                Delivery.order.delivery_longitude.isnot(None),
-            )
-            .group_by(Delivery.order.delivery_latitude, Delivery.order.delivery_longitude)
-            .all()
-        )
-
-        heatmap_points = []
-        for lat, lng, intensity, avg_time in heatmap_data:
-            heatmap_points.append(
-                {
-                    "lat": float(lat),
-                    "lng": float(lng),
-                    "intensity": intensity,
-                    "avg_delivery_time_hours": round((avg_time / 3600) if avg_time else 0, 2),
-                }
-            )
-
-        # Store heatmap data
-        analytics_service = AnalyticsService()
-        analytics_service.store_heatmap_data(
-            {
-                "type": "delivery_performance",
-                "period": f"{start_date.date()} to {end_date.date()}",
-                "data_points": heatmap_points,
-                "generated_at": datetime.now(timezone.utc).isoformat(),
-            }
-        )
-
-        logger.info(f"Generated heatmap data with {len(heatmap_points)} points")
-        return {"heatmap_points": len(heatmap_points), "data": heatmap_points}
-
-    except Exception as e:
-        logger.error(f"Failed to generate delivery heatmap data: {e}")
-        return {"error": str(e)}
-
-
-@shared_task(time_limit=600, soft_time_limit=540)
-def optimize_time_slots():
-    """Optimize delivery time slots based on historical data"""
-    try:
-        logger.info("Optimizing delivery time slots")
-
-        # Analyze time slot performance from last 30 days
-        end_date = datetime.now(timezone.utc)
-        start_date = end_date - timedelta(days=30)
-
-        from sqlalchemy import func
-
-        time_slot_analysis = (
-            db.session.query(
-                Delivery.scheduled_time_slot,
-                func.count(Delivery.id).label("total_deliveries"),
-                func.avg(func.extract("epoch", Delivery.actual_delivery_time - Delivery.scheduled_date)).label(
-                    "avg_delivery_time"
-                ),
-                func.count(func.nullif(Delivery.status != DeliveryStatus.DELIVERED, False)).label("failed_deliveries"),
-                func.avg(Delivery.customer_rating).label("avg_rating"),
-            )
-            .filter(Delivery.created_at.between(start_date, end_date))
-            .group_by(Delivery.scheduled_time_slot)
-            .all()
-        )
-
-        optimization_results = []
-
-        for slot, total, avg_time, failed, rating in time_slot_analysis:
-            if total > 0:
-                success_rate = ((total - (failed or 0)) / total) * 100
-                avg_time_hours = (avg_time / 3600) if avg_time else 0
-
-                # Determine if slot needs optimization
-                needs_optimization = (
-                    success_rate < 90  # Low success rate
-                    or avg_time_hours > 3  # Takes too long
-                    or (rating and rating < 4.0)  # Low customer satisfaction
-                )
-
-                optimization_results.append(
-                    {
-                        "time_slot": slot,
-                        "total_deliveries": total,
-                        "success_rate": round(success_rate, 2),
-                        "avg_delivery_time_hours": round(avg_time_hours, 2),
-                        "avg_rating": round(rating, 2) if rating else None,
-                        "needs_optimization": needs_optimization,
-                        "recommended_action": (
-                            "reduce_capacity"
-                            if avg_time_hours > 3
-                            else "maintain" if success_rate > 95 else "review_process"
-                        ),
-                    }
-                )
-
-        # Store optimization analysis
-        analytics_service = AnalyticsService()
-        analytics_service.store_time_slot_optimization(optimization_results)
-
-        logger.info(f"Time slot optimization completed for {len(optimization_results)} slots")
-        return {"analyzed_slots": len(optimization_results), "recommendations": optimization_results}
-
-    except Exception as e:
-        logger.error(f"Failed to optimize time slots: {e}")
-        return {"error": str(e)}
-
-
-@shared_task(time_limit=600, soft_time_limit=540)
-def send_daily_delivery_summary():
-    """Send daily delivery summary to management"""
-    try:
-        logger.info("Sending daily delivery summary")
-
-        # Get yesterday's data
-        yesterday = datetime.now(timezone.utc).date() - timedelta(days=1)
-        start_date = datetime.combine(yesterday, datetime.min.time()).replace(tzinfo=timezone.utc)
-        end_date = start_date + timedelta(days=1)
-
-        from sqlalchemy import func
-
-        # Calculate summary metrics
-        total_deliveries = Delivery.query.filter(Delivery.created_at.between(start_date, end_date)).count()
-
-        successful_deliveries = Delivery.query.filter(
-            Delivery.created_at.between(start_date, end_date), Delivery.status == DeliveryStatus.DELIVERED
-        ).count()
-
-        failed_deliveries = Delivery.query.filter(
-            Delivery.created_at.between(start_date, end_date), Delivery.status == DeliveryStatus.FAILED
-        ).count()
-
-        avg_rating = (
-            db.session.query(func.avg(Delivery.customer_rating))
-            .filter(Delivery.created_at.between(start_date, end_date), Delivery.customer_rating.isnot(None))
-            .scalar()
-            or 0
-        )
-
-        summary_data = {
-            "date": yesterday.isoformat(),
-            "total_deliveries": total_deliveries,
-            "successful_deliveries": successful_deliveries,
-            "failed_deliveries": failed_deliveries,
-            "success_rate": round((successful_deliveries / total_deliveries * 100) if total_deliveries > 0 else 0, 2),
-            "average_rating": round(avg_rating, 2),
-        }
-
-        # Send to management
-        notification_service = NotificationService()
-        admin_users = User.query.filter(User.role.in_([UserRole.ADMIN, UserRole.MANAGER])).all()
-
-        for admin in admin_users:
-            notification_service.send_notification(admin.id, "daily_delivery_summary", template_data=summary_data)
-
-        logger.info(f"Daily delivery summary sent: {summary_data}")
-        return summary_data
-
-    except Exception as e:
-        logger.error(f"Failed to send daily delivery summary: {e}")
         return {"error": str(e)}

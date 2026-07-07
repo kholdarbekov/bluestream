@@ -10,12 +10,11 @@ from typing import Dict, Any, List
 from flask import current_app
 from sqlalchemy import and_, or_
 
-from business_app.models.order import Order, OrderItem
+from business_app.models.order import Order
 from business_app.models.user import User
 from business_app.models.product import Product
 from business_app.services.order_service import OrderService
 from business_app.services.notification_service import NotificationService
-from business_app.services.analytics_service import AnalyticsService
 from business_app.utils.constants import NotificationChannel
 from shared.enums import OrderStatus, PaymentStatus, UserRole, UserStatus
 from business_app.utils.helpers import get_current_language
@@ -315,101 +314,6 @@ def send_low_stock_alert(self, product_id: int):
 
 
 @shared_task(time_limit=600, soft_time_limit=540)
-def generate_daily_order_report():
-    """Generate daily order summary report"""
-    try:
-        logger.info("Generating daily order report")
-
-        # Get yesterday's data
-        yesterday = datetime.now(timezone.utc).date() - timedelta(days=1)
-        start_time = datetime.combine(yesterday, datetime.min.time())
-        end_time = datetime.combine(yesterday, datetime.max.time())
-
-        # Order metrics
-        total_orders = Order.query.filter(Order.created_at.between(start_time, end_time)).count()
-
-        completed_orders = Order.query.filter(
-            Order.created_at.between(start_time, end_time), Order.status == OrderStatus.DELIVERED
-        ).count()
-
-        cancelled_orders = Order.query.filter(
-            Order.created_at.between(start_time, end_time), Order.status == OrderStatus.CANCELLED
-        ).count()
-
-        # Revenue metrics
-        from sqlalchemy import func
-
-        total_revenue = (
-            db.session.query(func.sum(Order.total_amount))
-            .filter(Order.created_at.between(start_time, end_time), Order.status != OrderStatus.CANCELLED)
-            .scalar()
-            or 0
-        )
-
-        avg_order_value = (
-            db.session.query(func.avg(Order.total_amount))
-            .filter(Order.created_at.between(start_time, end_time), Order.status != OrderStatus.CANCELLED)
-            .scalar()
-            or 0
-        )
-
-        # Top products
-        top_products = (
-            db.session.query(
-                Product.name,
-                func.sum(OrderItem.quantity).label("total_quantity"),
-                func.sum(OrderItem.total_price).label("total_revenue"),
-            )
-            .join(OrderItem)
-            .join(Order)
-            .filter(Order.created_at.between(start_time, end_time), Order.status != OrderStatus.CANCELLED)
-            .group_by(Product.id, Product.name)
-            .order_by(func.sum(OrderItem.total_price).desc())
-            .limit(5)
-            .all()
-        )
-
-        report_data = {
-            "date": yesterday.isoformat(),
-            "order_metrics": {
-                "total_orders": total_orders,
-                "completed_orders": completed_orders,
-                "cancelled_orders": cancelled_orders,
-                "completion_rate": round((completed_orders / total_orders * 100) if total_orders > 0 else 0, 2),
-            },
-            "revenue_metrics": {
-                "total_revenue": float(total_revenue),
-                "average_order_value": round(float(avg_order_value), 2),
-            },
-            "top_products": [
-                {"name": name, "quantity_sold": int(quantity), "revenue": float(revenue)}
-                for name, quantity, revenue in top_products
-            ],
-        }
-
-        # Send report to management
-        admin_users = User.query.filter(
-            User.role.in_([UserRole.ADMIN, UserRole.MANAGER]), User.status == UserStatus.ACTIVE
-        ).all()
-
-        notification_service = NotificationService()
-
-        for admin in admin_users:
-            notification_service.send_notification(admin.id, "daily_order_report", template_data=report_data)
-
-        # Store report
-        analytics_service = AnalyticsService()
-        analytics_service.store_daily_order_report(report_data)
-
-        logger.info(f"Daily order report generated for {yesterday}")
-        return report_data
-
-    except Exception as e:
-        logger.error(f"Failed to generate daily order report: {e}")
-        return {"error": str(e)}
-
-
-@shared_task(time_limit=600, soft_time_limit=540)
 def process_bulk_order_updates(order_updates: List[Dict[str, Any]]):
     """Process bulk order status updates"""
     try:
@@ -492,106 +396,6 @@ def send_order_followup(self, order_id: int, days_after_delivery: int = 3):
     except Exception as exc:
         logger.error(f"Failed to send order follow-up: {exc}")
         raise self.retry(exc=exc)
-
-
-@shared_task(time_limit=600, soft_time_limit=540)
-def analyze_order_patterns():
-    """Analyze order patterns and generate insights"""
-    try:
-        logger.info("Analyzing order patterns")
-
-        # Analyze last 30 days
-        end_date = datetime.now(timezone.utc)
-        start_date = end_date - timedelta(days=30)
-
-        # Peak ordering times
-        from sqlalchemy import func, extract
-
-        hourly_orders = (
-            db.session.query(extract("hour", Order.created_at).label("hour"), func.count(Order.id).label("order_count"))
-            .filter(Order.created_at.between(start_date, end_date))
-            .group_by(extract("hour", Order.created_at))
-            .order_by("hour")
-            .all()
-        )
-
-        # Daily patterns
-        daily_orders = (
-            db.session.query(
-                extract("dow", Order.created_at).label("day_of_week"),
-                func.count(Order.id).label("order_count"),
-                func.avg(Order.total_amount).label("avg_order_value"),
-            )
-            .filter(Order.created_at.between(start_date, end_date))
-            .group_by(extract("dow", Order.created_at))
-            .order_by("day_of_week")
-            .all()
-        )
-
-        # Customer ordering behavior
-        repeat_customers = (
-            db.session.query(
-                Order.user_id,
-                func.count(Order.id).label("order_count"),
-                func.avg(Order.total_amount).label("avg_value"),
-                func.min(Order.created_at).label("first_order"),
-                func.max(Order.created_at).label("last_order"),
-            )
-            .filter(Order.created_at.between(start_date, end_date))
-            .group_by(Order.user_id)
-            .having(func.count(Order.id) > 1)
-            .all()
-        )
-
-        # Generate insights
-        insights = []
-
-        # Find peak hour
-        if hourly_orders:
-            peak_hour = max(hourly_orders, key=lambda x: x.order_count)
-            insights.append(f"Peak ordering time is {peak_hour.hour}:00 with {peak_hour.order_count} orders")
-
-        # Find peak day
-        if daily_orders:
-            day_names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
-            peak_day = max(daily_orders, key=lambda x: x.order_count)
-            insights.append(
-                f"Peak ordering day is {day_names[int(peak_day.day_of_week)]} with {peak_day.order_count} orders"
-            )
-
-        # Repeat customer insights
-        if repeat_customers:
-            avg_orders_per_repeat_customer = sum(c.order_count for c in repeat_customers) / len(repeat_customers)
-            insights.append(f"Repeat customers average {avg_orders_per_repeat_customer:.1f} orders in 30 days")
-
-        analysis_data = {
-            "period": {"start_date": start_date.date().isoformat(), "end_date": end_date.date().isoformat()},
-            "hourly_patterns": [{"hour": int(hour), "order_count": count} for hour, count in hourly_orders],
-            "daily_patterns": [
-                {
-                    "day_of_week": int(dow),
-                    "day_name": ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][
-                        int(dow)
-                    ],
-                    "order_count": count,
-                    "avg_order_value": float(avg_value),
-                }
-                for dow, count, avg_value in daily_orders
-            ],
-            "repeat_customers_count": len(repeat_customers),
-            "insights": insights,
-        }
-
-        # Store analysis
-        analytics_service = AnalyticsService()
-        analytics_service.store_order_pattern_analysis(analysis_data)
-
-        logger.info(f"Order pattern analysis completed with {len(insights)} insights")
-        return analysis_data
-
-    except Exception as e:
-        logger.error(f"Failed to analyze order patterns: {e}")
-        return {"error": str(e)}
 
 
 @shared_task(time_limit=600, soft_time_limit=540)

@@ -523,7 +523,7 @@ services:
   # redis:6379 directly over HTTP, which Redis aborts as cross-protocol
   # scripting and logs as a "Possible SECURITY ATTACK".
   redis_exporter:
-    image: oliver006/redis_exporter:latest
+    image: oliver006/redis_exporter:v1.86.0
     environment:
       - TZ=${DISPLAY_TIMEZONE:-Asia/Tashkent}
       - REDIS_ADDR=redis://redis:6379

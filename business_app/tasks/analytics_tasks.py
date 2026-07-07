@@ -454,65 +454,6 @@ def cleanup_old_analytics_data():
         return {"error": str(e)}
 
 
-@shared_task(time_limit=3600, soft_time_limit=3300)
-def calculate_customer_lifetime_value():
-    """Calculate and update customer lifetime value metrics"""
-    try:
-        logger.info("Calculating customer lifetime value")
-
-        analytics_service = AnalyticsService()
-        clv_data = analytics_service._get_customer_lifetime_value_analysis()
-
-        # Update individual customer CLV scores
-        customers = User.query.filter(User.status == UserStatus.ACTIVE).all()
-        updated_customers = 0
-
-        for customer in customers:
-            try:
-                # Calculate individual CLV
-                customer_orders = Order.query.filter(Order.user_id == customer.id, Order.status != "cancelled").all()
-
-                if customer_orders:
-                    total_value = sum(order.total_amount for order in customer_orders)
-                    order_count = len(customer_orders)
-
-                    # Calculate customer lifespan
-                    first_order = min(customer_orders, key=lambda x: x.created_at)
-                    last_order = max(customer_orders, key=lambda x: x.created_at)
-                    lifespan_days = max(1, (last_order.created_at - first_order.created_at).days)
-
-                    # Simple CLV calculation
-                    avg_order_value = total_value / order_count
-                    purchase_frequency = order_count / (lifespan_days / 30)  # orders per month
-
-                    # Estimate future value (simplified)
-                    estimated_clv = avg_order_value * purchase_frequency * 12  # Annual CLV
-
-                    # Update customer record
-                    customer.lifetime_value = total_value
-                    customer.estimated_clv = estimated_clv
-                    customer.clv_updated_at = datetime.now(timezone.utc)
-
-                    updated_customers += 1
-
-            except Exception as e:
-                logger.error(f"Failed to calculate CLV for customer {customer.id}: {e}")
-                continue
-
-        db.session.commit()
-
-        logger.info(f"CLV calculated for {updated_customers} customers")
-        return {
-            "updated_customers": updated_customers,
-            "average_clv": clv_data["average_clv"],
-            "total_customers": clv_data["total_customers"],
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to calculate customer lifetime value: {e}")
-        return {"error": str(e)}
-
-
 def generate_business_insights(report_data: Dict[str, Any]) -> List[str]:
     """Generate business insights from report data"""
     insights = []

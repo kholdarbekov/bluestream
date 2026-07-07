@@ -11,6 +11,7 @@ from business_app.services.auth_service import AuthService
 from business_app.services.session_cleanup_service import SessionCleanupService
 from business_app.utils.decorators import admin_required, rate_limit, validate_json
 from business_app.utils.helpers import paginate_query
+from business_app.utils.request_helpers import parse_bool_arg
 from business_app.models.user import UserSession, User
 
 session_management_bp = Blueprint("session_management", __name__)
@@ -248,7 +249,7 @@ def get_all_sessions():
     try:
         page = request.args.get("page", 1, type=int)
         per_page = min(request.args.get("per_page", 20, type=int), 100)
-        active_only = request.args.get("active_only", False, type=bool)
+        active_only = parse_bool_arg("active_only", default=False)
 
         # Build query
         sessions_query = UserSession.query.join(User).order_by(UserSession.last_activity.desc())

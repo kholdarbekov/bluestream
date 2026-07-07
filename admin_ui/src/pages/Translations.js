@@ -36,6 +36,7 @@ import {
   UploadOutlined
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import adminService from '../services/adminService';
 
 const { Option } = Select;
@@ -69,6 +70,7 @@ const getEntityTypeFromCategory = (category = '') => {
 };
 
 const Translations = () => {
+  const { t } = useTranslation('translations_page');
   // State management
   const [searchText, setSearchText] = useState('');
   const [categoryFilter, setCategoryFilter] = useState();
@@ -149,7 +151,7 @@ const Translations = () => {
     mutationFn: adminService.createTranslation,
 
     onSuccess: () => {
-      message.success('Translation created successfully');
+      message.success(t('toast_created', { defaultValue: 'Translation created successfully' }));
       setIsCreateModalVisible(false);
       form.resetFields();
       queryClient.invalidateQueries({
@@ -164,7 +166,7 @@ const Translations = () => {
     },
 
     onError: (error) => {
-      message.error(error.message || 'Failed to create translation');
+      message.error(error.message || t('toast_create_failed', { defaultValue: 'Failed to create translation' }));
     },
   });
 
@@ -172,7 +174,7 @@ const Translations = () => {
     mutationFn: adminService.updateTranslation,
 
     onSuccess: () => {
-      message.success('Translation updated successfully');
+      message.success(t('toast_updated', { defaultValue: 'Translation updated successfully' }));
       setIsEditModalVisible(false);
       form.resetFields();
       queryClient.invalidateQueries({
@@ -184,7 +186,7 @@ const Translations = () => {
     },
 
     onError: (error) => {
-      message.error(error.message || 'Failed to update translation');
+      message.error(error.message || t('toast_update_failed', { defaultValue: 'Failed to update translation' }));
     },
   });
 
@@ -192,7 +194,7 @@ const Translations = () => {
     mutationFn: adminService.deleteTranslation,
 
     onSuccess: () => {
-      message.success('Translation deleted successfully');
+      message.success(t('toast_deleted', { defaultValue: 'Translation deleted successfully' }));
       queryClient.invalidateQueries({
         queryKey: ['translations'],
       });
@@ -205,7 +207,7 @@ const Translations = () => {
     },
 
     onError: (error) => {
-      message.error(error.message || 'Failed to delete translation');
+      message.error(error.message || t('toast_delete_failed', { defaultValue: 'Failed to delete translation' }));
     },
   });
 
@@ -213,7 +215,7 @@ const Translations = () => {
     mutationFn: adminService.syncEntityTranslations,
 
     onSuccess: (data) => {
-      message.success(data.message || 'Translations synced successfully');
+      message.success(data.message || t('toast_synced', { defaultValue: 'Translations synced successfully' }));
       setIsSyncModalVisible(false);
       syncForm.resetFields();
       queryClient.invalidateQueries({
@@ -225,7 +227,7 @@ const Translations = () => {
     },
 
     onError: (error) => {
-      message.error(error.message || 'Failed to sync translations');
+      message.error(error.message || t('toast_sync_failed', { defaultValue: 'Failed to sync translations' }));
     },
   });
 
@@ -236,10 +238,15 @@ const Translations = () => {
       const results = data?.data?.results;
       if (results) {
         message.success(
-          `Import completed: ${results.created} created, ${results.updated} updated, ${results.skipped} skipped`
+          t('toast_import_completed', {
+            created: results.created,
+            updated: results.updated,
+            skipped: results.skipped,
+            defaultValue: 'Import completed: {{created}} created, {{updated}} updated, {{skipped}} skipped',
+          })
         );
       } else {
-        message.success('Import completed successfully');
+        message.success(t('toast_import_completed_simple', { defaultValue: 'Import completed successfully' }));
       }
       setIsImportModalVisible(false);
       importForm.resetFields();
@@ -255,21 +262,21 @@ const Translations = () => {
     },
 
     onError: (error) => {
-      message.error(error.message || 'Failed to import translations');
+      message.error(error.message || t('toast_import_failed', { defaultValue: 'Failed to import translations' }));
     },
   });
 
   // Table columns for translations
   const translationColumns = [
     {
-      title: 'Category',
+      title: t('category', { defaultValue: 'Category' }),
       dataIndex: 'category',
       key: 'category',
       width: 120,
       render: (text) => <Tag color="cyan">{text}</Tag>,
     },
     {
-      title: 'Key',
+      title: t('key_col', { defaultValue: 'Key' }),
       dataIndex: 'key',
       key: 'key',
       ellipsis: { showTitle: false },
@@ -280,7 +287,7 @@ const Translations = () => {
       ),
     },
     {
-      title: 'Language',
+      title: t('language', { defaultValue: 'Language' }),
       dataIndex: 'language',
       key: 'language',
       width: 100,
@@ -295,7 +302,7 @@ const Translations = () => {
       },
     },
     {
-      title: 'Value',
+      title: t('value_col', { defaultValue: 'Value' }),
       dataIndex: 'value',
       key: 'value',
       ellipsis: { showTitle: false },
@@ -306,22 +313,22 @@ const Translations = () => {
       ),
     },
     {
-      title: 'Status',
+      title: t('status', { defaultValue: 'Status' }),
       key: 'status',
       width: 80,
       render: (_, record) => (
         <Tag color={record.is_active ? 'success' : 'default'}>
-          {record.is_active ? 'Active' : 'Inactive'}
+          {record.is_active ? t('active', { defaultValue: 'Active' }) : t('inactive', { defaultValue: 'Inactive' })}
         </Tag>
       ),
     },
     {
-      title: 'Actions',
+      title: t('actions', { defaultValue: 'Actions' }),
       key: 'actions',
       width: 120,
       render: (_, record) => (
         <Space size="small">
-          <Tooltip title="Edit">
+          <Tooltip title={t('edit', { defaultValue: 'Edit' })}>
             <Button
               type="text"
               icon={<EditOutlined />}
@@ -330,12 +337,12 @@ const Translations = () => {
             />
           </Tooltip>
           <Popconfirm
-            title="Are you sure you want to delete this translation?"
+            title={t('delete_confirm', { defaultValue: 'Are you sure you want to delete this translation?' })}
             onConfirm={() => deleteTranslationMutation.mutate(record.id)}
-            okText="Yes"
-            cancelText="No"
+            okText={t('yes', { defaultValue: 'Yes' })}
+            cancelText={t('no', { defaultValue: 'No' })}
           >
-            <Tooltip title="Delete">
+            <Tooltip title={t('delete', { defaultValue: 'Delete' })}>
               <Button
                 type="text"
                 danger
@@ -352,24 +359,24 @@ const Translations = () => {
   // Missing translations columns
   const missingColumns = [
     {
-      title: 'Type',
+      title: t('type_col', { defaultValue: 'Type' }),
       dataIndex: 'type',
       key: 'type',
       width: 90,
       render: (type) => (
         <Tag color={type === 'entity' ? 'purple' : 'blue'}>
-          {type === 'entity' ? 'Entity' : 'Static'}
+          {type === 'entity' ? t('entity_badge_label', { defaultValue: 'Entity' }) : t('static_type_label', { defaultValue: 'Static' })}
         </Tag>
       ),
     },
     {
-      title: 'Category',
+      title: t('category', { defaultValue: 'Category' }),
       dataIndex: 'category',
       key: 'category',
       render: (category) => <Tag color="cyan">{category}</Tag>,
     },
     {
-      title: 'Key',
+      title: t('key_col', { defaultValue: 'Key' }),
       key: 'key',
       render: (_, record) => (
         <Space direction="vertical" size={0}>
@@ -383,7 +390,7 @@ const Translations = () => {
       ),
     },
     {
-      title: 'Missing Language',
+      title: t('missing_language', { defaultValue: 'Missing Language' }),
       dataIndex: 'language',
       key: 'language',
       render: (lang) => {
@@ -397,7 +404,7 @@ const Translations = () => {
       },
     },
     {
-      title: 'Priority',
+      title: t('priority_col', { defaultValue: 'Priority' }),
       dataIndex: 'priority',
       key: 'priority',
       render: (priority) => (
@@ -407,7 +414,7 @@ const Translations = () => {
       ),
     },
     {
-      title: 'Actions',
+      title: t('actions', { defaultValue: 'Actions' }),
       key: 'actions',
       width: 160,
       render: (_, record) => (
@@ -417,7 +424,7 @@ const Translations = () => {
           icon={<PlusOutlined />}
           onClick={() => handleCreateFromMissing(record)}
         >
-          Add Translation
+          {t('add_translation', { defaultValue: 'Add Translation' })}
         </Button>
       ),
     },
@@ -478,9 +485,9 @@ const Translations = () => {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
 
-      message.success('Export completed successfully');
+      message.success(t('toast_export_completed', { defaultValue: 'Export completed successfully' }));
     } catch (error) {
-      message.error('Failed to export translations');
+      message.error(t('toast_export_failed', { defaultValue: 'Failed to export translations' }));
     }
   };
 
@@ -516,7 +523,7 @@ const Translations = () => {
           <Col span={6}>
             <Card>
               <Statistic
-                title="Overall Completion"
+                title={t('overall_completion', { defaultValue: 'Overall Completion' })}
                 value={overall_stats.overall_completion_percentage}
                 precision={1}
                 suffix="%"
@@ -532,7 +539,7 @@ const Translations = () => {
           <Col span={6}>
             <Card>
               <Statistic
-                title="English"
+                title={t('lang_english', { defaultValue: 'English' })}
                 value={englishStats.percentage}
                 precision={1}
                 suffix="%"
@@ -544,7 +551,7 @@ const Translations = () => {
           <Col span={6}>
             <Card>
               <Statistic
-                title="Uzbek"
+                title={t('lang_uzbek', { defaultValue: 'Uzbek' })}
                 value={uzbekStats.percentage}
                 precision={1}
                 suffix="%"
@@ -556,7 +563,7 @@ const Translations = () => {
           <Col span={6}>
             <Card>
               <Statistic
-                title="Russian"
+                title={t('lang_russian', { defaultValue: 'Russian' })}
                 value={russianStats.percentage}
                 precision={1}
                 suffix="%"
@@ -568,7 +575,7 @@ const Translations = () => {
         </Row>
 
         {completion_stats && completion_stats.length > 0 && (
-          <Card title="Completion by Category" style={{ marginBottom: 24 }}>
+          <Card title={t('completion_by_category', { defaultValue: 'Completion by Category' })} style={{ marginBottom: 24 }}>
             <Row gutter={[16, 16]}>
               {completion_stats.map((stat) => (
                 <Col span={8} key={`${stat.type}-${stat.category}`}>
@@ -581,7 +588,11 @@ const Translations = () => {
                         format={() => `${stat.completion_percentage}%`}
                       />
                       <Text type="secondary">
-                        {stat.total_actual_translations} / {stat.total_possible_translations} translations
+                        {t('translations_fraction', {
+                          actual: stat.total_actual_translations,
+                          possible: stat.total_possible_translations,
+                          defaultValue: '{{actual}} / {{possible}} translations',
+                        })}
                       </Text>
                     </Space>
                   </Card>
@@ -598,22 +609,21 @@ const Translations = () => {
     <div>
       <div style={{ marginBottom: 24 }}>
         <Title level={2}>
-          <TranslationOutlined /> Translation Management
+          <TranslationOutlined /> {t('page_title', { defaultValue: 'Translation Management' })}
         </Title>
         <Paragraph>
-          Manage multilingual content for all translatable entities in the system.
-          Track completion progress and maintain translations across English, Uzbek, and Russian.
+          {t('page_description', { defaultValue: 'Manage multilingual content for all translatable entities in the system. Track completion progress and maintain translations across English, Uzbek, and Russian.' })}
         </Paragraph>
       </div>
 
       <Tabs activeKey={activeTab} onChange={setActiveTab} style={{ marginBottom: 24 }}>
-        <TabPane tab={<span><TranslationOutlined />Translations</span>} key="translations">
+        <TabPane tab={<span><TranslationOutlined />{t('tab_translations', { defaultValue: 'Translations' })}</span>} key="translations">
           <Card>
             {/* Filters and Actions */}
             <div style={{ marginBottom: 16 }}>
               <Space wrap>
                 <Input
-                  placeholder="Search translations..."
+                  placeholder={t('search_placeholder', { defaultValue: 'Search translations...' })}
                   prefix={<SearchOutlined />}
                   value={searchText}
                   onChange={(e) => setSearchText(e.target.value)}
@@ -622,7 +632,7 @@ const Translations = () => {
                 />
 
                 <Select
-                  placeholder="Category"
+                  placeholder={t('category', { defaultValue: 'Category' })}
                   value={categoryFilter}
                   onChange={setCategoryFilter}
                   style={{ width: 150 }}
@@ -636,7 +646,7 @@ const Translations = () => {
                 </Select>
 
                 <Select
-                  placeholder="Language"
+                  placeholder={t('language', { defaultValue: 'Language' })}
                   value={languageFilter}
                   onChange={setLanguageFilter}
                   style={{ width: 120 }}
@@ -660,7 +670,7 @@ const Translations = () => {
                       setIsCreateModalVisible(true);
                     }}
                   >
-                    Add Translation
+                    {t('add_translation', { defaultValue: 'Add Translation' })}
                   </Button>
 
                   <Dropdown
@@ -669,25 +679,25 @@ const Translations = () => {
                         {
                           key: 'export-json',
                           icon: <DownloadOutlined />,
-                          label: 'Export JSON',
+                          label: t('export_json', { defaultValue: 'Export JSON' }),
                           onClick: () => handleExport('json')
                         },
                         {
                           key: 'export-csv',
                           icon: <DownloadOutlined />,
-                          label: 'Export CSV',
+                          label: t('export_csv', { defaultValue: 'Export CSV' }),
                           onClick: () => handleExport('csv')
                         },
                         {
                           key: 'import',
                           icon: <UploadOutlined />,
-                          label: 'Import',
+                          label: t('import_label', { defaultValue: 'Import' }),
                           onClick: () => setIsImportModalVisible(true)
                         },
                         {
                           key: 'sync',
                           icon: <SyncOutlined />,
-                          label: 'Sync Entities',
+                          label: t('sync_entities', { defaultValue: 'Sync Entities' }),
                           onClick: () => setIsSyncModalVisible(true)
                         }
                       ]
@@ -711,7 +721,12 @@ const Translations = () => {
                 total: translationsData?.meta?.total || 0,
                 showSizeChanger: true,
                 showQuickJumper: true,
-                showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} translations`,
+                showTotal: (total, range) => t('showing_range', {
+                  from: range[0],
+                  to: range[1],
+                  total,
+                  defaultValue: '{{from}}-{{to}} of {{total}} translations',
+                }),
               }}
               onChange={handleTableChange}
               scroll={{ x: 1200 }}
@@ -719,17 +734,24 @@ const Translations = () => {
           </Card>
         </TabPane>
 
-        <TabPane tab={<span><PercentageOutlined />Completion</span>} key="completion">
+        <TabPane tab={<span><PercentageOutlined />{t('tab_completion', { defaultValue: 'Completion' })}</span>} key="completion">
           {renderCompletionStats()}
         </TabPane>
 
-        <TabPane tab={<span><ExclamationCircleOutlined />Missing</span>} key="missing">
+        <TabPane tab={<span><ExclamationCircleOutlined />{t('tab_missing', { defaultValue: 'Missing' })}</span>} key="missing">
           <Card>
             <div style={{ marginBottom: 16 }}>
               {missingData?.data?.summary && (
                 <Alert
-                  message={`${missingData.data.summary.total_missing} missing translations found`}
-                  description={`${missingData.data.summary.high_priority} high priority, ${missingData.data.summary.medium_priority} medium priority`}
+                  message={t('missing_found', {
+                    count: missingData.data.summary.total_missing,
+                    defaultValue: '{{count}} missing translations found',
+                  })}
+                  description={t('priority_breakdown', {
+                    high: missingData.data.summary.high_priority,
+                    medium: missingData.data.summary.medium_priority,
+                    defaultValue: '{{high}} high priority, {{medium}} medium priority',
+                  })}
                   type="warning"
                   showIcon
                   style={{ marginBottom: 16 }}
@@ -748,7 +770,12 @@ const Translations = () => {
                 total: missingData?.meta?.total || 0,
                 showSizeChanger: true,
                 showQuickJumper: true,
-                showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} missing`,
+                showTotal: (total, range) => t('showing_range_missing', {
+                  from: range[0],
+                  to: range[1],
+                  total,
+                  defaultValue: '{{from}}-{{to}} of {{total}} missing',
+                }),
               }}
               onChange={handleMissingTableChange}
             />
@@ -758,7 +785,7 @@ const Translations = () => {
 
       {/* Create Translation Modal */}
       <Modal
-        title="Create Translation"
+        title={t('create_translation_title', { defaultValue: 'Create Translation' })}
         open={isCreateModalVisible}
         onCancel={() => {
           setIsCreateModalVisible(false);
@@ -775,11 +802,11 @@ const Translations = () => {
           <Row gutter={16}>
             <Col span={12}>
               <Form.Item
-                label="Category"
+                label={t('category', { defaultValue: 'Category' })}
                 name="category"
-                rules={[{ required: true, message: 'Category is required' }]}
+                rules={[{ required: true, message: t('category_required', { defaultValue: 'Category is required' }) }]}
               >
-                <Select placeholder="Select category">
+                <Select placeholder={t('select_category', { defaultValue: 'Select category' })}>
                   {categoryOptions.map(category => (
                     <Option key={category} value={category}>
                       {category}
@@ -790,11 +817,11 @@ const Translations = () => {
             </Col>
             <Col span={12}>
               <Form.Item
-                label="Language"
+                label={t('language', { defaultValue: 'Language' })}
                 name="language"
-                rules={[{ required: true, message: 'Language is required' }]}
+                rules={[{ required: true, message: t('language_required', { defaultValue: 'Language is required' }) }]}
               >
-                <Select placeholder="Select language">
+                <Select placeholder={t('select_language', { defaultValue: 'Select language' })}>
                   {Object.entries(LANGUAGES).map(([code, info]) => (
                     <Option key={code} value={code}>
                       {info.flag} {info.name}
@@ -806,28 +833,28 @@ const Translations = () => {
           </Row>
 
           <Form.Item
-            label="Key"
+            label={t('key_col', { defaultValue: 'Key' })}
             name="key"
-            rules={[{ required: true, message: 'Key is required' }]}
+            rules={[{ required: true, message: t('key_required', { defaultValue: 'Key is required' }) }]}
           >
-            <Input placeholder="e.g., telegram.welcome_message" />
+            <Input placeholder={t('key_placeholder', { defaultValue: 'e.g., telegram.welcome_message' })} />
           </Form.Item>
 
           <Form.Item
-            label="Value"
+            label={t('value_col', { defaultValue: 'Value' })}
             name="value"
-            rules={[{ required: true, message: 'Value is required' }]}
+            rules={[{ required: true, message: t('value_required', { defaultValue: 'Value is required' }) }]}
           >
             <TextArea
               rows={4}
-              placeholder="Enter translation value..."
+              placeholder={t('value_placeholder', { defaultValue: 'Enter translation value...' })}
               showCount
               maxLength={5000}
             />
           </Form.Item>
 
           <Form.Item
-            label="Active"
+            label={t('active', { defaultValue: 'Active' })}
             name="is_active"
             valuePropName="checked"
             initialValue={true}
@@ -841,14 +868,14 @@ const Translations = () => {
                 setIsCreateModalVisible(false);
                 form.resetFields();
               }}>
-                Cancel
+                {t('cancel', { defaultValue: 'Cancel' })}
               </Button>
               <Button
                 type="primary"
                 htmlType="submit"
                 loading={createTranslationMutation.isPending}
               >
-                Create Translation
+                {t('create_translation_title', { defaultValue: 'Create Translation' })}
               </Button>
             </Space>
           </Form.Item>
@@ -857,7 +884,7 @@ const Translations = () => {
 
       {/* Edit Translation Modal */}
       <Modal
-        title="Edit Translation"
+        title={t('edit_translation_title', { defaultValue: 'Edit Translation' })}
         open={isEditModalVisible}
         onCancel={() => {
           setIsEditModalVisible(false);
@@ -873,26 +900,30 @@ const Translations = () => {
           onFinish={handleEditSubmit}
         >
           <Alert
-            message={`Editing: ${selectedTranslation?.key} (${selectedLanguageInfo.name})`}
+            message={t('editing_alert', {
+              key: selectedTranslation?.key,
+              lang: selectedLanguageInfo.name,
+              defaultValue: 'Editing: {{key}} ({{lang}})',
+            })}
             type="info"
             style={{ marginBottom: 16 }}
           />
 
           <Form.Item
-            label="Value"
+            label={t('value_col', { defaultValue: 'Value' })}
             name="value"
-            rules={[{ required: true, message: 'Value is required' }]}
+            rules={[{ required: true, message: t('value_required', { defaultValue: 'Value is required' }) }]}
           >
             <TextArea
               rows={6}
-              placeholder="Enter translation value..."
+              placeholder={t('value_placeholder', { defaultValue: 'Enter translation value...' })}
               showCount
               maxLength={5000}
             />
           </Form.Item>
 
           <Form.Item
-            label="Active"
+            label={t('active', { defaultValue: 'Active' })}
             name="is_active"
             valuePropName="checked"
           >
@@ -906,14 +937,14 @@ const Translations = () => {
                 form.resetFields();
                 setSelectedTranslation(null);
               }}>
-                Cancel
+                {t('cancel', { defaultValue: 'Cancel' })}
               </Button>
               <Button
                 type="primary"
                 htmlType="submit"
                 loading={updateTranslationMutation.isPending}
               >
-                Update Translation
+                {t('update_translation_button', { defaultValue: 'Update Translation' })}
               </Button>
             </Space>
           </Form.Item>
@@ -922,7 +953,7 @@ const Translations = () => {
 
       {/* Sync Modal */}
       <Modal
-        title="Sync Entity Translations"
+        title={t('sync_title', { defaultValue: 'Sync Entity Translations' })}
         open={isSyncModalVisible}
         onCancel={() => {
           setIsSyncModalVisible(false);
@@ -936,17 +967,17 @@ const Translations = () => {
           onFinish={handleSyncSubmit}
         >
           <Alert
-            message="Sync creates baseline entity translations for records that do not have them yet."
+            message={t('sync_description', { defaultValue: 'Sync creates baseline entity translations for records that do not have them yet.' })}
             type="info"
             style={{ marginBottom: 16 }}
           />
 
           <Form.Item
-            label="Entity Type"
+            label={t('entity_type_label', { defaultValue: 'Entity Type' })}
             name="entity_type"
-            rules={[{ required: true, message: 'Entity type is required' }]}
+            rules={[{ required: true, message: t('entity_type_required', { defaultValue: 'Entity type is required' }) }]}
           >
-            <Select placeholder="Select entity type to sync" disabled={entityTypes.length === 0}>
+            <Select placeholder={t('select_entity_type', { defaultValue: 'Select entity type to sync' })} disabled={entityTypes.length === 0}>
               {entityTypes.map(entityType => (
                 <Option key={entityType} value={entityType}>
                   {entityType}
@@ -957,7 +988,7 @@ const Translations = () => {
 
           {entityTypes.length === 0 && (
             <Alert
-              message="No entity types found to sync."
+              message={t('no_entity_types', { defaultValue: 'No entity types found to sync.' })}
               type="warning"
               showIcon
               style={{ marginBottom: 16 }}
@@ -970,7 +1001,7 @@ const Translations = () => {
                 setIsSyncModalVisible(false);
                 syncForm.resetFields();
               }}>
-                Cancel
+                {t('cancel', { defaultValue: 'Cancel' })}
               </Button>
               <Button
                 type="primary"
@@ -978,7 +1009,7 @@ const Translations = () => {
                 disabled={entityTypes.length === 0}
                 loading={syncTranslationsMutation.isPending}
               >
-                Sync Translations
+                {t('sync_button', { defaultValue: 'Sync Translations' })}
               </Button>
             </Space>
           </Form.Item>
@@ -987,7 +1018,7 @@ const Translations = () => {
 
       {/* Import Modal */}
       <Modal
-        title="Import Translations"
+        title={t('import_title', { defaultValue: 'Import Translations' })}
         open={isImportModalVisible}
         onCancel={() => {
           setIsImportModalVisible(false);
@@ -997,8 +1028,8 @@ const Translations = () => {
         width={600}
       >
         <Alert
-          message="Import translations from JSON data"
-          description="Upload a JSON file or paste JSON data containing translation records."
+          message={t('import_description', { defaultValue: 'Import translations from JSON data' })}
+          description={t('import_description_detail', { defaultValue: 'Upload a JSON file or paste JSON data containing translation records.' })}
           type="info"
           style={{ marginBottom: 16 }}
         />
@@ -1012,7 +1043,7 @@ const Translations = () => {
               const translations = Array.isArray(parsed) ? parsed : parsed?.translations;
 
               if (!Array.isArray(translations)) {
-                message.error('JSON must be an array or an object with a "translations" array');
+                message.error(t('toast_invalid_json_structure', { defaultValue: 'JSON must be an array or an object with a "translations" array' }));
                 return;
               }
 
@@ -1021,23 +1052,23 @@ const Translations = () => {
                 update_existing: values.update_existing
               });
             } catch (error) {
-              message.error('Invalid JSON format');
+              message.error(t('toast_invalid_json', { defaultValue: 'Invalid JSON format' }));
             }
           }}
         >
           <Form.Item
-            label="JSON Data"
+            label={t('json_data_label', { defaultValue: 'JSON Data' })}
             name="translations_json"
-            rules={[{ required: true, message: 'JSON data is required' }]}
+            rules={[{ required: true, message: t('json_data_required', { defaultValue: 'JSON data is required' }) }]}
           >
             <TextArea
               rows={10}
-              placeholder='Paste JSON data here, e.g., [{"key": "telegram.welcome", "value": "Welcome!", "language": "en", "category": "telegram"}]'
+              placeholder={t('json_data_placeholder', { defaultValue: 'Paste JSON data here, e.g., [{"key": "telegram.welcome", "value": "Welcome!", "language": "en", "category": "telegram"}]' })}
             />
           </Form.Item>
 
           <Form.Item
-            label="Update Existing"
+            label={t('update_existing_label', { defaultValue: 'Update Existing' })}
             name="update_existing"
             valuePropName="checked"
             initialValue={false}
@@ -1051,14 +1082,14 @@ const Translations = () => {
                 setIsImportModalVisible(false);
                 importForm.resetFields();
               }}>
-                Cancel
+                {t('cancel', { defaultValue: 'Cancel' })}
               </Button>
               <Button
                 type="primary"
                 htmlType="submit"
                 loading={importTranslationsMutation.isPending}
               >
-                Import Translations
+                {t('import_button', { defaultValue: 'Import Translations' })}
               </Button>
             </Space>
           </Form.Item>

@@ -109,6 +109,7 @@ from business_app.utils.api_responses import (
 )
 from business_app.utils.bot_webhook import trigger_translation_reload
 from business_app.utils.pydantic_helpers import validate_json_with_model
+from business_app.utils.request_helpers import parse_bool_arg
 from business_app.serializers.subscription_serializers import (
     AdminCreateSubscriptionRequest,
     AdminUpdateSubscriptionRequest,
@@ -2614,8 +2615,8 @@ def get_products_admin():
         per_page = min(int(request.args.get("per_page", 50)), 100)
         search = request.args.get("search", "").strip()
         category_id = request.args.get("category_id", type=int)
-        is_active = request.args.get("is_active", type=bool)
-        low_stock_only = request.args.get("low_stock_only", type=bool, default=False)
+        is_active = parse_bool_arg("is_active")
+        low_stock_only = parse_bool_arg("low_stock_only", default=False)
         pricing_user_id = request.args.get("pricing_user_id", type=int)
 
         # Build query
@@ -3188,7 +3189,7 @@ def get_categories():
         page = int(request.args.get("page", 1))
         per_page = min(int(request.args.get("per_page", 50)), 100)
         search = request.args.get("search", "").strip()
-        is_active = request.args.get("is_active", type=bool)
+        is_active = parse_bool_arg("is_active")
         sort_by = request.args.get("sort_by", "sort_order")  # sort_order, name, created_at
 
         # Build query
@@ -3447,7 +3448,7 @@ def get_time_slots_admin():
     try:
         page = int(request.args.get("page", 1))
         per_page = min(int(request.args.get("per_page", 50)), 100)
-        is_active = request.args.get("is_active", type=bool)
+        is_active = parse_bool_arg("is_active")
 
         # Build query
         query = DeliveryTimeSlot.query
@@ -3718,7 +3719,7 @@ def get_delivery_personnel():
     try:
         page = int(request.args.get("page", 1))
         per_page = min(int(request.args.get("per_page", 50)), 100)
-        is_active = request.args.get("is_active", type=bool)
+        is_active = parse_bool_arg("is_active")
         search = request.args.get("search", "").strip()
 
         # Build query
@@ -5339,8 +5340,8 @@ def get_reviews():
         page = int(request.args.get("page", 1))
         per_page = min(int(request.args.get("per_page", 50)), 100)
         search = request.args.get("search", "").strip()
-        is_approved = request.args.get("is_approved", type=bool)
-        is_featured = request.args.get("is_featured", type=bool)
+        is_approved = parse_bool_arg("is_approved")
+        is_featured = parse_bool_arg("is_featured")
         rating = request.args.get("rating", type=int)
         product_id = request.args.get("product_id", type=int)
         user_id = request.args.get("user_id", type=int)

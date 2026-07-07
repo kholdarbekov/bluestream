@@ -1,0 +1,77 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Отчёт по инвентарю - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Отчёт по инвентарю</h1>
+{% endblock %}
+
+{% block content %}
+<h2>{{ report_type | capitalize }} отчёт по инвентарю</h2>
+
+<div class="info-box">
+    <p>Сформирован: <strong>{{ generated_at }}</strong></p>
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Всего товаров</th>
+        <td>{{ total_products }}</td>
+    </tr>
+    <tr>
+        <th>Товары с низким запасом</th>
+        <td>{{ low_stock_count }}</td>
+    </tr>
+    <tr>
+        <th>Товары не в наличии</th>
+        <td>{{ out_of_stock_count }}</td>
+    </tr>
+    <tr class="total-row">
+        <th>Общая стоимость запасов</th>
+        <td>{{ total_inventory_value }} сум</td>
+    </tr>
+</table>
+
+{% if out_of_stock_products %}
+<hr class="divider">
+<h2>Нет в наличии</h2>
+<table class="details-table">
+    <tr>
+        <th>Товар</th>
+        <th>Артикул</th>
+        <th>Остаток</th>
+    </tr>
+    {% for product in out_of_stock_products %}
+    <tr>
+        <td>{{ product.name }}</td>
+        <td>{{ product.sku or "N/A" }}</td>
+        <td>{{ product.stock }}</td>
+    </tr>
+    {% endfor %}
+</table>
+{% endif %}
+
+{% if low_stock_products %}
+<hr class="divider">
+<h2>Низкий запас</h2>
+<table class="details-table">
+    <tr>
+        <th>Товар</th>
+        <th>Артикул</th>
+        <th>Остаток</th>
+        <th>Мин. уровень</th>
+    </tr>
+    {% for product in low_stock_products %}
+    <tr>
+        <td>{{ product.name }}</td>
+        <td>{{ product.sku or "N/A" }}</td>
+        <td>{{ product.stock }}</td>
+        <td>{{ product.min_level }}</td>
+    </tr>
+    {% endfor %}
+</table>
+{% endif %}
+
+<hr class="divider">
+<p>Этот отчёт сформирован автоматически. Полную информацию смотрите в панели администратора.</p>
+{% endblock %}

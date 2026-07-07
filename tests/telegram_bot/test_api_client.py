@@ -1,11 +1,14 @@
 """Unit tests for telegram bot API client internals."""
 
+import hashlib
+import hmac
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
 import pytest
 
 from api_client import APIResponse, BusinessAPIClient, CircuitBreaker
+from config import config as bot_config
 
 
 class _FakeResponse:
@@ -24,10 +27,18 @@ class _FakeHTTPClient:
         self.response = response
         self.last_url = None
         self.last_headers = None
+        self.last_kwargs = None
 
     async def get(self, url, **kwargs):
         self.last_url = url
         self.last_headers = kwargs.get("headers", {})
+        self.last_kwargs = kwargs
+        return self.response
+
+    async def post(self, url, **kwargs):
+        self.last_url = url
+        self.last_headers = kwargs.get("headers", {})
+        self.last_kwargs = kwargs
         return self.response
 
 
@@ -127,3 +138,66 @@ class TestBusinessAPIClient:
             user_token="user-token",
             data=payload,
         )
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+class TestAuthenticateUserSignsLoginRequest:
+    """Backend now rejects unsigned /api/v1/auth/telegram-login requests (401).
+
+    These tests prove byte-exactness end-to-end: the signature the bot sends
+    must be HMAC-SHA256(secret, <the exact bytes placed on the wire>) rather
+    than a signature computed over a re-serialization of `data` that could
+    drift from what httpx actually sends.
+    """
+
+    async def test_authenticate_user_sends_matching_signature(self):
+        client = BusinessAPIClient()
+        client.max_retries = 0
+        fake_response = _FakeResponse(
+            200,
+            payload={
+                "data": {
+                    "access_token": "t",
+                    "refresh_token": "r",
+                    "expires_in": 3600,
+                }
+            },
+        )
+        fake_http = _FakeHTTPClient(fake_response)
+        client._client = fake_http
+
+        result = await client.authenticate_user(123456789, {"username": "x"})
+
+        assert result is not None
+        assert result["access_token"] == "t"
+
+        # Byte-exactness: signed with content=, not json= (json= would let
+        # httpx re-serialize and could desync from the signed bytes).
+        sent_content = fake_http.last_kwargs.get("content")
+        assert sent_content is not None
+        assert fake_http.last_kwargs.get("json") is None
+
+        secret = bot_config.security.webhook_secret
+        assert secret, "test env must seed BOT_WEBHOOK_SECRET (see tests/conftest.py)"
+        expected_signature = hmac.new(
+            secret.encode("utf-8"), sent_content, hashlib.sha256
+        ).hexdigest()
+        assert fake_http.last_headers["X-Bot-Webhook-Signature"] == expected_signature
+
+    async def test_non_login_post_is_unsigned_and_uses_json(self):
+        """Regression guard: only the login call site opts into `sign=True`."""
+        client = BusinessAPIClient()
+        client.max_retries = 0
+        fake_response = _FakeResponse(200, payload={"success": True, "data": {"ok": True}})
+        fake_http = _FakeHTTPClient(fake_response)
+        client._client = fake_http
+
+        response = await client._make_request(
+            "POST", "/api/v1/orders", data={"product_id": 1}
+        )
+
+        assert response.success is True
+        assert fake_http.last_kwargs.get("json") == {"product_id": 1}
+        assert fake_http.last_kwargs.get("content") is None
+        assert "X-Bot-Webhook-Signature" not in (fake_http.last_headers or {})

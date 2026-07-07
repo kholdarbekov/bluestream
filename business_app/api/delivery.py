@@ -367,7 +367,7 @@ def get_driver_assignments():
             )
 
         # Order by priority and scheduled time
-        query = query.order_by(Delivery.order.is_urgent.desc(), Delivery.scheduled_date.asc())
+        query = query.join(Order).order_by(Order.is_urgent.desc(), Delivery.scheduled_date.asc())
 
         deliveries = query.all()
 
@@ -382,13 +382,20 @@ def get_driver_assignments():
 
             deliveries_data.append(delivery_data)
 
+        delivery_service = get_delivery_service()
+        estimated_completion_time = (
+            delivery_service.estimate_route_completion_time(deliveries)
+            if hasattr(delivery_service, "estimate_route_completion_time")
+            else None
+        )
+
         return jsonify(
             {
                 "assignments": deliveries_data,
                 "summary": {
                     "total_assignments": len(deliveries),
                     "urgent_assignments": len([d for d in deliveries if d.order.is_urgent]),
-                    "estimated_completion_time": get_delivery_service().estimate_route_completion_time(deliveries),
+                    "estimated_completion_time": estimated_completion_time,
                 },
             }
         )

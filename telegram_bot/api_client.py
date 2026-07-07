@@ -2,6 +2,9 @@
 API client for communicating with the business application
 """
 import httpx
+import hashlib
+import hmac
+import json
 import logging
 import uuid
 from typing import Dict, Any, Optional, List, Union
@@ -198,7 +201,8 @@ class BusinessAPIClient:
                           user_token: Optional[str] = None,
                           language: Optional[str] = None,
                           token_manager=None,
-                          telegram_id: Optional[int] = None) -> APIResponse:
+                          telegram_id: Optional[int] = None,
+                          sign: bool = False) -> APIResponse:
         """Make HTTP request with retry logic and circuit breaker"""
         # Circuit breaker: fail fast if backend is presumed down
         if not self._circuit_breaker.allow_request():
@@ -230,6 +234,23 @@ class BusinessAPIClient:
         if params:
             logger.debug(f"Request params: {params}")
 
+        # Signed requests (currently: login) must send exactly the bytes we
+        # sign — httpx `json=` serializes internally, so we can't guarantee
+        # byte-equality with it. Pre-serialize the body ourselves and send it
+        # via `content=` so the signed bytes == the bytes on the wire ==
+        # backend's `request.get_data()`.
+        signed_body = None
+        if sign and data is not None:
+            secret = getattr(getattr(config, "security", None), "webhook_secret", None)
+            if secret:
+                signed_body = json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+                request_headers["Content-Type"] = "application/json"
+                request_headers["X-Bot-Webhook-Signature"] = hmac.new(
+                    secret.encode("utf-8"), signed_body, hashlib.sha256
+                ).hexdigest()
+            else:
+                logger.error("sign=True but config.security.webhook_secret is unset; login will 401")
+
         for attempt in range(self.max_retries + 1):
             try:
                 logger.debug(f"HTTP request attempt {attempt + 1}/{self.max_retries + 1}")
@@ -243,7 +264,10 @@ class BusinessAPIClient:
                 if method.upper() == 'GET':
                     response = await self._client.get(url, **request_kwargs)
                 elif method.upper() == 'POST':
-                    response = await self._client.post(url, json=data, **request_kwargs)
+                    if signed_body is not None:
+                        response = await self._client.post(url, content=signed_body, **request_kwargs)
+                    else:
+                        response = await self._client.post(url, json=data, **request_kwargs)
                 elif method.upper() == 'PUT':
                     response = await self._client.put(url, json=data, **request_kwargs)
                 elif method.upper() == 'PATCH':
@@ -394,7 +418,8 @@ class BusinessAPIClient:
             response = await self._make_request(
                 'POST',
                 '/api/v1/auth/telegram-login',
-                data=auth_data
+                data=auth_data,
+                sign=True
             )
 
             logger.debug(f"Auth response - Success: {response.success}, Status: {response.status_code}")

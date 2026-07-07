@@ -218,7 +218,7 @@ services:
           cpus: '0.5'
 
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.13.0
     ports:
       - "127.0.0.1:9090:9090"
     volumes:
@@ -253,7 +253,7 @@ services:
   # URL is loaded via Compose file-mount secret at
   # /run/secrets/slack_webhook_url — see monitoring/alertmanager.yml.
   alertmanager:
-    image: prom/alertmanager:latest
+    image: prom/alertmanager:v0.33.1
     ports:
       - "127.0.0.1:9093:9093"
     volumes:
@@ -281,7 +281,7 @@ services:
         max-file: "3"
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:13.1
     ports:
       - "127.0.0.1:3001:3000"
     volumes:
@@ -322,7 +322,7 @@ services:
   # password lives in secrets/postgres_monitoring_password and is read by the
   # exporter via DATA_SOURCE_PASS_FILE (no plaintext in env).
   postgres_exporter:
-    image: prometheuscommunity/postgres-exporter:latest
+    image: prometheuscommunity/postgres-exporter:v0.20.0
     environment:
       - DATA_SOURCE_URI=postgres:5432/${POSTGRES_DB:-bluestream_db}?sslmode=disable
       - DATA_SOURCE_USER=monitoring_ro
@@ -352,7 +352,7 @@ services:
   # Uses bind mounts (not network_mode: host) so we stay on the bridge with
   # everyone else; --path.rootfs=/host points the collectors at the host fs.
   node_exporter:
-    image: prom/node-exporter:latest
+    image: prom/node-exporter:v1.11.1
     command:
       - '--path.procfs=/host/proc'
       - '--path.sysfs=/host/sys'
@@ -384,7 +384,7 @@ services:
   # privileged: false but with cap_add + devices so it can read the cgroup
   # data it needs without a full --privileged.
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:latest
+    image: gcr.io/cadvisor/cadvisor:v0.60.3
     command:
       - '--housekeeping_interval=30s'
       - '--docker_only=true'
@@ -425,7 +425,7 @@ services:
   # nginx/conf.d/sites/00-stub-status.conf — locked down to the docker bridge
   # network). Required by dashboard 12708.
   nginx_exporter:
-    image: nginx/nginx-prometheus-exporter:latest
+    image: nginx/nginx-prometheus-exporter:1.5.1
     command:
       - '--nginx.scrape-uri=http://nginx:80/nginx_status'
     depends_on:
@@ -447,7 +447,7 @@ services:
         max-file: "3"
 
   loki:
-    image: grafana/loki:latest
+    image: grafana/loki:3.7.3
     ports:
       - "127.0.0.1:3100:3100"
     volumes:
@@ -480,7 +480,7 @@ services:
   # is the OTel-compatible successor and lets us add traces + metrics
   # collection later without swapping agents.
   alloy:
-    image: grafana/alloy:latest
+    image: grafana/alloy:v1.17.1  # pinned 2026-07-07 — verify matches the Pi's deployed version before next monitoring pull
     command:
       - run
       - /etc/alloy/config.alloy

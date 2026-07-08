@@ -501,7 +501,15 @@ class PaymentService:
             }
 
     def handle_click_webhook(self, webhook_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle Click Shop API callbacks synchronously."""
+        """Handle Click Shop API callbacks synchronously.
+
+        Terminal protocol outcomes are RETURN VALUES from handle_callback.
+        Anything raised here is a transient/unexpected failure: roll back and
+        re-raise so the route releases the idempotency claim and answers 503 —
+        Click's retry then re-enters processing (idempotent under the row
+        lock + status guards). Swallowing to {"error": -1} used to get cached
+        for 24h and permanently poisoned the gateway's retries.
+        """
         try:
             response = self._get_click_provider_service().handle_callback(webhook_data)
             db.session.commit()
@@ -509,7 +517,7 @@ class PaymentService:
         except Exception:
             db.session.rollback()
             current_app.logger.exception("Click webhook error")
-            return {"error": -1, "error_note": "Bad Request"}
+            raise
 
     def process_refund(self, payment_id: int, amount: int, reason: str = None) -> bool:
         """Process payment refund"""
@@ -615,6 +623,9 @@ class PaymentService:
             try:
                 status_data = self._get_click_provider_service().check_payment_status(payment)
             except (PaymentError, ProviderUnavailableError) as exc:
+                # H1: transport errors must NOT masquerade as gateway evidence
+                # (e.g. as an affirmative not_found) downstream.
+                payment._last_gateway_status = None
                 current_app.logger.warning(
                     "Click status check failed; leaving payment PENDING",
                     extra={"payment_id": payment.id, "order_id": payment.order_id, "error": str(exc)},
@@ -622,6 +633,11 @@ class PaymentService:
                 db.session.rollback()
                 return payment
             provider_status = str(status_data.get("status") or "").lower()
+            # H1 bridge: record the gateway-reported status for ALL outcomes as a
+            # NON-PERSISTENT instance attribute so check_payment_status() can
+            # surface affirmative evidence (e.g. "not_found") that this method
+            # intentionally does not act on. Never written to the DB.
+            payment._last_gateway_status = provider_status
             if provider_status in {"completed", PaymentStatus.COMPLETED.value, "success"}:
                 provider_txn_id = status_data.get("provider_transaction_id")
                 if not provider_txn_id:
@@ -673,7 +689,16 @@ class PaymentService:
             raise NotFoundError(get_translation("error.not_found"))
 
         self.update_payment_status(payment)
-        return self.get_payment_status(payment_id)
+        payload = self.get_payment_status(payment_id)
+        # H1 bridge: surface the gateway's affirmative "not_found" evidence that
+        # update_payment_status intentionally does not persist. Only while the
+        # payment is still PENDING — nothing is written here; the reconcile
+        # task's PAY-007 order-state gate still governs any cancel decision.
+        gateway_status = getattr(payment, "_last_gateway_status", None)
+        if gateway_status == "not_found" and payment.status == PaymentStatus.PENDING:
+            payload["status"] = "not_found"
+            payload["not_found"] = True
+        return payload
 
     def get_user_payment_statistics(self, user_id: int, period: str = "year") -> Dict[str, Any]:
         """Get aggregated payment statistics for a user.
@@ -999,48 +1024,53 @@ class PaymentService:
         if not trigger_notifications:
             return
 
-        # Send notification via Celery (email/SMS) for non-Telegram orders.
-        # Telegram orders are notified via the bot webhook below to avoid
-        # duplicate messages.
-        order_source = getattr(order, "order_source", None)
-        if order_source != "telegram":
-            from ..tasks.notification_tasks import send_payment_confirmation_task
+        self.dispatch_payment_confirmation(payment)
 
-            send_payment_confirmation_task.delay(payment.id)
+    def dispatch_payment_confirmation(self, payment: Payment) -> bool:
+        """Best-effort dispatch of the customer payment confirmation.
 
-        # Trigger telegram bot notification
+        Email/SMS via Celery for non-Telegram orders; bot push for Telegram
+        users (stable request_id keyed on payment.id, so re-dispatch is safe).
+        On success stamps provider_data.post_payment.confirmation_enqueued_at —
+        the side-effect sweep re-fires unmarked COMPLETED payments. NEVER raises:
+        this runs after the money commit and must not abort the webhook chain.
+        """
+        order = payment.order
         try:
-            from flask import current_app
+            order_source = getattr(order, "order_source", None) if order is not None else None
+            if order_source != "telegram":
+                from ..tasks.notification_tasks import send_payment_confirmation_task
+
+                send_payment_confirmation_task.delay(payment.id)
 
             user = payment.user
             if user and user.telegram_id:
                 from business_app.utils.bot_webhook import trigger_bot_webhook
 
                 # BOT-008: stable request_id keyed on payment.id so Celery
-                # retries of this confirmation step (or duplicate webhook
-                # arrivals at the backend) collapse to one bot notification.
+                # retries or re-dispatches collapse to one bot notification.
                 trigger_bot_webhook(
                     "/internal/payment-success",
                     {
                         "user_id": user.id,
                         "telegram_id": user.telegram_id,
-                        "order_id": order.id,
-                        "order_number": order.order_number,
-                        "amount": float(order.total_amount),
+                        "order_id": order.id if order else None,
+                        "order_number": order.order_number if order else None,
+                        "amount": float(order.total_amount) if order else float(payment.amount),
                         "currency": "UZS",
                     },
                     request_id=f"payment-confirm:{payment.id}",
                 )
-            else:
-                if current_app:
-                    current_app.logger.info(
-                        f"Skipping bot notification for payment {payment.id}: User has no telegram_id"
-                    )
-        except Exception:
-            from flask import current_app
+        except Exception:  # noqa: BLE001
+            current_app.logger.exception("Failed to dispatch payment confirmation for payment %s", payment.id)
+            return False
 
-            if current_app:
-                current_app.logger.exception("Failed to trigger bot payment success webhook")
+        provider_data = dict(payment.provider_data or {})
+        post_payment = dict(provider_data.get("post_payment") or {})
+        post_payment["confirmation_enqueued_at"] = datetime.now(timezone.utc).isoformat()
+        provider_data["post_payment"] = post_payment
+        payment.provider_data = provider_data
+        return True
 
     def _process_points_refund(self, payment: Payment, amount: int, reason: str) -> bool:
         """Refund a points-paid order by RETURNING the redeemed points.

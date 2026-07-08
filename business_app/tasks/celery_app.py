@@ -125,6 +125,13 @@ def make_celery(app=None):
             "task": "business_app.tasks.payment_tasks.reconcile_pending_payments",
             "schedule": crontab(minute="*/15"),
         },
+        # Repair lost post-payment side effects (fiscalization, customer
+        # confirmation) on COMPLETED electronic payments (spec 2026-07-08).
+        # Offset from reconcile-pending-payments to spread beat load.
+        "reconcile-completed-payment-side-effects": {
+            "task": "business_app.tasks.payment_tasks.reconcile_completed_payment_side_effects",
+            "schedule": crontab(minute="7-59/15"),
+        },
         # Mark active COD reconciliation sessions past the warning window every hour.
         "mark-overdue-cod-reconciliation-sessions": {
             "task": "business_app.tasks.payment_tasks.mark_overdue_cod_reconciliation_sessions",

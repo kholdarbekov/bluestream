@@ -32,7 +32,6 @@ import pytest
 from business_app import db as _db
 from business_app.models.order import Order
 from business_app.models.payment import Payment, PaymentTransaction
-from business_app.models.user import UserAddress
 from business_app.utils.constants import (
     PaymeState,
 )
@@ -48,7 +47,6 @@ from tests.integration.fake_gateways import (
     TEST_CLICK_SHOP_SECRET_KEY,
     TEST_PAYME_SECRET_KEY,
     UnscriptedGatewayCall,
-    apply_test_provider_secrets,
     make_click_signature,
     make_click_webhook_form,
     make_payme_webhook_body,
@@ -60,47 +58,18 @@ WEBHOOK_PATH = '/api/v1/payments/webhook/{provider}'
 
 # --------------------------------------------------------------------------- #
 # Module-level fixtures
+#
+# NOTE: ``matrix_app`` / ``matrix_client`` / ``no_fiscalization`` /
+# ``sample_address`` / ``order_with_address`` now live in
+# ``tests/integration/conftest.py`` so they are shared (via pytest fixture
+# discovery) with ``test_click_crash_recovery.py``. Do not redefine them here.
 # --------------------------------------------------------------------------- #
-
-@pytest.fixture
-def matrix_app(app):
-    """Apply test provider secrets and return the same app fixture."""
-    apply_test_provider_secrets(app)
-    # Payme uses the *_with_billing variants for signature verification on
-    # webhook receipts; mirror the primary key.
-    app.config['PAYME_MERCHANT_ID_WITH_BILLING'] = app.config['PAYME_MERCHANT_ID']
-    app.config['PAYME_SECRET_KEY_WITH_BILLING'] = app.config['PAYME_SECRET_KEY']
-    return app
-
-
-@pytest.fixture
-def matrix_client(matrix_app):
-    return matrix_app.test_client()
-
 
 @pytest.fixture
 def payme_basic_auth_header():
     """Build the Basic-auth header Payme webhook signature verification expects."""
     creds = f"Paycom:{TEST_PAYME_SECRET_KEY}".encode('utf-8')
     return {'Authorization': 'Basic ' + base64.b64encode(creds).decode('ascii')}
-
-
-@pytest.fixture
-def no_fiscalization(monkeypatch):
-    """Stub out post-payment fiscalization triggers (TST-011 territory).
-
-    ``_handle_successful_payment`` calls ``queue_click_fiscalization`` for
-    Click + Card payments after a successful webhook. Fiscalization has its
-    own retry/idempotency semantics that the OFD matrix (TST-011) covers.
-    Patch at the PaymentService level so any service instance picks it up.
-    """
-    from business_app.services.payment_service import PaymentService
-    monkeypatch.setattr(
-        PaymentService,
-        'queue_click_fiscalization',
-        lambda self, payment_id: None,
-        raising=True,
-    )
 
 
 @pytest.fixture
@@ -119,38 +88,6 @@ def fake_click_merchant(monkeypatch, matrix_app):
         raising=True,
     )
     yield fake
-
-
-@pytest.fixture
-def sample_address(db, sample_user):
-    """Default delivery address for sample_user.
-
-    ARCH-006 enforces ``delivery_address_id IS NOT NULL`` on the
-    PENDING → CONFIRMED transition. The shared ``sample_order`` fixture
-    intentionally creates orders without an address (covers pre-CONFIRMED
-    states), so this finding shadows it for tests that drive an order to
-    paid state.
-    """
-    address = UserAddress(
-        user_id=sample_user.id,
-        title='Home',
-        full_address='123 Test Street, Tashkent',
-        latitude=41.2995,
-        longitude=69.2401,
-        is_default=True,
-    )
-    db.session.add(address)
-    db.session.commit()
-    return address
-
-
-@pytest.fixture
-def order_with_address(db, sample_order, sample_address):
-    """Attach the test address to ``sample_order`` so paid-state
-    transitions clear the ARCH-006 guard."""
-    sample_order.delivery_address_id = sample_address.id
-    db.session.commit()
-    return sample_order
 
 
 @pytest.fixture
@@ -993,24 +930,20 @@ class TestReconciliationCatchesStrandedPending:
         payment_refreshed = Payment.query.get(payment.id)
         assert payment_refreshed.status == PaymentStatus.COMPLETED
 
-    def test_click_pending_past_timeout_with_unknown_status_auto_cancels(
+    def test_click_pending_past_timeout_with_unknown_status_leaves_pending_and_alerts(
         self, matrix_app, db, sample_order, fake_click_merchant, no_fiscalization,
     ):
-        """Past PAYMENT_TIMEOUT_MINUTES with no recognizable gateway status =>
-        auto-cancel.
+        """Positive-evidence contract (Task 7): past PAYMENT_TIMEOUT_MINUTES with
+        an *unknown/ambiguous* gateway status must NOT auto-cancel — the charge
+        may exist and blind-cancelling would strand a real payment. The payment
+        is left PENDING and flagged for manual review exactly once
+        (``provider_data.click.reconcile_alerted_at``).
 
         Skipped on SQLite: ``Payment.created_at`` is declared
         ``DateTime(timezone=True)`` but SQLite drops tz info on round-trip.
-        The reconcile branch ``payment.created_at < timeout_threshold``
-        raises ``TypeError: can't compare offset-naive and offset-aware
-        datetimes`` because the retrieved value is naive while
-        ``timeout_threshold`` (built from ``datetime.now(timezone.utc)``)
-        is aware. Postgres preserves the tz; this cell will run under the
-        Postgres-backed integration lane (mirrors TST-004's pattern). The
-        success-status reconcile cell above passes because that branch
-        exits before the timeout comparison runs.
+        Postgres preserves the tz; this cell runs under the Postgres-backed
+        integration lane (mirrors TST-004's pattern).
         """
-        from sqlalchemy import inspect as sa_inspect
         from business_app.tasks.payment_tasks import reconcile_pending_payments
 
         if _db.engine.url.get_backend_name() == 'sqlite':
@@ -1025,10 +958,11 @@ class TestReconciliationCatchesStrandedPending:
         db.session.commit()
 
         # error_code MUST be 0 — non-zero raises PaymentError out of
-        # merchant_request before reconcile can route to the auto-cancel
-        # branch. payment_status = 0 (or any non-recognised int) maps to
-        # PENDING via ``_map_payment_status``, which then triggers
-        # auto-cancel because the payment is past PAYMENT_TIMEOUT_MINUTES.
+        # merchant_request before reconcile can route into the timeout branch.
+        # payment_status = 0 maps to PENDING via ``_map_payment_status`` — a
+        # recognized-but-unresolved status, i.e. NOT affirmative evidence of
+        # cancellation. Under the positive-evidence contract this leaves the
+        # payment PENDING (only ``not_found`` / gateway cancelled/failed cancel).
         fake_click_merchant.script(
             method='GET',
             url_contains='',
@@ -1043,11 +977,15 @@ class TestReconciliationCatchesStrandedPending:
         with matrix_app.app_context():
             result = reconcile_pending_payments()
 
-        assert result['cancelled'] >= 1, result
+        assert result['cancelled'] == 0, result
+        assert result['unchanged'] >= 1, result
 
         _db.session.expire_all()
         payment_refreshed = Payment.query.get(payment.id)
-        assert payment_refreshed.status == PaymentStatus.CANCELLED
+        assert payment_refreshed.status == PaymentStatus.PENDING
+        assert (payment_refreshed.provider_data or {}).get('click', {}).get('reconcile_alerted_at'), (
+            "unknown-past-timeout must write the one-shot review flag"
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -1115,11 +1053,18 @@ class TestReconcilePreventionGate:
             "Payment must remain PENDING — order is in-fulfillment"
         )
 
-    def test_reconcile_still_cancels_timeout_for_pending_order(
+    def test_reconcile_cancels_pending_order_on_affirmative_gateway_cancel(
         self, matrix_app, db, sample_order, fake_click_merchant, no_fiscalization,
     ):
-        """PAY-007 gate: the existing auto-cancel behaviour is preserved when
-        the order itself is still PENDING (abandoned cart / no-show).
+        """PAY-007 gate + positive-evidence contract (Task 7): a genuinely-PENDING
+        order's payment is still cancelled when the gateway AFFIRMS cancellation
+        (``payment_status=2`` -> CANCELLED). The gate only suppresses *timeout*
+        auto-cancel for orders past PENDING; it never blocks a PENDING order, and
+        affirmative gateway evidence cancels regardless of age.
+
+        (Under the old contract this cell drove the timeout branch with an
+        unknown status; that path no longer cancels — see the sibling
+        ``..._leaves_pending_and_alerts`` cell for the unknown case.)
 
         Skipped on SQLite — same timezone-awareness limitation.
         """
@@ -1132,15 +1077,18 @@ class TestReconcilePreventionGate:
         # sample_order is already PENDING by default.
         payment = self._stale_click_payment(db, sample_order)
 
+        # payment_status = 2 maps to CANCELLED via ``_map_payment_status`` — this
+        # is affirmative gateway evidence (not a mere timeout), which the
+        # positive-evidence contract requires before cancelling.
         fake_click_merchant.script(
             method='GET',
             url_contains='',
             json_body={
-                'payment_status': 0,
+                'payment_status': 2,
                 'error_code': 0,
                 'payment_id': 999_011,
             },
-            label='click-status-unknown-pending-order',
+            label='click-status-cancelled-pending-order',
         )
 
         from business_app.tasks.payment_tasks import reconcile_pending_payments
@@ -1148,7 +1096,7 @@ class TestReconcilePreventionGate:
             result = reconcile_pending_payments()
 
         assert result['cancelled'] >= 1, (
-            f"Abandoned-cart PENDING order should still be cancelled; got counts={result}"
+            f"PENDING order with affirmative gateway cancel should be cancelled; got counts={result}"
         )
 
         _db.session.expire_all()

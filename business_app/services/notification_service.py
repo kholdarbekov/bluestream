@@ -3813,6 +3813,72 @@ Thank you for your purchase!"""
             },
         },
     },
+    # Late Click debit credited as prepaid balance - Email
+    ("payment_late_debit_credited", "email"): {
+        "name": "payment_late_debit_credited_email",
+        "translations": {
+            "uz": {
+                "subject": "To'lov oldindan to'lov sifatida hisobga olindi - {{company_name}}",
+                "content": "Buyurtma {order_number} uchun {amount} so'mlik karta to'lovingiz buyurtma allaqachon to'langanidan keyin keldi. Ushbu summa hisobingizga oldindan to'lov sifatida qo'shildi va keyingi buyurtmangizga avtomatik qo'llaniladi.",  # noqa: E501
+            },
+            "en": {
+                "subject": "Payment credited as prepaid balance - {{company_name}}",
+                "content": "Your card payment of {amount} UZS for order {order_number} arrived after the order was already settled. The amount has been added to your account as prepaid credit and will apply to your next order automatically.",  # noqa: E501
+            },
+            "ru": {
+                "subject": "Платёж зачислен как предоплата - {{company_name}}",
+                "content": "Ваш платёж картой на {amount} сум за заказ {order_number} поступил после того, как заказ уже был оплачен. Сумма зачислена на ваш счёт как предоплата и автоматически применится к следующему заказу.",  # noqa: E501
+            },
+        },
+    },
+    # Late Click debit credited as prepaid balance - Telegram
+    ("payment_late_debit_credited", "telegram"): {
+        "name": "payment_late_debit_credited_telegram",
+        "translations": {
+            "uz": {
+                "content": "Buyurtma {order_number} uchun {amount} so'mlik karta to'lovingiz buyurtma allaqachon to'langanidan keyin keldi. Ushbu summa hisobingizga oldindan to'lov sifatida qo'shildi va keyingi buyurtmangizga avtomatik qo'llaniladi.",  # noqa: E501
+            },
+            "en": {
+                "content": "Your card payment of {amount} UZS for order {order_number} arrived after the order was already settled. The amount has been added to your account as prepaid credit and will apply to your next order automatically.",  # noqa: E501
+            },
+            "ru": {
+                "content": "Ваш платёж картой на {amount} сум за заказ {order_number} поступил после того, как заказ уже был оплачен. Сумма зачислена на ваш счёт как предоплата и автоматически применится к следующему заказу.",  # noqa: E501
+            },
+        },
+    },
+    # Online payment auto-cancelled by reconciliation - Email
+    ("payment_autocancel_retry", "email"): {
+        "name": "payment_autocancel_retry_email",
+        "translations": {
+            "uz": {
+                "subject": "Onlayn to'lovingiz bekor qilindi - {{company_name}}",
+                "content": "Buyurtma {order_number} uchun onlayn to'lovingizni tasdiqlay olmadik, shuning uchun u bekor qilindi. Hech qanday summa yechilmadi. Buyurtmangizdan qayta to'lashingiz yoki boshqa to'lov usulini tanlashingiz mumkin.",  # noqa: E501
+            },
+            "en": {
+                "subject": "Your online payment was cancelled - {{company_name}}",
+                "content": "We couldn't confirm your online payment for order {order_number}, so it was cancelled. Nothing was charged. You can pay again from your order, or choose another payment method.",  # noqa: E501
+            },
+            "ru": {
+                "subject": "Ваша онлайн-оплата отменена - {{company_name}}",
+                "content": "Мы не смогли подтвердить вашу онлайн-оплату заказа {order_number}, поэтому она была отменена. Средства не списаны. Вы можете оплатить заказ повторно или выбрать другой способ оплаты.",  # noqa: E501
+            },
+        },
+    },
+    # Online payment auto-cancelled by reconciliation - Telegram
+    ("payment_autocancel_retry", "telegram"): {
+        "name": "payment_autocancel_retry_telegram",
+        "translations": {
+            "uz": {
+                "content": "Buyurtma {order_number} uchun onlayn to'lovingizni tasdiqlay olmadik, shuning uchun u bekor qilindi. Hech qanday summa yechilmadi. Buyurtmangizdan qayta to'lashingiz yoki boshqa to'lov usulini tanlashingiz mumkin.",  # noqa: E501
+            },
+            "en": {
+                "content": "We couldn't confirm your online payment for order {order_number}, so it was cancelled. Nothing was charged. You can pay again from your order, or choose another payment method.",  # noqa: E501
+            },
+            "ru": {
+                "content": "Мы не смогли подтвердить вашу онлайн-оплату заказа {order_number}, поэтому она была отменена. Средства не списаны. Вы можете оплатить заказ повторно или выбрать другой способ оплаты.",  # noqa: E501
+            },
+        },
+    },
     # Loyalty reward - Email
     ("loyalty_reward", "email"): {
         "name": "loyalty_reward_email",

@@ -42,6 +42,14 @@ from flask import current_app
 WEBHOOK_DEDUP_KEY_PREFIX = "bs:webhook:dedup"
 WEBHOOK_DEDUP_TTL_SECONDS = 24 * 3600  # 24h comfortably outlasts gateway retry windows
 
+# Two-phase claim (crash-window fix): check() takes only a SHORT provisional
+# claim; store_response() promotes it to the full TTL together with caching
+# the response. A hard crash mid-processing therefore leaves a claim that
+# expires within seconds — the gateway's retry then reprocesses (safe: the
+# Complete handler is idempotent under its row lock + status guards) instead
+# of being answered from a claim whose work never committed.
+WEBHOOK_DEDUP_PROVISIONAL_TTL_SECONDS = 90
+
 
 @dataclass(frozen=True)
 class IdempotencyVerdict:
@@ -116,10 +124,12 @@ class WebhookIdempotencyGuard:
         *,
         key_prefix: str = WEBHOOK_DEDUP_KEY_PREFIX,
         ttl_seconds: int = WEBHOOK_DEDUP_TTL_SECONDS,
+        provisional_ttl_seconds: Optional[int] = None,
     ) -> None:
         self._redis = redis_client
         self._prefix = key_prefix
         self._ttl = ttl_seconds
+        self._provisional_ttl = int(provisional_ttl_seconds or WEBHOOK_DEDUP_PROVISIONAL_TTL_SECONDS)
 
     # ---- keys -----------------------------------------------------------------
 
@@ -137,7 +147,7 @@ class WebhookIdempotencyGuard:
             return IdempotencyVerdict(is_duplicate=False, request_id=request_id)
         claim_key = self._claim_key(provider, request_id)
         try:
-            claimed = self._redis.set(claim_key, "1", nx=True, ex=self._ttl)
+            claimed = self._redis.set(claim_key, "1", nx=True, ex=self._provisional_ttl)
         except Exception as exc:  # pragma: no cover — availability over correctness
             self._log().warning(f"Webhook idempotency check failed (provider={provider}, err={exc})")
             return IdempotencyVerdict(is_duplicate=False, request_id=request_id)
@@ -153,16 +163,23 @@ class WebhookIdempotencyGuard:
         )
 
     def store_response(self, provider: str, request_id: str, response: Any) -> None:
-        """Cache a response body for the given request id under the dedup TTL."""
+        """Cache a response body AND promote the claim to the full dedup TTL.
+
+        Promotion happens only together with a successful cache write: a
+        long-lived claim with no cached response would starve gateway retries
+        (they would see duplicate-without-cache until the claim expired).
+        """
         if self._redis is None or response is None:
             return
         try:
             payload = json.dumps(response, default=str)
         except (TypeError, ValueError):
-            # Non-serializable response — skip caching; claim key still prevents reprocessing.
+            # Non-serializable response — leave the provisional claim so the
+            # gateway's retry reprocesses after it expires.
             return
         try:
             self._redis.setex(self._response_key(provider, request_id), self._ttl, payload)
+            self._redis.set(self._claim_key(provider, request_id), "1", ex=self._ttl)
         except Exception as exc:  # pragma: no cover
             self._log().warning(f"Webhook response cache store failed (provider={provider}, err={exc})")
 
@@ -205,8 +222,13 @@ class WebhookIdempotencyGuard:
 
 
 def build_default_guard(redis_client) -> WebhookIdempotencyGuard:
-    """Factory that wires the guard to the module-level defaults."""
-    return WebhookIdempotencyGuard(redis_client)
+    """Factory that wires the guard to module defaults + Flask config overrides."""
+    provisional = None
+    try:
+        provisional = current_app.config.get("WEBHOOK_CLAIM_PROVISIONAL_TTL_SECONDS")
+    except RuntimeError:
+        provisional = None
+    return WebhookIdempotencyGuard(redis_client, provisional_ttl_seconds=provisional)
 
 
 __all__ = [
@@ -214,6 +236,7 @@ __all__ = [
     "WebhookIdempotencyGuard",
     "WEBHOOK_DEDUP_KEY_PREFIX",
     "WEBHOOK_DEDUP_TTL_SECONDS",
+    "WEBHOOK_DEDUP_PROVISIONAL_TTL_SECONDS",
     "build_default_guard",
     "extract_webhook_request_id",
 ]

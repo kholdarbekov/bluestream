@@ -1170,6 +1170,15 @@ class OrderEditService:
         if not is_paid:
             payment.amount = new_total
             payment.outstanding_amount = max(Decimal("0.00"), new_total - collected)
+            # Keep the de-dup identity in sync with the new attempt scope —
+            # a stale key would let a later create_payment miss this row.
+            if payment.user_id is not None and payment.payment_method is not None:
+                payment.idempotency_key = Payment.compute_idempotency_key(
+                    order_id=payment.order_id,
+                    user_id=payment.user_id,
+                    amount=new_total,
+                    payment_method=payment.payment_method,
+                )
             db.session.flush()
             return
 

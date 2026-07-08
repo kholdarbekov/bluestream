@@ -9,6 +9,7 @@ import business_app.models.subscription as subscription_models
 import business_app.models.user as user_models
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
+from sqlalchemy.exc import IntegrityError
 from datetime import datetime
 
 try:
@@ -45,7 +46,7 @@ from business_app.utils.prometheus_metrics import (
     record_webhook_duplicate,
 )
 from business_app.utils.webhook_idempotency import (
-    WebhookIdempotencyGuard,
+    build_default_guard,
     extract_webhook_request_id,
 )
 from business_app.tasks.payment_tasks import process_payment_verification, handle_payment_webhook
@@ -79,7 +80,10 @@ def _get_webhook_idempotency_guard(payment_service):
     client = getattr(payment_service, "redis_client", None)
     if client is None:
         return None
-    return WebhookIdempotencyGuard(client)
+    # Route through build_default_guard so the WEBHOOK_CLAIM_PROVISIONAL_TTL_SECONDS
+    # config override takes effect (constructing WebhookIdempotencyGuard directly
+    # would ignore it and always use the module default).
+    return build_default_guard(client)
 
 
 # PAY-006: per-provider global cap. 600/min lets Click/Payme retry aggressively
@@ -280,7 +284,21 @@ def create_payment():
             if card:
                 payment_data["saved_card_id"] = saved_card_id
 
-        payment = get_payment_service().create_payment(**payment_data)
+        try:
+            payment = get_payment_service().create_payment(**payment_data)
+        except IntegrityError:
+            # Concurrent create for the same order: uq_payments_order_id made the
+            # other request the winner. Retry once — the service's order_id reuse
+            # branch (PaymentService.create_payment) finds the winner row and
+            # UPDATE-reuses it with the REQUESTED method/amount/PENDING status and
+            # a refreshed idempotency key (the winner may hold a different
+            # payment_method, so re-selecting the row as-is would be wrong).
+            # A second IntegrityError propagates; do not loop.
+            db.session.rollback()
+            current_app.logger.info(
+                f"Create-payment race for order {order_id}: retrying create_payment against winner row"
+            )
+            payment = get_payment_service().create_payment(**payment_data)
 
         # For cash payments, mark as pending
         if payment_method == "cash":
@@ -725,13 +743,18 @@ def payment_webhook(provider):
                 )
                 if verdict.cached_response is not None:
                     return jsonify(verdict.cached_response), 200
-                # No cached response yet (first run still in flight or un-cached path):
-                # return a minimal 200 so the gateway treats it as accepted.
+                # No cached response yet: the first delivery is either still in
+                # flight or crashed before caching. Never fake success — tell
+                # Click to retry shortly; the provisional claim expires within
+                # WEBHOOK_CLAIM_PROVISIONAL_TTL_SECONDS and the retry reprocesses.
                 if provider_lc == "payme":
                     rpc_id = webhook_data.get("id") if isinstance(webhook_data, dict) else None
                     return jsonify({"jsonrpc": "2.0", "id": rpc_id, "result": {}}), 200
                 if provider_lc == "click":
-                    return jsonify({"error": 0, "error_note": "Already processed"}), 200
+                    response = jsonify({"error": -1, "error_note": "Processing in progress, retry"})
+                    response.status_code = 503
+                    response.headers["Retry-After"] = "15"
+                    return response
                 return jsonify({"status": "duplicate"}), 200
 
         if provider_lc == "payme":
@@ -744,10 +767,25 @@ def payment_webhook(provider):
 
         if provider_lc == "click":
             # Click Prepare/Complete requires an immediate provider-formatted response.
+            # Exceptions propagate to the except blocks below (claim released, 5xx).
             response_data = payment_service.handle_click_webhook(webhook_data)
+            error_code = response_data.get("error") if isinstance(response_data, dict) else None
+            if error_code == -1:
+                # Defensive: transient marker must never be cached — release so
+                # the gateway's retry re-enters processing.
+                if idempotency_guard is not None and idempotency_request_id is not None:
+                    idempotency_guard.release(provider_lc, idempotency_request_id)
+                record_webhook_failure(provider_lc, "transient")
+                response = jsonify(response_data)
+                response.status_code = 503
+                response.headers["Retry-After"] = "30"
+                return response
             if idempotency_guard is not None and idempotency_request_id is not None:
                 idempotency_guard.store_response(provider_lc, idempotency_request_id, response_data)
-            record_webhook_received(provider_lc)
+            if error_code == 0:
+                record_webhook_received(provider_lc)
+            else:
+                record_webhook_failure(provider_lc, "protocol_reject")
             return jsonify(response_data), 200
 
         webhook_metadata = {
@@ -841,7 +879,13 @@ def payment_webhook(provider):
             )
 
         elif provider.lower() == "click":
-            return jsonify({"error": -1, "error_note": "Internal server error"}), 500
+            # Transient/unexpected server error: answer 503 + Retry-After so Click
+            # re-delivers (the claim was released above, so the retry reprocesses).
+            # A 500 would be treated as terminal and permanently drop the webhook.
+            response = jsonify({"error": -1, "error_note": "Internal server error, retry"})
+            response.status_code = 503
+            response.headers["Retry-After"] = "30"
+            return response
         else:
             return jsonify({"error": "Webhook processing failed"}), 500
 

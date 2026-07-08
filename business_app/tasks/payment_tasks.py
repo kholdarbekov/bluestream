@@ -17,6 +17,7 @@ from business_app.services.payment_fiscalization_service import PaymentFiscaliza
 from business_app.services.notification_service import NotificationService
 from business_app.utils.audit_logger import audit_logger
 from business_app.utils.constants import NotificationChannel
+from business_app.utils.exceptions import ProviderUnavailableError, PaymentError
 from shared.enums import PaymentMethod, PaymentStatus, OrderStatus
 from business_app import db
 
@@ -166,6 +167,12 @@ def reconcile_pending_payments():
             if method_value not in _RECONCILABLE_METHODS:
                 continue
             provider_value = payment.payment_provider
+            # Normalize created_at to tz-aware for the timeout comparisons below.
+            # Postgres preserves tz on round-trip; SQLite (tests) drops it, which
+            # would otherwise raise "can't compare offset-naive and offset-aware".
+            created_at = payment.created_at
+            if created_at is not None and created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
             status_payload = payment_service.check_payment_status(payment.id)
             normalized_status = str(status_payload.get("status") or "").lower()
 
@@ -188,7 +195,7 @@ def reconcile_pending_payments():
                 new_status = PaymentStatus.CANCELLED
             elif normalized_status in {"failed", PaymentStatus.FAILED.value}:
                 new_status = PaymentStatus.FAILED
-            elif payment.created_at < timeout_threshold:
+            elif created_at is not None and created_at < timeout_threshold:
                 order = payment.order
                 order_status = (
                     order.status.value
@@ -199,6 +206,8 @@ def reconcile_pending_payments():
                 # NOT auto-cancel its payment or release its marking codes — the
                 # customer may settle offline at/after delivery (personal card or
                 # cash). Leave it PENDING so the offline-settlement paths apply.
+                # This guard stays FIRST — even affirmative not_found evidence must
+                # not disturb an order that has already moved past PENDING.
                 if order is not None and order_status != OrderStatus.PENDING.value:
                     logger.info(
                         "Skipping timeout auto-cancel for payment %s — order %s status=%s past PENDING",
@@ -208,18 +217,48 @@ def reconcile_pending_payments():
                     )
                     counts["unchanged"] += 1
                     continue
-                new_status = PaymentStatus.CANCELLED
-                logger.info("Auto-cancelling payment %s — gateway status unknown past timeout", payment.id)
+                if normalized_status == "not_found":
+                    # Affirmative evidence: Click does not recognize the order's
+                    # merchant_trans_id on any candidate date — never charged.
+                    new_status = PaymentStatus.CANCELLED
+                    logger.info(
+                        "Auto-cancelling payment %s — gateway affirmatively does not recognize it past timeout",
+                        payment.id,
+                    )
+                else:
+                    # Unknown/ambiguous: the charge may exist. NEVER blind-cancel —
+                    # flag for review exactly once and leave PENDING.
+                    provider_data = dict(payment.provider_data or {})
+                    click_data = dict(provider_data.get("click") or {})
+                    if not click_data.get("reconcile_alerted_at"):
+                        click_data["reconcile_alerted_at"] = now.isoformat()
+                        provider_data["click"] = click_data
+                        payment.provider_data = provider_data
+                        audit_logger.log_event(
+                            event_type=AuditEventType.PAYMENT_FAILED,
+                            action="payment_reconcile_needs_review",
+                            severity=AuditSeverity.HIGH,
+                            resource_type="payment",
+                            resource_id=str(payment.id),
+                            description=(
+                                f"Payment {payment.id} pending past timeout with ambiguous gateway "
+                                f"status ({normalized_status or 'unknown'}) — manual review required"
+                            ),
+                            additional_data={"provider": provider_value, "gateway_status": normalized_status},
+                        )
+                    counts["unchanged"] += 1
+                    continue
 
             if new_status is None:
                 counts["unchanged"] += 1
                 continue
 
+            past_timeout = created_at is not None and created_at < timeout_threshold
             payment.status = new_status
             if new_status == PaymentStatus.CANCELLED and provider_value == PaymentMethod.CLICK.value:
                 fiscalization_service.release_reserved_marking_codes(
                     payment,
-                    reason="payment_timeout" if payment.created_at < timeout_threshold else "payment_cancelled_gateway",
+                    reason="payment_timeout" if past_timeout else "payment_cancelled_gateway",
                 )
             counts["cancelled" if new_status == PaymentStatus.CANCELLED else "failed"] += 1
             audit_logger.log_event(
@@ -232,11 +271,25 @@ def reconcile_pending_payments():
                 additional_data={
                     "provider": provider_value,
                     "gateway_status": normalized_status or "unknown",
-                    "reason": (
-                        "timeout" if payment.created_at < timeout_threshold and not normalized_status else "gateway"
-                    ),
+                    "reason": ("timeout" if past_timeout and not normalized_status else "gateway"),
                 },
             )
+
+            # Notify the customer on every reconcile-cancel so they can retry or
+            # switch payment method. Best-effort — a notification failure must
+            # never abort the reconcile loop or the status write above.
+            if new_status == PaymentStatus.CANCELLED:
+                try:
+                    from business_app.services.notification_service import NotificationService
+
+                    order_number = payment.order.order_number if payment.order else ""
+                    NotificationService().send_notification(
+                        payment.user_id,
+                        "payment_autocancel_retry",
+                        template_data={"order_number": order_number},
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception("Failed to notify customer of auto-cancelled payment %s", payment.id)
 
         except Exception as e:
             logger.error("Error reconciling pending payment %s: %s", payment.id, e)
@@ -252,6 +305,127 @@ def reconcile_pending_payments():
 
     logger.info("Reconciliation summary: %s", counts)
     return counts
+
+
+@shared_task(time_limit=300, soft_time_limit=270)
+def reconcile_completed_payment_side_effects():
+    """Repair lost post-payment side effects on COMPLETED electronic payments.
+
+    Spec 2026-07-08 defects #5/#10: fiscalization and customer confirmation run
+    after the money commit and can be lost to a crash or broker hiccup with no
+    Click-retry recovery (the -4 short-circuit never re-runs them). This sweep
+    re-drives both for CLICK/CARD payments completed in the last 7 days; each
+    target is idempotent. Terminal fiscalization states (COMPLETED — done;
+    NOT_REQUIRED — no fiscalizable items on the order) and ones already flagged
+    ``retries_exhausted_at`` (admin review pending) are left alone.
+    """
+    from shared.enums import FiscalizationStatus
+
+    now = datetime.now(timezone.utc)
+    window_start = now - timedelta(days=7)
+    stale_before = now - timedelta(minutes=30)
+    settled_fiscalization_statuses = {FiscalizationStatus.COMPLETED.value, FiscalizationStatus.NOT_REQUIRED.value}
+
+    payments = Payment.query.filter(
+        Payment.status == PaymentStatus.COMPLETED,
+        Payment.paid_at >= window_start,
+        Payment.payment_method.in_([PaymentMethod.CLICK, PaymentMethod.CARD]),
+    ).all()
+
+    counts = {"scanned": len(payments), "fiscalization_requeued": 0, "confirmation_redispatched": 0, "errors": 0}
+    payment_service = PaymentService()
+
+    for payment in payments:
+        try:
+            fisc = getattr(payment, "fiscalization", None)
+            if fisc is None:
+                payment_service.queue_click_fiscalization(payment.id)
+                counts["fiscalization_requeued"] += 1
+            else:
+                fisc_status = fisc.status.value if hasattr(fisc.status, "value") else fisc.status
+                # Normalize to tz-aware for the Python-side staleness compare below
+                # (Postgres round-trips tzinfo; SQLite in tests drops it).
+                last_touch = fisc.updated_at or fisc.created_at
+                if last_touch is not None and last_touch.tzinfo is None:
+                    last_touch = last_touch.replace(tzinfo=timezone.utc)
+                is_stale = last_touch is None or last_touch < stale_before
+                if fisc_status not in settled_fiscalization_statuses and fisc.retries_exhausted_at is None and is_stale:
+                    process_click_fiscalization_task.delay(payment.id)
+                    counts["fiscalization_requeued"] += 1
+
+            post_payment = (payment.provider_data or {}).get("post_payment") or {}
+            if not post_payment.get("confirmation_enqueued_at"):
+                if payment_service.dispatch_payment_confirmation(payment):
+                    counts["confirmation_redispatched"] += 1
+        except Exception:  # noqa: BLE001
+            logger.exception("Side-effect sweep failed for payment %s", payment.id)
+            db.session.rollback()
+            counts["errors"] += 1
+            continue
+
+    db.session.commit()
+    logger.info("Completed-payment side-effect sweep: %s", counts)
+    return counts
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=300, soft_time_limit=270)
+def reverse_click_payment_task(self, payment_id: int, click_paydoc_id: str, click_trans_id: str):
+    """Reverse a duplicate Click charge (spec 2026-07-08 Case B).
+
+    click_paydoc_id/click_trans_id identify the INCOMING duplicate charge —
+    never resolved from the payment row (those ids belong to the winner).
+    """
+    from business_app.utils.audit_logger import audit_logger
+    from business_app.models.audit import AuditEventType, AuditSeverity
+
+    payment = Payment.query.get(payment_id)
+    if not payment:
+        logger.error("reverse_click_payment_task: payment %s not found", payment_id)
+        return {"status": "payment_missing"}
+
+    txn = PaymentTransaction.query.filter_by(
+        payment_id=payment_id,
+        transaction_type="click_duplicate_charge",
+        provider_transaction_id=str(click_trans_id),
+    ).first()
+    if txn is not None and txn.status == "reversed":
+        return {"status": "already_reversed"}
+
+    service = PaymentService()._get_click_provider_service()
+    try:
+        response = service.reverse_by_click_payment_id(int(click_paydoc_id))
+    except ProviderUnavailableError as exc:
+        raise self.retry(exc=exc)
+    except PaymentError as exc:
+        if txn is not None:
+            txn.status = "reversal_rejected"
+            txn.failure_reason = str(exc)[:500]
+        audit_logger.log_event(
+            event_type=AuditEventType.PAYMENT_FAILED,
+            action="click_duplicate_reversal_rejected",
+            severity=AuditSeverity.HIGH,
+            resource_type="payment",
+            resource_id=str(payment_id),
+            description=f"Click rejected reversal of duplicate charge {click_trans_id}: {exc}",
+            additional_data={"click_paydoc_id": str(click_paydoc_id), "click_trans_id": str(click_trans_id)},
+        )
+        db.session.commit()
+        return {"status": "rejected"}
+
+    if txn is not None:
+        txn.status = "reversed"
+        txn.provider_response = {**(txn.provider_response or {}), "reversal": response}
+    audit_logger.log_event(
+        event_type=AuditEventType.PAYMENT_PROCESSED,
+        action="click_duplicate_charge_reversed",
+        severity=AuditSeverity.MEDIUM,
+        resource_type="payment",
+        resource_id=str(payment_id),
+        description=f"Reversed duplicate Click charge {click_trans_id}",
+        additional_data={"click_paydoc_id": str(click_paydoc_id)},
+    )
+    db.session.commit()
+    return {"status": "reversed"}
 
 
 @shared_task(bind=True, max_retries=3, time_limit=300, soft_time_limit=270)

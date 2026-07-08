@@ -1021,7 +1021,10 @@ class OrderService:
             db.session.commit()
             # Notification dispatch happens only after a successful commit so
             # rolled-back transitions do not fire stale notifications.
-            self._send_order_notification(order, f"status_changed_{new_status.value}")
+            try:
+                self._send_order_notification(order, f"status_changed_{new_status.value}")
+            except Exception:  # noqa: BLE001
+                current_app.logger.exception("Failed to dispatch status-change notification for order %s", order.id)
 
         return order
 

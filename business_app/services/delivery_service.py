@@ -101,8 +101,13 @@ class DeliveryService:
         db.session.add(delivery)
         db.session.commit()
 
-        # Schedule delivery assignment
-        self._schedule_delivery_assignment(delivery.id)
+        # Schedule delivery assignment. Best-effort: this runs after the commit
+        # above, inside the Click Complete chain — a broker hiccup here must not
+        # abort fiscalization/notifications (spec 2026-07-08 defect #6).
+        try:
+            self._schedule_delivery_assignment(delivery.id)
+        except Exception as exc:  # noqa: BLE001
+            current_app.logger.warning("Failed to schedule auto-assign for delivery %s: %s", delivery.id, exc)
 
         # Broadcast the new pool order to every eligible driver with an
         # inline Accept/Decline UX. First driver to Accept wins (server-side

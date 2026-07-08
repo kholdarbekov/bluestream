@@ -320,6 +320,9 @@ class BaseConfig:
         get_secret("click_merchant_api_secret", "CLICK_MERCHANT_API_SECRET", required=False) or CLICK_SECRET_KEY
     )
     CLICK_MERCHANT_API_STATUS_PATH = os.environ.get("CLICK_MERCHANT_API_STATUS_PATH")
+    CLICK_MERCHANT_API_STATUS_BY_MTI_PATH = os.environ.get(
+        "CLICK_MERCHANT_API_STATUS_BY_MTI_PATH", "/payment/status_by_mti"
+    )
     CLICK_MERCHANT_API_REFUND_PATH = os.environ.get("CLICK_MERCHANT_API_REFUND_PATH")
     CLICK_MERCHANT_API_FISCALIZATION_PATH = os.environ.get("CLICK_MERCHANT_API_FISCALIZATION_PATH")
     CLICK_MERCHANT_API_OFD_DATA_PATH = os.environ.get("CLICK_MERCHANT_API_OFD_DATA_PATH")
@@ -342,6 +345,16 @@ class BaseConfig:
     # Minimum age before PAY-007 reconciliation polls the gateway (avoids racing
     # webhooks for very fresh payments). Must be < PAYMENT_TIMEOUT_MINUTES.
     PAYMENT_RECONCILE_AFTER_MINUTES = int(os.environ.get("PAYMENT_RECONCILE_AFTER_MINUTES", 10) or 10)
+
+    # Two-phase webhook idempotency claim: short provisional TTL taken at
+    # check(), promoted to the 24h dedup TTL only when a response is cached.
+    WEBHOOK_CLAIM_PROVISIONAL_TTL_SECONDS = int(os.environ.get("WEBHOOK_CLAIM_PROVISIONAL_TTL_SECONDS", "90"))
+
+    # Kill-switch for automatic reversal of duplicate Click charges detected
+    # on the Complete webhook (spec 2026-07-08 Case B).
+    CLICK_DUPLICATE_AUTO_REVERSAL_ENABLED = (
+        os.environ.get("CLICK_DUPLICATE_AUTO_REVERSAL_ENABLED", "true").lower() == "true"
+    )
 
     # Payme Configuration
     PAYME_TIMEOUT_MS = int(os.environ.get("PAYME_TIMEOUT_MS", 43200000))  # 12 hours timeout for transactions

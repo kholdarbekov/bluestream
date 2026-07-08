@@ -9,6 +9,7 @@ import pytest
 
 from business_app.utils.webhook_idempotency import (
     WEBHOOK_DEDUP_KEY_PREFIX,
+    WEBHOOK_DEDUP_PROVISIONAL_TTL_SECONDS,
     WEBHOOK_DEDUP_TTL_SECONDS,
     WebhookIdempotencyGuard,
     extract_webhook_request_id,
@@ -103,7 +104,12 @@ def test_second_hit_is_duplicate():
     assert second.is_duplicate is True
 
 
-def test_claim_ttl_is_dedup_window():
+def test_claim_ttl_is_provisional_window():
+    # Two-phase claim (crash-window fix, see webhook_idempotency.py): check()
+    # only takes a SHORT provisional claim now; it is promoted to the full
+    # WEBHOOK_DEDUP_TTL_SECONDS window in store_response() instead. Updated
+    # per Task 1 brief guidance (this test previously asserted the full 24h
+    # TTL directly out of check()).
     redis = _FakeRedis()
     guard = WebhookIdempotencyGuard(redis)
 
@@ -111,7 +117,7 @@ def test_claim_ttl_is_dedup_window():
 
     key = f"{WEBHOOK_DEDUP_KEY_PREFIX}:payme:txn-xyz"
     assert redis.store[key] == "1"
-    assert redis.ttls[key] == WEBHOOK_DEDUP_TTL_SECONDS
+    assert redis.ttls[key] == WEBHOOK_DEDUP_PROVISIONAL_TTL_SECONDS
 
 
 def test_duplicate_returns_cached_response_when_present():

@@ -24,6 +24,8 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.exc import OperationalError
 
+from tests.integration.fake_gateways import apply_test_provider_secrets
+
 
 REQUIRES_PG_REASON = (
     "Postgres-backed integration test requires a Postgres DATABASE_URL "
@@ -116,3 +118,78 @@ def pg_db(pg_app):
     from business_app import db
 
     return db
+
+
+# --------------------------------------------------------------------------- #
+# Shared payment-webhook fixtures (used by test_payment_matrix.py and
+# test_click_crash_recovery.py). Kept here so both modules resolve them via
+# fixture discovery instead of cross-module imports (pytest fixtures do not
+# import across test modules).
+# --------------------------------------------------------------------------- #
+
+@pytest.fixture
+def matrix_app(app):
+    """Apply test provider secrets and return the same app fixture."""
+    apply_test_provider_secrets(app)
+    # Payme uses the *_with_billing variants for signature verification on
+    # webhook receipts; mirror the primary key.
+    app.config['PAYME_MERCHANT_ID_WITH_BILLING'] = app.config['PAYME_MERCHANT_ID']
+    app.config['PAYME_SECRET_KEY_WITH_BILLING'] = app.config['PAYME_SECRET_KEY']
+    return app
+
+
+@pytest.fixture
+def matrix_client(matrix_app):
+    return matrix_app.test_client()
+
+
+@pytest.fixture
+def no_fiscalization(monkeypatch):
+    """Stub out post-payment fiscalization triggers (TST-011 territory).
+
+    ``_handle_successful_payment`` calls ``queue_click_fiscalization`` for
+    Click + Card payments after a successful webhook. Fiscalization has its
+    own retry/idempotency semantics that the OFD matrix (TST-011) covers.
+    Patch at the PaymentService level so any service instance picks it up.
+    """
+    from business_app.services.payment_service import PaymentService
+    monkeypatch.setattr(
+        PaymentService,
+        'queue_click_fiscalization',
+        lambda self, payment_id: None,
+        raising=True,
+    )
+
+
+@pytest.fixture
+def sample_address(db, sample_user):
+    """Default delivery address for sample_user.
+
+    ARCH-006 enforces ``delivery_address_id IS NOT NULL`` on the
+    PENDING → CONFIRMED transition. The shared ``sample_order`` fixture
+    intentionally creates orders without an address (covers pre-CONFIRMED
+    states), so this finding shadows it for tests that drive an order to
+    paid state.
+    """
+    from business_app.models.user import UserAddress
+
+    address = UserAddress(
+        user_id=sample_user.id,
+        title='Home',
+        full_address='123 Test Street, Tashkent',
+        latitude=41.2995,
+        longitude=69.2401,
+        is_default=True,
+    )
+    db.session.add(address)
+    db.session.commit()
+    return address
+
+
+@pytest.fixture
+def order_with_address(db, sample_order, sample_address):
+    """Attach the test address to ``sample_order`` so paid-state
+    transitions clear the ARCH-006 guard."""
+    sample_order.delivery_address_id = sample_address.id
+    db.session.commit()
+    return sample_order

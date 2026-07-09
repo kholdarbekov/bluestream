@@ -29,6 +29,47 @@ os.environ.setdefault('WEBHOOK_SECRET', 'test-staff-webhook-secret')
 os.environ['FLASK_ENV'] = 'testing'
 os.environ['TESTING'] = 'true'
 
+# Hermetic containment (2026-07-08 staff-bot broadcast incident): @shared_task
+# resolves through Celery's *current app*. In a pytest process that never
+# imports business_app.tasks.celery_app, that is Celery's DEFAULT app, which
+# reads CELERY_BROKER_URL straight from the environment — under the docker
+# test runner that was .env's live broker (redis DB 0), so test-triggered
+# .delay() calls became real tasks: the dev celery_worker executed them
+# against the dev DB and the staff bot broadcast "new order" Telegram messages
+# to every delivery person, once per test run. Pin every broker and
+# outbound-webhook knob to an inert value BEFORE any business_app / bot module
+# can snapshot it at import time. Unroutable hosts use RFC 2606 `.invalid` so
+# an unmocked call fails fast instead of reaching the live compose services.
+os.environ['CELERY_BROKER_URL'] = 'memory://'
+os.environ['CELERY_RESULT_BACKEND'] = 'cache+memory://'
+os.environ['STAFF_BOT_WEBHOOK_URL'] = 'http://staff-bot-must-be-mocked.invalid'
+os.environ['BOT_WEBHOOK_URL'] = 'http://telegram-bot-must-be-mocked.invalid'
+os.environ['BUSINESS_APP_URL'] = 'http://api-must-be-mocked.invalid'
+
+
+def _force_nonzero_redis_db(url: str) -> str:
+    """Rewrite a redis URL so it can never point at DB 0 (the live broker).
+
+    The autouse ``reset_redis_state`` fixture calls ``flushdb()`` on whatever
+    ``REDIS_URL`` resolves to; ``.env``'s value is the compose stack's DB 0,
+    so a pytest run without the runner script's DB-15 override would wipe the
+    live Celery broker and app cache. URLs without an explicit DB segment, or
+    with DB 0, are forced to DB 15.
+    """
+    scheme_split = url.split('://', 1)
+    if len(scheme_split) != 2:
+        return url
+    scheme, rest = scheme_split
+    host_part, sep, db = rest.rpartition('/')
+    if sep and db.isdigit() and int(db) != 0:
+        return url
+    if not sep:
+        host_part = rest
+    return f"{scheme}://{host_part}/15"
+
+
+os.environ['REDIS_URL'] = _force_nonzero_redis_db(os.environ.get('REDIS_URL', 'redis://redis:6379/15'))
+
 # Add project root to Python path
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -47,9 +88,11 @@ def _per_worker_redis_url(base_url: str) -> str:
     With ``-n auto``, multiple workers run in parallel against the same Redis
     instance. The autouse ``reset_redis_state`` fixture calls ``flushdb()``,
     which would wipe other workers' setup state if every worker shared one DB.
-    Map ``gwN`` to ``DB (15 - N)`` so workers stay isolated within Redis's
-    default 16-DB range. Falls back to ``base_url`` for the master process or
-    unrecognised worker names.
+    Map ``gwN`` to ``DB (15 - N mod 15)`` so workers stay isolated within
+    Redis's default 16-DB range while never touching DB 0 — that's the live
+    broker/cache the compose stack runs on (collisions only start at 15+
+    workers, far above the runner's ``-n 4``). Falls back to ``base_url`` for
+    the master process or unrecognised worker names.
     """
     worker = os.environ.get('PYTEST_XDIST_WORKER', 'master')
     if not worker.startswith('gw'):
@@ -58,7 +101,7 @@ def _per_worker_redis_url(base_url: str) -> str:
         worker_num = int(worker[2:])
     except ValueError:
         return base_url
-    db_index = max(0, 15 - worker_num)
+    db_index = 15 - (worker_num % 15)
     scheme_split = base_url.split('://', 1)
     if len(scheme_split) != 2:
         return base_url

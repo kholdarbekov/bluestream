@@ -97,6 +97,19 @@ fi
 # Bot tests call api_client via BUSINESS_APP_URL, which .env points at the live
 # business_app. Override it to an unroutable host so an unmocked bot call fails
 # fast instead of writing to prod.
+#
+# CELERY_BROKER_URL / CELERY_RESULT_BACKEND are forced in-memory because
+# @shared_task resolves through Celery's *current app*: in a pytest process
+# that never imports business_app.tasks.celery_app that is the DEFAULT app,
+# which reads CELERY_BROKER_URL from the environment — .env's value is the
+# live broker (redis DB 0), so test-triggered .delay() calls became real tasks
+# the dev celery_worker executed against the dev DB (2026-07-08 staff-bot
+# broadcast incident). STAFF_BOT_WEBHOOK_URL / BOT_WEBHOOK_URL get the
+# BUSINESS_APP_URL treatment: their defaults (http://staff_bot:8081,
+# http://telegram_bot:8080) are reachable on the compose network.
+# tests/conftest.py pins the same values in-process (see the hermetic
+# containment block there); these -e flags keep the container boundary sealed
+# even if conftest is bypassed.
 exec docker run --rm \
     --network "${network}" \
     "${env_file_arg[@]}" \
@@ -105,6 +118,10 @@ exec docker run --rm \
     -e REDIS_URL="${test_redis_url}" \
     -e FLASK_ENV=testing \
     -e TESTING=true \
+    -e CELERY_BROKER_URL="memory://" \
+    -e CELERY_RESULT_BACKEND="cache+memory://" \
+    -e STAFF_BOT_WEBHOOK_URL="http://staff-bot-must-be-mocked.invalid" \
+    -e BOT_WEBHOOK_URL="http://telegram-bot-must-be-mocked.invalid" \
     -e BUSINESS_APP_URL="http://api-must-be-mocked.invalid" \
     "${image}" \
     sh -c "python -c 'import xdist' 2>/dev/null || pip install -q pytest-xdist==3.6.1 pytest-timeout==2.3.1 >&2; pytest tests/ --no-cov --no-header --dist=worksteal -n 4"

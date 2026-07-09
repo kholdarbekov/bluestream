@@ -182,8 +182,8 @@ def monitor_delivery_delays():
             try:
                 delay_minutes = (now - delivery.estimated_delivery_time).total_seconds() / 60
 
-                # Send alert to management for significant delays (>30 minutes)
-                if delay_minutes > 30:
+                # Send alert to management for significant delays (>12 hours)
+                if delay_minutes > 12 * 60:
                     # Send alert to operations team
                     admin_users = User.query.filter(User.role.in_([UserRole.ADMIN, UserRole.MANAGER])).all()
 

@@ -105,11 +105,11 @@ def make_celery(app=None):
             "task": "business_app.tasks.delivery_tasks.send_delivery_reminders",
             "schedule": crontab(minute="*/30"),
         },
-        # Alert admins on ETA-overdue in-flight deliveries (>30 min late)
-        # every ~30 minutes, offset from delivery-reminders.
+        # Alert admins on ETA-overdue in-flight deliveries (>12 hours late)
+        # every ~12 hours, offset from delivery-reminders.
         "monitor-delivery-delays": {
             "task": "business_app.tasks.delivery_tasks.monitor_delivery_delays",
-            "schedule": crontab(minute="15,45"),
+            "schedule": crontab(hour="*/12", minute=0),
             "options": {"time_limit": 600},
         },
         # Surface "stranded" deliveries (pool status while still assigned to a

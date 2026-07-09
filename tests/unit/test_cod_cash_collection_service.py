@@ -2400,7 +2400,7 @@ class TestCashCollectionGroceryUnitsMirror:
                 == 0
             )
 
-    def test_post_collection_skips_units_topup_when_consume_not_yet_posted(
+    def test_post_collection_funds_open_reserve_when_consume_not_yet_posted(
         self,
         app,
         db,
@@ -2423,10 +2423,12 @@ class TestCashCollectionGroceryUnitsMirror:
                 db, sample_user, sample_product, price_row, quantity=1
             )
 
-            # Reserve but do NOT consume yet — defensive path: cash collected
-            # while CONSUME ledger entries are still missing (skew / replay /
-            # manual data fix). Order is DELIVERED so the collection validator
-            # accepts it; the missing CONSUME entries are the focus here.
+            # Reserve but do NOT consume yet — cash collected while CONSUME
+            # ledger entries are still missing (e.g. cash collected ahead of
+            # the delivery-completion flow, or a replay/skew). Order is
+            # DELIVERED so the collection validator accepts it. Per the
+            # open-reserve funding fix, this now tops up against the still-open
+            # RESERVE entry instead of being a no-op.
             CorporateContractService().reserve_for_order(order.id)
             db.session.commit()
 
@@ -2439,7 +2441,7 @@ class TestCashCollectionGroceryUnitsMirror:
             service.ensure_cod_payment_for_order(order)
             db.session.commit()
 
-            service.post_collection(
+            event = service.post_collection(
                 customer_id=sample_user.id,
                 amount=Decimal(str(order.total_amount)),
                 source="delivery_completion",
@@ -2449,13 +2451,15 @@ class TestCashCollectionGroceryUnitsMirror:
                 delivery_id=delivery.id,
             )
 
-            assert (
-                CorporatePrepaymentLedger.query.filter_by(
-                    order_id=order.id,
-                    event_type=CorporatePrepaymentEventType.TOPUP,
-                ).count()
-                == 0
-            )
+            topups = CorporatePrepaymentLedger.query.filter_by(
+                order_id=order.id,
+                event_type=CorporatePrepaymentEventType.TOPUP,
+            ).all()
+            assert len(topups) == 1
+            topup = topups[0]
+            assert Decimal(str(topup.units)) == Decimal("1.00")
+            assert topup.idempotency_key.startswith(f"topup:cash_event:{event.id}:reserve:")
+            assert "source_reserve_entry_id" in topup.entry_metadata
 
     def test_post_collection_amount_mode_path_unchanged(
         self,
@@ -2555,6 +2559,37 @@ class TestCashCollectionGroceryUnitsMirror:
                 ).count()
                 == 0
             )
+
+
+def test_pre_delivery_personal_card_transfer_settles_legacy_grocery_units_contract(
+    app, db, sample_user, admin_user
+):
+    """Incident reproduction: recording a pre-delivery personal card transfer on a
+    legacy grocery UNITS order clears the corporate contract reservation debt."""
+    from tests.unit.test_corporate_contract_service import (
+        _setup_units_grocery_reserved_order,
+        _get_product_balance,
+    )
+
+    with app.app_context():
+        service, contract, account, product, order = _setup_units_grocery_reserved_order(db, sample_user)
+
+        cash_service = CashCollectionService()
+        cash_service.ensure_cod_payment_for_order(order)  # so personal-card resolves a target payment
+        db.session.commit()
+
+        cash_service.post_collection(
+            customer_id=sample_user.id,
+            amount=order.total_amount,
+            source="personal_card_transfer",
+            recorded_by_user_id=admin_user.id,
+            order_id=order.id,
+            notes="Customer paid by personal card before delivery.",
+        )
+        db.session.commit()
+
+        balance = _get_product_balance(account.id, product.id)
+        assert balance.available_units == Decimal("0.00")  # was -2 (debt) before the fix
 
 
 def _add_cash_order(db, user, *, status, amount, pay_status, collected="0.00"):

@@ -123,10 +123,12 @@ class TestMonitorDeliveryDelays:
         self, db, admin_user, sample_user, delivery_driver, sample_order
     ):
         """monitor_delivery_delays needs the delivery_delay_alert template to
-        exist (seeded here) and an overdue in-flight delivery to alert on."""
+        exist (seeded here) and an in-flight delivery overdue past the alert
+        threshold (>12 hours) to alert on."""
         seed_notification_templates()
 
-        overdue_eta = datetime.now(timezone.utc) - timedelta(minutes=45)
+        # Must exceed the task's 12-hour alert threshold, not merely be overdue.
+        overdue_eta = datetime.now(timezone.utc) - timedelta(hours=13)
         delivery = Delivery(
             order_id=sample_order.id,
             delivery_person_id=delivery_driver.id,

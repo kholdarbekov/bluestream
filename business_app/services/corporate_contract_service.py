@@ -1155,6 +1155,19 @@ class CorporateContractService:
             .all()
         )
 
+    def _get_order_reserve_entries_for_contract(
+        self, order_id: int, contract_id: int
+    ) -> List[CorporatePrepaymentLedger]:
+        return (
+            CorporatePrepaymentLedger.query.filter(
+                CorporatePrepaymentLedger.order_id == order_id,
+                CorporatePrepaymentLedger.contract_id == contract_id,
+                CorporatePrepaymentLedger.event_type == CorporatePrepaymentEventType.RESERVE,
+            )
+            .order_by(CorporatePrepaymentLedger.id.asc())
+            .all()
+        )
+
     def reserve_for_order(self, order_id: int, actor_user_id: Optional[int] = None) -> List[CorporatePrepaymentLedger]:
         order = Order.query.options(
             joinedload(Order.order_items).joinedload(OrderItem.product),
@@ -1171,7 +1184,10 @@ class CorporateContractService:
         order_user = order.user
         order_method = order.payment_method
         order_method_value = order_method.value if hasattr(order_method, "value") else order_method
-        if not (order_user and order_user.is_grocery_store) and order_method_value != PaymentMethod.BUSINESS_ACCOUNT.value:
+        if (
+            not (order_user and order_user.is_grocery_store)
+            and order_method_value != PaymentMethod.BUSINESS_ACCOUNT.value
+        ):
             return []
         # Grocery-store users with an active AMOUNT-mode contract skip
         # per-product unit reservation; money debt is posted at delivery via
@@ -1407,16 +1423,12 @@ class CorporateContractService:
                 if CorporatePrepaymentLedger.query.filter_by(idempotency_key=idempotency_key).first():
                     continue
                 balance = (
-                    CorporatePrepaymentBalance.query.filter_by(id=consume_row.balance_id)
-                    .with_for_update()
-                    .first()
+                    CorporatePrepaymentBalance.query.filter_by(id=consume_row.balance_id).with_for_update().first()
                 )
                 if not balance:
                     raise NotFoundError("Corporate prepayment balance not found")
                 units = Decimal(str(consume_row.units or 0))
-                balance.consumed_units = max(
-                    Decimal("0.00"), Decimal(str(balance.consumed_units or 0)) - units
-                )
+                balance.consumed_units = max(Decimal("0.00"), Decimal(str(balance.consumed_units or 0)) - units)
                 ledger_entries.append(
                     self._add_reversal_ledger(
                         source=consume_row,
@@ -1439,17 +1451,11 @@ class CorporateContractService:
             ).first()
             if already_released:
                 continue
-            balance = (
-                CorporatePrepaymentBalance.query.filter_by(id=reserve_entry.balance_id)
-                .with_for_update()
-                .first()
-            )
+            balance = CorporatePrepaymentBalance.query.filter_by(id=reserve_entry.balance_id).with_for_update().first()
             if not balance:
                 raise NotFoundError("Corporate prepayment balance not found")
             units = Decimal(str(reserve_entry.units or 0))
-            balance.reserved_units = max(
-                Decimal("0.00"), Decimal(str(balance.reserved_units or 0)) - units
-            )
+            balance.reserved_units = max(Decimal("0.00"), Decimal(str(balance.reserved_units or 0)) - units)
             ledger_entries.append(
                 self._add_reversal_ledger(
                     source=reserve_entry,
@@ -1605,6 +1611,7 @@ class CorporateContractService:
         order_id: Optional[int] = None,
         delivery_id: Optional[int] = None,
         cash_event_id: Optional[int] = None,
+        payment_id: Optional[int] = None,
         actor_user_id: Optional[int] = None,
         notes: Optional[str] = None,
     ) -> Optional[CorporatePrepaymentLedger]:
@@ -1618,10 +1625,13 @@ class CorporateContractService:
         if amount_decimal <= 0:
             return None
 
-        # Idempotency key prefers cash_event_id when present; otherwise tag by
-        # order. A residual collection (no order_id) gets a unique cash_event-only
-        # key so the residual posts exactly once per cash event.
-        if cash_event_id is not None and order_id is not None:
+        # Idempotency key prefers payment_id (electronic settlement) over
+        # cash_event_id when present; otherwise tag by order. A residual
+        # collection (no order_id) gets a unique cash_event-only key so the
+        # residual posts exactly once per cash event.
+        if payment_id is not None:
+            idempotency_key = f"collect:payment:{payment_id}"
+        elif cash_event_id is not None and order_id is not None:
             idempotency_key = f"collect:cash_event:{cash_event_id}:order:{order_id}"
         elif cash_event_id is not None:
             idempotency_key = f"collect:cash_event:{cash_event_id}:residual"
@@ -1659,6 +1669,7 @@ class CorporateContractService:
             entry_metadata={
                 "source": source,
                 "cash_event_id": cash_event_id,
+                "payment_id": payment_id,
                 "outstanding_after": float(account.outstanding_amount),
             },
         )
@@ -1677,6 +1688,7 @@ class CorporateContractService:
                 "order_id": order_id,
                 "delivery_id": delivery_id,
                 "cash_event_id": cash_event_id,
+                "payment_id": payment_id,
                 "outstanding_after": float(account.outstanding_amount),
             },
         )
@@ -1691,41 +1703,79 @@ class CorporateContractService:
         contract: CorporateContract,
         *,
         order_id: int,
-        cash_event_id: int,
+        cash_event_id: Optional[int] = None,
+        payment_id: Optional[int] = None,
+        collected_amount: Decimal,
         delivery_id: Optional[int] = None,
         actor_user_id: Optional[int] = None,
         source: Optional[str] = None,
         notes: Optional[str] = None,
     ) -> List[CorporatePrepaymentLedger]:
-        """Mirror cash collected at delivery onto a UNITS-mode contract.
+        """Mirror cash/payment collected for an order onto a legacy UNITS-mode grocery contract.
 
-        Posts one TOPUP ledger entry per CONSUME entry written at delivery for
-        ``order_id`` on ``contract``. Bridges the legacy gap where grocery-store
-        users remain on a UNITS-mode contract (current code forces AMOUNT-mode
-        for new grocery stores, but legacy contracts still hit
-        ``reserve_for_order`` -> ``consume_for_order``). Without this mirror,
-        cash collected at delivery would leave ``prepaid_units`` untouched while
-        ``consumed_units`` grows, producing a perpetually negative available
-        balance.
+        Funds ``prepaid_units`` to cover the order's reserved/consumed units, scaled by
+        the fraction of the order's contract value that ``collected_amount`` represents.
+        Works in both windows:
+          * pre-delivery  -> tops up against still-open RESERVE entries (the fix)
+          * post-delivery -> tops up against CONSUME entries (unchanged behavior)
 
-        Idempotent via
-        ``topup:cash_event:{cash_event_id}:consume:{consume_entry.id}``.
-        Returns existing entries on repost and an empty list when no CONSUME
-        entries exist yet (cash collected before delivery; defer).
+        Idempotent per (settlement ref, line), where the settlement ref is the
+        cash_event_id if given, else the payment_id. Cumulatively capped per
+        (order, balance) so repeated partial payments never fund more than the
+        reserved units. Returns existing entries on repost and an empty list when
+        there is nothing to fund (including when neither cash_event_id nor
+        payment_id is provided).
         """
         self._require_units_contract(contract)
 
-        consume_entries = (
-            CorporatePrepaymentLedger.query.filter(
-                CorporatePrepaymentLedger.order_id == order_id,
-                CorporatePrepaymentLedger.contract_id == contract.id,
-                CorporatePrepaymentLedger.event_type == CorporatePrepaymentEventType.CONSUME,
-            )
-            .order_by(CorporatePrepaymentLedger.id.asc())
-            .all()
-        )
-        if not consume_entries:
+        collected = Decimal(str(collected_amount or 0))
+        if collected <= 0:
             return []
+
+        if cash_event_id is not None:
+            settlement_ref = f"cash_event:{cash_event_id}"
+        elif payment_id is not None:
+            settlement_ref = f"payment:{payment_id}"
+        else:
+            return []
+
+        reserve_entries = self._get_order_reserve_entries_for_contract(order_id, contract.id)
+        if not reserve_entries:
+            return []
+
+        # Per-balance funding ceiling AND the funding denominator both come from the
+        # SAME surviving (non-released) set: a reserve that was released-and-not-
+        # consumed (e.g. a line removed by a pre-delivery order edit, which runs
+        # release_for_order then reserve_for_order, leaving old-released +
+        # new-open reserves under one order+contract) is excluded from both. Two
+        # order items of the same product share one prepayment balance (one
+        # RESERVE row each), so the ceiling must be the SUM of their reserved
+        # units, not a single line's — otherwise the second line sees the first
+        # line's topup as "already funded" and under-funds. Likewise, if the
+        # denominator counted released-not-consumed lines it would be larger than
+        # the fundable set, making funded_fraction too small and under-funding the
+        # surviving line after an edit-after-payment.
+        balance_target_units: Dict[int, Decimal] = {}
+        total_contract_amount = Decimal("0.00")
+        for entry in reserve_entries:
+            consumed = CorporatePrepaymentLedger.query.filter_by(idempotency_key=f"consume:reserve:{entry.id}").first()
+            was_released = CorporatePrepaymentLedger.query.filter_by(
+                idempotency_key=f"release:reserve:{entry.id}"
+            ).first()
+            if was_released is not None and consumed is None:
+                continue
+            src = consumed or entry
+            total_contract_amount += Decimal(str(src.amount or 0))
+            if src.balance_id is None:
+                continue
+            balance_target_units[src.balance_id] = balance_target_units.get(src.balance_id, Decimal("0.00")) + Decimal(
+                str(src.units or 0)
+            )
+
+        if total_contract_amount <= 0:
+            return []
+
+        funded_fraction = min(Decimal("1"), collected / total_contract_amount)
 
         account = self._get_or_create_locked_account(contract.id)
         now = datetime.now(timezone.utc)
@@ -1733,57 +1783,98 @@ class CorporateContractService:
         total_topped_up_units = Decimal("0.00")
         new_entry_count = 0
 
-        for consume_entry in consume_entries:
-            idempotency_key = f"topup:cash_event:{cash_event_id}:consume:{consume_entry.id}"
+        for reserve_entry in reserve_entries:
+            consume_entry = CorporatePrepaymentLedger.query.filter_by(
+                idempotency_key=f"consume:reserve:{reserve_entry.id}"
+            ).first()
+            released = CorporatePrepaymentLedger.query.filter_by(
+                idempotency_key=f"release:reserve:{reserve_entry.id}"
+            ).first()
+            if released is not None and consume_entry is None:
+                # Line cancelled before delivery -> nothing to fund.
+                continue
+
+            # Fund against the settled CONSUME row when present, else the open reserve.
+            source_entry = consume_entry or reserve_entry
+            if consume_entry is not None:
+                idempotency_key = f"topup:{settlement_ref}:consume:{consume_entry.id}"
+                metadata_source_key = "source_consume_entry_id"
+            else:
+                idempotency_key = f"topup:{settlement_ref}:reserve:{reserve_entry.id}"
+                metadata_source_key = "source_reserve_entry_id"
+
             existing = CorporatePrepaymentLedger.query.filter_by(idempotency_key=idempotency_key).first()
             if existing:
                 ledger_entries.append(existing)
                 continue
 
-            units = Decimal(str(consume_entry.units or 0))
-            if units <= 0:
+            line_units = Decimal(str(source_entry.units or 0))
+            if line_units <= 0:
                 continue
 
-            balance = CorporatePrepaymentBalance.query.filter_by(id=consume_entry.balance_id).with_for_update().first()
+            balance = CorporatePrepaymentBalance.query.filter_by(id=source_entry.balance_id).with_for_update().first()
             if not balance:
                 raise NotFoundError("Corporate prepayment balance not found")
 
-            balance.prepaid_units = Decimal(str(balance.prepaid_units or 0)) + units
+            # Cumulative cap: never fund this (order, balance) beyond its reserved units,
+            # even across multiple partial payments (each its own cash event).
+            already_funded = Decimal(
+                str(
+                    db.session.query(func.coalesce(func.sum(CorporatePrepaymentLedger.units), 0))
+                    .filter(
+                        CorporatePrepaymentLedger.order_id == order_id,
+                        CorporatePrepaymentLedger.balance_id == source_entry.balance_id,
+                        CorporatePrepaymentLedger.event_type == CorporatePrepaymentEventType.TOPUP,
+                    )
+                    .scalar()
+                    or 0
+                )
+            )
+            balance_ceiling = balance_target_units.get(source_entry.balance_id, line_units)
+            remaining = balance_ceiling - already_funded
+            if remaining <= 0:
+                continue
+
+            topup_units = min(line_units * funded_fraction, remaining).quantize(Decimal("0.01"))
+            if topup_units <= 0:
+                continue
+
+            balance.prepaid_units = Decimal(str(balance.prepaid_units or 0)) + topup_units
             balance.last_topup_at = now
 
             unit_price = (
-                Decimal(str(consume_entry.unit_price_snapshot))
-                if consume_entry.unit_price_snapshot is not None
-                else None
+                Decimal(str(source_entry.unit_price_snapshot)) if source_entry.unit_price_snapshot is not None else None
             )
-            amount = (units * unit_price) if unit_price is not None else None
+            amount = (topup_units * unit_price) if unit_price is not None else None
 
             ledger_entry = CorporatePrepaymentLedger(
                 contract_id=contract.id,
                 account_id=account.id,
-                balance_id=consume_entry.balance_id,
-                product_id=consume_entry.product_id,
+                balance_id=source_entry.balance_id,
+                product_id=source_entry.product_id,
                 order_id=order_id,
-                order_item_id=consume_entry.order_item_id,
+                order_item_id=source_entry.order_item_id,
                 delivery_id=delivery_id,
                 actor_user_id=actor_user_id,
                 event_type=CorporatePrepaymentEventType.TOPUP,
-                units=units,
+                units=topup_units,
                 unit_price_snapshot=unit_price,
                 amount=amount,
-                currency=consume_entry.currency,
+                currency=source_entry.currency,
                 notes=notes or "Auto topup from cash collection (legacy UNITS-mode grocery)",
                 idempotency_key=idempotency_key,
                 entry_metadata={
                     "auto_topup": True,
                     "source": source,
                     "cash_event_id": cash_event_id,
-                    "source_consume_entry_id": consume_entry.id,
+                    "payment_id": payment_id,
+                    metadata_source_key: source_entry.id,
+                    "funded_fraction": float(funded_fraction),
                 },
             )
             db.session.add(ledger_entry)
             ledger_entries.append(ledger_entry)
-            total_topped_up_units += units
+            total_topped_up_units += topup_units
             new_entry_count += 1
 
         if new_entry_count:
@@ -1801,13 +1892,85 @@ class CorporateContractService:
                     "order_id": order_id,
                     "delivery_id": delivery_id,
                     "cash_event_id": cash_event_id,
+                    "payment_id": payment_id,
                     "source": source,
                     "topup_entry_count": new_entry_count,
                     "total_units": float(total_topped_up_units),
+                    "funded_fraction": float(funded_fraction),
                 },
             )
 
         return ledger_entries
+
+    def settle_order_collection(
+        self,
+        *,
+        user: User,
+        order_id: Optional[int],
+        collected_amount: Decimal,
+        source: Optional[str] = None,
+        cash_event_id: Optional[int] = None,
+        payment_id: Optional[int] = None,
+        delivery_id: Optional[int] = None,
+        actor_user_id: Optional[int] = None,
+        notes: Optional[str] = None,
+    ) -> None:
+        """Mirror a recorded customer collection onto the user's corporate contract.
+
+        Single entry point (SSOT) for reflecting cash/card collected against an order
+        onto the grocery-store contract ledger. AMOUNT-mode contracts receive a COLLECT
+        (money debt down); legacy UNITS-mode contracts receive amount-scaled TOPUP
+        entries against the order's reserved/consumed units. No-op for non-grocery
+        users, non-positive amounts, or UNITS settlement without an order context.
+        """
+        amount = Decimal(str(collected_amount or 0))
+        if not user or not user.is_grocery_store or amount <= 0:
+            return
+
+        amount_contract = self.get_active_amount_contract_for_user(user.id)
+        if amount_contract:
+            self.record_money_collection(
+                contract=amount_contract,
+                amount=amount,
+                source=source,
+                order_id=order_id,
+                delivery_id=delivery_id,
+                cash_event_id=cash_event_id,
+                payment_id=payment_id,
+                actor_user_id=actor_user_id,
+                notes=notes,
+            )
+            return
+
+        if order_id is None:
+            return
+
+        contract_ids = {
+            row.contract_id
+            for row in OrderItem.query.filter(
+                OrderItem.order_id == order_id,
+                OrderItem.contract_id.isnot(None),
+            ).all()
+        }
+        if not contract_ids:
+            return
+
+        units_contracts = CorporateContract.query.filter(
+            CorporateContract.id.in_(contract_ids),
+            CorporateContract.tracking_mode == CorporateContractTrackingMode.UNITS,
+        ).all()
+        for units_contract in units_contracts:
+            self.topup_from_cash_collection(
+                contract=units_contract,
+                order_id=order_id,
+                cash_event_id=cash_event_id,
+                payment_id=payment_id,
+                collected_amount=amount,
+                delivery_id=delivery_id,
+                actor_user_id=actor_user_id,
+                source=source,
+                notes=notes,
+            )
 
     def post_money_adjustment(
         self,

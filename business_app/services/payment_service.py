@@ -1021,6 +1021,30 @@ class PaymentService:
 
         OrderService().maybe_award_purchase_points(order, commit=False)
 
+        # Settle the corporate contract for grocery-store customers paying
+        # electronically (Click/Payme/Card). Cash & personal-card already settle via
+        # CashCollectionService.post_collection; gating to electronic methods here
+        # prevents double-settlement (process_cash_payment also calls this hook).
+        # Runs in the completion transaction (owner-confirmed transactional+retryable);
+        # idempotent per payment_id so a retried webhook re-settles at most once.
+        if (
+            order.user
+            and order.user.is_grocery_store
+            and payment.payment_method in {PaymentMethod.CLICK, PaymentMethod.PAYME, PaymentMethod.CARD}
+            and Decimal(str(payment.amount or 0)) > Decimal("0")
+        ):
+            from business_app.services.corporate_contract_service import CorporateContractService
+
+            CorporateContractService().settle_order_collection(
+                user=order.user,
+                order_id=order.id,
+                collected_amount=Decimal(str(payment.amount)),
+                source=payment.payment_method.value,
+                payment_id=payment.id,
+                actor_user_id=(payment.provider_data or {}).get("actor_user_id"),
+                notes="Electronic payment settled against grocery contract",
+            )
+
         if not trigger_notifications:
             return
 

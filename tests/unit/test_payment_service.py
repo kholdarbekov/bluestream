@@ -396,3 +396,196 @@ class TestWebhookSignatures:
                 return {}
 
         assert payment_service.validate_webhook_signature('unknown', DummyRequest()) is False
+
+
+@pytest.mark.unit
+@pytest.mark.payment
+class TestGroceryContractSettlementOnElectronicCompletion:
+    """Task 4: `_handle_successful_payment` settles the grocery-store corporate
+    contract for electronic (Click/Payme/Card) payments, gated so cash (which
+    already settles via `CashCollectionService.post_collection`) never
+    double-settles through this hook."""
+
+    @pytest.mark.parametrize("method", [PaymentMethod.CLICK, PaymentMethod.PAYME, PaymentMethod.CARD])
+    def test_electronic_completion_settles_grocery_units_contract_pre_delivery(self, db, sample_user, method):
+        from business_app.models.corporate import CorporatePrepaymentEventType, CorporatePrepaymentLedger
+        from tests.unit.test_corporate_contract_service import (
+            _get_product_balance,
+            _setup_units_grocery_reserved_order,
+        )
+
+        _service, _contract, account, product, order = _setup_units_grocery_reserved_order(db, sample_user)
+        payment = Payment(
+            user_id=sample_user.id, order_id=order.id, amount=order.total_amount,
+            payment_method=method, status=PaymentStatus.COMPLETED,
+        )
+        db.session.add(payment)
+        db.session.commit()
+
+        PaymentService()._handle_successful_payment(
+            payment, trigger_notifications=False, allow_order_confirmation=False
+        )
+        db.session.commit()
+
+        topup = CorporatePrepaymentLedger.query.filter_by(
+            order_id=order.id, event_type=CorporatePrepaymentEventType.TOPUP
+        ).first()
+        assert topup is not None
+        assert topup.idempotency_key == (
+            f"topup:payment:{payment.id}:reserve:{topup.entry_metadata['source_reserve_entry_id']}"
+        )
+        assert _get_product_balance(account.id, product.id).available_units == Decimal("0.00")
+
+    def test_electronic_completion_settles_grocery_units_contract_post_delivery_consume(self, db, sample_user):
+        from business_app.models.corporate import CorporatePrepaymentEventType, CorporatePrepaymentLedger
+        from tests.unit.test_corporate_contract_service import (
+            _get_product_balance,
+            _setup_units_grocery_order_with_consume,
+        )
+
+        _service, _contract, account, products, order = _setup_units_grocery_order_with_consume(
+            db, sample_user, product_count=1
+        )
+        payment = Payment(
+            user_id=sample_user.id, order_id=order.id, amount=order.total_amount,
+            payment_method=PaymentMethod.CLICK, status=PaymentStatus.COMPLETED,
+        )
+        db.session.add(payment)
+        db.session.commit()
+
+        PaymentService()._handle_successful_payment(
+            payment, trigger_notifications=False, allow_order_confirmation=False
+        )
+        db.session.commit()
+
+        topup = CorporatePrepaymentLedger.query.filter_by(
+            order_id=order.id, event_type=CorporatePrepaymentEventType.TOPUP
+        ).first()
+        assert topup is not None
+        assert topup.idempotency_key.startswith(f"topup:payment:{payment.id}:consume:")
+
+        product, _unit_price, _quantity = products[0]
+        assert _get_product_balance(account.id, product.id).available_units == Decimal("0.00")
+
+    def test_electronic_completion_settles_grocery_amount_contract(self, db, sample_user, sample_order):
+        from datetime import timedelta
+        from uuid import uuid4
+
+        from business_app.models.corporate import (
+            CorporateContract,
+            CorporateContractStatus,
+            CorporatePrepaymentAccount,
+            CorporatePrepaymentEventType,
+            CorporatePrepaymentLedger,
+        )
+        from shared.enums import CorporateContractTrackingMode, EntitySubtype
+
+        sample_user.user_type = "entity"
+        sample_user.entity_subtype = EntitySubtype.GROCERY_STORE
+        db.session.commit()
+
+        contract = CorporateContract(
+            user_id=sample_user.id,
+            contract_number=f"CTR-{uuid4().hex[:10]}",
+            name="Money Contract",
+            status=CorporateContractStatus.ACTIVE,
+            start_date=datetime.now(UTC) - timedelta(days=1),
+            currency="UZS",
+            is_active=True,
+        )
+        contract.tracking_mode = CorporateContractTrackingMode.AMOUNT
+        db.session.add(contract)
+        db.session.flush()
+        account = CorporatePrepaymentAccount(
+            contract_id=contract.id, is_active=True, outstanding_amount=Decimal("50000.00")
+        )
+        db.session.add(account)
+        db.session.commit()
+
+        payment = Payment(
+            user_id=sample_user.id, order_id=sample_order.id, amount=sample_order.total_amount,
+            payment_method=PaymentMethod.CLICK, status=PaymentStatus.COMPLETED,
+        )
+        db.session.add(payment)
+        db.session.commit()
+
+        PaymentService()._handle_successful_payment(
+            payment, trigger_notifications=False, allow_order_confirmation=False
+        )
+        db.session.commit()
+
+        collect = CorporatePrepaymentLedger.query.filter_by(
+            contract_id=contract.id, event_type=CorporatePrepaymentEventType.COLLECT
+        ).first()
+        assert collect is not None
+        assert collect.idempotency_key == f"collect:payment:{payment.id}"
+
+        db.session.refresh(account)
+        assert account.outstanding_amount == Decimal("50000.00") - sample_order.total_amount
+
+    def test_cash_method_completion_does_not_settle_via_this_hook(self, db, sample_user):
+        from business_app.models.corporate import CorporatePrepaymentEventType, CorporatePrepaymentLedger
+        from tests.unit.test_corporate_contract_service import _setup_units_grocery_reserved_order
+
+        _service, _contract, _account, _product, order = _setup_units_grocery_reserved_order(db, sample_user)
+        payment = Payment(
+            user_id=sample_user.id, order_id=order.id, amount=order.total_amount,
+            payment_method=PaymentMethod.CASH, status=PaymentStatus.COMPLETED,
+            collected_by=sample_user.id,
+        )
+        db.session.add(payment)
+        db.session.commit()
+
+        PaymentService()._handle_successful_payment(
+            payment, trigger_notifications=False, allow_order_confirmation=False
+        )
+        db.session.commit()
+
+        topup = CorporatePrepaymentLedger.query.filter_by(
+            order_id=order.id, event_type=CorporatePrepaymentEventType.TOPUP
+        ).first()
+        assert topup is None
+
+    def test_non_grocery_electronic_completion_no_settlement(self, db, sample_user, sample_order):
+        from business_app.models.corporate import CorporatePrepaymentLedger
+
+        assert not sample_user.is_grocery_store
+        payment = Payment(
+            user_id=sample_user.id, order_id=sample_order.id, amount=sample_order.total_amount,
+            payment_method=PaymentMethod.CLICK, status=PaymentStatus.COMPLETED,
+        )
+        db.session.add(payment)
+        db.session.commit()
+
+        PaymentService()._handle_successful_payment(
+            payment, trigger_notifications=False, allow_order_confirmation=False
+        )
+        db.session.commit()
+
+        assert CorporatePrepaymentLedger.query.filter_by(order_id=sample_order.id).count() == 0
+
+    def test_electronic_completion_idempotent_on_replay(self, db, sample_user):
+        from business_app.models.corporate import CorporatePrepaymentEventType, CorporatePrepaymentLedger
+        from tests.unit.test_corporate_contract_service import _setup_units_grocery_reserved_order
+
+        _service, _contract, _account, _product, order = _setup_units_grocery_reserved_order(db, sample_user)
+        payment = Payment(
+            user_id=sample_user.id, order_id=order.id, amount=order.total_amount,
+            payment_method=PaymentMethod.CLICK, status=PaymentStatus.COMPLETED,
+        )
+        db.session.add(payment)
+        db.session.commit()
+
+        PaymentService()._handle_successful_payment(
+            payment, trigger_notifications=False, allow_order_confirmation=False
+        )
+        db.session.commit()
+        PaymentService()._handle_successful_payment(
+            payment, trigger_notifications=False, allow_order_confirmation=False
+        )
+        db.session.commit()
+
+        topups = CorporatePrepaymentLedger.query.filter_by(
+            order_id=order.id, event_type=CorporatePrepaymentEventType.TOPUP
+        ).count()
+        assert topups == 1

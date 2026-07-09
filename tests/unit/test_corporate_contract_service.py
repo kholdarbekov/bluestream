@@ -926,6 +926,7 @@ def test_topup_from_cash_collection_mirrors_consume_entries(db, sample_user):
         contract=contract,
         order_id=order.id,
         cash_event_id=4242,
+        collected_amount=order.total_amount,
         delivery_id=None,
         actor_user_id=sample_user.id,
         source="delivery_completion",
@@ -965,11 +966,19 @@ def test_topup_from_cash_collection_is_idempotent(db, sample_user):
     )
 
     first = service.topup_from_cash_collection(
-        contract=contract, order_id=order.id, cash_event_id=99, actor_user_id=sample_user.id
+        contract=contract,
+        order_id=order.id,
+        cash_event_id=99,
+        collected_amount=order.total_amount,
+        actor_user_id=sample_user.id,
     )
     db.session.commit()
     second = service.topup_from_cash_collection(
-        contract=contract, order_id=order.id, cash_event_id=99, actor_user_id=sample_user.id
+        contract=contract,
+        order_id=order.id,
+        cash_event_id=99,
+        collected_amount=order.total_amount,
+        actor_user_id=sample_user.id,
     )
     db.session.commit()
 
@@ -1004,10 +1013,10 @@ def test_topup_from_cash_collection_noop_without_consume_entries(db, sample_user
         contract_id=contract.id,
         contract_product_price_id=price_row.id,
     )
-    # No reserve, no consume -> no CONSUME entries exist for this order.
+    # No reserve and no consume -> nothing to fund.
 
     entries = service.topup_from_cash_collection(
-        contract=contract, order_id=order.id, cash_event_id=1
+        contract=contract, order_id=order.id, cash_event_id=1, collected_amount=Decimal("28000.00")
     )
     db.session.commit()
 
@@ -1048,7 +1057,276 @@ def test_topup_from_cash_collection_rejects_amount_mode_contract(db, sample_user
     import pytest
 
     with pytest.raises(ValidationError):
-        service.topup_from_cash_collection(contract=contract, order_id=1, cash_event_id=1)
+        service.topup_from_cash_collection(
+            contract=contract, order_id=1, cash_event_id=1, collected_amount=Decimal("1000.00")
+        )
+
+
+def _setup_units_grocery_reserved_order(db, user, *, quantity=2, unit_price=Decimal("14000.00")):
+    """Legacy grocery (UNITS) contract with a RESERVED-but-not-delivered order.
+
+    Returns (service, contract, account, product, order). prepaid=0, reserved=quantity
+    -> available = -quantity (debt shown), mirroring the pre-delivery incident state.
+    """
+    user.user_type = "entity"
+    user.entity_subtype = EntitySubtype.GROCERY_STORE
+    db.session.commit()
+
+    service = CorporateContractService()
+    contract, account = _create_contract_and_account(user.id)
+    product = _create_product("Grocery Reserve Water", Decimal("15000.00"))
+    price_row = _create_contract_price(contract.id, product.id, unit_price)
+    order = _create_order_with_item(
+        user_id=user.id,
+        product_id=product.id,
+        quantity=quantity,
+        unit_price=unit_price,
+        contract_id=contract.id,
+        contract_product_price_id=price_row.id,
+        payment_method=PaymentMethod.CASH,
+    )
+    service.reserve_for_order(order.id)
+    db.session.commit()
+    return service, contract, account, product, order
+
+
+def test_topup_from_cash_collection_funds_open_reserve_pre_delivery(db, sample_user):
+    service, contract, account, product, order = _setup_units_grocery_reserved_order(db, sample_user)
+
+    entries = service.topup_from_cash_collection(
+        contract=contract,
+        order_id=order.id,
+        cash_event_id=7001,
+        collected_amount=order.total_amount,  # full order -> funded_fraction == 1
+        source="personal_card_transfer",
+        actor_user_id=sample_user.id,
+    )
+    db.session.commit()
+
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry.event_type == CorporatePrepaymentEventType.TOPUP
+    assert entry.product_id == product.id
+    assert entry.order_id == order.id
+    assert Decimal(str(entry.units)) == Decimal("2.00")
+    assert entry.idempotency_key == f"topup:cash_event:7001:reserve:{_reserve_id(order.id)}"
+    assert entry.entry_metadata["source_reserve_entry_id"] == _reserve_id(order.id)
+
+    balance = _get_product_balance(account.id, product.id)
+    assert Decimal(str(balance.prepaid_units)) == Decimal("2.00")
+    assert balance.available_units == Decimal("0.00")  # debt cleared
+
+
+def test_topup_from_cash_collection_scales_units_for_partial_payment(db, sample_user):
+    service, contract, account, product, order = _setup_units_grocery_reserved_order(db, sample_user)
+
+    # Pay half the order total -> fund half the reserved units.
+    service.topup_from_cash_collection(
+        contract=contract,
+        order_id=order.id,
+        cash_event_id=7002,
+        collected_amount=order.total_amount / 2,
+        source="personal_card_transfer",
+    )
+    db.session.commit()
+
+    balance = _get_product_balance(account.id, product.id)
+    assert Decimal(str(balance.prepaid_units)) == Decimal("1.00")
+    assert balance.available_units == Decimal("-1.00")  # half still owed
+
+
+def test_topup_from_cash_collection_two_partials_do_not_overfund(db, sample_user):
+    service, contract, account, product, order = _setup_units_grocery_reserved_order(db, sample_user)
+
+    service.topup_from_cash_collection(
+        contract=contract, order_id=order.id, cash_event_id=7003,
+        collected_amount=order.total_amount / 2, source="personal_card_transfer",
+    )
+    db.session.commit()
+    service.topup_from_cash_collection(
+        contract=contract, order_id=order.id, cash_event_id=7004,
+        collected_amount=order.total_amount / 2, source="personal_card_transfer",
+    )
+    db.session.commit()
+
+    balance = _get_product_balance(account.id, product.id)
+    assert Decimal(str(balance.prepaid_units)) == Decimal("2.00")  # exactly reserved, no over-fund
+    assert balance.available_units == Decimal("0.00")
+
+
+def test_topup_from_cash_collection_overpayment_capped_at_reservation(db, sample_user):
+    service, contract, account, product, order = _setup_units_grocery_reserved_order(db, sample_user)
+
+    service.topup_from_cash_collection(
+        contract=contract, order_id=order.id, cash_event_id=7005,
+        collected_amount=order.total_amount * 3, source="personal_card_transfer",
+    )
+    db.session.commit()
+
+    balance = _get_product_balance(account.id, product.id)
+    assert Decimal(str(balance.prepaid_units)) == Decimal("2.00")  # capped, no phantom units
+    assert balance.available_units == Decimal("0.00")
+
+
+def test_topup_from_cash_collection_reserve_funding_is_idempotent(db, sample_user):
+    service, contract, account, product, order = _setup_units_grocery_reserved_order(db, sample_user)
+
+    first = service.topup_from_cash_collection(
+        contract=contract, order_id=order.id, cash_event_id=7006,
+        collected_amount=order.total_amount, source="personal_card_transfer",
+    )
+    db.session.commit()
+    second = service.topup_from_cash_collection(
+        contract=contract, order_id=order.id, cash_event_id=7006,
+        collected_amount=order.total_amount, source="personal_card_transfer",
+    )
+    db.session.commit()
+
+    assert {e.id for e in first} == {e.id for e in second}
+    topups = CorporatePrepaymentLedger.query.filter_by(
+        order_id=order.id, event_type=CorporatePrepaymentEventType.TOPUP,
+    ).count()
+    assert topups == 1
+    balance = _get_product_balance(account.id, product.id)
+    assert Decimal(str(balance.prepaid_units)) == Decimal("2.00")
+
+
+def test_topup_from_cash_collection_cancel_after_prepayment_leaves_credit(db, sample_user):
+    service, contract, account, product, order = _setup_units_grocery_reserved_order(db, sample_user)
+
+    service.topup_from_cash_collection(
+        contract=contract, order_id=order.id, cash_event_id=7007,
+        collected_amount=order.total_amount, source="personal_card_transfer",
+    )
+    db.session.commit()
+    # Order cancelled before delivery -> reserve released, prepaid stays -> credit.
+    service.release_for_order(order.id, reason="cancelled after prepayment")
+    db.session.commit()
+
+    balance = _get_product_balance(account.id, product.id)
+    assert balance.available_units == Decimal("2.00")  # positive == customer credit
+
+
+def test_topup_from_cash_collection_funds_full_reservation_for_duplicate_product_lines(db, sample_user):
+    from uuid import uuid4
+    from business_app.models.order import Order, OrderItem
+
+    sample_user.user_type = "entity"
+    sample_user.entity_subtype = EntitySubtype.GROCERY_STORE
+    db.session.commit()
+
+    service = CorporateContractService()
+    contract, account = _create_contract_and_account(sample_user.id)
+    product = _create_product("Dup Product Water", Decimal("15000.00"))
+    unit_price = Decimal("14000.00")
+    price_row = _create_contract_price(contract.id, product.id, unit_price)
+
+    # Two line items of the SAME product on one order (share one balance).
+    line_total = unit_price  # qty 1 each
+    order = Order(
+        order_number=f"ORD-{uuid4().hex[:8]}",
+        user_id=sample_user.id,
+        status=OrderStatus.PENDING,
+        subtotal=line_total * 2,
+        delivery_fee=Decimal("0.00"),
+        total_amount=line_total * 2,
+        payment_method=PaymentMethod.CASH,
+        order_source="admin",
+    )
+    db.session.add(order)
+    db.session.flush()
+    for _ in range(2):
+        db.session.add(OrderItem(
+            order_id=order.id, product_id=product.id,
+            contract_id=contract.id, contract_product_price_id=price_row.id,
+            quantity=1, unit_price=unit_price, total_price=line_total,
+        ))
+    db.session.commit()
+
+    service.reserve_for_order(order.id)
+    db.session.commit()
+
+    service.topup_from_cash_collection(
+        contract=contract, order_id=order.id, cash_event_id=7100,
+        collected_amount=order.total_amount, source="personal_card_transfer",
+    )
+    db.session.commit()
+
+    balance = _get_product_balance(account.id, product.id)
+    assert Decimal(str(balance.prepaid_units)) == Decimal("2.00")  # both lines funded, not just one
+    assert balance.available_units == Decimal("0.00")
+
+
+def test_topup_from_cash_collection_excludes_released_reserves_from_denominator(db, sample_user):
+    """Edit-after-payment: a released (removed) reserve line must not inflate the
+    funding denominator and under-fund the surviving line."""
+    from uuid import uuid4
+    from business_app.models.order import Order, OrderItem
+
+    sample_user.user_type = "entity"
+    sample_user.entity_subtype = EntitySubtype.GROCERY_STORE
+    db.session.commit()
+
+    service = CorporateContractService()
+    contract, account = _create_contract_and_account(sample_user.id)
+    unit_price = Decimal("14000.00")
+    product_a = _create_product("Edit Water A", Decimal("15000.00"))
+    product_b = _create_product("Edit Water B", Decimal("15000.00"))
+    price_a = _create_contract_price(contract.id, product_a.id, unit_price)
+    price_b = _create_contract_price(contract.id, product_b.id, unit_price)
+
+    order = Order(
+        order_number=f"ORD-{uuid4().hex[:8]}",
+        user_id=sample_user.id,
+        status=OrderStatus.PENDING,
+        subtotal=unit_price,
+        delivery_fee=Decimal("0.00"),
+        total_amount=unit_price,
+        payment_method=PaymentMethod.CASH,
+        order_source="admin",
+    )
+    db.session.add(order)
+    db.session.flush()
+    db.session.add(OrderItem(order_id=order.id, product_id=product_a.id,
+                             contract_id=contract.id, contract_product_price_id=price_a.id,
+                             quantity=1, unit_price=unit_price, total_price=unit_price))
+    db.session.commit()
+
+    # Reserve line A, then release it (edit removed line A).
+    service.reserve_for_order(order.id)
+    db.session.commit()
+    service.release_for_order(order.id, reason="edit removed line A")
+    db.session.commit()
+
+    # Edit adds line B; re-reserve (A stays released-not-consumed, B open).
+    db.session.add(OrderItem(order_id=order.id, product_id=product_b.id,
+                             contract_id=contract.id, contract_product_price_id=price_b.id,
+                             quantity=1, unit_price=unit_price, total_price=unit_price))
+    db.session.commit()
+    service.reserve_for_order(order.id)
+    db.session.commit()
+
+    # Pay the surviving line B in full. Denominator must be B only (unit_price),
+    # not A+B, so B is fully funded.
+    service.topup_from_cash_collection(
+        contract=contract, order_id=order.id, cash_event_id=7200,
+        collected_amount=unit_price, source="personal_card_transfer",
+    )
+    db.session.commit()
+
+    balance_b = _get_product_balance(account.id, product_b.id)
+    assert balance_b.available_units == Decimal("0.00")  # fully funded; released A excluded from denominator
+
+
+def _reserve_id(order_id):
+    row = (
+        CorporatePrepaymentLedger.query.filter_by(
+            order_id=order_id, event_type=CorporatePrepaymentEventType.RESERVE,
+        )
+        .order_by(CorporatePrepaymentLedger.id.asc())
+        .first()
+    )
+    return row.id
 
 
 def _create_corporate_user(
@@ -1274,3 +1552,125 @@ def test_reserve_for_order_still_runs_for_grocery_units_cash_order(db, sample_us
         ).count()
         == 1
     )
+
+
+def test_settle_order_collection_units_grocery_funds_reserve(db, sample_user):
+    service, contract, account, product, order = _setup_units_grocery_reserved_order(db, sample_user)
+
+    service.settle_order_collection(
+        user=sample_user,
+        order_id=order.id,
+        collected_amount=order.total_amount,
+        source="personal_card_transfer",
+        cash_event_id=8001,
+        actor_user_id=sample_user.id,
+    )
+    db.session.commit()
+
+    balance = _get_product_balance(account.id, product.id)
+    assert balance.available_units == Decimal("0.00")  # debt cleared via TOPUP
+
+
+def test_settle_order_collection_noop_for_non_grocery_user(db, sample_user):
+    service, contract, account, product, order = _setup_units_grocery_reserved_order(db, sample_user)
+    sample_user.entity_subtype = EntitySubtype.WORKPLACE  # no longer a grocery store
+    db.session.commit()
+
+    service.settle_order_collection(
+        user=sample_user, order_id=order.id, collected_amount=order.total_amount,
+        source="personal_card_transfer", cash_event_id=8002,
+    )
+    db.session.commit()
+
+    topups = CorporatePrepaymentLedger.query.filter_by(
+        order_id=order.id, event_type=CorporatePrepaymentEventType.TOPUP,
+    ).count()
+    assert topups == 0
+
+
+def test_settle_order_collection_amount_mode_grocery_records_collect(db, sample_user):
+    sample_user.user_type = "entity"
+    sample_user.entity_subtype = EntitySubtype.GROCERY_STORE
+    db.session.commit()
+
+    # Money-mode grocery contract (bypass the service default that also forces AMOUNT).
+    contract = CorporateContract(
+        user_id=sample_user.id,
+        contract_number=f"CTR-{uuid4().hex[:10]}",
+        name="Money Contract",
+        status=CorporateContractStatus.ACTIVE,
+        start_date=datetime.now(UTC) - timedelta(days=1),
+        currency="UZS",
+        is_active=True,
+    )
+    contract.tracking_mode = CorporateContractTrackingMode.AMOUNT
+    db.session.add(contract)
+    db.session.flush()
+    account = CorporatePrepaymentAccount(contract_id=contract.id, is_active=True)
+    db.session.add(account)
+    db.session.commit()
+
+    service = CorporateContractService()
+    service.settle_order_collection(
+        user=sample_user, order_id=None, collected_amount=Decimal("50000.00"),
+        source="personal_card_transfer", cash_event_id=8003,
+    )
+    db.session.commit()
+
+    db.session.refresh(account)
+    assert account.outstanding_amount == Decimal("-50000.00")  # COLLECT drove it into credit
+    collects = CorporatePrepaymentLedger.query.filter_by(
+        contract_id=contract.id, event_type=CorporatePrepaymentEventType.COLLECT,
+    ).count()
+    assert collects == 1
+
+
+def test_record_money_collection_payment_id_key_and_idempotent(db, sample_user):
+    from uuid import uuid4
+    sample_user.user_type = "entity"
+    sample_user.entity_subtype = EntitySubtype.GROCERY_STORE
+    db.session.commit()
+    contract = CorporateContract(
+        user_id=sample_user.id, contract_number=f"CTR-{uuid4().hex[:10]}",
+        name="Money", status=CorporateContractStatus.ACTIVE,
+        start_date=datetime.now(UTC) - timedelta(days=1), currency="UZS", is_active=True,
+    )
+    contract.tracking_mode = CorporateContractTrackingMode.AMOUNT
+    db.session.add(contract); db.session.flush()
+    db.session.add(CorporatePrepaymentAccount(contract_id=contract.id, is_active=True)); db.session.commit()
+    service = CorporateContractService()
+
+    e1 = service.record_money_collection(contract=contract, amount=Decimal("50000.00"), payment_id=9001, source="click")
+    db.session.commit()
+    e2 = service.record_money_collection(contract=contract, amount=Decimal("50000.00"), payment_id=9001, source="click")
+    db.session.commit()
+
+    assert e1.idempotency_key == "collect:payment:9001"
+    assert e1.id == e2.id  # idempotent replay, one COLLECT
+    assert CorporatePrepaymentLedger.query.filter_by(
+        contract_id=contract.id, event_type=CorporatePrepaymentEventType.COLLECT).count() == 1
+
+
+def test_topup_from_cash_collection_payment_id_funds_reserve(db, sample_user):
+    service, contract, account, product, order = _setup_units_grocery_reserved_order(db, sample_user)
+    entries = service.topup_from_cash_collection(
+        contract=contract, order_id=order.id, payment_id=9002, collected_amount=order.total_amount, source="click",
+    )
+    db.session.commit()
+    assert len(entries) == 1
+    assert entries[0].idempotency_key == f"topup:payment:9002:reserve:{_reserve_id(order.id)}"
+    balance = _get_product_balance(account.id, product.id)
+    assert balance.available_units == Decimal("0.00")
+
+
+def test_settle_order_collection_threads_payment_id_units(db, sample_user):
+    service, contract, account, product, order = _setup_units_grocery_reserved_order(db, sample_user)
+    service.settle_order_collection(
+        user=sample_user, order_id=order.id, collected_amount=order.total_amount,
+        source="click", payment_id=9003,
+    )
+    db.session.commit()
+    topup = CorporatePrepaymentLedger.query.filter_by(
+        order_id=order.id, event_type=CorporatePrepaymentEventType.TOPUP).first()
+    assert topup.idempotency_key == f"topup:payment:9003:reserve:{_reserve_id(order.id)}"
+    assert _get_product_balance(account.id, product.id).available_units == Decimal("0.00")

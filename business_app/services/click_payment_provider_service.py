@@ -944,15 +944,35 @@ class ClickPaymentProviderService:
 
     @staticmethod
     def _map_payment_status(payment_status: Any) -> str:
+        """Map Click's numeric ``payment_status`` code to our PaymentStatus.
+
+        Verified 2026-07-09 against Click's live merchant API (payment 784 /
+        click id 5139712349, a confirmed-successful payment): GET
+        /payment/status returned ``payment_status: 2`` with
+        error_note "Успешно проведен" ("successfully processed"). The
+        previously-shipped mapping (1=completed, {2,-1,-2}=cancelled) was
+        INVERTED versus reality and has been corrected here.
+
+        Verified/documented enum:
+            <0  = error
+            0   = created
+            1   = processing
+            2   = success
+
+        Only affirmative evidence is treated as terminal: 2 -> COMPLETED;
+        -1/-2 -> CANCELLED; -3 -> FAILED. Everything else (0, 1, and any
+        unrecognized/future code) maps to PENDING — created/processing/
+        unknown are not proof of a terminal outcome.
+        """
         try:
             code = int(payment_status)
         except (TypeError, ValueError):
             return "pending"
-        if code == 1:
+        if code == 2:
             return PaymentStatus.COMPLETED.value
-        if code in {2, -1, -2}:
+        if code in {-1, -2}:
             return PaymentStatus.CANCELLED.value
-        if code in {3, -3}:
+        if code == -3:
             return PaymentStatus.FAILED.value
         return PaymentStatus.PENDING.value
 

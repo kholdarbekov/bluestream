@@ -908,13 +908,15 @@ class TestReconciliationCatchesStrandedPending:
         payment.created_at = datetime.now(timezone.utc) - timedelta(minutes=20)
         db.session.commit()
 
-        # Click status endpoint — return code 1 for the reconcile poll.
-        # ``_map_payment_status``: 1=completed, 2/-1/-2=cancelled, 3/-3=failed.
+        # Click status endpoint — return code 2 (verified "success") for the
+        # reconcile poll. ``_map_payment_status`` (corrected 2026-07-09 against
+        # Click's live merchant API): 2=completed, -1/-2=cancelled, -3=failed,
+        # 0/1/anything else=pending (created/processing are not terminal).
         fake_click_merchant.script(
             method='GET',
             url_contains='',
             json_body={
-                'payment_status': 1,
+                'payment_status': 2,
                 'error_code': 0,
                 'payment_id': 999_001,
             },
@@ -1058,7 +1060,7 @@ class TestReconcilePreventionGate:
     ):
         """PAY-007 gate + positive-evidence contract (Task 7): a genuinely-PENDING
         order's payment is still cancelled when the gateway AFFIRMS cancellation
-        (``payment_status=2`` -> CANCELLED). The gate only suppresses *timeout*
+        (``payment_status=-2`` -> CANCELLED). The gate only suppresses *timeout*
         auto-cancel for orders past PENDING; it never blocks a PENDING order, and
         affirmative gateway evidence cancels regardless of age.
 
@@ -1077,14 +1079,15 @@ class TestReconcilePreventionGate:
         # sample_order is already PENDING by default.
         payment = self._stale_click_payment(db, sample_order)
 
-        # payment_status = 2 maps to CANCELLED via ``_map_payment_status`` — this
-        # is affirmative gateway evidence (not a mere timeout), which the
-        # positive-evidence contract requires before cancelling.
+        # payment_status = -2 maps to CANCELLED via ``_map_payment_status``
+        # (corrected 2026-07-09: negative codes are Click's error/cancel
+        # range) — this is affirmative gateway evidence (not a mere timeout),
+        # which the positive-evidence contract requires before cancelling.
         fake_click_merchant.script(
             method='GET',
             url_contains='',
             json_body={
-                'payment_status': 2,
+                'payment_status': -2,
                 'error_code': 0,
                 'payment_id': 999_011,
             },

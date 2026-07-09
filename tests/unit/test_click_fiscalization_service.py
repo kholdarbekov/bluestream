@@ -718,7 +718,7 @@ class TestClickFiscalizationService:
             return_value=Mock(check_payment_status=Mock(return_value={
                 'status': 'completed',
                 'provider_transaction_id': None,
-                'raw': {'payment_status': 1},
+                'raw': {'payment_status': 2},
             })),
         ), patch.object(payment_service, '_handle_successful_payment') as handle_success, patch.object(
             payment_service, 'queue_click_fiscalization',
@@ -765,7 +765,10 @@ class TestClickFiscalizationService:
         payment.provider_data = {'click': {'click_paydoc_id': '22110099'}}
         db.session.flush()
 
-        with patch.object(provider, 'merchant_request', return_value={'error_code': 0, 'payment_status': 1}) as merchant_request:
+        # payment_status=2 is Click's verified "success" code (2026-07-09 live
+        # verification); the mapping heals a poll to COMPLETED only on this
+        # affirmative code, not on 1 ("processing").
+        with patch.object(provider, 'merchant_request', return_value={'error_code': 0, 'payment_status': 2}) as merchant_request:
             payload = provider.check_payment_status(payment)
 
         assert payload['status'] == PaymentStatus.COMPLETED.value

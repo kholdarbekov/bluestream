@@ -66,7 +66,10 @@ def main() -> int:
         raw_code = result.get("payment_status_code")
         print(f"payment_id={payment.id} local_status={payment.status}")
         print(f"RAW Click payment_status code: {raw_code!r}")
-        print(f"Current code mapping says:     {result.get('status')!r}  (1=completed, 2=cancelled)")
+        print(
+            f"Current code mapping says:     {result.get('status')!r}  "
+            "(2=completed; 0/1=pending; <0=cancelled/failed)"
+        )
         docs_enum = {0: "created", 1: "processing", 2: "success"}
         try:
             docs_says = docs_enum.get(int(raw_code), "error(<0)" if int(raw_code) < 0 else "unknown")

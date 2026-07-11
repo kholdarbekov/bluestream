@@ -794,3 +794,18 @@ def send_welcome_sms_task(self, user_id: int):
     except Exception as exc:
         logger.error(f"Failed to send welcome SMS for user {user_id}: {exc}")
         raise self.retry(exc=exc)
+
+
+@shared_task(time_limit=120, soft_time_limit=100)
+def send_tax_committee_token_refresh_alert_task(reason, status_code=None, body=None):
+    """Fire-and-forget: alert admins (Slack + email) that the Tax Committee
+    (Asl Belgisi) API token refresh failed.
+
+    Dispatched from TaxCommitteeService.refresh_token so the Slack + per-admin
+    email fan-out runs in a worker — off the request path and off the token-row
+    SELECT..FOR UPDATE lock. FiscalizationAlertService is best-effort and never
+    raises; no retry (a failed alert must not requeue and re-spam).
+    """
+    from business_app.services.fiscalization_alert_service import FiscalizationAlertService
+
+    FiscalizationAlertService().notify_token_refresh_failed(reason, status_code=status_code, body=body)

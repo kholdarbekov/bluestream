@@ -1,0 +1,27 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Не удалось обновить токен Asl Belgisi - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>⛔ Оповещение о фискализации</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Не удалось обновить токен Asl Belgisi</h2>
+
+<div class="warning-box">
+    <p><strong>Требуется действие.</strong> Не удалось обновить токен API Налогового комитета (Asl Belgisi). Пока он не восстановлен, все операции фискализации и маркировки заблокированы, что грозит штрафами за фискальную отчётность.</p>
+</div>
+
+<table class="details-table">
+    <tr><th>Причина</th><td>{{ reason }}</td></tr>
+    <tr><th>HTTP-статус</th><td>{{ status_code if status_code is not none else "N/A" }}</td></tr>
+    <tr><th>ИНН компании</th><td>{{ company_tin or "N/A" }}</td></tr>
+    <tr><th>Время</th><td>{{ timestamp }}</td></tr>
+    <tr><th>Окружение</th><td>{{ environment or "N/A" }}</td></tr>
+    {% if body %}<tr><th>Ответ</th><td>{{ body }}</td></tr>{% endif %}
+</table>
+
+<hr class="divider">
+<p>Пожалуйста, как можно скорее переавторизуйте / обновите токен API Asl Belgisi и убедитесь, что фискализация возобновилась.</p>
+{% endblock %}

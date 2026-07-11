@@ -79,6 +79,24 @@ class TaxCommitteeService:
         self._log_step("check_token_validity_invalid", level="warning", status_code=resp.status_code)
         return {"valid": False, "status_code": resp.status_code, "body": resp.text}
 
+    def _alert_token_refresh_failed(
+        self, reason: str, *, status_code: Optional[int] = None, body: Optional[str] = None
+    ) -> None:
+        """Fire-and-forget best-effort admin alert (Slack + email) for a token refresh failure.
+
+        Dispatched to Celery so the Slack/email fan-out runs off the request path
+        and off the token-row SELECT..FOR UPDATE lock held by _ensure_valid_token.
+        Never raises — a broker hiccup must not mask the refresh failure itself.
+        """
+        try:
+            from business_app.tasks.notification_tasks import (
+                send_tax_committee_token_refresh_alert_task,
+            )
+
+            send_tax_committee_token_refresh_alert_task.delay(reason, status_code, body)
+        except Exception:
+            current_app.logger.exception("Failed to dispatch tax committee token refresh alert")
+
     def refresh_token(self, old_token: str) -> str:
         """POST refresh endpoint. Returns the new token string."""
         url = f"{self._base_url}/public/api/v1/party/parties/{self._company_tin}/api-keys/refresh"
@@ -96,11 +114,14 @@ class TaxCommitteeService:
                 status_code=resp.status_code,
                 body=resp.text,
             )
+            self._alert_token_refresh_failed("http_error", status_code=resp.status_code, body=resp.text)
             raise ValidationError(f"Failed to refresh Tax Committee API token: HTTP {resp.status_code}")
 
         data = resp.json()
         new_token_value = data if isinstance(data, str) else data.get("apiKey") or data.get("token")
         if not new_token_value:
+            self._log_step("refresh_token_failed", level="error", reason="empty_token")
+            self._alert_token_refresh_failed("empty_token")
             raise ValidationError("Tax Committee token refresh returned empty token")
 
         # Deactivate old row(s)

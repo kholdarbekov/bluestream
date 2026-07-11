@@ -1,0 +1,27 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Asl Belgisi token refresh failed - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>⛔ Fiscalization Alert</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Asl Belgisi token refresh failed</h2>
+
+<div class="warning-box">
+    <p><strong>Action required.</strong> The Tax Committee (Asl Belgisi) API token could not be refreshed. Until it is restored, all fiscalization and marking-code operations are blocked, which risks fiscal-reporting fines.</p>
+</div>
+
+<table class="details-table">
+    <tr><th>Reason</th><td>{{ reason }}</td></tr>
+    <tr><th>HTTP status</th><td>{{ status_code if status_code is not none else "N/A" }}</td></tr>
+    <tr><th>Company TIN</th><td>{{ company_tin or "N/A" }}</td></tr>
+    <tr><th>Time</th><td>{{ timestamp }}</td></tr>
+    <tr><th>Environment</th><td>{{ environment or "N/A" }}</td></tr>
+    {% if body %}<tr><th>Response</th><td>{{ body }}</td></tr>{% endif %}
+</table>
+
+<hr class="divider">
+<p>Please re-authorise / rotate the Asl Belgisi API token as soon as possible, then confirm that fiscalization resumes.</p>
+{% endblock %}

@@ -151,6 +151,12 @@ class EmailTemplateService:
             "en": "Reorder Suggestions: {total_products} products - {company_name}",
             "ru": "Предложения по дозаказу: {total_products} товаров - {company_name}",
         },
+        # Fiscalization (Asl Belgisi / Tax Committee) critical alert
+        "tax_committee_token_refresh_failed": {
+            "uz": "⛔ Asl Belgisi tokenini yangilash muvaffaqiyatsiz — fiskalizatsiya bloklandi - {company_name}",
+            "en": "⛔ Asl Belgisi token refresh FAILED — fiscalization blocked - {company_name}",
+            "ru": "⛔ Не удалось обновить токен Asl Belgisi — фискализация заблокирована - {company_name}",
+        },
     }
 
     SUPPORTED_LANGUAGES = ["uz", "en", "ru"]

@@ -138,6 +138,43 @@ class TestTaxCommitteeTokenManagement:
 
         assert token == 'refreshed-token'
 
+    def test_refresh_token_http_failure_dispatches_alert(self, app, db):
+        _configure_tax_committee_context(app)
+        service = TaxCommitteeService()
+        mock_resp = Mock()
+        mock_resp.status_code = 401
+        mock_resp.text = 'Unauthorized'
+        with patch('business_app.services.tax_committee_service.requests.post', return_value=mock_resp), \
+             patch('business_app.tasks.notification_tasks.send_tax_committee_token_refresh_alert_task') as mock_task:
+            with pytest.raises(ValidationError, match='Failed to refresh'):
+                service.refresh_token('bad-old-token')
+        mock_task.delay.assert_called_once_with('http_error', 401, 'Unauthorized')
+
+    def test_refresh_token_empty_token_dispatches_alert(self, app, db):
+        _configure_tax_committee_context(app)
+        service = TaxCommitteeService()
+        mock_resp = Mock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {}
+        with patch('business_app.services.tax_committee_service.requests.post', return_value=mock_resp), \
+             patch('business_app.tasks.notification_tasks.send_tax_committee_token_refresh_alert_task') as mock_task:
+            with pytest.raises(ValidationError, match='empty token'):
+                service.refresh_token('old-token')
+        mock_task.delay.assert_called_once_with('empty_token', None, None)
+
+    def test_refresh_token_alert_dispatch_failure_does_not_suppress_validation_error(self, app, db):
+        _configure_tax_committee_context(app)
+        service = TaxCommitteeService()
+        mock_resp = Mock()
+        mock_resp.status_code = 500
+        mock_resp.text = 'Server Error'
+        with patch('business_app.services.tax_committee_service.requests.post', return_value=mock_resp), \
+             patch('business_app.tasks.notification_tasks.send_tax_committee_token_refresh_alert_task') as mock_task:
+            mock_task.delay.side_effect = RuntimeError('broker down')
+            # The refresh failure's ValidationError must still surface, not the dispatch error.
+            with pytest.raises(ValidationError, match='Failed to refresh'):
+                service.refresh_token('old-token')
+
 
 @pytest.mark.unit
 class TestTaxCommitteeUtilisation:

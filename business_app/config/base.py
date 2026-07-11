@@ -255,6 +255,11 @@ class BaseConfig:
 
     # Email Configuration (Brevo - Primary)
     BREVO_API_KEY = get_secret("brevo_api_key", "BREVO_API_KEY", required=False)
+
+    # Slack incoming webhook for application-level alerts. Reuses the same
+    # docker secret Alertmanager posts to (→ #alerts-prod). Optional: unset in
+    # dev/test, in which case send_slack_alert() is a no-op.
+    SLACK_ALERTS_WEBHOOK_URL = get_secret("slack_webhook_url", "SLACK_WEBHOOK_URL", required=False)
     BREVO_SENDER_EMAIL = os.environ.get("BREVO_SENDER_EMAIL", "noreply@aqua-element.uz")
     BREVO_SENDER_NAME = os.environ.get("BREVO_SENDER_NAME", "Aqua Element")
 

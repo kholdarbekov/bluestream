@@ -1,0 +1,27 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Asl Belgisi tokenini yangilash muvaffaqiyatsiz - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>⛔ Fiskalizatsiya ogohlantirishi</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Asl Belgisi tokenini yangilash muvaffaqiyatsiz tugadi</h2>
+
+<div class="warning-box">
+    <p><strong>Harakat talab qilinadi.</strong> Soliq qo'mitasi (Asl Belgisi) API tokenini yangilab bo'lmadi. U tiklanmaguncha barcha fiskalizatsiya va markirovka amallari bloklanadi — bu fiskal hisobot uchun jarimalar xavfini tug'diradi.</p>
+</div>
+
+<table class="details-table">
+    <tr><th>Sabab</th><td>{{ reason }}</td></tr>
+    <tr><th>HTTP holati</th><td>{{ status_code if status_code is not none else "N/A" }}</td></tr>
+    <tr><th>Kompaniya STIR</th><td>{{ company_tin or "N/A" }}</td></tr>
+    <tr><th>Vaqt</th><td>{{ timestamp }}</td></tr>
+    <tr><th>Muhit</th><td>{{ environment or "N/A" }}</td></tr>
+    {% if body %}<tr><th>Javob</th><td>{{ body }}</td></tr>{% endif %}
+</table>
+
+<hr class="divider">
+<p>Iltimos, imkon qadar tezroq Asl Belgisi API tokenini qayta avtorizatsiya qiling / yangilang va fiskalizatsiya tiklanganini tasdiqlang.</p>
+{% endblock %}

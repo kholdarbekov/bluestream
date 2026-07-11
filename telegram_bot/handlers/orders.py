@@ -28,28 +28,9 @@ class OrderHandlers(BaseHandler):
 
     @staticmethod
     def _build_checkout_payment_methods(available_methods: List[Dict[str, Any]], language: str) -> List[Dict[str, str]]:
-        method_codes = {
-            str(method.get('method'))
-            for method in (available_methods or [])
-            if method.get('is_active', True)
-        }
-        payment_methods: List[Dict[str, str]] = []
-        if 'cash' in method_codes:
-            payment_methods.append({
-                'type': 'cash',
-                'name': i18n.get('telegram.payment_cash', language),
-            })
-        if any(code not in ('cash', 'business_account') for code in method_codes):
-            payment_methods.append({
-                'type': 'card',
-                'name': i18n.get('telegram.payment_card', language),
-            })
-        if 'business_account' in method_codes:
-            payment_methods.append({
-                'type': 'business_account',
-                'name': i18n.get('telegram.payment_business_account', language),
-            })
-        return payment_methods
+        from payment_methods import build_payment_method_buttons
+
+        return build_payment_method_buttons(available_methods, language)
 
     @staticmethod
     def _cod_restriction_notice(restrictions: Dict[str, Any], language: str) -> str:

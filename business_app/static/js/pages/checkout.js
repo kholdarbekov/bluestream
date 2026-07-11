@@ -579,30 +579,7 @@
     // MAIN PLACE ORDER
     // ==========================================
 
-    async function createOrderForPayme() {
-        var orderData = {
-            items: cartItems,
-            delivery_address_id: selectedAddress,
-            delivery_date: deliveryDate,
-            delivery_time_slot: selectedTimeSlot,
-            payment_method: 'payme',
-            delivery_notes: document.getElementById('order-notes').value || null,
-            source: 'web'
-        };
-
-        var orderResponse = await apiRequest('/orders/', {
-            method: 'POST',
-            body: JSON.stringify(orderData)
-        });
-
-        var orderResult = await orderResponse.json();
-
-        if (!orderResult.success) throw new Error(orderResult.message || 'Order creation failed');
-
-        currentOrderId = orderResult.data.order.id;
-    }
-
-    async function placeOrderWithCash() {
+    async function placeOrderDirect(method) {
         document.getElementById('loading-overlay').style.display = 'flex';
         document.getElementById('place-order-btn').disabled = true;
 
@@ -612,7 +589,7 @@
                 delivery_address_id: selectedAddress,
                 delivery_date: deliveryDate,
                 delivery_time_slot: selectedTimeSlot,
-                payment_method: 'cash',
+                payment_method: method,
                 delivery_notes: document.getElementById('order-notes').value || null,
                 source: 'web'
             };
@@ -697,8 +674,38 @@
         if (selectedPaymentMethod === 'click') {
             await placeOrderWithClick();
         } else {
-            await placeOrderWithCash();
+            // cash and business_account both settle without a redirect.
+            await placeOrderDirect(selectedPaymentMethod);
         }
+    }
+
+    async function loadPaymentMethods() {
+        var container = document.getElementById('payment-methods-container');
+        var ICONS = {
+            cash: 'far fa-money-bill-wave',
+            click: 'far fa-credit-card',
+            business_account: 'far fa-building'
+        };
+        var methods = [];
+        try {
+            var response = await apiRequest('/payments/methods?context=order');
+            var payload = await response.json();
+            methods = (payload.data && payload.data.available_methods) || [];
+        } catch (error) {
+            methods = [{ method: 'cash', display_name: 'Cash on Delivery', description: 'Pay when you receive' }];
+        }
+
+        container.innerHTML = methods.map(function (m, index) {
+            return '<div class="payment-method' + (index === 0 ? ' selected' : '') + '"' +
+                ' data-action="select-payment-method" data-method="' + escapeHtml(m.method) + '">' +
+                '<i class="' + (ICONS[m.method] || 'far fa-credit-card') + '"></i>' +
+                '<div class="payment-method-name">' + escapeHtml(m.display_name) + '</div>' +
+                '<div class="payment-method-desc">' + escapeHtml(m.description || '') + '</div>' +
+                '</div>';
+        }).join('');
+
+        selectedPaymentMethod = methods.length ? methods[0].method : 'cash';
+        document.getElementById('selected-payment-method').value = selectedPaymentMethod;
     }
 
     document.addEventListener('DOMContentLoaded', async function () {
@@ -718,6 +725,7 @@
 
         await loadCartSummary();
         loadTimeSlots();
+        await loadPaymentMethods();
 
         var firstAddress = document.querySelector('.address-card[data-address-id]');
         if (firstAddress) {

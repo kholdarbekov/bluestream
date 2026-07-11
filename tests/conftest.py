@@ -309,6 +309,25 @@ def sample_user(db):
 
 
 @pytest.fixture
+def user_address(db, sample_user):
+    """A delivery address inside the Tashkent polygon, owned by sample_user."""
+    from business_app.models.user import UserAddress
+
+    address = UserAddress(
+        user_id=sample_user.id,
+        full_address="1 Test St, Tashkent",
+        street_address="1 Test St",
+        city="Tashkent",
+        latitude=41.3111,
+        longitude=69.2797,
+        is_default=True,
+    )
+    db.session.add(address)
+    db.session.commit()
+    return address
+
+
+@pytest.fixture
 def admin_user(db):
     """Create an admin user for testing"""
     user = User(

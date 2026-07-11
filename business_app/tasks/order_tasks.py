@@ -8,9 +8,10 @@ from celery.utils.log import get_task_logger
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List
 from flask import current_app
-from sqlalchemy import and_, or_
+from sqlalchemy import or_
 
 from business_app.models.order import Order
+from business_app.models.payment import Payment
 from business_app.models.user import User
 from business_app.models.product import Product
 from business_app.services.order_service import OrderService
@@ -153,12 +154,17 @@ def cancel_abandoned_orders():
         # Get orders pending for more than 24 hours without payment
         cutoff_time = datetime.now(timezone.utc) - timedelta(hours=24)
 
-        # Use FOR UPDATE SKIP LOCKED to prevent concurrent workers from processing same orders
+        # Use FOR UPDATE SKIP LOCKED to prevent concurrent workers from processing same orders.
+        # Order.payment is a relationship(uselist=False) — it has no .is_() and no
+        # .status. Use the relationship's EXISTS comparator instead.
         abandoned_orders = (
             Order.query.filter(
                 Order.status == OrderStatus.PENDING,
                 Order.created_at < cutoff_time,
-                or_(Order.payment.is_(None), and_(Order.payment.has(), Order.payment.status != "completed")),
+                or_(
+                    ~Order.payment.has(),
+                    Order.payment.has(Payment.status != PaymentStatus.COMPLETED),
+                ),
             )
             .with_for_update(skip_locked=True)
             .all()

@@ -62,8 +62,6 @@ class Subscription(db.Model, TimestampMixin, TranslatableMixin):
     payment_method = Column(
         Enum(PaymentMethod, name="payment_method", values_callable=lambda x: [e.value for e in x]), nullable=False
     )
-    auto_payment = Column(Boolean, default=True)
-    payment_token = Column(String(255), nullable=True)  # Stored payment token for auto-payment
     failed_payment_count = Column(Integer, default=0)
 
     # Pause/Resume functionality
@@ -200,7 +198,6 @@ class Subscription(db.Model, TimestampMixin, TranslatableMixin):
                 "start_date": self.start_date.isoformat() if self.start_date else None,
                 "end_date": self.end_date.isoformat() if self.end_date else None,
                 "auto_renew": self.auto_renew,
-                "auto_payment": self.auto_payment,
                 "discount_percentage": self.discount_percentage,
                 "total_orders_generated": self.total_orders_generated,
                 "total_amount_billed": float(self.total_amount_billed),

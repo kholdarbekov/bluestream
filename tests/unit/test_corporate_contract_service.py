@@ -4,6 +4,8 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
+import pytest
+
 from business_app import db
 from business_app.models.corporate import (
     CorporateContract,
@@ -1674,3 +1676,171 @@ def test_settle_order_collection_threads_payment_id_units(db, sample_user):
         order_id=order.id, event_type=CorporatePrepaymentEventType.TOPUP).first()
     assert topup.idempotency_key == f"topup:payment:9003:reserve:{_reserve_id(order.id)}"
     assert _get_product_balance(account.id, product.id).available_units == Decimal("0.00")
+
+
+# --- Task 10: business_account offer gate / enforcement gate parity fixtures ---
+
+
+@pytest.fixture
+def entity_user_without_subtype(db):
+    """A legacy entity user: is_entity_user True, entity_subtype still NULL --
+    but WITH a real active contract that fully covers and can afford an order
+    line. Neither workplace nor grocery store: the exact shape that slipped
+    through the old, loose `is_entity_user and not is_grocery_store` gate.
+
+    Giving this fixture an actual funded, covering contract (rather than none)
+    matters: without it, `get_business_account_balances` returning `[]` and
+    `validate_business_account_order` raising would both be true anyway
+    because there is nothing to find/cover, regardless of any workplace
+    check -- a false-positive RED. With a real covering contract, both
+    assertions only hold once the new positive workplace check exists.
+    """
+    user = User(
+        email="entity-no-subtype@example.com",
+        phone="+998901234570",
+        password_hash=hash_password("TestPassword123!"),
+        first_name="Legacy",
+        last_name="Entity",
+        user_type=UserType.ENTITY,
+        role=UserRole.CUSTOMER,
+        is_verified=True,
+        created_at=datetime.now(UTC),
+    )
+    db.session.add(user)
+    db.session.commit()
+    assert user.is_entity_user is True
+    assert user.entity_subtype is None
+    assert user.is_workplace_entity is False
+
+    service = CorporateContractService()
+    contract, account = _create_contract_and_account(user.id)
+    product = _create_product("Legacy Entity Contract Water", Decimal("15000.00"))
+    price_row = _create_contract_price(contract.id, product.id, Decimal("14000.00"))
+    service.topup_contract(
+        contract_id=contract.id,
+        product_id=product.id,
+        units=Decimal("5.00"),
+        amount=Decimal("70000.00"),
+    )
+    db.session.commit()
+
+    user._contract = contract
+    user._account = account
+    user._product = product
+    user._price_row = price_row
+    return user
+
+
+@pytest.fixture
+def workplace_user_with_contract(db):
+    """A genuine workplace entity with an active contract and a usable (funded) balance."""
+    user = User(
+        email="workplace-user@example.com",
+        phone="+998901234571",
+        password_hash=hash_password("TestPassword123!"),
+        first_name="Workplace",
+        last_name="Entity",
+        user_type=UserType.ENTITY,
+        entity_subtype=EntitySubtype.WORKPLACE,
+        role=UserRole.CUSTOMER,
+        is_verified=True,
+        created_at=datetime.now(UTC),
+    )
+    db.session.add(user)
+    db.session.commit()
+    assert user.is_workplace_entity is True
+
+    service = CorporateContractService()
+    contract, account = _create_contract_and_account(user.id)
+    product = _create_product("Workplace Contract Water", Decimal("15000.00"))
+    price_row = _create_contract_price(contract.id, product.id, Decimal("14000.00"))
+    service.topup_contract(
+        contract_id=contract.id,
+        product_id=product.id,
+        units=Decimal("5.00"),
+        amount=Decimal("70000.00"),
+    )
+    db.session.commit()
+
+    # Test-only annotations (not mapped columns/relationships on User) so the
+    # contract_covered_items fixture can build matching order items.
+    user._contract = contract
+    user._account = account
+    user._product = product
+    user._price_row = price_row
+    return user
+
+
+@pytest.fixture
+def contract_covered_items(workplace_user_with_contract):
+    """Order items covered by workplace_user_with_contract's contract, well within
+    its funded balance (5 units funded, 2 requested)."""
+    user = workplace_user_with_contract
+    return [
+        {
+            "product_id": user._product.id,
+            "quantity": 2,
+            "contract_id": user._contract.id,
+            "contract_product_price_id": user._price_row.id,
+        }
+    ]
+
+
+class TestBusinessAccountGateParity:
+    def test_offer_gate_rejects_a_non_entity_individual(self, app, db, sample_user):
+        # sample_user is an individual. Previously get_business_account_balances
+        # only checked `not is_grocery_store`, so an individual with a contract
+        # was offered a method validate_business_account_order then rejected.
+        # Attach a real, funded contract to sample_user's own user_id so the
+        # `== []` assertion proves exclusion-by-individual-status, not just
+        # "there was nothing to find" (a false-positive RED otherwise).
+        with app.app_context():
+            service = CorporateContractService()
+            contract, _account = _create_contract_and_account(sample_user.id)
+            product = _create_product("Individual Contract Water", Decimal("15000.00"))
+            _create_contract_price(contract.id, product.id, Decimal("14000.00"))
+            service.topup_contract(
+                contract_id=contract.id,
+                product_id=product.id,
+                units=Decimal("5.00"),
+                amount=Decimal("70000.00"),
+            )
+            db.session.commit()
+
+            assert service.get_business_account_balances(sample_user) == []
+            assert service.user_can_use_business_account(sample_user) is False
+
+    def test_offer_gate_rejects_entity_with_null_subtype(self, app, db, entity_user_without_subtype):
+        with app.app_context():
+            assert CorporateContractService().get_business_account_balances(entity_user_without_subtype) == []
+
+    def test_validator_rejects_entity_with_null_subtype(self, app, db, entity_user_without_subtype):
+        # order_items are fully contract-covered and well within the funded
+        # balance, so the ONLY reason this may raise is the workplace check --
+        # not a missing-coverage error (which would raise regardless of the fix).
+        user = entity_user_without_subtype
+        with app.app_context():
+            with pytest.raises(ValidationError):
+                CorporateContractService().validate_business_account_order(
+                    user=user,
+                    order_items=[
+                        {
+                            "product_id": user._product.id,
+                            "quantity": 1,
+                            "contract_id": user._contract.id,
+                            "contract_product_price_id": user._price_row.id,
+                        }
+                    ],
+                )
+
+    def test_offered_implies_validator_passes(self, app, db, workplace_user_with_contract, contract_covered_items):
+        """Property: if the menu offers business_account, creating the order must work."""
+        with app.app_context():
+            service = CorporateContractService()
+            offered = service.order_qualifies_for_business_account(workplace_user_with_contract, contract_covered_items)
+            # Guard against a vacuously-true property test: this fixture must actually
+            # produce an offered==True case, or the assertion below never executes.
+            assert offered is True
+            service.validate_business_account_order(
+                user=workplace_user_with_contract, order_items=contract_covered_items
+            )  # must not raise

@@ -1203,6 +1203,15 @@ const Orders = () => {
                   </Button>
                 ) : null}
               </Descriptions.Item>
+              <Descriptions.Item label={t('ui.orders.origin', 'Origin')}>
+                {selectedOrder.is_subscription_order ? (
+                  <Tag color="blue">
+                    {t('ui.orders.from_subscription', 'Subscription')} #{selectedOrder.subscription_id}
+                  </Tag>
+                ) : (
+                  t('ui.orders.one_off', 'One-off')
+                )}
+              </Descriptions.Item>
               <Descriptions.Item label={t('ui.orders.payment_provider', 'Payment Provider')}>
                 {selectedOrder.payment_provider || '—'}
               </Descriptions.Item>

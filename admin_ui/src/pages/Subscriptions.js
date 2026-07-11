@@ -21,7 +21,6 @@ const STATUS_COLORS = { active: 'green', paused: 'orange', cancelled: 'red', exp
 const STATUS_OPTIONS = ['active', 'paused', 'cancelled', 'expired', 'trial'];
 const FREQUENCY_OPTIONS = ['daily', 'weekly', 'biweekly', 'monthly'];
 const FREQUENCY_RANK = { daily: 1, weekly: 2, biweekly: 3, monthly: 4 };
-const PAYMENT_METHODS = ['cash', 'card', 'payme', 'click', 'business_account'];
 
 const mapDetailToForm = (d) => ({
   name: d.name,
@@ -33,7 +32,6 @@ const mapDetailToForm = (d) => ({
   delivery_time_slot_id: d.delivery_time_slot_id ?? d.delivery_time_slot?.id,
   delivery_address_id: d.delivery_address_id,
   payment_method: d.payment_method,
-  auto_payment: d.auto_payment,
   auto_renew: d.auto_renew,
   discount_percentage: d.discount_percentage,
   loyalty_points_multiplier: d.loyalty_points_multiplier,
@@ -113,6 +111,12 @@ const Subscriptions = () => {
     enabled: Boolean(drawerId),
   });
 
+  const paymentMethodsQuery = useQuery({
+    queryKey: ['payment-methods', 'subscription'],
+    queryFn: () => adminService.getPaymentMethods('subscription'),
+    staleTime: 5 * 60 * 1000,
+  });
+
   const rows = listQuery.data?.items || [];
   const total = listQuery.data?.total || 0;
   const users = usersQuery.data?.data?.items || usersQuery.data?.items || [];
@@ -120,6 +124,7 @@ const Subscriptions = () => {
   const timeSlots = timeSlotsQuery.data?.data?.items || timeSlotsQuery.data?.items || [];
   const addresses = addressesQuery.data?.data?.addresses || addressesQuery.data?.addresses || [];
   const detail = detailQuery.data || {};
+  const paymentMethods = paymentMethodsQuery.data || [];
 
   const invalidateList = () => queryClient.invalidateQueries({ queryKey: ['admin-subscriptions'] });
   const invalidateDetail = () => queryClient.invalidateQueries({ queryKey: ['admin-subscription-detail'] });
@@ -192,7 +197,6 @@ const Subscriptions = () => {
       billing_cycle: 'monthly',
       delivery_frequency: 'weekly',
       payment_method: 'cash',
-      auto_payment: true,
       auto_renew: true,
       discount_percentage: 0,
       items: [{ quantity: 1 }],
@@ -392,7 +396,10 @@ const Subscriptions = () => {
             </Col>
             <Col span={8}>
               <Form.Item name="payment_method" label={t('payment_method', { defaultValue: 'Payment method' })} rules={[{ required: true }]}>
-                <Select options={PAYMENT_METHODS.map((m) => ({ value: m, label: m }))} />
+                <Select
+                  loading={paymentMethodsQuery.isLoading}
+                  options={paymentMethods.map((m) => ({ value: m.method, label: m.display_name || m.method }))}
+                />
               </Form.Item>
             </Col>
             <Col span={8}>
@@ -402,17 +409,12 @@ const Subscriptions = () => {
             </Col>
           </Row>
           <Row gutter={16}>
-            <Col span={8}>
+            <Col span={12}>
               <Form.Item name="loyalty_points_multiplier" label={t('loyalty_multiplier', { defaultValue: 'Loyalty multiplier' })}>
                 <InputNumber min={0} step={0.1} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
-            <Col span={8}>
-              <Form.Item name="auto_payment" label={t('auto_payment', { defaultValue: 'Auto payment' })} valuePropName="checked">
-                <Switch />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
+            <Col span={12}>
               <Form.Item name="auto_renew" label={t('auto_renew', { defaultValue: 'Auto renew' })} valuePropName="checked">
                 <Switch />
               </Form.Item>
@@ -525,6 +527,7 @@ const Subscriptions = () => {
               </Descriptions.Item>
               <Descriptions.Item label={t('billing_cycle', { defaultValue: 'Billing' })}>{detail.billing_cycle}</Descriptions.Item>
               <Descriptions.Item label={t('billing_amount', { defaultValue: 'Amount' })}>{Number(detail.billing_amount || 0).toLocaleString()}</Descriptions.Item>
+              <Descriptions.Item label={t('payment_method', { defaultValue: 'Payment method' })}>{detail.payment_method || '—'}</Descriptions.Item>
               <Descriptions.Item label={t('delivery_frequency', { defaultValue: 'Delivery' })}>{detail.delivery_frequency}</Descriptions.Item>
               <Descriptions.Item label={t('next_billing', { defaultValue: 'Next billing' })}>{detail.next_billing_date ? formatDateTime(detail.next_billing_date) : '-'}</Descriptions.Item>
               <Descriptions.Item label={t('total_orders', { defaultValue: 'Orders generated' })}>{detail.total_orders_generated ?? 0}</Descriptions.Item>

@@ -221,12 +221,25 @@ class SubscriptionConstructor {
     }
 
     async loadPaymentMethods() {
-        this.paymentMethods = [
-            { id: 'cash', name: 'Cash on Delivery', icon: '💵', description: 'Pay when you receive' },
-            { id: 'card', name: 'Credit/Debit Card', icon: '💳', description: 'Pay online securely' },
-            { id: 'payme', name: 'Payme', icon: '📱', description: 'Fast mobile payment' },
-            { id: 'click', name: 'Click', icon: '🔘', description: 'Uzbekistan\'s payment system' }
-        ];
+        // Payment methods come from the backend SSOT so this menu can never
+        // diverge from checkout. Payme is not offered; `click` is labelled "Card".
+        const ICONS = { cash: '💵', click: '💳', business_account: '🏢' };
+        try {
+            const response = await apiRequest('/payments/methods?context=subscription');
+            const payload = await response.json();
+            const methods = (payload.data && payload.data.available_methods) || [];
+            this.paymentMethods = methods.map((m) => ({
+                id: m.method,
+                name: m.display_name,
+                icon: ICONS[m.method] || '💳',
+                description: m.description || ''
+            }));
+        } catch (error) {
+            // Cash is always available offline; degrade rather than block signup.
+            this.paymentMethods = [
+                { id: 'cash', name: 'Cash on Delivery', icon: '💵', description: 'Pay when you receive' }
+            ];
+        }
         this.renderPaymentMethods();
     }
 
@@ -972,7 +985,6 @@ class SubscriptionConstructor {
                 delivery_time_slot_id: this.selectedTimeSlot,  // Now sends integer ID (or null)
                 delivery_address_id: this.selectedAddress.id,
                 payment_method: this.selectedPaymentMethod,
-                auto_payment: this.selectedPaymentMethod !== 'cash',
                 auto_renew: true,
                 discount_percentage: 0,
                 items: Array.from(this.selectedProducts.values()).map(({ product, quantity }) => ({

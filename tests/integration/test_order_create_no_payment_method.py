@@ -1,5 +1,5 @@
-"""Regression: OrderService.create_order must not crash when order_data omits
-``payment_method``.
+"""Regression: OrderService.create_order must not crash with an
+``UnboundLocalError`` when order_data omits ``payment_method``.
 
 Prod bug (celery_worker, daily ``process_daily_subscription_billing``): a
 redundant local ``from shared.enums import PaymentMethod`` inside
@@ -11,6 +11,14 @@ key, so the guarded local import never ran and the later reference
 as ``ValidationError: Failed to create order``. The existing subscription
 billing tests never caught this because they mock ``create_order``; this test
 drives the real method with a subscription-style payload (no payment_method).
+
+Task 2 (payment-method SSOT) additionally closed the door this bug lived
+behind: a caller that omits ``payment_method`` and does not qualify for the
+business-account default must now get a clean ``ValidationError`` instead of
+either crashing on ``UnboundLocalError`` OR silently persisting a NULL
+``orders.payment_method`` (the original assertion here). An explicit method is
+supplied below so this regression test keeps exercising the real
+``create_order`` path end-to-end.
 """
 
 from types import SimpleNamespace
@@ -20,6 +28,7 @@ import pytest
 
 from business_app.models.user import UserAddress
 from business_app.services.order_service import OrderService
+from shared.enums import PaymentMethod
 
 
 @pytest.fixture
@@ -44,8 +53,11 @@ def delivery_address(db, sample_user):
 def test_create_order_without_payment_method_does_not_raise_unbound_local(
     app, db, sample_user, sample_product, mock_inventory_service, delivery_address
 ):
-    """order_data with no ``payment_method`` key (mirrors subscription billing)
-    must create the order, leaving ``order.payment_method`` as None."""
+    """order_data with an explicit ``payment_method`` (mirrors subscription
+    billing after Task 4) must create the order without hitting the historical
+    ``UnboundLocalError``. Omitting ``payment_method`` entirely is covered by
+    ``tests/unit/test_subscription_order_parity.py`` — post-Task-2, that now
+    correctly raises ``ValidationError`` instead of persisting NULL."""
     mock_inventory_service.check_multiple_products_availability.return_value = [
         SimpleNamespace(
             product_id=sample_product.id,
@@ -68,7 +80,7 @@ def test_create_order_without_payment_method_does_not_raise_unbound_local(
             "latitude": delivery_address.latitude,
             "longitude": delivery_address.longitude,
         },
-        # Intentionally NO "payment_method" — this is what subscription billing sends.
+        "payment_method": "cash",
     }
 
     with patch(
@@ -82,4 +94,4 @@ def test_create_order_without_payment_method_does_not_raise_unbound_local(
 
     db.session.refresh(order)
     assert order.id is not None
-    assert order.payment_method is None
+    assert order.payment_method is PaymentMethod.CASH

@@ -23,6 +23,7 @@ vi.mock('../../services/adminService', () => ({
     getUserAddresses: vi.fn(),
     getProducts: vi.fn(),
     getTimeSlots: vi.fn(),
+    getPaymentMethods: vi.fn(),
   },
 }));
 
@@ -57,6 +58,10 @@ describe('Subscriptions page', () => {
       discount_percentage: 0, status: 'active', items: [],
     });
     adminService.updateSubscription.mockResolvedValue({ id: 1 });
+    adminService.getPaymentMethods.mockResolvedValue([
+      { method: 'cash', display_name: 'Cash on Delivery', is_active: true },
+      { method: 'click', display_name: 'Click', is_active: true },
+    ]);
   });
 
   it('renders a subscription row from the list endpoint', async () => {
@@ -115,5 +120,45 @@ describe('Subscriptions page', () => {
     await waitFor(() => {
       expect(adminService.updateSubscriptionItem).toHaveBeenCalledWith(1, 55, { quantity: 7 });
     });
+  });
+
+  it('populates the payment-method select from the API, not a hardcoded list', async () => {
+    render(<Subscriptions />, { wrapper: createWrapper() });
+    await screen.findByText('SUB-1');
+    fireEvent.click(screen.getByRole('button', { name: /create subscription/i }));
+
+    const dialog = await screen.findByRole('dialog');
+
+    await waitFor(() => {
+      expect(adminService.getPaymentMethods).toHaveBeenCalledWith('subscription');
+    });
+
+    const paymentMethodLabel = within(dialog).getByText('Payment method');
+    const formItem = paymentMethodLabel.closest('.ant-form-item');
+    const selector = formItem.querySelector('.ant-select-selector');
+    fireEvent.mouseDown(selector);
+
+    const dropdown = await waitFor(() => {
+      const el = document.querySelector('.ant-select-dropdown');
+      expect(el).toBeTruthy();
+      return el;
+    });
+
+    expect(await within(dropdown).findByText('Cash on Delivery')).toBeInTheDocument();
+    expect(within(dropdown).getByText('Click')).toBeInTheDocument();
+    expect(within(dropdown).queryByText(/payme/i)).not.toBeInTheDocument();
+  });
+
+  it('shows payment_method in the detail drawer', async () => {
+    adminService.getSubscription.mockResolvedValue({
+      id: 1, subscription_number: 'SUB-1', user: { id: 7, name: 'Test User' },
+      name: 'Existing Sub', description: 'd', billing_cycle: 'monthly', delivery_frequency: 'weekly',
+      payment_method: 'click', delivery_address_id: 3, auto_renew: true,
+      discount_percentage: 0, status: 'active', items: [],
+    });
+    render(<Subscriptions />, { wrapper: createWrapper() });
+    await screen.findByText('SUB-1');
+    fireEvent.click(document.querySelector('.anticon-eye').closest('button'));
+    expect(await screen.findByText('click')).toBeInTheDocument();
   });
 });

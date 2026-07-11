@@ -4,6 +4,7 @@ Handles recurring water delivery subscriptions
 """
 
 from datetime import UTC, date, datetime, timezone, timedelta
+from decimal import Decimal
 from typing import List, Dict, Any, Optional
 from flask import current_app
 from dateutil.relativedelta import relativedelta
@@ -56,9 +57,31 @@ class SubscriptionService:
         )
 
     def __init__(self):
-        self.trial_days = current_app.config.get("SUBSCRIPTION_TRIAL_DAYS", 7)
         self.billing_day = current_app.config.get("SUBSCRIPTION_BILLING_DAY", 1)
         self.max_items = current_app.config.get("MAX_SUBSCRIPTION_ITEMS", 10)
+
+    @staticmethod
+    def _validated_payment_method(raw) -> PaymentMethod:
+        """Normalize and enforce the customer-selectable set.
+
+        Previously ``PaymentMethod(raw)`` accepted all six enum members, so a
+        subscription could be created with ``loyalty_points`` or ``payme`` —
+        methods ``create_order`` rejects at billing time, so an unvalidated
+        subscription would fail every single billing cycle forever.
+        """
+        from shared.payment_methods import (
+            UnknownPaymentMethodError,
+            UnsupportedPaymentMethodError,
+            assert_customer_selectable,
+            normalize_payment_method,
+        )
+
+        try:
+            method = normalize_payment_method(raw)
+            assert_customer_selectable(method)
+        except (UnknownPaymentMethodError, UnsupportedPaymentMethodError) as exc:
+            raise ValidationError("api.subscriptions.error.invalid_payment_method") from exc
+        return method
 
     def create_subscription(self, subscription_data: Dict[str, Any], items: List[Dict[str, Any]]) -> Subscription:
         """
@@ -137,8 +160,7 @@ class SubscriptionService:
             delivery_day_of_month=subscription_data.get("delivery_day_of_month"),
             delivery_time_slot_id=subscription_data.get("delivery_time_slot_id"),
             delivery_address_id=subscription_data.get("delivery_address_id"),
-            payment_method=subscription_data.get("payment_method", PaymentMethod.CASH),
-            auto_payment=subscription_data.get("auto_payment", False),
+            payment_method=self._validated_payment_method(subscription_data.get("payment_method", "cash")),
             auto_renew=subscription_data.get("auto_renew", True),
             discount_percentage=discount_percentage,
             billing_amount=total_amount,
@@ -260,8 +282,10 @@ class SubscriptionService:
 
             total_amount += unit_price * item_data["quantity"]
 
-        # Update subscription total
-        subscription.total_amount = total_amount
+        # Note: `Subscription` has no `total_amount` column (only
+        # `billing_amount` / `total_amount_billed`) — the running
+        # `total_amount` computed above is a local variable only, never
+        # persisted on the model (Task 20).
         subscription.updated_at = datetime.now(timezone.utc)
 
         db.session.commit()
@@ -384,7 +408,7 @@ class SubscriptionService:
         if not subscription:
             raise NotFoundError("Subscription not found")
 
-        if subscription.status not in [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIAL]:
+        if subscription.status != SubscriptionStatus.ACTIVE:
             db.session.commit()  # release the row lock before raising
             raise ValidationError("Cannot bill inactive subscription")
 
@@ -423,60 +447,95 @@ class SubscriptionService:
                 "latitude": address.latitude if address else None,
                 "longitude": address.longitude if address else None,
             },
-            "delivery_instructions": address.delivery_instructions if address else None,
-            "notes": f"Subscription order #{subscription.id}",
+            "delivery_notes": address.delivery_instructions if address else None,
+            "payment_method": subscription.payment_method.value,
         }
 
         try:
             order = order_service.create_order(
-                subscription.user_id, order_data, apply_payment_method_default=False
+                subscription.user_id,
+                order_data,
+                subscription=subscription,
             )
 
-            # Process payment if not trial
-            if subscription.status != SubscriptionStatus.TRIAL:
-                from .payment_service import PaymentService
+            # The Order is authoritative. create_order already produced exactly
+            # one Payment for order.total_amount via initialize_order_payment,
+            # so billing_amount records what was actually charged rather than a
+            # separately-computed estimate that could never be fully paid.
+            subscription.billing_amount = order.total_amount
+            subscription.total_amount_billed = (
+                subscription.total_amount_billed or Decimal("0.00")
+            ) + order.total_amount
 
-                payment_service = PaymentService()
-
-                # Use subscription's preferred payment method
-                payment_method = subscription.payment_method or "card"
-                payment = payment_service.create_payment(order.id, payment_method, subscription.billing_amount)
-
-                # Auto-charge if payment method is stored
-                if subscription.payment_token:
-                    # Process automatic payment
-                    success = self._process_auto_payment(payment, subscription.payment_token)
-                    if not success:
-                        # Payment failed - handle accordingly
-                        self._handle_payment_failure(subscription)
-
-            # Update subscription. Link the generated order back to the
-            # subscription (the model exposes Subscription.orders via
-            # Order.subscription_id) and advance the billing counters using the
-            # real model fields.
-            order.subscription_id = subscription.id
-            subscription.last_billing_date = datetime.now(timezone.utc)
-            subscription.next_billing_date = self._calculate_next_billing_date(
-                datetime.now(timezone.utc), subscription.billing_cycle
-            )
+            now = datetime.now(timezone.utc)
+            subscription.last_billing_date = now
+            subscription.next_billing_date = self._calculate_next_billing_date(now, subscription.billing_cycle)
             subscription.total_orders_generated = (subscription.total_orders_generated or 0) + 1
-
-            # Convert from trial to active if applicable
-            if subscription.status == SubscriptionStatus.TRIAL:
-                subscription.status = SubscriptionStatus.ACTIVE
 
             db.session.commit()
 
             return {
                 "success": True,
                 "order_id": order.id,
-                "amount": float(subscription.billing_amount),
+                "amount": float(order.total_amount),
                 "next_billing_date": subscription.next_billing_date.isoformat(),
             }
 
+        except ValidationError as exc:
+            db.session.rollback()
+            if getattr(exc, "error_code", None) == "COD_DEBT_LIMIT_REACHED":
+                return self._skip_cycle_for_cod_debt(subscription)
+            current_app.logger.warning("Subscription %s billing rejected: %s", subscription_id, exc)
+            return {"success": False, "error": str(exc)}
+
         except Exception as e:
+            db.session.rollback()
             current_app.logger.exception("Subscription billing failed")
             return {"success": False, "error": str(e)}
+
+    def _skip_cycle_for_cod_debt(self, subscription: Subscription) -> Dict[str, Any]:
+        """Billing was refused because the customer is over the COD debt cap.
+
+        This is NOT a payment failure: we never touch failed_payment_count (so
+        it can't trip the pause-after-N machinery) and the subscription stays
+        ACTIVE. We advance next_billing_date so the daily task doesn't retry
+        every run; the subscription self-heals as soon as the debt is settled.
+        """
+        from business_app.services.notification_service import NotificationService
+
+        now = datetime.now(timezone.utc)
+        subscription.next_billing_date = self._calculate_next_billing_date(now, subscription.billing_cycle)
+        db.session.commit()
+
+        current_app.logger.warning(
+            "Subscription %s billing skipped: customer %s is over the COD debt limit",
+            subscription.id,
+            subscription.user_id,
+        )
+
+        try:
+            NotificationService().send_notification(
+                subscription.user_id,
+                "subscription_billing_skipped_cod_debt",
+                template_data={
+                    "subscription_name": subscription.name,
+                    "next_billing_date": (
+                        subscription.next_billing_date.isoformat() if subscription.next_billing_date else None
+                    ),
+                },
+            )
+        except Exception:
+            current_app.logger.exception(
+                "Failed to notify user %s about the skipped subscription cycle", subscription.user_id
+            )
+
+        return {
+            "success": False,
+            "skipped": True,
+            "reason": "cod_debt_limit",
+            "subscription_id": subscription.id,
+            "next_billing_date": subscription.next_billing_date.isoformat(),
+        }
 
     def get_user_subscriptions(self, user_id: int, status: SubscriptionStatus = None) -> List[Subscription]:
         """Get user's subscriptions"""
@@ -507,9 +566,11 @@ class SubscriptionService:
         trial_subscriptions = len([s for s in subscriptions if s.status == SubscriptionStatus.TRIAL])
         cancelled_subscriptions = len([s for s in subscriptions if s.status == SubscriptionStatus.CANCELLED])
 
-        # Revenue metrics
+        # Revenue metrics. `Subscription` has no `total_amount` column — only
+        # `billing_amount` (last/estimated charge) and `total_amount_billed`
+        # (running total); the former mirrors what this method is estimating.
         monthly_revenue = sum(
-            s.total_amount
+            float(s.billing_amount or 0)
             for s in subscriptions
             if s.status == SubscriptionStatus.ACTIVE and s.frequency == SubscriptionFrequency.MONTHLY
         )
@@ -518,7 +579,9 @@ class SubscriptionService:
         churn_rate = (cancelled_subscriptions / total_subscriptions) * 100 if total_subscriptions > 0 else 0
 
         # Average subscription value
-        avg_subscription_value = sum(s.total_amount for s in subscriptions) / len(subscriptions) if subscriptions else 0
+        avg_subscription_value = (
+            sum(float(s.billing_amount or 0) for s in subscriptions) / len(subscriptions) if subscriptions else 0
+        )
 
         return {
             "total_subscriptions": total_subscriptions,
@@ -589,10 +652,7 @@ class SubscriptionService:
             if not time_slot or not time_slot.is_active:
                 raise NotFoundError("api.subscriptions.error.invalid_or_inactive_time_slot")
 
-        try:
-            payment_method = PaymentMethod(validated_data.payment_method)
-        except ValueError as exc:
-            raise ValidationError("api.subscriptions.error.invalid_payment_method") from exc
+        payment_method = self._validated_payment_method(validated_data.payment_method)
 
         subscription_data = {
             "user_id": user_id,
@@ -605,7 +665,6 @@ class SubscriptionService:
             "delivery_time_slot_id": validated_data.delivery_time_slot_id,
             "delivery_address_id": validated_data.delivery_address_id,
             "payment_method": payment_method,
-            "auto_payment": validated_data.auto_payment,
             "auto_renew": validated_data.auto_renew,
             "discount_percentage": validated_data.discount_percentage,
             "start_date": validated_data.start_date or datetime.now(UTC),
@@ -643,10 +702,7 @@ class SubscriptionService:
                     raise NotFoundError("api.subscriptions.error.invalid_or_inactive_time_slot")
 
             if field == "payment_method":
-                try:
-                    new_value = PaymentMethod(new_value)
-                except ValueError as exc:
-                    raise ValidationError("api.subscriptions.error.invalid_payment_method") from exc
+                new_value = self._validated_payment_method(new_value)
 
             setattr(subscription, field, new_value)
             changes[field] = {
@@ -1122,10 +1178,7 @@ class SubscriptionService:
         if subscription.status not in [SubscriptionStatus.ACTIVE, SubscriptionStatus.PAUSED]:
             raise ValidationError("api.subscriptions.error.cannot_change_payment_cancelled")
 
-        try:
-            new_payment_method = PaymentMethod(payment_method)
-        except ValueError as exc:
-            raise ValidationError("api.subscriptions.error.invalid_payment_method") from exc
+        new_payment_method = self._validated_payment_method(payment_method)
 
         old_payment_method = subscription.payment_method
         subscription.payment_method = new_payment_method
@@ -1199,10 +1252,7 @@ class SubscriptionService:
             if not time_slot or not time_slot.is_active:
                 raise NotFoundError("Delivery time slot not found or inactive")
 
-        try:
-            payment_method = PaymentMethod(validated_data.payment_method)
-        except ValueError as exc:
-            raise ValidationError("Invalid payment method") from exc
+        payment_method = self._validated_payment_method(validated_data.payment_method)
 
         subscription_data = {
             "user_id": validated_data.user_id,
@@ -1215,7 +1265,6 @@ class SubscriptionService:
             "delivery_time_slot_id": validated_data.delivery_time_slot_id,
             "delivery_address_id": validated_data.delivery_address_id,
             "payment_method": payment_method,
-            "auto_payment": validated_data.auto_payment,
             "auto_renew": validated_data.auto_renew,
             "discount_percentage": validated_data.discount_percentage,
             "start_date": (
@@ -1317,10 +1366,7 @@ class SubscriptionService:
                     raise NotFoundError("Delivery time slot not found or inactive")
 
             if field == "payment_method":
-                try:
-                    new_value = PaymentMethod(new_value)
-                except ValueError as exc:
-                    raise ValidationError("Invalid payment method") from exc
+                new_value = self._validated_payment_method(new_value)
 
             if field in ("billing_cycle", "delivery_frequency"):
                 try:
@@ -1639,27 +1685,51 @@ class SubscriptionService:
                 f"Example: You cannot bill monthly for daily deliveries."
             )
 
-    @staticmethod
-    def _already_billed_this_cycle(subscription: Subscription) -> bool:
-        """Return True when the subscription has a ``last_billing_date`` that
-        falls within the current UTC day's billing window.
+    def _already_billed_this_cycle(self, subscription: Subscription) -> bool:
+        """True when this subscription has already been billed in the current
+        UTC-day window.
 
-        The daily billing task keys off ``next_billing_date < tomorrow_start``;
-        once we bill, ``last_billing_date`` advances to ``now`` and
-        ``next_billing_date`` moves forward by at least one frequency step.
-        Checking the floor of ``last_billing_date`` against today's UTC midnight
-        is enough to short-circuit a re-bill on retry.
+        Two clauses, because ``last_billing_date`` alone is not crash-proof:
+        ``create_order`` commits the order before the caller advances the
+        counters (``last_billing_date`` / ``next_billing_date`` /
+        ``total_orders_generated``), so a crash in between would otherwise
+        re-bill on retry and mint a duplicate order. Since ``create_order``
+        now stamps ``Order.subscription_id`` inside its own atomic
+        transaction, we can ask the orders table directly instead of trusting
+        counters that might not have advanced.
+
+        The order clause counts orders of ANY status, including CANCELLED. An
+        abandoned electronic order that ``cancel_abandoned_orders`` cancelled
+        must not trigger an immediate replacement — the customer receives the
+        next cycle's order on schedule, not an instant retry.
         """
-        if subscription.last_billing_date is None:
-            return False
-        try:
-            last = subscription.last_billing_date
-            if last.tzinfo is None:
-                last = last.replace(tzinfo=timezone.utc)
-            today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-            return last >= today_start
-        except Exception:
-            return False
+        from business_app.models.order import Order
+
+        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+
+        last = subscription.last_billing_date
+        if last is not None:
+            try:
+                if last.tzinfo is None:
+                    last = last.replace(tzinfo=timezone.utc)
+                if last >= today_start:
+                    return True
+            except (AttributeError, TypeError):
+                # Legacy/corrupt last_billing_date (e.g. wrong type). Don't
+                # trust it either way — the row-level lock in
+                # process_subscription_billing is already held, so raising
+                # here would leave that transaction open across the caller's
+                # per-subscription try/except in the daily billing task. Fall
+                # through to the order-existence check instead, which is the
+                # crash-proof source of truth anyway.
+                pass
+
+        return db.session.query(
+            Order.query.filter(
+                Order.subscription_id == subscription.id,
+                Order.created_at >= today_start,
+            ).exists()
+        ).scalar()
 
     def _calculate_next_billing_date(self, start_date: datetime, frequency: SubscriptionFrequency) -> datetime:
         """Calculate next billing date based on frequency"""
@@ -1773,27 +1843,6 @@ class SubscriptionService:
         else:
             # Default to weekly
             return start_date + timedelta(weeks=1)
-
-    def _process_auto_payment(self, payment, payment_token: str) -> bool:
-        """Process automatic payment using stored payment method"""
-        # This would integrate with actual payment gateway for auto-charging
-        # For now, return True as placeholder
-        return True
-
-    def _handle_payment_failure(self, subscription: Subscription):
-        """Handle subscription payment failure"""
-        # Increment failed payment count
-        subscription.failed_payment_count = (subscription.failed_payment_count or 0) + 1
-
-        # Pause subscription after 3 failed payments
-        if subscription.failed_payment_count >= 3:
-            subscription.status = SubscriptionStatus.PAUSED
-            subscription.paused_at = datetime.now(timezone.utc)
-
-        db.session.commit()
-
-        # Send payment failure notification
-        self._send_subscription_notification(subscription, "payment_failed")
 
     def get_billing_info(self, subscription_id: int) -> Dict[str, Any]:
         """
@@ -1915,8 +1964,6 @@ class SubscriptionService:
             "delivery_frequency": delivery_frequency,
             "estimated_monthly_cost": float(monthly_cost),
             "estimated_annual_cost": float(monthly_cost * 12),
-            "trial_available": True,
-            "trial_days": self.trial_days,
         }
 
     def calculate_subscription_statistics(self, user_id: int) -> Dict[str, Any]:
@@ -1967,7 +2014,7 @@ class SubscriptionService:
 
                 estimated_deliveries = int((days_active / 7) * deliveries_per_week)
                 total_deliveries += estimated_deliveries
-                total_spent += subscription.total_amount * estimated_deliveries
+                total_spent += float(subscription.billing_amount or 0) * estimated_deliveries
 
             # Count products
             for item in subscription.subscription_items:

@@ -710,9 +710,10 @@ class BusinessAPIClient:
         )
 
     # Payment methods
-    async def get_payment_methods(self, user_token: str) -> APIResponse:
-        """Get user's payment methods"""
+    async def get_payment_methods(self, user_token: str, context: str = "order") -> APIResponse:
+        """Get user's eligible payment methods for the given context (order/subscription)."""
         return await self._make_request('GET', '/api/v1/payments/methods',
+                                       params={'context': context},
                                        user_token=user_token)
 
     async def create_payment(self, user_token: str, payment_data: Dict) -> APIResponse:

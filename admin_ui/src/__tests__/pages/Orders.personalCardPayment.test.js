@@ -243,4 +243,132 @@ describe('Orders personal card payment flow', () => {
       expect(adminService.getOrderDetails).toHaveBeenCalledTimes(2);
     });
   });
+
+  it('shows the personal card action for a subscription-generated COD order', async () => {
+    // Regression guard: Order.subscription_id/is_subscription_order (Task 3)
+    // must not affect the personal-card gate, which reads payment_method only.
+    adminService.getOrderDetails.mockResolvedValue({
+      success: true,
+      data: {
+        order: {
+          id: 456,
+          order_number: 'ORD-TEST-456',
+          user_id: 77,
+          status: 'confirmed',
+          payment_method: 'cash',
+          payment_status: 'partially_paid',
+          total_amount: 18000,
+          amount_collected: 5000,
+          outstanding_amount: 13000,
+          customer_name: 'Ali Buyer',
+          customer_email: 'ali@example.com',
+          customer_phone: '+998901234500',
+          created_at: '2026-03-11T10:00:00+00:00',
+          items: [],
+          is_subscription_order: true,
+          subscription_id: 7,
+        },
+      },
+    });
+
+    const user = userEvent.setup();
+    render(<Orders />, { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(adminService.getOrders).toHaveBeenCalled();
+    });
+
+    await user.click(await screen.findByText(/view_details|View Details/i));
+
+    await waitFor(() => {
+      expect(adminService.getOrderDetails).toHaveBeenCalledWith(456);
+    });
+
+    expect(
+      await screen.findByText(/record_personal_card_payment|Record Personal Card Payment/i)
+    ).toBeInTheDocument();
+  });
+
+  it('tags a subscription-generated order in the detail modal', async () => {
+    adminService.getOrderDetails.mockResolvedValue({
+      success: true,
+      data: {
+        order: {
+          id: 456,
+          order_number: 'ORD-TEST-456',
+          user_id: 77,
+          status: 'confirmed',
+          payment_method: 'cash',
+          payment_status: 'partially_paid',
+          total_amount: 18000,
+          amount_collected: 5000,
+          outstanding_amount: 13000,
+          customer_name: 'Ali Buyer',
+          customer_email: 'ali@example.com',
+          customer_phone: '+998901234500',
+          created_at: '2026-03-11T10:00:00+00:00',
+          items: [],
+          is_subscription_order: true,
+          subscription_id: 7,
+        },
+      },
+    });
+
+    const user = userEvent.setup();
+    render(<Orders />, { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(adminService.getOrders).toHaveBeenCalled();
+    });
+
+    await user.click(await screen.findByText(/view_details|View Details/i));
+
+    await waitFor(() => {
+      expect(adminService.getOrderDetails).toHaveBeenCalledWith(456);
+    });
+
+    expect(await screen.findByText(/subscription #7/i)).toBeInTheDocument();
+  });
+
+  it('labels an ordinary (non-subscription) order as One-off in the detail modal', async () => {
+    adminService.getOrderDetails.mockResolvedValue({
+      success: true,
+      data: {
+        order: {
+          id: 456,
+          order_number: 'ORD-TEST-456',
+          user_id: 77,
+          status: 'confirmed',
+          payment_method: 'cash',
+          payment_status: 'partially_paid',
+          total_amount: 18000,
+          amount_collected: 5000,
+          outstanding_amount: 13000,
+          customer_name: 'Ordinary Buyer',
+          customer_email: 'ord@example.com',
+          customer_phone: '+998901234501',
+          created_at: '2026-03-11T10:00:00+00:00',
+          items: [],
+          is_subscription_order: false,
+          subscription_id: null,
+        },
+      },
+    });
+
+    const user = userEvent.setup();
+    render(<Orders />, { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(adminService.getOrders).toHaveBeenCalled();
+    });
+
+    await user.click(await screen.findByText(/view_details|View Details/i));
+
+    await waitFor(() => {
+      expect(adminService.getOrderDetails).toHaveBeenCalledWith(456);
+    });
+
+    expect(await screen.findByText('One-off')).toBeInTheDocument();
+    expect(screen.queryByText(/subscription #/i)).not.toBeInTheDocument();
+  });
 });

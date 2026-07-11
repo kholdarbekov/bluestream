@@ -396,10 +396,20 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Business Account to\'lov usuli oziq-ovqat do\'kon hisoblari uchun mavjud emas.',
         'ru': 'Способ оплаты Business Account недоступен для счетов продуктовых магазинов.'
     },
+    'api.orders.error.business_account_workplace_only': {
+        'en': 'Business Account payment is only available for workplace accounts.',
+        'uz': 'Business Account to\'lov usuli faqat ish joyi hisoblari uchun mavjud.',
+        'ru': 'Способ оплаты Business Account доступен только для счетов рабочих мест.'
+    },
     'api.orders.error.ambiguous_contract_pricing': {
         'en': 'Ambiguous contract pricing for product {product_id}. Multiple active contracts match: {contract_numbers}',
         'uz': '{product_id} mahsulot uchun shartnoma narxi noaniq. Bir nechta faol shartnoma mos keldi: {contract_numbers}',
         'ru': 'Неоднозначная контрактная цена для товара {product_id}. Подходят несколько активных договоров: {contract_numbers}'
+    },
+    'api.orders.error.repeat_legacy_order_unsupported': {
+        'en': 'This order can\'t be repeated. Please place a new order.',
+        'uz': 'Bu buyurtmani takrorlab bo\'lmaydi. Iltimos, yangi buyurtma bering.',
+        'ru': 'Этот заказ нельзя повторить. Пожалуйста, оформите новый заказ.'
     },
 
     # ============================================================================
@@ -532,6 +542,11 @@ BACKEND_TRANSLATIONS = {
         'en': 'Subscription not found',
         'uz': 'Obuna topilmadi',
         'ru': 'Подписка не найдена'
+    },
+    'api.payments.error.invalid_context': {
+        'en': 'Unknown payment method context.',
+        'uz': 'To\'lov usuli konteksti noma\'lum.',
+        'ru': 'Неизвестный контекст способа оплаты.'
     },
     'api.payments.error.get_methods_failed': {
         'en': 'Failed to get payment methods',
@@ -2372,6 +2387,21 @@ BACKEND_TRANSLATIONS = {
         'en': 'Could not create order',
         'uz': 'Buyurtmani yaratib bo\'lmadi',
         'ru': 'Не удалось создать заказ'
+    },
+    'ui.orders.origin': {
+        'en': 'Origin',
+        'uz': 'Manba',
+        'ru': 'Источник'
+    },
+    'ui.orders.from_subscription': {
+        'en': 'Subscription',
+        'uz': 'Obuna',
+        'ru': 'Подписка'
+    },
+    'ui.orders.one_off': {
+        'en': 'One-off',
+        'uz': 'Bir martalik',
+        'ru': 'Разовый'
     },
     'ui.corporate.account': {
         'en': 'Account Number',

@@ -375,6 +375,11 @@ class AdminService {
     return response.data;
   }
 
+  async getPaymentMethods(context = 'order') {
+    const response = await api.get('/payments/methods', { params: { context } });
+    return response.data?.data?.available_methods || [];
+  }
+
   // Order edit (admin)
   async previewOrderEdit(orderId, payload) {
     const response = await api.post(`/admin/orders/${orderId}/edit-preview`, payload);

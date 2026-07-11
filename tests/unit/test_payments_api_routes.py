@@ -15,13 +15,18 @@ def _auth_headers(app, user_id: int) -> dict:
 
 
 def test_get_payment_methods_returns_only_supported_public_methods(client, app, sample_user):
+    # payme is excluded by construction (shared.payment_methods.PAYMENT_METHOD_CATALOG /
+    # CUSTOMER_SELECTABLE_METHODS, wired into PaymentService in the payment-methods
+    # SSOT refactor) — it was never a customer-selectable method, only a legacy
+    # webhook target. This assertion previously encoded that bug.
     response = client.get('/api/v1/payments/methods', headers=_auth_headers(app, sample_user.id))
 
     assert response.status_code == 200
     payload = response.get_json()
     methods = [item['method'] for item in payload['data']['available_methods']]
 
-    assert methods == ['click', 'payme', 'cash']
+    assert methods == ['cash', 'click']
+    assert 'payme' not in methods
     assert 'uzcard' not in methods
     assert 'humo' not in methods
 

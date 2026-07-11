@@ -838,13 +838,21 @@ class SubscriptionKeyboards:
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod
-    def payment_methods(language: str = 'en') -> InlineKeyboardMarkup:
-        """Payment method selection for subscription"""
+    def payment_methods(available_methods: List[Dict[str, Any]], language: str = 'en') -> InlineKeyboardMarkup:
+        """Payment method selection for subscription.
+
+        Buttons are derived from GET /payments/methods so the subscription menu
+        can never diverge from checkout. Callback data is `sub_payment_<type>`;
+        handlers MUST parse it with split('_', 2)[2] because `business_account`
+        contains an underscore.
+        """
+        from payment_methods import build_payment_method_buttons
+
         buttons = [
-            [{'text': i18n.get('telegram.payment_card', language), 'callback_data': 'sub_payment_card'}],
-            [{'text': i18n.get('telegram.payment_cash', language), 'callback_data': 'sub_payment_cash'}],
-            [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_address_selection'}]
+            [{'text': option['name'], 'callback_data': f"sub_payment_{option['type']}"}]
+            for option in build_payment_method_buttons(available_methods, language)
         ]
+        buttons.append([{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_address_selection'}])
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod

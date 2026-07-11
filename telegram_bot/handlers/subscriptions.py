@@ -23,7 +23,6 @@ from handlers.base import BaseHandler
 
 class SubscriptionHandlers(BaseHandler):
     """Subscription-related handlers with full functionality"""
-    ALLOWED_SUBSCRIPTION_PAYMENT_METHODS = {'cash', 'payme', 'card'}
 
     async def subscriptions_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show user subscriptions"""
@@ -314,8 +313,21 @@ class SubscriptionHandlers(BaseHandler):
             address_id = int(query.data.split('_')[1])
             context.user_data['subscription_creation']['address_id'] = address_id
 
+            async with api_client as client:
+                user_token = await get_auth_token(update, context, client)
+                if not user_token:
+                    await self._handle_auth_error(update, language)
+                    return ConversationHandler.END
+
+                methods_response = await client.get_payment_methods(user_token, context="subscription")
+                if not methods_response.success:
+                    await self._handle_api_error(update, methods_response.error, language)
+                    return ConversationHandler.END
+
+            available_methods = (methods_response.data or {}).get('data', {}).get('available_methods', [])
+
             text = i18n.get('telegram.subscription.select_payment', language)
-            keyboard = SubscriptionKeyboards.payment_methods(language)
+            keyboard = SubscriptionKeyboards.payment_methods(available_methods, language)
 
             await query.edit_message_text(text=text, reply_markup=keyboard)
             await query.answer()
@@ -334,7 +346,7 @@ class SubscriptionHandlers(BaseHandler):
             language = await i18n.get_user_language(user_id)
 
             # Save payment method
-            payment_method = query.data.split('_')[2]
+            payment_method = query.data.split('_', 2)[2]
             context.user_data['subscription_creation']['payment_method'] = payment_method
 
             # Get preview from API
@@ -370,9 +382,6 @@ class SubscriptionHandlers(BaseHandler):
             text += f"{i18n.get(preview_frequency_key, language)}\n"
             text += f"💰 {i18n.get('telegram.subscription.total', language)}: "
             text += f"{preview.get('total_amount')} {i18n.get('telegram.currency.uzs', language)}\n"
-
-            if preview.get('trial_days'):
-                text += f"\n🎁 {i18n.get('telegram.subscription.trial', language, preview['trial_days'])}\n"
 
             keyboard = [[
                 InlineKeyboardButton(
@@ -420,7 +429,6 @@ class SubscriptionHandlers(BaseHandler):
                     'delivery_address_id': context_data.get('address_id'),  # Map address_id to delivery_address_id
                     'payment_method': context_data.get('payment_method'),
                     'items': context_data.get('items', []),
-                    'auto_payment': True,
                     'auto_renew': True,
                     'delivery_time_slot_id': context_data.get('delivery_time_slot_id'),  # Optional: user preference
                     'discount_percentage': context_data.get('discount_percentage', 0.0)
@@ -977,8 +985,21 @@ class SubscriptionHandlers(BaseHandler):
             sub_id = int(query.data.split('_')[3])
             context.user_data['editing_subscription_id'] = sub_id
 
+            async with api_client as client:
+                user_token = await get_auth_token(update, context, client)
+                if not user_token:
+                    await self._handle_auth_error(update, language)
+                    return
+
+                methods_response = await client.get_payment_methods(user_token, context="subscription")
+                if not methods_response.success:
+                    await self._handle_api_error(update, methods_response.error, language)
+                    return
+
+            available_methods = (methods_response.data or {}).get('data', {}).get('available_methods', [])
+
             text = i18n.get('telegram.subscription.select_new_payment_method', language)
-            keyboard = SubscriptionKeyboards.payment_methods(language)
+            keyboard = SubscriptionKeyboards.payment_methods(available_methods, language)
 
             await query.edit_message_text(text=text, reply_markup=keyboard)
             await query.answer()
@@ -993,7 +1014,7 @@ class SubscriptionHandlers(BaseHandler):
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            payment_method = query.data.split('_')[2]
+            payment_method = query.data.split('_', 2)[2]
             sub_id = context.user_data.get('editing_subscription_id')
 
             async with api_client as client:

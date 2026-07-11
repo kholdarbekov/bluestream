@@ -731,18 +731,8 @@
                                     {{ 'Payment Method'|t }}
                                 </h4>
 
-                                <div class="payment-methods">
-                                    <div class="payment-method selected" data-action="select-payment-method" data-method="cash">
-                                        <i class="far fa-money-bill-wave"></i>
-                                        <div class="payment-method-name">{{ 'Cash on Delivery'|t }}</div>
-                                        <div class="payment-method-desc">{{ 'Pay when you receive'|t }}</div>
-                                    </div>
-
-                                    <div class="payment-method" data-action="select-payment-method" data-method="click">
-                                        <i class="far fa-credit-card"></i>
-                                        <div class="payment-method-name">{{ 'Card'|t }}</div>
-                                        <div class="payment-method-desc">{{ 'Pay online via Click'|t }}</div>
-                                    </div>
+                                <div class="payment-methods" id="payment-methods-container">
+                                    <!-- Populated from GET /payments/methods by checkout.js -->
                                 </div>
 
                                 <!-- Legacy card form kept hidden for fallback compatibility. -->

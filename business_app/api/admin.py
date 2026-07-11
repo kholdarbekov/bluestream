@@ -4442,7 +4442,6 @@ def get_subscription(subscription_id):
                 if hasattr(subscription.payment_method, "value")
                 else subscription.payment_method
             ),
-            "auto_payment": subscription.auto_payment,
             "paused_at": subscription.paused_at.isoformat() if subscription.paused_at else None,
             "pause_reason": subscription.pause_reason,
             "resume_date": subscription.resume_date.isoformat() if subscription.resume_date else None,

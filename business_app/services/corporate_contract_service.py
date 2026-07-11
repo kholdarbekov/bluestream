@@ -90,6 +90,19 @@ class CorporateContractService:
                 )
             )
 
+        # Positive check. `is_entity_user and not is_grocery_store` also admits a
+        # legacy entity whose entity_subtype is still NULL — a user that
+        # create_order rejects anyway, at its entity_subtype-required guard.
+        # Requiring workplace explicitly keeps this validator and the offer gate
+        # resolvable from one predicate.
+        if not user.is_workplace_entity:
+            raise ValidationError(
+                self._translate(
+                    "api.orders.error.business_account_workplace_only",
+                    "Business Account payment is only available for workplace accounts.",
+                )
+            )
+
         if not order_items:
             raise ValidationError(
                 self._translate(
@@ -2202,12 +2215,28 @@ class CorporateContractService:
             )
         return results
 
+    def user_can_use_business_account(self, user) -> bool:
+        """User-level half of the business-account predicate: a workplace entity
+        with at least one active corporate contract balance.
+
+        Used where no cart exists yet (menu render before item selection). The
+        item-level half — every line contract-covered, sufficient prepaid units
+        or a debt-allowing contract — is enforced by
+        ``validate_business_account_order`` at create time.
+        """
+        if user is None or not getattr(user, "is_workplace_entity", False):
+            return False
+        return bool(self.get_active_contract_balances_for_user(user.id))
+
     def get_business_account_balances(self, user) -> List[Dict[str, Any]]:
         """Active corporate prepayment balances if the user may pay via the
-        business_account method, else []. Grocery stores never use prepaid
-        bottle settlement; individuals have no contracts (so naturally []).
-        This is the single source for "is business_account offered to a user"."""
-        if user is None or getattr(user, "is_grocery_store", False):
+        business_account method, else [].
+
+        Only workplace entities qualify. Grocery stores never use prepaid bottle
+        settlement; individuals have no contracts. This is the single source for
+        "is business_account offered to a user".
+        """
+        if user is None or not getattr(user, "is_workplace_entity", False):
             return []
         return self.get_active_contract_balances_for_user(user.id)
 

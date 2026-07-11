@@ -76,7 +76,6 @@ def _make_subscription(
     last_billing_date=None,
     total_orders_generated=0,
     payment_method=PaymentMethod.CARD,
-    payment_token=None,
 ):
     sub = Subscription(
         subscription_number=number,
@@ -90,7 +89,6 @@ def _make_subscription(
         delivery_frequency=SubscriptionFrequency.WEEKLY,
         delivery_address_id=addr.id,
         payment_method=payment_method,
-        payment_token=payment_token,
         start_date=datetime.now(UTC),
         total_orders_generated=total_orders_generated,
     )
@@ -132,12 +130,14 @@ def _add_item(db, sub, product, *, quantity=2):
 def _real_order_factory(user_id):
     """Return a fn that creates+persists a real Order, mimicking create_order.
 
-    The billing path does ``order.subscription_id = subscription.id`` AFTER
-    create_order returns, so the returned object must be a real, flushed Order
-    whose subscription_id assignment persists and is queryable.
+    create_order (not the billing method) now stamps subscription_id /
+    is_subscription_order atomically when called with ``subscription=...``
+    (see OrderService.create_order). This stub mirrors that so tests that
+    assert on the link still exercise the real invariant, just via the new
+    division of responsibility.
     """
 
-    def _create_order(uid, order_data, **kwargs):
+    def _create_order(uid, order_data, subscription=None, **kwargs):
         order = Order(
             user_id=uid,
             status=OrderStatus.PENDING,
@@ -146,6 +146,8 @@ def _real_order_factory(user_id):
             discount_amount=Decimal("0.00"),
             loyalty_discount=Decimal("0.00"),
             total_amount=Decimal("50000.00"),
+            subscription_id=subscription.id if subscription is not None else None,
+            is_subscription_order=subscription is not None,
         )
         _db.session.add(order)
         _db.session.flush()
@@ -276,11 +278,16 @@ class TestProcessSubscriptionBilling:
             refreshed = Subscription.query.get(sub.id)
             assert created_ids["order_id"] in [o.id for o in refreshed.orders]
 
-    def test_active_subscription_creates_payment_with_billing_amount(
+    def test_active_subscription_threads_payment_method_and_subscription_into_create_order(
         self, app, db, sample_user, sample_product
     ):
-        """ACTIVE (non-trial) subscription charges create_payment with the
-        subscription's billing_amount and its preferred payment method."""
+        """Billing no longer calls create_payment itself — create_order owns the
+        single Payment row for order.total_amount (see
+        tests/unit/test_subscription_order_parity.py::TestSubscriptionBillingCollapse).
+        What billing must still get right is threading the subscription's
+        payment_method into order_data (so create_order can resolve it) and
+        passing the subscription row itself (so create_order can stamp
+        subscription_id / apply the discount)."""
         with app.app_context():
             addr = _make_address(db, sample_user)
             sub = _make_subscription(
@@ -294,64 +301,33 @@ class TestProcessSubscriptionBilling:
             _add_item(db, sub, sample_product)
             db.session.commit()
 
+            captured = {}
+
+            def _capture(uid, order_data, **kwargs):
+                captured["order_data"] = order_data
+                captured["kwargs"] = kwargs
+                return _real_order_factory(uid)(uid, order_data, **kwargs)
+
             with (
                 patch("business_app.services.order_service.OrderService") as order_cls,
                 patch("business_app.services.payment_service.PaymentService") as payment_cls,
             ):
-                order_cls.return_value.create_order.side_effect = _real_order_factory(
-                    sample_user.id
-                )
-                create_payment = payment_cls.return_value.create_payment
-                create_payment.return_value = MagicMock(id=1)
+                order_cls.return_value.create_order.side_effect = _capture
 
                 SubscriptionService().process_subscription_billing(sub.id)
 
-            create_payment.assert_called_once()
-            args = create_payment.call_args.args
-            # signature: create_payment(order_id, payment_method, amount)
-            assert args[1] == PaymentMethod.CARD
-            assert args[2] == Decimal("73000.00")
+            assert captured["order_data"]["payment_method"] == PaymentMethod.CARD.value
+            assert captured["kwargs"]["subscription"] is sub
+            payment_cls.return_value.create_payment.assert_not_called()
 
-    def test_payment_token_present_triggers_auto_payment(
+    def test_trial_subscription_is_rejected_like_any_non_active_status(
         self, app, db, sample_user, sample_product
     ):
-        """When a payment_token is stored, the auto-payment path runs."""
-        with app.app_context():
-            addr = _make_address(db, sample_user)
-            sub = _make_subscription(
-                db,
-                sample_user,
-                addr,
-                number="SUB-B5",
-                payment_token="tok_stored_123",
-            )
-            _add_item(db, sub, sample_product)
-            db.session.commit()
-
-            svc = SubscriptionService()
-            with (
-                patch("business_app.services.order_service.OrderService") as order_cls,
-                patch("business_app.services.payment_service.PaymentService") as payment_cls,
-                patch.object(svc, "_process_auto_payment", return_value=True) as auto,
-            ):
-                order_cls.return_value.create_order.side_effect = _real_order_factory(
-                    sample_user.id
-                )
-                payment = MagicMock(id=1)
-                payment_cls.return_value.create_payment.return_value = payment
-
-                result = svc.process_subscription_billing(sub.id)
-
-            auto.assert_called_once()
-            assert auto.call_args.args[0] is payment
-            assert auto.call_args.args[1] == "tok_stored_123"
-            assert result["success"] is True
-
-    def test_trial_subscription_skips_payment_and_flips_to_active(
-        self, app, db, sample_user, sample_product
-    ):
-        """A TRIAL subscription bills (creates the order) but does NOT create a
-        payment and is promoted to ACTIVE."""
+        """TRIAL was dead code: create_subscription hardcodes status=ACTIVE, so
+        no row is ever created with TRIAL. The old trial-to-active conversion
+        branch (and the payment_token auto-charge stub it guarded) is removed;
+        TRIAL now fails the same active-only gate as PAUSED/CANCELLED instead
+        of silently billing and self-promoting."""
         with app.app_context():
             addr = _make_address(db, sample_user)
             sub = _make_subscription(
@@ -364,26 +340,16 @@ class TestProcessSubscriptionBilling:
             _add_item(db, sub, sample_product)
             db.session.commit()
 
-            with (
-                patch("business_app.services.order_service.OrderService") as order_cls,
-                patch("business_app.services.payment_service.PaymentService") as payment_cls,
-            ):
-                order_cls.return_value.create_order.side_effect = _real_order_factory(
-                    sample_user.id
-                )
-                create_payment = payment_cls.return_value.create_payment
-
-                result = SubscriptionService().process_subscription_billing(sub.id)
-
-            create_payment.assert_not_called()
-            refreshed = Subscription.query.get(sub.id)
-            assert refreshed.status == SubscriptionStatus.ACTIVE
-            assert result["success"] is True
+            with pytest.raises(ValidationError):
+                SubscriptionService().process_subscription_billing(sub.id)
 
     def test_delivery_instructions_from_address_propagated(
         self, app, db, sample_user, sample_product
     ):
-        """Address-level delivery_instructions must flow into order_data."""
+        """Address-level delivery_instructions must flow into order_data under
+        the 'delivery_notes' key — the only key create_order actually reads
+        (order_service.py). The dead 'delivery_instructions' key create_order
+        never consumed is removed by the same change (task 13)."""
         with app.app_context():
             addr = _make_address(db, sample_user, instructions="Leave at door, ring twice")
             sub = _make_subscription(db, sample_user, addr, number="SUB-B6")
@@ -405,7 +371,7 @@ class TestProcessSubscriptionBilling:
 
                 SubscriptionService().process_subscription_billing(sub.id)
 
-            assert captured["order_data"]["delivery_instructions"] == "Leave at door, ring twice"
+            assert captured["order_data"]["delivery_notes"] == "Leave at door, ring twice"
 
     def test_already_billed_this_cycle_is_skipped_idempotently(
         self, app, db, sample_user, sample_product

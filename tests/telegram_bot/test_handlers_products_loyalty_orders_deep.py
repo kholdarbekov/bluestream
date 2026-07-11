@@ -446,7 +446,11 @@ class TestOrderHandlerDeepFlows:
                     data={
                         "data": {
                             "available_methods": [
-                                {"method": "payme", "is_active": True},
+                                # Cash is COD-restricted here; click (-> "card") is the
+                                # one method still on offer. "payme" is never returned by
+                                # the backend (excluded per shared/payment_methods.py SSOT)
+                                # so it's not a realistic fixture value.
+                                {"method": "click", "is_active": True},
                             ],
                             "payment_restrictions": {
                                 "cod_restricted": True,

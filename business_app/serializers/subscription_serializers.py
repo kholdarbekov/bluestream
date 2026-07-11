@@ -79,7 +79,6 @@ class SubscriptionSchema(BaseModel):
 
     # Payment configuration
     payment_method: str
-    auto_payment: bool = Field(default=True)
     auto_renew: bool = Field(default=True)
 
     # Billing tracking
@@ -119,7 +118,6 @@ class CreateSubscriptionRequest(BaseModel):
     delivery_time_slot_id: Optional[int] = Field(None, gt=0)
     delivery_address_id: int = Field(..., gt=0)
     payment_method: str
-    auto_payment: bool = Field(default=True)
     auto_renew: bool = Field(default=True)
     discount_percentage: float = Field(default=0.0, ge=0.0, le=100.0)
     start_date: Optional[datetime] = None
@@ -137,7 +135,6 @@ class UpdateSubscriptionRequest(BaseModel):
     delivery_time_slot_id: Optional[int] = Field(None, gt=0)
     delivery_address_id: Optional[int] = Field(None, gt=0)
     payment_method: Optional[str] = None
-    auto_payment: Optional[bool] = None
     auto_renew: Optional[bool] = None
 
 
@@ -209,7 +206,6 @@ class SubscriptionBillingInfo(BaseModel):
     next_billing_date: Optional[datetime] = None
     billing_amount: MoneyFloat
     payment_method: str
-    auto_payment_enabled: bool
     failed_attempts: int = Field(default=0)
     last_successful_payment: Optional[datetime] = None
     total_amount_billed: MoneyFloat = Field(default=0)
@@ -353,7 +349,6 @@ def serialize_subscription(subscription, include_items=False, include_address=Fa
                 if hasattr(subscription.payment_method, "value")
                 else str(subscription.payment_method)
             ),
-            "auto_payment": getattr(subscription, "auto_payment", True),
             "auto_renew": getattr(subscription, "auto_renew", True),
             "total_amount_billed": float(getattr(subscription, "total_amount_billed", 0)),
             "failed_billing_attempts": getattr(subscription, "failed_billing_attempts", 0),
@@ -455,7 +450,6 @@ def serialize_subscription_billing_info(billing_info: Dict[str, Any]) -> Dict[st
         "next_billing_date": billing_info.get("next_billing_date"),
         "billing_amount": float(billing_info.get("billing_amount", 0)),
         "payment_method": billing_info.get("payment_method", ""),
-        "auto_payment_enabled": billing_info.get("auto_payment_enabled", True),
         "failed_attempts": billing_info.get("failed_attempts", 0),
         "last_successful_payment": billing_info.get("last_successful_payment"),
         "total_amount_billed": float(billing_info.get("total_amount_billed", 0)),
@@ -530,7 +524,6 @@ class AdminCreateSubscriptionRequest(BaseModel):
     delivery_time_slot_id: Optional[int] = Field(None, gt=0)
     delivery_address_id: int = Field(..., gt=0)
     payment_method: str
-    auto_payment: bool = Field(default=True)
     auto_renew: bool = Field(default=True)
     discount_percentage: float = Field(default=0.0, ge=0.0, le=100.0)
     loyalty_points_multiplier: Optional[float] = Field(None, ge=0.0)
@@ -557,7 +550,6 @@ class AdminUpdateSubscriptionRequest(BaseModel):
     delivery_time_slot_id: Optional[int] = Field(None, gt=0)
     delivery_address_id: Optional[int] = Field(None, gt=0)
     payment_method: Optional[str] = None
-    auto_payment: Optional[bool] = None
     auto_renew: Optional[bool] = None
     discount_percentage: Optional[float] = Field(None, ge=0.0, le=100.0)
     loyalty_points_multiplier: Optional[float] = Field(None, ge=0.0)

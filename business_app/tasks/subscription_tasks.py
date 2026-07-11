@@ -14,7 +14,7 @@ from business_app.models.order import Order
 from business_app.services.subscription_service import SubscriptionService
 from business_app.services.notification_service import NotificationService
 from business_app.services.order_service import OrderService
-from shared.enums import SubscriptionStatus, OrderStatus, UserRole, UserStatus
+from shared.enums import SubscriptionStatus, OrderStatus, PaymentMethod, PaymentStatus, UserRole, UserStatus
 from business_app.utils.helpers import get_current_language
 from business_app import db
 
@@ -32,7 +32,7 @@ def schedule_subscription_delivery_task(self, subscription_id: int):
             logger.error(f"Subscription {subscription_id} not found")
             return {"success": False, "error": "Subscription not found"}
 
-        if subscription.status not in [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIAL]:
+        if subscription.status != SubscriptionStatus.ACTIVE:
             logger.info(f"Subscription {subscription_id} is not active")
             return {"success": False, "error": "Subscription not active"}
 
@@ -60,38 +60,49 @@ def schedule_subscription_delivery_task(self, subscription_id: int):
 
 @shared_task(bind=True, max_retries=3, time_limit=600, soft_time_limit=540)
 def create_subscription_delivery_task(self, subscription_id: int):
-    """Create order and delivery for subscription"""
+    """Generate this subscription's order for the current cycle.
+
+    The DELIVERY is NOT created here. Delivery creation belongs to the
+    CONFIRMED status transition (order_service._handle_status_change_actions),
+    exactly as it does for an ordinary order. A subscription order that is
+    still PENDING — a first-time COD customer, or an unpaid click order — has
+    no delivery yet, and that is correct: the auto_confirm_pending_orders
+    backstop or the customer's payment will confirm it.
+    """
     try:
-        logger.info(f"Creating delivery for subscription {subscription_id}")
+        logger.info(f"Billing subscription {subscription_id}")
 
         subscription_service = SubscriptionService()
-
-        # Process subscription billing (creates order)
         billing_result = subscription_service.process_subscription_billing(subscription_id)
 
-        if billing_result["success"]:
-            order_id = billing_result["order_id"]
-
-            # Create delivery for the order
-            from business_app.services.delivery_service import DeliveryService
-
-            delivery_service = DeliveryService()
-
-            delivery = delivery_service.create_delivery(order_id)
-
-            logger.info(f"Delivery created for subscription {subscription_id}, order {order_id}")
-            return {
-                "success": True,
-                "subscription_id": subscription_id,
-                "order_id": order_id,
-                "delivery_id": delivery.id,
-            }
-        else:
+        if not billing_result.get("success"):
             logger.error(f"Billing failed for subscription {subscription_id}: {billing_result.get('error')}")
             return billing_result
 
+        if billing_result.get("skipped"):
+            # Already billed this cycle — there is no order_id to report.
+            logger.info(f"Subscription {subscription_id} skipped: {billing_result.get('reason')}")
+            return billing_result
+
+        order_id = billing_result["order_id"]
+        order = Order.query.get(order_id)
+        delivery_id = order.delivery.id if order is not None and order.delivery is not None else None
+
+        logger.info(
+            "Subscription %s billed: order=%s delivery=%s",
+            subscription_id,
+            order_id,
+            delivery_id,
+        )
+        return {
+            "success": True,
+            "subscription_id": subscription_id,
+            "order_id": order_id,
+            "delivery_id": delivery_id,
+        }
+
     except Exception as exc:
-        logger.error(f"Failed to create subscription delivery: {exc}")
+        logger.error(f"Failed to bill subscription {subscription_id}: {exc}")
         raise self.retry(exc=exc)
 
 
@@ -107,7 +118,7 @@ def process_daily_subscription_billing():
 
         due_subscriptions = Subscription.query.filter(
             Subscription.next_billing_date < next_day_start,
-            Subscription.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIAL]),
+            Subscription.status == SubscriptionStatus.ACTIVE,
         ).all()
 
         results = {"total_processed": 0, "successful": 0, "failed": 0, "errors": []}
@@ -232,7 +243,10 @@ def handle_failed_subscription_payments():
                         notification_service.send_notification(
                             subscription.user_id,
                             "payment_retry_success",
-                            template_data={"subscription_id": subscription.id, "amount": subscription.total_amount},
+                            template_data={
+                                "subscription_id": subscription.id,
+                                "amount": float(subscription.billing_amount or 0),
+                            },
                         )
 
                         retry_count += 1
@@ -280,11 +294,14 @@ def cancel_subscription_deliveries_task(self, subscription_id: int):
             logger.error(f"Subscription {subscription_id} not found")
             return {"success": False, "error": "Subscription not found"}
 
-        # Find pending orders and deliveries for this subscription
+        # Order.subscription_id is authoritative and set inside create_order's
+        # transaction. The previous filter referenced Order.notes — a column
+        # that does not exist on Order (only delivery_notes does) — so the
+        # query raised AttributeError unconditionally at build time. This task
+        # never completed successfully, regardless of order contents.
         pending_orders = Order.query.filter(
-            Order.user_id == subscription.user_id,
+            Order.subscription_id == subscription_id,
             Order.status.in_([OrderStatus.PENDING, OrderStatus.CONFIRMED]),
-            Order.notes.contains(f"Subscription order #{subscription_id}"),
         ).all()
 
         cancelled_count = 0
@@ -347,7 +364,7 @@ def generate_subscription_churn_prediction():
                                 if subscription.plan
                                 else "Standard"
                             ),
-                            "monthly_value": subscription.total_amount,
+                            "monthly_value": float(subscription.billing_amount or 0),
                         }
                     )
 
@@ -470,6 +487,20 @@ def process_subscription_billing(self, subscription_id: int):
         if billing_result.get("success"):
             logger.info(f"Billing processed successfully for subscription {subscription_id}")
 
+            # Forward-looking data for a future subscription_billed notification
+            # template (that follow-up is explicitly descoped for now — see
+            # Task 20). Guarded end-to-end: the "already billed this cycle"
+            # success path has no order_id, and the order/payment rows may not
+            # exist even when it is present, so neither access is assumed safe.
+            order_number = None
+            payment_action_required = False
+            billed_order = Order.query.get(billing_result["order_id"]) if billing_result.get("order_id") else None
+            if billed_order:
+                order_number = billed_order.order_number
+                payment = billed_order.payment
+                if payment and payment.payment_method in (PaymentMethod.CLICK, PaymentMethod.PAYME):
+                    payment_action_required = payment.status != PaymentStatus.COMPLETED
+
             # Send billing notification
             notification_service = NotificationService()
             notification_service.send_notification(
@@ -481,6 +512,8 @@ def process_subscription_billing(self, subscription_id: int):
                     "next_billing_date": (
                         subscription.next_billing_date.isoformat() if subscription.next_billing_date else None
                     ),
+                    "order_number": order_number,
+                    "payment_action_required": payment_action_required,
                 },
             )
 

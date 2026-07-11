@@ -130,6 +130,8 @@ class OrderAdminSchema(BaseModel):
     delivery_fee: MoneyFloat = Field(default=0)
     payment_method: Optional[str] = None
     payment_status: Optional[str] = None
+    is_subscription_order: bool = Field(default=False)
+    subscription_id: Optional[int] = None
     delivery_date: Optional[datetime] = None
     delivery_address: Optional[str] = None
     special_instructions: Optional[str] = None
@@ -669,6 +671,8 @@ def serialize_order_admin(order: Order) -> Dict[str, Any]:
             "discount_amount": float(getattr(order, "discount_amount", 0)),
             "delivery_fee": float(getattr(order, "delivery_fee", 0)),
             "payment_method": order.payment_method.value if order.payment_method else None,
+            "is_subscription_order": bool(order.is_subscription_order),
+            "subscription_id": order.subscription_id,
             "delivery_date": order.delivery_date.isoformat() if order.delivery_date else None,
             "delivery_address": order.delivery_address.to_dict() if getattr(order, "delivery_address", None) else None,
             "special_instructions": getattr(order, "special_instructions", None),

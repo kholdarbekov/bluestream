@@ -163,6 +163,13 @@ def make_celery(app=None):
             "task": "business_app.tasks.order_tasks.auto_confirm_pending_orders",
             "schedule": crontab(minute="*/10"),
         },
+        # Cancel orders left PENDING and unpaid for 24h. Hourly, offset from
+        # the :00 tasks. See the design spec §5.2 — this task had never run.
+        "cancel-abandoned-orders": {
+            "task": "business_app.tasks.order_tasks.cancel_abandoned_orders",
+            "schedule": crontab(minute=15),
+            "options": {"time_limit": 600},
+        },
         # Scan for unusual order patterns (>3 orders/user/hour, oversized
         # orders, zero-item orders) hourly and alert admins on high-severity hits.
         "monitor-order-anomalies": {

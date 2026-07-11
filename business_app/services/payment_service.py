@@ -3,8 +3,10 @@ Payment service for the Water Business Platform
 Supports Payme, Click, Cash, and Loyalty Points payments
 """
 
+import copy
 from decimal import Decimal
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 from typing import Dict, Any, Optional, List
 from flask import current_app
 import redis
@@ -23,6 +25,7 @@ from shared.enums import (
     PaymentMethod,
     FiscalizationStatus,
 )
+from shared.payment_methods import CUSTOMER_SELECTABLE_METHODS, PAYMENT_METHOD_CATALOG
 from business_app.utils.helpers import generate_random_string
 from business_app.utils.timezone_utils import ensure_utc
 from business_app.utils.payment_projection import (
@@ -35,6 +38,18 @@ from business_app.services.card_token_service import CardTokenService
 from business_app.services.providers.payme_provider import PaymeProvider
 from business_app.services.providers.webhook_signature import WebhookSignatureVerifier
 from business_app import db
+
+
+class PaymentContext(str, Enum):
+    """Where a payment method is being offered.
+
+    ORDER carries an item list (or None, before a cart exists); SUBSCRIPTION
+    never has line items, so business_account eligibility always falls back
+    to the user-level predicate for it.
+    """
+
+    ORDER = "order"
+    SUBSCRIPTION = "subscription"
 
 
 class PaymentService:
@@ -96,6 +111,83 @@ class PaymentService:
                 click_provider_service=self._get_click_provider_service(),
             )
         return self._payment_fiscalization_service
+
+    @staticmethod
+    def _method_is_configured(method_code: str) -> bool:
+        """Derive is_active from configured provider credentials.
+
+        The old catalog (business_app/serializers/payment_serializers.py)
+        hardcoded ``"is_active": True``, so an install with no merchant ID
+        still advertised the provider. Cash needs no provider and is always
+        active.
+        """
+        if method_code == PaymentMethod.CLICK.value:
+            return bool(current_app.config.get("CLICK_MERCHANT_ID") and current_app.config.get("CLICK_SERVICE_ID"))
+        if method_code == PaymentMethod.PAYME.value:
+            return bool(current_app.config.get("PAYME_MERCHANT_ID"))
+        return True
+
+    def get_available_payment_methods(
+        self,
+        user,
+        *,
+        context: PaymentContext = PaymentContext.ORDER,
+        items: Optional[List[Dict[str, Any]]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Which payment methods may THIS user be offered in THIS context.
+
+        Single source of truth for every surface: both bots, web checkout, the
+        web subscription constructor, and the admin UI. Payme and
+        loyalty_points are excluded by ``CUSTOMER_SELECTABLE_METHODS`` and
+        never appear.
+        """
+        from business_app.services.cash_collection_service import CashCollectionService
+        from business_app.services.corporate_contract_service import CorporateContractService
+
+        selectable_codes = {method.value for method in CUSTOMER_SELECTABLE_METHODS}
+
+        available: List[Dict[str, Any]] = []
+        for entry in PAYMENT_METHOD_CATALOG:
+            code = entry["method"]
+            if code not in selectable_codes:
+                continue
+            if not self._method_is_configured(code):
+                continue
+            # deepcopy, not {**entry}: a shallow spread would share the nested
+            # `supported_currencies` list with the module-level catalog, so a
+            # caller annotating a returned dict would corrupt it process-wide.
+            # shared/payment_methods.py declares the catalog read-only.
+            available.append({**copy.deepcopy(entry), "is_active": True})
+
+        cod_context = CashCollectionService().get_cod_restriction_context(user.id)
+        if cod_context.get("cod_restricted"):
+            available = [entry for entry in available if entry["method"] != PaymentMethod.CASH.value]
+
+        contract_service = CorporateContractService()
+        if items:
+            # Item-level mirror of validate_business_account_order: if we
+            # offer it, creating the order will succeed.
+            business_account_ok = contract_service.order_qualifies_for_business_account(user, items)
+        else:
+            # No cart yet (menu render) or a context with no line items
+            # (e.g. subscriptions). User-level half of the same predicate.
+            business_account_ok = contract_service.user_can_use_business_account(user)
+
+        if business_account_ok:
+            available.append(
+                {
+                    "method": PaymentMethod.BUSINESS_ACCOUNT.value,
+                    "name": PaymentMethod.BUSINESS_ACCOUNT.value,
+                    "display_name": "Business Account",
+                    "icon_url": None,
+                    "description": "Charge the active corporate prepayment balance",
+                    "is_active": True,
+                    "is_default": True,
+                    "supported_currencies": ["UZS"],
+                }
+            )
+
+        return available
 
     def create_payment(self, order_id: int, payment_method: PaymentMethod, amount: int = None, **kwargs) -> Payment:
         """

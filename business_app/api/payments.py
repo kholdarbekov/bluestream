@@ -27,7 +27,6 @@ from shared.redis_keyspace import RedisKeyspace
 from business_app.serializers.payment_serializers import (
     serialize_payment,
     serialize_credit_card,
-    get_available_payment_methods,
 )
 from business_app.utils.decorators import validate_json, rate_limit
 from business_app.utils.constants import PaymeErrors, PaymentMethodType
@@ -134,49 +133,28 @@ def _check_provider_webhook_rate_limit(provider_lc: str, redis_client):
 @payments_bp.route("/methods", methods=["GET"])
 @jwt_required()
 def get_payment_methods():
-    """Get available payment methods"""
+    """Payment methods available to the authenticated user."""
     try:
         current_user_id = get_jwt_identity()
         from business_app.services.cash_collection_service import CashCollectionService
+        from business_app.services.payment_service import PaymentContext
 
         user = User.query.get(current_user_id)
         if not user:
             return not_found_response(message=get_translation("user_not_found"))
 
-        # Get user's saved payment methods
-        saved_cards = CreditCard.query.filter_by(user_id=current_user_id, is_active=True).all()
-
-        available_methods = [
-            {
-                "method": method["method"],
-                "name": method["display_name"],
-                "icon_url": method["icon_url"],
-                "description": method["description"],
-                "is_active": method["is_active"],
-                "supported_currencies": method["supported_currencies"],
-            }
-            for method in get_available_payment_methods()
-            if method.get("is_active")
-        ]
-
-        cod_context = CashCollectionService().get_cod_restriction_context(current_user_id)
-        if cod_context["cod_restricted"]:
-            available_methods = [method for method in available_methods if method["method"] != "cash"]
-
-        from business_app.services.corporate_contract_service import CorporateContractService
-
-        if CorporateContractService().get_business_account_balances(user):
-            available_methods.append(
-                {
-                    "method": "business_account",
-                    "name": "Business Account",
-                    "icon_url": None,
-                    "description": "Charge the active corporate prepayment balance",
-                    "is_active": True,
-                    "is_default": True,
-                    "supported_currencies": ["UZS"],
-                }
+        raw_context = request.args.get("context", PaymentContext.ORDER.value)
+        try:
+            context = PaymentContext(raw_context)
+        except ValueError:
+            return error_response(
+                message=get_translation("api.payments.error.invalid_context"),
+                status_code=400,
             )
+
+        available_methods = get_payment_service().get_available_payment_methods(user, context=context)
+        cod_context = CashCollectionService().get_cod_restriction_context(current_user_id)
+        saved_cards = CreditCard.query.filter_by(user_id=current_user_id, is_active=True).all()
 
         return success_response(
             data={

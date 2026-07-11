@@ -17,7 +17,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from business_app.services.subscription_service import SubscriptionService
-from shared.enums import SubscriptionFrequency, SubscriptionStatus
+from shared.enums import PaymentMethod, SubscriptionFrequency, SubscriptionStatus
 
 
 def _billing_subscription():
@@ -40,9 +40,13 @@ def _billing_subscription():
         subscription_items=[item],
         delivery_address_id=314,
         delivery_address=address,
-        payment_method="card",
+        # Real column is a NOT NULL PaymentMethod enum (see business_app/models/
+        # subscription.py); the stub must mirror that now that billing reads
+        # subscription.payment_method.value to build order_data.
+        payment_method=PaymentMethod.CARD,
         payment_token=None,
         billing_amount=Decimal("50000.00"),
+        total_amount_billed=Decimal("0.00"),
         billing_cycle=SubscriptionFrequency.WEEKLY,
         total_orders_generated=0,
     )
@@ -53,13 +57,22 @@ def test_process_subscription_billing_builds_order_items_from_subscription_items
 
     with (
         patch("business_app.services.subscription_service.Subscription") as subscription_model,
-        patch("business_app.services.subscription_service.db"),
+        patch("business_app.services.subscription_service.db") as db_mock,
         patch("business_app.services.order_service.OrderService") as order_service_cls,
         patch("business_app.services.payment_service.PaymentService") as payment_service_cls,
     ):
         subscription_model.query.filter_by.return_value.with_for_update.return_value.first.return_value = subscription
+        # _already_billed_this_cycle (task 5) now also asks the orders table
+        # whether one was created today for this subscription_id, via
+        # db.session.query(...).scalar(). db is mocked wholesale here, so
+        # that call would otherwise return a truthy MagicMock and make a
+        # never-billed subscription look already-billed, short-circuiting
+        # before create_order is ever reached. Tell the mock there is none.
+        db_mock.session.query.return_value.scalar.return_value = False
         create_order = order_service_cls.return_value.create_order
-        create_order.return_value = SimpleNamespace(id=99)
+        # total_amount is required now: billing reads order.total_amount (the
+        # Order is authoritative) instead of the old separate create_payment call.
+        create_order.return_value = SimpleNamespace(id=99, total_amount=Decimal("50000.00"))
         payment_service_cls.return_value.create_payment.return_value = SimpleNamespace(id=11)
 
         result = SubscriptionService().process_subscription_billing(42)
@@ -83,8 +96,12 @@ def _stats_subscription():
         status=SubscriptionStatus.ACTIVE,
         created_at=datetime.now(timezone.utc) - timedelta(days=14),
         frequency="weekly",
-        # float, not Decimal: the method mixes total_spent with float literals
-        total_amount=50000.0,
+        # Subscription has NO total_amount column (business_app/models/
+        # subscription.py) — only billing_amount / total_amount_billed. This
+        # stub used to expose `total_amount` instead, which meant it silently
+        # mirrored the phantom-read bug in calculate_subscription_statistics
+        # rather than catching it: the real ORM object has no such attribute.
+        billing_amount=Decimal("50000.00"),
         subscription_items=[item],
     )
 
@@ -98,3 +115,8 @@ def test_calculate_subscription_statistics_counts_products_from_subscription_ite
     assert stats["total_subscriptions"] == 1
     assert stats["active_subscriptions"] == 1
     assert stats["most_ordered_product"] == "Water 19L"
+    # days_active=14, weekly => estimated_deliveries=2; billing_amount=50000.00
+    # per delivery => total_spent = 100000.0 (Task 20: was AttributeError on
+    # the nonexistent `total_amount` attribute pre-fix).
+    assert stats["total_spent"] == 100000.0
+    assert stats["average_order_value"] == 50000.0

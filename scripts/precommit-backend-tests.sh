@@ -110,6 +110,21 @@ fi
 # tests/conftest.py pins the same values in-process (see the hermetic
 # containment block there); these -e flags keep the container boundary sealed
 # even if conftest is bypassed.
+
+# Argument passthrough. With no args we run the whole suite sharded across 4
+# workers (the pre-commit behaviour). With args we forward them verbatim and
+# drop -n 4, because xdist sharding a single test just adds startup cost and
+# scrambles the failure output TDD depends on.
+if [ "$#" -eq 0 ]; then
+    pytest_args="tests/ --no-cov --no-header --dist=worksteal -n 4"
+else
+    # %q escapes each argument so the container's shell re-parses the exact
+    # original argument boundaries. Without this, "$*" flattens the arguments
+    # and `-k "a or b"` arrives at pytest as three separate tokens.
+    printf -v quoted '%q ' "$@"
+    pytest_args="${quoted}--no-cov --no-header"
+fi
+
 exec docker run --rm \
     --network "${network}" \
     "${env_file_arg[@]}" \
@@ -124,4 +139,4 @@ exec docker run --rm \
     -e BOT_WEBHOOK_URL="http://telegram-bot-must-be-mocked.invalid" \
     -e BUSINESS_APP_URL="http://api-must-be-mocked.invalid" \
     "${image}" \
-    sh -c "python -c 'import xdist' 2>/dev/null || pip install -q pytest-xdist==3.6.1 pytest-timeout==2.3.1 >&2; pytest tests/ --no-cov --no-header --dist=worksteal -n 4"
+    sh -c "python -c 'import xdist' 2>/dev/null || pip install -q pytest-xdist==3.6.1 pytest-timeout==2.3.1 >&2; pytest ${pytest_args}"

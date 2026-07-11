@@ -456,7 +456,6 @@ class BaseConfig:
     # the former REFERRAL_BONUS_POINTS config was removed (loyalty SSOT, Unit E).
 
     # Subscription Configuration
-    SUBSCRIPTION_TRIAL_DAYS = int(os.environ.get("SUBSCRIPTION_TRIAL_DAYS", 7))
     SUBSCRIPTION_BILLING_DAY = int(os.environ.get("SUBSCRIPTION_BILLING_DAY", 1))
     MAX_SUBSCRIPTION_ITEMS = int(os.environ.get("MAX_SUBSCRIPTION_ITEMS", 10))
     SUBSCRIPTION_FAILED_PAYMENT_MAX_ATTEMPTS = business_config.SUBSCRIPTION_FAILED_PAYMENT_MAX_ATTEMPTS

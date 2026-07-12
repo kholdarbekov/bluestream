@@ -400,6 +400,16 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Yigildi",
         "ru": "Собрано",
     },
+    "staff.delivery.total_label": {
+        "en": "Total",
+        "uz": "Jami",
+        "ru": "Итого",
+    },
+    "staff.delivery.no_cash_note": {
+        "en": "No cash to collect",
+        "uz": "Naqd talab qilinmaydi",
+        "ru": "Наличные не требуются",
+    },
     "staff.delivery.cash_outstanding_label": {
         "en": "Outstanding",
         "uz": "Qoldiq qarz",

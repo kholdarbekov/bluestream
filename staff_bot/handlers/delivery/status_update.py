@@ -11,7 +11,13 @@ from staff_bot.api_client import api_client
 from staff_bot.keyboards.delivery import DeliveryKeyboards
 from staff_bot.keyboards.common import CommonKeyboards
 from staff_bot.keyboards.menu import MenuKeyboards
-from staff_bot.utils.formatters import format_delivery_status, format_currency, get_cod_cash_projection
+from staff_bot.utils.formatters import (
+    format_delivery_status,
+    format_currency,
+    get_cod_cash_projection,
+    format_active_delivery_summary,
+    is_unsettled_electronic,
+)
 from staff_bot.permissions import require_auth, require_delivery_driver
 from staff_bot.i18n import i18n
 from staff_bot.utils import flow_state
@@ -88,6 +94,17 @@ class StatusUpdateHandler(BaseHandler):
     @staticmethod
     def _get_expected_cash_to_collect(delivery_info: dict) -> float:
         return get_cod_cash_projection(delivery_info)['expected_cash_to_collect']
+
+    @staticmethod
+    def _order_brief(context: ContextTypes.DEFAULT_TYPE, language: str) -> str:
+        """Short no-money order card prepended to status-change confirm/updated
+        messages so the driver sees which order they're acting on. Returns '' if
+        no current_delivery snapshot is available (renders without a brief)."""
+        info = context.user_data.get('current_delivery') or {}
+        if not info:
+            return ''
+        brief = format_active_delivery_summary(info, language, include_money=False)
+        return f"{brief}\n\n" if brief else ''
 
     @staticmethod
     def _format_session_summary(session: dict, language: str) -> str:
@@ -179,6 +196,7 @@ class StatusUpdateHandler(BaseHandler):
             context.user_data['current_delivery']['status'] = 'delivered'
 
         message = (
+            f"{self._order_brief(context, language)}"
             f"✅ {i18n.get('staff.delivery.delivered_success', language)}\n"
             f"💵 {i18n.get('staff.delivery.cash_recorded', language, amount=format_currency(cash_amount, language=language))}"
         )
@@ -224,7 +242,8 @@ class StatusUpdateHandler(BaseHandler):
                 # Show reason selection
                 keyboard = DeliveryKeyboards.failed_reasons(language, delivery_id)
                 await query.edit_message_text(
-                    i18n.get('staff.delivery.select_fail_reason', language),
+                    self._order_brief(context, language)
+                    + i18n.get('staff.delivery.select_fail_reason', language),
                     reply_markup=keyboard,
                     parse_mode='HTML'
                 )
@@ -239,24 +258,18 @@ class StatusUpdateHandler(BaseHandler):
                 # Detect unsuccessful-electronic orders: online payment method but
                 # payment not completed (pending/cancelled/failed) — driver pays cash
                 # at the door to settle the order (Task 5, plan 2026-06-22).
-                _electronic_methods = {'click', 'payme', 'card'}
-                _settled_statuses = {'completed', 'paid', 'partially_paid'}
-                payment_status_lower = str(delivery_info.get('payment_status') or '').lower()
-                is_unsettled_electronic = (
-                    payment_method in _electronic_methods
-                    and payment_status_lower not in _settled_statuses
-                )
-                if is_unsettled_electronic:
+                unsettled_electronic = is_unsettled_electronic(delivery_info)
+                if unsettled_electronic:
                     # For an unsettled electronic order the full order amount is due
                     # in cash; outstanding_amount / total_amount are equivalent here
                     # (no partial cash collected yet) — use total_amount as the prompt.
                     cash_due_amount = float(delivery_info.get('total_amount') or 0)
 
-                if (payment_method == 'cash' and cash_due_amount > 0) or is_unsettled_electronic:
+                if (payment_method == 'cash' and cash_due_amount > 0) or unsettled_electronic:
                     keyboard = DeliveryKeyboards.cash_collection_options(
                         language, delivery_id, cash_due_amount
                     )
-                    message_text = i18n.get(
+                    message_text = self._order_brief(context, language) + i18n.get(
                         'staff.delivery.cash_collection',
                         language,
                         amount=format_currency(cash_due_amount, language=language),
@@ -275,7 +288,10 @@ class StatusUpdateHandler(BaseHandler):
 
             # Standard confirmation for other statuses
             status_text = format_delivery_status(new_status, language)
-            text = i18n.get('staff.delivery.confirm_status', language, status=status_text)
+            text = (
+                self._order_brief(context, language)
+                + i18n.get('staff.delivery.confirm_status', language, status=status_text)
+            )
 
             keyboard = CommonKeyboards.confirm_cancel(
                 language,
@@ -320,7 +336,8 @@ class StatusUpdateHandler(BaseHandler):
                     }
                     keyboard, message = self._build_bottle_prompt(language, delivery_id, context)
                     await query.edit_message_text(
-                        message, reply_markup=keyboard, parse_mode='HTML'
+                        f"{self._order_brief(context, language)}{message}",
+                        reply_markup=keyboard, parse_mode='HTML'
                     )
                     return
 
@@ -353,7 +370,7 @@ class StatusUpdateHandler(BaseHandler):
                 )
 
             await query.edit_message_text(
-                f"✅ {success_msg}",
+                f"{self._order_brief(context, language)}✅ {success_msg}",
                 reply_markup=keyboard,
                 parse_mode='HTML'
             )
@@ -391,7 +408,10 @@ class StatusUpdateHandler(BaseHandler):
                 return
 
             reason_text = i18n.get(f'staff.delivery.reason.{reason}', language)
+            if context.user_data.get('current_delivery'):
+                context.user_data['current_delivery']['status'] = 'failed'
             await query.edit_message_text(
+                f"{self._order_brief(context, language)}"
                 f"❌ {i18n.get('staff.delivery.marked_failed', language)}\n"
                 f"{i18n.get('staff.delivery.fail_reason_label', language)}: {reason_text}",
                 reply_markup=CommonKeyboards.back_button(language, "staff_active_deliveries"),
@@ -821,6 +841,7 @@ class StatusUpdateHandler(BaseHandler):
 
             language = await self._get_language(update, context)
             keyboard, message = self._build_bottle_prompt(language, delivery_id, context)
+            message = f"{self._order_brief(context, language)}{message}"
             if update.callback_query:
                 await update.callback_query.edit_message_text(
                     message, reply_markup=keyboard, parse_mode='HTML'

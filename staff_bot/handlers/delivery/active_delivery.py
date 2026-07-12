@@ -14,10 +14,8 @@ from staff_bot.api_client import api_client
 from staff_bot.keyboards.delivery import DeliveryKeyboards
 from staff_bot.keyboards.common import CommonKeyboards
 from staff_bot.utils.formatters import (
-    format_delivery_status,
-    format_currency,
     escape_html,
-    get_cod_cash_projection,
+    format_active_delivery_summary,
 )
 from staff_bot.permissions import require_auth, require_delivery_driver
 from staff_bot.i18n import i18n
@@ -277,10 +275,6 @@ class ActiveDeliveryHandler(BaseHandler):
             # we can reclaim them on the next render.
             new_card_ids = []
             for delivery in deliveries:
-                status = delivery.get('status', '')
-                status_text = format_delivery_status(status, language)
-                order_num = escape_html(delivery.get('order_number') or i18n.get('staff.common.not_available', language))
-
                 lines = []
                 # Only show the "Next stop · ETA · km" badge when we have a
                 # real driver location to compute it from. When location is
@@ -302,54 +296,14 @@ class ActiveDeliveryHandler(BaseHandler):
                         )
                     lines.append(' · '.join(next_parts))
 
-                position = delivery.get('route_position')
-                position_prefix = f"{position + 1}. " if isinstance(position, int) else ""
                 lines.append(
-                    f"🚚 <b>{position_prefix}#{order_num}</b> — {status_text}"
+                    format_active_delivery_summary(
+                        delivery,
+                        language,
+                        include_money=True,
+                        position=delivery.get('route_position'),
+                    )
                 )
-
-                customer_name = escape_html(delivery.get('customer_name', ''))
-                if customer_name:
-                    lines.append(f"👤 {customer_name}")
-
-                address = escape_html(delivery.get('address', ''))
-                district = escape_html(delivery.get('district', ''))
-                if district:
-                    lines.append(f"📍 {district}")
-                if address:
-                    lines.append(f"    {address}")
-
-                total = format_currency(delivery.get('total_amount'), language=language)
-                payment = delivery.get('payment_method', '')
-                payment_label = i18n.get(f'staff.delivery.payment.{payment}', language) if payment else ''
-                if payment_label:
-                    lines.append(f"💰 {total} ({payment_label})")
-                else:
-                    lines.append(f"💰 {total}")
-                if payment == 'cash':
-                    cod_projection = get_cod_cash_projection(delivery)
-                    lines.append(
-                        f"🧾 {i18n.get('staff.delivery.cash_collected_label', language)}: "
-                        f"{format_currency(delivery.get('amount_collected'), language=language)}"
-                    )
-                    lines.append(
-                        f"💸 {i18n.get('staff.delivery.cash_outstanding_label', language)}: "
-                        f"{format_currency(delivery.get('outstanding_amount'), language=language)}"
-                    )
-                    if cod_projection['cod_reserved_prepayment_amount'] > 0:
-                        lines.append(
-                            f"💳 {i18n.get('staff.delivery.cod_prepaid_reserved', language)}: "
-                            f"{format_currency(cod_projection['cod_reserved_prepayment_amount'], language=language)}"
-                        )
-                    lines.append(
-                        f"💵 {i18n.get('staff.delivery.cash_to_collect_now', language)}: "
-                        f"{format_currency(cod_projection['expected_cash_to_collect'], language=language)}"
-                    )
-                    payment_status = str(delivery.get('payment_status') or '').lower()
-                    if payment_status == 'completed' or cod_projection['expected_cash_to_collect'] <= 0:
-                        lines.append(f"✅ {i18n.get('staff.delivery.cash_already_collected', language)}")
-                    elif payment_status == 'partially_paid':
-                        lines.append(f"ℹ️ {i18n.get('staff.delivery.cash_partially_collected', language)}")
 
                 text = '\n'.join(lines)
                 delivery_id = delivery.get('delivery_id') or delivery.get('id')
@@ -413,99 +367,33 @@ class ActiveDeliveryHandler(BaseHandler):
                 )
                 return
 
-            # Build detailed view
+            # Build detailed view — shared compact card (identical to the list card).
             status = delivery.get('status', '')
-            status_text = format_delivery_status(status, language)
-            order_num = escape_html(delivery.get('order_number') or i18n.get('staff.common.not_available', language))
+            text = format_active_delivery_summary(delivery, language, include_money=True)
 
-            lines = [
-                f"🚚 <b>#{order_num}</b>",
-                f"{i18n.get('staff.delivery.current_status', language)}: {status_text}",
-                "",
-            ]
-
-            # Items
-            items = delivery.get('items', [])
-            if items:
-                lines.append(f"<b>{i18n.get('staff.delivery.items', language)}:</b>")
-                for item in items:
-                    name = escape_html(item.get('product_name', item.get('name', '')))
-                    qty = item.get('quantity', 1)
-                    lines.append(f"  • {name} x{qty}")
-                lines.append("")
-
-            # Customer
-            customer_name = escape_html(delivery.get('customer_name', ''))
-            customer_phone = escape_html(delivery.get('customer_phone', ''))
-            if customer_name:
-                lines.append(f"👤 {customer_name}")
-            if customer_phone:
-                lines.append(f"📞 {customer_phone}")
-
-            # Address
-            address = escape_html(delivery.get('address', ''))
-            district = escape_html(delivery.get('district', ''))
-            if district:
-                lines.append(f"📍 {district}")
-            if address:
-                lines.append(f"    {address}")
-            delivery_instructions = escape_html(delivery.get('delivery_instructions', ''))
-            if delivery_instructions:
-                lines.append(f"    📝 {delivery_instructions}")
-
-            # Payment
-            total = format_currency(delivery.get('total_amount'), language=language)
-            payment = delivery.get('payment_method', '')
-            payment_info = f"💰 {total}"
-            if payment:
-                payment_label = i18n.get(f'staff.delivery.payment.{payment}', language)
-                payment_info += f" ({payment_label})"
-            lines.append(payment_info)
-            if payment == 'cash':
-                cod_projection = get_cod_cash_projection(delivery)
-                lines.append(
-                    f"🧾 {i18n.get('staff.delivery.cash_collected_label', language)}: "
-                    f"{format_currency(delivery.get('amount_collected'), language=language)}"
-                )
-                lines.append(
-                    f"💸 {i18n.get('staff.delivery.cash_outstanding_label', language)}: "
-                    f"{format_currency(delivery.get('outstanding_amount'), language=language)}"
-                )
-                if cod_projection['cod_reserved_prepayment_amount'] > 0:
-                    lines.append(
-                        f"💳 {i18n.get('staff.delivery.cod_prepaid_reserved', language)}: "
-                        f"{format_currency(cod_projection['cod_reserved_prepayment_amount'], language=language)}"
-                    )
-                lines.append(
-                    f"💵 {i18n.get('staff.delivery.cash_to_collect_now', language)}: "
-                    f"{format_currency(cod_projection['expected_cash_to_collect'], language=language)}"
-                )
-                payment_status = str(delivery.get('payment_status') or '').lower()
-                if payment_status == 'completed' or cod_projection['expected_cash_to_collect'] <= 0:
-                    lines.append(f"✅ {i18n.get('staff.delivery.cash_already_collected', language)}")
-                elif payment_status == 'partially_paid':
-                    lines.append(f"ℹ️ {i18n.get('staff.delivery.cash_partially_collected', language)}")
-
-            # Delivery notes
-            notes = delivery.get('delivery_notes', '')
-            if notes:
-                lines.append(f"💬 {escape_html(notes)}")
-
-            # Store delivery info in context for status updates/navigation
+            # Cache a snapshot for the status-change handlers, which read order
+            # context solely from current_delivery. Store RAW values (the brief
+            # formatter HTML-escapes on render).
             context.user_data['current_delivery'] = {
                 'delivery_id': delivery_id,
                 'order_id': delivery.get('order_id'),
+                'order_number': delivery.get('order_number'),
                 'customer_id': delivery.get('customer_id'),
+                'customer_name': delivery.get('customer_name'),
+                'customer_phone': delivery.get('customer_phone'),
                 'status': status,
+                'district': delivery.get('district'),
+                'address': delivery.get('address'),
+                'delivery_instructions': delivery.get('delivery_instructions'),
+                'delivery_notes': delivery.get('delivery_notes'),
+                'items': delivery.get('items', []),
                 'total_amount': delivery.get('total_amount', 0),
-                'payment_method': payment,
+                'payment_method': delivery.get('payment_method', ''),
                 'payment_status': delivery.get('payment_status'),
                 'amount_collected': delivery.get('amount_collected', 0),
                 'outstanding_amount': delivery.get('outstanding_amount', 0),
                 'cod_reserved_prepayment_amount': delivery.get('cod_reserved_prepayment_amount', 0),
                 'expected_cash_to_collect': delivery.get('expected_cash_to_collect', 0),
-                'customer_phone': customer_phone,
-                'address': address,
                 # Origin: driver's last known point
                 'origin_lat': delivery.get('current_location_lat'),
                 'origin_lng': delivery.get('current_location_lng'),
@@ -517,9 +405,7 @@ class ActiveDeliveryHandler(BaseHandler):
                 'customer_bottle_balance': delivery.get('customer_bottle_balance', 0),
             }
 
-            text = '\n'.join(lines)
             keyboard = DeliveryKeyboards.active_delivery_actions(language, delivery_id, status)
-
             await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
 
         except Exception as e:

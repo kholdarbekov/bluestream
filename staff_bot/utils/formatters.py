@@ -68,6 +68,22 @@ def get_cod_cash_projection(payload: Dict[str, Any]) -> Dict[str, float]:
     }
 
 
+# Online payment methods that settle at the gateway. When such a payment has
+# NOT settled, the driver collects the full amount in cash at the door — so it
+# behaves like a cash order for "cash to collect" purposes. SSOT shared by the
+# order-card formatter and the delivery-completion cash prompt (status_update).
+_ELECTRONIC_METHODS = {'click', 'payme', 'card'}
+_SETTLED_PAYMENT_STATUSES = {'completed', 'paid', 'partially_paid'}
+
+
+def is_unsettled_electronic(payload: Dict[str, Any]) -> bool:
+    """True when an order's online payment (click/payme/card) has not settled,
+    so the full amount is due in cash at the door."""
+    method = payload.get('payment_method', '')
+    status = str(payload.get('payment_status') or '').lower()
+    return method in _ELECTRONIC_METHODS and status not in _SETTLED_PAYMENT_STATUSES
+
+
 def format_order_card(order: Dict[str, Any], language: str) -> str:
     """
     Format order details as a compact card for Telegram message.
@@ -128,6 +144,110 @@ def format_order_card(order: Dict[str, Any], language: str) -> str:
 
     if delivery_notes:
         lines.append(f"💬 {delivery_notes}")
+
+    return '\n'.join(lines)
+
+
+def format_active_delivery_summary(
+    delivery: Dict[str, Any],
+    language: str,
+    *,
+    include_money: bool = True,
+    position: Optional[int] = None,
+) -> str:
+    """Compact order card shared by the active-delivery list, detail view, and
+    the status-change confirm/updated briefs.
+
+    Field order: order# — status, customer name, phone, address (+instructions),
+    items, then (when include_money) the money block; optional delivery notes
+    trail on every surface. Missing fields are skipped, so the same function
+    renders a full card or a partial `current_delivery` snapshot without error.
+
+    Args:
+        delivery: delivery/order dict (from get_active_deliveries or the cached
+            current_delivery snapshot).
+        language: UI language code.
+        include_money: when False, omit the total/collected/to-collect block
+            (the status-change brief).
+        position: optional 0-based route position; when an int, prefixes the
+            header with "{position+1}. " (list view only).
+    """
+    lines = []
+
+    order_num = escape_html(
+        delivery.get('order_number') or i18n.get('staff.common.not_available', language)
+    )
+    status_text = format_delivery_status(delivery.get('status', ''), language)
+    position_prefix = f"{position + 1}. " if isinstance(position, int) else ""
+    lines.append(f"🚚 <b>{position_prefix}#{order_num}</b> — {status_text}")
+
+    customer_name = escape_html(delivery.get('customer_name', ''))
+    if customer_name:
+        lines.append(f"👤 {customer_name}")
+    customer_phone = escape_html(delivery.get('customer_phone', ''))
+    if customer_phone:
+        lines.append(f"📞 {customer_phone}")
+
+    district = escape_html(delivery.get('district', ''))
+    if district:
+        lines.append(f"📍 {district}")
+    address = escape_html(delivery.get('address', ''))
+    if address:
+        lines.append(f"    {address}")
+    instructions = escape_html(delivery.get('delivery_instructions', ''))
+    if instructions:
+        lines.append(f"    📝 {instructions}")
+
+    for item in delivery.get('items') or []:
+        name = escape_html(item.get('product_name') or item.get('name') or '')
+        if not name:
+            continue
+        qty = format_quantity(item.get('quantity', 1))
+        lines.append(f"📦 {name} ×{qty}")
+
+    if include_money:
+        total = format_currency(delivery.get('total_amount'), language=language)
+        payment = delivery.get('payment_method', '')
+        payment_label = (
+            i18n.get(f'staff.delivery.payment.{payment}', language) if payment else ''
+        )
+        total_line = f"💰 {i18n.get('staff.delivery.total_label', language)}: {total}"
+        if payment_label:
+            total_line += f" ({payment_label})"
+        lines.append(total_line)
+
+        if payment == 'cash':
+            cod = get_cod_cash_projection(delivery)
+            lines.append(
+                f"🧾 {i18n.get('staff.delivery.cash_collected_label', language)}: "
+                f"{format_currency(delivery.get('amount_collected'), language=language)}"
+            )
+            if cod['cod_reserved_prepayment_amount'] > 0:
+                lines.append(
+                    f"💳 {i18n.get('staff.delivery.cod_prepaid_reserved', language)}: "
+                    f"{format_currency(cod['cod_reserved_prepayment_amount'], language=language)}"
+                )
+            lines.append(
+                f"💵 {i18n.get('staff.delivery.cash_to_collect_now', language)}: "
+                f"{format_currency(cod['expected_cash_to_collect'], language=language)}"
+            )
+        elif is_unsettled_electronic(delivery):
+            # Online payment not settled → full amount due in cash at the door
+            # (mirrors the delivery-completion prompt in status_update.py).
+            lines.append(
+                f"💵 {i18n.get('staff.delivery.cash_to_collect_now', language)}: "
+                f"{format_currency(delivery.get('total_amount'), language=language)}"
+            )
+        else:
+            lines.append(
+                f"💵 {i18n.get('staff.delivery.cash_to_collect_now', language)}: "
+                f"{format_currency(0, language=language)} "
+                f"({i18n.get('staff.delivery.no_cash_note', language)})"
+            )
+
+    notes = escape_html(delivery.get('delivery_notes', ''))
+    if notes:
+        lines.append(f"💬 {notes}")
 
     return '\n'.join(lines)
 

@@ -4,6 +4,7 @@ All conversation handlers and command processors
 """
 
 from i18n import i18n
+from keyboards import MenuKeyboards
 
 from handlers.menu import main_menu_handler
 from handlers.language import language_handler
@@ -30,13 +31,18 @@ class SimpleHandlers:
             pass
         return 'en'
 
-    async def _send_response(self, update, text: str):
-        """Send/edit response depending on update type."""
+    async def _send_response(self, update, text: str, reply_markup=None):
+        """Send/edit response depending on update type.
+
+        ``reply_markup`` is optional so callers that need navigation (e.g. a
+        back button) can attach an inline keyboard; existing callers pass
+        nothing and behave exactly as before.
+        """
         if update.callback_query:
-            await update.callback_query.edit_message_text(text)
+            await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
             await update.callback_query.answer()
         else:
-            await update.message.reply_text(text)
+            await update.message.reply_text(text, reply_markup=reply_markup)
 
     async def admin_panel(self, update, context):
         """Admin panel - access controlled by backend API"""
@@ -45,19 +51,35 @@ class SimpleHandlers:
 
     async def help_handler(self, update, context):
         language = await self._get_language(update)
-        await self._send_response(update, i18n.get('telegram.help.command_hint', language))
+        await self._send_response(
+            update,
+            i18n.get('telegram.help.command_hint', language),
+            reply_markup=MenuKeyboards.back_button(language),
+        )
 
     async def support_menu(self, update, context):
         language = await self._get_language(update)
-        await self._send_response(update, i18n.get('telegram.support.menu_coming_soon', language))
+        await self._send_response(
+            update,
+            i18n.get('telegram.support.menu_coming_soon', language),
+            reply_markup=MenuKeyboards.back_button(language),
+        )
 
     async def faq_handler(self, update, context):
         language = await self._get_language(update)
-        await self._send_response(update, i18n.get('telegram.support.faq_coming_soon', language))
+        await self._send_response(
+            update,
+            i18n.get('telegram.support.faq_coming_soon', language),
+            reply_markup=MenuKeyboards.back_button(language),
+        )
 
     async def contact_support(self, update, context):
         language = await self._get_language(update)
-        await self._send_response(update, i18n.get('telegram.support.contact_message', language))
+        await self._send_response(
+            update,
+            i18n.get('telegram.support.contact_message', language),
+            reply_markup=MenuKeyboards.back_button(language),
+        )
 
     async def handle_support_message(self, update, context, text):
         language = await self._get_language(update)

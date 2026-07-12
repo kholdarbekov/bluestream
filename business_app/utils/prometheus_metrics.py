@@ -20,8 +20,11 @@ its own snapshot, aggregated via sum/max in the dashboard query.
 from __future__ import annotations
 
 import os
+import time
+from datetime import timezone
 from typing import Optional
 
+from flask import request
 from prometheus_client import Counter, Gauge, Summary, CollectorRegistry, multiprocess
 from prometheus_flask_exporter import PrometheusMetrics
 
@@ -73,6 +76,47 @@ stranded_deliveries = Gauge(
     multiprocess_mode="liveall",
 )
 
+# INF-008: backup freshness gauges. These replace the ephemeral
+# `celery_task_succeeded_total{name="backup.database"}` counter the backup
+# alerts used to depend on. That counter lives in-memory in the celery-exporter
+# and is PURGED whenever the worker that ran the task times out / is recreated;
+# for a once-daily task the single success sample routinely vanished before the
+# next run, firing a false "no successful DB backup" alert while the backup had
+# in fact completed and shipped to Drive. These gauges are derived on each
+# /metrics scrape from the audit-log ground truth (backup_*_completed /
+# backup_database_failed events), so they survive worker + exporter restarts.
+#
+# They carry unix timestamps (seconds) and only ever move forward, so
+# multiprocess_mode="max" collapses the per-worker files to a single series and
+# is immune to stale/dead worker files (an old value can never beat a newer one).
+last_successful_db_backup_timestamp = Gauge(
+    "bluestream_last_successful_db_backup_timestamp_seconds",
+    "Unix timestamp of the most recent successful nightly database backup "
+    "(newest backup_database_completed audit event).",
+    multiprocess_mode="max",
+)
+
+last_successful_uploads_backup_timestamp = Gauge(
+    "bluestream_last_successful_uploads_backup_timestamp_seconds",
+    "Unix timestamp of the most recent successful weekly uploads backup "
+    "(newest backup_uploads_completed audit event).",
+    multiprocess_mode="max",
+)
+
+last_db_backup_failure_timestamp = Gauge(
+    "bluestream_last_db_backup_failure_timestamp_seconds",
+    "Unix timestamp of the most recent failed database backup attempt "
+    "(newest backup_database_failed audit event). Compared against the success "
+    "gauge so DatabaseBackupFailing fires only when the latest attempt failed.",
+    multiprocess_mode="max",
+)
+
+# The freshness gauges change at most once a day, so we refresh them at most
+# once per this interval regardless of scrape cadence — keeps the per-scrape DB
+# query off the hot path even if /metrics is polled aggressively.
+_BACKUP_FRESHNESS_TTL_SECONDS = 60.0
+_backup_freshness_last_refresh = 0.0
+
 
 _flask_exporter: Optional[PrometheusMetrics] = None
 
@@ -91,6 +135,61 @@ def _update_pool_gauges() -> None:
             pg_pool_in_use.set(pool.checkedout())
     except Exception:  # pragma: no cover — defensive: pool metrics are best-effort
         pass
+
+
+def _latest_audit_timestamp(action: str) -> Optional[float]:
+    """Return the unix timestamp of the newest audit_logs row for `action`.
+
+    None if no such row exists. `created_at` is timezone-aware in Postgres but
+    can come back naive from SQLite (tests) — treat naive as UTC.
+    """
+    from sqlalchemy import func
+
+    from business_app import db
+    from business_app.models.audit import AuditLog
+
+    dt = db.session.query(func.max(AuditLog.created_at)).filter(AuditLog.action == action).scalar()
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
+
+
+def _refresh_backup_freshness_gauges() -> None:
+    """Refresh the backup-freshness gauges from the audit-log ground truth.
+
+    TTL-throttled and best-effort: on any DB error the previous gauge values are
+    left intact — never zeroed, which would false-fire DatabaseBackupStale. A
+    missing event (e.g. no failure ever recorded) simply leaves that gauge unset;
+    the alert rules use `... or vector(0)` to treat absence as "stale".
+    """
+    global _backup_freshness_last_refresh
+
+    now = time.time()
+    if now - _backup_freshness_last_refresh < _BACKUP_FRESHNESS_TTL_SECONDS:
+        return
+
+    from business_app import db
+
+    try:
+        db_ok = _latest_audit_timestamp("backup_database_completed")
+        uploads_ok = _latest_audit_timestamp("backup_uploads_completed")
+        db_fail = _latest_audit_timestamp("backup_database_failed")
+
+        if db_ok is not None:
+            last_successful_db_backup_timestamp.set(db_ok)
+        if uploads_ok is not None:
+            last_successful_uploads_backup_timestamp.set(uploads_ok)
+        if db_fail is not None:
+            last_db_backup_failure_timestamp.set(db_fail)
+
+        _backup_freshness_last_refresh = now
+    except Exception:  # pragma: no cover — defensive: freshness metrics are best-effort
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
 
 
 def setup_prometheus_metrics(app) -> PrometheusMetrics:
@@ -127,6 +226,10 @@ def setup_prometheus_metrics(app) -> PrometheusMetrics:
     @app.before_request
     def _refresh_pool_metrics() -> None:
         _update_pool_gauges()
+        # Backup-freshness gauges are only needed on the scrape itself, and they
+        # hit the DB — keep them off every other request path.
+        if request.path == "/metrics":
+            _refresh_backup_freshness_gauges()
 
     return _flask_exporter
 

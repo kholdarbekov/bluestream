@@ -307,14 +307,15 @@ def make_celery(app=None):
             "schedule": crontab(hour=6, minute=30),  # Daily at 6:30 AM
             "options": {"time_limit": 600},
         },
-        # INF-008: nightly Postgres backup. 02:30 UTC = 07:30 Tashkent —
-        # off-peak. pg_dump → gzip → optional rclone offsite copy.
+        # INF-008: nightly Postgres backup. celery.conf.timezone is
+        # DISPLAY_TIMEZONE (Asia/Tashkent), so this runs at 02:30 Tashkent =
+        # 21:30 UTC — off-peak. pg_dump → gzip → optional rclone offsite copy.
         # Local retention: BACKUP_LOCAL_RETENTION_DAYS (default 14).
         "backup-database": {
             "task": "backup.database",
             "schedule": crontab(hour=2, minute=30),
         },
-        # INF-008: weekly uploads backup. Sunday 03:00 UTC = 08:00 Tashkent.
+        # INF-008: weekly uploads backup. Sunday 03:00 Tashkent = Sat 22:00 UTC.
         # Larger payload than DB so weekly cadence keeps storage reasonable;
         # uploads are typically immutable (avatars, fiscalization receipts)
         # so daily diffs would be wasteful.

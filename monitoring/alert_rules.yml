@@ -124,35 +124,60 @@ groups:
           summary: "Celery task {{ $labels.name }} stuck (p95 runtime > 30m)"
           description: "Task {{ $labels.name }} p95 runtime exceeded 30 minutes over a 15m window. Inspect worker for hung threads / blocking I/O."
 
-      # INF-008: nightly DB backup health. The backup itself (pg_dump) rarely
-      # fails — the usual culprit is the offsite copy to Google Drive (rclone).
-      # A 2026-06 outage went unnoticed for 4 days: the Google OAuth consent
-      # screen was in "Testing" status, so the refresh token expired after 7
-      # days and every `rclone copyto` failed with `invalid_grant`. These two
-      # alerts close that blind spot. `name="backup.database"` is the custom
-      # task name from @shared_task(name=...); metrics via danihodovic/celery-exporter.
-      - alert: DatabaseBackupFailing
-        expr: increase(celery_task_failed_total{name="backup.database"}[2h]) > 0
-        for: 5m
-        labels:
-          severity: critical
-          area: backups
-        annotations:
-          summary: "Nightly DB backup is failing"
-          description: "backup.database recorded task failures in the last 2h. Check celery_worker logs for the rclone stderr. Likely the offsite Google Drive copy — note a 'Testing'-status OAuth consent screen expires the refresh token after 7 days (re-publish to production + re-auth)."
-
-      # Catches the other failure mode: beat stops sending the task at all (dead
-      # celery_beat / schedule change), so it never even fails — it just goes
-      # silent. `or vector(0)` makes the rule fire when the series is absent too.
+      # INF-008: backup health. The backup itself (pg_dump) rarely fails — the
+      # usual culprit is the offsite copy to Google Drive (rclone). A 2026-06
+      # outage went unnoticed for 4 days: the Google OAuth consent screen was in
+      # "Testing" status, so the refresh token expired after 7 days and every
+      # `rclone copyto` failed with `invalid_grant`.
+      #
+      # These rules read the `bluestream_last_*_backup_timestamp_seconds` gauges
+      # (business_app/utils/prometheus_metrics.py), derived on each /metrics
+      # scrape from the audit-log ground truth. They replace an earlier design
+      # that keyed off `celery_task_{succeeded,failed}_total{name="backup.database"}`
+      # from danihodovic/celery-exporter — that counter is in-memory and gets
+      # PURGED when the worker that ran the once-daily task times out or its
+      # container is recreated, so DatabaseBackupStale fired daily false positives
+      # while backups were in fact completing and shipping to Drive. A timestamp
+      # gauge survives worker + exporter restarts. `... or vector(0)` makes a rule
+      # fire when the gauge is absent entirely (app unscraped / never backed up),
+      # so a silent gap is treated as stale rather than ignored.
       - alert: DatabaseBackupStale
-        expr: (sum(increase(celery_task_succeeded_total{name="backup.database"}[26h])) or vector(0)) == 0
+        expr: (time() - (max(bluestream_last_successful_db_backup_timestamp_seconds) or vector(0))) > 93600
         for: 30m
         labels:
           severity: warning
           area: backups
         annotations:
           summary: "No successful DB backup in 26h"
-          description: "backup.database has not succeeded in 26h (expected nightly at 02:30 Tashkent / 21:30 UTC). Check celery_beat schedule and celery_worker, and whether the rclone Google Drive token expired."
+          description: "No backup_database_completed event in 26h (expected nightly at 02:30 Tashkent / 21:30 UTC). Check celery_beat schedule and celery_worker, and whether the rclone Google Drive token expired."
+
+      # Fires when the MOST RECENT backup attempt ended in failure — i.e. the
+      # last failure is newer than the last success. Auto-resolves the moment a
+      # subsequent backup succeeds (success timestamp overtakes failure). `for`
+      # gives the task's own retries (max_retries=2, 10m apart) time to succeed
+      # before paging.
+      - alert: DatabaseBackupFailing
+        expr: (max(bluestream_last_db_backup_failure_timestamp_seconds) or vector(0)) > (max(bluestream_last_successful_db_backup_timestamp_seconds) or vector(0))
+        for: 30m
+        labels:
+          severity: critical
+          area: backups
+        annotations:
+          summary: "Latest DB backup attempt failed"
+          description: "The most recent backup_database_failed event is newer than the last success. Check celery_worker logs for the rclone stderr. Likely the offsite Google Drive copy — note a 'Testing'-status OAuth consent screen expires the refresh token after 7 days (re-publish to production + re-auth)."
+
+      # Weekly uploads backup (Sunday 03:00 Tashkent / Sat 22:00 UTC). Threshold
+      # is 8 days so a single missed weekly run alerts within ~a day of the next
+      # expected run without flapping on normal 7-day spacing.
+      - alert: UploadsBackupStale
+        expr: (time() - (max(bluestream_last_successful_uploads_backup_timestamp_seconds) or vector(0))) > 691200
+        for: 1h
+        labels:
+          severity: warning
+          area: backups
+        annotations:
+          summary: "No successful uploads backup in 8d"
+          description: "No backup_uploads_completed event in 8 days (expected weekly, Sunday 03:00 Tashkent). Check celery_beat schedule, celery_worker, and the rclone Google Drive token."
 
       # INF-003: business-critical alerts from the 2026-04 audit
       # Payment webhook failures: gateway callbacks dropping indicates lost revenue.

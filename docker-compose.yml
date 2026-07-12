@@ -497,7 +497,11 @@ services:
       celery_worker:
         condition: service_started
     healthcheck:
-      test: [ "CMD-SHELL", "wget -qO- http://localhost:9540/health || exit 1" ]
+      # minervaproject/celery-exporter ships no wget/curl (distroless-ish python
+      # image), so the old `wget` probe always failed → container stuck
+      # "unhealthy" even though metrics on :9540 were fine. That masked real
+      # exporter outages. Probe /health with the python that ships in the image.
+      test: [ "CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:9540/health', timeout=5).status == 200 else 1)" ]
       interval: 60s
       timeout: 10s
       retries: 3

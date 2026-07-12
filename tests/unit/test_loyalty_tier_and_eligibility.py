@@ -228,10 +228,23 @@ class TestCalculatePointsForPurchase:
         # Give Bronze a 1.5x multiplier so the truncation is observable.
         tiers["Bronze"].points_multiplier = 1.5
         db.session.commit()
-        # 1250 / 250 = 5 base points; 5 * 1.5 = 7.5 -> int() truncates to 7.
+        # 1250 / 250 = 5 base points; 5 * 1.5 = 7.5 -> floor to 7.
         assert loyalty_service.calculate_points_for_purchase(account.user_id, 1250) == 7
         # 1000 / 250 = 4 base; 4 * 1.5 = 6.0 -> 6 (exact, no truncation).
         assert loyalty_service.calculate_points_for_purchase(account.user_id, 1000) == 6
+
+    def test_tier_multiplier_no_float_truncation_at_integer_boundary(
+        self, loyalty_service, account, tiers, db
+    ):
+        # Regression: 1.15x is not exactly representable as a binary float, so
+        # 360 * 1.15 evaluates to 413.99999999999994 and int() used to floor
+        # it to 413. The EXACT product is 414, which is what must be awarded.
+        tiers["Bronze"].points_multiplier = 1.15
+        db.session.commit()
+        # 90000 / 250 = 360 base points; 360 * 1.15 = 414 (exact integer).
+        assert loyalty_service.calculate_points_for_purchase(account.user_id, 90000) == 414
+        # 3000 / 250 = 12 base; 12 * 1.15 = 13.8 -> floor to 13 (genuine fraction).
+        assert loyalty_service.calculate_points_for_purchase(account.user_id, 3000) == 13
 
 
 # --------------------------------------------------------------------------

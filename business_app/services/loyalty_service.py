@@ -107,8 +107,9 @@ class LoyaltyService:
         current_tier = account.current_tier or "Bronze"
         multiplier = self._get_tier_multiplier(current_tier, account.program_id)
 
-        # Final points calculation
-        final_points = int(base_points * multiplier)
+        from decimal import Decimal
+
+        final_points = int(Decimal(base_points) * Decimal(str(multiplier)))
 
         return max(0, final_points)
 

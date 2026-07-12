@@ -384,7 +384,7 @@ services:
   # privileged: false but with cap_add + devices so it can read the cgroup
   # data it needs without a full --privileged.
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.60.3
+    image: ghcr.io/google/cadvisor:v0.60.3
     command:
       - '--housekeeping_interval=30s'
       - '--docker_only=true'

@@ -45,6 +45,11 @@ export default defineConfig({
     css: true,
     testTimeout: 15000,
     hookTimeout: 15000,
+    // Uncapped forks (= CPU count) oversubscribe dev machines that also run
+    // the docker compose stack: antd+jsdom workers starve past testTimeout
+    // (observed: 13 spurious 15s timeouts at 10 forks vs 42/42 green at 4,
+    // and ~40% faster wall-clock). CI runners have <= 4 cores, so no CI cost.
+    maxWorkers: 4,
     include: [
       'src/**/__tests__/**/*.{js,jsx,ts,tsx}',
       'src/**/*.{test,spec}.{js,jsx,ts,tsx}',

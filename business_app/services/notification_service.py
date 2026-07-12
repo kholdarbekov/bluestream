@@ -51,7 +51,12 @@ from shared.enums import (
 )
 from business_app.utils.translations import get_translation
 from business_app.services.email_template_service import get_email_template_service
-from business_app import db
+from business_app.services.bottle_tracking_service import (
+    BottleTrackingService,
+    format_bottle_quantity,
+)
+from business_app.utils.bot_webhook import trigger_bot_webhook
+from business_app import db, redis_client
 from sqlalchemy import func
 
 # Use standard logging that works in both Flask and Celery contexts
@@ -67,6 +72,15 @@ logger = get_task_logger(__name__)
 #     logger.addHandler(handler)
 #     logger.setLevel(logging.INFO)
 #     logger.propagate = True
+
+
+class BottleSummaryNotReady(Exception):
+    """Raised when a delivered order's bottle ledger has not committed yet.
+
+    The dispatch raises this WITHOUT claiming the idempotency key so the
+    send_delivery_update_task retry re-runs it once the ledger commit lands
+    (design §2 commit race / §3.2 step 3).
+    """
 
 
 class NotificationService:
@@ -454,6 +468,12 @@ class NotificationService:
                 delivery.id,
             )
 
+        # Delivered: dispatch the bottle summary webhook to the customer bot
+        # instead of the (empty-channel) status notification. One hook covers all
+        # three DELIVERED code paths (design §2/§3.2).
+        if history_status == DeliveryStatus.DELIVERED.value:
+            return self._dispatch_bottle_delivery_summary(history, delivery, order, user)
+
         language = getattr(user, "preferred_language", "en") or "en"
         template_data = self._build_delivery_status_template_data(
             delivery=delivery,
@@ -468,6 +488,100 @@ class NotificationService:
             channels,
             template_data,
         )
+
+    def _dispatch_bottle_delivery_summary(self, history, delivery, order, user) -> Dict[str, Any]:
+        """Send the delivered bottle summary to the customer's Telegram (design §3.2).
+
+        Hooked from send_delivery_status_change_notification's delivered branch.
+        Returns a result dict; RAISES to trigger send_delivery_update_task's retry
+        when the dispatch must be re-attempted (ledger not committed yet, or a
+        transient bot-webhook failure).
+        """
+        # Step 1 — no Telegram means nothing to send (email fallback is a non-goal).
+        if not getattr(user, "telegram_id", None):
+            logger.info(
+                "Bottle summary skipped: user %s has no telegram_id (order %s)",
+                user.id,
+                order.id,
+            )
+            return {"success": True, "skipped": True, "reason": "no_telegram"}
+
+        # Step 1b — a legacy/non-numeric telegram_id can't address a chat. Skip
+        # with the same skipped shape rather than raising ValueError deep in
+        # payload-building (which would burn the task's 3 retries on an
+        # unfixable value). Do this BEFORE claiming the idempotency key so the
+        # (never-sent) summary isn't marked dispatched.
+        try:
+            telegram_chat_id = int(user.telegram_id)
+        except (TypeError, ValueError):
+            logger.warning(
+                "Bottle summary skipped: user %s has a non-numeric telegram_id %r (order %s)",
+                user.id,
+                user.telegram_id,
+                order.id,
+            )
+            return {"success": True, "skipped": True, "reason": "invalid_telegram_id"}
+
+        # Step 2 — read the SSOT summary.
+        summary = BottleTrackingService.get_order_bottle_summary(order)
+
+        # Step 3 — readiness guard (fixes the §2 commit race): a bottle-bearing
+        # order whose DELIVERY ledger row is not yet visible means the ledger
+        # commit is still in flight on the DeliveryService/OrderService-direct
+        # paths. Raise WITHOUT claiming the idempotency key so the task retries
+        # after the commit lands. A genuinely non-bottle order (expected 0)
+        # proceeds — no ledger row will ever exist.
+        if summary["expected_bottles"] > 0 and not summary["delivery_recorded"]:
+            logger.info(
+                "Bottle summary not ready for order %s: expected=%s but no DELIVERY ledger row yet; will retry",
+                order.id,
+                summary["expected_bottles"],
+            )
+            raise BottleSummaryNotReady(f"Bottle ledger not committed yet for order {order.id}")
+
+        # Step 4 — claim idempotency (72h TTL, above the task's max retry window).
+        idempotency_key = f"notif:bottle_summary:{order.id}"
+        claimed = redis_client.set(idempotency_key, 1, nx=True, ex=259200)
+        if not claimed:
+            logger.info("Bottle summary already dispatched for order %s, skipping", order.id)
+            return {"success": True, "skipped": True, "reason": "already_dispatched"}
+
+        # Step 5 — build the webhook payload (quantities pre-formatted).
+        payload = {
+            "order_id": order.id,
+            "order_number": order.order_number,
+            "telegram_id": telegram_chat_id,
+            "bottles_delivered": format_bottle_quantity(summary["bottles_delivered"]),
+            "bottles_collected": format_bottle_quantity(summary["bottles_collected"]),
+            "balance": format_bottle_quantity(summary["balance"]),
+        }
+
+        # Step 6 — dispatch. trigger_bot_webhook never raises; inspect success.
+        result = trigger_bot_webhook("/internal/delivery-completed", payload)
+        if result.get("success"):
+            logger.info("Bottle delivery summary dispatched for order %s", order.id)
+            return {"success": True, "dispatched": True, "order_id": order.id}
+
+        # Failure — the key is only durable after a successful dispatch, so
+        # release it in both failure branches (§4: "key not kept").
+        message = str(result.get("message", ""))
+        redis_client.delete(idempotency_key)
+        if "not configured" in message.lower():
+            # Unfixable misconfiguration — retrying cannot help; do NOT raise.
+            logger.error(
+                "Bottle summary dispatch failed for order %s: bot webhook not configured (%s); not retrying",
+                order.id,
+                message,
+            )
+            return {"success": False, "reason": "bot_webhook_unconfigured", "message": message}
+
+        # Transient (bot unreachable / non-2xx / timeout) — raise so the task retries.
+        logger.error(
+            "Bottle summary dispatch failed for order %s (transient: %s); released key, retrying",
+            order.id,
+            message,
+        )
+        raise RuntimeError(f"Bottle summary webhook failed for order {order.id}: {message}")
 
     def send_payment_notification(self, payment_id: int) -> Dict[str, Any]:
         """Send payment confirmation notification via Telegram (if user has telegram) or email"""

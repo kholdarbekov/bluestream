@@ -448,19 +448,11 @@ def test_send_delivery_status_change_notification_sends_nothing_when_no_bot_and_
     assert captured['channels'] == []
 
 
-def test_send_delivery_status_change_notification_sends_nothing_for_delivered_status(
+def test_send_delivery_status_change_notification_dispatches_bottle_summary_for_delivered_status(
     db, sample_user, sample_order
 ):
     sample_user.telegram_id = '998900001236'
     sample_user.is_bot_active = True
-    db.session.add(
-        NotificationPreference(
-            user_id=sample_user.id,
-            notification_type=NotificationType.DELIVERY_UPDATE.value,
-            channel=NotificationChannel.SMS,
-            is_enabled=True,
-        )
-    )
     delivery = Delivery(
         order_id=sample_order.id,
         status=DeliveryStatus.DELIVERED,
@@ -479,17 +471,37 @@ def test_send_delivery_status_change_notification_sends_nothing_for_delivered_st
     db.session.commit()
 
     service = NotificationService()
-    captured = {}
+    send_notification_calls = []
 
     def _fake_send_notification(user_id, notification_type, channels=None, template_data=None, priority='normal'):
-        captured['channels'] = channels
+        send_notification_calls.append(channels)
         return {}
 
     service.send_notification = _fake_send_notification
 
-    service.send_delivery_status_change_notification(history.id)
+    # Patch redis + webhook at the module-under-test path so the test is
+    # deterministic regardless of the test-runner's Redis DB sharding.
+    with patch('business_app.services.notification_service.trigger_bot_webhook') as mock_webhook, patch(
+        'business_app.services.notification_service.redis_client'
+    ) as mock_redis:
+        mock_webhook.return_value = {'success': True}
+        mock_redis.set.return_value = True
+        result = service.send_delivery_status_change_notification(history.id)
 
-    assert captured['channels'] == []
+    # Delivered no longer routes through channel resolution — it dispatches the
+    # bottle-summary webhook instead.
+    assert send_notification_calls == []
+    mock_webhook.assert_called_once()
+    endpoint, payload = mock_webhook.call_args[0]
+    assert endpoint == '/internal/delivery-completed'
+    assert payload['order_id'] == sample_order.id
+    assert payload['order_number'] == sample_order.order_number
+    assert payload['telegram_id'] == 998900001236
+    # sample_order has no bottle-bearing items → non-bottle order → zeros.
+    assert payload['bottles_delivered'] == '0'
+    assert payload['bottles_collected'] == '0'
+    assert payload['balance'] == '0'
+    assert result['dispatched'] is True
 
 
 def test_send_delivery_status_change_notification_sends_nothing_for_non_target_status_with_default_channels(

@@ -60,7 +60,7 @@ from handlers import (
     main_menu_handler, language_handler,
     product_handlers, order_handlers, subscription_handlers,
     profile_handlers, loyalty_handlers, admin_handlers,
-    support_handlers, payment_handlers, bottle_handlers,
+    support_handlers, support_flow_handlers, payment_handlers, bottle_handlers,
     quick_order_handlers,
 )
 # Import conversation states directly (they are module-level constants)
@@ -367,6 +367,7 @@ class WaterBusinessBot:
 
             # Bottle balance callback
             CallbackQueryHandler(bottle_handlers.show_bottle_balance, pattern="^my_bottles$"),
+            CallbackQueryHandler(bottle_handlers.show_bottle_history, pattern=r"^bottle_history_\d+_\d+$"),
 
             # Loyalty callbacks
             CallbackQueryHandler(loyalty_handlers.loyalty_menu, pattern="^menu_loyalty$"),
@@ -379,6 +380,12 @@ class WaterBusinessBot:
             CallbackQueryHandler(support_handlers.support_menu, pattern="^menu_support$"),
             CallbackQueryHandler(support_handlers.faq_handler, pattern="^faq$"),
             CallbackQueryHandler(support_handlers.contact_support, pattern="^contact_support$"),
+
+            # Concern flow off the delivered-summary "Report an issue" button.
+            # No conflict with the ^order_ / ^checkout / ^cancel_ / ^menu_support
+            # prefixes above ("report_issue_" / "support_cancel" match none of them).
+            CallbackQueryHandler(support_flow_handlers.start_order_issue_report, pattern=r"^report_issue_\d+$"),
+            CallbackQueryHandler(support_flow_handlers.cancel_issue_report, pattern="^support_cancel$"),
 
             # Admin callbacks (restricted - access control handled in handler)
             CallbackQueryHandler(admin_handlers.admin_orders, pattern="^admin_orders$"),
@@ -865,8 +872,8 @@ class WaterBusinessBot:
             # Handle product search
             await product_handlers.search_products(update, context, text)
         elif input_type == 'support_message':
-            # Handle support message
-            await support_handlers.handle_support_message(update, context, text)
+            # Guided concern capture armed by the delivered-summary Report button.
+            await support_flow_handlers.handle_support_message(update, context, text)
         elif input_type == 'edit_address_title':
             # Handle address title editing
             await profile_handlers.handle_address_title_edit(update, context, text, user_state)

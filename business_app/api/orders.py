@@ -1054,7 +1054,6 @@ def get_my_bottle_balances():
 def get_my_bottle_ledger(address_id):
     """Get the current customer's bottle ledger for a specific address."""
     from business_app.services.bottle_tracking_service import BottleTrackingService
-    from business_app.serializers.bottle_serializers import serialize_bottle_ledger_entry
 
     user_id = get_jwt_identity()
     page = request.args.get("page", 1, type=int)
@@ -1064,7 +1063,7 @@ def get_my_bottle_ledger(address_id):
     result = service.get_address_ledger(user_id, address_id, page=page, per_page=per_page)
     return success_response(
         data={
-            "items": [serialize_bottle_ledger_entry(e) for e in result["items"]],
+            "items": result["items"],
             "total": result["total"],
             "page": result["page"],
             "per_page": result["per_page"],

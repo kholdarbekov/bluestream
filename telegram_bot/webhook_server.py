@@ -359,6 +359,40 @@ class WebhookServer:
         self._processed_orders[composite] = now
         return False
 
+    async def _release_order_dedup(self, order_id) -> None:
+        """Release the order-id delivery-dedup marker claimed by
+        ``_is_duplicate_webhook('delivery-completed-order', 'order:{order_id}')``.
+
+        The order-id layer is load-bearing: a backend Celery retry mints a FRESH
+        X-Request-ID, so only the order-id SET-NX can collapse it. But that also
+        means a claimed order-id key permanently absorbs the retry — if the
+        Telegram send fails AFTER the claim, the handler 500s, the backend
+        releases its own key and re-POSTs, and this layer answers "already
+        processed", silently dropping the summary. Releasing the key on send
+        failure lets the retry through. Best-effort in both stores
+        ``_is_duplicate_webhook`` writes (Redis marker + in-memory fallback set).
+        """
+        endpoint = 'delivery-completed-order'
+        request_id = f"order:{order_id}"
+
+        # In-memory fallback store (single-replica degraded path).
+        self._processed_orders.pop(f"{endpoint}:{request_id}", None)
+
+        # Redis marker (the primary store when Redis is up).
+        try:
+            token_manager = (
+                self.bot_app.bot_data.get('token_manager')
+                if self.bot_app else None
+            )
+            if token_manager and token_manager.redis:
+                await token_manager.redis.delete(
+                    RedisKeyspace.bot_webhook_dedup(endpoint, request_id)
+                )
+        except Exception as exc:
+            report_redis_failure(
+                "webhook_server.dedup_release", str(exc), tier="reliability"
+            )
+
     async def setup(self):
         """Setup webhook server routes"""
         # BOT-007: ip_allowlist_middleware gates /internal/* on source IP.
@@ -371,6 +405,7 @@ class WebhookServer:
         # Add routes
         self.app.router.add_post('/internal/reload-translations', reload_translations_handler)
         self.app.router.add_post('/internal/payment-success', self.payment_success_handler)
+        self.app.router.add_post('/internal/delivery-completed', self.delivery_completed_handler)
         self.app.router.add_get('/internal/stats', stats_handler)
         self.app.router.add_get('/health', health_handler)
 
@@ -542,6 +577,157 @@ class WebhookServer:
                 'message': 'Internal server error'
             }, status=500)
 
+    async def delivery_completed_handler(self, request):
+        """
+        Handle delivery-completed webhook from backend.
+
+        POST /internal/delivery-completed
+        {
+            "order_id": 67890,
+            "order_number": "1234",
+            "telegram_id": 12345,
+            "bottles_delivered": "4",   # normalized Decimal strings, pre-formatted
+            "bottles_collected": "3",   # by the backend (format_bottle_quantity)
+            "balance": "5"
+        }
+
+        Sends the customer a delivery summary with a "Report an issue" inline
+        button. Numbers arrive pre-formatted as strings and are rendered verbatim
+        — the bot performs no numeric formatting of its own.
+        """
+        try:
+            # Verify signature
+            if not await verify_webhook_signature(request):
+                logger.warning(f"Invalid webhook signature from {request.remote}")
+                return web.json_response({
+                    'success': False,
+                    'message': 'Invalid signature'
+                }, status=401)
+
+            if not self.bot_app:
+                logger.error("Bot application not initialized in webhook server")
+                return web.json_response({
+                    'success': False,
+                    'message': 'Bot not initialized'
+                }, status=503)
+
+            # Parse request data
+            try:
+                data = await request.json()
+            except Exception:
+                return web.json_response({
+                    'success': False,
+                    'message': 'Invalid JSON'
+                }, status=400)
+
+            order_id = data.get('order_id')
+            order_number = data.get('order_number')
+            telegram_id = data.get('telegram_id')
+            bottles_delivered = str(data.get('bottles_delivered', '0'))
+            bottles_collected = str(data.get('bottles_collected', '0'))
+            balance = str(data.get('balance', '0'))
+
+            if not order_id or not telegram_id:
+                return web.json_response({
+                    'success': False,
+                    'message': 'Missing required fields: order_id, telegram_id'
+                }, status=400)
+
+            # Two-layer dedup. Layer 1 (X-Request-ID) collapses an exact HTTP
+            # replay of ONE Celery attempt. Layer 2 (order_id) is load-bearing:
+            # trigger_bot_webhook mints a FRESH X-Request-ID on every Celery
+            # retry (no g.request_id outside a Flask request), so request-id
+            # dedup alone can't collapse backend retries of the same delivery.
+            # Both reuse the shared Redis SET-NX helper (24h TTL, in-memory
+            # fallback + Sentry-observable Redis-failure reporting).
+            request_id = request.headers.get('X-Request-ID')
+            if request_id and await self._is_duplicate_webhook('delivery-completed', request_id):
+                logger.info(
+                    "Duplicate delivery webhook (request_id=%s order=%s), skipping",
+                    request_id, order_id,
+                )
+                return web.json_response({
+                    'success': True,
+                    'message': 'Already processed (deduplicated)'
+                })
+            if await self._is_duplicate_webhook('delivery-completed-order', f"order:{order_id}"):
+                logger.info("Duplicate delivery webhook for order %s, skipping", order_id)
+                return web.json_response({
+                    'success': True,
+                    'message': 'Already processed (deduplicated)'
+                })
+
+            logger.info(
+                f"Sending delivery summary to telegram_id {telegram_id} "
+                f"for order {order_number or order_id}"
+            )
+
+            # Build the localized message (HTML). Title always; the bottle block
+            # (incl. the balance line) is omitted for a genuinely non-bottle order
+            # — the backend readiness guard guarantees zero/zero means "no ledger
+            # row will ever exist", not "ledger not committed yet".
+            language = await i18n.get_user_language(telegram_id)
+
+            lines = [
+                i18n.get(
+                    'telegram.delivery_summary.title', language,
+                    order_number=order_number or str(order_id),
+                )
+            ]
+            if not (bottles_delivered == '0' and bottles_collected == '0'):
+                lines.append('')
+                lines.append(i18n.get(
+                    'telegram.delivery_summary.bottles_delivered', language,
+                    count=bottles_delivered,
+                ))
+                lines.append(i18n.get(
+                    'telegram.delivery_summary.bottles_collected', language,
+                    count=bottles_collected,
+                ))
+                lines.append(i18n.get(
+                    'telegram.delivery_summary.balance', language,
+                    count=balance,
+                ))
+            message_text = '\n'.join(lines)
+
+            # Lazy import mirrors payment_success_handler's `from keyboards import
+            # PaymentKeyboards` — keeps keyboards out of module import time.
+            from keyboards import KeyboardBuilder
+            keyboard = KeyboardBuilder.build_inline_keyboard([[
+                {
+                    'text': i18n.get('telegram.delivery_summary.report_button', language),
+                    'callback_data': f'report_issue_{order_id}',
+                }
+            ]])
+
+            try:
+                await self.bot_app.bot.send_message(
+                    chat_id=telegram_id,
+                    text=message_text,
+                    parse_mode='HTML',
+                    reply_markup=keyboard,
+                )
+            except Exception:
+                # Send failed AFTER the order-id dedup key was claimed. Release
+                # it so the backend's Celery retry (fresh X-Request-ID → only the
+                # order-id layer could catch it) is NOT absorbed and the summary
+                # permanently lost. Re-raise into the 500 branch below so the
+                # backend still sees the failure and retries.
+                await self._release_order_dedup(order_id)
+                raise
+
+            return web.json_response({
+                'success': True,
+                'message': 'Notification sent'
+            })
+
+        except Exception as e:
+            logger.error(f"Error processing delivery completed: {e}", exc_info=True)
+            return web.json_response({
+                'success': False,
+                'message': 'Internal server error'
+            }, status=500)
+
     async def start(self):
         """Start the webhook server"""
         try:
@@ -558,6 +744,7 @@ class WebhookServer:
             logger.info("Available endpoints:")
             logger.info(f"  POST http://{self.host}:{self.port}/internal/reload-translations")
             logger.info(f"  POST http://{self.host}:{self.port}/internal/payment-success")
+            logger.info(f"  POST http://{self.host}:{self.port}/internal/delivery-completed")
             logger.info(f"  GET  http://{self.host}:{self.port}/internal/stats")
             logger.info(f"  GET  http://{self.host}:{self.port}/health")
 

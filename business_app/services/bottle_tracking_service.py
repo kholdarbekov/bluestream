@@ -41,6 +41,17 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def format_bottle_quantity(value) -> str:
+    """Render a returnable-bottle quantity as a normalized decimal string.
+
+    Drops insignificant trailing zeros ("4.00" -> "4", "1.50" -> "1.5") without
+    int() truncation, so schema-permitted fractional Numeric(12,2) quantities
+    survive. ``None``/0 render as "0".
+    """
+    dec = Decimal(str(value if value is not None else 0))
+    return format(dec.normalize(), "f")
+
+
 class BottleTrackingService:
     """Manages returnable bottle balances, ledger, fines, and driver accountability."""
 
@@ -543,18 +554,72 @@ class BottleTrackingService:
 
     @staticmethod
     def get_address_ledger(user_id: int, address_id: int, page: int = 1, per_page: int = 20) -> Dict:
-        """Get paginated ledger for a specific user+address."""
-        query = BottleLedger.query.filter_by(user_id=user_id, address_id=address_id).order_by(
-            BottleLedger.occurred_at.desc()
+        """Get paginated ledger for a specific user+address.
+
+        Each serialized row carries ``order_number`` (``None`` for standalone
+        events with no ``order_id``), resolved via the ``BottleLedger.order``
+        relationship.
+        """
+        query = (
+            BottleLedger.query.options(joinedload(BottleLedger.order))
+            .filter_by(user_id=user_id, address_id=address_id)
+            .order_by(BottleLedger.occurred_at.desc())
         )
         total = query.count()
         entries = query.offset((page - 1) * per_page).limit(per_page).all()
+        items = []
+        for entry in entries:
+            row = entry.to_dict()
+            row["order_number"] = entry.order.order_number if entry.order else None
+            items.append(row)
         return {
-            "items": [e.to_dict() for e in entries],
+            "items": items,
             "total": total,
             "page": page,
             "per_page": per_page,
             "pages": (total + per_page - 1) // per_page if per_page else 0,
+        }
+
+    @staticmethod
+    def get_order_bottle_summary(order: Order) -> Dict[str, Any]:
+        """Read-only SSOT for the delivered bottle summary (design §3.1).
+
+        Returns Decimals for exact rendering by the webhook payload builder:
+          - expected_bottles: what the order's items imply (readiness-guard input only)
+          - delivery_recorded: whether the DELIVERY ledger row (idempotency key
+            delivery:{order_id}) exists yet — the guard keys on this, not on a zero qty
+          - bottles_delivered: quantity from that DELIVERY row; 0 if absent
+          - bottles_collected: abs value of the RETURN_ON_DELIVERY row for the order; 0 if absent
+          - balance: current per-address BottleBalance at read time; 0 if no row
+        """
+        expected_bottles = BottleTrackingService.calculate_bottles_for_order(order)
+
+        delivery_row = BottleLedger.query.filter_by(idempotency_key=f"delivery:{order.id}").first()
+        delivery_recorded = delivery_row is not None
+        bottles_delivered = Decimal(str(delivery_row.quantity)) if delivery_row is not None else Decimal("0")
+
+        return_row = (
+            BottleLedger.query.filter_by(
+                order_id=order.id,
+                event_type=BottleLedgerEventType.RETURN_ON_DELIVERY,
+            )
+            .order_by(BottleLedger.occurred_at.desc())
+            .first()
+        )
+        bottles_collected = abs(Decimal(str(return_row.quantity))) if return_row is not None else Decimal("0")
+
+        balance = Decimal("0")
+        if order.delivery_address_id is not None:
+            balance_row = BottleTrackingService.get_balance(order.user_id, order.delivery_address_id)
+            if balance_row is not None:
+                balance = Decimal(str(balance_row.balance or 0))
+
+        return {
+            "expected_bottles": expected_bottles,
+            "delivery_recorded": delivery_recorded,
+            "bottles_delivered": bottles_delivered,
+            "bottles_collected": bottles_collected,
+            "balance": balance,
         }
 
     @staticmethod

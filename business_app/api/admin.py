@@ -50,6 +50,7 @@ from business_app.services.admin_delivery_service import AdminDeliveryService
 from business_app.services.admin_loyalty_service import AdminLoyaltyService
 from business_app.services.product_fiscal_service import ProductFiscalService
 from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
+from business_app.services.customer_map_service import CustomerMapService
 from business_app.serializers.admin_serializers import (
     serialize_user_admin,
     serialize_order_admin,
@@ -57,6 +58,7 @@ from business_app.serializers.admin_serializers import (
     serialize_delivery_person_admin,
     serialize_category_admin,
     InactiveCustomersQuerySchema,
+    CustomerMapPinSchema,
 )
 from business_app.utils.service_factory import get_analytics_service, get_support_conversation_service
 from business_app.serializers.support_serializers import (
@@ -1112,6 +1114,24 @@ def get_users():
     except Exception as e:
         current_app.logger.error(f"Get users error: {e}")
         return internal_error_response("Failed to get users")
+
+
+@admin_bp.route("/customers/map-pins", methods=["GET"])
+@jwt_required()
+@validate_admin_action(["view_users"])
+def get_customer_map_pins():
+    """All ordering customers' geocoded address pins for the admin map (no pagination)."""
+    try:
+        rows = CustomerMapService.get_customer_map_pins()
+        pins = [
+            # mode="json": datetime -> ISO string (not Flask's RFC-1123), MoneyFloat -> float.
+            CustomerMapPinSchema.model_validate(row).model_dump(mode="json", by_alias=True)
+            for row in rows
+        ]
+        return success_response(data={"pins": pins})
+    except Exception as e:  # noqa: BLE001
+        current_app.logger.error(f"Customer map pins error: {e}")
+        return internal_error_response("Failed to load customer map")
 
 
 @admin_bp.route("/users/<int:user_id>", methods=["GET"])

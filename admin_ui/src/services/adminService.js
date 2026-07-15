@@ -273,6 +273,11 @@ class AdminService {
     return response.data;
   }
 
+  async getCustomerMapPins() {
+    const response = await api.get('/admin/customers/map-pins');
+    return response.data;
+  }
+
   async getUserDetails(userId) {
     const response = await api.get(`/admin/users/${userId}`);
     return response.data;

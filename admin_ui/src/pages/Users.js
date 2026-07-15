@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, lazy, Suspense } from 'react';
 import dayjs from 'dayjs';
 import { DEFAULT_PAGE_SIZE } from '../utils/constants';
 import {
@@ -19,7 +19,8 @@ import {
   Checkbox,
   Divider,
   Tooltip,
-  DatePicker
+  DatePicker,
+  Tabs
 } from 'antd';
 import {
   SearchOutlined,
@@ -50,6 +51,11 @@ import { formatLocalDate, formatLocaleDateTime } from '../utils/dateUtils';
 import exportUtils from '../utils/exportUtils';
 
 const { Option } = Select;
+
+// Lazy-loaded so the heavy Leaflet/map bundle (and its leaflet.heat dep) is only
+// fetched when the "Map" tab is opened, keeping the default list view lean.
+const CustomerMap = lazy(() => import('../components/CustomerMap'));
+
 const USER_TYPE_OPTIONS = [
   { value: 'individual', labelKey: 'ui.users.user_type_individual', fallback: 'Individual' },
   { value: 'entity', labelKey: 'ui.users.user_type_entity', fallback: 'Entity' }
@@ -110,6 +116,7 @@ const Users = () => {
   const [districts, setDistricts] = useState([]);
   const [addressCoordinates, setAddressCoordinates] = useState(null);
   const [pagination, setPagination] = useState({ page: 1, per_page: DEFAULT_PAGE_SIZE });
+  const [activeTab, setActiveTab] = useState('list');
   const responsive = useResponsive();
   const [createForm] = Form.useForm();
   const [addressForm] = Form.useForm();
@@ -779,6 +786,21 @@ const Users = () => {
     fetchUserCart(user);
   };
 
+  // Opens the existing user-detail modal from a bare user id (used by the Map
+  // tab's "View full profile"). getUserDetails returns the response body
+  // { success, data: { user, statistics, recent_orders, addresses } }; the
+  // customer object is at data.user — passing the wrapper renders an empty modal.
+  const openUserDetailById = useCallback(async (userId) => {
+    try {
+      const res = await adminService.getUserDetails(userId);
+      const full = res?.data?.user;
+      if (!full) throw new Error('missing user');
+      handleViewUser(full);
+    } catch {
+      message.error(t('ui.users.map.load_profile_failed', 'Could not load customer profile'));
+    }
+  }, [t]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleEditUser = (user) => {
     setEditingUser(user);
     setIsCreateModalVisible(true);
@@ -887,7 +909,16 @@ const Users = () => {
 
   return (
     <div>
-      <Card>
+      <Tabs
+        activeKey={activeTab}
+        onChange={setActiveTab}
+        destroyInactiveTabPane={false}
+        items={[
+          {
+            key: 'list',
+            label: <Space><UserOutlined />{t('ui.users.map.tab_list', 'List')}</Space>,
+            children: (
+              <Card>
         {/* Header - Universal Responsive Layout */}
         <Row
           gutter={[16, 16]}
@@ -1012,7 +1043,26 @@ const Users = () => {
           }}
           size={responsive.isMobileDevice ? 'small' : 'middle'}
         />
-      </Card>
+              </Card>
+            ),
+          },
+          {
+            key: 'map',
+            label: <Space><EnvironmentOutlined />{t('ui.users.map.tab_map', 'Map')}</Space>,
+            children: activeTab === 'map' ? (
+              <Suspense
+                fallback={(
+                  <div style={{ padding: 24, textAlign: 'center' }}>
+                    {t('ui.common.loading', 'Loading...')}
+                  </div>
+                )}
+              >
+                <CustomerMap onViewUser={openUserDetailById} />
+              </Suspense>
+            ) : null,
+          },
+        ]}
+      />
 
       {/* User Details Modal - Responsive */}
       <Modal

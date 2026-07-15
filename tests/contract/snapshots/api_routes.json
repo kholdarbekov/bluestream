@@ -448,6 +448,13 @@
     "rule": "/api/v1/admin/corporate/contracts/overlap-preview"
   },
   {
+    "endpoint": "admin.get_customer_map_pins",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/customers/map-pins"
+  },
+  {
     "endpoint": "admin.get_admin_dashboard",
     "methods": [
       "GET"

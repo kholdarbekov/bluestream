@@ -555,6 +555,7 @@ __all__ = [
     "SystemMaintenanceRequest",
     "AdminResponseSchema",
     "InactiveCustomersQuerySchema",
+    "CustomerMapPinSchema",
     "UserRole",
     "UserStatus",
     "OrderStatus",
@@ -991,6 +992,33 @@ def generate_admin_dashboard_data() -> Dict[str, Any]:
     )
 
     return dashboard.model_dump()
+
+
+class CustomerMapPinSchema(BaseModel):
+    """One customer address pin for the admin map."""
+
+    # populate_by_name=True lets model_validate accept the snake_case dicts the
+    # service produces (without it, alias_generator=to_camel forces camelCase input).
+    model_config = ConfigDict(from_attributes=True, alias_generator=to_camel, populate_by_name=True)
+
+    address_id: int
+    user_id: int
+    full_name: str
+    phone: Optional[str] = None
+    user_type: str
+    entity_subtype: Optional[str] = None
+    lat: float
+    lng: float
+    is_default: bool = False
+    address_label: str = ""
+    address_index: int = 1
+    address_count: int = 1
+    last_order_date: Optional[datetime] = None
+    order_count: int = 0
+    bottle_balance: MoneyFloat = Field(default=0)
+    outstanding_debt: MoneyFloat = Field(default=0)
+    active_cod_debt_count: int = 0
+    cod_restricted: bool = False
 
 
 # Helper functions (would typically query the database)

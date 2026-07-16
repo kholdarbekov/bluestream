@@ -454,7 +454,13 @@ const Orders = () => {
 
   const openCashEdit = () => {
     cashEditForm.resetFields();
-    cashEditForm.setFieldsValue({ new_amount: Number(selectedOrder.amount_collected || 0), reason: '' });
+    // Seed from the cash event this edit adjusts. amount_collected may be funded from
+    // another source (card transfer, prepaid credit) and would seed a figure the edit
+    // cannot move.
+    cashEditForm.setFieldsValue({
+      new_amount: Number(selectedOrder.collected_cash_event_amount ?? 0),
+      reason: '',
+    });
     setCashEditPreview(null);
     setPendingCashEdit(null);
     setCashEditStep(1);
@@ -2384,6 +2390,9 @@ const Orders = () => {
             <Descriptions column={1} size="small" bordered style={{ marginBottom: 12 }}>
               <Descriptions.Item label={t('ui.orders.new_collected_amount', 'Actual collected amount')}>
                 {formatMoney(cashEditPreview?.new_amount)} UZS
+              </Descriptions.Item>
+              <Descriptions.Item label={t('ui.orders.applied_to_order', 'Applied to this order')}>
+                {formatMoney(cashEditPreview?.applied_to_order)} UZS
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.orders.surplus_or_shortfall', 'Surplus / shortfall')}>
                 {formatMoney(cashEditPreview?.surplus_or_shortfall)} UZS

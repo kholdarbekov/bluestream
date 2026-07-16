@@ -44,6 +44,7 @@ class CashEditPlan:
     new_amount: Decimal
     order_total: Decimal
     surplus_or_shortfall: Decimal
+    applied_to_order: Decimal
     projected_outstanding: Decimal
     projected_payment_status: str
     customer_credit_delta: Decimal
@@ -64,6 +65,7 @@ class CashEditPlan:
             "new_amount": float(self.new_amount),
             "order_total": float(self.order_total),
             "surplus_or_shortfall": float(self.surplus_or_shortfall),
+            "applied_to_order": float(self.applied_to_order),
             "projected_outstanding": float(self.projected_outstanding),
             "projected_payment_status": self.projected_payment_status,
             "customer_credit_delta": float(self.customer_credit_delta),
@@ -127,7 +129,11 @@ class OrderCashEditService:
         is_cod = order.payment_method == PaymentMethod.CASH
         delivered = order.status == OrderStatus.DELIVERED
         if not (is_cod and delivered):
-            return {"is_collected_cash_editable": False, "collected_cash_edit_window_remaining_hours": None}
+            return {
+                "is_collected_cash_editable": False,
+                "collected_cash_edit_window_remaining_hours": None,
+                "collected_cash_event_amount": None,
+            }
         remaining: Optional[float] = None
         editable = True
         delivered_at = delivered_at_utc(order)
@@ -135,11 +141,15 @@ class OrderCashEditService:
             age = (datetime.now(timezone.utc) - delivered_at).total_seconds() / 3600.0
             remaining = max(0.0, self._window_hours() - age)
             editable = age <= self._window_hours()
-        if self._event_query(order.id).count() != 1:
+        events = self._event_query(order.id).all()
+        if len(events) != 1:
             editable = False
         return {
             "is_collected_cash_editable": bool(editable),
             "collected_cash_edit_window_remaining_hours": (round(remaining, 1) if remaining is not None else None),
+            # The edit adjusts this event; payment.amount_collected may be funded from
+            # another source (card transfer, prepaid credit) and would seed a wrong figure.
+            "collected_cash_event_amount": (float(events[0].amount) if len(events) == 1 else None),
         }
 
     # ---- preview (read-only) ----
@@ -199,22 +209,43 @@ class OrderCashEditService:
                     blocking.append(f"session_not_adjustable: status '{session_status}'")
 
         surplus = new_dec - order_total
-        projected_outstanding = order_total - new_dec
-        if projected_outstanding < Decimal("0.00"):
-            projected_outstanding = Decimal("0.00")
-        if new_dec >= order_total:
+
+        # Project against what the allocator will actually do, not against the order total:
+        # a payment already settled from another source has nothing left to apply to, so the
+        # whole entry becomes customer credit.
+        if event is not None:
+            projection = self.cash_service.simulate_event_amount_change(
+                event=event, new_amount=new_dec, order_id=order.id
+            )
+            applied_to_order = projection["applied_to_order"]
+            projected_outstanding = projection["order_outstanding_after"]
+            customer_credit_delta = projection["credit_after"] - projection["credit_before"]
+            order_settled_elsewhere = projection["order_outstanding_before"] <= Decimal("0.00")
+            payment_amount = projection["order_amount"] or order_total
+        else:
+            applied_to_order = Decimal("0.00")
+            projected_outstanding = max(Decimal("0.00"), order_total - new_dec)
+            customer_credit_delta = Decimal("0.00")
+            order_settled_elsewhere = False
+            payment_amount = order_total
+
+        if projected_outstanding <= Decimal("0.00"):
             projected_status = "completed"
-        elif new_dec > Decimal("0.00"):
+        elif payment_amount - projected_outstanding > Decimal("0.00"):
             projected_status = "partially_paid"
         else:
             projected_status = "pending"
-        customer_credit_delta = max(Decimal("0.00"), surplus) - max(Decimal("0.00"), current_collected - order_total)
 
-        if event and surplus < Decimal("0.00"):
+        if event and projected_outstanding > Decimal("0.00"):
             warnings.append(
                 "collected_below_order_total - order will not be fully paid; loyalty may need manual review"
             )
-        if event and surplus > Decimal("0.00"):
+        if event and order_settled_elsewhere and new_dec > Decimal("0.00"):
+            warnings.append(
+                "order_already_settled_by_other_source - this order is already paid (card transfer "
+                "or prepaid credit), so nothing applies to it and the full amount becomes customer credit"
+            )
+        if event and customer_credit_delta > Decimal("0.00"):
             warnings.append("surplus_credited_to_customer - auto-applies to the customer's other unpaid orders if any")
 
         if event is not None:
@@ -235,6 +266,7 @@ class OrderCashEditService:
             new_amount=new_dec,
             order_total=order_total,
             surplus_or_shortfall=surplus,
+            applied_to_order=applied_to_order,
             projected_outstanding=projected_outstanding,
             projected_payment_status=projected_status,
             customer_credit_delta=customer_credit_delta,

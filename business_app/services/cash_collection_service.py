@@ -3,7 +3,7 @@
 import logging
 from datetime import datetime, UTC
 from decimal import Decimal
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from sqlalchemy import func
 from sqlalchemy.orm import contains_eager, joinedload
@@ -1968,6 +1968,73 @@ class CashCollectionService:
             db.session.commit()
         return replacement
 
+    def _cod_payments_ordered(self, customer_id: int, *, for_update: bool = False) -> List[Payment]:
+        """CASH payments on the customer's DELIVERED orders, oldest-first.
+
+        Unlike _active_cod_payments_query this keeps settled rows, so a caller modelling a
+        pending reversal can resurrect one whose outstanding is only zero because the event
+        being reversed paid it.
+        """
+        query = (
+            Payment.query.join(Order, Payment.order_id == Order.id)
+            .options(contains_eager(Payment.order))
+            .filter(
+                Payment.user_id == customer_id,
+                Payment.payment_method == PaymentMethod.CASH,
+                Order.status == OrderStatus.DELIVERED,
+            )
+            .order_by(Order.created_at.asc(), Payment.created_at.asc(), Payment.id.asc())
+        )
+        if for_update:
+            query = query.with_for_update(of=Payment)
+        return query.all()
+
+    def _allocation_candidates(
+        self,
+        *,
+        customer_id: int,
+        order_id: Optional[int],
+        payments: List[Payment],
+        outstanding_of: Callable[[Payment], Decimal],
+    ) -> List[Payment]:
+        """Payments the oldest-first allocator walks, in order: the customer's active COD
+        debts oldest-first, then the current order's own payment.
+
+        `outstanding_of` lets a projection model balances that differ from the stored rows.
+        """
+        candidates = [payment for payment in payments if outstanding_of(payment) > Decimal("0.00")]
+        if order_id:
+            current_order_payment = (
+                Payment.query.options(joinedload(Payment.order)).filter_by(order_id=order_id).first()
+            )
+            if (
+                current_order_payment
+                and current_order_payment.payment_method == PaymentMethod.CASH
+                and outstanding_of(current_order_payment) > Decimal("0.00")
+                and current_order_payment.id not in {payment.id for payment in candidates}
+            ):
+                candidates.append(current_order_payment)
+        return candidates
+
+    @staticmethod
+    def _plan_allocation(
+        candidates: List[Payment],
+        amount: Decimal,
+        outstanding_of: Callable[[Payment], Decimal],
+    ) -> Tuple[List[Tuple[Payment, Decimal]], Decimal]:
+        """Split `amount` across `candidates` in order. Returns (plan, unallocated residual)."""
+        plan: List[Tuple[Payment, Decimal]] = []
+        remaining = amount
+        for payment in candidates:
+            if remaining <= Decimal("0.00"):
+                break
+            allocatable = min(outstanding_of(payment), remaining)
+            if allocatable <= Decimal("0.00"):
+                continue
+            plan.append((payment, allocatable))
+            remaining -= allocatable
+        return plan, remaining
+
     def _allocate_oldest_first(
         self,
         *,
@@ -1979,31 +2046,19 @@ class CashCollectionService:
         if self._to_decimal(event.amount) <= Decimal("0.00"):
             return
 
-        allocation_order = 0
-        payments = self.get_active_cod_payments_for_customer(customer_id, for_update=True)
+        def live_outstanding(payment: Payment) -> Decimal:
+            return self._to_decimal(payment.outstanding_amount)
 
-        if order_id:
-            current_order_payment = (
-                Payment.query.options(joinedload(Payment.order)).filter_by(order_id=order_id).first()
-            )
-            if (
-                current_order_payment
-                and current_order_payment.payment_method == PaymentMethod.CASH
-                and self._to_decimal(current_order_payment.outstanding_amount) > Decimal("0.00")
-                and current_order_payment.id not in {payment.id for payment in payments}
-            ):
-                payments.append(current_order_payment)
-
-        for payment in payments:
-            if self._to_decimal(event.unapplied_amount) <= Decimal("0.00"):
-                break
-            allocation_order += 1
-            allocatable = min(
-                self._to_decimal(payment.outstanding_amount),
-                self._to_decimal(event.unapplied_amount),
-            )
-            if allocatable <= Decimal("0.00"):
-                continue
+        candidates = self._allocation_candidates(
+            customer_id=customer_id,
+            order_id=order_id,
+            payments=self.get_active_cod_payments_for_customer(customer_id, for_update=True),
+            outstanding_of=live_outstanding,
+        )
+        plan, _residual = self._plan_allocation(
+            candidates, self._to_decimal(event.unapplied_amount), live_outstanding
+        )
+        for allocation_order, (payment, allocatable) in enumerate(plan, start=1):
             self._allocate_to_payment(
                 event=event,
                 payment=payment,
@@ -2011,6 +2066,64 @@ class CashCollectionService:
                 allocation_order=allocation_order,
                 allocation_mode=allocation_mode,
             )
+
+    def simulate_event_amount_change(
+        self,
+        *,
+        event: CashCollectionEvent,
+        new_amount: Any,
+        order_id: Optional[int],
+    ) -> Dict[str, Decimal]:
+        """Project adjust_event_amount(event, new_amount) without mutating anything.
+
+        Mirrors the void-then-repost sequence: hand the event's live allocations back to
+        their payments, then re-run the oldest-first split for the new amount. Callers get
+        the truth an order-total-based estimate misses when the payment is already settled
+        from another source (card transfer, prepaid credit), where nothing can be applied
+        and the whole amount lands as customer credit.
+        """
+        new_amount = self._to_decimal(new_amount)
+        restored: Dict[int, Decimal] = {}
+        for allocation in event.allocations:
+            if allocation.reversed_at or not self._allocation_affects_payment_projection(allocation):
+                continue
+            restored[allocation.payment_id] = restored.get(
+                allocation.payment_id, Decimal("0.00")
+            ) + self._to_decimal(allocation.allocated_amount)
+
+        def outstanding_after_reversal(payment: Payment) -> Decimal:
+            amount = self._to_decimal(payment.amount)
+            collected = self._to_decimal(payment.amount_collected) - restored.get(
+                payment.id, Decimal("0.00")
+            )
+            collected = min(amount, max(Decimal("0.00"), collected))
+            return max(Decimal("0.00"), amount - collected)
+
+        candidates = self._allocation_candidates(
+            customer_id=event.customer_id,
+            order_id=order_id,
+            payments=self._cod_payments_ordered(event.customer_id),
+            outstanding_of=outstanding_after_reversal,
+        )
+        plan, residual = self._plan_allocation(candidates, new_amount, outstanding_after_reversal)
+
+        applied_to_order = sum(
+            (amount for payment, amount in plan if payment.order_id == order_id),
+            Decimal("0.00"),
+        )
+        order_payment = Payment.query.filter_by(order_id=order_id).first() if order_id else None
+        outstanding_before = (
+            outstanding_after_reversal(order_payment) if order_payment else Decimal("0.00")
+        )
+        return {
+            "applied_to_order": applied_to_order,
+            "applied_total": new_amount - residual,
+            "credit_before": self._to_decimal(event.unapplied_amount),
+            "credit_after": residual,
+            "order_amount": self._to_decimal(order_payment.amount) if order_payment else Decimal("0.00"),
+            "order_outstanding_before": outstanding_before,
+            "order_outstanding_after": max(Decimal("0.00"), outstanding_before - applied_to_order),
+        }
 
     def _allocate_to_payment(
         self,

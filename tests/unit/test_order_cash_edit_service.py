@@ -265,3 +265,107 @@ def test_preview_no_multi_debt_warning_for_single_order_customer(
 
     assert plan.is_editable
     assert not any(w.startswith("customer_has_other_unpaid_cod_orders") for w in plan.warnings)
+
+
+@pytest.fixture
+def card_settled_order(db, sample_user, delivery_driver, driver_profile, delivered_cod):
+    """Order already settled by a personal card transfer, with no cash recorded by the driver.
+
+    Mirrors prod TG_000251_26: the driver logged 0 cash ("Karta"), an admin then booked the
+    90k as a personal card transfer, so the payment already sits at outstanding 0 before
+    anyone opens the collected-cash edit.
+    """
+    order, delivery = delivered_cod
+    order.total_amount = Decimal("90000")
+    db.session.commit()
+    svc = CashCollectionService()
+    svc.ensure_cod_payment_for_order(order)
+    svc.post_collection(
+        customer_id=sample_user.id, amount=Decimal("0"), source="delivery_completion",
+        collector_user_id=delivery_driver.id, recorded_by_user_id=delivery_driver.id,
+        order_id=order.id, delivery_id=delivery.id, notes="Karta",
+    )
+    svc.post_collection(
+        customer_id=sample_user.id, amount=Decimal("90000"), source="personal_card_transfer",
+        recorded_by_user_id=sample_user.id, order_id=order.id, notes="tolandi",
+    )
+    return order, delivery
+
+
+def test_preview_credits_full_amount_when_order_settled_elsewhere(
+    db, sample_user, delivery_driver, driver_profile, card_settled_order
+):
+    """Nothing is left to pay, so the whole entry becomes credit — preview must say so.
+
+    Prod TG_000251_26 promised "+10,000 credit" (100k - 90k order total) while the
+    allocator, seeing outstanding 0, credited the full 100k.
+    """
+    order, _ = card_settled_order
+    plan = OrderCashEditService().preview(order_id=order.id, new_amount="100000")
+    assert plan.customer_credit_delta == Decimal("100000")
+    assert plan.applied_to_order == Decimal("0")
+
+
+def test_preview_warns_when_order_settled_elsewhere(
+    db, sample_user, delivery_driver, driver_profile, card_settled_order
+):
+    order, _ = card_settled_order
+    plan = OrderCashEditService().preview(order_id=order.id, new_amount="100000")
+    assert any(w.startswith("order_already_settled_by_other_source") for w in plan.warnings)
+
+
+def test_preview_keeps_completed_status_when_order_settled_elsewhere(
+    db, sample_user, delivery_driver, driver_profile, card_settled_order
+):
+    """Booking the 10k actually collected must not read as an 80k shortfall on a paid order."""
+    order, _ = card_settled_order
+    plan = OrderCashEditService().preview(order_id=order.id, new_amount="10000")
+    assert plan.projected_outstanding == Decimal("0")
+    assert plan.projected_payment_status == "completed"
+    assert plan.customer_credit_delta == Decimal("10000")
+    assert not any("collected_below_order_total" in w for w in plan.warnings)
+
+
+def test_preview_reports_amount_applied_to_order_for_normal_overcollection(
+    db, sample_user, delivery_driver, driver_profile, delivered_cod
+):
+    """Regression: the ordinary surplus case still settles the order and credits only the excess."""
+    order, delivery = delivered_cod
+    svc = CashCollectionService()
+    _seed(svc, sample_user, delivery_driver, order, delivery, "54000")
+
+    plan = OrderCashEditService().preview(order_id=order.id, new_amount="60000")
+
+    assert plan.applied_to_order == Decimal("54000")
+    assert plan.customer_credit_delta == Decimal("6000")
+    assert not any(w.startswith("order_already_settled_by_other_source") for w in plan.warnings)
+
+
+def test_edit_metadata_exposes_event_amount_not_payment_collected(
+    db, sample_user, delivery_driver, driver_profile, card_settled_order
+):
+    """The form must seed from the event being adjusted, not from payment.amount_collected,
+    which here is funded by the card transfer rather than by cash."""
+    order, _ = card_settled_order
+    meta = OrderCashEditService().get_edit_metadata(order)
+    assert meta["collected_cash_event_amount"] == 0.0
+    payment = Payment.query.filter_by(order_id=order.id).first()
+    assert Decimal(str(payment.amount_collected)) == Decimal("90000")
+
+
+def test_apply_on_card_settled_order_credits_only_the_cash_collected(
+    db, sample_user, delivery_driver, driver_profile, card_settled_order
+):
+    """Remediation path: booking the true 10k leaves the card settlement intact."""
+    order, _ = card_settled_order
+    svc = CashCollectionService()
+
+    OrderCashEditService().apply_edit(
+        order_id=order.id, new_amount="10000", reason="driver collected only 10k cash",
+        actor_user_id=delivery_driver.id,
+    )
+
+    payment = Payment.query.filter_by(order_id=order.id).first()
+    assert Decimal(str(payment.amount_collected)) == Decimal("90000")  # card transfer untouched
+    assert Decimal(str(payment.outstanding_amount)) == Decimal("0.00")
+    assert svc.get_customer_prepaid_balance(sample_user.id) == Decimal("10000")

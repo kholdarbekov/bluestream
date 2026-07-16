@@ -59,7 +59,8 @@ def test_preview_happy_upward(db, sample_user, delivery_driver, driver_profile, 
     assert plan.current_collected == Decimal("54000")
     assert plan.new_amount == Decimal("60000")
     assert plan.order_total == Decimal("54000")
-    assert plan.surplus_or_shortfall == Decimal("6000")
+    assert plan.applied_to_order == Decimal("54000")
+    assert plan.projected_outstanding == Decimal("0")
     assert plan.projected_payment_status == "completed"
     assert plan.customer_credit_delta == Decimal("6000")
 
@@ -339,6 +340,20 @@ def test_preview_reports_amount_applied_to_order_for_normal_overcollection(
     assert plan.applied_to_order == Decimal("54000")
     assert plan.customer_credit_delta == Decimal("6000")
     assert not any(w.startswith("order_already_settled_by_other_source") for w in plan.warnings)
+
+
+def test_preview_summary_drops_order_total_delta_when_order_settled_elsewhere(
+    db, sample_user, delivery_driver, driver_profile, card_settled_order
+):
+    """Comparing the entry against the order total is meaningless once the payment is
+    settled from another source — it reads as a shortfall on an already-paid order, so the
+    summary must not carry it at all."""
+    order, _ = card_settled_order
+    summary = OrderCashEditService().preview(order_id=order.id, new_amount="12000").to_summary()
+    assert "surplus_or_shortfall" not in summary
+    assert summary["applied_to_order"] == 0.0
+    assert summary["projected_outstanding"] == 0.0
+    assert summary["customer_credit_delta"] == 12000.0
 
 
 def test_edit_metadata_exposes_event_amount_not_payment_collected(

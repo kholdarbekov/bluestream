@@ -43,7 +43,6 @@ class CashEditPlan:
     current_collected: Decimal
     new_amount: Decimal
     order_total: Decimal
-    surplus_or_shortfall: Decimal
     applied_to_order: Decimal
     projected_outstanding: Decimal
     projected_payment_status: str
@@ -64,7 +63,6 @@ class CashEditPlan:
             "current_collected": float(self.current_collected),
             "new_amount": float(self.new_amount),
             "order_total": float(self.order_total),
-            "surplus_or_shortfall": float(self.surplus_or_shortfall),
             "applied_to_order": float(self.applied_to_order),
             "projected_outstanding": float(self.projected_outstanding),
             "projected_payment_status": self.projected_payment_status,
@@ -208,8 +206,6 @@ class OrderCashEditService:
                 elif session_status not in _DIRECT_ADJUSTABLE:
                     blocking.append(f"session_not_adjustable: status '{session_status}'")
 
-        surplus = new_dec - order_total
-
         # Project against what the allocator will actually do, not against the order total:
         # a payment already settled from another source has nothing left to apply to, so the
         # whole entry becomes customer credit.
@@ -265,7 +261,6 @@ class OrderCashEditService:
             current_collected=current_collected,
             new_amount=new_dec,
             order_total=order_total,
-            surplus_or_shortfall=surplus,
             applied_to_order=applied_to_order,
             projected_outstanding=projected_outstanding,
             projected_payment_status=projected_status,

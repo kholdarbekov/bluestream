@@ -2394,8 +2394,8 @@ const Orders = () => {
               <Descriptions.Item label={t('ui.orders.applied_to_order', 'Applied to this order')}>
                 {formatMoney(cashEditPreview?.applied_to_order)} UZS
               </Descriptions.Item>
-              <Descriptions.Item label={t('ui.orders.surplus_or_shortfall', 'Surplus / shortfall')}>
-                {formatMoney(cashEditPreview?.surplus_or_shortfall)} UZS
+              <Descriptions.Item label={t('ui.orders.projected_outstanding', 'Order still unpaid')}>
+                {formatMoney(cashEditPreview?.projected_outstanding)} UZS
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.orders.customer_credit', 'Customer credit change')}>
                 {formatMoney(cashEditPreview?.customer_credit_delta)} UZS

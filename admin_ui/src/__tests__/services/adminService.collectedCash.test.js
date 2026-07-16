@@ -13,10 +13,10 @@ describe('adminService collected-cash methods', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('previewCollectedCashEdit POSTs to the preview route and returns data', async () => {
-    api.post.mockResolvedValue({ data: { data: { surplus_or_shortfall: 6000 } } });
+    api.post.mockResolvedValue({ data: { data: { applied_to_order: 54000 } } });
     const out = await adminService.previewCollectedCashEdit(42, { new_amount: 60000 });
     expect(api.post).toHaveBeenCalledWith('/admin/orders/42/collected-cash/preview', { new_amount: 60000 });
-    expect(out).toEqual({ data: { surplus_or_shortfall: 6000 } });
+    expect(out).toEqual({ data: { applied_to_order: 54000 } });
   });
 
   it('editCollectedCash POSTs to the apply route and returns data', async () => {

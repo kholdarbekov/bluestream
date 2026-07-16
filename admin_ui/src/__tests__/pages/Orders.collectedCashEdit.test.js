@@ -85,6 +85,7 @@ const DELIVERED_CASH_ORDER = {
   amount_collected: 54000,
   outstanding_amount: 0,
   is_collected_cash_editable: true,
+  collected_cash_event_amount: 54000,
   collected_cash_edit_window_remaining_hours: 23.5,
   customer_name: 'Test Driver Cash',
   customer_email: 'test@example.com',
@@ -132,7 +133,8 @@ function setupBaseMocks() {
   adminService.previewCollectedCashEdit.mockResolvedValue({
     data: {
       new_amount: 60000,
-      surplus_or_shortfall: 6000,
+      applied_to_order: 54000,
+      projected_outstanding: 0,
       customer_credit_delta: 6000,
       session_will_reopen: false,
       warnings: [],
@@ -233,7 +235,8 @@ describe('Orders collected cash edit flow', () => {
     adminService.previewCollectedCashEdit.mockResolvedValueOnce({
       data: {
         new_amount: 60000,
-        surplus_or_shortfall: 6000,
+        applied_to_order: 54000,
+        projected_outstanding: 0,
         customer_credit_delta: 6000,
         session_will_reopen: false,
         is_editable: false,

@@ -68,7 +68,8 @@ def test_admin_preview_then_apply(app, client, db, admin_user, sample_user, seed
                           json={"new_amount": 60000}, headers=_headers(app, admin_user.id))
     assert preview.status_code == 200
     data = preview.get_json()["data"]
-    assert data["surplus_or_shortfall"] == 6000
+    assert data["applied_to_order"] == 54000
+    assert data["customer_credit_delta"] == 6000
     assert data["is_editable"] is True
 
     apply = client.post(f"/api/v1/admin/orders/{seeded_cod.id}/collected-cash",
@@ -78,7 +79,7 @@ def test_admin_preview_then_apply(app, client, db, admin_user, sample_user, seed
     apply_body = apply.get_json()["data"]
     assert apply_body["order_id"] == seeded_cod.id
     assert apply_body["replacement_event_id"] is not None
-    assert apply_body["summary"]["surplus_or_shortfall"] == 6000
+    assert apply_body["summary"]["applied_to_order"] == 54000
     assert isinstance(apply_body["warnings"], list)
     payment = Payment.query.filter_by(order_id=seeded_cod.id).first()
     assert Decimal(str(payment.amount_collected)) == Decimal("54000")

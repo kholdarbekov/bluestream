@@ -6136,6 +6136,7 @@ def _category_for(key: str) -> str:
 
 ADMIN_UI_ORDER_TRANSLATIONS = {
     'ui.common.archive': _ui_tr('Archive', 'Arxivlash', 'Архивировать'),
+    'ui.common.back': _ui_tr('Back', 'Orqaga', 'Назад'),
     'ui.common.disabled': _ui_tr('Disabled', "O'chirilgan", 'Отключено'),
     'ui.common.enabled': _ui_tr('Enabled', 'Yoqilgan', 'Включено'),
     'ui.common.failed': _ui_tr('Failed', 'Muvaffaqiyatsiz', 'Неудачно'),
@@ -6437,10 +6438,15 @@ ADMIN_UI_ORDER_TRANSLATIONS = {
     'ui.orders.collected_cash_reason_required': _ui_tr('Reason (min 5 chars) is required', 'Sabab (kamida 5 belgi) kerak', 'Требуется причина (мин. 5 симв.)'),
     'ui.orders.cash_session_will_reopen': _ui_tr('Driver session reopen', 'Haydovchi sessiyasi qayta ochiladi', 'Переоткрытие сессии курьера'),
     'ui.orders.preview_impact': _ui_tr('Preview impact', "Ko'rib chiqish", 'Предпросмотр'),
-    'ui.orders.surplus_or_shortfall': _ui_tr(
-        'Surplus / shortfall',
-        'Ortiqcha / kamomad',
-        'Излишек / недостача',
+    'ui.orders.applied_to_order': _ui_tr(
+        'Applied to this order',
+        'Shu buyurtmaga hisoblandi',
+        'Зачтено в этот заказ',
+    ),
+    'ui.orders.projected_outstanding': _ui_tr(
+        'Order still unpaid',
+        "Buyurtma bo'yicha qoldiq",
+        'Остаток по заказу',
     ),
     'ui.orders.customer_credit': _ui_tr(
         'Customer credit change',

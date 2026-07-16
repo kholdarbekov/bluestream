@@ -938,7 +938,8 @@ class LoyaltyService:
         user_id: int,
         points: int,
         description: str,
-        reference_id: int = None,
+        *,
+        order_id: int = None,
         skip_notification: bool = True,
         notification_type_str: str = None,
         commit: bool = True,
@@ -949,7 +950,10 @@ class LoyaltyService:
             user_id: User to deduct points from
             points: Number of points to deduct (positive number)
             description: Description of the deduction
-            reference_id: Optional reference ID (e.g., order_id)
+            order_id: Optional orders.id this deduction belongs to. Keyword-only, and named
+                for the FK it populates: anything that is not an order id (a user, a reward)
+                would either violate the constraint or silently mis-attribute the
+                transaction to whatever order happens to share that id.
             skip_notification: If True, don't send points notification (default: True since callers usually handle their own)  # noqa: E501
             notification_type_str: String value of NotificationType enum to use for notification
             commit: If True, commit the transaction; if False, flush only so the
@@ -972,7 +976,7 @@ class LoyaltyService:
             transaction_type=LoyaltyTransactionType.REDEEMED,
             points=-points,  # Negative for deductions
             description=description,
-            order_id=reference_id,
+            order_id=order_id,
         )
 
         db.session.add(transaction)
@@ -1258,7 +1262,7 @@ class LoyaltyService:
                 order.user_id,
                 points_cost,
                 f"Redeemed reward: {reward.name}",
-                order.id,
+                order_id=order.id,
                 skip_notification=True,
                 commit=False,
             )
@@ -2341,8 +2345,9 @@ class LoyaltyService:
         if sender_points < points_amount:
             raise ValidationError(f"Insufficient points. Available: {sender_points}, Required: {points_amount}")
 
-        # Deduct from sender
-        self.deduct_points(sender_id, points_amount, f"Gift to user #{recipient_id}: {message}", recipient_id)
+        # Deduct from sender. A gift has no order, so order_id stays NULL — the counterparty
+        # is recorded in the description.
+        self.deduct_points(sender_id, points_amount, f"Gift to user #{recipient_id}: {message}")
 
         # Award to recipient
         credit_transaction = self.award_points(
@@ -2350,7 +2355,6 @@ class LoyaltyService:
             points_amount,
             f"Gift from user #{sender_id}: {message}",
             LoyaltyActionType.WELCOME_BONUS,  # Using this as gift type
-            sender_id,
         )
 
         return credit_transaction

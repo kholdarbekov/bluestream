@@ -50,7 +50,10 @@
     "zustand": "^4.3.6"
   },
   "overrides": {
-    "tmp": "^0.2.6"
+    "tmp": "^0.2.6",
+    "archiver": "^7.0.1",
+    "unzipper": "^0.12.5",
+    "glob": "^13.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",

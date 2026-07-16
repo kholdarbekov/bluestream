@@ -279,7 +279,7 @@ def test_rewards_history_lists_redeemed_transactions(
 ):
     """The redemption-history endpoint serializes REDEEMED ledger rows."""
     LoyaltyService().deduct_points(
-        sample_user.id, 100, f"Redeemed reward: {discount_reward.name}", discount_reward.id
+        sample_user.id, 100, f"Redeemed reward: {discount_reward.name}", order_id=discount_reward.id
     )
 
     response = client.get("/api/v1/loyalty/rewards/history", headers=auth_headers)
@@ -299,7 +299,7 @@ def test_rewards_history_lists_redeemed_transactions(
 def test_statistics_computes_from_seeded_ledger(client, auth_headers, db, sample_user, loyalty_account):
     """Statistics aggregates EARNED/REDEEMED across the seeded ledger (period=all)."""
     service = LoyaltyService()
-    service.deduct_points(sample_user.id, 200, "redeem", None)
+    service.deduct_points(sample_user.id, 200, "redeem")
 
     response = client.get("/api/v1/loyalty/statistics?period=all", headers=auth_headers)
 
@@ -671,7 +671,7 @@ def test_admin_member_detail_returns_member_and_recent_redemptions(
     client, admin_auth_headers, db, sample_user, loyalty_account, discount_reward
 ):
     """Member detail includes the serialized member and its recent redemptions card."""
-    LoyaltyService().deduct_points(sample_user.id, 100, "Redeemed reward", discount_reward.id)
+    LoyaltyService().deduct_points(sample_user.id, 100, "Redeemed reward", order_id=discount_reward.id)
 
     response = client.get(
         f"/api/v1/admin/loyalty/members/{sample_user.id}",
@@ -757,7 +757,7 @@ def test_admin_analytics_returns_summary(
     client, admin_auth_headers, db, sample_user, loyalty_account, discount_reward
 ):
     """Analytics computes a members/points summary from the real ledger."""
-    LoyaltyService().deduct_points(sample_user.id, 100, "Redeemed reward", discount_reward.id)
+    LoyaltyService().deduct_points(sample_user.id, 100, "Redeemed reward", order_id=discount_reward.id)
 
     response = client.get(
         "/api/v1/admin/loyalty/analytics",

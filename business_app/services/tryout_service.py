@@ -264,14 +264,14 @@ class TryoutService:
             raise ValidationError("Try-out items cannot be changed after handoff is completed")
 
         built_items = TryoutService._validate_and_build_items(items_payload)
-        for item in list(tryout.items or []):
-            db.session.delete(item)
-        db.session.flush()
 
+        # Mutate through the relationship, not session.delete()/session.add(): a flush does not
+        # refresh an already-loaded collection, so raw-FK writes would leave `tryout.items`
+        # holding the deleted rows for the rest of the request — and _apply_handoff bills from it.
+        tryout.items.clear()
         for item_data in built_items:
-            db.session.add(
+            tryout.items.append(
                 ProductTryoutItem(
-                    tryout_id=tryout.id,
                     product_id=item_data["product"].id,
                     quantity=item_data["quantity"],
                     unit_price_snapshot=item_data["unit_price_snapshot"],
@@ -605,65 +605,71 @@ class TryoutService:
         tryout: ProductTryout, task: TryoutTask, actor_user_id: Optional[int], notes: Optional[str]
     ) -> None:
         handoff_at = task.completed_at or datetime.now(UTC)
+        # A try-out's stock and bottle liability are booked exactly once. The per-item
+        # idempotency key below only dedupes a replay of the *same* task, so gate the booking
+        # on the try-out's own hand-off state — a second hand-off task would otherwise
+        # decrement stock and ledger the bottles a second time.
+        already_applied = tryout.handoff_completed_at is not None
         tryout.handoff_completed_at = handoff_at
         if not tryout.return_due_at:
             tryout.return_due_at = handoff_at + timedelta(days=TryoutService.DEFAULT_RETURN_DUE_DAYS)
 
-        for item in tryout.items:
-            product = item.product
-            if product.track_inventory:
-                product.stock_quantity = max(0, int(product.stock_quantity or 0) - int(item.quantity))
-                product.updated_at = datetime.now(UTC)
+        if not already_applied:
+            for item in tryout.items:
+                product = item.product
+                if product.track_inventory:
+                    product.stock_quantity = max(0, int(product.stock_quantity or 0) - int(item.quantity))
+                    product.updated_at = datetime.now(UTC)
 
-            if TryoutService._as_decimal(item.returnable_bottles_due) <= 0:
-                continue
+                if TryoutService._as_decimal(item.returnable_bottles_due) <= 0:
+                    continue
 
-            idempotency_key = f"handoff:task:{task.id}:item:{item.id}"
-            existing = TryoutBottleLedger.query.filter_by(idempotency_key=idempotency_key).first()
-            if existing:
-                continue
-            db.session.add(
-                TryoutBottleLedger(
-                    tryout_id=tryout.id,
-                    tryout_item_id=item.id,
-                    product_id=item.product_id,
-                    task_id=task.id,
-                    actor_user_id=actor_user_id,
-                    event_type=TryoutBottleLedgerEventType.HANDOFF,
-                    units=item.returnable_bottles_due,
-                    occurred_at=handoff_at,
-                    notes=notes or "Try-out handoff completed",
-                    idempotency_key=idempotency_key,
+                idempotency_key = f"handoff:task:{task.id}:item:{item.id}"
+                existing = TryoutBottleLedger.query.filter_by(idempotency_key=idempotency_key).first()
+                if existing:
+                    continue
+                db.session.add(
+                    TryoutBottleLedger(
+                        tryout_id=tryout.id,
+                        tryout_item_id=item.id,
+                        product_id=item.product_id,
+                        task_id=task.id,
+                        actor_user_id=actor_user_id,
+                        event_type=TryoutBottleLedgerEventType.HANDOFF,
+                        units=item.returnable_bottles_due,
+                        occurred_at=handoff_at,
+                        notes=notes or "Try-out handoff completed",
+                        idempotency_key=idempotency_key,
+                    )
                 )
+
+            db.session.flush()
+
+            # Tally tryout-handoff bottles against the driver's open session (if any).
+            # Mirrors the tally done for regular order deliveries so the driver's
+            # session discrepancy formula stays balanced.
+            total_bottles_handed_off = sum(
+                TryoutService._as_decimal(item.returnable_bottles_due)
+                for item in tryout.items
+                if TryoutService._as_decimal(item.returnable_bottles_due) > 0
             )
+            if actor_user_id and total_bottles_handed_off > 0:
+                try:
+                    from business_app.services.bottle_tracking_service import BottleTrackingService
 
-        db.session.flush()
+                    BottleTrackingService().update_session_delivery_tally(
+                        actor_user_id,
+                        bottles_delivered=int(total_bottles_handed_off),
+                    )
+                except Exception:
+                    import logging
 
-        # Tally tryout-handoff bottles against the driver's open session (if any).
-        # Mirrors the tally done for regular order deliveries so the driver's
-        # session discrepancy formula stays balanced.
-        total_bottles_handed_off = sum(
-            TryoutService._as_decimal(item.returnable_bottles_due)
-            for item in tryout.items
-            if TryoutService._as_decimal(item.returnable_bottles_due) > 0
-        )
-        if actor_user_id and total_bottles_handed_off > 0:
-            try:
-                from business_app.services.bottle_tracking_service import BottleTrackingService
-
-                BottleTrackingService().update_session_delivery_tally(
-                    actor_user_id,
-                    bottles_delivered=int(total_bottles_handed_off),
-                )
-            except Exception:
-                import logging
-
-                logging.getLogger(__name__).warning(
-                    "[BOTTLE] tryout handoff session tally failed for tryout=%s actor=%s",
-                    tryout.id,
-                    actor_user_id,
-                    exc_info=True,
-                )
+                    logging.getLogger(__name__).warning(
+                        "[BOTTLE] tryout handoff session tally failed for tryout=%s actor=%s",
+                        tryout.id,
+                        actor_user_id,
+                        exc_info=True,
+                    )
 
         db.session.expire(tryout, ["bottle_ledger_entries"])
         TryoutService._ensure_pickup_task(tryout, actor_user_id, assigned_driver_user_id=task.assigned_driver_user_id)

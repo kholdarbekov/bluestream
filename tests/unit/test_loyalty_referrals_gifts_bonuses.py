@@ -369,6 +369,27 @@ class TestGiftPoints:
         ).first()
         assert deduction.points == -200
 
+    def test_gift_transactions_are_not_attributed_to_an_order(
+        self, loyalty_service, db, sample_user, loyalty_program
+    ):
+        """A gift has no order, so neither leg may populate the orders.id FK.
+
+        Regression: gift_points routed the recipient's user id into deduct_points'
+        reference_id, which is written straight into LoyaltyTransaction.order_id — so a
+        gift was either rejected by the FK or silently attributed to an unrelated order
+        that happened to share the id.
+        """
+        _seed_account_with_lot(db, loyalty_program, sample_user, 500)
+        recipient = _make_user(db, suffix="gift_order_fk")
+
+        credit = loyalty_service.gift_points(sample_user.id, recipient.id, 200, "Happy birthday")
+
+        deduction = LoyaltyTransaction.query.filter_by(
+            user_id=sample_user.id, transaction_type=LoyaltyTransactionType.REDEEMED
+        ).first()
+        assert deduction.order_id is None
+        assert credit.order_id is None
+
     def test_insufficient_sender_balance_raises_validation_error(
         self, loyalty_service, db, sample_user, loyalty_program
     ):

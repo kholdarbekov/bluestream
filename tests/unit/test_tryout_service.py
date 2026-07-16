@@ -4,6 +4,8 @@ from decimal import Decimal
 
 import pytest
 
+from business_app.models.product import Product
+from business_app.models.tryout import ProductTryoutItem, TryoutBottleLedger
 from business_app.models.user import UserAddress
 from business_app.services.bottle_tracking_service import BottleTrackingService
 from business_app.services.tryout_service import TryoutService
@@ -267,3 +269,139 @@ def test_update_tryout_allows_contact_phone_address_and_items_before_handoff(db,
     assert serialized["address_snapshot"]["latitude"] == pytest.approx(41.3205)
     assert serialized["items"][0]["quantity"] == 4
     assert serialized["notes"] == "Updated try-out note"
+
+
+@pytest.mark.unit
+def test_update_tryout_replacing_items_and_completing_handoff_uses_new_items(db, sample_product, admin_user):
+    """Replacing items and completing the handoff in one request must bill the NEW items.
+
+    Regression: the handoff read a stale `tryout.items`, so it wrote ledger rows and
+    decremented stock from the just-deleted items (and referenced their dead ids).
+    """
+    sample_product.is_tryout_eligible = True
+    sample_product.tracks_returnable_bottles = True
+    sample_product.returnable_bottles_per_unit = Decimal("1.00")
+    sample_product.stock_quantity = 10
+    db.session.commit()
+
+    tryout = TryoutService.create_tryout(
+        _build_payload(sample_product.id, quantity=1, complete_handoff=False),
+        admin_user.id,
+        source="admin",
+    )
+
+    TryoutService.update_tryout(
+        tryout.id,
+        {
+            "items": [{"product_id": sample_product.id, "quantity": 7}],
+            "complete_handoff": True,
+        },
+        admin_user.id,
+    )
+
+    ledger = TryoutBottleLedger.query.filter_by(tryout_id=tryout.id).all()
+    handoff_entries = [entry for entry in ledger if entry.event_type.value == "handoff"]
+    assert len(handoff_entries) == 1
+    assert Decimal(handoff_entries[0].units) == Decimal("7.00")
+
+    live_item_ids = {item.id for item in ProductTryoutItem.query.filter_by(tryout_id=tryout.id)}
+    assert handoff_entries[0].tryout_item_id in live_item_ids
+
+    db.session.refresh(sample_product)
+    assert sample_product.stock_quantity == 3
+
+
+@pytest.mark.unit
+def test_update_tryout_replacing_non_returnable_item_records_new_bottle_liability(
+    db, sample_category, sample_product, admin_user
+):
+    """The silent variant: when the replaced item is non-returnable nothing raises.
+
+    Regression: stock was decremented on the removed product, the new product's bottles
+    were never ledgered, and no pickup task was created — all committed as a 200.
+    """
+    sample_product.is_tryout_eligible = True
+    sample_product.tracks_returnable_bottles = False
+    sample_product.returnable_bottles_per_unit = Decimal("0.00")
+    sample_product.track_inventory = True
+    sample_product.stock_quantity = 100
+
+    returnable_product = Product(
+        name="Returnable Water 19L",
+        category_id=sample_category.id,
+        size="19L",
+        base_price=Decimal("15000.00"),
+        stock_quantity=100,
+        track_inventory=True,
+        is_active=True,
+        is_tryout_eligible=True,
+        tracks_returnable_bottles=True,
+        returnable_bottles_per_unit=Decimal("1.00"),
+    )
+    db.session.add(returnable_product)
+    db.session.commit()
+
+    tryout = TryoutService.create_tryout(
+        _build_payload(sample_product.id, quantity=5, complete_handoff=False),
+        admin_user.id,
+        source="admin",
+    )
+
+    updated = TryoutService.update_tryout(
+        tryout.id,
+        {
+            "items": [{"product_id": returnable_product.id, "quantity": 2}],
+            "complete_handoff": True,
+        },
+        admin_user.id,
+    )
+
+    handoff_entries = [
+        entry
+        for entry in TryoutBottleLedger.query.filter_by(tryout_id=tryout.id)
+        if entry.event_type.value == "handoff"
+    ]
+    assert len(handoff_entries) == 1
+    assert handoff_entries[0].product_id == returnable_product.id
+    assert Decimal(handoff_entries[0].units) == Decimal("2.00")
+
+    assert float(TryoutService.get_outstanding_bottles_by_product(updated)[returnable_product.id]) == 2.0
+    assert len([task for task in updated.tasks if task.task_type.value == "pickup"]) == 1
+
+    db.session.refresh(sample_product)
+    db.session.refresh(returnable_product)
+    assert sample_product.stock_quantity == 100
+    assert returnable_product.stock_quantity == 98
+
+
+@pytest.mark.unit
+def test_reapplying_handoff_does_not_double_decrement_stock(db, sample_product, admin_user):
+    """The stock decrement must sit behind the same idempotency guard as the ledger."""
+    sample_product.is_tryout_eligible = True
+    sample_product.tracks_returnable_bottles = True
+    sample_product.returnable_bottles_per_unit = Decimal("1.00")
+    sample_product.stock_quantity = 10
+    db.session.commit()
+
+    tryout = TryoutService.create_tryout(
+        _build_payload(sample_product.id, quantity=3, complete_handoff=True),
+        admin_user.id,
+        source="admin",
+    )
+    db.session.refresh(sample_product)
+    assert sample_product.stock_quantity == 7
+
+    reloaded = TryoutService._load_tryout(tryout.id)
+    handoff_task = next(task for task in reloaded.tasks if task.task_type.value == "handoff")
+    TryoutService._apply_handoff(reloaded, handoff_task, admin_user.id, None)
+    db.session.commit()
+
+    handoff_entries = [
+        entry
+        for entry in TryoutBottleLedger.query.filter_by(tryout_id=tryout.id)
+        if entry.event_type.value == "handoff"
+    ]
+    assert len(handoff_entries) == 1
+
+    db.session.refresh(sample_product)
+    assert sample_product.stock_quantity == 7

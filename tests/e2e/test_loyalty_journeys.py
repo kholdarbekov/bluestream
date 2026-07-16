@@ -534,7 +534,7 @@ def test_j5_order_edit_clawback_clamped_to_available_balance(
     earn_txn = service.award_points(
         sample_user.id, 200, "Order earnings", action_type=LoyaltyActionType.PURCHASE, reference_id=4242,
     )
-    service.deduct_points(sample_user.id, 150, "Redeem", reference_id=4242, skip_notification=True)
+    service.deduct_points(sample_user.id, 150, "Redeem", order_id=4242, skip_notification=True)
     assert service.get_available_points(sample_user.id) == 50
 
     acc = LoyaltyPoints.query.filter_by(user_id=sample_user.id).first()
@@ -882,7 +882,7 @@ def test_j10_reconciliation_invariant_after_complex_sequence(
     assert service.get_available_points(sample_user.id) == 1200
 
     # REDEEM again (net redemption that stays spent): deduct 300 directly.
-    service.deduct_points(sample_user.id, 300, "manual redeem", reference_id=order.id, skip_notification=True)
+    service.deduct_points(sample_user.id, 300, "manual redeem", order_id=order.id, skip_notification=True)
     assert service.get_available_points(sample_user.id) == 900
 
     # EXPIRE: the 200-pt short lot lapses. The FIFO 300 redemption drew from the

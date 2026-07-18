@@ -10,7 +10,7 @@ from business_app.models.audit import AuditEventType, AuditLog
 from business_app.models.delivery import Delivery, DeliveryStatusHistory
 from business_app.models.notification import Notification, NotificationPreference, NotificationTemplate
 from business_app.models.translation import Translation
-from business_app.services.notification_service import NotificationService
+from business_app.services.notification_service import DEFAULT_TEMPLATES, NotificationService
 from business_app.utils.constants import (
     NotificationChannel,
     NotificationStatus,
@@ -831,42 +831,53 @@ def test_send_payment_notification_uses_delivered_follow_up_message_for_cod_orde
     )
 
 
-def test_send_telegram_payment_confirmation_rewrites_legacy_processing_copy(app, db, sample_user):
+def _telegram_payment_confirmation_template():
+    """Faithful copy of the shipped ``payment_confirmation``/``telegram`` default
+    template, which injects the contextual follow-up line via the
+    ``{payment_follow_up_message}`` placeholder."""
+    translations = DEFAULT_TEMPLATES[('payment_confirmation', 'telegram')]['translations']
+
+    def _get_translated(field, language):
+        if field != 'content':
+            return None
+        return translations.get(language, translations['uz'])['content']
+
+    return SimpleNamespace(
+        content=translations['uz']['content'],
+        get_translated=_get_translated,
+    )
+
+
+@pytest.mark.parametrize(
+    'language,follow_up_tail',
+    [
+        ('uz', "Keyingi holat bo'yicha sizni xabardor qilamiz."),
+        ('ru', "Мы сообщим вам о следующем обновлении статуса."),
+        ('en', "We'll notify you about the next status update."),
+    ],
+)
+def test_send_telegram_payment_confirmation_fills_follow_up_placeholder_once(
+    app, db, sample_user, language, follow_up_tail
+):
+    """The ``{payment_follow_up_message}`` placeholder is the single injection
+    point for the follow-up copy, so it must appear exactly once.
+
+    Regression: a runtime "legacy rewrite" shim also string-replaced a legacy
+    follow-up sentence into the copy. For uz/ru that legacy sentence is a strict
+    prefix of the new copy, so the shim re-appended the tail after the
+    placeholder already rendered it — producing the duplicated
+    "Keyingi holat bo'yicha sizni xabardor qilamiz." seen in production.
+    """
     sample_user.telegram_id = '104933915'
     sample_user.is_bot_active = True
-    sample_user.preferred_language = 'en'
+    sample_user.preferred_language = language
     db.session.commit()
 
     service = NotificationService()
     app.config['TELEGRAM_BOT_TOKEN'] = 'test-token'
     service.telegram_bot_token = 'test-token'
 
-    legacy_line = "Your order is now being processed. We'll notify you when it's ready for delivery."
-    replacement_line = (
-        "Your order has already been delivered. "
-        "This message confirms that we have received your payment."
-    )
-
-    fake_template = SimpleNamespace(
-        content=f'''✅ <b>Payment Confirmed!</b>
-
-Order: #{{order_number}}
-Amount: {{payment_amount}} UZS
-Method: {{payment_method}}
-
-{legacy_line}
-
-Thank you for your purchase!''',
-        get_translated=lambda field, language: f'''✅ <b>Payment Confirmed!</b>
-
-Order: #{{order_number}}
-Amount: {{payment_amount}} UZS
-Method: {{payment_method}}
-
-{legacy_line}
-
-Thank you for your purchase!''' if field == 'content' else None,
-    )
+    follow_up = NotificationService.PAYMENT_FOLLOW_UP_MESSAGES[language]['processing']
 
     fake_response = Mock()
     fake_response.status_code = 200
@@ -881,16 +892,16 @@ Thank you for your purchase!''' if field == 'content' else None,
                 'order_number': 'TG_000040_26',
                 'payment_amount': '18000',
                 'payment_method': 'cash',
-                'payment_follow_up_message': replacement_line,
+                'payment_follow_up_message': follow_up,
             },
-            'en',
-            template_override=fake_template,
+            language,
+            template_override=_telegram_payment_confirmation_template(),
         )
 
     assert result['success'] is True
     payload_text = post_mock.call_args.kwargs['json']['text']
-    assert replacement_line in payload_text
-    assert legacy_line not in payload_text
+    assert follow_up in payload_text
+    assert payload_text.count(follow_up_tail) == 1
 
 
 def test_get_delivery_telegram_setting_defaults_to_enabled_without_override(db, sample_user):

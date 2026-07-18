@@ -186,18 +186,6 @@ class NotificationService:
         },
     }
 
-    LEGACY_PAYMENT_FOLLOW_UP_PHRASES = (
-        "Your order is now being processed.",
-        "Your order is now being processed. We'll notify you when it's ready for delivery.",
-        "Your order is now being processed and will be delivered soon. You can track your order status using the button above.",  # noqa: E501
-        "Buyurtmangiz qayta ishlanmoqda.",
-        "Buyurtmangiz qayta ishlanmoqda. Yetkazib berishga tayyor bo'lganda xabar beramiz.",
-        "Buyurtmangiz hozir qayta ishlanmoqda va tez orada yetkazib beriladi. Yuqoridagi tugma orqali buyurtma holatini kuzatishingiz mumkin.",  # noqa: E501
-        "Ваш заказ обрабатывается.",
-        "Ваш заказ обрабатывается. Мы уведомим вас, когда он будет готов к доставке.",
-        "Ваш заказ обрабатывается и скоро будет доставлен. Вы можете отслеживать статус заказа по кнопке выше.",
-    )
-
     def __init__(self):
         # Email configuration (Brevo)
         self.brevo_api_key = current_app.config.get("BREVO_API_KEY")
@@ -2936,23 +2924,6 @@ class NotificationService:
         )
         return language_messages.get(message_key, self.PAYMENT_FOLLOW_UP_MESSAGES["en"][message_key])
 
-    @classmethod
-    def _rewrite_legacy_payment_follow_up_content(
-        cls,
-        content: str,
-        follow_up_message: Optional[str],
-    ) -> str:
-        """Replace legacy hardcoded payment follow-up lines with contextual copy."""
-        if not content or not follow_up_message:
-            return content
-
-        updated_content = content
-        for phrase in cls.LEGACY_PAYMENT_FOLLOW_UP_PHRASES:
-            if phrase in updated_content:
-                updated_content = updated_content.replace(phrase, follow_up_message)
-
-        return updated_content
-
     # Private methods for different channels
     def _send_email_notification(
         self,
@@ -3013,12 +2984,6 @@ class NotificationService:
             # Render template
             subject = self._render_template(template_subject, template_data_with_user, language)
             content = self._render_template(template_content, template_data_with_user, language)
-
-        if notification_type_str == NotificationType.PAYMENT_CONFIRMATION.value:
-            content = self._rewrite_legacy_payment_follow_up_content(
-                content,
-                template_data_with_user.get("payment_follow_up_message"),
-            )
 
         # Build Brevo API request
         url = "https://api.brevo.com/v3/smtp/email"
@@ -3387,11 +3352,6 @@ class NotificationService:
         content = self._render_template(template_content, template_data, language)
         if notification_type_value == NotificationType.DELIVERY_UPDATE.value:
             content = self._strip_driver_info_from_delivery_message(content)
-        elif notification_type_value == NotificationType.PAYMENT_CONFIRMATION.value:
-            content = self._rewrite_legacy_payment_follow_up_content(
-                content,
-                (template_data or {}).get("payment_follow_up_message"),
-            )
 
         # Send via Telegram Bot API
         url = f"https://api.telegram.org/bot{effective_bot_token}/sendMessage"

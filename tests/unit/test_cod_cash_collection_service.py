@@ -1107,6 +1107,224 @@ class TestCashCollectionService:
             assert event.unapplied_amount == Decimal("7000.00")
             assert service.get_customer_prepaid_balance(sample_user.id) == Decimal("7000.00")
 
+    def test_personal_card_transfer_surplus_settles_older_delivered_cod_debt(
+        self,
+        app,
+        db,
+        sample_user,
+        admin_user,
+    ):
+        """A card transfer larger than its target order must spill the surplus onto the
+        customer's other outstanding DELIVERED COD debts (oldest-first) rather than
+        parking it as prepaid credit.
+
+        The target order is still settled first and is never over-allocated; only the
+        residual spills. Mirrors the reported case: two 90k delivered debts, 100k paid
+        by personal card transfer, recorded from one order's detail modal.
+        """
+        with app.app_context():
+            service = CashCollectionService()
+
+            older_debt_order = Order(
+                user_id=sample_user.id,
+                order_number="ORD-PCT-SPILL-OLD",
+                status=OrderStatus.DELIVERED,
+                subtotal=Decimal("90000.00"),
+                delivery_fee=Decimal("0.00"),
+                discount_amount=Decimal("0.00"),
+                loyalty_discount=Decimal("0.00"),
+                total_amount=Decimal("90000.00"),
+                payment_method=PaymentMethod.CASH,
+                created_at=datetime.now(UTC) - timedelta(days=2),
+            )
+            target_order = Order(
+                user_id=sample_user.id,
+                order_number="ORD-PCT-SPILL-TARGET",
+                status=OrderStatus.DELIVERED,
+                subtotal=Decimal("90000.00"),
+                delivery_fee=Decimal("0.00"),
+                discount_amount=Decimal("0.00"),
+                loyalty_discount=Decimal("0.00"),
+                total_amount=Decimal("90000.00"),
+                payment_method=PaymentMethod.CASH,
+                created_at=datetime.now(UTC) - timedelta(days=1),
+            )
+            db.session.add_all([older_debt_order, target_order])
+            db.session.flush()
+            older_debt_payment = service.ensure_cod_payment_for_order(older_debt_order)
+            target_payment = service.ensure_cod_payment_for_order(target_order)
+            db.session.commit()
+
+            assert service.get_active_cod_debt_count(sample_user.id) == 2
+
+            event = service.post_collection(
+                customer_id=sample_user.id,
+                amount=Decimal("100000.00"),
+                source="personal_card_transfer",
+                recorded_by_user_id=admin_user.id,
+                order_id=target_order.id,
+                notes="Customer transferred 100k to owner personal card.",
+            )
+
+            db.session.refresh(target_payment)
+            db.session.refresh(older_debt_payment)
+
+            # The order the admin was looking at settles first, and is never over-allocated.
+            assert target_payment.amount_collected == Decimal("90000.00")
+            assert target_payment.outstanding_amount == Decimal("0.00")
+            assert target_payment.status == PaymentStatus.COMPLETED
+
+            # The 10k surplus pays down the older delivered debt instead of becoming credit.
+            assert older_debt_payment.amount_collected == Decimal("10000.00")
+            assert older_debt_payment.outstanding_amount == Decimal("80000.00")
+            assert older_debt_payment.status == PaymentStatus.PARTIALLY_PAID
+
+            assert event.unapplied_amount == Decimal("0.00")
+            assert service.get_customer_prepaid_balance(sample_user.id) == Decimal("0.00")
+
+            # Both debts are discharged from one event, and the audit trail numbers
+            # them in the order the money was actually applied.
+            allocations = sorted(event.allocations, key=lambda item: item.allocation_order)
+            assert [
+                (item.payment_id, item.allocation_order, item.allocated_amount)
+                for item in allocations
+            ] == [
+                (target_payment.id, 1, Decimal("90000.00")),
+                (older_debt_payment.id, 2, Decimal("10000.00")),
+            ]
+
+    def test_allocate_oldest_first_can_suppress_completion_notifications(
+        self,
+        app,
+        db,
+        sample_user,
+        admin_user,
+        cod_order,
+    ):
+        """The remediation script re-runs this allocator inside a transaction it may roll
+        back. ``send_payment_confirmation_task.delay`` escapes a rollback, so the caller
+        must be able to suppress it — otherwise a dry-run tells a customer their debt is
+        settled and burns the notification's idempotency key."""
+        from shared.enums import CashCollectionSource
+
+        with app.app_context():
+            service = CashCollectionService()
+            payment = service.ensure_cod_payment_for_order(cod_order)
+            db.session.commit()
+
+            event = CashCollectionEvent(
+                customer_id=sample_user.id,
+                recorded_by_user_id=admin_user.id,
+                amount=payment.outstanding_amount,
+                currency="UZS",
+                source=CashCollectionSource.STANDALONE_MEETING,
+                occurred_at=datetime.now(UTC),
+                notes="settles the debt in full",
+                proof_data={},
+                unapplied_amount=payment.outstanding_amount,
+            )
+            db.session.add(event)
+            db.session.flush()
+
+            with patch(
+                "business_app.tasks.notification_tasks.send_payment_confirmation_task.delay"
+            ) as delay:
+                service._allocate_oldest_first(
+                    event=event,
+                    customer_id=sample_user.id,
+                    order_id=None,
+                    allocation_mode="auto",
+                    trigger_completion_notification=False,
+                )
+
+            db.session.refresh(payment)
+            assert payment.status == PaymentStatus.COMPLETED  # it really did settle
+            delay.assert_not_called()
+
+    def test_preview_personal_card_transfer_projects_target_then_spill_then_credit(
+        self,
+        app,
+        db,
+        sample_user,
+    ):
+        """The admin modal's preview must show where the money actually lands, so an
+        admin entering 100k against a 90k order sees the 10k spill instead of
+        discovering it after the fact. Projects without mutating anything."""
+        with app.app_context():
+            service = CashCollectionService()
+
+            older_debt_order = Order(
+                user_id=sample_user.id,
+                order_number="ORD-PCT-PREVIEW-OLD",
+                status=OrderStatus.DELIVERED,
+                subtotal=Decimal("90000.00"),
+                delivery_fee=Decimal("0.00"),
+                discount_amount=Decimal("0.00"),
+                loyalty_discount=Decimal("0.00"),
+                total_amount=Decimal("90000.00"),
+                payment_method=PaymentMethod.CASH,
+                created_at=datetime.now(UTC) - timedelta(days=2),
+            )
+            target_order = Order(
+                user_id=sample_user.id,
+                order_number="ORD-PCT-PREVIEW-TARGET",
+                status=OrderStatus.DELIVERED,
+                subtotal=Decimal("90000.00"),
+                delivery_fee=Decimal("0.00"),
+                discount_amount=Decimal("0.00"),
+                loyalty_discount=Decimal("0.00"),
+                total_amount=Decimal("90000.00"),
+                payment_method=PaymentMethod.CASH,
+                created_at=datetime.now(UTC) - timedelta(days=1),
+            )
+            db.session.add_all([older_debt_order, target_order])
+            db.session.flush()
+            older_debt_payment = service.ensure_cod_payment_for_order(older_debt_order)
+            target_payment = service.ensure_cod_payment_for_order(target_order)
+            db.session.commit()
+
+            plan = service.preview_personal_card_transfer(
+                order_id=target_order.id, amount=Decimal("100000.00")
+            )
+
+            assert plan.applied_to_order == Decimal("90000.00")
+            assert plan.order_outstanding_after == Decimal("0.00")
+            assert plan.applied_to_other_debts == Decimal("10000.00")
+            assert plan.remaining_as_credit == Decimal("0.00")
+            assert [
+                (spill["order_number"], spill["amount"]) for spill in plan.spill_allocations
+            ] == [("ORD-PCT-PREVIEW-OLD", Decimal("10000.00"))]
+
+            # A preview must not move money.
+            db.session.refresh(target_payment)
+            db.session.refresh(older_debt_payment)
+            assert target_payment.outstanding_amount == Decimal("90000.00")
+            assert older_debt_payment.outstanding_amount == Decimal("90000.00")
+            assert CashCollectionEvent.query.count() == 0
+
+    def test_preview_personal_card_transfer_reports_surplus_with_no_other_debt_as_credit(
+        self,
+        app,
+        db,
+        sample_user,
+        cod_order,
+    ):
+        """With no other delivered debt to absorb it, surplus is still credit — and the
+        preview must say so rather than implying a spill."""
+        with app.app_context():
+            service = CashCollectionService()
+            service.ensure_cod_payment_for_order(cod_order)
+            db.session.commit()
+
+            plan = service.preview_personal_card_transfer(
+                order_id=cod_order.id, amount=Decimal("25000.00")
+            )
+
+            assert plan.applied_to_order == Decimal("18000.00")
+            assert plan.applied_to_other_debts == Decimal("0.00")
+            assert plan.spill_allocations == []
+            assert plan.remaining_as_credit == Decimal("7000.00")
+
     def test_personal_card_transfer_requires_target_order_and_disallows_driver_context(
         self,
         app,

@@ -159,6 +159,11 @@ const Orders = () => {
   const [orderDetailsLoading, setOrderDetailsLoading] = useState(false);
   const [createOrderErrors, setCreateOrderErrors] = useState([]);
   const [isPersonalCardModalVisible, setIsPersonalCardModalVisible] = useState(false);
+  // Live projection of where the transfer lands. The amount can exceed this order's
+  // outstanding, in which case the surplus pays the customer's other delivered COD
+  // debts — the admin needs to see that before confirming, not after.
+  const [personalCardPreview, setPersonalCardPreview] = useState(null);
+  const [personalCardPreviewLoading, setPersonalCardPreviewLoading] = useState(false);
   // Order-edit modal (2-step flow): step 1 = form, step 2 = preview/confirm.
   const [isEditItemsModalVisible, setIsEditItemsModalVisible] = useState(false);
   const [editItemsStep, setEditItemsStep] = useState(1);
@@ -354,6 +359,53 @@ const Orders = () => {
     },
   });
 
+  const personalCardPreviewTimer = useRef(null);
+  const personalCardPreviewSeq = useRef(0);
+
+  const requestPersonalCardPreview = (rawAmount) => {
+    if (personalCardPreviewTimer.current) {
+      clearTimeout(personalCardPreviewTimer.current);
+    }
+    const amount = Number(rawAmount);
+    if (!selectedOrder?.id || !Number.isFinite(amount) || amount <= 0) {
+      // Invalidate any already-dispatched request too: clearing the field must not
+      // let an in-flight response repaint a projection for an amount that is no
+      // longer entered.
+      personalCardPreviewSeq.current += 1;
+      setPersonalCardPreview(null);
+      setPersonalCardPreviewLoading(false);
+      return;
+    }
+    setPersonalCardPreviewLoading(true);
+    personalCardPreviewTimer.current = setTimeout(async () => {
+      // Responses can land out of order while the admin is still typing; only the
+      // newest request may write state.
+      const seq = (personalCardPreviewSeq.current += 1);
+      try {
+        const response = await adminService.previewPersonalCardTransfer(selectedOrder.id, { amount });
+        if (seq !== personalCardPreviewSeq.current) return;
+        setPersonalCardPreview(response.data);
+      } catch (_error) {
+        if (seq !== personalCardPreviewSeq.current) return;
+        // The preview is advisory; a failure must not block recording the payment.
+        setPersonalCardPreview(null);
+      } finally {
+        if (seq === personalCardPreviewSeq.current) setPersonalCardPreviewLoading(false);
+      }
+    }, 400);
+  };
+
+  const closePersonalCardModal = () => {
+    if (personalCardPreviewTimer.current) {
+      clearTimeout(personalCardPreviewTimer.current);
+    }
+    personalCardPreviewSeq.current += 1;
+    setIsPersonalCardModalVisible(false);
+    setPersonalCardPreview(null);
+    setPersonalCardPreviewLoading(false);
+    personalCardForm.resetFields();
+  };
+
   const recordPersonalCardPaymentMutation = useMutation({
     mutationFn: (payload) => adminService.recordStaffCashCollection(payload),
 
@@ -362,8 +414,7 @@ const Orders = () => {
       queryClient.invalidateQueries({
         queryKey: ['orders'],
       });
-      setIsPersonalCardModalVisible(false);
-      personalCardForm.resetFields();
+      closePersonalCardModal();
 
       if (selectedOrder?.id) {
         try {
@@ -1744,7 +1795,12 @@ const Orders = () => {
                         amount: selectedOrder.outstanding_amount || 0,
                         notes: '',
                       });
+                      setPersonalCardPreview(null);
                       setIsPersonalCardModalVisible(true);
+                      // setFieldsValue doesn't fire onChange, so project the
+                      // pre-filled amount explicitly — otherwise the preview stays
+                      // blank until the admin edits the field.
+                      requestPersonalCardPreview(selectedOrder.outstanding_amount || 0);
                     }}
                   >
                     {t('ui.orders.record_personal_card_payment', 'Record Personal Card Payment')}
@@ -2053,10 +2109,7 @@ const Orders = () => {
       <Modal
         title={t('ui.orders.record_personal_card_payment', 'Record Personal Card Payment')}
         open={isPersonalCardModalVisible}
-        onCancel={() => {
-          setIsPersonalCardModalVisible(false);
-          personalCardForm.resetFields();
-        }}
+        onCancel={closePersonalCardModal}
         onOk={() => personalCardForm.submit()}
         confirmLoading={recordPersonalCardPaymentMutation.isPending}
       >
@@ -2085,8 +2138,72 @@ const Orders = () => {
             <Input value={`${formatMoney(selectedOrder?.outstanding_amount)} UZS`} disabled />
           </Form.Item>
           <Form.Item name="amount" label={t('ui.orders.amount', 'Amount')} rules={[{ required: true, message: t('ui.orders.amount_required', 'Amount is required') }]}>
-            <Input type="number" min={0} />
+            <Input type="number" min={0} onChange={(e) => requestPersonalCardPreview(e.target.value)} />
           </Form.Item>
+
+          {personalCardPreviewLoading && (
+            <div style={{ marginBottom: 16 }}>
+              <Spin size="small" />{' '}
+              <span style={{ color: '#8c8c8c' }}>
+                {t('ui.orders.personal_card_preview_loading', 'Calculating allocation…')}
+              </span>
+            </div>
+          )}
+
+          {!personalCardPreviewLoading && personalCardPreview && (
+            <Alert
+              type={personalCardPreview.remaining_as_credit > 0 ? 'warning' : 'info'}
+              style={{ marginBottom: 16 }}
+              message={t('ui.orders.personal_card_preview_title', 'Where this payment will go')}
+              description={
+                <Descriptions column={1} size="small" style={{ marginTop: 4 }}>
+                  <Descriptions.Item label={t('ui.orders.personal_card_preview_this_order', 'Applied to this order')}>
+                    {formatMoney(personalCardPreview.applied_to_order)} UZS
+                    {personalCardPreview.order_outstanding_after > 0 && (
+                      <span style={{ color: '#8c8c8c' }}>
+                        {' '}
+                        ({t('ui.orders.personal_card_preview_still_owing', 'still owing')}{' '}
+                        {formatMoney(personalCardPreview.order_outstanding_after)} UZS)
+                      </span>
+                    )}
+                  </Descriptions.Item>
+
+                  {(personalCardPreview.spill_allocations || []).map((spill) => (
+                    <Descriptions.Item
+                      key={spill.order_id}
+                      label={
+                        <>
+                          {t('ui.orders.personal_card_preview_other_debt', 'Applied to debt')}{' '}
+                          <Tag>{spill.order_number}</Tag>
+                        </>
+                      }
+                    >
+                      {formatMoney(spill.amount)} UZS
+                      <span style={{ color: '#8c8c8c' }}>
+                        {' '}
+                        ({formatMoney(spill.outstanding_before)} → {formatMoney(spill.outstanding_after)} UZS)
+                      </span>
+                    </Descriptions.Item>
+                  ))}
+
+                  {personalCardPreview.remaining_as_credit > 0 && (
+                    <Descriptions.Item
+                      label={t('ui.orders.personal_card_preview_credit', 'Left as customer credit')}
+                    >
+                      {formatMoney(personalCardPreview.remaining_as_credit)} UZS
+                      <div style={{ color: '#8c8c8c' }}>
+                        {t(
+                          'ui.orders.personal_card_preview_credit_hint',
+                          'No outstanding delivered order can absorb this. It stays as prepaid credit for future orders.',
+                        )}
+                      </div>
+                    </Descriptions.Item>
+                  )}
+                </Descriptions>
+              }
+            />
+          )}
+
           <Form.Item name="notes" label={t('ui.orders.notes', 'Notes')} rules={[{ required: true, message: t('ui.orders.notes_required', 'Notes are required') }]}>
             <Input.TextArea rows={3} placeholder={t('ui.orders.personal_card_notes_placeholder', 'Example: Customer transferred to owner personal card')} />
           </Form.Item>

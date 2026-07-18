@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -242,6 +242,181 @@ describe('Orders personal card payment flow', () => {
     await waitFor(() => {
       expect(adminService.getOrderDetails).toHaveBeenCalledTimes(2);
     });
+  });
+
+  it('previews the surplus spilling onto another delivered debt before the admin confirms', async () => {
+    // The admin's only on-screen anchor used to be THIS order's outstanding, so a
+    // transfer covering an older debt too gave no signal. The preview must name the
+    // other order and the amount going to it.
+    adminService.previewPersonalCardTransfer.mockResolvedValue({
+      data: {
+        order_id: 456,
+        order_number: 'ORD-TEST-456',
+        amount: 100000,
+        applied_to_order: 13000,
+        order_outstanding_before: 13000,
+        order_outstanding_after: 0,
+        applied_to_other_debts: 87000,
+        remaining_as_credit: 0,
+        spill_allocations: [
+          {
+            order_id: 321,
+            order_number: 'ORD-OLD-DEBT',
+            amount: 87000,
+            outstanding_before: 90000,
+            outstanding_after: 3000,
+          },
+        ],
+        warnings: [],
+      },
+    });
+
+    const user = userEvent.setup();
+    render(<Orders />, { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(adminService.getOrders).toHaveBeenCalled();
+    });
+    await user.click(await screen.findByText(/view_details|View Details/i));
+    await waitFor(() => {
+      expect(adminService.getOrderDetails).toHaveBeenCalledWith(456);
+    });
+    await user.click(await screen.findByText(/record_personal_card_payment|Record Personal Card Payment/i));
+
+    // The amount field opens pre-filled with this order's outstanding.
+    await waitFor(
+      () => {
+        expect(adminService.previewPersonalCardTransfer).toHaveBeenCalledWith(456, { amount: 13000 });
+      },
+      { timeout: 3000 },
+    );
+
+    const amountInput = screen.getByRole('spinbutton');
+    await user.clear(amountInput);
+    await user.type(amountInput, '100000');
+
+    // Debounced: typing 6 characters must still produce one request for the final
+    // amount, as a number — not one per keystroke.
+    await waitFor(
+      () => {
+        expect(adminService.previewPersonalCardTransfer).toHaveBeenCalledWith(456, { amount: 100000 });
+      },
+      { timeout: 3000 },
+    );
+    expect(adminService.previewPersonalCardTransfer).toHaveBeenCalledTimes(2);
+
+    expect(await screen.findByText('Where this payment will go')).toBeInTheDocument();
+    expect(await screen.findByText('ORD-OLD-DEBT')).toBeInTheDocument();
+  });
+
+  it('drops an in-flight preview when the amount is cleared', async () => {
+    // Otherwise a slow response repaints an allocation breakdown for an amount the
+    // admin has already erased.
+    let releasePreview;
+    adminService.previewPersonalCardTransfer.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releasePreview = () =>
+            resolve({
+              data: {
+                order_id: 456,
+                order_number: 'ORD-TEST-456',
+                amount: 100000,
+                applied_to_order: 13000,
+                order_outstanding_before: 13000,
+                order_outstanding_after: 0,
+                applied_to_other_debts: 87000,
+                remaining_as_credit: 0,
+                spill_allocations: [
+                  {
+                    order_id: 321,
+                    order_number: 'ORD-STALE-DEBT',
+                    amount: 87000,
+                    outstanding_before: 90000,
+                    outstanding_after: 3000,
+                  },
+                ],
+                warnings: [],
+              },
+            });
+        }),
+    );
+
+    const user = userEvent.setup();
+    render(<Orders />, { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(adminService.getOrders).toHaveBeenCalled();
+    });
+    await user.click(await screen.findByText(/view_details|View Details/i));
+    await waitFor(() => {
+      expect(adminService.getOrderDetails).toHaveBeenCalledWith(456);
+    });
+    await user.click(await screen.findByText(/record_personal_card_payment|Record Personal Card Payment/i));
+
+    const amountInput = screen.getByRole('spinbutton');
+    await user.clear(amountInput);
+    await user.type(amountInput, '100000');
+
+    await waitFor(
+      () => {
+        expect(releasePreview).toBeDefined();
+      },
+      { timeout: 3000 },
+    );
+
+    // Erase the amount while the request is still in flight, then let it land and
+    // give React a real chance to paint it — asserting absence immediately would
+    // pass whether or not the response is discarded.
+    await user.clear(amountInput);
+    await act(async () => {
+      releasePreview();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    expect(screen.queryByText('ORD-STALE-DEBT')).not.toBeInTheDocument();
+  });
+
+  it('warns that surplus with no other debt to absorb it becomes customer credit', async () => {
+    adminService.previewPersonalCardTransfer.mockResolvedValue({
+      data: {
+        order_id: 456,
+        order_number: 'ORD-TEST-456',
+        amount: 20000,
+        applied_to_order: 13000,
+        order_outstanding_before: 13000,
+        order_outstanding_after: 0,
+        applied_to_other_debts: 0,
+        remaining_as_credit: 7000,
+        spill_allocations: [],
+        warnings: ['surplus_becomes_customer_credit'],
+      },
+    });
+
+    const user = userEvent.setup();
+    render(<Orders />, { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(adminService.getOrders).toHaveBeenCalled();
+    });
+    await user.click(await screen.findByText(/view_details|View Details/i));
+    await waitFor(() => {
+      expect(adminService.getOrderDetails).toHaveBeenCalledWith(456);
+    });
+    await user.click(await screen.findByText(/record_personal_card_payment|Record Personal Card Payment/i));
+
+    const amountInput = screen.getByRole('spinbutton');
+    await user.clear(amountInput);
+    await user.type(amountInput, '20000');
+
+    await waitFor(
+      () => {
+        expect(adminService.previewPersonalCardTransfer).toHaveBeenCalledWith(456, { amount: 20000 });
+      },
+      { timeout: 3000 },
+    );
+
+    expect(await screen.findByText('Left as customer credit')).toBeInTheDocument();
   });
 
   it('shows the personal card action for a subscription-generated COD order', async () => {

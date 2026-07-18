@@ -1,6 +1,7 @@
 """Service for COD cash collection, receivable allocation, and debt rules."""
 
 import logging
+from dataclasses import dataclass, field
 from datetime import datetime, UTC
 from decimal import Decimal
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
@@ -32,6 +33,51 @@ from business_app.utils.state_validators import assert_cash_payment_collector
 
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class PersonalCardTransferPlan:
+    """Projection of where a personal card transfer's money would land.
+
+    Mirrors the allocation order ``post_collection`` actually performs: the target
+    order settles first (never over-allocated), the surplus spills onto the
+    customer's other delivered COD debts oldest-first, and only what no debt can
+    absorb becomes customer credit.
+    """
+
+    order_id: int
+    order_number: Optional[str]
+    amount: Decimal
+    applied_to_order: Decimal
+    order_outstanding_before: Decimal
+    order_outstanding_after: Decimal
+    applied_to_other_debts: Decimal
+    remaining_as_credit: Decimal
+    spill_allocations: List[Dict[str, Any]] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+
+    def to_summary(self) -> Dict[str, Any]:
+        return {
+            "order_id": self.order_id,
+            "order_number": self.order_number,
+            "amount": float(self.amount),
+            "applied_to_order": float(self.applied_to_order),
+            "order_outstanding_before": float(self.order_outstanding_before),
+            "order_outstanding_after": float(self.order_outstanding_after),
+            "applied_to_other_debts": float(self.applied_to_other_debts),
+            "remaining_as_credit": float(self.remaining_as_credit),
+            "spill_allocations": [
+                {
+                    "order_id": spill["order_id"],
+                    "order_number": spill["order_number"],
+                    "amount": float(spill["amount"]),
+                    "outstanding_before": float(spill["outstanding_before"]),
+                    "outstanding_after": float(spill["outstanding_after"]),
+                }
+                for spill in self.spill_allocations
+            ],
+            "warnings": self.warnings,
+        }
 
 
 class CashCollectionService:
@@ -1434,6 +1480,25 @@ class CashCollectionService:
                     allocation_mode="manual",
                     allocation_metadata={"allocation_origin": CashCollectionSource.PERSONAL_CARD_TRANSFER.value},
                 )
+            # Spill any surplus onto the customer's other delivered COD debts,
+            # oldest-first — the same rule every other collection source follows.
+            # Target-first ordering is load-bearing: this is the one source that
+            # may be posted before delivery, and _allocation_candidates ranks the
+            # current order last, so only the residual may spill. Whatever is
+            # still unapplied afterwards falls through to the pending-order
+            # reservation sweep below, and then to customer prepaid credit.
+            #
+            # Guarded rather than called unconditionally: the allocator locks the
+            # customer's debt rows, and a transfer that merely settles its target
+            # (the common case) has no reason to take those locks in an order
+            # opposite to the oldest-first sources.
+            if self._to_decimal(event.unapplied_amount) > Decimal("0.00"):
+                self._allocate_oldest_first(
+                    event=event,
+                    customer_id=customer_id,
+                    order_id=order_id,
+                    allocation_mode=allocation_mode,
+                )
         elif allocations:
             allocation_order = 0
             for allocation in allocations:
@@ -2042,6 +2107,7 @@ class CashCollectionService:
         customer_id: int,
         order_id: Optional[int],
         allocation_mode: str,
+        trigger_completion_notification: bool = True,
     ) -> None:
         if self._to_decimal(event.amount) <= Decimal("0.00"):
             return
@@ -2055,17 +2121,97 @@ class CashCollectionService:
             payments=self.get_active_cod_payments_for_customer(customer_id, for_update=True),
             outstanding_of=live_outstanding,
         )
-        plan, _residual = self._plan_allocation(
-            candidates, self._to_decimal(event.unapplied_amount), live_outstanding
-        )
-        for allocation_order, (payment, allocatable) in enumerate(plan, start=1):
+        plan, _residual = self._plan_allocation(candidates, self._to_decimal(event.unapplied_amount), live_outstanding)
+        # Continue this event's existing numbering rather than restarting at 1:
+        # a personal card transfer allocates to its target order first and then
+        # spills the residual through here. On an event with no allocations yet
+        # this resolves to 1, so every other source is unaffected.
+        base_allocation_order = self._next_allocation_order(event.id)
+        for offset, (payment, allocatable) in enumerate(plan):
             self._allocate_to_payment(
                 event=event,
                 payment=payment,
                 amount=allocatable,
-                allocation_order=allocation_order,
+                allocation_order=base_allocation_order + offset,
                 allocation_mode=allocation_mode,
+                trigger_completion_notification=trigger_completion_notification,
             )
+
+    def preview_personal_card_transfer(
+        self,
+        *,
+        order_id: int,
+        amount: Any,
+    ) -> PersonalCardTransferPlan:
+        """Project ``post_collection(source=personal_card_transfer)`` without mutating.
+
+        Reuses ``_plan_allocation`` — the same splitter the real path runs — so the
+        admin modal cannot drift from what actually happens when they confirm.
+        """
+        amount = self._to_decimal(amount)
+        if amount < Decimal("0.00"):
+            raise ValidationError("Collection amount cannot be negative")
+
+        order = Order.query.options(joinedload(Order.payment)).get(order_id)
+        if not order:
+            raise NotFoundError("Order not found")
+
+        warnings: List[str] = []
+        payment = order.payment
+        if payment and payment.payment_method == PaymentMethod.CASH:
+            target_outstanding = self._to_decimal(payment.outstanding_amount)
+            target_payment_id = payment.id
+        else:
+            # An electronic order is converted to COD when the transfer is recorded,
+            # and a COD order with no payment row yet gets one; either way the target
+            # starts out owing the full order total.
+            if order.payment_method in {PaymentMethod.CLICK, PaymentMethod.PAYME, PaymentMethod.CARD}:
+                warnings.append("order_will_convert_to_cash")
+            target_outstanding = self._to_decimal(order.total_amount)
+            target_payment_id = None
+
+        applied_to_order = min(amount, target_outstanding)
+        residual = amount - applied_to_order
+
+        # The target settles first, so it is excluded from the spill exactly as the
+        # live allocator excludes it (its outstanding is 0 by then).
+        candidates = [
+            candidate
+            for candidate in self._active_cod_payments_query(order.user_id).all()
+            if candidate.id != target_payment_id
+        ]
+        plan, remaining_as_credit = self._plan_allocation(
+            candidates, residual, lambda candidate: self._to_decimal(candidate.outstanding_amount)
+        )
+
+        spill_allocations = []
+        for candidate, allocatable in plan:
+            outstanding_before = self._to_decimal(candidate.outstanding_amount)
+            spill_allocations.append(
+                {
+                    "order_id": candidate.order_id,
+                    "order_number": candidate.order.order_number if candidate.order else None,
+                    "amount": allocatable,
+                    "outstanding_before": outstanding_before,
+                    "outstanding_after": outstanding_before - allocatable,
+                }
+            )
+
+        if remaining_as_credit > Decimal("0.00"):
+            warnings.append("surplus_becomes_customer_credit")
+
+        return PersonalCardTransferPlan(
+            order_id=order.id,
+            order_number=order.order_number,
+            amount=amount,
+            applied_to_order=applied_to_order,
+            order_outstanding_before=target_outstanding,
+            order_outstanding_after=target_outstanding - applied_to_order,
+            applied_to_other_debts=residual - remaining_as_credit,
+            remaining_as_credit=remaining_as_credit,
+            spill_allocations=spill_allocations,
+            warnings=warnings,
+        )
 
     def simulate_event_amount_change(
         self,
@@ -2087,15 +2233,13 @@ class CashCollectionService:
         for allocation in event.allocations:
             if allocation.reversed_at or not self._allocation_affects_payment_projection(allocation):
                 continue
-            restored[allocation.payment_id] = restored.get(
-                allocation.payment_id, Decimal("0.00")
-            ) + self._to_decimal(allocation.allocated_amount)
+            restored[allocation.payment_id] = restored.get(allocation.payment_id, Decimal("0.00")) + self._to_decimal(
+                allocation.allocated_amount
+            )
 
         def outstanding_after_reversal(payment: Payment) -> Decimal:
             amount = self._to_decimal(payment.amount)
-            collected = self._to_decimal(payment.amount_collected) - restored.get(
-                payment.id, Decimal("0.00")
-            )
+            collected = self._to_decimal(payment.amount_collected) - restored.get(payment.id, Decimal("0.00"))
             collected = min(amount, max(Decimal("0.00"), collected))
             return max(Decimal("0.00"), amount - collected)
 
@@ -2112,9 +2256,7 @@ class CashCollectionService:
             Decimal("0.00"),
         )
         order_payment = Payment.query.filter_by(order_id=order_id).first() if order_id else None
-        outstanding_before = (
-            outstanding_after_reversal(order_payment) if order_payment else Decimal("0.00")
-        )
+        outstanding_before = outstanding_after_reversal(order_payment) if order_payment else Decimal("0.00")
         return {
             "applied_to_order": applied_to_order,
             "applied_total": new_amount - residual,

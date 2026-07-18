@@ -1043,6 +1043,13 @@
     "rule": "/api/v1/admin/orders/<int:order_id>/payment-method/preview"
   },
   {
+    "endpoint": "admin.preview_personal_card_transfer",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/orders/<int:order_id>/personal-card-transfer/preview"
+  },
+  {
     "endpoint": "admin.update_order_status",
     "methods": [
       "PUT"

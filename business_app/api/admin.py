@@ -12097,6 +12097,33 @@ def get_cash_reconciliation_report():
         return internal_error_response("Failed to generate cash reconciliation report")
 
 
+@admin_bp.route("/orders/<int:order_id>/personal-card-transfer/preview", methods=["POST"])
+@jwt_required()
+@manager_or_higher_required
+def preview_personal_card_transfer(order_id):
+    """Dry-run a personal card transfer: show what settles this order, what spills onto
+    the customer's other delivered COD debts, and what is left as customer credit."""
+    try:
+        from business_app.services.cash_collection_service import CashCollectionService
+
+        data = request.get_json(silent=True) or {}
+        if data.get("amount") is None:
+            return validation_error_response("amount is required")
+
+        plan = CashCollectionService().preview_personal_card_transfer(
+            order_id=order_id,
+            amount=data.get("amount"),
+        )
+        return success_response(data=plan.to_summary())
+    except NotFoundError as exc:
+        return not_found_response(resource_type="Order", message=str(exc))
+    except ValidationError as exc:
+        return validation_error_response(str(exc))
+    except Exception:  # noqa: BLE001
+        current_app.logger.exception("personal card transfer preview failed for order %s", order_id)
+        return internal_error_response("Failed to preview personal card transfer")
+
+
 @admin_bp.route("/staff/cash-reconciliation/collections", methods=["POST"])
 @jwt_required()
 @manager_or_higher_required

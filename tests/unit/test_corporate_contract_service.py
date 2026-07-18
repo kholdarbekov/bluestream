@@ -1844,3 +1844,96 @@ class TestBusinessAccountGateParity:
             service.validate_business_account_order(
                 user=workplace_user_with_contract, order_items=contract_covered_items
             )  # must not raise
+
+
+# --- reverse_order_collection: symmetric inverse of settle_order_collection ---
+
+
+def _setup_amount_grocery_contract(db, user):
+    user.user_type = "entity"
+    user.entity_subtype = EntitySubtype.GROCERY_STORE
+    db.session.commit()
+    contract = CorporateContract(
+        user_id=user.id,
+        contract_number=f"CTR-{uuid4().hex[:10]}",
+        name="Money Contract",
+        status=CorporateContractStatus.ACTIVE,
+        start_date=datetime.now(UTC) - timedelta(days=1),
+        currency="UZS",
+        is_active=True,
+    )
+    contract.tracking_mode = CorporateContractTrackingMode.AMOUNT
+    db.session.add(contract)
+    db.session.flush()
+    account = CorporatePrepaymentAccount(contract_id=contract.id, is_active=True)
+    db.session.add(account)
+    db.session.commit()
+    return CorporateContractService(), contract, account
+
+
+def test_reverse_order_collection_amount_mode_restores_outstanding(db, sample_user):
+    service, contract, account = _setup_amount_grocery_contract(db, sample_user)
+    service.settle_order_collection(
+        user=sample_user, order_id=555, collected_amount=Decimal("50000.00"),
+        source="delivery_completion", cash_event_id=9101, actor_user_id=sample_user.id,
+    )
+    db.session.commit()
+    db.session.refresh(account)
+    assert account.outstanding_amount == Decimal("-50000.00")
+    assert account.lifetime_collected == Decimal("50000.00")
+
+    service.reverse_order_collection(cash_event_id=9101, actor_user_id=sample_user.id, reason="cash correction")
+    db.session.commit()
+    db.session.refresh(account)
+    assert account.outstanding_amount == Decimal("0.00")  # money debt restored
+    assert account.lifetime_collected == Decimal("0.00")
+    reversals = CorporatePrepaymentLedger.query.filter_by(
+        contract_id=contract.id, event_type=CorporatePrepaymentEventType.ADJUSTMENT,
+    ).all()
+    assert len(reversals) == 1
+    assert Decimal(str(reversals[0].amount)) == Decimal("50000.00")
+
+
+def test_reverse_order_collection_amount_mode_idempotent(db, sample_user):
+    service, contract, account = _setup_amount_grocery_contract(db, sample_user)
+    service.settle_order_collection(
+        user=sample_user, order_id=556, collected_amount=Decimal("30000.00"),
+        source="delivery_completion", cash_event_id=9102,
+    )
+    db.session.commit()
+    service.reverse_order_collection(cash_event_id=9102, reason="first")
+    db.session.commit()
+    service.reverse_order_collection(cash_event_id=9102, reason="second")
+    db.session.commit()
+    db.session.refresh(account)
+    assert account.outstanding_amount == Decimal("0.00")  # not restored twice
+    assert CorporatePrepaymentLedger.query.filter_by(
+        contract_id=contract.id, event_type=CorporatePrepaymentEventType.ADJUSTMENT,
+    ).count() == 1
+
+
+def test_reverse_order_collection_units_mode_claws_back_prepaid_units(db, sample_user):
+    service, contract, account, product, order = _setup_units_grocery_reserved_order(db, sample_user)
+    service.topup_from_cash_collection(
+        contract=contract, order_id=order.id, cash_event_id=9201,
+        collected_amount=order.total_amount, source="delivery_completion",
+    )
+    db.session.commit()
+    assert Decimal(str(_get_product_balance(account.id, product.id).prepaid_units)) == Decimal("2.00")
+
+    service.reverse_order_collection(cash_event_id=9201, reason="cash correction")
+    db.session.commit()
+    assert Decimal(str(_get_product_balance(account.id, product.id).prepaid_units)) == Decimal("0.00")
+
+    # The cumulative TOPUP cap nets to zero, so a fresh collection can fund again.
+    service.topup_from_cash_collection(
+        contract=contract, order_id=order.id, cash_event_id=9202,
+        collected_amount=order.total_amount, source="delivery_completion",
+    )
+    db.session.commit()
+    assert Decimal(str(_get_product_balance(account.id, product.id).prepaid_units)) == Decimal("2.00")
+
+
+def test_reverse_order_collection_noop_when_nothing_posted(db, sample_user):
+    result = CorporateContractService().reverse_order_collection(cash_event_id=999999, reason="nothing")
+    assert result == []

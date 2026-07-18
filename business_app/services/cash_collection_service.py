@@ -1889,6 +1889,18 @@ class CashCollectionService:
             collector_user_id=event.collector_user_id,
         )
 
+        # Unwind the corporate-contract mirror post_collection posted for this cash
+        # event (grocery-store customers only; no-op otherwise). On an admin
+        # collected-cash correction the replacement re-posts the corrected amount
+        # under its own event id, so the net contract effect matches the correction.
+        from business_app.services.corporate_contract_service import CorporateContractService
+
+        CorporateContractService().reverse_order_collection(
+            cash_event_id=event.id,
+            actor_user_id=reversed_by_user_id,
+            reason=f"Cash collection reversed: {reason}",
+        )
+
         audit_logger.log_event(
             event_type=AuditEventType.PAYMENT_REFUNDED,
             action="cash_collection_reversed",
@@ -1927,8 +1939,11 @@ class CashCollectionService:
         via entry_metadata so the audit trail survives.
         """
         normalized_amount = self._to_decimal(new_amount)
-        if normalized_amount <= Decimal("0.00"):
-            raise ValidationError("Adjusted amount must be positive")
+        if normalized_amount < Decimal("0.00"):
+            # 0 is valid: it records that no cash was actually collected (the
+            # replacement below carries a zero-amount "no cash collected" event,
+            # which post_collection already models). Only negatives are rejected.
+            raise ValidationError("Adjusted amount cannot be negative")
         reason = (reason or "").strip()
         if not reason:
             raise ValidationError("An adjustment reason is required")
@@ -1977,6 +1992,13 @@ class CashCollectionService:
         replacement_proof["adjustment_source"] = "admin_correction"
         replacement_proof["original_event_id"] = event.id
 
+        # post_collection requires notes when the amount is 0. A real
+        # delivery-completion event carries no notes unless nothing was
+        # collected, so a correction *down to* 0 must supply its own.
+        replacement_notes = original_context["notes"]
+        if normalized_amount == Decimal("0.00") and not (replacement_notes or "").strip():
+            replacement_notes = f"Corrected to 0 (no cash collected): {reason}"
+
         replacement = self.post_collection(
             customer_id=original_context["customer_id"],
             amount=normalized_amount,
@@ -1986,7 +2008,7 @@ class CashCollectionService:
             order_id=original_context["order_id"],
             delivery_id=original_context["delivery_id"],
             driver_cash_session_id=original_context["driver_cash_session_id"],
-            notes=original_context["notes"],
+            notes=replacement_notes,
             proof_data=replacement_proof,
             occurred_at=original_context["occurred_at"],
             commit=False,

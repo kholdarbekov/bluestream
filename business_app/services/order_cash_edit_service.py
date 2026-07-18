@@ -165,8 +165,10 @@ class OrderCashEditService:
             blocking.append(f"order_not_delivered: status is '{getattr(order.status, 'value', order.status)}'")
         if order.payment_method != PaymentMethod.CASH:
             blocking.append("order_not_cash")
-        if new_dec <= Decimal("0.00"):
-            blocking.append("new_amount_must_be_positive")
+        if new_dec < Decimal("0.00"):
+            # 0 is valid: the admin can correct a bogus collection down to
+            # "no cash collected". Only a negative amount is nonsensical.
+            blocking.append("new_amount_cannot_be_negative")
 
         delivered_at = delivered_at_utc(order)
         if delivered_at is None:

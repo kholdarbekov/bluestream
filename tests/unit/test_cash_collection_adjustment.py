@@ -401,7 +401,7 @@ class TestAdjustEventAmount:
                     reason="   ",
                 )
 
-    def test_rejects_non_positive_amount(
+    def test_rejects_negative_amount(
         self,
         app,
         db,
@@ -412,6 +412,7 @@ class TestAdjustEventAmount:
         cod_order,
         cod_delivery,
     ):
+        # 0 is a valid correction ("no cash collected"); only negatives are rejected.
         with app.app_context():
             service = CashCollectionService()
             original = _seed_collection(
@@ -423,12 +424,12 @@ class TestAdjustEventAmount:
                 amount="18000.00",
             )
 
-            with pytest.raises(ValidationError, match="must be positive"):
+            with pytest.raises(ValidationError, match="cannot be negative"):
                 service.adjust_event_amount(
                     original.id,
-                    new_amount=Decimal("0.00"),
+                    new_amount=Decimal("-1.00"),
                     adjusted_by_user_id=admin_user.id,
-                    reason="zero amount",
+                    reason="negative amount",
                 )
 
     def test_cannot_adjust_already_voided_event(

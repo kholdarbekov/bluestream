@@ -1985,6 +1985,145 @@ class CorporateContractService:
                 notes=notes,
             )
 
+    def reverse_order_collection(
+        self,
+        *,
+        cash_event_id: int,
+        actor_user_id: Optional[int] = None,
+        reason: Optional[str] = None,
+    ) -> List[CorporatePrepaymentLedger]:
+        """Reverse whatever ``settle_order_collection`` posted for a cash event.
+
+        Symmetric inverse of ``settle_order_collection``, discovered via the
+        deterministic cash-event idempotency keys the forward path stamps:
+          * AMOUNT-mode COLLECT rows -> money debt restored (outstanding back up,
+            lifetime_collected back down) via a linking ADJUSTMENT.
+          * legacy UNITS-mode TOPUP rows -> ``prepaid_units`` clawed back via a
+            *negative-units* TOPUP, so ``topup_from_cash_collection``'s cumulative
+            cap (which sums TOPUP units per order+balance) nets to zero and a
+            corrected re-collection can fund up to the ceiling again.
+
+        Idempotent — one reversal per source row (guarded by a ``reverse:*`` key).
+        No-op when the cash event posted nothing (non-grocery customers, zero
+        amounts). Called by ``CashCollectionService.reverse_collection_event`` so an
+        admin collected-cash correction unwinds the contract mirror before the
+        replacement re-posts the corrected amount.
+        """
+        if cash_event_id is None:
+            return []
+
+        reversals: List[CorporatePrepaymentLedger] = []
+
+        collect_rows = CorporatePrepaymentLedger.query.filter(
+            CorporatePrepaymentLedger.event_type == CorporatePrepaymentEventType.COLLECT,
+            CorporatePrepaymentLedger.idempotency_key.like(f"collect:cash_event:{cash_event_id}:%"),
+        ).all()
+        for row in collect_rows:
+            entry = self._reverse_money_collection_entry(row, actor_user_id=actor_user_id, reason=reason)
+            if entry is not None:
+                reversals.append(entry)
+
+        topup_rows = CorporatePrepaymentLedger.query.filter(
+            CorporatePrepaymentLedger.event_type == CorporatePrepaymentEventType.TOPUP,
+            CorporatePrepaymentLedger.idempotency_key.like(f"topup:cash_event:{cash_event_id}:%"),
+        ).all()
+        for row in topup_rows:
+            entry = self._reverse_topup_entry(row, actor_user_id=actor_user_id, reason=reason)
+            if entry is not None:
+                reversals.append(entry)
+
+        db.session.flush()
+        return reversals
+
+    def _reverse_money_collection_entry(
+        self,
+        source: CorporatePrepaymentLedger,
+        *,
+        actor_user_id: Optional[int],
+        reason: Optional[str],
+    ) -> Optional[CorporatePrepaymentLedger]:
+        """Undo one AMOUNT-mode COLLECT row (inverse of ``record_money_collection``)."""
+        idempotency_key = f"reverse:collect:{source.id}"
+        if CorporatePrepaymentLedger.query.filter_by(idempotency_key=idempotency_key).first():
+            return None
+
+        amount = Decimal(str(source.amount or 0))
+        account = self._get_or_create_locked_account(source.contract_id)
+        account.outstanding_amount = Decimal(str(account.outstanding_amount or 0)) + amount
+        account.lifetime_collected = max(Decimal("0.00"), Decimal(str(account.lifetime_collected or 0)) - amount)
+
+        entry = CorporatePrepaymentLedger(
+            contract_id=source.contract_id,
+            account_id=source.account_id,
+            balance_id=None,
+            product_id=None,
+            order_id=source.order_id,
+            order_item_id=None,
+            delivery_id=source.delivery_id,
+            actor_user_id=actor_user_id,
+            event_type=CorporatePrepaymentEventType.ADJUSTMENT,
+            units=None,
+            unit_price_snapshot=None,
+            amount=amount,
+            currency=source.currency,
+            notes=reason or "Reversed cash collection on correction",
+            idempotency_key=idempotency_key,
+            entry_metadata={
+                "kind": "collection_reversal",
+                "reversal_of_collect_entry_id": source.id,
+                "cash_event_id": (source.entry_metadata or {}).get("cash_event_id"),
+                "outstanding_after": float(account.outstanding_amount),
+            },
+        )
+        db.session.add(entry)
+        return entry
+
+    def _reverse_topup_entry(
+        self,
+        source: CorporatePrepaymentLedger,
+        *,
+        actor_user_id: Optional[int],
+        reason: Optional[str],
+    ) -> Optional[CorporatePrepaymentLedger]:
+        """Undo one UNITS-mode TOPUP row (inverse of ``topup_from_cash_collection``)."""
+        idempotency_key = f"reverse:topup:{source.id}"
+        if CorporatePrepaymentLedger.query.filter_by(idempotency_key=idempotency_key).first():
+            return None
+
+        units = Decimal(str(source.units or 0))
+        if source.balance_id is not None and units > 0:
+            balance = CorporatePrepaymentBalance.query.filter_by(id=source.balance_id).with_for_update().first()
+            if not balance:
+                raise NotFoundError("Corporate prepayment balance not found")
+            balance.prepaid_units = max(Decimal("0.00"), Decimal(str(balance.prepaid_units or 0)) - units)
+
+        entry = CorporatePrepaymentLedger(
+            contract_id=source.contract_id,
+            account_id=source.account_id,
+            balance_id=source.balance_id,
+            product_id=source.product_id,
+            order_id=source.order_id,
+            order_item_id=source.order_item_id,
+            delivery_id=source.delivery_id,
+            actor_user_id=actor_user_id,
+            # Negative-units TOPUP (not ADJUSTMENT) so the cumulative-cap sum in
+            # topup_from_cash_collection nets to zero after the reversal.
+            event_type=CorporatePrepaymentEventType.TOPUP,
+            units=-units,
+            unit_price_snapshot=source.unit_price_snapshot,
+            amount=(-Decimal(str(source.amount)) if source.amount is not None else None),
+            currency=source.currency,
+            notes=reason or "Reversed auto-topup on cash correction",
+            idempotency_key=idempotency_key,
+            entry_metadata={
+                "kind": "topup_reversal",
+                "reversal_of_topup_entry_id": source.id,
+                "cash_event_id": (source.entry_metadata or {}).get("cash_event_id"),
+            },
+        )
+        db.session.add(entry)
+        return entry
+
     def post_money_adjustment(
         self,
         contract: CorporateContract,

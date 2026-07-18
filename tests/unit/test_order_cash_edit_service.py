@@ -1,17 +1,30 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from uuid import uuid4
 
 import pytest
 
 from business_app import db
+from business_app.models.corporate import (
+    CorporateContract,
+    CorporateContractStatus,
+    CorporatePrepaymentAccount,
+)
 from business_app.models.delivery import Delivery, DeliveryPerson
 from business_app.models.order import Order
 from business_app.models.payment import DriverCashSession, Payment
 from business_app.services.cash_collection_service import CashCollectionService
+from business_app.services.corporate_contract_service import CorporateContractService
 from business_app.services.driver_reconciliation_service import DriverReconciliationService
 from business_app.services.order_cash_edit_service import OrderCashEditService
 from business_app.utils.exceptions import ConflictError, ValidationError
-from shared.enums import DeliveryStatus, OrderStatus, PaymentMethod
+from shared.enums import (
+    CorporateContractTrackingMode,
+    DeliveryStatus,
+    EntitySubtype,
+    OrderStatus,
+    PaymentMethod,
+)
 
 
 @pytest.fixture
@@ -384,3 +397,136 @@ def test_apply_on_card_settled_order_credits_only_the_cash_collected(
     assert Decimal(str(payment.amount_collected)) == Decimal("90000")  # card transfer untouched
     assert Decimal(str(payment.outstanding_amount)) == Decimal("0.00")
     assert svc.get_customer_prepaid_balance(sample_user.id) == Decimal("10000")
+
+
+def test_preview_allows_zero_collected(
+    db, sample_user, delivery_driver, driver_profile, delivered_cod
+):
+    """Admin correcting the collected cash to 0 (driver collected nothing) is valid:
+    zero is not blocked, only negatives are."""
+    order, delivery = delivered_cod
+    svc = CashCollectionService()
+    _seed(svc, sample_user, delivery_driver, order, delivery, "54000")
+    plan = OrderCashEditService().preview(order_id=order.id, new_amount="0")
+    assert plan.is_editable
+    assert not plan.blocking_reasons
+    assert plan.new_amount == Decimal("0")
+    assert plan.applied_to_order == Decimal("0")
+    assert plan.projected_outstanding == Decimal("54000")
+    assert plan.projected_payment_status == "pending"
+    assert plan.customer_credit_delta == Decimal("0")
+
+
+def test_preview_blocks_negative_collected(
+    db, sample_user, delivery_driver, driver_profile, delivered_cod
+):
+    order, delivery = delivered_cod
+    svc = CashCollectionService()
+    _seed(svc, sample_user, delivery_driver, order, delivery, "54000")
+    plan = OrderCashEditService().preview(order_id=order.id, new_amount="-1")
+    assert not plan.is_editable
+    assert "new_amount_cannot_be_negative" in plan.blocking_reasons
+
+
+def test_apply_zero_leaves_order_fully_unpaid(
+    db, sample_user, delivery_driver, driver_profile, delivered_cod
+):
+    order, delivery = delivered_cod
+    svc = CashCollectionService()
+    _seed(svc, sample_user, delivery_driver, order, delivery, "54000")
+
+    result = OrderCashEditService().apply_edit(
+        order_id=order.id, new_amount="0", reason="driver collected nothing",
+        actor_user_id=delivery_driver.id,
+    )
+    payment = Payment.query.filter_by(order_id=order.id).first()
+    assert Decimal(str(payment.amount_collected)) == Decimal("0")
+    assert Decimal(str(payment.outstanding_amount)) == Decimal("54000")
+    assert result.replacement_event_id is not None
+
+
+def test_apply_zero_when_original_event_has_no_notes(
+    db, sample_user, delivery_driver, driver_profile, delivered_cod
+):
+    """A real delivery-completion cash event with cash collected carries no notes
+    (staff_service only sets notes for the zero-cash case). Correcting it down to 0
+    must still succeed — post_collection requires notes only for a zero amount, so
+    adjust_event_amount must supply a fallback."""
+    order, delivery = delivered_cod
+    svc = CashCollectionService()
+    svc.ensure_cod_payment_for_order(order)
+    svc.post_collection(
+        customer_id=sample_user.id, amount=Decimal("54000"), source="delivery_completion",
+        collector_user_id=delivery_driver.id, recorded_by_user_id=delivery_driver.id,
+        order_id=order.id, delivery_id=delivery.id, notes=None,
+    )
+    result = OrderCashEditService().apply_edit(
+        order_id=order.id, new_amount="0", reason="driver collected nothing",
+        actor_user_id=delivery_driver.id,
+    )
+    payment = Payment.query.filter_by(order_id=order.id).first()
+    assert Decimal(str(payment.amount_collected)) == Decimal("0")
+    assert Decimal(str(payment.outstanding_amount)) == Decimal("54000")
+    assert result.replacement_event_id is not None
+
+
+def _make_grocery_amount_contract(db, user):
+    user.user_type = "entity"
+    user.entity_subtype = EntitySubtype.GROCERY_STORE
+    db.session.commit()
+    contract = CorporateContract(
+        user_id=user.id,
+        contract_number=f"CTR-{uuid4().hex[:10]}",
+        name="Money Contract",
+        status=CorporateContractStatus.ACTIVE,
+        start_date=datetime.now(timezone.utc) - timedelta(days=1),
+        currency="UZS",
+        is_active=True,
+    )
+    contract.tracking_mode = CorporateContractTrackingMode.AMOUNT
+    db.session.add(contract)
+    db.session.flush()
+    account = CorporatePrepaymentAccount(contract_id=contract.id, is_active=True)
+    db.session.add(account)
+    db.session.commit()
+    return contract, account
+
+
+def test_apply_downward_reverses_corporate_overcollection_for_grocery(
+    db, sample_user, delivery_driver, driver_profile, delivered_cod
+):
+    """54k->40k on a grocery AMOUNT contract must net -40k, not -94k: the original
+    COLLECT is reversed before the replacement re-mirrors the corrected amount."""
+    order, delivery = delivered_cod
+    contract, account = _make_grocery_amount_contract(db, sample_user)
+    svc = CashCollectionService()
+    _seed(svc, sample_user, delivery_driver, order, delivery, "54000")
+    db.session.refresh(account)
+    assert Decimal(str(account.outstanding_amount)) == Decimal("-54000.00")  # mirrored on collection
+
+    OrderCashEditService().apply_edit(
+        order_id=order.id, new_amount="40000", reason="driver only collected 40k",
+        actor_user_id=delivery_driver.id,
+    )
+    db.session.refresh(account)
+    assert Decimal(str(account.outstanding_amount)) == Decimal("-40000.00")
+    assert Decimal(str(account.lifetime_collected)) == Decimal("40000.00")
+
+
+def test_apply_zero_reverses_corporate_collection_for_grocery(
+    db, sample_user, delivery_driver, driver_profile, delivered_cod
+):
+    """Correcting a grocery COD collection down to 0 must fully unwind the contract
+    mirror — otherwise the store's balance stays permanently over-settled."""
+    order, delivery = delivered_cod
+    contract, account = _make_grocery_amount_contract(db, sample_user)
+    svc = CashCollectionService()
+    _seed(svc, sample_user, delivery_driver, order, delivery, "54000")
+
+    OrderCashEditService().apply_edit(
+        order_id=order.id, new_amount="0", reason="driver collected nothing",
+        actor_user_id=delivery_driver.id,
+    )
+    db.session.refresh(account)
+    assert Decimal(str(account.outstanding_amount)) == Decimal("0.00")
+    assert Decimal(str(account.lifetime_collected)) == Decimal("0.00")

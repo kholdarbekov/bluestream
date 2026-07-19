@@ -118,6 +118,13 @@ def make_celery(app=None):
             "task": "business_app.tasks.delivery_monitoring_tasks.monitor_stranded_deliveries",
             "schedule": crontab(minute="*/15"),
         },
+        # Re-offer long-unassigned pool deliveries for auto-assignment every 10
+        # minutes — the "periodic re-enqueue" auto_assign_delivery_task promises
+        # after it exhausts its own retries. Offset from monitor-stranded.
+        "reenqueue-stale-pool-deliveries": {
+            "task": "business_app.tasks.delivery_monitoring_tasks.reenqueue_stale_pool_deliveries",
+            "schedule": crontab(minute="5-55/10"),
+        },
         # Reconcile PENDING payments against the gateway every 15 minutes (PAY-007).
         # Polls payments older than PAYMENT_RECONCILE_AFTER_MINUTES (default 10 min)
         # and auto-cancels ones still unknown to the gateway past PAYMENT_TIMEOUT_MINUTES.

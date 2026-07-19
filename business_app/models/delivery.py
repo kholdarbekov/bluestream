@@ -381,9 +381,16 @@ class DeliveryPerson(db.Model, TimestampMixin):
         if not self.is_active or not self.is_available:
             return False
 
-        from datetime import datetime, time, UTC
+        from datetime import time
 
-        now = datetime.now(UTC).time()
+        from business_app.utils.timezone_utils import get_utc_now, utc_to_local
+        from shared.constants import DISPLAY_TIMEZONE
+
+        # working_hours_start/end are authored in the business's local
+        # (DISPLAY_TIMEZONE) wall clock, so "now" must be compared in that same
+        # zone — not UTC, which shifted the whole shift window by the offset and
+        # made drivers look off-shift during their real morning hours.
+        now = utc_to_local(get_utc_now(), DISPLAY_TIMEZONE).time()
         start_time = time.fromisoformat(self.working_hours_start)
         end_time = time.fromisoformat(self.working_hours_end)
 

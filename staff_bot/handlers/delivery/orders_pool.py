@@ -20,10 +20,53 @@ logger = logging.getLogger(__name__)
 class OrdersPoolHandler(BaseHandler):
     """Handle order pool browsing and acceptance"""
 
+    @staticmethod
+    def _effective_page(user_data: dict, *, reset: bool) -> int:
+        """Resolve which pool page to fetch.
+
+        Fresh entry into the "New Orders" menu (reset=True) always starts at
+        page 1 — otherwise a ``pool_page`` left over from an earlier pagination
+        tap pins the driver to a stale page and they never see page 1 again.
+        Pagination taps pass reset=False to honour the page the driver chose.
+        """
+        if reset:
+            user_data['pool_page'] = 1
+        page = user_data.get('pool_page', 1)
+        if not isinstance(page, int) or page < 1:
+            page = 1
+            user_data['pool_page'] = 1
+        return page
+
+    @staticmethod
+    def _clamp_page(user_data: dict, total_pages: int) -> int:
+        """Clamp the stored page into ``[1, total_pages]`` (min 1) and persist it.
+
+        A pagination button rendered while the pool was larger can request a
+        page that no longer exists after other drivers claimed orders; without
+        this the driver sees an empty list with no way back to page 1.
+        """
+        pages = total_pages if isinstance(total_pages, int) and total_pages >= 1 else 1
+        page = user_data.get('pool_page', 1)
+        if not isinstance(page, int) or page < 1:
+            page = 1
+        clamped = min(page, pages)
+        user_data['pool_page'] = clamped
+        return clamped
+
+    async def _fetch_pool_page(self, token, page):
+        """Fetch a single page of the unassigned-order pool."""
+        async with api_client as client:
+            return await client.get_order_pool(token, filters={'page': page, 'per_page': 10})
+
     @require_auth
     @require_delivery_driver
-    async def show_pool(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Show available orders pool"""
+    async def show_pool(self, update: Update, context: ContextTypes.DEFAULT_TYPE, reset_page: bool = True):
+        """Show available orders pool.
+
+        ``reset_page`` defaults to True so every fresh open of the menu starts
+        at page 1; the pagination handler passes reset_page=False to keep the
+        page the driver navigated to.
+        """
         language = await self._get_language(update, context)
         token = await self._get_auth_token(update, context)
         if not token:
@@ -31,9 +74,8 @@ class OrdersPoolHandler(BaseHandler):
             return
 
         try:
-            page = context.user_data.get('pool_page', 1)
-            async with api_client as client:
-                response = await client.get_order_pool(token, filters={'page': page, 'per_page': 10})
+            page = self._effective_page(context.user_data, reset=reset_page)
+            response = await self._fetch_pool_page(token, page)
 
             if not response.success:
                 if response.status_code == 401:
@@ -42,8 +84,23 @@ class OrdersPoolHandler(BaseHandler):
                     await self._handle_api_response_error(update, response, language)
                 return
 
-            orders = response.data.get('items', [])
             pagination = response.data.get('pagination', {})
+            # A stale page beyond the current range (pool shrank since the
+            # button was rendered) is clamped back into range and re-fetched,
+            # so the driver never lands on a dead-end empty page.
+            clamped = self._clamp_page(context.user_data, pagination.get('pages', 1) or 1)
+            if clamped != page:
+                page = clamped
+                response = await self._fetch_pool_page(token, page)
+                if not response.success:
+                    if response.status_code == 401:
+                        await self._handle_auth_error(update, language)
+                    else:
+                        await self._handle_api_response_error(update, response, language)
+                    return
+                pagination = response.data.get('pagination', {})
+
+            orders = response.data.get('items', [])
 
             if not orders:
                 text = f"📦 {i18n.get('staff.delivery.pool_empty', language)}"
@@ -367,7 +424,7 @@ class OrdersPoolHandler(BaseHandler):
             # Extract page: staff_pool_page_{page}
             page = int(query.data.split('_')[-1])
             context.user_data['pool_page'] = page
-            await self.show_pool(update, context)
+            await self.show_pool(update, context, reset_page=False)
 
         except Exception as e:
             logger.error(f"Error in pool pagination: {e}", exc_info=True)

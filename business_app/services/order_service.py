@@ -1003,6 +1003,21 @@ class OrderService:
 
         # Update order
         old_status = current_status
+
+        # SERIALISE THE TRANSITION ITSELF. Everything below — the delivery
+        # completion, the COD settlement, the loyalty award, the bottle write
+        # and the driver-session tally — assumes it is running exactly once per
+        # transition. Nothing guaranteed that: two callers (an admin using the
+        # dropdown while the driver submits at the door) both read the same
+        # pre-image, both passed `_is_valid_status_transition`, and both ran the
+        # whole branch. The bottle LEDGER survived it on idempotency keys, but
+        # the driver-session tally is a bare `+=` and was credited twice, which
+        # `compute_discrepancy()` then reads as the driver losing bottles.
+        if not self._claim_status_transition(order, old_status, new_status):
+            # A concurrent transaction already applied this exact transition.
+            # Idempotent no-op: no side-effects, no second notification.
+            return order
+
         order.status = new_status
         order.updated_at = datetime.now(timezone.utc)
 
@@ -1342,7 +1357,15 @@ class OrderService:
         if payment_method == PaymentMethod.CASH and not bypass_cod_check:
             from business_app.services.cash_collection_service import CashCollectionService
 
-            CashCollectionService().validate_customer_can_use_cod(user.id)
+            # The cap has TWO arms (spec 5.5): the orderer's linked cluster AND
+            # the destination PLACE group. Pass the address so the place arm can
+            # fire; an absent/ungrouped address degrades to the person arm, i.e.
+            # byte-identical to the pre-Phase-2b behaviour.
+            delivery_address = order_data.get("delivery_address") or {}
+            CashCollectionService().validate_customer_can_use_cod(
+                user.id,
+                delivery_address_id=delivery_address.get("delivery_address_id"),
+            )
 
         if payment_method == PaymentMethod.BUSINESS_ACCOUNT:
             CorporateContractService().validate_business_account_order(user=user, order_items=order_items)
@@ -1478,6 +1501,69 @@ class OrderService:
         """Check if status transition is valid (delegates to shared.status_transitions)."""
         return is_valid_order_transition(current_status, new_status)
 
+    def _claim_status_transition(self, order: Order, old_status, new_status: OrderStatus) -> bool:
+        """Take the transition with a compare-and-set UPDATE, not a bare write.
+
+        ``UPDATE orders SET status = <new> WHERE id = <id> AND status = <pre-image>``.
+
+        The pre-image predicate is what makes ``_handle_status_change_actions``
+        run once per transition instead of once per caller. Postgres takes the
+        row lock on the first writer and re-evaluates the WHERE clause for the
+        second one against the WINNER's committed row (EvalPlanQual under READ
+        COMMITTED), so the loser matches 0 rows and never enters the branch.
+
+        This is the same lock the ``db.session.flush()`` a few lines below
+        already took; it is simply taken BEFORE the side-effects are decided
+        rather than after, and it carries a predicate.
+
+        Returns
+        -------
+        True
+            This transaction owns the transition and must run its side-effects.
+        False
+            A concurrent transaction already applied *this same* transition.
+            The caller returns the order untouched — idempotent no-op.
+
+        Raises
+        ------
+        ConflictError
+            The row moved to some OTHER status while we were deciding. Reporting
+            success would tell the caller a transition happened that did not.
+        """
+        claimed = (
+            db.session.query(Order)
+            .filter(Order.id == order.id, Order.status == old_status)
+            .update({Order.status: new_status}, synchronize_session=False)
+        )
+        if claimed:
+            return True
+
+        # Lost the race. Re-read the row the winner committed (the UPDATE above
+        # already waited on its lock, so this SELECT sees the settled value).
+        db.session.expire(order)
+        observed = order.status
+        if isinstance(observed, str):
+            try:
+                observed = OrderStatus(observed)
+            except ValueError:
+                pass
+
+        if observed == new_status:
+            logger.info(
+                "Order %s was already moved to %s by a concurrent transition; "
+                "skipping duplicate status-change actions",
+                order.id,
+                new_status.value if hasattr(new_status, "value") else new_status,
+            )
+            return False
+
+        observed_val = observed.value if hasattr(observed, "value") else str(observed)
+        new_val = new_status.value if hasattr(new_status, "value") else str(new_status)
+        raise ConflictError(
+            f"Order status changed concurrently to {observed_val}; " f"the transition to {new_val} was not applied",
+            error_code="ORDER_STATUS_CONFLICT",
+        )
+
     def _update_status_fields(self, order: Order, new_status: OrderStatus):
         """Update status-specific fields"""
         now = datetime.now(timezone.utc)
@@ -1560,6 +1646,14 @@ class OrderService:
             # completed payment — never accrues points prematurely.
 
         elif new_status == OrderStatus.DELIVERED:
+            # --- Returnable bottle tracking ---
+            # FIRST, and deliberately so: everything below this line COMMITS
+            # (delivery completion, the COD prepayment settlement, the loyalty
+            # award). A bottle failure must be able to abort the transition
+            # while there is still something to abort. See
+            # `_record_delivery_bottles` for the full reasoning.
+            self._record_delivery_bottles(order, bottles_returned, updated_by)
+
             # Mark delivery as completed (sync_order_status=False to prevent circular callback)
             if order.delivery:
                 from .delivery_service import DeliveryService
@@ -1636,103 +1730,6 @@ class OrderService:
                 corporate_service.consume_for_order(
                     order_id=order.id,
                     delivery_id=order.delivery.id if order.delivery else None,
-                )
-
-            # --- Returnable bottle tracking ---
-            logger.info(
-                f"[BOTTLE] Starting bottle tracking for order={order.id} user={order.user_id} address={order.delivery_address_id} updated_by={updated_by} bottles_returned={bottles_returned}"  # noqa: E501
-            )
-            try:
-                from business_app.services.bottle_tracking_service import BottleTrackingService
-
-                bottle_service = BottleTrackingService()
-                bottles_in_order = bottle_service.calculate_bottles_for_order(order)
-                logger.info(f"[BOTTLE] order={order.id} calculated bottles_in_order={bottles_in_order}")
-
-                if bottles_in_order <= 0:
-                    logger.info(f"[BOTTLE] order={order.id} skipping — no returnable bottles in order items")
-                elif not order.delivery_address_id:
-                    logger.info(f"[BOTTLE] order={order.id} skipping — delivery_address_id is None")
-                else:
-                    logger.info(
-                        f"[BOTTLE] order={order.id} recording delivery: user={order.user_id} address={order.delivery_address_id} qty={bottles_in_order} actor={updated_by}",  # noqa: E501
-                    )
-                    bottle_service.record_bottles_delivered(
-                        order_id=order.id,
-                        user_id=order.user_id,
-                        address_id=order.delivery_address_id,
-                        quantity=bottles_in_order,
-                        actor_user_id=updated_by,
-                    )
-                    logger.info(f"[BOTTLE] order={order.id} record_bottles_delivered OK")
-
-                    bottles_returned_qty = Decimal(str(bottles_returned)) if bottles_returned else Decimal("0")
-                    logger.info(f"[BOTTLE] order={order.id} bottles_returned_qty={bottles_returned_qty}")
-                    if bottles_returned_qty > 0:
-                        logger.info(
-                            f"[BOTTLE] order={order.id} recording return: qty={bottles_returned_qty} delivery={order.delivery.id if order.delivery else None}",  # noqa: E501
-                        )
-                        bottle_service.record_bottles_returned(
-                            user_id=order.user_id,
-                            address_id=order.delivery_address_id,
-                            quantity=bottles_returned_qty,
-                            order_id=order.id,
-                            delivery_id=order.delivery.id if order.delivery else None,
-                            actor_user_id=updated_by,
-                        )
-                        logger.info(f"[BOTTLE] order={order.id} record_bottles_returned OK", order.id)
-
-                    # Credit the session the order is bound to. The progress
-                    # guard (assert_driver_can_progress_delivery) migrates the
-                    # binding onto the driver's current open session at pickup,
-                    # so by delivery time binding.session_id is the session that
-                    # physically carried these bottles — even when the order was
-                    # accepted under an earlier, now-closed session (carry-over).
-                    # Closed sessions keep their sealed counters; the carry-over
-                    # tallies here, against the delivering session.
-                    from business_app.models.bottle import DriverBottleSession, DriverBottleSessionOrder
-
-                    binding = DriverBottleSessionOrder.query.filter_by(order_id=order.id).first()
-                    if binding:
-                        bottle_session = DriverBottleSession.query.get(binding.session_id)
-                        if bottle_session:
-                            prev_delivered = bottle_session.bottles_delivered or 0
-                            prev_collected = bottle_session.bottles_collected_from_customers or 0
-                            bottle_session.bottles_delivered = prev_delivered + int(bottles_in_order)
-                            bottle_session.bottles_collected_from_customers = prev_collected + int(bottles_returned_qty)
-                            db.session.flush()
-                            logger.info(
-                                "[BOTTLE] order=%s tallied to bound session=%s " "delivered=%s→%s collected=%s→%s",
-                                order.id,
-                                bottle_session.id,
-                                prev_delivered,
-                                bottle_session.bottles_delivered,
-                                prev_collected,
-                                bottle_session.bottles_collected_from_customers,
-                            )
-                        else:
-                            self._handle_missing_bottle_session_on_delivery(
-                                order,
-                                f"binding {binding.id} references missing session {binding.session_id}",
-                            )
-                    else:
-                        self._handle_missing_bottle_session_on_delivery(
-                            order,
-                            "no DriverBottleSessionOrder binding exists " "(should have been created at accept time)",
-                        )
-
-            except ValidationError:
-                # Bottle-session invariant violations must abort the
-                # delivery transition rather than be swallowed (that's
-                # the bug we're fixing). Let the outer transaction
-                # roll back.
-                raise
-            except Exception as bottle_exc:
-                logger.error(
-                    "[BOTTLE] FAILED for order=%s: %s",
-                    order.id,
-                    bottle_exc,
-                    exc_info=True,
                 )
 
             if commit:
@@ -1894,6 +1891,158 @@ class OrderService:
         order.is_paid = False
         order.paid_at = None
         return True
+
+    def _record_delivery_bottles(self, order: Order, bottles_returned, updated_by) -> None:
+        """Book the delivered/returned bottles and tally the driver session.
+
+        RUNS FIRST IN THE DELIVERED BRANCH, and that ordering is the whole
+        point. `update_order_status` flushes `status=DELIVERED` and then calls
+        `_handle_status_change_actions` "before commit so a failure rolls back
+        the status change atomically". That contract was false while this block
+        ran LAST: `consume_reserved_prepayment_for_payment` /
+        `apply_customer_prepaid_credit_to_payment` (@transactional),
+        `maybe_award_purchase_points(commit=True)` and
+        `LoyaltyService.update_streak(commit=True)` each COMMIT, so by the time
+        a bottle `ValidationError` was re-raised the DELIVERED status and the
+        whole settlement were already durable. The caller saw an exception and
+        believed nothing had happened, while a fully-settled delivery sat on the
+        books with no bottle record — and the `delivery:{order_id}` idempotency
+        key plus `ORDER_STATUS_TRANSITIONS[DELIVERED] == []` meant no retry could
+        ever book those bottles.
+
+        Hoisting the block above the first committing call restores the stated
+        contract without touching payment or loyalty semantics: a bottle failure
+        now aborts before any money has been settled, and the transition rolls
+        back whole.
+        """
+        # --- Returnable bottle tracking ---
+        logger.info(
+            f"[BOTTLE] Starting bottle tracking for order={order.id} user={order.user_id} address={order.delivery_address_id} updated_by={updated_by} bottles_returned={bottles_returned}"  # noqa: E501
+        )
+        try:
+            from business_app.services.bottle_tracking_service import BottleTrackingService
+
+            bottle_service = BottleTrackingService()
+            bottles_in_order = bottle_service.calculate_bottles_for_order(order)
+            logger.info(f"[BOTTLE] order={order.id} calculated bottles_in_order={bottles_in_order}")
+
+            if bottles_in_order <= 0:
+                logger.info(f"[BOTTLE] order={order.id} skipping — no returnable bottles in order items")
+            elif not order.delivery_address_id:
+                logger.info(f"[BOTTLE] order={order.id} skipping — delivery_address_id is None")
+            else:
+                logger.info(
+                    f"[BOTTLE] order={order.id} recording delivery: user={order.user_id} address={order.delivery_address_id} qty={bottles_in_order} actor={updated_by}",  # noqa: E501
+                )
+                bottle_service.record_bottles_delivered(
+                    order_id=order.id,
+                    user_id=order.user_id,
+                    address_id=order.delivery_address_id,
+                    quantity=bottles_in_order,
+                    actor_user_id=updated_by,
+                )
+                logger.info(f"[BOTTLE] order={order.id} record_bottles_delivered OK")
+
+                bottles_returned_qty = Decimal(str(bottles_returned)) if bottles_returned else Decimal("0")
+                logger.info(f"[BOTTLE] order={order.id} bottles_returned_qty={bottles_returned_qty}")
+                if bottles_returned_qty > 0:
+                    logger.info(
+                        f"[BOTTLE] order={order.id} recording return: qty={bottles_returned_qty} delivery={order.delivery.id if order.delivery else None}",  # noqa: E501
+                    )
+                    bottle_service.record_bottles_returned(
+                        user_id=order.user_id,
+                        address_id=order.delivery_address_id,
+                        quantity=bottles_returned_qty,
+                        order_id=order.id,
+                        delivery_id=order.delivery.id if order.delivery else None,
+                        actor_user_id=updated_by,
+                    )
+                    logger.info(f"[BOTTLE] order={order.id} record_bottles_returned OK", order.id)
+
+                # Credit the session the order is bound to. The progress
+                # guard (assert_driver_can_progress_delivery) migrates the
+                # binding onto the driver's current open session at pickup,
+                # so by delivery time binding.session_id is the session that
+                # physically carried these bottles — even when the order was
+                # accepted under an earlier, now-closed session (carry-over).
+                # Closed sessions keep their sealed counters; the carry-over
+                # tallies here, against the delivering session.
+                from business_app.models.bottle import DriverBottleSession, DriverBottleSessionOrder
+
+                binding = DriverBottleSessionOrder.query.filter_by(order_id=order.id).first()
+                if binding:
+                    bottle_session = DriverBottleSession.query.get(binding.session_id)
+                    if bottle_session:
+                        prev_delivered = bottle_session.bottles_delivered or 0
+                        prev_collected = bottle_session.bottles_collected_from_customers or 0
+                        bottle_session.bottles_delivered = prev_delivered + int(bottles_in_order)
+                        bottle_session.bottles_collected_from_customers = prev_collected + int(bottles_returned_qty)
+                        db.session.flush()
+                        logger.info(
+                            "[BOTTLE] order=%s tallied to bound session=%s " "delivered=%s→%s collected=%s→%s",
+                            order.id,
+                            bottle_session.id,
+                            prev_delivered,
+                            bottle_session.bottles_delivered,
+                            prev_collected,
+                            bottle_session.bottles_collected_from_customers,
+                        )
+                    else:
+                        self._handle_missing_bottle_session_on_delivery(
+                            order,
+                            f"binding {binding.id} references missing session {binding.session_id}",
+                        )
+                else:
+                    self._handle_missing_bottle_session_on_delivery(
+                        order,
+                        "no DriverBottleSessionOrder binding exists " "(should have been created at accept time)",
+                    )
+
+        except ValidationError:
+            # Bottle-session invariant violations must abort the
+            # delivery transition rather than be swallowed (that's
+            # the bug we're fixing). Let the outer transaction
+            # roll back.
+            raise
+        except ConflictError as conflict_exc:
+            # The place-scope lock ladder timed out (BOTTLE_SCOPE_LOCK_TIMEOUT):
+            # an admin is regrouping this address right now.
+            #
+            # THIS ONE MUST NOT BE SWALLOWED, and the reason is severe.
+            # `resolve_scope_for_write` has already rolled back — Postgres
+            # aborted the transaction on 55P03, so there was nothing else it
+            # could do. Falling through to the `db.session.commit()` below
+            # would report a SUCCESSFUL delivery to the driver while the
+            # status transition, the payment sync, the loyalty award and the
+            # bottle movement had all been discarded: the driver reads
+            # "✅ Delivered" for an order that never moved. That is strictly
+            # worse than the bare 500 this change set out to remove.
+            #
+            # Re-raising is what makes the bounded wait honest — the driver
+            # is told nothing was saved, and a retry seconds later performs
+            # the whole transition properly.
+            #
+            # NARROWED TO THAT ONE CODE ON PURPOSE. Other ConflictErrors are
+            # reachable here (the `assert_scope_locked` registry refusal,
+            # fine- and session-state conflicts) and are swallowed today.
+            # Whether that is right is a real question, but answering it
+            # would change delivery behaviour well beyond this fix, so those
+            # keep their existing handling.
+            if getattr(conflict_exc, "error_code", None) == "BOTTLE_SCOPE_LOCK_TIMEOUT":
+                raise
+            logger.error(
+                "[BOTTLE] FAILED for order=%s: %s",
+                order.id,
+                conflict_exc,
+                exc_info=True,
+            )
+        except Exception as bottle_exc:
+            logger.error(
+                "[BOTTLE] FAILED for order=%s: %s",
+                order.id,
+                bottle_exc,
+                exc_info=True,
+            )
 
     def _handle_missing_bottle_session_on_delivery(self, order: Order, detail: str) -> None:
         """Handle a delivered order whose bottle-session binding is missing or broken.

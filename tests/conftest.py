@@ -328,6 +328,82 @@ def user_address(db, sample_user):
 
 
 @pytest.fixture
+def second_sample_user(db):
+    """A second individual customer — the coworker in the place-group scenarios.
+
+    The phone deliberately avoids '+998901234568', which `admin_user` already
+    owns: `users.phone` is UNIQUE, so any test combining `place` (which pulls
+    this fixture in) with `admin_auth_headers` would otherwise die at setup
+    with an IntegrityError before reaching its assertions.
+    """
+    from business_app.models.user import User
+    from shared.enums import UserRole, UserType
+    from business_app.utils.password_security import hash_password
+
+    user = User(
+        email='coworker@example.com',
+        phone='+998901234570',
+        password_hash=hash_password('TestPassword123!'),
+        first_name='Co',
+        last_name='Worker',
+        user_type=UserType.INDIVIDUAL,
+        role=UserRole.CUSTOMER,
+        is_verified=True,
+    )
+    db.session.add(user)
+    db.session.commit()
+    return user
+
+
+@pytest.fixture
+def place(db, sample_user, second_sample_user):
+    """Two coworkers' 'work' addresses grouped as ONE physical place.
+
+    This is the spec's scenario: address_group "office" holding two members
+    whose bottles are one pool, not a 6/1 split.
+    """
+    from business_app.models.customer_link import AddressGroup
+    from business_app.models.user import UserAddress
+
+    group = AddressGroup(label="office")
+    db.session.add(group)
+    db.session.flush()
+    a1 = UserAddress(user_id=sample_user.id, title="work", address_group_id=group.id,
+                     full_address="1 Office St, Tashkent", street_address="1 Office St",
+                     city="Tashkent", latitude=41.2746, longitude=69.2061)
+    a2 = UserAddress(user_id=second_sample_user.id, title="work", address_group_id=group.id,
+                     full_address="1 Office St, Tashkent", street_address="1 Office St",
+                     city="Tashkent", latitude=41.2745, longitude=69.2062)
+    db.session.add_all([a1, a2])
+    db.session.commit()
+    return {"group": group, "a1": a1, "a2": a2}
+
+
+@pytest.fixture
+def seeded_orders_for_map(db, sample_user, second_sample_user):
+    """One DELIVERED order per map user.
+
+    `customer_map_service` INNER-joins its `last_order` subquery, so a customer
+    who has never placed a non-cancelled order produces no pin at all — without
+    this fixture a map assertion silently has nothing to assert against.
+    """
+    from business_app.models.order import Order
+    from shared.enums import OrderStatus
+
+    orders = []
+    for user in (sample_user, second_sample_user):
+        order = Order(
+            user_id=user.id,
+            status=OrderStatus.DELIVERED,
+            total_amount=Decimal("50000.00"),
+        )
+        db.session.add(order)
+        orders.append(order)
+    db.session.commit()
+    return orders
+
+
+@pytest.fixture
 def admin_user(db):
     """Create an admin user for testing"""
     user = User(

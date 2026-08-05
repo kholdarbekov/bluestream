@@ -43,6 +43,16 @@ KEYS = {
     "ui.users.map.view_profile":    ("View full profile", "To'liq profil", "Полный профиль"),
     "ui.users.map.orders":          ("orders", "buyurtma", "заказов"),
     "ui.users.map.load_profile_failed": ("Could not load customer profile", "Profil yuklanmadi", "Не удалось загрузить профиль"),
+    # Bottle balances are keyed on the PLACE (the address group), so every pin of a
+    # shared workplace repeats the same pool figure. Three coworkers at one office
+    # each show "Bottles: 7" for a single 7-bottle place — this badge is what stops
+    # an admin totalling that cluster to 21. The `en` value must stay byte-identical
+    # to the inline fallback in admin_ui/src/components/CustomerMap.js
+    # (tests/unit/test_place_group_translation_seeds.py pins it).
+    # The Uzbek said "bitta hisob" — one ACCOUNT — which re-introduces the
+    # per-account framing this badge exists to deny. "yagona zaxira" is one
+    # shared STOCK of bottles, matching EN "one pool" / RU "один пул".
+    "ui.users.map.shared_place":    ("shared place — one pool", "umumiy joy — yagona zaxira", "общее место — один пул"),
 }
 
 def run():

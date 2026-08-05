@@ -382,3 +382,60 @@ def serialize_credit_card(card) -> Dict[str, Any]:
             "is_active": card.is_active,
             "created_at": card.created_at.isoformat() if card.created_at else None,
         }
+
+
+def serialize_customer_place_cod_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    """Customer-facing row of a PLACE's open COD breakdown (spec §7).
+
+    Same redaction contract as ``serialize_customer_place_ledger_entry`` in
+    ``bottle_serializers``: a shared workplace spans different people, so the
+    coworker's NAME crosses the in-group boundary (approved full in-group
+    transparency) and nothing else does. Built as an explicit allow-list, not by
+    popping keys off ``get_place_cod_statement``'s row — that dict carries
+    ``payment_id``, ``order_id`` and ``owner_user_id``, and a deny-list silently
+    leaks whatever the service adds next.
+    """
+    return {
+        "order_number": item.get("order_number"),
+        "member_name": item.get("owner_name"),
+        "outstanding_amount": float(item.get("outstanding_amount") or 0),
+        "created_at": item.get("created_at"),
+    }
+
+
+def serialize_customer_cod_summary(
+    statement: Dict[str, Any],
+    place_statements: Dict[int, Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Customer wallet payload (spec §7): the cluster shown as ONE customer,
+    plus each grouped address's unified place total with a per-order breakdown.
+
+    ``statement`` is ``CashCollectionService.get_customer_cod_statement`` for the
+    AUTHENTICATED user and ``place_statements`` maps place-group id ->
+    ``get_place_cod_statement`` for the groups that statement already listed —
+    i.e. only groups the viewer's own cluster belongs to. Both inputs are
+    projected, never passed through: the statement carries the viewer's phone
+    and per-payment ids, and the place statement carries every member's ids.
+
+    Degrades to ``cluster_member_count == 1`` / ``places == []`` for an unlinked,
+    ungrouped customer.
+    """
+    places: List[Dict[str, Any]] = []
+    for place in statement.get("places") or []:
+        group_id = place.get("place_group_id")
+        detail = place_statements.get(group_id) or {}
+        places.append(
+            {
+                "place_group_id": group_id,
+                "label": detail.get("label") or place.get("label"),
+                "place_open_cod_debt_total": float(place.get("place_open_cod_debt_total") or 0),
+                "items": [serialize_customer_place_cod_item(item) for item in (detail.get("items") or [])],
+            }
+        )
+
+    return {
+        "cluster_member_count": int(statement.get("cluster_member_count") or 1),
+        "cluster_delivered_outstanding_amount": float(statement.get("cluster_delivered_outstanding_amount") or 0),
+        "available_prepayment_balance": float(statement.get("available_prepayment_balance") or 0),
+        "places": places,
+    }

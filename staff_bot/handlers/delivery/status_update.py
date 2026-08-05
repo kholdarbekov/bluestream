@@ -3,6 +3,9 @@ Delivery Status Update Handler for Staff Bot
 Handles status transitions, delivered flow, failed flow, and cash collection.
 """
 import logging
+import math
+from decimal import Decimal, InvalidOperation
+
 from telegram import Update, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 
@@ -16,6 +19,8 @@ from staff_bot.utils.formatters import (
     format_currency,
     get_cod_cash_projection,
     format_active_delivery_summary,
+    format_place_cod_lines,
+    format_quantity,
     is_unsettled_electronic,
 )
 from staff_bot.permissions import require_auth, require_delivery_driver
@@ -63,8 +68,33 @@ class StatusUpdateHandler(BaseHandler):
 
     @staticmethod
     def _parse_amount(raw_text: str) -> float:
-        text = raw_text.strip().replace(',', '').replace(' ', '')
-        cash_amount = float(text)
+        """Coerce a driver-typed cash amount, fencing NON-FINITE values.
+
+        `float(text)` returns `nan` for "nan" and `inf` for "inf"/"Infinity"/
+        "1e400", and neither is caught by a sign check: `nan < 0` and `inf < 0`
+        are both False. Both would then be posted as the non-standard JSON
+        literals Python's json module emits AND re-parses, into
+        `metadata['cash_collected']`.
+
+        Decimal first (the same coercion the backend's SSOT money fence uses),
+        `is_finite()` BEFORE any ordering comparison — Python's decimal is not
+        IEEE-754, so comparing `Decimal('NaN')` RAISES — then a second
+        finiteness check on the float, because `Decimal('1e400')` is perfectly
+        finite until `float()` overflows it to `inf`.
+
+        Raises ``ValueError`` (never ``InvalidOperation``) so every existing
+        `except (TypeError, ValueError)` call site keeps catching it.
+        """
+        text = (raw_text or '').strip().replace(',', '').replace(' ', '')
+        try:
+            amount = Decimal(text)
+        except (InvalidOperation, TypeError, ValueError):
+            raise ValueError("Not a number")
+        if not amount.is_finite():
+            raise ValueError("Non-finite amount")
+        cash_amount = float(amount)
+        if not math.isfinite(cash_amount):
+            raise ValueError("Amount overflows to infinity")
         if cash_amount < 0:
             raise ValueError("Negative amount")
         return cash_amount
@@ -94,6 +124,103 @@ class StatusUpdateHandler(BaseHandler):
     @staticmethod
     def _get_expected_cash_to_collect(delivery_info: dict) -> float:
         return get_cod_cash_projection(delivery_info)['expected_cash_to_collect']
+
+    @staticmethod
+    def _tapped_delivery_id(update: Update, fallback=None):
+        """The delivery id trailing the callback the driver actually TAPPED.
+
+        Every at-door callback ends in the delivery id (`staff_execute_status_
+        {id}_{status}` is parsed by its own handler; `staff_bottles_full_{id}`,
+        `staff_bottles_none_{id}`, `staff_collect_cash_{id}` … all end in it).
+        Falls back rather than raising, because a lost `callback_query.data`
+        must degrade to the flow's own id, not to a crash at the door.
+        """
+        query = getattr(update, 'callback_query', None)
+        data = getattr(query, 'data', None) if query is not None else None
+        try:
+            return int(str(data).rsplit('_', 1)[-1])
+        except (TypeError, ValueError):
+            return fallback
+
+    async def _anchor_current_delivery(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        delivery_id,
+    ):
+        """Re-anchor ``current_delivery`` on the delivery the driver TAPPED.
+
+        Each active-delivery card is its own Telegram message, but PTB gives a
+        driver ONE ``context.user_data`` and ``current_delivery`` is a single
+        overwritten key. A driver who opens B and then acts on A's older —
+        still perfectly live — card used to drive A's completion with B's
+        anchor: B's "All N returned" posted against A's place, and A's screen
+        titled with B's order number.
+
+        Every handler that reads the snapshot must therefore compare it against
+        the id in the callback and, on a mismatch, re-read the tapped delivery
+        from ``/delivery/active`` (the same source ``view_active_delivery``
+        builds the card from) rather than trust the stale one.
+
+        Returns the snapshot to act on, or ``None`` when the tapped delivery can
+        no longer be found — the caller MUST refuse to act on that.
+        A snapshot without a ``delivery_id`` (pre-deploy card, cleared
+        user_data) is left exactly as it is: there is nothing to compare, and
+        refusing there would strand drivers mid-trip on a deploy.
+        """
+        info = context.user_data.get('current_delivery') or {}
+        current_id = info.get('delivery_id')
+        if delivery_id is None or current_id is None or current_id == delivery_id:
+            return info
+
+        logger.info(
+            "current_delivery snapshot (%s) does not match the tapped delivery "
+            "(%s); re-anchoring from /delivery/active",
+            current_id, delivery_id,
+        )
+        token = await self._get_auth_token(update, context)
+        if not token:
+            return None
+
+        async with api_client as client:
+            response = await client.get_active_deliveries(token)
+        if not response.success:
+            return None
+
+        data = response.data
+        rows = data if isinstance(data, list) else (data or {}).get('items', [])
+        for row in rows or []:
+            if (row.get('delivery_id') or row.get('id')) != delivery_id:
+                continue
+            # The row IS the card payload `view_active_delivery` whitelists
+            # from; copy it wholesale and add only the derived keys that
+            # handler renames, so this can never fall behind that whitelist.
+            snapshot = dict(row)
+            snapshot['delivery_id'] = delivery_id
+            snapshot.setdefault('origin_lat', row.get('current_location_lat'))
+            snapshot.setdefault('origin_lng', row.get('current_location_lng'))
+            snapshot.setdefault('destination_lat', row.get('destination_latitude'))
+            snapshot.setdefault('destination_lng', row.get('destination_longitude'))
+            context.user_data['current_delivery'] = snapshot
+            return snapshot
+        return None
+
+    async def _refuse_stale_card(self, update: Update, language: str):
+        """The tapped delivery is gone from the driver's active list.
+
+        Acting on the snapshot that happens to be loaded is exactly the bug this
+        guard exists to stop, so say so and send them back to the list.
+        """
+        text = i18n.get('staff.delivery.not_found', language)
+        keyboard = CommonKeyboards.back_button(language, "staff_active_deliveries")
+        if update.callback_query:
+            await update.callback_query.edit_message_text(
+                text, reply_markup=keyboard, parse_mode='HTML'
+            )
+        else:
+            await update.message.reply_text(
+                text, reply_markup=keyboard, parse_mode='HTML'
+            )
 
     @staticmethod
     def _order_brief(context: ContextTypes.DEFAULT_TYPE, language: str) -> str:
@@ -188,8 +315,30 @@ class StatusUpdateHandler(BaseHandler):
             )
 
         if not response.success:
-            await self._handle_api_response_error(update, response, language)
-            return ConversationHandler.END
+            # A RETRY IS NOT A FAILURE. `StaffAPIClient._make_request` re-sends
+            # only `RETRY_SAFE_METHODS` ({GET, HEAD, PUT}) after an AMBIGUOUS
+            # failure, and any verb after a connect-phase one. **This PUT is in
+            # that set** — deliberately, because its replay is provably zero
+            # writes. So a PUT the backend COMMITTED and then failed to
+            # acknowledge is still sent again — and the second attempt hits the
+            # terminal-status guard
+            # (`DELIVERY_STATUS_TRANSITIONS['delivered'] == []`) and 400s with
+            # STAFF_INVALID_STATUS_TRANSITION. The bottles and the money both
+            # landed exactly once (both writes are keyed), so rendering that as
+            # a failure sends the driver back to a door with nothing left to do
+            # — on an order that is already delivered and already billed — and
+            # returns before the at-door flow is cleared, leaving it armed.
+            # The transition the driver could reach on this screen is the one
+            # THIS method just submitted, so an invalid-transition refusal here
+            # means it is already recorded: acknowledge it idempotently.
+            if getattr(response, 'error_code', None) != 'STAFF_INVALID_STATUS_TRANSITION':
+                await self._handle_api_response_error(update, response, language)
+                return ConversationHandler.END
+            logger.warning(
+                "Delivery %s refused the 'delivered' transition (%s); treating it "
+                "as an already-recorded completion and clearing the at-door flow.",
+                delivery_id, getattr(response, 'error', None),
+            )
 
         await self._clear_delivery_cash_flow(context, update)
         if context.user_data.get('current_delivery'):
@@ -231,6 +380,13 @@ class StatusUpdateHandler(BaseHandler):
             delivery_id = int(parts[2])
             new_status = '_'.join(parts[3:])  # Handle statuses like 'in_transit'
 
+            # Anchor on the TAPPED delivery before any of the money/bottle
+            # figures below are read out of the snapshot.
+            delivery_info = await self._anchor_current_delivery(update, context, delivery_id)
+            if delivery_info is None:
+                await self._refuse_stale_card(update, language)
+                return
+
             # Store pending status change
             context.user_data['pending_status'] = {
                 'delivery_id': delivery_id,
@@ -250,7 +406,6 @@ class StatusUpdateHandler(BaseHandler):
                 return
 
             if new_status == 'delivered':
-                delivery_info = context.user_data.get('current_delivery', {})
                 payment_method = delivery_info.get('payment_method', '')
                 cash_due_amount = self._get_expected_cash_to_collect(delivery_info)
                 reserved_prepayment = float(delivery_info.get('cod_reserved_prepayment_amount') or 0)
@@ -279,6 +434,11 @@ class StatusUpdateHandler(BaseHandler):
                             f"\n💳 {i18n.get('staff.delivery.cod_prepaid_deduction', language)}: "
                             f"{format_currency(reserved_prepayment, language=language)}"
                         )
+                    # Grouped workplace: show the WHOLE place's open COD total so
+                    # the driver knows what is collectable at this door (spec 8).
+                    place_lines = format_place_cod_lines(delivery_info, language)
+                    if place_lines:
+                        message_text += "\n" + "\n".join(place_lines)
                     await query.edit_message_text(
                         message_text,
                         reply_markup=keyboard,
@@ -322,6 +482,13 @@ class StatusUpdateHandler(BaseHandler):
             parts = query.data.split('_')
             delivery_id = int(parts[3])
             new_status = '_'.join(parts[4:])
+
+            # The bottle prompt below is anchored on the snapshot, and
+            # `_order_brief` titles every screen from it — so both must be the
+            # TAPPED delivery's, not whichever card was opened last.
+            if await self._anchor_current_delivery(update, context, delivery_id) is None:
+                await self._refuse_stale_card(update, language)
+                return
 
             # For non-cash delivered orders: check for returnable bottles first
             if new_status == 'delivered':
@@ -431,7 +598,12 @@ class StatusUpdateHandler(BaseHandler):
 
         try:
             delivery_id = int(query.data.split('_')[-1])
-            delivery_info = context.user_data.get('current_delivery', {})
+            delivery_info = await self._anchor_current_delivery(update, context, delivery_id)
+            if delivery_info is None:
+                await self._refuse_stale_card(
+                    update, await self._get_language(update, context)
+                )
+                return
             cash_amount = self._get_expected_cash_to_collect(delivery_info)
             await self._maybe_show_bottle_prompt_or_submit(
                 update,
@@ -453,6 +625,11 @@ class StatusUpdateHandler(BaseHandler):
 
         try:
             delivery_id = int(query.data.split('_')[-1])
+            # The typed amount is submitted against THIS delivery, and the
+            # bottle prompt that follows reads the snapshot — anchor first.
+            if await self._anchor_current_delivery(update, context, delivery_id) is None:
+                await self._refuse_stale_card(update, language)
+                return
             # F-2: set the flag *before* the prompt render and clear it on
             # render failure. Otherwise an `edit_message_text` exception
             # (network blip, message-too-old, parse error) leaves
@@ -497,6 +674,9 @@ class StatusUpdateHandler(BaseHandler):
 
         try:
             delivery_id = int(query.data.split('_')[-1])
+            if await self._anchor_current_delivery(update, context, delivery_id) is None:
+                await self._refuse_stale_card(update, language)
+                return
             context.user_data['pending_delivery_cash_flow'] = {
                 'delivery_id': delivery_id,
                 'flow_type': 'none',
@@ -662,10 +842,40 @@ class StatusUpdateHandler(BaseHandler):
     @require_auth
     @require_delivery_driver
     async def submit_reconciliation_all(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Submit the current session using the expected cash-on-hand amount."""
+        """Hand off EXACTLY the amount the tapped button displayed.
+
+        ONE DECISION (sweep #8). The figure travels with the tap: it was frozen
+        into the callback by ``DeliveryKeyboards.reconciliation_actions`` at the
+        moment the screen was drawn, and it is posted verbatim, so the
+        cash-custody record and the button the driver read carry the same
+        number by construction.
+
+        This used to post ``{}``. An empty payload is not "no amount" — it is
+        "server, decide the amount", and the server decides it from live
+        ``CashCollectionEvent``s at tap time. One COD collection completing
+        between the render and the tap therefore wrote a handoff the driver had
+        never seen and never agreed to (measured: shown 120,000, recorded
+        150,000), with no second confirmation step. Never post an amount-less
+        handoff again: if a tap arrives without a figure, redraw the screen so
+        the driver can confirm a fresh one.
+
+        The remainder is not lost when a collection lands in the gap — it stays
+        on the session and appears on the next screen, named, on a button the
+        driver can read before tapping.
+        """
         query = update.callback_query
         await query.answer()
         language = await self._get_language(update, context)
+
+        frozen_amount = DeliveryKeyboards.parse_handoff_callback(getattr(query, 'data', None))
+        if frozen_amount is None:
+            # The tap carried no figure (a button rendered before the amount was
+            # frozen into the callback, or a malformed payload). Writing here
+            # would mean handing the amount decision to the server — the defect
+            # itself. Redraw instead; the new button names what it will record.
+            await self.show_reconciliation_session(update, context)
+            return
+
         token = await self._get_auth_token(update, context)
         if not token:
             await self._handle_auth_error(update, language)
@@ -673,7 +883,9 @@ class StatusUpdateHandler(BaseHandler):
 
         try:
             async with api_client as client:
-                response = await client.submit_reconciliation_session(token, {})
+                response = await client.submit_reconciliation_session(
+                    token, {'declared_cash': float(frozen_amount)}
+                )
 
             if not response.success:
                 await self._handle_api_response_error(update, response, language)
@@ -793,19 +1005,52 @@ class StatusUpdateHandler(BaseHandler):
         delivery_info = context.user_data.get('current_delivery', {})
         return float(delivery_info.get('expected_returnable_bottles', 0))
 
-    def _get_suggested_return_count(self, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Suggested bottles-returned count = customer's current per-address balance.
+    def _get_suggested_return_count(self, context: ContextTypes.DEFAULT_TYPE):
+        """Suggested bottles-returned count = the empties standing at this PLACE.
+
+        The place is the address group when the delivery address is grouped,
+        else the address itself — so at a shared workplace this includes a
+        coworker's empties, and the driver may legitimately be handed more than
+        this customer ever received. The backend CLAMPS it at 0
+        (`_customer_bottle_balance`) so "All N returned" can never offer a
+        negative count; `_get_place_signed_balance` is the unclamped companion.
 
         This is the prompt's anchor and the value submitted when the driver taps
         "All returned". Distinct from `_get_expected_bottles`, which only GATES
         whether the prompt appears (based on this order's returnable quantity).
+
+        NOT `int(float(...))`: truncation toward zero turned a place holding
+        0 < b < 1 into a suggestion of 0, and `_build_bottle_prompt` then found
+        `signed >= 0` and announced "no empties are on record for this
+        customer" — factually wrong, and the exact mirror of the bug the
+        over-returned arm was added to fix. Integral balances still come back as
+        `int` so the prompt and the keyboard read "All 4 returned", never
+        "All 4.0 returned"; only a real fraction survives as one.
         """
         delivery_info = context.user_data.get('current_delivery', {})
-        return int(float(delivery_info.get('customer_bottle_balance', 0) or 0))
+        balance = float(delivery_info.get('customer_bottle_balance', 0) or 0)
+        if balance <= 0:
+            return 0
+        return int(balance) if balance.is_integer() else balance
+
+    def _get_place_signed_balance(self, context: ContextTypes.DEFAULT_TYPE) -> float:
+        """The place's SIGNED balance; negative means over-returned.
+
+        Additional to the clamped anchor, never a replacement for it. Absent on
+        a delivery snapshot taken before the backend field shipped, which reads
+        as 0 — i.e. today's behaviour.
+        """
+        delivery_info = context.user_data.get('current_delivery', {})
+        return float(delivery_info.get('place_bottle_balance_signed', 0) or 0)
 
     def _build_bottle_prompt(self, language: str, delivery_id: int, context: ContextTypes.DEFAULT_TYPE) -> tuple[InlineKeyboardMarkup, str]:
         """Build (keyboard, message) for the bottle-return prompt, anchored on the
-        customer's current bottle balance."""
+        PLACE's current bottle balance.
+
+        Three states, not two: an over-returned place used to be told "no
+        empties are on record for this customer yet", which is factually wrong —
+        there IS a record and it is negative.
+        """
         suggested = self._get_suggested_return_count(context)
         keyboard = DeliveryKeyboards.bottle_return_options(language, delivery_id, suggested)
         if suggested > 0:
@@ -813,9 +1058,16 @@ class StatusUpdateHandler(BaseHandler):
                 'staff.delivery.bottles_return_prompt', language, balance=suggested
             )
         else:
-            message = i18n.get(
-                'staff.delivery.bottles_return_prompt_no_balance', language
-            )
+            signed = self._get_place_signed_balance(context)
+            if signed < 0:
+                message = i18n.get(
+                    'staff.delivery.bottles_return_prompt_over_returned', language,
+                    count=format_quantity(abs(signed)),
+                )
+            else:
+                message = i18n.get(
+                    'staff.delivery.bottles_return_prompt_no_balance', language
+                )
         return keyboard, message
 
     async def _maybe_show_bottle_prompt_or_submit(
@@ -868,12 +1120,21 @@ class StatusUpdateHandler(BaseHandler):
         await query.answer()
         try:
             flow = context.user_data.get('pending_delivery_cash_flow') or {}
+            # The anchor submitted here IS the place balance read off the
+            # snapshot, so the snapshot must belong to the tapped card.
+            delivery_id = self._tapped_delivery_id(update, flow.get('delivery_id'))
+            if await self._anchor_current_delivery(update, context, delivery_id) is None:
+                await self._refuse_stale_card(
+                    update, await self._get_language(update, context)
+                )
+                return
+            flow['delivery_id'] = delivery_id
             flow['bottles_returned'] = self._get_suggested_return_count(context)
             context.user_data['pending_delivery_cash_flow'] = flow
 
             return await self._submit_delivery_completion(
                 update, context,
-                delivery_id=flow['delivery_id'],
+                delivery_id=delivery_id,
                 cash_amount=flow.get('cash_amount', 0),
                 notes=flow.get('cash_notes'),
             )
@@ -890,6 +1151,13 @@ class StatusUpdateHandler(BaseHandler):
         language = await self._get_language(update, context)
 
         flow = context.user_data.get('pending_delivery_cash_flow') or {}
+        # The typed count is submitted for THIS delivery, and `receive_bottle_count`
+        # has no callback of its own to re-derive it from — pin it here.
+        delivery_id = self._tapped_delivery_id(update, flow.get('delivery_id'))
+        if await self._anchor_current_delivery(update, context, delivery_id) is None:
+            await self._refuse_stale_card(update, language)
+            return ConversationHandler.END
+        flow['delivery_id'] = delivery_id
         flow['awaiting_bottle_count'] = True
         context.user_data['pending_delivery_cash_flow'] = flow
 
@@ -948,12 +1216,19 @@ class StatusUpdateHandler(BaseHandler):
         await query.answer()
         try:
             flow = context.user_data.get('pending_delivery_cash_flow') or {}
+            delivery_id = self._tapped_delivery_id(update, flow.get('delivery_id'))
+            if await self._anchor_current_delivery(update, context, delivery_id) is None:
+                await self._refuse_stale_card(
+                    update, await self._get_language(update, context)
+                )
+                return
+            flow['delivery_id'] = delivery_id
             flow['bottles_returned'] = 0
             context.user_data['pending_delivery_cash_flow'] = flow
 
             return await self._submit_delivery_completion(
                 update, context,
-                delivery_id=flow['delivery_id'],
+                delivery_id=delivery_id,
                 cash_amount=flow.get('cash_amount', 0),
                 notes=flow.get('cash_notes'),
             )

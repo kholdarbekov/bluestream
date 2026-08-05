@@ -9,7 +9,7 @@ import { useTranslation } from 'react-i18next';
 import adminService from '../services/adminService';
 import HeatLayer from './HeatLayer';
 import {
-  daysSince, colorForDays, loadThresholds, saveThresholds, applyFilters,
+  daysSince, colorForDays, loadThresholds, saveThresholds, applyFilters, heatWeight,
 } from '../utils/customerMapLogic';
 import { formatMoney } from '../utils/formatMoney';
 
@@ -55,7 +55,12 @@ const CustomerMap = ({ onViewUser, height = 640 }) => {
     () => applyFilters(pins, { idleMinDays, bottleOnly, debtOnly, type }, now),
     [pins, idleMinDays, bottleOnly, debtOnly, type], // eslint-disable-line react-hooks/exhaustive-deps
   );
-  const heatPoints = useMemo(() => visible.map((p) => [p.lat, p.lng, 1]), [visible]);
+  // One PLACE = one unit of heat, split across its pins: every pin of a shared
+  // workplace is coincident and reports the SAME pool, so an unweighted layer
+  // counts one office once per member. The weight never reaches 0 — a
+  // zero-balance customer is still a customer and has to stay on the map. See
+  // `heatWeight`.
+  const heatPoints = useMemo(() => visible.map((p) => [p.lat, p.lng, heatWeight(p)]), [visible]);
 
   const updateThreshold = (next) => {
     const clean = { t1: next.t1 ?? t1, t2: next.t2 ?? t2 };
@@ -144,7 +149,15 @@ const CustomerMap = ({ onViewUser, height = 640 }) => {
                 key={p.addressId}
                 center={[p.lat, p.lng]}
                 radius={8}
-                pathOptions={{ color, fillColor: color, fillOpacity: 0.85, weight: 1 }}
+                pathOptions={{
+                  color,
+                  fillColor: color,
+                  fillOpacity: 0.85,
+                  // Shared-place pins are coincident with their coworkers', so the
+                  // glyph has to say "one pool" before anyone opens a popup.
+                  weight: p.isSharedPlace ? 3 : 1,
+                  dashArray: p.isSharedPlace ? '3' : undefined,
+                }}
               >
                 <Popup>
                   <Space direction="vertical" size={2}>
@@ -172,6 +185,16 @@ const CustomerMap = ({ onViewUser, height = 640 }) => {
                       {t('ui.users.map.bottles', 'Bottles')}: {p.bottleBalance}
                       {p.addressCount > 1 && (
                         <Text type="secondary"> ({t('ui.users.map.address', 'address')} {p.addressIndex}/{p.addressCount})</Text>
+                      )}
+                      {/* This number is the whole PLACE's pool, repeated verbatim on
+                          every coworker's pin. Without the badge an admin reading a
+                          3-member office totals 7+7+7 = 21 bottles that do not exist.
+                          `addressIndex/addressCount` cannot disambiguate it: that is
+                          the per-USER address counter, so all three read 1/1. */}
+                      {p.isSharedPlace && (
+                        <Tag color="purple" style={{ marginLeft: 6 }}>
+                          {t('ui.users.map.shared_place', 'shared place — one pool')}
+                        </Tag>
                       )}
                     </Text>
                     <Text>{t('ui.users.map.debt', 'Debt')}: {formatMoney(p.outstandingDebt)} UZS</Text>

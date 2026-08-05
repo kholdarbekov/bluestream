@@ -458,7 +458,10 @@ class StaffBot:
             CallbackQueryHandler(status_update_handler.start_partial_cash_collection, pattern=r"^staff_cash_partial_\d+$"),
             CallbackQueryHandler(status_update_handler.start_no_cash_collection, pattern=r"^staff_cash_none_\d+$"),
             CallbackQueryHandler(status_update_handler.show_reconciliation_session, pattern="^staff_reconcile_session$"),
-            CallbackQueryHandler(status_update_handler.submit_reconciliation_all, pattern="^staff_reconcile_submit_all$"),
+            # The handoff button carries the amount it displayed: "…submit_all:120000.00".
+            # The bare form is still routed so buttons rendered before that
+            # change keep reaching the handler (which redraws instead of writing).
+            CallbackQueryHandler(status_update_handler.submit_reconciliation_all, pattern=r"^staff_reconcile_submit_all(:|$)"),
             CallbackQueryHandler(status_update_handler.start_reconciliation_submit, pattern="^staff_reconcile_submit$"),
             CallbackQueryHandler(cash_collection_handler.show_debtor_list, pattern="^staff_cod_collect_menu$"),
             CallbackQueryHandler(cash_collection_handler.paginate_debtor_list, pattern=r"^staff_cod_list_page_\d+$"),

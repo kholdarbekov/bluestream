@@ -26,6 +26,21 @@ from config import config
 logger = logging.getLogger('handlers')
 
 
+def min_order_shortfall(subtotal: float) -> float:
+    """How far a cart subtotal sits below the shared checkout floor.
+
+    ONE expression decides BOTH halves of the minimum-order gate: whether the
+    checkout button is unlocked, and what the "add N UZS more" line says. They
+    used to be two (`subtotal < MIN_ORDER_AMOUNT` and `MIN_ORDER_AMOUNT -
+    subtotal`) sitting next to each other, which is the same shape as every
+    show-vs-settle defect in this codebase, only smaller.
+
+    `subtotal` must be the SERVER's `cart['subtotal']` — never a client sum.
+    Nothing is posted from the returned figure; it is gate + copy only.
+    """
+    return max(0.0, float(MIN_ORDER_AMOUNT) - float(subtotal))
+
+
 class ProductHandlers(BaseHandler):
     """Product-related handlers"""
 
@@ -997,14 +1012,41 @@ class ProductHandlers(BaseHandler):
             cart_is_empty = True
         else:
             lines = [i18n.get('telegram.cart_title', language) + ":\n"]
-            total_amount = 0
             min_qty_violations = []
+
+            # 🔴 THE FIGURE SHOWN AND THE FIGURE CHARGED ARE ONE DECISION, AND
+            # THAT DECISION IS THE SERVER'S. Do not reintroduce arithmetic here.
+            #
+            # This screen used to re-derive the money:
+            #     price       = product['current_price']
+            #     line_total  = price * quantity
+            #     total_amount += line_total
+            # `current_price` is baked by `CartItem.to_dict()` through
+            # `Product.calculate_price`, which IGNORES its `user` argument
+            # (business_app/models/product.py:140-143) — contract-blind and
+            # price-rule-blind. `CartService.get_cart_details` patches it from
+            # `get_cart_summary` afterwards, but ONLY for the lines that summary
+            # kept: `get_cart_summary` SKIPS inactive products entirely
+            # (cart_service.py:635-637), so a dropped line keeps its raw
+            # `current_price` and this screen kept adding it into a total the
+            # server's `subtotal` excludes and the order will never contain.
+            # That same total also drove the MIN_ORDER_AMOUNT gate below, so it
+            # could unlock or block checkout against a figure the server
+            # disagrees with.
+            #
+            # `cart_items[].total_price` and `cart['subtotal']` are both composed
+            # by `CartService.get_cart_summary` — one calculation, the same one
+            # `_show_order_confirmation` reads one screen later and the same one
+            # order creation is built from. Read them; never re-multiply. A
+            # server-dropped line has no `total_price`, so it renders 0 — which
+            # is exactly what it contributes to the order.
+            # tests/integration/test_cart_screen_total_is_server_authoritative.py
+            subtotal = float(cart.get('subtotal') or 0)
+
             for item in cart_items:
                 product = item['product']
                 quantity = item['quantity']
-                price = product['current_price']
-                line_total = price * quantity
-                total_amount += line_total
+                line_total = float(item.get('total_price') or 0)
 
                 lines.append(
                     f"🛒 {product['name']} x {quantity} = {format_price(line_total)} UZS"
@@ -1019,13 +1061,13 @@ class ProductHandlers(BaseHandler):
                         'min_qty': min_qty,
                         'remaining': min_qty - quantity,
                     })
-            cart_is_empty = total_amount <= 0
-            lines.append(f"\n💰 {i18n.get('telegram.cart_total', language)}: {format_price(total_amount)} UZS")
+            cart_is_empty = subtotal <= 0
+            lines.append(f"\n💰 {i18n.get('telegram.cart_total', language)}: {format_price(subtotal)} UZS")
 
             cod_prepayment = cart.get('cod_prepayment') or {}
             available_balance = float(cod_prepayment.get('available_balance') or 0)
             potential_applied = float(cod_prepayment.get('potential_applied_amount') or 0)
-            payable_after = float(cod_prepayment.get('estimated_payable_after_prepayment') or total_amount)
+            payable_after = float(cod_prepayment.get('estimated_payable_after_prepayment') or subtotal)
             if available_balance > 0:
                 lines.append("")
                 lines.append(i18n.get(
@@ -1044,14 +1086,17 @@ class ProductHandlers(BaseHandler):
                     payable_after=format_price(payable_after),
                 ))
 
-            # Add minimum order warning if needed
-            if total_amount < MIN_ORDER_AMOUNT:
+            # Minimum-order gate. `min_order_shortfall` is the ONE expression
+            # behind both the gate and the "add N more" copy, and it is fed the
+            # server's subtotal — so checkout can no longer be unlocked (or
+            # blocked) against a total the order will not have.
+            shortfall = min_order_shortfall(subtotal)
+            if shortfall > 0:
                 meets_minimum = False
-                remaining = MIN_ORDER_AMOUNT - total_amount
                 lines.append("")
                 lines.append("⚠️ " + i18n.get('telegram.cart_min_order_warning', language,
                     min_amount=format_price(MIN_ORDER_AMOUNT),
-                    remaining=format_price(remaining)))
+                    remaining=format_price(shortfall)))
 
             # Per-product minimum order quantity warnings.
             if min_qty_violations:

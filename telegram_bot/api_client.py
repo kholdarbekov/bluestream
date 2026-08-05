@@ -710,11 +710,27 @@ class BusinessAPIClient:
         )
 
     # Payment methods
-    async def get_payment_methods(self, user_token: str, context: str = "order") -> APIResponse:
-        """Get user's eligible payment methods for the given context (order/subscription)."""
+    async def get_payment_methods(
+        self,
+        user_token: str,
+        context: str = "order",
+        delivery_address_id: Optional[int] = None,
+    ) -> APIResponse:
+        """Get the user's eligible payment methods for the given context.
+
+        ``delivery_address_id`` is what lets the backend evaluate the PLACE arm
+        of the COD cap: at a grouped workplace an unpaid coworker order is every
+        coworker's debt, so Cash must disappear from the menu exactly when order
+        creation would refuse it. Omitting it degrades to the person arm — which
+        is what the bot did until Plan E, leaving the customer to be rejected
+        after choosing Cash.
+        """
+        params = {'context': context}
+        if delivery_address_id is not None:
+            params['delivery_address_id'] = delivery_address_id
         return await self._make_request('GET', '/api/v1/payments/methods',
-                                       params={'context': context},
-                                       user_token=user_token)
+                                        params=params,
+                                        user_token=user_token)
 
     async def create_payment(self, user_token: str, payment_data: Dict) -> APIResponse:
         """Create payment for order"""
@@ -1068,13 +1084,29 @@ class BusinessAPIClient:
 
 
     async def get_my_bottle_balances(self, user_token: str) -> 'APIResponse':
-        """Get current user's bottle balances across all addresses."""
+        """Place-keyed bottle overview for the customer's whole linked cluster.
+
+        Returns `{is_linked, balances: [...]}` with one row per distinct PLACE
+        (the address group when grouped, else the address), each carrying that
+        place's `place_balance` and, when grouped, its member NAMES."""
         return await self._make_request('GET', '/api/v1/orders/bottles/my-balances',
+                                        user_token=user_token)
+
+    async def get_my_cod_summary(self, user_token: str) -> 'APIResponse':
+        """Cluster-unified COD debt + prepaid credit, plus a per-place breakdown.
+
+        Everything is scoped server-side to the authenticated customer — the
+        endpoint takes no ids, so there is nothing here to pass through."""
+        return await self._make_request('GET', '/api/v1/payments/my-cod-summary',
                                         user_token=user_token)
 
     async def get_my_bottle_ledger(self, user_token: str, address_id: int,
                                     page: int = 1, per_page: int = 10) -> 'APIResponse':
-        """Get current user's bottle ledger for a specific address."""
+        """Paginated PLACE ledger for the place this address belongs to.
+
+        For a grouped address the page spans every group member's entries. The
+        endpoint answers 404 (not an empty 200) when the caller may not view the
+        address, so a stale callback lands on the generic load-error path."""
         return await self._make_request('GET',
                                         f'/api/v1/orders/bottles/my-ledger/{address_id}',
                                         params={'page': page, 'per_page': per_page},

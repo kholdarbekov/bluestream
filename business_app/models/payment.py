@@ -16,6 +16,7 @@ from sqlalchemy import (
     CheckConstraint,
     text as sa_text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship, backref
 import uuid
 from business_app import db
@@ -599,6 +600,16 @@ class CashCollectionEvent(db.Model, TimestampMixin):
     voided_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     void_reason = Column(String(255), nullable=True)
     entry_metadata = Column(JSON, nullable=True, default=dict)
+    # Scope-aware allocation (Phase 2, spec §4/§5.1): the scope resolved at post
+    # time, frozen on the event. 'personal' | 'cluster' | 'place'. Personal
+    # events (snapshot NULL) behave byte-identically to pre-Phase-2 collections.
+    # Immutable after write; corrections replay under THIS snapshot.
+    scope_type = Column(String(16), nullable=False, default="personal", server_default="personal")
+    # JSONB on Postgres, JSON on SQLite (tests). Postgres `json` has no equality
+    # operator, so DISTINCT / GROUP BY / `=` over this column raise there while
+    # passing on SQLite — a trap for any future .distinct()/.union() over
+    # CashCollectionEvent. Storage shape is unchanged (plain dict in, dict out).
+    scope_snapshot = Column(JSON().with_variant(JSONB(astext_type=Text()), "postgresql"), nullable=True)
 
     customer = relationship("User", foreign_keys=[customer_id], backref="cash_collection_events")
     collector_user = relationship("User", foreign_keys=[collector_user_id])
@@ -669,6 +680,12 @@ class CashCollectionAllocation(db.Model, TimestampMixin):
     reversed_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     reversal_reason = Column(String(255), nullable=True)
     allocation_metadata = Column(JSON, nullable=True, default=dict)
+    # Dual audit stamps (Phase 2, spec §4.3): denormalized at-allocation values
+    # of event.customer_id / payment.user_id. Deliberately NO FK — historical
+    # stamps, and payment.user_id is mutable. Pre-migration rows stay NULL by
+    # design; the FK pair (cash_collection_event_id, payment_id) remains SSOT.
+    source_customer_id = Column(Integer, nullable=True)
+    beneficiary_user_id = Column(Integer, nullable=True)
 
     cash_collection_event = relationship("CashCollectionEvent", back_populates="allocations")
     payment = relationship("Payment", back_populates="cash_collection_allocations")

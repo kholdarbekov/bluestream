@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
     DateTime,
     Enum as SqlEnum,
@@ -30,35 +31,46 @@ from shared.enums import (
 
 
 class BottleBalance(db.Model, TimestampMixin):
-    """Materialized balance of returnable bottles per customer per address.
+    """Materialized balance of returnable bottles for one PHYSICAL PLACE.
 
-    Positive balance means the customer currently holds that many bottles.
-    Updated atomically on every ledger write; can be reconciled from ledger.
+    A place is the address group when the address is grouped, else the address
+    itself (spec 2026-07-27 section 3). Positive balance means that many bottles
+    are currently held at the place. Updated atomically on every ledger write;
+    reconcilable from the ledger. There is deliberately no `user_id` — bottles at
+    a shared place are one pool, not per-coworker slices.
     """
 
     __tablename__ = "bottle_balances"
     __table_args__ = (
-        UniqueConstraint("user_id", "address_id", name="uq_bottle_balance_user_address"),
-        Index("idx_bottle_balances_user", "user_id"),
+        # Exactly one scope key. Written as the portable `<>`-of-two-IS-NULLs
+        # rather than Postgres' num_nonnulls(), which SQLite does not implement
+        # and which would break db.create_all() in the test suite.
+        CheckConstraint(
+            "(address_group_id IS NULL) <> (address_id IS NULL)",
+            name="ck_bottle_balance_scope",
+        ),
+        UniqueConstraint("address_group_id", name="uq_bottle_balance_group"),
+        UniqueConstraint("address_id", name="uq_bottle_balance_addr"),
+        Index("idx_bottle_balances_group", "address_group_id"),
         Index("idx_bottle_balances_address", "address_id"),
         Index("idx_bottle_balances_balance", "balance"),
     )
 
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    address_id = Column(Integer, ForeignKey("addresses.id"), nullable=False)
+    address_group_id = Column(Integer, ForeignKey("address_groups.id"), nullable=True)
+    address_id = Column(Integer, ForeignKey("addresses.id"), nullable=True)
     balance = Column(Numeric(precision=12, scale=2), nullable=False, default=Decimal("0.00"))
     last_delivery_at = Column(DateTime(timezone=True), nullable=True)
     last_return_at = Column(DateTime(timezone=True), nullable=True)
     notes = Column(Text, nullable=True)
 
-    user = relationship("User", backref="bottle_balances", foreign_keys=[user_id])
     address = relationship("UserAddress", backref="bottle_balances", foreign_keys=[address_id])
+    address_group = relationship("AddressGroup", foreign_keys=[address_group_id])
 
     def to_dict(self):
         return {
             "id": self.id,
-            "user_id": self.user_id,
+            "address_group_id": self.address_group_id,
             "address_id": self.address_id,
             "balance": float(self.balance or 0),
             "last_delivery_at": self.last_delivery_at.isoformat() if self.last_delivery_at else None,
@@ -86,12 +98,14 @@ class BottleLedger(db.Model, TimestampMixin):
         Index("idx_bottle_ledger_address_created", "address_id", "created_at"),
         Index("idx_bottle_ledger_order", "order_id"),
         Index("idx_bottle_ledger_event_type", "event_type"),
+        Index("idx_bottle_ledger_group_occurred", "address_group_id", "occurred_at"),
         UniqueConstraint("idempotency_key", name="uq_bottle_ledger_idempotency"),
     )
 
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     address_id = Column(Integer, ForeignKey("addresses.id"), nullable=False, index=True)
+    address_group_id = Column(Integer, ForeignKey("address_groups.id"), nullable=True, index=True)
     order_id = Column(Integer, ForeignKey("orders.id"), nullable=True, index=True)
     delivery_id = Column(Integer, ForeignKey("deliveries.id"), nullable=True, index=True)
 
@@ -125,6 +139,7 @@ class BottleLedger(db.Model, TimestampMixin):
             "id": self.id,
             "user_id": self.user_id,
             "address_id": self.address_id,
+            "address_group_id": self.address_group_id,
             "order_id": self.order_id,
             "delivery_id": self.delivery_id,
             "event_type": self.event_type.value if hasattr(self.event_type, "value") else self.event_type,
@@ -151,12 +166,18 @@ class BottleFine(db.Model, TimestampMixin):
     __tablename__ = "bottle_fines"
     __table_args__ = (
         Index("idx_bottle_fines_user_status", "user_id", "status"),
-        Index("idx_bottle_fines_balance", "bottle_balance_id"),
+        Index("idx_bottle_fines_address", "address_id"),
+        UniqueConstraint("idempotency_key", name="uq_bottle_fines_idempotency_key"),
     )
 
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    bottle_balance_id = Column(Integer, ForeignKey("bottle_balances.id"), nullable=False)
+    address_id = Column(Integer, ForeignKey("addresses.id"), nullable=False)
+    # The scope AT ISSUE, frozen. Without it a fine issued while an address was
+    # grouped puts FINE_ISSUED in the place ledger, and — if the address later
+    # leaves — FINE_PAID in the address ledger, splitting the pair across two
+    # ledgers and leaving both balances wrong.
+    address_group_id = Column(Integer, ForeignKey("address_groups.id"), nullable=True)
     quantity = Column(Numeric(precision=12, scale=2), nullable=False)
     fine_amount = Column(Numeric(precision=10, scale=2), nullable=False)
     status = Column(
@@ -174,9 +195,21 @@ class BottleFine(db.Model, TimestampMixin):
     waived_at = Column(DateTime(timezone=True), nullable=True)
     waived_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     notes = Column(Text, nullable=True)
+    # Client-supplied retry token, NAMESPACED SERVER-SIDE — see
+    # `BottleTrackingService.compose_client_idempotency_key`. Same shape as
+    # `bottle_ledger.idempotency_key` (:128): String(255), nullable, plain
+    # global UNIQUE. NULL for every server-initiated and legacy-client fine;
+    # Postgres AND SQLite both treat NULLs as distinct under a plain UNIQUE, so
+    # un-keyed fines stay unconstrained on both engines.
+    #
+    # The guard has to live on THIS table, not on the FINE_ISSUED ledger row:
+    # that row carries `quantity=Decimal("0")`, so the fine's money lives here
+    # and keying only the ledger would let the money duplicate while its audit
+    # trail deduped.
+    idempotency_key = Column(String(255), nullable=True)
 
     user = relationship("User", foreign_keys=[user_id])
-    bottle_balance = relationship("BottleBalance", backref="fines", foreign_keys=[bottle_balance_id])
+    address = relationship("UserAddress", foreign_keys=[address_id])
     issuer = relationship("User", foreign_keys=[issued_by])
     waiver = relationship("User", foreign_keys=[waived_by])
 
@@ -184,7 +217,8 @@ class BottleFine(db.Model, TimestampMixin):
         return {
             "id": self.id,
             "user_id": self.user_id,
-            "bottle_balance_id": self.bottle_balance_id,
+            "address_id": self.address_id,
+            "address_group_id": self.address_group_id,
             "quantity": float(self.quantity or 0),
             "fine_amount": float(self.fine_amount or 0),
             "status": self.status.value if hasattr(self.status, "value") else self.status,

@@ -214,6 +214,12 @@ def validation_error_response(*args, **kwargs):
 
     Args:
         errors: Validation error details. Accepts legacy positional or keyword forms.
+        error_code: Optional machine-readable code (e.g. "PLACE_GROUP_MIN_ADDRESSES").
+            Surfaced as ``data.error_code`` — the same envelope the rest of the API
+            already uses for machine-readable codes (see api/orders.py's
+            ASL_BELGISI_UNAVAILABLE and api/auth.py's ACCOUNT_MATCH_FOUND) — so UI
+            clients can branch on the code instead of matching on prose. Omitted
+            entirely when None, keeping legacy responses byte-identical.
 
     Returns:
         Flask response tuple (json, 400)
@@ -224,8 +230,13 @@ def validation_error_response(*args, **kwargs):
             data = CreateOrderRequest(**request.get_json())
         except ValidationError as e:
             return validation_error_response(e.errors())
+
+        # Propagating a service-layer fence code to the client
+        except ValidationError as e:
+            return validation_error_response(e.message, error_code=e.error_code)
     """
     errors = kwargs.pop("errors", None)
+    error_code = kwargs.pop("error_code", None)
     if args:
         if errors is None:
             errors = args[0]
@@ -252,7 +263,12 @@ def validation_error_response(*args, **kwargs):
     else:
         error_list = [str(errors)]
 
-    return error_response(message="Validation failed", errors=error_list, status_code=400)
+    return error_response(
+        message="Validation failed",
+        errors=error_list,
+        status_code=400,
+        data={"error_code": error_code} if error_code else None,
+    )
 
 
 def conflict_response(message: str = "Resource already exists"):

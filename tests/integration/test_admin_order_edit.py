@@ -658,9 +658,9 @@ def test_apply_edit_pre_delivery_does_not_touch_bottle_balance(
     ).all()
     assert adjustments == [], "pre-delivery edit must not write a bottle ADMIN_ADJUSTMENT"
 
-    balance = BottleBalance.query.filter_by(
-        user_id=sample_user.id, address_id=address.id
-    ).first()
+    # Balances are keyed by PLACE now; this address is ungrouped, so its place
+    # row is the address-keyed one.
+    balance = BottleBalance.query.filter_by(address_id=address.id).first()
     assert balance is None, "pre-delivery edit must not create/modify a bottle balance"
 
 
@@ -678,10 +678,8 @@ def test_apply_edit_delivered_adjusts_bottle_balance(
     address = _attach_returnable_address(db, sample_user, sample_product)
     order = _seed_paid_cash_delivered_order(sample_user, sample_product, quantity=4)
     order.delivery_address_id = address.id
-    # Delivery already credited 4 bottles to the customer.
-    balance = BottleBalance(
-        user_id=sample_user.id, address_id=address.id, balance=Decimal("4.00")
-    )
+    # Delivery already credited 4 bottles to the place (ungrouped => address-keyed).
+    balance = BottleBalance(address_id=address.id, balance=Decimal("4.00"))
     db.session.add(balance)
     db.session.commit()
 

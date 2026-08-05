@@ -1354,6 +1354,31 @@ class AuthService:
                     },
                 )
 
+        # Grocery flag-flip fence (Phase 2 spec §5.8 layer 2): converting a user
+        # to ENTITY (any subtype) or to the grocery_store subtype while they are
+        # in a wallet cluster or own a place-grouped address would let mirrored
+        # grocery money co-mingle with other people's debts. The admin must
+        # unlink / ungroup first. Layer 1 = link/group fences; layer 3 = the
+        # money-path forced-PERSONAL backstop (Plan 2b).
+        becoming_entity = normalized_user_type == UserType.ENTITY.value and current_user_type != UserType.ENTITY.value
+        becoming_grocery = (
+            new_subtype_value == EntitySubtype.GROCERY_STORE.value
+            and current_subtype_value != EntitySubtype.GROCERY_STORE.value
+        )
+        if becoming_entity or becoming_grocery:
+            has_grouped_address = (
+                db.session.query(UserAddress.id)
+                .filter(UserAddress.user_id == user_id, UserAddress.address_group_id.isnot(None))
+                .first()
+                is not None
+            )
+            if user.canonical_customer_id is not None or has_grouped_address:
+                raise ValidationError(
+                    "Unlink this account and remove its addresses from place groups "
+                    "before converting it to an entity/grocery account",
+                    error_code="GROCERY_FLAG_BLOCKED_WHILE_LINKED",
+                )
+
         if normalized_user_type != UserType.ENTITY.value:
             normalized_company_name = None
             normalized_tax_id = None
@@ -1582,6 +1607,13 @@ class AuthService:
         address = UserAddress.query.filter_by(id=address_id, user_id=user_id).first()
         if not address:
             raise NotFoundError(get_translation("api.auth.address_not_found"))
+
+        # Spec §7.3: a grouped address has no balance row of its own, so the
+        # IntegrityError below never fires for exactly the members who share a
+        # pool. The route's @handle_api_exception already forwards error_code.
+        from business_app.services.customer_link_service import CustomerLinkService
+
+        CustomerLinkService.assert_address_not_in_place_group(address_id)
 
         from business_app.models.subscription import Subscription
 

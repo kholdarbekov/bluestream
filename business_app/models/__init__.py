@@ -29,3 +29,10 @@ from business_app.models import tryout  # noqa: F401, E402
 from business_app.models import marking_code_config  # noqa: F401, E402
 from business_app.models import marking_code_task_run  # noqa: F401, E402
 from business_app.models import support  # noqa: F401, E402
+from business_app.models.customer_link import (  # noqa: F401, E402
+    AddressGroup,
+    CanonicalCustomer,
+    CustomerDistinctPair,
+    CustomerLinkEvent,
+    PlaceSuggestionDismissal,
+)

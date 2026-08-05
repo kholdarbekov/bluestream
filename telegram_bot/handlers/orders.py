@@ -22,6 +22,97 @@ from handlers.products import product_handlers
 
 logger = logging.getLogger('handlers')
 
+# Cap on the per-order rows printed under one place. The place TOTAL above them
+# is never capped, so a busy office is still told the right amount; this only
+# keeps one shared workplace from pushing the orders menu past Telegram's
+# 4096-character message limit.
+_PLACE_ITEM_LIMIT = 10
+
+
+def _money(value) -> str:
+    """Format an API money value for display, never raising.
+
+    This block is appended to a menu the customer already asked for, so a
+    malformed field must degrade to '0' rather than take the whole screen down.
+    """
+    try:
+        return format_price(float(value or 0))
+    except (TypeError, ValueError):
+        return format_price(0)
+
+
+def _cod_summary_payload(response) -> dict:
+    """Unwrap ``GET /payments/my-cod-summary`` into the summary dict.
+
+    ``APIResponse.data`` is the whole success ENVELOPE (``{'success': …,
+    'data': {…}}``), not the payload — same shape the bottles handler unwraps.
+    A failed, empty or unexpectedly-shaped response yields ``{}``, which the
+    formatter renders as nothing.
+    """
+    if not response or not getattr(response, 'success', False):
+        return {}
+    envelope = response.data if isinstance(response.data, dict) else {}
+    summary = envelope.get('data')
+    return summary if isinstance(summary, dict) else {}
+
+
+def _build_cod_summary_lines(summary: dict, language: str) -> list:
+    """Wallet display (spec §7) for the bottom of the orders menu.
+
+    Two blocks, both derived server-side from the authenticated customer:
+
+    * the CLUSTER block — their linked accounts' unpaid COD total and their
+      cluster-wide prepaid credit, i.e. "as a single customer" (UC1/UC2), and
+    * one PLACE block per grouped address — that workplace's unified open COD
+      total with a per-order breakdown naming the coworker each order belongs to
+      (approved full in-group transparency; the payload carries names only).
+
+    Emits NOTHING for an unlinked + ungrouped customer, so their orders menu is
+    byte-identical to today.
+
+    No HTML escaping: ``orders_menu`` sends its body with no ``parse_mode`` and
+    the application sets no ``Defaults(parse_mode=...)``, so this text is plain.
+    Escaping would render ``O&#x27;Brien`` — and apostrophes are ordinary in
+    Uzbek names and place labels.
+    """
+    lines = []
+
+    if int(summary.get('cluster_member_count') or 1) > 1:
+        lines.append(i18n.get(
+            'telegram.payments.cluster_debt_total', language,
+            total=_money(summary.get('cluster_delivered_outstanding_amount')),
+        ))
+        # Prepaid credit is cluster-wide too (2b); showing the debt without it
+        # would overstate what this person still owes. Reuses the key the
+        # checkout/cart surfaces already render this same balance with.
+        prepaid = summary.get('available_prepayment_balance') or 0
+        try:
+            has_prepaid = float(prepaid) > 0
+        except (TypeError, ValueError):
+            has_prepaid = False
+        if has_prepaid:
+            lines.append(i18n.get(
+                'telegram.orders.cod_prepaid_balance', language,
+                available_balance=_money(prepaid),
+            ))
+
+    for place in summary.get('places') or []:
+        label = place.get('label') or f"#{place.get('place_group_id')}"
+        lines.append(i18n.get(
+            'telegram.payments.place_debt_total', language,
+            label=str(label),
+            total=_money(place.get('place_open_cod_debt_total')),
+        ))
+        for item in (place.get('items') or [])[:_PLACE_ITEM_LIMIT]:
+            lines.append("   " + i18n.get(
+                'telegram.payments.place_order_line', language,
+                order_number=str(item.get('order_number') or '—'),
+                member_name=str(item.get('member_name') or '—'),
+                amount=_money(item.get('outstanding_amount')),
+            ))
+
+    return lines
+
 
 class OrderHandlers(BaseHandler):
     """Order-related handlers"""
@@ -34,6 +125,29 @@ class OrderHandlers(BaseHandler):
 
     @staticmethod
     def _cod_restriction_notice(restrictions: Dict[str, Any], language: str) -> str:
+        # The cap has two arms (spec 5.5): the orderer's own linked cluster is
+        # at the limit ('person'), or the grouped WORKPLACE this order ships to
+        # is ('place' — a coworker's unpaid orders). Blaming a customer with a
+        # clean personal record for a colleague's debt is wrong, so branch on
+        # the discriminator the backend supplies. Payloads without a scope
+        # (legacy / no delivery address) keep today's count-based copy.
+        if restrictions.get('restriction_scope') == 'place':
+            place_key = 'telegram.orders.cod_restricted_place'
+            place_notice = i18n.get(
+                place_key,
+                language,
+                place_active_cod_debt_count=restrictions.get('place_active_cod_debt_count') or 0,
+            )
+            # The place key is NEW and is seeded by its own script, so any
+            # environment where that script has not run renders the humanised
+            # key — the literal English debug text "Cod restricted place", in
+            # all three languages, to a paying customer at checkout. The two
+            # keys below predate 2b and ship with the base seed, so degrade to
+            # them instead: less specific copy, but never raw text. Deliberately
+            # a RENDER check, not a seeded-key lookup, so it also catches a row
+            # that exists but is empty/blank-seeded.
+            if place_notice and place_notice != i18n.humanised_missing_key(place_key):
+                return place_notice
         active_debt_count = restrictions.get('active_cod_debt_count') or 0
         if active_debt_count:
             return i18n.get(
@@ -93,6 +207,19 @@ class OrderHandlers(BaseHandler):
 
                 orders = response.data.get('data', {}).get('orders', [])
 
+                # Wallet block (spec §7). Best-effort: the customer asked for
+                # their orders, so a failing/slow/misshapen summary must degrade
+                # to today's screen rather than take the menu down.
+                summary_lines = []
+                if orders:
+                    try:
+                        cod_response = await client.get_my_cod_summary(user_token)
+                        summary_lines = _build_cod_summary_lines(
+                            _cod_summary_payload(cod_response), language
+                        )
+                    except Exception as cod_error:
+                        logger.warning(f"COD summary skipped for user {user_id}: {cod_error}")
+
             if not orders:
                 no_orders_text = i18n.get('telegram.orders.no_orders', language)
                 keyboard = await main_menu_for(update.effective_user.id, language)
@@ -119,6 +246,8 @@ class OrderHandlers(BaseHandler):
 
             # Show orders list
             orders_text = i18n.get('telegram.orders.your_orders', language, count=len(orders)) + "\n\n"
+            if summary_lines:
+                orders_text += "\n".join(summary_lines)
             keyboard = OrderKeyboards.order_list(orders, language)
 
             if update.callback_query:
@@ -620,7 +749,25 @@ class OrderHandlers(BaseHandler):
                 await self._handle_auth_error(update, language)
                 return
 
-            response = await client.get_payment_methods(user_token)
+            selected_address_id = context.user_data.get('selected_address_id')
+            response = await client.get_payment_methods(
+                user_token,
+                delivery_address_id=selected_address_id,
+            )
+            if not response.success and selected_address_id is not None:
+                # Plan E: /payments/methods 400s for an address that is foreign
+                # OR NO LONGER EXISTS (business_app/api/payments.py:158-172 ->
+                # order_service.py:547-553). That is correct there — a foreign
+                # id would leak a stranger's place_active_cod_debt_count — but
+                # it must never dead-end a checkout that worked before Plan E.
+                # Reachable without malice: the address is deleted between
+                # selection and checkout, or Quick Order pre-filled it from a
+                # prior order. Retry WITHOUT the address: the place arm simply
+                # does not apply for this request, which is exactly the
+                # pre-Plan-E behaviour, and the customer still gets a keyboard.
+                # This task is UNGATED (E11), so there is no flag to fall back
+                # to — the fallback has to be here.
+                response = await client.get_payment_methods(user_token)
             if not response.success:
                 await self._handle_api_error(update, response.error, language)
                 return
@@ -1014,7 +1161,7 @@ class OrderHandlers(BaseHandler):
         confirmation_text = i18n.get('telegram.orders.confirmation_title', language) + "\n\n"
 
         # Get cart items from API by api_client.get_cart and show them
-        cart_total_amount = 0
+        cart_total_amount = 0.0
         min_qty_violations: list = []
         selected_reward = None
         async with api_client as client:
@@ -1032,13 +1179,39 @@ class OrderHandlers(BaseHandler):
             if not cart:
                 await self._handle_api_error(update, i18n.get('telegram.orders.cart_empty', language), language)
                 return
+
+            # The server's own subtotal — the single authoritative figure for
+            # this cart, composed by `CartService.get_cart_summary` from the same
+            # contract-aware unit prices order creation charges.
+            cart_total_amount = float(cart.get('subtotal') or 0)
+
+            # 🔴 THE FIGURE SHOWN AND THE FIGURE CHARGED ARE ONE DECISION, AND
+            # THAT DECISION IS THE SERVER'S. Do not reintroduce arithmetic here.
+            #
+            # This screen used to re-derive the money:
+            #     item_subtotal_price = product_payload['current_price'] * quantity
+            #     cart_total_amount  += item_subtotal_price
+            # `current_price` is baked by `CartItem.to_dict()` through
+            # `Product.calculate_price`, which IGNORES its `user` argument
+            # (business_app/models/product.py:140-143) — contract-blind and
+            # price-rule-blind. `CartService.get_cart_details` patches it from
+            # `get_cart_summary` afterwards, but ONLY for the lines that summary
+            # kept: a line the server drops (inactive product) keeps the raw
+            # figure, and the bot kept adding it to a total the server's
+            # `subtotal` excludes. Order creation, meanwhile, prices through
+            # `resolve_contract_pricing_for_user_product`
+            # (order_service.py:1461).
+            #
+            # `cart_items[].total_price` and `cart['subtotal']` are both composed
+            # by `CartService.get_cart_summary` — one calculation, the same one
+            # the order is built from. Read them; never re-multiply.
+            # tests/integration/test_checkout_total_is_server_authoritative.py
             confirmation_text += f"{i18n.get('telegram.orders.items_header', language)}:\n"
             for item in cart.get('cart_items', []):
                 product_payload = item.get('product') or {}
                 quantity = item.get('quantity', 1)
                 confirmation_text += f"• {product_payload.get('name', unknown_text)} x{quantity}\n"
-                item_subtotal_price = product_payload.get('current_price', 0) * quantity
-                cart_total_amount += item_subtotal_price
+                item_subtotal_price = float(item.get('total_price') or 0)
                 confirmation_text += f"  💰 {format_price(item_subtotal_price)} UZS\n\n"
 
                 # Per-product purchase minimum (mirrors backend rule).
@@ -1250,10 +1423,13 @@ class OrderHandlers(BaseHandler):
                     await self._handle_api_error(update, cart_response.error, language)
                     return
                 cart = (cart_response.data or {}).get('data', {}).get('cart') or {}
-                subtotal = sum(
-                    (item.get('product') or {}).get('current_price', 0) * item.get('quantity', 1)
-                    for item in cart.get('cart_items', [])
-                )
+                # Same one decision as the confirmation screen: the server's own
+                # `subtotal`, not a re-summation over the contract-blind
+                # `current_price` baked by `CartItem.to_dict()`. This figure both
+                # gates which rewards are tappable and renders the "add N UZS to
+                # unlock" shortfall below, so a bot-side total that disagrees
+                # with the backend offers rewards order creation then rejects.
+                subtotal = float(cart.get('subtotal') or 0)
 
                 rewards_response = await client.get_loyalty_rewards(user_token)
                 rewards = (

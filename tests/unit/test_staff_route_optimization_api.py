@@ -413,7 +413,7 @@ class TestActiveDeliveryBottleBalance:
 
     def test_balance_reflected_for_delivery_address(self, app, client, db, driver, customer):
         delivery, addr = _delivery_with_address(db, customer.id, driver.id, "ORD-bal")
-        db.session.add(BottleBalance(user_id=customer.id, address_id=addr.id, balance=Decimal("7")))
+        db.session.add(BottleBalance(address_id=addr.id, balance=Decimal("7")))
         db.session.commit()
 
         resp = client.get("/api/v1/staff/delivery/active", headers=_auth_headers(app, driver.id))
@@ -426,7 +426,7 @@ class TestActiveDeliveryBottleBalance:
 
     def test_negative_balance_floored_to_zero(self, app, client, db, driver, customer):
         delivery, addr = _delivery_with_address(db, customer.id, driver.id, "ORD-neg")
-        db.session.add(BottleBalance(user_id=customer.id, address_id=addr.id, balance=Decimal("-3")))
+        db.session.add(BottleBalance(address_id=addr.id, balance=Decimal("-3")))
         db.session.commit()
         resp = client.get("/api/v1/staff/delivery/active", headers=_auth_headers(app, driver.id))
         assert self._item_for(resp, delivery.id)["customer_bottle_balance"] == 0
@@ -439,7 +439,7 @@ class TestActiveDeliveryBottleBalance:
         )
         db.session.add(other)
         db.session.flush()
-        db.session.add(BottleBalance(user_id=customer.id, address_id=other.id, balance=Decimal("9")))
+        db.session.add(BottleBalance(address_id=other.id, balance=Decimal("9")))
         db.session.commit()
         resp = client.get("/api/v1/staff/delivery/active", headers=_auth_headers(app, driver.id))
         # Balance lives under a different address → this delivery shows 0.

@@ -17,6 +17,11 @@ from business_app.models.user import User, UserAddress
 from business_app.models.order import Order, OrderItem
 from business_app.models.delivery import Delivery, DeliveryPerson, DeliveryStatusHistory
 from business_app.models.staff import StaffActivityLog
+from business_app.services.cod_collect_ceiling import (
+    collectible_cod_total,
+    place_widening_applies,
+    resolve_collect_scope,
+)
 from business_app.utils.exceptions import ValidationError, NotFoundError, ForbiddenError, ConflictError
 from business_app.utils.geo_validation import ensure_within_delivery_zone
 from business_app.utils.state_validators import (
@@ -1151,7 +1156,10 @@ class StaffService:
             if is_cash_order:
                 # Pre-count only for true CASH orders; we use it for the debt-limit
                 # breach notification below (which must not fire for just-converted orders).
-                pre_cod_debt_count = cash_collection_service.get_active_cod_debt_count(delivery.order.user_id)
+                # Cluster-wide (spec 5.5) so the warning fires exactly when the cap
+                # the engine enforces is actually crossed — one person's linked
+                # phones share a single credit line.
+                pre_cod_debt_count = cash_collection_service.get_cluster_active_cod_debt_count(delivery.order.user_id)
 
         old_status_value = delivery.status.value if hasattr(delivery.status, "value") else delivery.status
 
@@ -1255,6 +1263,33 @@ class StaffService:
             db.session.flush()
             history_id = history.id
 
+            # Take the id-ordered candidate batch for the whole settlement BEFORE
+            # anything in this transaction writes a single payment row.
+            #
+            # BOTH settlement shapes need it, not just the conversion:
+            #   * settle_electronic_as_cash — convert_electronic_order_to_cash
+            #     returns a ROW-LOCKED payment;
+            #   * plain CASH — update_order_status(..., DELIVERED) reaches
+            #     consume_reserved_prepayment_for_payment and
+            #     apply_customer_prepaid_credit_to_payment, which write
+            #     payment.amount_collected and so take a ROW EXCLUSIVE lock on the
+            #     target at the next autoflush.
+            # Either way a lone row lock ahead of the batch is the inversion that
+            # deadlocks against a concurrent post walking the batch in id order:
+            # T1 holds P_target then requests {P_older, P_target}; T2 holds
+            # P_older and blocks on P_target. Cluster-fungible credit makes this
+            # likelier still — a SIBLING's over-collection now also triggers the
+            # pre-batch write. The abort is worse than a 500: _allocate_to_payment
+            # may already have enqueued send_payment_confirmation_task, which does
+            # not roll back, so the customer is told a rolled-back payment was
+            # confirmed. Holding the batch first makes every later single-row lock
+            # a re-request of a row we already own.
+            if new_status == "delivered" and (is_cash_order or settle_electronic_as_cash) and cash_collection_service:
+                cash_collection_service.lock_order_settlement_candidates(
+                    delivery.order,
+                    source="delivery_completion",
+                )
+
             # Sync order status per DELIVERY_TO_ORDER_STATUS_SYNC
             order_status_str = DELIVERY_TO_ORDER_STATUS_SYNC.get(new_status)
             if order_status_str and delivery.order:
@@ -1293,6 +1328,9 @@ class StaffService:
                 # For unsuccessful electronic orders, convert to CASH first so the
                 # existing delivery_completion collection can post against a CASH payment.
                 if settle_electronic_as_cash:
+                    # The id-ordered batch is already held (see above), so the
+                    # ROW-LOCKED payment this conversion returns is a re-request
+                    # of a row we already own rather than a new lock order.
                     cash_collection_service.convert_electronic_order_to_cash(
                         delivery.order,
                         actor_user_id=staff_user_id,
@@ -1326,9 +1364,12 @@ class StaffService:
                 # Debt-limit breach notification only applies to true CASH orders
                 # (pre_cod_debt_count was captured only for those).
                 if is_cash_order:
-                    post_cod_debt_count = cash_collection_service.get_active_cod_debt_count(delivery.order.user_id)
+                    post_cod_debt_count = cash_collection_service.get_cluster_active_cod_debt_count(
+                        delivery.order.user_id
+                    )
+                    limit = cash_collection_service.COD_ACTIVE_DEBT_LIMIT
                     cod_debt_limit_breached = (
-                        pre_cod_debt_count is not None and pre_cod_debt_count < 2 and post_cod_debt_count >= 2
+                        pre_cod_debt_count is not None and pre_cod_debt_count < limit and post_cod_debt_count >= limit
                     )
 
             db.session.commit()
@@ -1399,25 +1440,25 @@ class StaffService:
         try:
             from types import SimpleNamespace
 
+            from business_app.services.cash_collection_service import CashCollectionService
             from business_app.services.notification_service import NotificationService
             from business_app.utils.constants import NotificationChannel, NotificationType
 
+            # The cap is configuration, not copy — read it from the SSOT so the
+            # message can never claim a threshold the engine does not enforce.
+            # "or more" because the crossing count is cluster-wide and a single
+            # delivery can take the cluster past the cap.
+            limit = CashCollectionService.COD_ACTIVE_DEBT_LIMIT
+            subject = "Cash on delivery is restricted"
+            body = (
+                f"You have {limit} or more outstanding cash on delivery debts. "
+                "Cash on delivery is now unavailable for new orders. "
+                "Please use card payment methods until your outstanding COD debts are settled."
+            )
             template = SimpleNamespace(
-                subject="Cash on delivery is restricted",
-                content=(
-                    "You have 2 outstanding cash on delivery debts. "
-                    "Cash on delivery is now unavailable for new orders. "
-                    "Please use card payment methods until your outstanding COD debts are settled."
-                ),
-                get_translated=lambda field_name, _language: (
-                    "Cash on delivery is restricted"
-                    if field_name == "subject"
-                    else (
-                        "You have 2 outstanding cash on delivery debts. "
-                        "Cash on delivery is now unavailable for new orders. "
-                        "Please use card payment methods until your outstanding COD debts are settled."
-                    )
-                ),
+                subject=subject,
+                content=body,
+                get_translated=lambda field_name, _language: (subject if field_name == "subject" else body),
             )
             NotificationService().send_notification(
                 user_id,
@@ -1771,6 +1812,135 @@ class StaffService:
         return user
 
     @staticmethod
+    def price_phone_order(client_id: int, order_data: Dict[str, Any]) -> Dict[str, Any]:
+        """🔴 THE ONE PLACE A PHONE ORDER IS PRICED. Do not grow a second one.
+
+        Prices for the **CLIENT**, never for the caller. That distinction is the
+        whole reason this function exists as a callable rather than as a loop
+        inlined in :meth:`create_phone_order`:
+
+        ``GET /api/v1/products/`` resolves ``pricing.current_price`` for whoever
+        holds the JWT (``business_app/api/products.py:100-111`` ->
+        ``serialize_product(..., user=current_user)``), and on the operator's
+        order screen that is the OPERATOR. For a client on a corporate contract
+        the operator therefore read the GENERIC price down the phone while this
+        loop charged the CONTRACT price — measured 45 000 shown against 27 000
+        charged (``tests/integration/test_operator_order_price_parity.py``).
+        The catalogue payload also carries the caller's VIP / loyalty-tier
+        discount (``product_serializers.calculate_product_price``), which this
+        loop does not apply at all — a discounted operator leaked their own
+        rate into every quote.
+
+        The estimate endpoint
+        (``POST /staff/operator/users/<id>/order-estimate`` ->
+        :meth:`estimate_phone_order`) and :meth:`create_phone_order` both enter
+        HERE. The figure quoted and the figure charged are the same expression
+        by construction; two expressions that agree today desynchronise on the
+        next edit.
+
+        Returns a dict of ``items`` (the exact rows ``OrderItem`` is built from),
+        ``subtotal``, ``delivery_fee`` and ``total_amount``, all ``Decimal``.
+
+        Raises:
+            NotFoundError: a requested product does not exist.
+            ValidationError: contract pricing for a line is ambiguous.
+        """
+        from business_app.models.product import Product
+        from business_app.services.corporate_contract_service import CorporateContractService
+
+        corporate_service = CorporateContractService()
+        order_items: List[Dict[str, Any]] = []
+        subtotal = Decimal("0")
+
+        for item in order_data.get("items") or []:
+            product_id = item.get("product_id")
+            quantity = item.get("quantity", 1)
+
+            product = Product.query.get(product_id)
+            if not product:
+                raise NotFoundError(
+                    f"Product {product_id} not found",
+                    error_code="STAFF_PRODUCT_NOT_FOUND",
+                )
+
+            fallback_price = Decimal(str(product.calculate_price(quantity=quantity)))
+            resolution = corporate_service.resolve_contract_pricing_for_user_product(
+                user_id=client_id,
+                product_id=product_id,
+                fallback_price=fallback_price,
+            )
+            unit_price = Decimal(str(resolution["unit_price"]))
+            item_total = unit_price * Decimal(str(quantity))
+            subtotal += item_total
+
+            order_items.append(
+                {
+                    "product_id": product_id,
+                    "product_name": product.name,
+                    "contract_id": resolution["contract"].id if resolution["contract"] else None,
+                    "contract_product_price_id": (
+                        resolution["contract_price_row"].id if resolution["contract_price_row"] else None
+                    ),
+                    "quantity": quantity,
+                    "unit_price": unit_price,
+                    "total_price": item_total,
+                }
+            )
+
+        delivery_fee = Decimal(str(order_data.get("delivery_fee", 0)))
+
+        return {
+            "items": order_items,
+            "subtotal": subtotal,
+            "delivery_fee": delivery_fee,
+            "total_amount": subtotal + delivery_fee,
+        }
+
+    @staticmethod
+    def estimate_phone_order(client_id: int, order_data: Dict[str, Any]) -> Dict[str, Any]:
+        """READ-ONLY client-scoped quote for a phone-order basket.
+
+        The operator screen's money surface. It writes NOTHING — no order, no
+        item, no reservation, no activity log — it only replays
+        :meth:`price_phone_order`, the same call :meth:`create_phone_order`
+        makes, so what the operator reads out and what the customer is charged
+        cannot diverge.
+
+        Deliberately NOT re-checked here: the delivery-address ownership guard
+        and the COD cap. Those decide whether an order may be PLACED, not what
+        it costs, and running them on a quote would make a read-only endpoint
+        reject baskets the operator is still building.
+        """
+        client = User.query.get(client_id)
+        if not client:
+            raise NotFoundError("Client user not found", error_code="STAFF_CLIENT_NOT_FOUND")
+
+        items_data = order_data.get("items") or []
+        if not items_data:
+            raise ValidationError("Order must contain at least one item", error_code="STAFF_ORDER_ITEMS_REQUIRED")
+
+        pricing = StaffService.price_phone_order(client_id, order_data)
+
+        return {
+            "client_id": client_id,
+            "currency": "UZS",
+            "items": [
+                {
+                    "product_id": row["product_id"],
+                    "product_name": row["product_name"],
+                    "quantity": row["quantity"],
+                    "unit_price": float(row["unit_price"]),
+                    "total_price": float(row["total_price"]),
+                    "is_contract_price": row["contract_id"] is not None,
+                }
+                for row in pricing["items"]
+            ],
+            "subtotal": float(pricing["subtotal"]),
+            "delivery_fee": float(pricing["delivery_fee"]),
+            "total_amount": float(pricing["total_amount"]),
+        }
+
+    @staticmethod
     def create_phone_order(operator_id: int, client_id: int, order_data: Dict[str, Any]) -> Order:
         """
         Create an order on behalf of a client (phone order by operator).
@@ -1797,51 +1967,41 @@ class StaffService:
 
         delivery_address_id = order_data.get("delivery_address_id")
 
-        # Process order items
-        from business_app.models.product import Product
+        # Five of the six order-creation paths re-check that the delivery
+        # address belongs to the order's user; this one did not. The FK
+        # guarantees the row exists, not who owns it, and
+        # `assert_order_address_for_status` checks PRESENCE only
+        # (business_app/utils/state_validators.py:101-126). Unreachable from the
+        # operator's own screen — which only lists this client's addresses — but
+        # reachable by a direct API call or a script, and an order carrying
+        # someone else's address silently breaks place-scoped COD collection
+        # (plan Q5/E16). Same predicate as
+        # OrderService.get_user_and_address_for_order (order_service.py:547-553).
+        # MUST run before the COD cap call below: an unowned address must never
+        # seed the place arm of validate_customer_can_use_cod.
+        if delivery_address_id is not None:
+            owned_address = UserAddress.query.filter_by(
+                id=delivery_address_id,
+                user_id=client_id,
+            ).first()
+            if owned_address is None:
+                raise ValidationError(
+                    "Delivery address does not belong to this client",
+                    error_code="STAFF_INVALID_DELIVERY_ADDRESS",
+                )
+
+        # Process order items. The pricing lives in `price_phone_order` — the
+        # SAME call the operator's order-estimate endpoint makes, so the figure
+        # quoted on the phone and the figure charged here are one expression.
+        # Do NOT re-inline this loop.
         from business_app.services.corporate_contract_service import CorporateContractService
 
         corporate_service = CorporateContractService()
-        order_items = []
-        subtotal = Decimal("0")
-
-        for item in items_data:
-            product_id = item.get("product_id")
-            quantity = item.get("quantity", 1)
-
-            product = Product.query.get(product_id)
-            if not product:
-                raise NotFoundError(
-                    f"Product {product_id} not found",
-                    error_code="STAFF_PRODUCT_NOT_FOUND",
-                )
-
-            fallback_price = Decimal(str(product.calculate_price(quantity=quantity)))
-            resolution = corporate_service.resolve_contract_pricing_for_user_product(
-                user_id=client_id,
-                product_id=product_id,
-                fallback_price=fallback_price,
-            )
-            unit_price = Decimal(str(resolution["unit_price"]))
-            item_total = unit_price * Decimal(str(quantity))
-            subtotal += item_total
-
-            order_items.append(
-                {
-                    "product_id": product_id,
-                    "contract_id": resolution["contract"].id if resolution["contract"] else None,
-                    "contract_product_price_id": (
-                        resolution["contract_price_row"].id if resolution["contract_price_row"] else None
-                    ),
-                    "quantity": quantity,
-                    "unit_price": unit_price,
-                    "total_price": item_total,
-                }
-            )
-
-        # Calculate delivery fee
-        delivery_fee = Decimal(str(order_data.get("delivery_fee", 0)))
-        total_amount = subtotal + delivery_fee
+        pricing = StaffService.price_phone_order(client_id, order_data)
+        order_items = pricing["items"]
+        subtotal = pricing["subtotal"]
+        delivery_fee = pricing["delivery_fee"]
+        total_amount = pricing["total_amount"]
 
         # Map payment method
         payment_method = None
@@ -1854,7 +2014,10 @@ class StaffService:
         if payment_method == PaymentMethod.CASH:
             from business_app.services.cash_collection_service import CashCollectionService
 
-            CashCollectionService().validate_customer_can_use_cod(client_id)
+            # Two-armed cap (spec 5.5): the client's cluster AND the destination
+            # place group. `delivery_address_id` is resolved above from
+            # order_data; None / ungrouped degrades to the person arm.
+            CashCollectionService().validate_customer_can_use_cod(client_id, delivery_address_id=delivery_address_id)
         if payment_method == PaymentMethod.BUSINESS_ACCOUNT:
             corporate_service.validate_business_account_order(
                 user=client,
@@ -2020,8 +2183,14 @@ class StaffService:
         return UserAddress.query.filter_by(user_id=user_id).all()
 
     @staticmethod
-    def get_client_payment_methods(user_id: int) -> Dict[str, Any]:
-        """Return debt-aware payment methods for an operator-created customer order."""
+    def get_client_payment_methods(user_id: int, delivery_address_id: Optional[int] = None) -> Dict[str, Any]:
+        """Return debt-aware payment methods for an operator-created customer order.
+
+        ``delivery_address_id`` is optional: supply the destination address and
+        the COD cap's PLACE arm is evaluated too (spec 5.5), so the operator's
+        menu matches what ``create_phone_order`` will actually accept. Omitted
+        (or ungrouped) ⇒ person arm only, exactly as before.
+        """
         user = User.query.get(user_id)
         if not user:
             raise NotFoundError("User not found", error_code="STAFF_USER_NOT_FOUND")
@@ -2082,7 +2251,9 @@ class StaffService:
                 }
             )
 
-        cod_context = CashCollectionService().get_cod_restriction_context(user_id)
+        cod_context = CashCollectionService().get_cod_restriction_context(
+            user_id, delivery_address_id=delivery_address_id
+        )
         # Grocery stores are exempt from the COD restriction cap (already
         # enforced in get_cod_restriction_context).
         if cod_context["cod_restricted"]:
@@ -2232,16 +2403,48 @@ class StaffService:
         *,
         only_with_open_cod: bool = True,
     ) -> List[Dict[str, Any]]:
-        """Search users and attach COD debt summary for collection workflows."""
+        """Search users and attach COD debt summary for collection workflows.
+
+        🔴 THE ROW IS THE COLLECT SCOPE (A6/R-A, R-B). This search feeds the
+        ADMIN cash-collection modal's customer dropdown
+        (``api/admin.py:12243``) as well as the staff bot, so the same rule that
+        governs the driver's debtor list governs it: the figure a row advertises
+        must be the figure collecting from that row settles.
+
+        Before this, every row was built from the RAW per-account statement and
+        filtered on the person's OWN ``active_cod_debt_count`` — the exact
+        per-person gate Plan E R1 removed everywhere else. Two measured
+        consequences on the A6 rows:
+
+        * Alice's row read ``(2 debts, 25 000)`` where the collection settles
+          ``(3, 45 000)``;
+        * a debt-free coworker standing at an indebted workplace returned **zero
+          rows**, so the admin could not select the very person holding the
+          office's cash.
+
+        Both halves now come from :func:`resolve_collect_scope` — the one
+        decision the admin modal itself posts with. Gate OFF ⇒ the raw engine
+        figures, verbatim (plan C0).
+        """
         users = StaffService.search_cod_collection_users(query_text, search_type)
 
         from business_app.services.cash_collection_service import CashCollectionService
 
         cash_collection_service = CashCollectionService()
+        gate_on = bool(current_app.config.get("PLACE_COD_COLLECTION_ENABLED"))
+        staff_service = StaffService()
         items: List[Dict[str, Any]] = []
         for user in users:
-            statement = cash_collection_service.get_customer_cod_statement(user.id)
-            if only_with_open_cod and statement["active_cod_debt_count"] <= 0:
+            if gate_on:
+                statement = staff_service.get_customer_cod_statement_for_admin(user.id)
+                scope = statement["collect_scope"]
+                debt_count = scope["debt_count"]
+                outstanding = scope["amount"]
+            else:
+                statement = cash_collection_service.get_customer_cod_statement(user.id)
+                debt_count = statement["active_cod_debt_count"]
+                outstanding = statement["total_outstanding_amount"]
+            if only_with_open_cod and debt_count <= 0:
                 continue
 
             items.append(
@@ -2252,13 +2455,551 @@ class StaffService:
                     "phone": user.phone,
                     "address_count": len(user.addresses) if hasattr(user, "addresses") and user.addresses else 0,
                     "order_count": len(user.orders) if hasattr(user, "orders") and user.orders else 0,
-                    "active_cod_debt_count": statement["active_cod_debt_count"],
-                    "total_outstanding_amount": statement["total_outstanding_amount"],
+                    "active_cod_debt_count": debt_count,
+                    "total_outstanding_amount": outstanding,
                     "cod_restricted": statement["cod_restricted"],
                 }
             )
 
         return items
+
+    def get_customer_cod_statement_for_staff(self, customer_id: int) -> Dict[str, Any]:
+        """The engine's COD statement, plus THE collect ceiling for each place.
+
+        🔴 A6/R-B — THE OTHER END OF THE ROW==CEILING SEAM. Do not inline this
+        arithmetic into the staff bot.
+
+        The driver's debtor row is composed by
+        :meth:`paginate_cod_debtors_for_staff` as the person's own cluster debt
+        UNION their place's debt. The staff bot cannot reproduce that union from
+        the raw engine statement: ``places[].place_open_cod_debt_total`` is the
+        place's WHOLE debt, and nothing in the payload says how much of it the
+        cluster already owns — so the bot combined the two figures with a
+        ``max``, and ``max(25k, 25k, 35k)`` is 35 000 where the row (and the
+        settlement) is 45 000. This method publishes the union itself, computed
+        by the SAME :func:`collectible_cod_total` the row calls, so the bot has
+        a figure to READ instead of one to recompose.
+
+        ``place_collect_ceiling_amount`` is what one standalone collection
+        posted by this customer AT that place can settle: ring 1 (the place, any
+        owner) ∪ ring 2 (their own cluster) —
+        ``cash_collection_service.py:3503-3511``. Anything above it is a genuine
+        surplus, which is what makes the driver's overpayment copy true.
+
+        🔴 A PLACE IS ONLY PUBLISHED WHEN THE ENGINE WILL HONOUR IT. The ceiling
+        above is the union a PLACE-scoped post settles, so it may only be
+        published for a place the engine actually resolves to PLACE scope for
+        this customer. It does not for a grocery account, whose contract-mirrored
+        cash is forced to personal scope — and the union was published for it
+        anyway, which is instance #4 of the show-vs-settle defect (see
+        :func:`place_widening_applies`, which is the one call both display halves
+        now gate on).
+
+        Gate OFF ⇒ the engine's payload is returned untouched, so the rollback
+        path is a true no-op (plan C0). The engine itself is never opened
+        (plan C1): ``get_customer_cod_statement`` and ``get_place_cod_statement``
+        are public readers and this is a composition over them.
+        """
+        from business_app.services.cash_collection_service import CashCollectionService
+        from business_app.services.customer_link_service import CustomerLinkService
+
+        cash_service = CashCollectionService()
+        statement = cash_service.get_customer_cod_statement(customer_id)
+        if not current_app.config.get("PLACE_COD_COLLECTION_ENABLED"):
+            return statement
+
+        places = statement.get("places") or []
+        if not places:
+            return statement
+
+        cluster_ids = CustomerLinkService().get_cluster_user_ids(customer_id)
+        # Both halves of the person's OWN debt, cluster-wide and DELIVERED-only —
+        # the identical definition the debtor row is collapsed from
+        # (cash_collection_service.py:1544-1561 vs :1935-1944 / :1995).
+        cluster_total = float(statement.get("cluster_delivered_outstanding_amount") or 0)
+        cluster_count = int(statement.get("active_cod_debt_count") or 0)
+        for place in places:
+            group_id = place.get("place_group_id")
+            # 🔴 ASK THE ENGINE FIRST (:func:`place_widening_applies`). A grocery
+            # account is FORCED to personal scope, so a post at this very address
+            # settles only its own debt; publishing a place ceiling for it would
+            # advertise a coworker's debt no lap can ever pay. Publishing NOTHING
+            # is how this payload already spells "degrade": both consumers —
+            # `CashCollectionHandler._scoped_ceiling` and
+            # :func:`resolve_collect_scope` — treat an absent ceiling as
+            # "cluster-scoped, no address", dropping the figure and the address
+            # TOGETHER. So the fix needs no new key and no new branch anywhere.
+            if not place_widening_applies(cash_service, customer_id, place.get("address_id")):
+                continue
+            place_items = cash_service.get_place_cod_statement(int(group_id))["items"] if group_id else []
+            ceiling, ceiling_count = collectible_cod_total(
+                cluster_total=cluster_total,
+                cluster_debt_count=cluster_count,
+                place_items=place_items,
+                cluster_user_ids=cluster_ids,
+            )
+            place["place_collect_ceiling_amount"] = ceiling
+            place["place_collect_ceiling_debt_count"] = ceiling_count
+        return statement
+
+    def get_customer_cod_statement_for_admin(self, customer_id: int) -> Dict[str, Any]:
+        """The staff statement, plus the RESOLVED ``collect_scope`` the admin
+        cash-collection modal must both DISPLAY and POST.
+
+        🔴 THIRD INSTANCE OF ONE ROOT DEFECT. The admin modal decided its two
+        halves in two places that never met: it posted
+        ``places[0].address_id`` (``DeliveryReports.js:1310``) ⇒ PLACE scope,
+        settling ring 1 ∪ ring 2, while displaying the RAW per-account
+        ``total_outstanding_amount`` (``:1361``). The route behind it
+        (``api/admin.py``) called the engine's ``get_customer_cod_statement``
+        directly, so ``place_collect_ceiling_amount`` — composed only in
+        :meth:`get_customer_cod_statement_for_staff` — never reached the admin
+        at all. Measured on the A6 rows: shown **25 000**, posted address 2,
+        true ceiling **45 000**; the admin collects the 25 000 they were shown,
+        Alice still owes 10 000 and 10 000 of BOB's debt is paid. With a PENDING
+        order present the displayed figure was 95 000 against the same 45 000.
+
+        The staff bot solved this with ``_scoped_ceiling`` returning the posting
+        scope and the offer from one call; the admin needs the same object, so
+        it is resolved server-side and published as ONE dict. The UI reads it —
+        it does not recompose either half.
+
+        WHY THIS IS A SEPARATE METHOD FROM THE STAFF ONE. The staff payload is
+        pinned: gate OFF must be a verbatim pass-through with **no new fields**
+        (plan C0, ``test_gate_off_leaves_the_row_and_the_ceiling_un_widened``),
+        and the driver's screen resolves its place from the address the driver
+        TAPPED, which no server-side derivation can stand in for. The admin has
+        no tap, so its scope is derived from "exactly one grouped place" — and
+        it is published in BOTH gate states, because with the gate off the modal
+        must still show the figure a cluster-scoped post settles rather than the
+        PENDING-inclusive per-account headline.
+
+        The engine is never opened (plan C1) — this is a composition over public
+        readers, the technique task 4 and the P0 ceiling fix both used.
+        """
+        statement = self.get_customer_cod_statement_for_staff(customer_id)
+        statement["collect_scope"] = resolve_collect_scope(statement)
+        return statement
+
+    def paginate_cod_debtors_for_staff(self, *, page: int = 1, per_page: int = 10) -> Dict[str, Any]:
+        """The driver's COD debtor list: **USER ROWS ONLY**, each carrying the
+        debt of the grouped places they belong to (plan E14 / owner rule 3).
+
+        🔴 OWNER RULING A7 — NO PLACE ROW. Verbatim: *"in staff bot there won't
+        be any 'office' row in debtors list. The debtors list only shows the
+        users, and the office debt is included in each coworker's debt."* The
+        engine's own paginator still emits a 🏢 row per indebted group
+        (``paginate_users_with_open_cod_debts``) and is left byte-identical
+        (plan C1); this staff-facing composition simply does not carry that
+        family through, in EITHER gate state. Emitting it here while the bot has
+        no handler for ``staff_cod_place_<id>`` would ship a dead button and
+        inflate the pagination block with rows the driver can never see.
+
+        Why the removal is capability-neutral: A7/R-F — the office's debt is
+        collectible THROUGH A PERSON. Half 1 puts it on every existing
+        coworker's row and half 2 synthesises a row for a coworker who owes
+        nothing personally, so every doorway the 🏢 row offered has a person-row
+        equivalent that leads to the SAME place-scoped settlement (ring 1 ∪
+        ring 2). With the gate off the 🏢 row was navigation only — its buttons
+        opened each member's own statement, which the list already lists.
+
+        WHY THIS LIVES HERE AND NOT IN CashCollectionService: the allocation
+        engine is frozen for Plan E (plan C1). Every input below is an existing
+        PUBLIC reader, so the rule is expressible as a composition and the
+        engine stays byte-identical. Do not "simplify" this by moving it into
+        cash_collection_service.py.
+
+        The rule: a debt at a shared workplace is EVERY coworker's (plan R3), so
+        it must appear on every coworker's row. A member's OWN debt is already in
+        their person row, so only items whose ``owner_user_id`` falls outside
+        their cluster are added; otherwise the office order they placed
+        themselves would be counted twice.
+
+        Gate off => no widening and no synthesis: the engine's own person rows,
+        in the engine's own order, so the rollback path is a true money no-op.
+
+        TWO HALVES, and half 2 is the one that makes the rule real:
+          1. widen the person rows that already exist;
+          2. SYNTHESISE a row for a place member who owes nothing personally.
+             Without (2) a driver who meets Bob, when only Alice owes, has no
+             Bob row to tap and cannot collect the office's debt from him --
+             which is the exact scenario R3 exists for.
+        """
+        from business_app.services.cash_collection_service import CashCollectionService
+
+        cash_service = CashCollectionService()
+        safe_page = max(1, int(page or 1))
+        safe_per_page = max(1, min(int(per_page or 10), 100))
+
+        # The same person-row set, in the same order, that the engine's own
+        # paginator builds (cash_collection_service.py:1815) — one public reader,
+        # so gate-on and gate-off can never disagree about who is on the list.
+        person_rows = cash_service.list_users_with_open_cod_debts(limit=1000)
+        if not current_app.config.get("PLACE_COD_COLLECTION_ENABLED"):
+            return self._paginate_rows(person_rows, safe_page, safe_per_page)
+
+        # NOT a list row any more (A7) — purely the set of indebted groups whose
+        # debt the person rows must absorb. limit MUST match the engine's default
+        # (cash_collection_service.py:1816) or the widened set would diverge from
+        # the engine's own place set above 200 groups.
+        place_rows = cash_service.get_place_cod_debtor_rows()
+
+        # One statement fetch per indebted group, reused across every member.
+        statements = {
+            int(r["place_group_id"]): cash_service.get_place_cod_statement(int(r["place_group_id"])) for r in place_rows
+        }
+        if statements:
+            groups_by_user = self._address_group_ids_by_user(list(statements.keys()))
+
+            # ---- ONE definition of "person", shared by BOTH halves ---------
+            # (invariant 3c) An earlier draft discovered half 1's groups through
+            # row["member_user_ids"], which holds only the cluster members that
+            # carry their OWN debt. A person whose only group-owning account is
+            # the debt-free sibling therefore discovered no group in half 1 AND
+            # was skipped as "already covered" in half 2, and the office's debt
+            # vanished for them. Both halves now ask the same question.
+            place_member_ids = {int(uid) for uid in groups_by_user}
+            row_member_ids = {int(m) for r in person_rows for m in (r.get("member_user_ids") or [r["id"]])}
+            all_ids = sorted(place_member_ids | row_member_ids)
+            # Same ("c"/"u") key shape as the engine's own collapse
+            # (cash_collection_service.py:1766-1768), so a person the engine
+            # collapses into one row is one person here too. Plain FK select on
+            # `users` -- C9 does not apply (no orders/payments join).
+            canonical_by_user: Dict[int, Any] = {}
+            if all_ids:
+                canonical_by_user = {
+                    int(r[0]): r[1]
+                    for r in db.session.query(User.id, User.canonical_customer_id).filter(User.id.in_(all_ids)).all()
+                }
+
+            def _cluster_key(uid: int):
+                canonical = canonical_by_user.get(int(uid))
+                return ("c", int(canonical)) if canonical is not None else ("u", int(uid))
+
+            place_members_by_key: Dict[Any, List[int]] = {}
+            for uid in sorted(place_member_ids):
+                place_members_by_key.setdefault(_cluster_key(uid), []).append(uid)
+
+            # ---- the E7 seam: never advertise a total the collect flow refuses
+            # A person row is a doorway to ONE screen, and that screen resolves
+            # ONE place. `get_customer_cod_statement` puts every grouped address
+            # of the cluster into `places` (cash_collection_service.py:1948-1952)
+            # and `_resolve_scope_address_id` returns None whenever there is more
+            # than one — since A7 removed the place screen, nothing can name a
+            # place for the driver any more, so two places is always ambiguous.
+            # With no address `_resolved_place` yields 0.0: the ceiling collapses
+            # back to the person's own cluster debt, and a debt-free member gets
+            # no Collect button at all. So for a cluster owning two or more
+            # places we widen NOTHING and synthesise NOTHING. This is decision E7
+            # ("ambiguity must not be guessed"), applied one screen earlier.
+            #
+            # ⚠️ A7 CONSEQUENCE, RECORDED RATHER THAN PAPERED OVER. This guard
+            # used to be free: the 🏢 place row was still a route to that debt,
+            # and tapping it set the place explicitly. That row is gone, so a
+            # place ALL of whose members own a second grouped address is no
+            # longer collectible from the staff bot at all — it must be settled
+            # from the admin surface (`get_customer_cod_statement_for_admin`,
+            # which resolves its own scope) or the second grouping removed.
+            # Widening anyway would re-open the exact show-vs-settle split A6
+            # and A7 exist to close, so the guard stays.
+            owned_groups_by_key = self._owned_place_group_ids_by_cluster(canonical_by_user)
+
+            def _place_is_unambiguous(key) -> bool:
+                return len(owned_groups_by_key.get(key, ())) == 1
+
+            # 🔴 ONE GATE, BOTH HALVES. `_place_items` is the only door either
+            # half reaches a place's debt through, so gating it here is what
+            # makes "never advertise a total the collect flow refuses" true by
+            # construction rather than by two call sites remembering to ask.
+            widening_gate: Dict[tuple, bool] = {}
+
+            def _may_widen(customer_id: int, address_id: int) -> bool:
+                """Memoised :func:`place_widening_applies` — the debtor list asks
+                the same (person, place) question once per row and once per
+                synthesised row, and each answer costs the engine a handful of
+                SELECTs."""
+                key = (int(customer_id), int(address_id))
+                if key not in widening_gate:
+                    widening_gate[key] = place_widening_applies(cash_service, customer_id, address_id)
+                return widening_gate[key]
+
+            def _place_items(customer_id: int, cluster: set) -> List[Dict[str, Any]]:
+                """Every open-debt item at the indebted places this cluster
+                belongs to, each group visited once — restricted to the places
+                the ENGINE will actually settle from ``customer_id``.
+
+                ``customer_id`` is the account the row is KEYED on, i.e. the one
+                the collect flow posts as ``customer_id``, so the question asked
+                here is byte-for-byte the one ``post_collection`` answers. It is
+                not a property of the cluster: grocery-ness lives on the account
+                (``User.is_grocery_store``), so a grocery member and an
+                individual sibling of one person get different answers, and each
+                row must ask for itself.
+                """
+                items: List[Dict[str, Any]] = []
+                seen_groups = set()
+                for member_id in sorted(cluster):
+                    for group_id, address_id in (groups_by_user.get(member_id) or {}).items():
+                        if group_id in seen_groups or group_id not in statements:
+                            continue
+                        seen_groups.add(group_id)
+                        if not _may_widen(customer_id, address_id):
+                            continue
+                        items.extend(statements[group_id]["items"])
+                return items
+
+            def _foreign(customer_id: int, cluster: set) -> tuple:
+                """(amount, count) of debt at this cluster's groups that is NOT
+                already theirs — :func:`collectible_cod_total` with an empty own
+                half. Excluding `owner_user_id in cluster` is the whole
+                anti-double-count argument: a member's own office order is
+                ALREADY in their person row (it is their Payment.user_id).
+
+                Returns ``(0.0, 0)`` for an account the engine forces to personal
+                scope, because `_place_items` hands it nothing — which is exactly
+                what drops a grocery's synthesised row (half 2 skips a zero)."""
+                return collectible_cod_total(
+                    cluster_total=0.0,
+                    cluster_debt_count=0,
+                    place_items=_place_items(customer_id, cluster),
+                    cluster_user_ids=cluster,
+                )
+
+            # ---- half 1: widen the rows that exist -------------------------
+            for row in person_rows:
+                if not _place_is_unambiguous(_cluster_key(row["id"])):
+                    continue
+                seed = {int(m) for m in (row.get("member_user_ids") or [row["id"]])}
+                # The FULL cluster, not just the accounts carrying debt: a
+                # debt-free linked sibling may be the ONLY account that OWNS the
+                # office address, and without them this row discovers no group.
+                cluster = set(seed)
+                for uid in seed:
+                    cluster.update(place_members_by_key.get(_cluster_key(uid), ()))
+                # 🔴 A6/R-B: THE SAME FUNCTION the staff bot's collect ceiling
+                # calls, via `get_customer_cod_statement_for_staff`. The row and
+                # the ceiling are one calculation, not two that agree — two
+                # agreeing expressions (a union here, a `max` there) is exactly
+                # what shipped 45 000 on the row and refused it in the flow.
+                row["total_outstanding_amount"], row["active_cod_debt_count"] = collectible_cod_total(
+                    cluster_total=float(row["total_outstanding_amount"]),
+                    cluster_debt_count=int(row["active_cod_debt_count"]),
+                    place_items=_place_items(row["id"], cluster),
+                    cluster_user_ids=cluster,
+                )
+
+            # ---- half 2: give the debt-free coworkers a row ----------------
+            # Same `_cluster_key`, so a sibling half 1 has just widened through
+            # is `covered` here and does NOT also get a row of her own.
+            covered_keys = {_cluster_key(uid) for uid in row_member_ids}
+            person_rows.extend(
+                self._synthesise_debt_free_place_member_rows(
+                    cash_service,
+                    {
+                        k: ids
+                        for k, ids in place_members_by_key.items()
+                        if k not in covered_keys and _place_is_unambiguous(k)
+                    },
+                    _foreign,
+                )
+            )
+
+            # Widening AND synthesis move people up the list; re-sort ONCE,
+            # after both, so the coworker holding the office's cash is not
+            # stranded on page 3.
+            person_rows.sort(key=lambda r: r["total_outstanding_amount"], reverse=True)
+
+        return self._paginate_rows(person_rows, safe_page, safe_per_page)
+
+    @staticmethod
+    def _paginate_rows(rows: List[Dict[str, Any]], page: int, per_page: int) -> Dict[str, Any]:
+        """In-memory page slice in the engine's own shape
+        (``cash_collection_service.py:1818-1830``), shared by both gate states so
+        ``total``/``pages`` can never describe a different list than ``items``.
+        Inputs are already clamped by the caller."""
+        total = len(rows)
+        pages = (total + per_page - 1) // per_page
+        start = (page - 1) * per_page
+        return {
+            "items": rows[start : start + per_page],
+            "pagination": {
+                "page": page,
+                "per_page": per_page,
+                "total": total,
+                "pages": pages,
+            },
+        }
+
+    @staticmethod
+    def _address_group_ids_by_user(group_ids: List[int]) -> Dict[int, Dict[int, int]]:
+        """``{user_id: {address_group_id: address_id}}`` for the given groups.
+
+        The ADDRESS rides along with the group because the widening gate
+        (:func:`place_widening_applies`) asks the engine what scope a post at a
+        concrete address resolves to — ``resolve_allocation_scope`` takes a
+        ``delivery_address_id``, not a group. Carrying it here keeps that one
+        extra column on the query the caller already issues instead of adding a
+        second round trip. Iterating a value still yields group ids, which is all
+        the arithmetic below needs.
+
+        A user may own several addresses in one group; the lowest id wins, so the
+        gate asks the same question twice for the same world.
+
+        `addresses` has a SINGLE FK to `users`, so this join is unambiguous —
+        the multi-FK gotcha (plan C9) applies to `orders`/`payments`, not here.
+        """
+        rows = (
+            db.session.query(UserAddress.user_id, UserAddress.address_group_id, UserAddress.id)
+            .filter(UserAddress.address_group_id.in_(group_ids))
+            .distinct()
+            .all()
+        )
+        out: Dict[int, Dict[int, int]] = {}
+        for user_id, group_id, address_id in rows:
+            by_group = out.setdefault(int(user_id), {})
+            existing = by_group.get(int(group_id))
+            if existing is None or int(address_id) < existing:
+                by_group[int(group_id)] = int(address_id)
+        return out
+
+    @staticmethod
+    def _owned_place_group_ids_by_cluster(canonical_by_user: Dict[int, Any]) -> Dict[Any, set]:
+        """``{cluster_key: {address_group_id, ...}}`` — every place a cluster
+        OWNS an address in, indebted or not.
+
+        This is deliberately a DIFFERENT question from
+        :meth:`_address_group_ids_by_user`, which answers "which of the INDEBTED
+        groups does this account own an address in?" and feeds the arithmetic.
+        This one answers "how many places will the driver's next screen have to
+        choose between?", and the screen counts them ALL: `statement["places"]`
+        is built from every grouped address of the cluster with no debt filter
+        (``cash_collection_service.py:1948-1952``). A single debt-free second
+        group is therefore enough to make the place ambiguous, so counting only
+        the indebted ones here would silently re-open the mismatch the caller's
+        guard exists to close.
+
+        THE CLUSTER IS EXPANDED TO ITS FULL MEMBERSHIP FIRST. `canonical_by_user`
+        covers only the accounts already in play — the debtors and the members of
+        indebted groups — but the statement is built over
+        ``CustomerLinkService.get_cluster_user_ids`` (`:1934`), i.e. every account
+        sharing the canonical customer. A linked sibling who owns an address in a
+        second, debt-free group appears in neither input set and would be missed,
+        yet she is exactly what makes her own person's screen ambiguous.
+
+        `users` → `addresses` is a SINGLE FK, so this join is unambiguous; the
+        multi-FK gotcha (plan C9) is about `orders`/`payments`.
+        """
+        seeds = sorted(int(uid) for uid in canonical_by_user)
+        if not seeds:
+            return {}
+        conditions = [User.id.in_(seeds)]
+        canonicals = sorted({int(c) for c in canonical_by_user.values() if c is not None})
+        if canonicals:
+            conditions.append(User.canonical_customer_id.in_(canonicals))
+
+        rows = (
+            db.session.query(User.id, User.canonical_customer_id, UserAddress.address_group_id)
+            .join(UserAddress, UserAddress.user_id == User.id)
+            .filter(UserAddress.address_group_id.isnot(None), or_(*conditions))
+            .distinct()
+            .all()
+        )
+        out: Dict[Any, set] = {}
+        for user_id, canonical, group_id in rows:
+            # Same ("c"/"u") shape as the caller's `_cluster_key` and the
+            # engine's own collapse (cash_collection_service.py:1766-1768).
+            key = ("c", int(canonical)) if canonical is not None else ("u", int(user_id))
+            out.setdefault(key, set()).add(int(group_id))
+        return out
+
+    @staticmethod
+    def _synthesise_debt_free_place_member_rows(cash_service, pending, foreign) -> List[Dict[str, Any]]:
+        """Rows for coworkers who owe NOTHING of their own at an indebted place.
+
+        Owner rule 3 is "the debt is ALL the coworkers' debt". A coworker with no
+        personal debt never enters `_open_cod_debtors_query`
+        (cash_collection_service.py:1552-1561 filters on their OWN
+        Payment.outstanding_amount > 0), so widening alone leaves them off the
+        list entirely -- and a driver standing in front of them cannot collect
+        the office's debt. This is the row that makes them tappable.
+
+        `pending` is ``{cluster_key: [user_id, ...]}`` -- the place members whose
+        cluster carries NO existing person row, already collapsed with the SAME
+        `_cluster_key` the caller widens half 1 with (invariant 3c). Two
+        debt-free members of one person therefore produce ONE row, and a
+        debt-free sibling of an existing debtor produces NONE because half 1 has
+        already put that place's debt on the sibling's row. `foreign` is half 1's
+        own ``(customer_id, cluster) -> (amount, count)`` reducer, PASSED IN
+        rather than re-implemented here, so the two halves can never disagree
+        about what a place owes — nor about whether the engine will settle it.
+
+        Their statement is already correct once tapped: Task 3's widened
+        can_collect and ceiling use place_open_cod_debt_total, and
+        resolve_allocation_scope grants PLACE scope because they genuinely own
+        an address in the group (cash_collection_service.py:621) — unless it
+        refuses them one, which is why `foreign` asks it. An account forced to
+        personal scope reduces to 0 here and gets no row: offering a doorway to a
+        settlement the engine will not perform is the whole defect this list has
+        now been fixed for four times.
+        """
+        if not pending:
+            return []
+
+        missing_ids = sorted({uid for ids in pending.values() for uid in ids})
+        # Plain FK select on `users` — C9 does not apply (no orders/payments join).
+        users = {u.id: u for u in User.query.filter(User.id.in_(missing_ids)).all()}
+        flags = cash_service.get_cod_restricted_flags(missing_ids)
+
+        synthesised: List[Dict[str, Any]] = []
+        for cluster_ids in pending.values():
+            identity = users.get(cluster_ids[0])
+            if identity is None:
+                continue
+            # `cluster_ids[0]` is the account this row will be KEYED on, so it is
+            # the account the collect flow posts and therefore the one `foreign`
+            # must ask the engine about (invariant 3c: both halves ask the same
+            # question of the same person).
+            amount, count = foreign(int(identity.id), set(cluster_ids))
+            # Normally non-zero (an indebted group has items and none is theirs),
+            # but a zero-debt entry on a DEBTORS list would be noise — and it is
+            # exactly zero for an account the engine forces to personal scope, so
+            # a grocery who owes nothing personally is never offered a coworker's
+            # debt it cannot settle.
+            if count == 0 or amount <= 0:
+                continue
+            role_value = identity.role.value if hasattr(identity.role, "value") else identity.role
+            type_value = identity.user_type.value if hasattr(identity.user_type, "value") else identity.user_type
+            synthesised.append(
+                {
+                    # EXACTLY the shape _serialize_open_cod_debtor_row emits
+                    # (cash_collection_service.py:1581-1594) plus the two collapse
+                    # keys. `id` in particular is what makes the row RENDERABLE:
+                    # DeliveryKeyboards.cod_debtor_list skips any row without one
+                    # (staff_bot/keyboards/delivery.py:247) — a row missing it is
+                    # silently invisible to the driver.
+                    "id": int(identity.id),
+                    "first_name": identity.first_name,
+                    "last_name": identity.last_name,
+                    "phone": identity.phone,
+                    "role": role_value,
+                    "user_type": type_value,
+                    "active_cod_debt_count": count,
+                    "total_outstanding_amount": float(amount),  # C6: float on the wire
+                    "cod_restricted": bool(flags.get(int(identity.id), False)),
+                    "row_type": "person",
+                    "member_user_ids": sorted(int(i) for i in cluster_ids),
+                    # ⚠️ SAME key, SAME type, DIFFERENT population -- deliberately.
+                    # On an engine row this counts the cluster's DEBTOR accounts
+                    # (cash_collection_service.py:1786-1788); this cluster HAS none
+                    # (that is why the row is synthesised), so it counts its PLACE
+                    # MEMBERS. Both are honest for the only consumer, the 👥xN
+                    # marker (staff_bot/keyboards/delivery.py:253-259) = "one person,
+                    # several phone accounts". Do NOT "make them match": 0 or 1 here
+                    # drops the marker for a real two-account human. Invariant 3b.
+                    "cluster_member_count": len(cluster_ids),
+                }
+            )
+        return synthesised
 
     @staticmethod
     def get_staff_overview() -> Dict[str, Any]:

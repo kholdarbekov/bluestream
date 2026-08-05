@@ -37,6 +37,8 @@ import { useTranslation } from 'react-i18next';
 import staffService from '../services/staffService';
 import { usePermissions } from '../components/common/PermissionGuard';
 import { formatDateTimeSeconds } from '../utils/dateUtils';
+import { describeAllocationScope } from '../utils/cashScopeDisplay';
+import { resolveCollectScope } from '../utils/codCollectScope';
 
 const ADJUSTABLE_SESSION_STATUSES = new Set(['submitted', 'partial', 'mismatch', 'overdue']);
 
@@ -283,6 +285,16 @@ const DeliveryReports = () => {
   const customerStatement = customerStatementQuery.data?.data?.data || null;
   const orderTimeline = orderTimelineQuery.data?.data?.data || null;
   const recordCollectionStatement = recordCollectionStatementQuery.data?.data?.data || null;
+  // 🔴 ONE object for BOTH halves of the collection: the figure rendered in the
+  // summary alert below and the `delivery_address_id` the submit posts are read
+  // off THIS, and nothing else. They were two independent decisions — the raw
+  // per-account outstanding was shown while `places[0].address_id` was posted —
+  // so the admin was told "25 000" and their 25 000 settled 10 000 of a
+  // coworker's debt. See utils/codCollectScope.js.
+  const recordCollectionScope = useMemo(
+    () => resolveCollectScope(recordCollectionStatement, collectionSource),
+    [recordCollectionStatement, collectionSource]
+  );
   const codDebtUsers = codDebtUsersQuery.data?.data?.data?.items || [];
   const deliveryDrivers = driverOptionsQuery.data?.data?.data?.items || [];
 
@@ -511,6 +523,16 @@ const DeliveryReports = () => {
       render: (value) => <Tag>{value}</Tag>,
     },
     {
+      // Spec §4/§5.1: a shared-workplace collection must not read as personal
+      // cash. Personal/legacy events keep today's (empty) rendering.
+      title: t('staff:scope', 'Scope'),
+      key: 'scope',
+      render: (_, record) => {
+        const label = describeAllocationScope(record, t);
+        return label ? <Tag color="purple">{label}</Tag> : '—';
+      },
+    },
+    {
       title: t('staff:customer', 'Customer'),
       key: 'customer',
       render: (_, record) =>
@@ -619,6 +641,24 @@ const DeliveryReports = () => {
             {alloc.reversed ? <Tag color="red">{t('staff:reversed', 'Reversed')}</Tag> : null}
           </Space>
         ),
+      },
+      {
+        // Dual audit stamps (spec §4.3): whose cash -> whose debt. The scope
+        // lives on the EVENT, the stamps on the allocation, so merge both.
+        title: t('staff:attribution', 'Paid by → settles'),
+        key: 'attribution',
+        render: (_, alloc) => {
+          const label = describeAllocationScope(
+            {
+              scope_type: record.scope_type,
+              scope_group_label: record.scope_group_label,
+              source_customer_id: alloc.source_customer_id,
+              beneficiary_user_id: alloc.beneficiary_user_id,
+            },
+            t,
+          );
+          return label ? <Text type="secondary">{label}</Text> : '—';
+        },
       },
       {
         title: t('staff:actions', 'Actions'),
@@ -1264,28 +1304,34 @@ const DeliveryReports = () => {
           layout="vertical"
           initialValues={{ source: 'standalone_meeting' }}
           onFinish={(values) => {
-            if (
-              values.source !== 'admin_adjustment' &&
-              values.source !== 'backfill' &&
-              values.source !== 'personal_card_transfer' &&
-              recordCollectionStatement &&
-              Number(recordCollectionStatement.active_cod_debt_count || 0) <= 0
-            ) {
-              message.error(
-                t(
-                  'staff:no_open_cod_for_collection',
-                  'This customer has no active COD debt to collect. Use an admin correction instead if this is an adjustment.'
-                )
-              );
-              return;
-            }
-
+            // Plan E R1: no per-person gating on any surface. The old guard
+            // refused to submit when the SELECTED PERSON had
+            // active_cod_debt_count <= 0 — which is exactly the coworker
+            // holding the office's cash. The place's debt is every coworker's,
+            // so the person's own count decides nothing here.
+            //
+            // 🔴 Plan E E9 + the P0 admin split: the place address is DERIVED,
+            // never picked — and it is derived by the SAME call that produced
+            // the figure the admin was just shown (`recordCollectionScope`),
+            // not by a second expression here. Re-deriving it locally is the
+            // whole defect: this code used to read `places[0].address_id`
+            // straight off the statement while the alert above rendered the raw
+            // `total_outstanding_amount`, so a submit could settle a set of
+            // debts the screen never described.
+            //
+            // One grouped place => its address; two => null, because guessing
+            // would settle the wrong workplace; no published ceiling => null,
+            // because a place-scoped post behind an un-ceilinged figure is
+            // exactly the shape that paid a coworker's debt silently.
+            // Non-door-cash sources never carry it: resolve_allocation_scope
+            // refuses them place scope anyway.
             recordCollectionMutation.mutate({
               ...values,
               customer_id: values.customer_id,
               collector_user_id: values.collector_user_id || null,
               driver_cash_session_id: values.driver_cash_session_id || null,
               order_id: values.order_id || null,
+              delivery_address_id: recordCollectionScope.deliveryAddressId,
               proof_data: { channel: 'admin_ui_delivery_reports' },
             });
           }}
@@ -1322,14 +1368,27 @@ const DeliveryReports = () => {
               type="info"
               showIcon
               style={{ marginBottom: 16 }}
+              // 🔴 The SAME object the submit above posts with. This used to
+              // render `total_outstanding_amount` — the raw, per-account,
+              // PENDING-inclusive headline — while the submit posted a place
+              // address. Never reintroduce a second source for this number.
               message={t(
                 'staff:collection_statement_summary',
                 'Active COD debts: {{count}} | Outstanding: {{amount}} UZS',
                 {
-                  count: recordCollectionStatement.active_cod_debt_count || 0,
-                  amount: (recordCollectionStatement.total_outstanding_amount || 0).toLocaleString(),
+                  count: recordCollectionScope.debtCount,
+                  amount: recordCollectionScope.amount.toLocaleString(),
                 }
               )}
+              description={recordCollectionScope.scopeType === 'place'
+                ? t(
+                  'staff:collection_place_scope_help',
+                  'This collection is scoped to the customer\'s workplace: the amount above is '
+                    + 'their own delivered COD debt plus their coworkers\' debt at that place, and '
+                    + 'collecting it settles all of them. Anything above it becomes this '
+                    + 'customer\'s prepaid credit.'
+                )
+                : null}
             />
           ) : null}
 

@@ -555,6 +555,14 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Bu amalni bajarib bolmadi, tizimda ziddiyat bor.",
         "ru": "Не удалось выполнить действие из-за конфликта.",
     },
+    # Rendered when the place-scope lock ladder times out (BOTTLE_SCOPE_LOCK_TIMEOUT).
+    # Says WHY and says RETRY — a driver at the door needs to know the submission
+    # was not recorded and that pressing again shortly will work.
+    "staff.error.api.scope_busy": {
+        "en": "This address is being updated by an administrator right now. Nothing was saved — please try again in a few seconds.",
+        "uz": "Bu manzilni hozir administrator tahrirlayapti. Hech narsa saqlanmadi — bir necha soniyadan keyin qayta urinib koring.",
+        "ru": "Этот адрес сейчас редактирует администратор. Ничего не сохранено — повторите попытку через несколько секунд.",
+    },
     "staff.error.api.invalid_input": {
         "en": "Invalid input. Please correct it and try again.",
         "uz": "Noto'gri malumot kiritildi. Iltimos, tuzatib qayta urinib koring.",
@@ -860,6 +868,20 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Kutilmagan server javobi. Qayta urinib koring.",
         "ru": "Неожиданный ответ сервера. Попробуйте снова.",
     },
+    # Rendered ONLY for a TRANSPORT_AMBIGUOUS bottle collection / fine failure —
+    # the request may already have reached the backend and been committed, and
+    # the response was what got lost. Redoing the flow by hand mints a NEW
+    # intent token, which the server-side dedup fence cannot collapse, so the
+    # driver must check before repeating. Deliberately does NOT say "try again":
+    # the generic transport copy (`service_unavailable`, "please try later") is
+    # the one instruction that turns a possible duplicate into a certain one.
+    # Kept under 200 characters — BaseHandler._notify_user answers a callback
+    # query with show_alert, and Telegram rejects longer alert text.
+    "staff.error.api.maybe_recorded": {
+        "en": "Connection lost after sending. This may ALREADY be recorded — check the customer's bottle statement before entering it again.",
+        "uz": "Yuborilgandan keyin aloqa uzildi. Bu ALLAQACHON yozilgan bo'lishi mumkin — qayta kiritishdan oldin mijozning idish hisobini tekshiring.",
+        "ru": "Связь пропала после отправки. Возможно, это УЖЕ записано — проверьте отчёт по таре клиента, прежде чем вводить снова.",
+    },
 
     # --- Bottle tracking translations ---
     "staff.menu.bottle_collection": {
@@ -867,35 +889,49 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Idish yigish",
         "ru": "Сбор тары",
     },
+    # The statement lists one line per distinct PLACE (the address group when one
+    # exists, else the address), and its header total is the signed sum over
+    # `cluster_scopes` — one row per place, so a shared workplace is counted ONCE
+    # no matter how many members own an address there. "Total bottles" read as a
+    # per-customer figure and invited the driver to add the body lines up
+    # differently.
     "staff.delivery.bottle_statement_title": {
-        "en": "Bottle Statement",
-        "uz": "Idish hisoboti",
-        "ru": "Отчёт по таре",
+        "en": "Bottles by place",
+        "uz": "Joylar bo'yicha idish hisoboti",
+        "ru": "Тара по местам",
     },
     "staff.delivery.total_bottles": {
-        "en": "Total bottles",
-        "uz": "Jami idishlar",
-        "ru": "Всего тара",
+        "en": "Bottles across places",
+        "uz": "Barcha joylar bo'yicha jami",
+        "ru": "Всего по всем местам",
     },
     "staff.delivery.active_fines": {
         "en": "Active fines",
         "uz": "Faol jarimalar",
         "ru": "Активные штрафы",
     },
+    # ZERO only. The over-returned (negative) case has its own copy
+    # (staff.delivery.place_over_returned / …_over_returned_hint) — this string
+    # used to cover zero, negative AND lookup misses, so a driver could not tell
+    # "nothing out here" from "three too many came back".
     "staff.delivery.no_bottle_balance": {
-        "en": "No bottle balance on record.",
-        "uz": "Idish balansi topilmadi.",
-        "ru": "Баланс тары не обнаружен.",
+        "en": "No bottles are currently out.",
+        "uz": "Hozircha chiqarilgan idish yo'q.",
+        "ru": "Сейчас тары на руках нет.",
     },
     "staff.delivery.bottle_collection_search_prompt": {
         "en": "Enter a customer name or phone number to find their bottle balance.",
         "uz": "Mijoz ismi yoki telefon raqamini kiriting.",
         "ru": "Введите имя клиента или номер телефона для поиска баланса тары.",
     },
+    # The search is a plain customer lookup (`only_with_open_cod=False`) whose
+    # results resolve to PLACES, so "customers with bottles" was wrong twice
+    # over: it does not filter on bottles, and a match may be any member of a
+    # shared place.
     "staff.delivery.no_customer_bottle_results": {
-        "en": "No customers with bottles found for \"{query}\".",
-        "uz": "\"{query}\" uchun idishli mijoz topilmadi.",
-        "ru": "Клиенты с тарой по запросу «{query}» не найдены.",
+        "en": "No customers found for \"{query}\".",
+        "uz": "\"{query}\" bo'yicha mijoz topilmadi.",
+        "ru": "Клиенты по запросу «{query}» не найдены.",
     },
     "staff.delivery.view_bottle_balance": {
         "en": "View Bottle Balance",
@@ -938,19 +974,23 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "ru": "Сохранить без примечания",
     },
     "staff.delivery.bottle_search_results_title": {
-        "en": "Found {count} customer(s). Tap one to view their bottle balance:",
-        "uz": "{count} ta mijoz topildi. Idish balansini korish uchun bosing:",
-        "ru": "Найдено клиентов: {count}. Нажмите для просмотра баланса тары:",
+        "en": "Found {count} customer(s). Tap one to see the bottles at their places:",
+        "uz": "{count} ta mijoz topildi. Joylaridagi idishlarni korish uchun bosing:",
+        "ru": "Найдено клиентов: {count}. Нажмите, чтобы увидеть тару по их местам:",
     },
     "staff.delivery.invalid_bottle_count": {
         "en": "Please enter a valid positive number.",
         "uz": "Iltimos, musbat son kiriting.",
         "ru": "Пожалуйста, введите положительное число.",
     },
+    # `{remaining}` is the PLACE's remainder, not this account's — at a shared
+    # workplace it still counts a coworker's empties. Phrased to mirror its
+    # over-returned sibling (staff.delivery.bottle_collection_recorded_over_returned),
+    # which handles the negative arm.
     "staff.delivery.bottle_collection_recorded": {
-        "en": "Collected {quantity} bottle(s). Remaining balance: {remaining}.",
-        "uz": "{quantity} ta idish yigib olindi. Qolgan balans: {remaining}.",
-        "ru": "Собрано {quantity} ед. тары. Остаток: {remaining}.",
+        "en": "Collected {quantity} bottle(s). This place now holds {remaining}.",
+        "uz": "{quantity} ta idish yigib olindi. Endi bu joyda {remaining} ta idish bor.",
+        "ru": "Собрано {quantity} ед. тары. Теперь в этом месте {remaining}.",
     },
     "staff.delivery.enter_fine_bottle_qty": {
         "en": "How many bottles to fine for?",
@@ -977,12 +1017,10 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Jarima yaratildi: {quantity} ta idish, miqdori {amount}.",
         "ru": "Штраф создан: {quantity} ед. тары, сумма {amount}.",
     },
-    # Bottle return during delivery
-    "staff.delivery.bottles_returned_prompt": {
-        "en": "How many bottles did the customer return?",
-        "uz": "Mijoz necha idish qaytardi?",
-        "ru": "Сколько тары вернул клиент?",
-    },
+    # Bottle return during delivery.
+    # NOTE: `staff.delivery.bottles_return*ed*_prompt` used to be curated here and
+    # had ZERO readers — the handler calls `staff.delivery.bottles_return_prompt`
+    # (no "ed"). It was a curated typo that only ever produced a dead row.
     "staff.delivery.bottles_all_returned": {
         "en": "All {count} bottles returned",
         "uz": "Barcha {count} ta idish qaytarildi",
@@ -1400,15 +1438,22 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Faol naqd to'lov qarzlari",
         "ru": "Активные долги по наложенным платежам",
     },
+    # `{balance}` is the PLACE's pool (`customer_bottle_balance`, clamped at 0),
+    # so at a shared workplace it includes a coworker's empties and the driver may
+    # legitimately be handed more than THIS customer ever received. "Customer
+    # currently holds" made that read like an accusation; anchor it on the door.
     "staff.delivery.bottles_return_prompt": {
-        "en": "How many bottles (18.9 L) did the customer return? Customer currently holds: {balance}",
-        "uz": "Mijoz nechta idish (18.9 L) qaytardi? Mijozda hozir: {balance} ta",
-        "ru": "Сколько бутылок (18.9 L) вернул клиент? Сейчас у клиента: {balance}",
+        "en": "How many bottles (18.9 L) did the customer return? At this address: {balance}",
+        "uz": "Mijoz nechta idish (18.9 L) qaytardi? Ushbu manzilda: {balance} ta",
+        "ru": "Сколько бутылок (18.9 L) вернул клиент? По этому адресу: {balance}",
     },
+    # TRUE ZERO only — the over-returned arm has its own key
+    # (staff.delivery.bottles_return_prompt_over_returned), because there the
+    # record exists and is negative.
     "staff.delivery.bottles_return_prompt_no_balance": {
-        "en": "How many bottles (18.9 L) did the customer return? No empties are on record for this customer yet.",
-        "uz": "Mijoz nechta idish (18.9 L) qaytardi? Mijozda hozircha qayd etilgan bo'sh idish yo'q.",
-        "ru": "Сколько бутылок (18.9 L) вернул клиент? Пока нет учтённой тары у клиента.",
+        "en": "How many bottles (18.9 L) did the customer return? No empties are on record at this address yet.",
+        "uz": "Mijoz nechta idish (18.9 L) qaytardi? Ushbu manzilda hozircha qayd etilgan bo'sh idish yo'q.",
+        "ru": "Сколько бутылок (18.9 L) вернул клиент? По этому адресу пока нет учтённой тары.",
     },
     "staff.delivery.cash_already_collected": {
         "en": "Cash already collected in full",
@@ -2011,8 +2056,14 @@ def _humanize_key(key: str, language: str) -> str:
     return phrase[0].upper() + phrase[1:]
 
 
-def _resolve_value(key: str, language: str) -> str:
-    """Resolve translation value from curated map, dynamic families, or fallback."""
+def _curated_value(key: str, language: str) -> Optional[str]:
+    """Resolve from the curated map / dynamic families ONLY.
+
+    Returns None for a key this script has no opinion about — the caller must
+    then decide between "invent a humanised placeholder" (fine for a row that
+    does not exist yet) and "leave the existing row alone" (mandatory: another
+    seed owns it).
+    """
     curated = STAFF_TRANSLATIONS.get(key, {})
     if language in curated:
         return curated[language]
@@ -2022,6 +2073,15 @@ def _resolve_value(key: str, language: str) -> str:
     dynamic_value = _auto_family_translation(key, language)
     if dynamic_value:
         return dynamic_value
+
+    return None
+
+
+def _resolve_value(key: str, language: str) -> str:
+    """Resolve translation value from curated map, dynamic families, or fallback."""
+    value = _curated_value(key, language)
+    if value:
+        return value
 
     # Fallback for uncatalogued keys.
     return _humanize_key(key, language)
@@ -2052,46 +2112,100 @@ def _validate_russian_translations(keys: Set[str]) -> None:
         )
 
 
+def collect_keys(repo_root: Path) -> Set[str]:
+    """Every `staff.*` key this script is responsible for."""
+    keys = _extract_literal_keys(repo_root)
+    _add_dynamic_keys(keys)
+    _add_curated_keys(keys)
+    return keys
+
+
+def seed_translations(keys: Set[str]) -> Dict[str, int]:
+    """Upsert `keys` x LANGUAGES into category='staff_bot'. Requires an app context.
+
+    ABSENT-ONLY for uncurated keys. ``_extract_literal_keys`` scans
+    ``staff_bot/**/*.py``, so it picks up keys that a *different*, curated seed
+    owns (e.g. the eight place-group strings in
+    scripts/seed_place_group_staff_translations.py). For those,
+    ``_curated_value`` returns None and the only value this script could write
+    is ``_humanize_key`` guesswork — which would silently replace
+    "Bottles at this place across all members: {union}" with "Fine place union
+    hint", dropping the placeholder in all three languages while staff_bot's
+    /health stays green because the row still exists. So: humanise only when
+    CREATING a row that does not exist yet; never overwrite one. Behaviour for
+    curated keys is unchanged.
+    """
+    created = 0
+    updated = 0
+    skipped = 0
+
+    for key in sorted(keys):
+        for lang in LANGUAGES:
+            existing = Translation.query.filter_by(key=key, language=lang).first()
+            curated = _curated_value(key, lang)
+
+            if existing is not None:
+                if curated is None:
+                    skipped += 1
+                    continue
+                existing.value = curated
+                existing.category = "staff_bot"
+                existing.is_active = True
+                updated += 1
+            else:
+                db.session.add(
+                    Translation(
+                        key=key,
+                        language=lang,
+                        value=curated if curated else _humanize_key(key, lang),
+                        category="staff_bot",
+                        is_active=True,
+                    )
+                )
+                created += 1
+
+    db.session.commit()
+    return {"keys": len(keys), "created": created, "updated": updated, "skipped": skipped}
+
+
+def _repo_root() -> Path:
+    """Where to look for ``staff_bot/`` — tolerant of being piped over stdin.
+
+    ``scripts/`` is NOT volume-mounted, so the ONLY documented way to run this is
+        docker compose exec -T business_app python - < scripts/seed_staff_translations.py
+    and under ``python -`` there is no ``__file__`` at all: reading it raised
+    ``NameError`` before a single row was written, which made the sole documented
+    deploy path a no-op.
+
+    The fallback is safe rather than lucky. ``Path.cwd()`` is the container's
+    WORKDIR ``/app``, which has no ``staff_bot/`` tree; ``_extract_literal_keys``
+    rglobs a non-existent directory, which yields nothing instead of raising, so
+    the key set degrades to ``_add_curated_keys`` alone. That degradation is the
+    documented, pinned behaviour — see
+    ``tests/unit/test_staff_translation_seed_script_regressions.py::test_seed_script_adds_curated_keys``
+    ("prevents partial seeding when staff_bot source directory is unavailable in
+    the runtime container"). Run from a checkout instead and ``__file__`` is
+    defined, so the full source scan still happens.
+    """
+    if "__file__" in globals():
+        return Path(__file__).resolve().parents[1]
+    return Path.cwd()
+
+
 def main() -> int:
     app = create_app()
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = _repo_root()
 
     with app.app_context():
-        keys = _extract_literal_keys(repo_root)
-        _add_dynamic_keys(keys)
-        _add_curated_keys(keys)
+        keys = collect_keys(repo_root)
         # _validate_russian_translations(keys)
 
-        total_keys = len(keys)
-        created = 0
-        updated = 0
-
-        for key in sorted(keys):
-            for lang in LANGUAGES:
-                value = _resolve_value(key, lang)
-                existing = Translation.query.filter_by(key=key, language=lang).first()
-                if existing:
-                    existing.value = value
-                    existing.category = "staff_bot"
-                    existing.is_active = True
-                    updated += 1
-                else:
-                    db.session.add(
-                        Translation(
-                            key=key,
-                            language=lang,
-                            value=value,
-                            category="staff_bot",
-                            is_active=True,
-                        )
-                    )
-                    created += 1
-
-        db.session.commit()
+        stats = seed_translations(keys)
 
         print(
-            f"Staff translations seeded: keys={total_keys}, "
-            f"created={created}, updated={updated}"
+            f"Staff translations seeded: keys={stats['keys']}, "
+            f"created={stats['created']}, updated={stats['updated']}, "
+            f"skipped_uncurated={stats['skipped']}"
         )
         return 0
 

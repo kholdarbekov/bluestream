@@ -50,9 +50,20 @@ class TestingConfig(BaseConfig):
     CACHE_TYPE = "simple"
     CACHE_DEFAULT_TIMEOUT = 1  # Short timeout for testing
 
-    # JWT Configuration - Short-lived tokens for testing
-    JWT_ACCESS_TOKEN_EXPIRES = timedelta(seconds=10)
-    JWT_REFRESH_TOKEN_EXPIRES = timedelta(seconds=30)
+    # JWT Configuration - long enough that no token can lapse mid-test.
+    #
+    # Raised from 10s/30s. Under `-n 4` the full suite runs ~31 minutes, and a
+    # token minted in a fixture expired mid-run — one test showed 20s of wall
+    # clock between its last setup write and its first API call. That was the
+    # cause of all three suite failures the retry-safety work started against.
+    # Nothing reads these values: a repo-wide grep for JWT_ACCESS_TOKEN_EXPIRES /
+    # JWT_REFRESH_TOKEN_EXPIRES under tests/ returns ZERO hits, and the two
+    # tests that need expiry control mint their own tokens with an explicit
+    # `expires_delta` — tests/unit/test_jwt_error_log_levels.py:66
+    # (timedelta(seconds=-1)) and tests/unit/test_agent_discovery.py:245
+    # (timedelta(minutes=10)) — so both keep working unchanged.
+    JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=1)
+    JWT_REFRESH_TOKEN_EXPIRES = timedelta(hours=2)
     JWT_COOKIE_SECURE = False  # Allow HTTP in tests
 
     # Session Configuration

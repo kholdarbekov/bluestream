@@ -1019,6 +1019,8 @@ class CustomerMapPinSchema(BaseModel):
     outstanding_debt: MoneyFloat = Field(default=0)
     active_cod_debt_count: int = 0
     cod_restricted: bool = False
+    is_shared_place: bool = False
+    place_member_count: int = 1
 
 
 # Helper functions (would typically query the database)

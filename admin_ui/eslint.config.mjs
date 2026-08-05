@@ -138,6 +138,19 @@ export default [
     rules: {
       'no-console': 'off',
       'no-unused-vars': 'off',
+      // Tests that verify a module's SHAPE have to read properties by computed
+      // name — `real[name]` where `name` came from `Object.getOwnPropertyNames`,
+      // or `actual.default[name]` over a declared list of required methods.
+      // This rule flags every bracket access as a "Generic Object Injection
+      // Sink" without tracking where the key came from, so on that code it is a
+      // pure false positive: the key is derived from the module under test, not
+      // from user input, and a test file has no untrusted input to begin with.
+      //
+      // Turned off here rather than as inline disables, because the alternative
+      // is a new `eslint-disable-next-line` every time someone writes a
+      // shape-verifying test — which is exactly the kind of test that caught a
+      // deleted service method still answering calls.
+      'security/detect-object-injection': 'off',
     },
   },
   {

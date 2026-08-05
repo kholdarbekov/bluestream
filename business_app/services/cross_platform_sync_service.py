@@ -137,6 +137,13 @@ class CrossPlatformSyncService:
             if primary_user.id == secondary_user.id:
                 raise ValueError("Cannot link user to themselves")
 
+            # Refuse to merge if either side is already the canonical record for a
+            # customer. A destructive merge deletes a user row and reparents FKs;
+            # doing that to a clustered account would orphan canonical_customer_id
+            # members and address-group entries. Linking is the non-destructive path.
+            if primary_user.canonical_customer_id is not None or secondary_user.canonical_customer_id is not None:
+                raise ValueError("Cannot merge: an account is already linked to a canonical customer")
+
             # Check status - handle both enum and string values
             primary_status = primary_user.status.value if hasattr(primary_user.status, "value") else primary_user.status
             if primary_status != UserStatus.ACTIVE.value:
@@ -300,6 +307,13 @@ class CrossPlatformSyncService:
         from business_app.models.loyalty import ReferralProgram
         from business_app.models.analytics import UserBehavior, UserEvent, ProductView
         from business_app.models.audit import AuditLog
+        from business_app.models.bottle import BottleFine, BottleLedger
+        from business_app.models.customer_link import (
+            CanonicalCustomer,
+            CustomerDistinctPair,
+            CustomerLinkEvent,
+            PlaceSuggestionDismissal,
+        )
 
         # Orders
         Order.query.filter_by(user_id=secondary_id).update({"user_id": primary_id})
@@ -325,6 +339,15 @@ class CrossPlatformSyncService:
         # User data
         UserAddress.query.filter_by(user_id=secondary_id).update({"user_id": primary_id})
         UserSession.query.filter_by(user_id=secondary_id).update({"user_id": primary_id})
+
+        # Bottle attribution follows the surviving account. bottle_balances is
+        # NOT listed: it has no user_id since the place re-key (spec section 4.1).
+        # These two still carry NOT NULL / NO ACTION FKs to users, so without
+        # this the terminal db.session.delete(secondary_user) aborts on Postgres
+        # and dangles in the FK-off test suite — leaving entry.user None and
+        # serialize_customer_place_ledger_entry emitting member_name: null.
+        BottleLedger.query.filter_by(user_id=secondary_id).update({"user_id": primary_id})
+        BottleFine.query.filter_by(user_id=secondary_id).update({"user_id": primary_id})
 
         # Delivery
         Delivery.query.filter_by(delivery_person_id=secondary_id).update({"delivery_person_id": primary_id})
@@ -352,6 +375,50 @@ class CrossPlatformSyncService:
 
         # Audit logs
         AuditLog.query.filter_by(user_id=secondary_id).update({"user_id": primary_id})
+
+        # Canonical-customer identity (multi-phone linking). The caller deletes
+        # the secondary User a few lines later; every FK below points at users.id
+        # and shipped NO ACTION, which would abort that DELETE on Postgres.
+        # customer_distinct_pairs rows in particular are written for exactly the
+        # account pairs this merge flow targets, so they are the expected case,
+        # not a corner one. The FKs now carry ondelete (migration f7c3b9e1d5a2)
+        # as the DB backstop; the code below is what keeps the SEMANTICS right,
+        # and it is also what makes the behaviour observable on SQLite, where the
+        # test suite runs with foreign keys OFF.
+        #
+        # NOTE: auto_link_accounts already refuses to merge when EITHER account
+        # carries canonical_customer_id, so a clustered *member* never reaches
+        # here — but an admin acting-stamp, a distinct-pair participant and a
+        # dangling primary_user_id pointer all can.
+        #
+        # primary_user_id is the cluster's display "face", not a member list. The
+        # fence above means the doomed account is NOT a member of the cluster it
+        # fronts, so pointing the face at the surviving account would be wrong —
+        # NULL it, exactly as the FK's SET NULL does, and let
+        # CustomerLinkService._refresh_primary re-elect the oldest ACTIVE member
+        # on the next cluster mutation.
+        CanonicalCustomer.query.filter_by(primary_user_id=secondary_id).update({"primary_user_id": None})
+        CanonicalCustomer.query.filter_by(created_by_admin_id=secondary_id).update({"created_by_admin_id": primary_id})
+        CustomerLinkEvent.query.filter_by(acting_admin_id=secondary_id).update({"acting_admin_id": primary_id})
+        PlaceSuggestionDismissal.query.filter_by(dismissed_by_admin_id=secondary_id).update(
+            {"dismissed_by_admin_id": primary_id}
+        )
+        CustomerDistinctPair.query.filter_by(dismissed_by_admin_id=secondary_id).update(
+            {"dismissed_by_admin_id": primary_id}
+        )
+
+        # A "these two accounts are different people" assertion naming the account
+        # being merged away is either disproved by the merge (the pair IS primary
+        # + secondary) or has lost its subject. Both user columns are NOT NULL, so
+        # there is nothing to null out — drop the rows. Done explicitly rather
+        # than left to the ondelete CASCADE so the behaviour is identical on
+        # SQLite (test suite, FKs off) and Postgres.
+        CustomerDistinctPair.query.filter(
+            or_(
+                CustomerDistinctPair.user_id_low == secondary_id,
+                CustomerDistinctPair.user_id_high == secondary_id,
+            )
+        ).delete(synchronize_session=False)
 
         db.session.flush()
         logger.info(f"Transferred all user references from {secondary_id} to {primary_id}")

@@ -4,9 +4,9 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, UTC
 from decimal import Decimal
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Optional, Tuple
 
-from sqlalchemy import func
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import contains_eager, joinedload
 
 from business_app import db
@@ -18,7 +18,7 @@ from business_app.models.payment import (
     DriverCashSession,
     Payment,
 )
-from business_app.models.user import User
+from business_app.models.user import User, UserAddress
 from business_app.utils.audit_logger import AuditEventType, AuditSeverity, audit_logger
 from shared.enums import (
     CashCollectionSource,
@@ -32,6 +32,10 @@ from business_app.utils.payment_projection import get_payment_projection
 from business_app.utils.state_validators import assert_cash_payment_collector
 
 
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from business_app.services.allocation_scope import AllocationScope
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -41,7 +45,7 @@ class PersonalCardTransferPlan:
 
     Mirrors the allocation order ``post_collection`` actually performs: the target
     order settles first (never over-allocated), the surplus spills onto the
-    customer's other delivered COD debts oldest-first, and only what no debt can
+    scope's other delivered COD debts oldest-first, and only what no debt can
     absorb becomes customer credit.
     """
 
@@ -149,24 +153,26 @@ class CashCollectionService:
 
         return payment
 
-    def get_active_cod_payments_for_customer(
-        self,
-        customer_id: int,
-        *,
-        for_update: bool = False,
-    ) -> List[Payment]:
-        query = self._active_cod_payments_query(customer_id)
-        if for_update:
-            # Lock only payment rows to avoid Postgres FOR UPDATE errors with nullable eager joins.
-            query = query.with_for_update(of=Payment)
-        return query.all()
+    def get_active_cod_payments_for_customer(self, customer_id: int) -> List[Payment]:
+        """Read-only: the customer's open delivered COD debts, oldest-first.
+
+        Deliberately lock-free. Row locks on ``payments`` are taken ONLY by
+        :meth:`_lock_payments_by_ids` (ordered by ``payments.id``); a second
+        locking query ordered by ``Order.created_at`` — which this method used
+        to offer via a ``for_update`` flag — is the deadlock pair that flag
+        existed to create.
+        """
+        return self._active_cod_payments_query(customer_id).all()
 
     def _active_cod_payments_query(self, customer_id: int):
+        return self._active_cod_payments_query_for_users([customer_id])
+
+    def _active_cod_payments_query_for_users(self, user_ids: List[int]):
         return (
             Payment.query.join(Order, Payment.order_id == Order.id)
             .options(contains_eager(Payment.order))
             .filter(
-                Payment.user_id == customer_id,
+                Payment.user_id.in_(user_ids),
                 Payment.payment_method == PaymentMethod.CASH,
                 Payment.outstanding_amount > 0,
                 Order.status == OrderStatus.DELIVERED,
@@ -174,57 +180,651 @@ class CashCollectionService:
             .order_by(Order.created_at.asc(), Payment.created_at.asc(), Payment.id.asc())
         )
 
+    def _active_cod_payment_ids_for_users(self, user_ids: List[int]) -> List[int]:
+        """Ids only, no locks — phase 1 of the two-phase lock discipline (spec 5.3)."""
+        rows = (
+            db.session.query(Payment.id)
+            .join(Order, Payment.order_id == Order.id)
+            .filter(
+                Payment.user_id.in_(user_ids),
+                Payment.payment_method == PaymentMethod.CASH,
+                Payment.outstanding_amount > 0,
+                Order.status == OrderStatus.DELIVERED,
+            )
+            .all()
+        )
+        return [r[0] for r in rows]
+
+    def _lock_payments_by_ids(self, payment_ids: Iterable[int]) -> Dict[int, Payment]:
+        """Phase 2 of the two-phase lock discipline (spec 5.3 / R6).
+
+        THE single place any allocation path takes payment row locks. Every
+        candidate is acquired in ONE query ``ORDER BY payments.id ASC``, so
+        concurrent posts over overlapping rows can never request the same two
+        rows in opposite orders. Allocation ordering (ring, then oldest-first)
+        is re-applied purely in memory over the already-locked rows.
+
+        This must stay the ONLY lock order in play. A place- or cluster-scoped
+        post and a plain personal post routinely touch the same payment (a ring-1
+        member who is themselves unlinked still posts personally), so a second
+        path locking by ``Order.created_at`` reintroduces the deadlock this
+        query exists to prevent. The failure mode is worse than a 500:
+        ``_allocate_to_payment`` may already have enqueued
+        ``send_payment_confirmation_task`` — which performs no status re-check
+        and does not roll back — before blocking, so a deadlock abort can tell a
+        customer their payment was confirmed while the transaction rolled back.
+
+        ``populate_existing()`` is NOT optional here. This batch deliberately
+        includes the current order's payment, which need not be DELIVERED, so the
+        business predicates that guard :meth:`_lock_credit_events_by_ids` (where
+        ``FOR UPDATE`` re-qualification drops a row that stopped qualifying while
+        we were blocked) cannot live on this query. Without re-qualification the
+        ONLY protection left is that the locked rows carry live values — and a
+        locking ``SELECT`` does not refresh the column attributes of a row already
+        in the session identity map (the identity map wins; the fetched values are
+        discarded). The stale-read is a real lost update: a staff delivery loads
+        ``delivery.order.payment`` at outstanding=3000, a concurrent collection
+        settles it in full and commits, we unblock, ``live_outstanding`` still
+        reads 3000, ``_allocate_to_payment``'s over-allocation guard compares the
+        same stale 3000 and passes, and ``amount_collected = stale(0) + 3000``
+        CLOBBERS the committed write. ``populate_existing`` makes the lock refresh
+        what it returns, so every downstream read sees the row we actually hold.
+        """
+        ids = sorted({int(pid) for pid in payment_ids})
+        if not ids:
+            return {}
+        locked = (
+            Payment.query.filter(Payment.id.in_(ids))
+            .order_by(Payment.id.asc())
+            .with_for_update(of=Payment)
+            .populate_existing()
+            .all()
+        )
+        return {payment.id: payment for payment in locked}
+
+    def _active_place_cod_payment_ids(self, address_ids: List[int]) -> List[int]:
+        """Ring-1 candidate ids: open COD debts delivered to a place's member
+        addresses, ANY owner. Ids only, no locks (phase 1)."""
+        rows = (
+            db.session.query(Payment.id)
+            .join(Order, Payment.order_id == Order.id)
+            .filter(
+                Order.delivery_address_id.in_(address_ids),
+                Payment.payment_method == PaymentMethod.CASH,
+                Payment.outstanding_amount > 0,
+                Order.status == OrderStatus.DELIVERED,
+            )
+            .all()
+        )
+        return [r[0] for r in rows]
+
+    def get_active_cod_payments_for_scope(self, scope: "AllocationScope") -> List[Payment]:
+        """Active COD debts visible to a scope: place ring 1 + orderer-cluster
+        ring 2 for PLACE, cluster for CLUSTER/PERSONAL. Read-only (no locks)."""
+        cluster = self._active_cod_payments_query_for_users(list(scope.orderer_cluster_user_ids)).all()
+        if scope.scope_type != "place":
+            return cluster
+        ring1_ids = set(self._active_place_cod_payment_ids(list(scope.address_ids)))
+        if not ring1_ids:
+            return cluster
+        ring1 = Payment.query.options(joinedload(Payment.order)).filter(Payment.id.in_(ring1_ids)).all()
+        rank1 = self._oldest_first_rank(list(ring1_ids))
+        ring1.sort(key=lambda p: rank1[p.id])
+        return ring1 + [p for p in cluster if p.id not in ring1_ids]
+
     def get_active_cod_debt_count(self, customer_id: int) -> int:
         return len(self.get_active_cod_payments_for_customer(customer_id))
 
+    def _cluster_members(self, customer_id: int):
+        from business_app.services.customer_link_service import CustomerLinkService
+
+        cluster_ids = CustomerLinkService().get_cluster_user_ids(customer_id)
+        return User.query.filter(User.id.in_(cluster_ids)).all()
+
+    def _credit_pool_user_ids(self, user_ids: Iterable[int]) -> List[int]:
+        """Every account whose credit ``user_ids`` can collectively draw on.
+
+        The union of each id's cluster, resolved in two plain FK selects rather
+        than one ``get_cluster_user_ids`` call per id (never ``join(User)`` —
+        multi-FK gotcha). Used by the ring-3 sweep, whose candidate universe is
+        supplied by the caller and therefore need not be a single cluster.
+        """
+        ids = {int(uid) for uid in user_ids}
+        if not ids:
+            return []
+        canonical_ids = {
+            r[0]
+            for r in db.session.query(User.canonical_customer_id)
+            .filter(User.id.in_(ids), User.canonical_customer_id.isnot(None))
+            .all()
+        }
+        if canonical_ids:
+            ids |= {r[0] for r in db.session.query(User.id).filter(User.canonical_customer_id.in_(canonical_ids)).all()}
+        return sorted(ids)
+
+    def _cluster_has_cod_exempt_member(self, customer_id: int) -> bool:
+        return any(bool(m.cod_debt_check_exempt) for m in self._cluster_members(customer_id))
+
+    def _cluster_has_grocery_member(self, customer_id: int) -> bool:
+        return any(bool(m.is_grocery_store) for m in self._cluster_members(customer_id))
+
+    def get_cluster_active_cod_debt_count(self, customer_id: int) -> int:
+        """Active COD debts across the customer's whole linked cluster.
+
+        One real person = one credit line. For an unlinked user the cluster is
+        [customer_id], so this equals the per-account count. Selection for cash
+        *allocation* is intentionally NOT changed (that stays per-account until
+        Phase 2) — only the cap decision widens.
+        """
+        from business_app.services.customer_link_service import CustomerLinkService
+
+        cluster_ids = CustomerLinkService().get_cluster_user_ids(customer_id)
+        count = (
+            db.session.query(func.count(Payment.id))
+            .join(Order, Payment.order_id == Order.id)
+            .filter(
+                Payment.user_id.in_(cluster_ids),
+                Payment.payment_method == PaymentMethod.CASH,
+                Payment.outstanding_amount > 0,
+                Order.status == OrderStatus.DELIVERED,
+            )
+            .scalar()
+        )
+        return int(count or 0)
+
+    def get_place_active_cod_debt_count(self, address_id: int) -> int:
+        """Open delivered COD debts delivered to ANY member address of this
+        address's place group — any owner, regardless of exemptions (spec 5.5).
+        Ungrouped addresses degrade to the single address."""
+        from business_app.services.customer_link_service import CustomerLinkService
+
+        member_ids = CustomerLinkService().get_address_group_member_ids(address_id)
+        count = (
+            db.session.query(func.count(Payment.id))
+            .join(Order, Payment.order_id == Order.id)
+            .filter(
+                Order.delivery_address_id.in_(member_ids),
+                Payment.payment_method == PaymentMethod.CASH,
+                Payment.outstanding_amount > 0,
+                Order.status == OrderStatus.DELIVERED,
+            )
+            .scalar()
+        )
+        return int(count or 0)
+
+    def get_place_open_cod_debt_total(self, group_id: int) -> Decimal:
+        """Sum of outstanding COD debt across a place group's addresses."""
+        address_ids = [
+            r[0] for r in db.session.query(UserAddress.id).filter(UserAddress.address_group_id == group_id).all()
+        ]
+        if not address_ids:
+            return Decimal("0.00")
+        total = db.session.query(func.coalesce(func.sum(Payment.outstanding_amount), Decimal("0.00"))).select_from(
+            Payment
+        ).join(Order, Payment.order_id == Order.id).filter(
+            Order.delivery_address_id.in_(address_ids),
+            Payment.payment_method == PaymentMethod.CASH,
+            Payment.outstanding_amount > 0,
+            Order.status == OrderStatus.DELIVERED,
+        ).scalar() or Decimal(
+            "0.00"
+        )
+        return self._to_decimal(total)
+
+    def get_place_cod_context(self, address_id: Optional[int]) -> Dict[str, Any]:
+        """Place-group COD context for one delivery address (spec 8).
+
+        The block spread into every driver delivery card. Ungrouped (or absent)
+        addresses return the all-falsy/zero shape, so an ungrouped customer's
+        payload is byte-identical to today plus constant-false fields.
+        Money values are floats because this is consumed straight by the API
+        boundary; nothing here moves money.
+        """
+        empty = {
+            "is_place_grouped": False,
+            "place_group_id": None,
+            "place_group_label": None,
+            "place_outstanding_cod_total": 0.0,
+            "place_active_cod_debt_count": 0,
+        }
+        if not address_id:
+            return empty
+
+        from business_app.models.customer_link import AddressGroup
+
+        group_id = db.session.query(UserAddress.address_group_id).filter(UserAddress.id == address_id).scalar()
+        if not group_id:
+            return empty
+
+        group = AddressGroup.query.get(group_id)
+        return {
+            "is_place_grouped": True,
+            "place_group_id": group_id,
+            "place_group_label": group.label if group else None,
+            "place_outstanding_cod_total": float(self.get_place_open_cod_debt_total(group_id)),
+            "place_active_cod_debt_count": self.get_place_active_cod_debt_count(address_id),
+        }
+
     def is_customer_cod_restricted(self, customer_id: int) -> bool:
-        # Admin-granted exemption for trusted customers takes precedence:
-        # they may always use COD regardless of outstanding debts.
-        # Grocery stores carry money debt by design and are also exempt
-        # from the active-COD-debt cap.
-        customer = User.query.get(customer_id)
-        if customer and customer.cod_debt_check_exempt:
+        # Exemption is OR-ed across the whole cluster: any exempt or grocery member
+        # exempts the cluster. PERSON arm only — this is the address-less entry
+        # point, so it deliberately mirrors get_cod_restriction_context(customer_id)
+        # with no delivery_address_id. Callers that know the destination address
+        # must use get_cod_restriction_context / validate_customer_can_use_cod so
+        # the PLACE arm is evaluated too (spec 5.5).
+        if self._cluster_has_cod_exempt_member(customer_id):
             return False
-        if customer and customer.is_grocery_store:
+        if self._cluster_has_grocery_member(customer_id):
             return False
-        return self.get_active_cod_debt_count(customer_id) >= self.COD_ACTIVE_DEBT_LIMIT
+        return self.get_cluster_active_cod_debt_count(customer_id) >= self.COD_ACTIVE_DEBT_LIMIT
 
-    def get_cod_restriction_context(self, customer_id: int) -> Dict[str, Any]:
-        active_debt_count = self.get_active_cod_debt_count(customer_id)
-        customer = User.query.get(customer_id)
-        is_cod_exempt = bool(customer and customer.cod_debt_check_exempt)
-        is_grocery_store = bool(customer and customer.is_grocery_store)
+    def get_cod_restricted_flags(self, user_ids: List[int]) -> Dict[int, bool]:
+        """Cluster-aware ``cod_restricted`` for a batch of users.
 
-        # Order matches is_customer_cod_restricted(): admin exemption first,
-        # then structural grocery-store exemption, then the debt cap.
+        Returns exactly what :meth:`is_customer_cod_restricted` returns for each
+        id — that method is the SSOT for the PERSON-arm rule and this is only a
+        batched way to ask it (pinned by
+        ``test_get_cod_restricted_flags_matches_single_calls``). Unlinked users
+        are their own singleton cluster, so their flag is byte-identical to the
+        pre-Phase-2 per-account answer whenever they are neither exempt nor a
+        grocery store.
+
+        Resolved in a bounded three queries rather than ~7 per user, because the
+        list surfaces that consume it — the 200-row admin debtor list and the
+        *unpaginated* admin customer map — would otherwise turn one query into
+        thousands. Like :meth:`is_customer_cod_restricted` this is the
+        address-less PERSON arm only; callers that know the destination address
+        must use :meth:`get_cod_restriction_context` so the PLACE arm is
+        evaluated too (spec 5.5).
+        """
+        ids = sorted({int(uid) for uid in user_ids})
+        if not ids:
+            return {}
+
+        # (1) canonical id per requested user — plain FK select, never join(User).
+        canonical_by_user: Dict[int, Optional[int]] = {
+            int(row[0]): row[1]
+            for row in db.session.query(User.id, User.canonical_customer_id).filter(User.id.in_(ids)).all()
+        }
+        canonical_ids = sorted({c for c in canonical_by_user.values() if c is not None})
+
+        # (2) every member of every touched cluster, as ORM rows so the exemption
+        # reads stay `cod_debt_check_exempt` / `is_grocery_store` — the very
+        # attributes `_cluster_has_cod_exempt_member` / `_cluster_has_grocery_member`
+        # use, rather than a re-implementation of the grocery predicate.
+        member_filter = User.id.in_(ids)
+        if canonical_ids:
+            member_filter = or_(member_filter, User.canonical_customer_id.in_(canonical_ids))
+        members = User.query.filter(member_filter).all()
+
+        def _cluster_key(user_id: int, canonical_id: Optional[int]) -> Tuple[str, int]:
+            # Unlinked accounts are singleton clusters keyed on their own id;
+            # the "c"/"u" tag keeps the two id spaces from colliding.
+            return ("c", int(canonical_id)) if canonical_id is not None else ("u", int(user_id))
+
+        cluster_members: Dict[Tuple[str, int], List[User]] = {}
+        for member in members:
+            key = _cluster_key(member.id, member.canonical_customer_id)
+            cluster_members.setdefault(key, []).append(member)
+
+        # (3) open delivered COD debts per member, one grouped count. Same debt
+        # definition as get_cluster_active_cod_debt_count.
+        debts_by_user: Dict[int, int] = {}
+        member_ids = [m.id for m in members]
+        if member_ids:
+            debts_by_user = {
+                int(row[0]): int(row[1] or 0)
+                for row in db.session.query(Payment.user_id, func.count(Payment.id))
+                .join(Order, Payment.order_id == Order.id)
+                .filter(
+                    Payment.user_id.in_(member_ids),
+                    Payment.payment_method == PaymentMethod.CASH,
+                    Payment.outstanding_amount > 0,
+                    Order.status == OrderStatus.DELIVERED,
+                )
+                .group_by(Payment.user_id)
+                .all()
+            }
+
+        decisions: Dict[Tuple[str, int], bool] = {}
+        for key, cluster in cluster_members.items():
+            # Mirrors is_customer_cod_restricted: one exempt member OR one
+            # grocery member exempts the whole cluster; otherwise the cluster's
+            # total open COD debts are compared with the cap.
+            if any(bool(m.cod_debt_check_exempt) for m in cluster) or any(m.is_grocery_store for m in cluster):
+                decisions[key] = False
+                continue
+            cluster_debts = sum(debts_by_user.get(m.id, 0) for m in cluster)
+            decisions[key] = cluster_debts >= self.COD_ACTIVE_DEBT_LIMIT
+
+        # Ids with no user row degrade to "not restricted" — the same answer the
+        # single-user path gives for a missing/deleted account.
+        return {uid: decisions.get(_cluster_key(uid, canonical_by_user.get(uid)), False) for uid in ids}
+
+    def get_cod_restriction_context(
+        self, customer_id: int, delivery_address_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Cap by PLACE **and** by PERSON (spec 5.5).
+
+        A new COD order is blocked when EITHER the orderer's linked cluster is at
+        ``COD_ACTIVE_DEBT_LIMIT`` open delivered COD debts, OR the grouped place
+        it would be delivered to is. ``restriction_scope`` tells downstream
+        surfaces which arm fired so they can show the right message.
+
+        Without ``delivery_address_id`` — or when the address is ungrouped — the
+        place arm is simply not evaluated and the result is byte-identical to the
+        person-only behaviour, so unlinked + ungrouped customers are unaffected.
+        """
+        active_debt_count = self.get_cluster_active_cod_debt_count(customer_id)
+        is_cod_exempt = self._cluster_has_cod_exempt_member(customer_id)
+        is_grocery_store = self._cluster_has_grocery_member(customer_id)
+
+        # Place arm only applies when the delivery address is grouped.
+        place_debt_count: Optional[int] = None
+        if delivery_address_id is not None:
+            group_id = (
+                db.session.query(UserAddress.address_group_id).filter(UserAddress.id == delivery_address_id).scalar()
+            )
+            if group_id is not None:
+                place_debt_count = self.get_place_active_cod_debt_count(delivery_address_id)
+
+        # Admin exemption first, then structural grocery-store exemption, then
+        # the person cap, then the place cap (spec 5.5).
+        restriction_scope: Optional[str] = None
         if is_cod_exempt:
             is_restricted, reason = False, "customer_is_cod_exempt"
         elif is_grocery_store:
             is_restricted, reason = False, None
         elif active_debt_count >= self.COD_ACTIVE_DEBT_LIMIT:
             is_restricted, reason = True, "customer_has_max_active_cod_debts"
+            restriction_scope = "person"
+        elif place_debt_count is not None and place_debt_count >= self.COD_ACTIVE_DEBT_LIMIT:
+            is_restricted, reason = True, "place_has_max_active_cod_debts"
+            restriction_scope = "place"
         else:
             is_restricted, reason = False, None
 
         return {
             "active_cod_debt_count": active_debt_count,
+            "place_active_cod_debt_count": place_debt_count,
             "cod_restricted": is_restricted,
+            "restriction_scope": restriction_scope,
+            # Cluster-fungible since Phase 2b (spec 5.3).
             "available_prepayment_balance": float(self.get_customer_prepaid_balance(customer_id)),
             "cod_restriction_reason": reason,
             "cod_exempt": is_cod_exempt,
+            # Distinct from ``cod_exempt`` (the admin-granted flag, pinned
+            # independent of grocery status by
+            # test_cod_exempt_flag_independent_of_grocery_store): callers that
+            # need "will the cap EVER apply to this cluster" must OR the two —
+            # a grocery cluster is never restricted either, but for a
+            # structural reason, not an admin one.
+            "is_grocery_store": is_grocery_store,
         }
 
-    def get_customer_prepaid_balance(self, customer_id: int) -> Decimal:
-        """Return customer's unapplied COD over-collection balance."""
+    # Sources that are physically cash handed over AT the delivery address.
+    # Only these may resolve PLACE scope (spec 5.1). PERSONAL_CARD_TRANSFER is
+    # identifiably the payer's own money and NEVER place-scoped; admin
+    # adjustments / backfills are book corrections, not door cash.
+    _PLACE_SCOPE_SOURCES = frozenset(
+        {
+            CashCollectionSource.DELIVERY_COMPLETION,
+            CashCollectionSource.NEXT_DELIVERY,
+            CashCollectionSource.STANDALONE_MEETING,
+        }
+    )
+
+    def resolve_allocation_scope(
+        self,
+        customer_id: int,
+        delivery_address_id: Optional[int] = None,
+        source: Optional[Any] = None,
+    ) -> "AllocationScope":
+        """Resolve the allocation scope for a collection (spec 5.1). Single point.
+
+        Grocery backstop: a grocery event customer is FORCED to personal scope
+        so mirrored corporate money can never co-mingle with other accounts,
+        even if the account is somehow linked or grouped (spec 5.8 layer 3).
+        """
+        from business_app.services.allocation_scope import AllocationScope
+        from business_app.services.customer_link_service import CustomerLinkService
+
+        customer = User.query.get(customer_id)
+        if not customer:
+            raise NotFoundError("Customer not found")
+
+        if customer.is_grocery_store:
+            return AllocationScope.personal(customer_id)
+
+        source_enum = self._normalize_source(source) if source is not None else None
+        link_service = CustomerLinkService()
+        cluster_ids = link_service.get_cluster_user_ids(customer_id)
+
+        if delivery_address_id is not None and source_enum in self._PLACE_SCOPE_SOURCES:
+            group_id = (
+                db.session.query(UserAddress.address_group_id).filter(UserAddress.id == delivery_address_id).scalar()
+            )
+            if group_id is not None:
+                member_address_ids = link_service.get_address_group_member_ids(delivery_address_id)
+                place_user_ids = sorted(
+                    {
+                        r[0]
+                        for r in db.session.query(UserAddress.user_id)
+                        .filter(UserAddress.id.in_(member_address_ids))
+                        .all()
+                    }
+                )
+                # The posting customer (or a cluster sibling) must actually be a
+                # member of the place. Without this the scope-membership guard is
+                # circular: it would authorise ANY stranger's order merely because
+                # that order was delivered to a grouped address.
+                if set(cluster_ids) & set(place_user_ids):
+                    return AllocationScope.place(
+                        group_id=group_id,
+                        address_ids=member_address_ids,
+                        place_user_ids=place_user_ids,
+                        orderer_cluster_user_ids=cluster_ids,
+                    )
+
+        if len(cluster_ids) > 1:
+            return AllocationScope.cluster(cluster_ids)
+        return AllocationScope.personal(customer_id)
+
+    @staticmethod
+    def _scope_covers_order(scope: "AllocationScope", order: Order) -> bool:
+        """Order-level arm of the scope-membership guard (spec 5.4).
+
+        Mirrors AllocationScope.covers_payment for the pre-payment case: the
+        order owner is in the scope's cluster arm, OR — place scope only —
+        the order was delivered to a member address of the place.
+        """
+        if order.user_id in scope.orderer_cluster_user_ids:
+            return True
+        return scope.scope_type == "place" and order.delivery_address_id in scope.address_ids
+
+    def _unapplied_credit_total(self, user_ids: Iterable[int]) -> Decimal:
+        """Unapplied (non-voided) over-collection credit held by ``user_ids``.
+
+        The single SQL shape behind every credit balance read, so the wallet
+        cannot drift between the balance a gate checks and the pool a loop
+        actually spends.
+        """
+        ids = [int(uid) for uid in user_ids]
+        if not ids:
+            return Decimal("0.00")
         total = db.session.query(func.coalesce(func.sum(CashCollectionEvent.unapplied_amount), Decimal("0.00"))).filter(
-            CashCollectionEvent.customer_id == customer_id,
+            CashCollectionEvent.customer_id.in_(ids),
             CashCollectionEvent.voided_at.is_(None),
             CashCollectionEvent.unapplied_amount > 0,
         ).scalar() or Decimal("0.00")
         return self._to_decimal(total)
 
+    def get_customer_prepaid_balance(self, customer_id: int) -> Decimal:
+        """Cluster-fungible unapplied COD over-collection balance (spec 5.3).
+
+        One real person = one wallet, so a linked sibling's credit is part of
+        this balance. For an unlinked user the cluster is ``[customer_id]``, so
+        this equals the as-built per-account value byte-for-byte. Place groups
+        NEVER pool credit — coworkers are different people; only their bottles
+        and the place's COD debt are shared.
+        """
+        return self._unapplied_credit_total(self._credit_pool_for_anchor(customer_id))
+
+    def _credit_pool_for_anchor(self, anchor_user_id: int) -> List[int]:
+        """THE accounts whose unapplied credit ``anchor_user_id`` may spend.
+
+        The single resolution point for the credit pool, so the balance a gate
+        reads and the events a loop locks can never disagree about membership.
+
+        Grocery backstop (spec 5.8 layer 3), mirroring ``resolve_allocation_scope``
+        and ``post_collection``: grocery money is mirrored per-account onto a
+        corporate contract, so it never co-mingles. The guard is two-sided — a
+        grocery anchor is alone, and a grocery MEMBER is dropped from an
+        individual anchor's pool — because either direction would otherwise let
+        contract-mirrored cash settle an unrelated personal debt. Unreachable
+        while linking rejects grocery accounts, but reachable the moment an
+        already-linked individual is converted to a grocery entity.
+
+        ``is_grocery_store`` is a derived Python property (user_type +
+        entity_subtype), so it is evaluated on the User INSTANCE — never as a
+        SQL filter.
+        """
+        from business_app.services.customer_link_service import CustomerLinkService
+
+        anchor = User.query.get(anchor_user_id)
+        if anchor is not None and anchor.is_grocery_store:
+            return [int(anchor_user_id)]
+
+        cluster_ids = [int(uid) for uid in CustomerLinkService().get_cluster_user_ids(anchor_user_id)]
+        if len(cluster_ids) <= 1:
+            return cluster_ids
+        grocery_ids = {member.id for member in self._cluster_members(anchor_user_id) if member.is_grocery_store}
+        if not grocery_ids:
+            return cluster_ids
+        return [uid for uid in cluster_ids if uid not in grocery_ids]
+
+    def _lock_credit_events_by_ids(
+        self,
+        candidate_ids: Iterable[int],
+        *,
+        must_hold_event_ids: Iterable[int] = (),
+    ) -> Dict[int, CashCollectionEvent]:
+        """THE single place ``cash_collection_events`` rows are locked (spec 5.3 / R6).
+
+        One query, ``ORDER BY cash_collection_events.id ASC``, so two transactions
+        touching overlapping events always request them in the same order and can
+        never deadlock. Never take a bare single-row ``FOR UPDATE`` on an event
+        this batch may also contain: T1 holding E5 and requesting {E3} deadlocks
+        against T2 holding E3 and blocking on E5 — and voiding E5 first does NOT
+        help, because a concurrent transaction cannot see our uncommitted void
+        and its own batch still blocks on the row.
+
+        The business predicates (``voided_at IS NULL``, ``unapplied_amount > 0``)
+        MUST live on THIS query rather than being applied to its result. Under
+        READ COMMITTED, a locking ``SELECT`` that blocks on a row another
+        transaction is updating re-evaluates *this query's own WHERE* against the
+        row version that transaction committed and drops the row if it no longer
+        qualifies. That re-qualification is what turns the predicates into a
+        concurrency guard rather than a mere filter. Locking by id ALONE always
+        re-qualifies, so we would unblock holding a just-voided event with its
+        credit restored (``reverse_collection_event`` resets
+        ``unapplied_amount = event.amount`` on void) and settle a real debt with
+        money the business has declared never happened. An in-memory re-check is
+        not an equivalent substitute either: the row is already in the session
+        identity map, so a plain reload leaves its stale attributes in place.
+
+        ``must_hold_event_ids`` is the second arm — rows the caller must hold
+        regardless of credit state (an adjustment target is usually fully
+        allocated, so the spendable arm would not contain it). They are acquired
+        in the SAME id-ordered query; that is the entire point of the arm.
+
+        ``populate_existing()`` covers what the predicates cannot. They correctly
+        DROP a row that stopped qualifying, but a row that still qualifies can
+        come back with a stale-high ``unapplied_amount``: a locking ``SELECT``
+        does not refresh the column attributes of a row already in the session
+        identity map, so the fetched values are discarded in favour of the stale
+        ones. The consuming loops and ``_allocate_to_payment``'s "exceeds
+        unapplied event balance" guard would then all agree on credit that a
+        committed concurrent allocation already spent. Forcing the refresh means
+        the lock and the values we allocate against describe the same row version.
+        """
+        ids = sorted({int(eid) for eid in candidate_ids})
+        must_hold = sorted({int(eid) for eid in must_hold_event_ids})
+        if not ids and not must_hold:
+            return {}
+
+        spendable_arm = and_(
+            CashCollectionEvent.id.in_(ids),
+            CashCollectionEvent.voided_at.is_(None),
+            CashCollectionEvent.unapplied_amount > 0,
+        )
+        criterion = spendable_arm if not must_hold else or_(spendable_arm, CashCollectionEvent.id.in_(must_hold))
+        locked = (
+            CashCollectionEvent.query.filter(criterion)
+            .order_by(CashCollectionEvent.id.asc())
+            .with_for_update(of=CashCollectionEvent)
+            .populate_existing()
+            .all()
+        )
+        return {event.id: event for event in locked}
+
+    def _locked_cluster_credit_events(self, anchor_user_id: int) -> List[CashCollectionEvent]:
+        """Two-phase lock of the cluster's credit events (spec 5.3 / R6).
+
+        Phase 1 resolves the candidate id set with no locks; phase 2 derives the
+        consumption order IN SQL and locks all rows in ONE query ordered by id
+        ASC so concurrent posts over overlapping clusters always acquire locks
+        in the same order; the SQL-derived order is then reapplied in memory.
+
+        Phase 2 repeats phase 1's business predicates rather than locking by id
+        alone — see :meth:`_lock_credit_events_by_ids`: on this table they are a
+        concurrency guard (``FOR UPDATE`` re-qualification), not just a filter,
+        and dropping them lets a concurrently-voided event fund a live
+        allocation. Neither consuming loop below re-checks ``voided_at``.
+
+        The consumption order MUST come from SQL: CashCollectionEvent.occurred_at
+        is DateTime(timezone=True) and its Python value is tz-AWARE for an event
+        built+flushed in this transaction (post_collection sets
+        occurred_at=datetime.now(UTC)) but NAIVE for a row reloaded from SQLite,
+        so ``sorted(locked, key=lambda e: (e.occurred_at, e.id))`` raises
+        ``TypeError: can't compare offset-naive and offset-aware datetimes`` on a
+        live money path (post_collection -> auto_reserve_against_pending_payments
+        -> reserve_customer_prepaid_credit_for_payment -> here, whenever the
+        cluster already holds >= 1 other unapplied credit event).
+
+        ``anchor_user_id`` is the account whose wallet is being spent — always
+        the BENEFICIARY payment's owner, never the poster, so a payment can only
+        ever draw on its own person's credit.
+        """
+        cluster_ids = self._credit_pool_for_anchor(anchor_user_id)
+        candidate_ids = [
+            r[0]
+            for r in db.session.query(CashCollectionEvent.id)
+            .filter(
+                CashCollectionEvent.customer_id.in_(cluster_ids),
+                CashCollectionEvent.voided_at.is_(None),
+                CashCollectionEvent.unapplied_amount > 0,
+            )
+            .all()
+        ]
+        if not candidate_ids:
+            return []
+        ordered_ids = [
+            r[0]
+            for r in db.session.query(CashCollectionEvent.id)
+            .filter(CashCollectionEvent.id.in_(candidate_ids))
+            .order_by(CashCollectionEvent.occurred_at.asc(), CashCollectionEvent.id.asc())
+            .all()
+        ]
+        by_id = self._lock_credit_events_by_ids(candidate_ids)
+        return [by_id[i] for i in ordered_ids if i in by_id]
+
     def apply_customer_prepaid_credit_to_payment(self, payment: Payment) -> Payment:
-        """Auto-apply unapplied customer cash credit to a COD payment."""
+        """Auto-apply unapplied customer cash credit to a COD payment.
+
+        The credit pool is the payment owner's CLUSTER (spec 5.3), so a linked
+        sibling's over-collection settles this debt. Never a place group.
+        """
         if not payment:
             return payment
         if payment.payment_method != PaymentMethod.CASH:
@@ -232,16 +832,7 @@ class CashCollectionService:
         if self._to_decimal(payment.outstanding_amount) <= Decimal("0.00"):
             return payment
 
-        unapplied_events = (
-            CashCollectionEvent.query.filter(
-                CashCollectionEvent.customer_id == payment.user_id,
-                CashCollectionEvent.voided_at.is_(None),
-                CashCollectionEvent.unapplied_amount > 0,
-            )
-            .order_by(CashCollectionEvent.occurred_at.asc(), CashCollectionEvent.id.asc())
-            .with_for_update(of=CashCollectionEvent)
-            .all()
-        )
+        unapplied_events = self._locked_cluster_credit_events(payment.user_id)
 
         for event in unapplied_events:
             outstanding = self._to_decimal(payment.outstanding_amount)
@@ -273,6 +864,10 @@ class CashCollectionService:
         pending orders (reclaimable). Over-collection credit is cash-only-usable,
         so non-cash orders return 0. Used by the order-edit preview/cascade to
         report how much of an increase the customer has already paid.
+
+        The available leg is CLUSTER-fungible (spec 5.3) — it delegates to the
+        widened ``get_customer_prepaid_balance``, so a linked sibling's credit
+        counts toward what this order can already cover. Never place-pooled.
         """
         if not order or order.payment_method != PaymentMethod.CASH:
             return Decimal("0.00")
@@ -300,6 +895,10 @@ class CashCollectionService:
         first covered by cash the customer already paid (e.g. a driver who
         over-collected at the door). No-op for non-cash payments or payments
         with nothing outstanding. Caller controls the transaction (no commit).
+
+        Steps 2 and 3 delegate to the widened primitives, so "the customer's own
+        cash credit" means the payment owner's whole CLUSTER wallet (spec 5.3) —
+        one person, one wallet. Credit is never pooled across a place group.
         """
         if not payment or payment.payment_method != PaymentMethod.CASH:
             return payment
@@ -414,7 +1013,11 @@ class CashCollectionService:
         *,
         actor_user_id: Optional[int] = None,
     ) -> Decimal:
-        """Reserve available customer COD prepayment for a pending COD order payment."""
+        """Reserve available customer COD prepayment for a pending COD order payment.
+
+        Draws on the payment owner's CLUSTER wallet (spec 5.3): one person's
+        accounts share credit. Place groups never pool credit.
+        """
         if not payment or payment.payment_method != PaymentMethod.CASH:
             return Decimal("0.00")
 
@@ -425,16 +1028,7 @@ class CashCollectionService:
             self._sync_reserved_prepayment_projection(payment)
             return Decimal("0.00")
 
-        unapplied_events = (
-            CashCollectionEvent.query.filter(
-                CashCollectionEvent.customer_id == payment.user_id,
-                CashCollectionEvent.voided_at.is_(None),
-                CashCollectionEvent.unapplied_amount > 0,
-            )
-            .order_by(CashCollectionEvent.occurred_at.asc(), CashCollectionEvent.id.asc())
-            .with_for_update(of=CashCollectionEvent)
-            .all()
-        )
+        unapplied_events = self._locked_cluster_credit_events(payment.user_id)
 
         total_reserved = Decimal("0.00")
         for event in unapplied_events:
@@ -625,6 +1219,95 @@ class CashCollectionService:
         self._sync_reserved_prepayment_projection(payment)
         return self._to_decimal(released_total)
 
+    def release_out_of_scope_reservations(
+        self,
+        leaving_user_ids: List[int],
+        remaining_user_ids: List[int],
+    ) -> int:
+        """Release prepaid reservations that no longer resolve after an unlink
+        (spec 5.7).
+
+        Credit is fungible across ONE person's cluster, so a reservation may be
+        funded by account A and parked on sibling account B's pending order. A
+        reservation is out of scope when its funding event's customer and its
+        target payment's user end up on OPPOSITE sides of the split — the two
+        wallets are no longer one, so B's order may not keep holding A's money.
+        Reservations whose two sides land on the SAME side stay untouched.
+
+        Applied allocations are immutable history and are NEVER rewritten: only
+        ``allocation_mode == 'prepaid_reservation'`` rows are considered, and
+        the released amount goes straight back to the funding event's unapplied
+        balance (conservation: live allocations + unapplied == event.amount).
+        Affected payments are re-projected so the driver's expected-cash figure
+        at the door does not still net out a released reservation.
+
+        Idempotent (already-reversed rows are filtered out). Runs in the
+        caller's transaction (no commit). Returns the count released.
+        """
+        leaving = {int(uid) for uid in (leaving_user_ids or [])}
+        remaining = {int(uid) for uid in (remaining_user_ids or [])}
+        if not leaving or not remaining:
+            return 0
+
+        candidates = (
+            CashCollectionAllocation.query.options(
+                joinedload(CashCollectionAllocation.cash_collection_event),
+                joinedload(CashCollectionAllocation.payment),
+            )
+            .join(
+                CashCollectionEvent,
+                CashCollectionAllocation.cash_collection_event_id == CashCollectionEvent.id,
+            )
+            .filter(
+                CashCollectionAllocation.allocation_mode == "prepaid_reservation",
+                CashCollectionAllocation.reversed_at.is_(None),
+                CashCollectionEvent.voided_at.is_(None),
+                CashCollectionEvent.customer_id.in_(leaving | remaining),
+            )
+            .order_by(CashCollectionAllocation.id.asc())
+            .with_for_update(of=CashCollectionAllocation)
+            .all()
+        )
+
+        now = datetime.now(UTC)
+        released_count = 0
+        affected_payments: Dict[int, Payment] = {}
+        for allocation in candidates:
+            event = allocation.cash_collection_event
+            payment = allocation.payment
+            if event is None or payment is None:
+                continue
+            source_side = event.customer_id
+            target_side = payment.user_id
+            out_of_scope = (source_side in leaving and target_side in remaining) or (
+                source_side in remaining and target_side in leaving
+            )
+            if not out_of_scope:
+                continue
+            amount = self._to_decimal(allocation.allocated_amount)
+            event.unapplied_amount = self._to_decimal(event.unapplied_amount) + amount
+            allocation.reversed_at = now
+            allocation.reversal_reason = "Released: reservation out of scope after account unlink"
+            metadata = dict(allocation.allocation_metadata or {})
+            metadata["reservation_state"] = "released"
+            metadata["reservation_released_at"] = now.isoformat()
+            metadata["affects_payment_projection"] = False
+            allocation.allocation_metadata = metadata
+            released_count += 1
+            affected_payments[payment.id] = payment
+
+        if not released_count:
+            return 0
+
+        # Flush the reversals BEFORE re-projecting: the projection is recomputed
+        # by a SQL SUM over live reservations, so the reversal stamps must be in
+        # the database, not merely pending in the session.
+        db.session.flush()
+        for payment in affected_payments.values():
+            self._sync_reserved_prepayment_projection(payment)
+        db.session.flush()
+        return released_count
+
     def release_pre_delivery_prepaid_settlement_for_order(
         self,
         order_id: int,
@@ -767,20 +1450,40 @@ class CashCollectionService:
         customer_id: int,
         *,
         actor_user_id: Optional[int] = None,
+        cluster_user_ids: Optional[Iterable[int]] = None,
     ) -> Decimal:
-        """Reserve any unapplied customer prepayment against the customer's
-        non-delivered CASH payments (oldest-first). Idempotent. Best-effort:
-        skips locked rows (Postgres only) so concurrent order creation doesn't
-        block the sweep; the new order's own creation path retriggers reservation.
+        """Sweeps the customer's CURRENT cluster's non-delivered CASH payments
+        (ring 3, spec 5.2/5.6 — the sweep is forward-looking state, never
+        frozen), reserving unapplied prepayment against them oldest-first.
+        Idempotent. Best-effort: skips locked rows (Postgres only) so concurrent
+        order creation doesn't block the sweep; the new order's own creation path
+        retriggers reservation.
+
+        ``cluster_user_ids`` is ring 3's candidate universe (spec 5.2): the
+        pending CASH payments this sweep may reserve against. It MUST always be
+        resolved from CURRENT topology, never from an event's frozen scope — see
+        the carve-out comment at the call site in ``post_collection`` (spec 5.6).
+        Omitted (the default) it stays the single account, which is what an
+        unlinked customer's cluster resolves to anyway.
+
+        Gate discipline: the loop body spends the PAYMENT OWNER's cluster wallet
+        (``reserve_customer_prepaid_credit_for_payment`` anchors on
+        ``payment.user_id``), so both the early return and the per-iteration
+        check are evaluated on that same pool — never on the poster's balance.
+        Gating on the poster stranded a sibling's pending order whose own credit
+        was sitting available, because the walk broke out as soon as the poster's
+        share hit zero.
         """
-        if self.get_customer_prepaid_balance(customer_id) <= Decimal("0.00"):
+        owner_ids = [int(uid) for uid in cluster_user_ids] if cluster_user_ids else [customer_id]
+
+        if self._unapplied_credit_total(self._credit_pool_user_ids(owner_ids)) <= Decimal("0.00"):
             return Decimal("0.00")
 
         query = (
             Payment.query.join(Order, Payment.order_id == Order.id)
             .options(contains_eager(Payment.order))
             .filter(
-                Payment.user_id == customer_id,
+                Payment.user_id.in_(owner_ids),
                 Payment.payment_method == PaymentMethod.CASH,
                 Payment.outstanding_amount > Decimal("0.00"),
                 Order.status.in_(self.RESERVABLE_ORDER_STATUSES),
@@ -792,6 +1495,11 @@ class CashCollectionService:
         # don't race against this sweep. Postgres supports skip_locked; SQLite
         # (used in unit tests) silently ignores the locking clause, so we only
         # apply it when the dialect actually understands it.
+        #
+        # This is the ONE payments lock not ordered by Payment.id, and it is
+        # exempt precisely because SKIP LOCKED never waits: a transaction that
+        # cannot block cannot be an edge in a deadlock cycle. Do NOT drop
+        # skip_locked here without also moving this onto _lock_payments_by_ids.
         if db.engine.dialect.name == "postgresql":
             # Count first (without lock) so we can detect rows silently
             # dropped by skip_locked when a concurrent transaction holds them.
@@ -814,8 +1522,11 @@ class CashCollectionService:
 
         total_reserved = Decimal("0.00")
         for payment in payments:
-            if self.get_customer_prepaid_balance(customer_id) <= Decimal("0.00"):
-                break
+            # `continue`, not `break`: the universe may span several people (a
+            # caller-supplied universe need not be one cluster), and one
+            # exhausted wallet says nothing about the next payment's owner.
+            if self.get_customer_prepaid_balance(payment.user_id) <= Decimal("0.00"):
+                continue
             reserved = self.reserve_customer_prepaid_credit_for_payment(
                 payment,
                 actor_user_id=actor_user_id,
@@ -863,7 +1574,7 @@ class CashCollectionService:
             )
         )
 
-    def _serialize_open_cod_debtor_row(self, row) -> Dict[str, Any]:
+    def _serialize_open_cod_debtor_row(self, row, *, cod_restricted: bool) -> Dict[str, Any]:
         active_count = int(row.active_cod_debt_count or 0)
         role_value = row.role.value if hasattr(row.role, "value") else row.role
         user_type_value = row.user_type.value if hasattr(row.user_type, "value") else row.user_type
@@ -874,29 +1585,242 @@ class CashCollectionService:
             "phone": row.phone,
             "role": role_value,
             "user_type": user_type_value,
+            # Per-account slice of the debt; the restriction flag is
+            # cluster-aware and exemption-aware (spec 5.5), so the two can
+            # legitimately disagree for a linked or exempt customer.
             "active_cod_debt_count": active_count,
             "total_outstanding_amount": float(row.total_outstanding_amount or 0),
-            "cod_restricted": active_count >= self.COD_ACTIVE_DEBT_LIMIT,
+            "cod_restricted": cod_restricted,
         }
 
+    def _serialize_open_cod_debtor_rows(self, rows) -> List[Dict[str, Any]]:
+        """Serialize debtor rows with one batched cluster-flag lookup."""
+        flags = self.get_cod_restricted_flags([int(row.user_id) for row in rows])
+        return [
+            self._serialize_open_cod_debtor_row(row, cod_restricted=flags.get(int(row.user_id), False)) for row in rows
+        ]
+
+    def get_place_cod_statement(self, group_id: int) -> Dict[str, Any]:
+        """Unified open COD debt at one place group (any member's orders).
+
+        Debt selection mirrors ring 1 of the scope engine: CASH payments with
+        outstanding > 0 on DELIVERED orders whose ``delivery_address_id`` is a
+        member address. Read-only; never ``join(User)`` from payments/orders
+        (multi-FK gotcha) — owner names are resolved by a second id-filtered
+        query.
+        """
+        from business_app.models.customer_link import AddressGroup
+
+        group = AddressGroup.query.get(group_id)
+        if group is None:
+            raise NotFoundError("Place group not found")
+
+        member_address_ids = [
+            r[0] for r in db.session.query(UserAddress.id).filter(UserAddress.address_group_id == group_id).all()
+        ]
+        payments = []
+        if member_address_ids:
+            payments = (
+                Payment.query.join(Order, Payment.order_id == Order.id)
+                .options(joinedload(Payment.order))
+                .filter(
+                    Order.delivery_address_id.in_(member_address_ids),
+                    Payment.payment_method == PaymentMethod.CASH,
+                    Payment.outstanding_amount > 0,
+                    Order.status == OrderStatus.DELIVERED,
+                )
+                .order_by(Order.created_at.asc(), Payment.id.asc())
+                .all()
+            )
+
+        owner_ids = sorted({p.user_id for p in payments})
+        owners = {u.id: u for u in User.query.filter(User.id.in_(owner_ids)).all()} if owner_ids else {}
+
+        items = []
+        total = Decimal("0.00")
+        for payment in payments:
+            outstanding = self._to_decimal(payment.outstanding_amount)
+            total += outstanding
+            owner = owners.get(payment.user_id)
+            items.append(
+                {
+                    "payment_id": payment.id,
+                    "order_id": payment.order_id,
+                    "order_number": payment.order.order_number if payment.order else None,
+                    "owner_user_id": payment.user_id,
+                    # Names only — a place spans different people, so no phone
+                    # or other member PII leaves this payload (spec 7).
+                    "owner_name": owner.full_name if owner else None,
+                    "outstanding_amount": float(outstanding),
+                    "created_at": payment.created_at.isoformat() if payment.created_at else None,
+                }
+            )
+
+        # Distinct address OWNERS, not addresses: one person with two grouped
+        # addresses is one member.
+        member_count = (
+            db.session.query(func.count(func.distinct(UserAddress.user_id)))
+            .filter(UserAddress.address_group_id == group_id)
+            .scalar()
+        ) or 0
+
+        return {
+            "place_group_id": group_id,
+            "label": group.label,
+            "member_count": int(member_count),
+            "total_outstanding_amount": float(total),
+            "active_cod_debt_count": len(items),
+            "items": items,
+        }
+
+    def get_place_cod_debtor_rows(self, limit: int = 200) -> List[Dict[str, Any]]:
+        """One row per place group that currently has open delivered COD debt.
+
+        Sorted by outstanding descending. A place with no open debt is absent.
+        """
+        from business_app.models.customer_link import AddressGroup
+
+        rows = (
+            db.session.query(
+                UserAddress.address_group_id.label("place_group_id"),
+                func.count(Payment.id).label("active_cod_debt_count"),
+                func.coalesce(func.sum(Payment.outstanding_amount), Decimal("0.00")).label("total_outstanding_amount"),
+                func.count(func.distinct(Payment.user_id)).label("debtor_member_count"),
+            )
+            .select_from(Payment)
+            .join(Order, Order.id == Payment.order_id)
+            # addresses has a single FK to users, and this join is on the order's
+            # delivery address — no User join is involved.
+            .join(UserAddress, UserAddress.id == Order.delivery_address_id)
+            .filter(
+                UserAddress.address_group_id.isnot(None),
+                Payment.payment_method == PaymentMethod.CASH,
+                Payment.outstanding_amount > 0,
+                Order.status == OrderStatus.DELIVERED,
+            )
+            .group_by(UserAddress.address_group_id)
+            .order_by(func.sum(Payment.outstanding_amount).desc())
+            .limit(max(1, min(int(limit or 200), 1000)))
+            .all()
+        )
+        if not rows:
+            return []
+
+        group_ids = [r.place_group_id for r in rows]
+        labels = {g.id: g.label for g in AddressGroup.query.filter(AddressGroup.id.in_(group_ids)).all()}
+        # `member_count` MUST be the number of distinct address OWNERS in the
+        # group (same definition as get_place_cod_statement) — NOT the number of
+        # indebted payers, or a 3-person office with one debtor would render
+        # "(1 members)" on the list and "(3)" on the statement.
+        member_counts = dict(
+            db.session.query(UserAddress.address_group_id, func.count(func.distinct(UserAddress.user_id)))
+            .filter(UserAddress.address_group_id.in_(group_ids))
+            .group_by(UserAddress.address_group_id)
+            .all()
+        )
+        return [
+            {
+                "row_type": "place",
+                "place_group_id": int(r.place_group_id),
+                "label": labels.get(r.place_group_id),
+                "member_count": int(member_counts.get(r.place_group_id, 0)),
+                "debtor_member_count": int(r.debtor_member_count or 0),
+                "active_cod_debt_count": int(r.active_cod_debt_count or 0),
+                "total_outstanding_amount": float(r.total_outstanding_amount or 0),
+            }
+            for r in rows
+        ]
+
+    def _collapse_debtor_rows_by_cluster(self, rows) -> List[Dict[str, Any]]:
+        """Collapse per-account debtor rows into one row per linked person.
+
+        Unlinked users pass through unchanged (singleton cluster) apart from the
+        three additive keys, so their row is byte-identical to the pre-Phase-2
+        one. The surviving row keeps the identity of the member with the largest
+        outstanding — that is the account a collector is most likely to
+        recognise — and sums counts/amounts across the cluster.
+
+        ``cod_restricted`` comes from :meth:`_serialize_open_cod_debtor_rows`,
+        i.e. the batched cluster- and exemption-aware
+        :meth:`get_cod_restricted_flags` (2b Task 9). It is deliberately NOT
+        recomputed from the collapsed counts.
+        """
+        serialized = self._serialize_open_cod_debtor_rows(rows)
+        if not serialized:
+            return []
+
+        # One batched canonical lookup rather than a per-row
+        # CustomerLinkService.resolve_canonical() — same semantics (the user's
+        # canonical_customer_id, None when unlinked), same anti-N+1 reasoning as
+        # get_cod_restricted_flags. Plain FK select on users, never join(User)
+        # from payments/orders.
+        row_ids = [row["id"] for row in serialized]
+        canonical_by_user: Dict[int, Optional[int]] = {
+            int(r[0]): r[1]
+            for r in db.session.query(User.id, User.canonical_customer_id).filter(User.id.in_(row_ids)).all()
+        }
+
+        by_key: Dict[Tuple[str, int], Dict[str, Any]] = {}
+        order_of_keys: List[Tuple[str, int]] = []
+        for row in serialized:
+            canonical = canonical_by_user.get(row["id"])
+            # The "c"/"u" tag keeps the canonical and user id spaces from colliding.
+            key = ("c", int(canonical)) if canonical is not None else ("u", int(row["id"]))
+            existing = by_key.get(key)
+            if existing is None:
+                row = dict(row)
+                row["row_type"] = "person"
+                row["member_user_ids"] = [row["id"]]
+                by_key[key] = row
+                order_of_keys.append(key)
+                continue
+            if row["total_outstanding_amount"] > existing["total_outstanding_amount"]:
+                for field_name in ("id", "first_name", "last_name", "phone", "role", "user_type"):
+                    existing[field_name] = row[field_name]
+            existing["active_cod_debt_count"] += row["active_cod_debt_count"]
+            existing["total_outstanding_amount"] += row["total_outstanding_amount"]
+            existing["member_user_ids"].append(row["id"])
+            existing["cod_restricted"] = existing["cod_restricted"] or row["cod_restricted"]
+
+        collapsed = [by_key[k] for k in order_of_keys]
+        for row in collapsed:
+            row["member_user_ids"] = sorted(row["member_user_ids"])
+            row["cluster_member_count"] = len(row["member_user_ids"])
+        collapsed.sort(key=lambda r: r["total_outstanding_amount"], reverse=True)
+        return collapsed
+
     def list_users_with_open_cod_debts(self, *, limit: int = 200) -> List[Dict[str, Any]]:
-        """Return users that currently have at least one open delivered COD debt."""
+        """Debtors with at least one open delivered COD debt, one row per person.
+
+        Cluster-collapsed (spec 5.3: one real person, one credit line); no place
+        rows — the admin surface pairs this list with its own place view.
+        """
         safe_limit = max(1, min(int(limit or 200), 1000))
-        rows = self._open_cod_debtors_query().limit(safe_limit).all()
-        return [self._serialize_open_cod_debtor_row(row) for row in rows]
+        rows = self._open_cod_debtors_query().limit(1000).all()
+        return self._collapse_debtor_rows_by_cluster(rows)[:safe_limit]
 
     def paginate_users_with_open_cod_debts(self, *, page: int = 1, per_page: int = 10) -> Dict[str, Any]:
-        """Page through users with open delivered COD debts (staff bot list)."""
+        """Page through COD debtors: place rows first, then cluster-collapsed
+        person rows (staff bot list).
+
+        Combined in memory — the debtor universe is small (bounded at 1000
+        accounts) and cluster collapse cannot be expressed as SQL pagination.
+        Note the two row families overlap by design: a debt delivered to a
+        grouped address is counted both in its place row and in its orderer's
+        person row, because a collector may settle it either way.
+        """
         safe_page = max(1, int(page or 1))
         safe_per_page = max(1, min(int(per_page or 10), 100))
 
-        query = self._open_cod_debtors_query()
-        total = query.count()
+        person_rows = self._collapse_debtor_rows_by_cluster(self._open_cod_debtors_query().limit(1000).all())
+        combined = self.get_place_cod_debtor_rows() + person_rows
+
+        total = len(combined)
         pages = (total + safe_per_page - 1) // safe_per_page
-        rows = query.offset((safe_page - 1) * safe_per_page).limit(safe_per_page).all()
+        start = (safe_page - 1) * safe_per_page
 
         return {
-            "items": [self._serialize_open_cod_debtor_row(row) for row in rows],
+            "items": combined[start : start + safe_per_page],
             "pagination": {
                 "page": safe_page,
                 "per_page": safe_per_page,
@@ -905,8 +1829,10 @@ class CashCollectionService:
             },
         }
 
-    def validate_customer_can_use_cod(self, customer_id: int) -> Dict[str, Any]:
-        context = self.get_cod_restriction_context(customer_id)
+    def validate_customer_can_use_cod(
+        self, customer_id: int, delivery_address_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        context = self.get_cod_restriction_context(customer_id, delivery_address_id=delivery_address_id)
         if context["cod_restricted"]:
             raise ValidationError(
                 "Customer has reached the maximum number of active cash on delivery debts.",
@@ -1000,6 +1926,56 @@ class CashCollectionService:
         # must avoid issuing two identical SUM queries here.
         unreserved_balance = float(self.get_customer_prepaid_balance(customer_id))
 
+        # --- cluster + place context (Phase 2c read surfaces) -----------------
+        # Everything below is DERIVED at read time; no cluster/place figure is
+        # ever stored (plan 2c global constraint 1).
+        from business_app.services.customer_link_service import CustomerLinkService
+
+        cluster_ids = CustomerLinkService().get_cluster_user_ids(customer_id)
+        cluster_delivered_outstanding = db.session.query(
+            func.coalesce(func.sum(Payment.outstanding_amount), Decimal("0.00"))
+        ).join(Order, Payment.order_id == Order.id).filter(
+            Payment.user_id.in_(cluster_ids),
+            Payment.payment_method == PaymentMethod.CASH,
+            Payment.outstanding_amount > 0,
+            Order.status == OrderStatus.DELIVERED,
+        ).scalar() or Decimal(
+            "0.00"
+        )
+
+        from business_app.models.customer_link import AddressGroup
+
+        places: List[Dict[str, Any]] = []
+        grouped_addresses = UserAddress.query.filter(
+            UserAddress.user_id.in_(cluster_ids),
+            UserAddress.address_group_id.isnot(None),
+        ).all()
+        # `UserAddress` has NO `address_group` relationship (models/user.py
+        # declares only `user` and `orders`) — labels MUST come from an explicit
+        # bulk lookup, never `addr.address_group`.
+        group_labels = {}
+        if grouped_addresses:
+            group_labels = {
+                g.id: g.label
+                for g in AddressGroup.query.filter(
+                    AddressGroup.id.in_({a.address_group_id for a in grouped_addresses})
+                ).all()
+            }
+        seen_groups = set()
+        for addr in grouped_addresses:
+            if addr.address_group_id in seen_groups:
+                continue
+            seen_groups.add(addr.address_group_id)
+            places.append(
+                {
+                    "address_id": addr.id,
+                    "place_group_id": addr.address_group_id,
+                    "label": group_labels.get(addr.address_group_id),
+                    "place_open_cod_debt_total": float(self.get_place_open_cod_debt_total(addr.address_group_id)),
+                    "place_active_cod_debt_count": self.get_place_active_cod_debt_count(addr.id),
+                }
+            )
+
         return {
             "customer_id": customer_id,
             "first_name": customer.first_name,
@@ -1010,7 +1986,18 @@ class CashCollectionService:
                 if customer.entity_subtype is not None and hasattr(customer.entity_subtype, "value")
                 else customer.entity_subtype
             ),
-            "active_cod_debt_count": self.get_active_cod_debt_count(customer_id),
+            # Cluster-wide (spec 5.5) so it agrees with `cod_restricted` and with
+            # what the cap actually enforces. `items` / `total_outstanding_amount`
+            # below stay per-account — a linked sibling can therefore report a
+            # non-zero count with an empty item list, which is what the staff-bot
+            # COD search (`only_with_open_cod`) needs in order to surface the
+            # person whose cluster owes money.
+            "active_cod_debt_count": self.get_cluster_active_cod_debt_count(customer_id),
+            # The per-account half of that asymmetry, so a surface can *state*
+            # it ("cluster owes 2, none on this account") instead of inferring
+            # it from an empty `items` list. Equals `active_cod_debt_count` for
+            # an unlinked customer.
+            "account_active_cod_debt_count": self.get_active_cod_debt_count(customer_id),
             "cod_restricted": self.is_customer_cod_restricted(customer_id),
             "total_outstanding_amount": float(total_outstanding),
             # Alias of total_outstanding_amount; named for UI clarity so the
@@ -1024,6 +2011,12 @@ class CashCollectionService:
             # under a clearer name for the UI.
             "unreserved_prepayment_balance": unreserved_balance,
             "grocery_debt": grocery_debt,
+            # Cluster/place context. For an unlinked + ungrouped customer these
+            # degrade to: cluster_member_count 1, cluster total == this
+            # account's delivered outstanding, places [].
+            "cluster_member_count": len(cluster_ids),
+            "cluster_delivered_outstanding_amount": float(cluster_delivered_outstanding),
+            "places": places,
             "items": items,
         }
 
@@ -1038,8 +2031,13 @@ class CashCollectionService:
         """Return a customer's full COD cash-collection ledger with allocations.
 
         The result powers the admin "Customer Prepayments" view. It surfaces every
-        cash collection event for the customer alongside the allocations that
-        consumed (or are reserving) each event, plus aggregate totals.
+        cash collection event for the customer's whole CLUSTER (spec 5.3 — one
+        person, one wallet) alongside the allocations that consumed (or are
+        reserving) each event, plus aggregate totals. Each event carries its own
+        ``customer_id`` and the payload carries ``cluster_member_ids`` so the UI
+        can attribute a row to the account that actually collected it. For an
+        unlinked customer the cluster is themselves and the payload is unchanged
+        apart from the two new keys.
 
         Args:
             customer_id: The customer's user id.
@@ -1056,12 +2054,21 @@ class CashCollectionService:
 
         safe_limit = max(1, min(int(limit or 200), 1000))
 
+        # The ledger must describe the SAME pool as the balance it is shown next
+        # to, so it goes through the one credit-pool resolver rather than reading
+        # the raw cluster: ``available_prepayment_balance`` below is
+        # ``get_customer_prepaid_balance``, which is grocery-guarded. Reading the
+        # raw cluster here would list a grocery member's contract-mirrored events
+        # (and sum them into the lifetime totals) beside a balance that
+        # deliberately excludes them.
+        cluster_ids = self._credit_pool_for_anchor(customer_id)
+
         query = CashCollectionEvent.query.options(
             joinedload(CashCollectionEvent.allocations)
             .joinedload(CashCollectionAllocation.payment)
             .joinedload(Payment.order),
             joinedload(CashCollectionEvent.order),
-        ).filter(CashCollectionEvent.customer_id == customer_id)
+        ).filter(CashCollectionEvent.customer_id.in_(cluster_ids))
 
         if not include_voided:
             query = query.filter(CashCollectionEvent.voided_at.is_(None))
@@ -1088,7 +2095,7 @@ class CashCollectionService:
                 ),
             )
             .filter(
-                CashCollectionEvent.customer_id == customer_id,
+                CashCollectionEvent.customer_id.in_(cluster_ids),
                 CashCollectionEvent.voided_at.is_(None),
             )
             .one()
@@ -1133,6 +2140,10 @@ class CashCollectionService:
                 {
                     "id": event.id,
                     "event_id": event.event_id,
+                    # Which cluster member actually collected this cash. Only
+                    # meaningful once the ledger spans a cluster, and the only
+                    # per-row attribution the UI has.
+                    "customer_id": event.customer_id,
                     "amount": float(event.amount or 0),
                     "unapplied_amount": float(event.unapplied_amount or 0),
                     "currency": event.currency,
@@ -1157,6 +2168,7 @@ class CashCollectionService:
             "available_prepayment_balance": float(self.get_customer_prepaid_balance(customer_id)),
             "lifetime_collected": float(lifetime_collected),
             "lifetime_applied": float(lifetime_applied),
+            "cluster_member_ids": cluster_ids,
             "events": serialized_events,
         }
 
@@ -1170,6 +2182,13 @@ class CashCollectionService:
 
         Mirrors :meth:`list_users_with_open_cod_debts` but aggregates
         ``unapplied_amount`` from non-voided ``CashCollectionEvent`` rows.
+
+        Credit is cluster-fungible (spec 5.3), so linked accounts collapse into
+        ONE row per person carrying the summed balance and a ``member_user_ids``
+        list. Unlinked rows pass through unchanged (with a single-element
+        ``member_user_ids``). Note ``limit`` is applied by the SQL query BEFORE
+        the merge, so a caller may receive fewer rows than requested when linked
+        accounts collapse — accepted for this phase.
         """
         safe_limit = max(1, min(int(limit or 200), 1000))
 
@@ -1234,9 +2253,58 @@ class CashCollectionService:
                     "last_collection_at": (row.last_collection_at.isoformat() if row.last_collection_at else None),
                 }
             )
-        return items
 
-    def get_order_payment_timeline(self, order_id: int) -> Dict[str, Any]:
+        # Cluster-fungible credit: collapse linked accounts into one row per
+        # person (spec 5.3). Unlinked rows pass through unchanged.
+        user_ids = [item["id"] for item in items]
+        canon = dict(
+            db.session.query(User.id, User.canonical_customer_id)
+            .filter(User.id.in_(user_ids), User.canonical_customer_id.isnot(None))
+            .all()
+        )
+        merged: Dict[Any, Dict[str, Any]] = {}
+        ordered_keys: List[Any] = []
+        for item in items:
+            key = ("c", canon[item["id"]]) if item["id"] in canon else ("u", item["id"])
+            if key not in merged:
+                item = dict(item)
+                item["member_user_ids"] = [item["id"]]
+                # Accumulate in Decimal; convert once at the end (money rule:
+                # Decimal inside services, float only at the boundary).
+                item["available_prepayment_balance"] = self._to_decimal(item["available_prepayment_balance"])
+                merged[key] = item
+                ordered_keys.append(key)
+            else:
+                row = merged[key]
+                row["available_prepayment_balance"] += self._to_decimal(item["available_prepayment_balance"])
+                row["member_user_ids"].append(item["id"])
+                if (item["last_collection_at"] or "") > (row["last_collection_at"] or ""):
+                    row["last_collection_at"] = item["last_collection_at"]
+        # The SQL ORDER BY ran per-ACCOUNT, so merged cluster totals no longer
+        # respect the descending-balance ordering the UI relies on — re-sort.
+        collapsed = [merged[k] for k in ordered_keys]
+        for row in collapsed:
+            row["available_prepayment_balance"] = float(row["available_prepayment_balance"])
+        return sorted(
+            collapsed,
+            key=lambda r: (-r["available_prepayment_balance"], r["id"]),
+        )
+
+    def get_order_payment_timeline(self, order_id: int, viewer_user_id: Optional[int] = None) -> Dict[str, Any]:
+        """Payment timeline for one order.
+
+        ``viewer_user_id`` selects the rendering arm (spec §7/§9):
+
+        * ``None`` (default — every admin/staff caller) keeps today's full
+          rendering and ADDS the scope + dual attribution stamps so a reviewer
+          can trace a cross-customer settlement.
+        * set (customer-facing callers) sanitizes allocations funded by an
+          event owned OUTSIDE the viewer's cluster: since the money engine is
+          scope-aware, another person's collection can settle this order, and
+          that event's free-text notes and full amount are not the viewer's to
+          see. Cluster-sibling events are the same person's own wallet and
+          render exactly as today.
+        """
         order = Order.query.options(
             joinedload(Order.payment),
             joinedload(Order.user),
@@ -1280,14 +2348,55 @@ class CashCollectionService:
             .order_by(CashCollectionAllocation.allocated_at.asc(), CashCollectionAllocation.id.asc())
             .all()
         )
+        viewer_cluster = None
+        if viewer_user_id is not None:
+            from business_app.services.customer_link_service import CustomerLinkService
+
+            viewer_cluster = set(CustomerLinkService().get_cluster_user_ids(int(viewer_user_id)))
+
+        group_label_cache: Dict[Any, Optional[str]] = {}
+
+        def _group_label(group_id):
+            if group_id is None:
+                return None
+            if group_id not in group_label_cache:
+                from business_app.models.customer_link import AddressGroup
+
+                group = AddressGroup.query.get(group_id)
+                group_label_cache[group_id] = group.label if group else None
+            return group_label_cache[group_id]
+
         for allocation in allocations:
             event = allocation.cash_collection_event
-            timeline.append(
+            entry = {
+                "type": "cash_collection_allocation",
+                "timestamp": allocation.allocated_at.isoformat() if allocation.allocated_at else None,
+                "allocated_amount": float(allocation.allocated_amount or 0),
+                "allocation_mode": allocation.allocation_mode,
+                "reversed_at": allocation.reversed_at.isoformat() if allocation.reversed_at else None,
+            }
+            out_of_cluster = (
+                viewer_cluster is not None and event is not None and event.customer_id not in viewer_cluster
+            )
+            if out_of_cluster:
+                # Spec §7: neutral rendering — "settled by workplace collection".
+                # No source event internals, no free-text notes, no full
+                # collection amount, regardless of scope_type (also covers the
+                # ex-member / frozen-snapshot correction case).
+                entry.update(
+                    {
+                        "settled_by": "workplace_collection",
+                        "collection_event_id": None,
+                        "collection_amount": None,
+                        "collection_source": None,
+                        "delivery_id": None,
+                        "notes": None,
+                    }
+                )
+                timeline.append(entry)
+                continue
+            entry.update(
                 {
-                    "type": "cash_collection_allocation",
-                    "timestamp": allocation.allocated_at.isoformat() if allocation.allocated_at else None,
-                    "allocated_amount": float(allocation.allocated_amount or 0),
-                    "allocation_mode": allocation.allocation_mode,
                     "collection_event_id": allocation.cash_collection_event_id,
                     "collection_amount": float(event.amount or 0) if event else None,
                     "collection_source": (
@@ -1297,9 +2406,25 @@ class CashCollectionService:
                     ),
                     "delivery_id": event.delivery_id if event else None,
                     "notes": event.notes if event else None,
-                    "reversed_at": allocation.reversed_at.isoformat() if allocation.reversed_at else None,
                 }
             )
+            if viewer_cluster is None:
+                # Admin/staff arm (spec §9): scope + dual attribution stamps.
+                scope_type = (getattr(event, "scope_type", None) or "personal") if event else "personal"
+                snapshot = (getattr(event, "scope_snapshot", None) or {}) if event else {}
+                if not isinstance(snapshot, dict):  # pragma: no cover - defensive
+                    snapshot = {}
+                group_id = snapshot.get("group_id") if scope_type == "place" else None
+                entry.update(
+                    {
+                        "scope_type": scope_type,
+                        "scope_group_id": group_id,
+                        "scope_group_label": _group_label(group_id),
+                        "source_customer_id": getattr(allocation, "source_customer_id", None),
+                        "beneficiary_user_id": getattr(allocation, "beneficiary_user_id", None),
+                    }
+                )
+            timeline.append(entry)
 
         return {
             "order_id": order_id,
@@ -1398,6 +2523,8 @@ class CashCollectionService:
         idempotency_key: Optional[str] = None,
         commit: bool = True,
         bypass_driver_block_check: bool = False,
+        delivery_address_id: Optional[int] = None,
+        replay_scope: Optional["AllocationScope"] = None,
     ) -> CashCollectionEvent:
         customer = User.query.get(customer_id)
         if not customer:
@@ -1419,9 +2546,40 @@ class CashCollectionService:
         if occurred_at.tzinfo is None:
             occurred_at = occurred_at.replace(tzinfo=UTC)
 
+        # Resolve the allocation scope ONCE and freeze it on the event.
+        # A correction replay (adjust_event_amount) passes the original event's
+        # frozen scope via replay_scope — never current topology (spec 5.6).
+        # An explicit delivery_address_id seeds the scope address for order-less
+        # standalone collections; order/delivery context overrides it when present.
+        scope_address_id: Optional[int] = delivery_address_id
+        if order_id:
+            _scope_order = Order.query.get(order_id)
+            if _scope_order is not None:
+                scope_address_id = _scope_order.delivery_address_id
+        elif delivery_id:
+            _scope_delivery = Delivery.query.options(joinedload(Delivery.order)).get(delivery_id)
+            if _scope_delivery is not None and _scope_delivery.order is not None:
+                scope_address_id = _scope_delivery.order.delivery_address_id
+        scope = replay_scope or self.resolve_allocation_scope(
+            customer_id,
+            delivery_address_id=scope_address_id,
+            source=source_enum,
+        )
+
+        # Defense-in-depth: the grocery backstop (spec 5.8 layer 3) must hold
+        # even when a caller supplies replay_scope directly, since replay_scope
+        # bypasses resolve_allocation_scope's own grocery check entirely.
+        # Grocery cash is mirrored into a corporate contract, so it may NEVER
+        # carry cluster/place scope — no caller may override this.
+        if customer.is_grocery_store:
+            from business_app.services.allocation_scope import AllocationScope
+
+            scope = AllocationScope.personal(customer_id)
+
         target_payment: Optional[Payment] = None
         self._validate_collection_context(
             customer_id=customer_id,
+            scope=scope,
             source=source_enum,
             collector_user_id=collector_user_id,
             recorded_by_user_id=recorded_by_user_id,
@@ -1433,6 +2591,18 @@ class CashCollectionService:
             bypass_driver_block_check=bypass_driver_block_check,
         )
         if source_enum == CashCollectionSource.PERSONAL_CARD_TRANSFER:
+            # Acquire the WHOLE id-ordered candidate set — the transfer's target
+            # included — BEFORE resolving it and before the target-first
+            # allocation below. Two reasons this cannot be left to
+            # `_allocate_scoped`: (1) a transfer that merely settles its target
+            # never reaches the ring walk, so this is the only lock the target
+            # ever gets and skipping it trades a deadlock for a lost update;
+            # (2) resolution may CONVERT an electronic order to cash, which
+            # writes the target row and therefore takes its lock — ahead of a
+            # batch holding lower-id debts of the same customer, that is exactly
+            # the inversion. A payment row created during resolution (COD order
+            # with no payment yet) needs no lock: nobody else can see our insert.
+            self._lock_scoped_payments(scope=scope, order_id=order_id)
             target_payment = self._resolve_target_payment_for_personal_card_transfer(
                 order_id=order_id,
                 actor_user_id=recorded_by_user_id,
@@ -1453,6 +2623,8 @@ class CashCollectionService:
             proof_data=proof_data or {},
             unapplied_amount=normalized_amount,
             idempotency_key=idempotency_key,
+            scope_type=scope.scope_type,
+            scope_snapshot=scope.to_snapshot(),
         )
         db.session.add(event)
         db.session.flush()
@@ -1493,17 +2665,23 @@ class CashCollectionService:
             # (the common case) has no reason to take those locks in an order
             # opposite to the oldest-first sources.
             if self._to_decimal(event.unapplied_amount) > Decimal("0.00"):
-                self._allocate_oldest_first(
+                self._allocate_scoped(
                     event=event,
-                    customer_id=customer_id,
+                    scope=scope,
                     order_id=order_id,
                     allocation_mode=allocation_mode,
                 )
         elif allocations:
+            # One id-ordered batch lock, then the caller's allocation order in
+            # memory: locking row-by-row in caller order is a second lock order
+            # over the same rows the ring allocator takes.
+            locked_manual = self._lock_payments_by_ids(
+                [allocation["payment_id"] for allocation in allocations if allocation.get("payment_id") is not None]
+            )
             allocation_order = 0
             for allocation in allocations:
                 allocation_order += 1
-                payment = Payment.query.with_for_update(of=Payment).get(allocation["payment_id"])
+                payment = locked_manual.get(allocation.get("payment_id"))
                 if not payment:
                     raise NotFoundError("Payment not found for manual allocation")
                 allocated_amount = self._to_decimal(allocation.get("amount"))
@@ -1515,9 +2693,9 @@ class CashCollectionService:
                     allocation_mode="manual",
                 )
         else:
-            self._allocate_oldest_first(
+            self._allocate_scoped(
                 event=event,
-                customer_id=customer_id,
+                scope=scope,
                 order_id=order_id,
                 allocation_mode=allocation_mode,
             )
@@ -1538,10 +2716,29 @@ class CashCollectionService:
         # Sweep any leftover unapplied prepayment onto the customer's
         # non-delivered CASH payments so the next driver/admin sees the right
         # cash-to-collect figure and the customer modal shows the net debt.
+        #
+        # Ring 3 — the ONE step carved out of the frozen-scope replay rule
+        # (spec 5.6). Rings 1-2 above settle historical debt, so on a correction
+        # they must replay `scope`, which may be the original event's frozen
+        # snapshot. This sweep must NOT: reservations are releasable,
+        # forward-looking state (spec 5.7), not history. Resolving it from a
+        # frozen scope would let a correction posted after an unlink re-create
+        # reservations on a departed sibling's pending orders — parking credit
+        # against a stranger's order and understating the driver's expected cash
+        # there. So the universe is always re-resolved from the CURRENT cluster
+        # of the event's customer, never from `scope`. Grocery mirrors
+        # resolve_allocation_scope's backstop: grocery cash never co-mingles, so
+        # it stays the single account no matter what the topology says.
         if self._to_decimal(event.unapplied_amount) > Decimal("0.00"):
+            sweep_user_ids: List[int] = [customer_id]
+            if not customer.is_grocery_store:
+                from business_app.services.customer_link_service import CustomerLinkService
+
+                sweep_user_ids = CustomerLinkService().get_cluster_user_ids(customer_id)
             self.auto_reserve_against_pending_payments(
                 customer_id,
                 actor_user_id=recorded_by_user_id or collector_user_id,
+                cluster_user_ids=sweep_user_ids,
             )
 
         # Mirror the collected money onto the customer's corporate contract via the
@@ -1589,6 +2786,7 @@ class CashCollectionService:
         self,
         *,
         customer_id: int,
+        scope: "AllocationScope",
         source: CashCollectionSource,
         collector_user_id: Optional[int],
         recorded_by_user_id: Optional[int],
@@ -1662,7 +2860,7 @@ class CashCollectionService:
             order = Order.query.get(order_id)
             if not order:
                 raise NotFoundError("Order not found")
-            if order.user_id != customer_id:
+            if not self._scope_covers_order(scope, order):
                 raise ValidationError("Order does not belong to the selected customer")
             _electronic_methods = {PaymentMethod.CLICK, PaymentMethod.PAYME, PaymentMethod.CARD}
             if order.payment_method != PaymentMethod.CASH:
@@ -1697,7 +2895,7 @@ class CashCollectionService:
             delivery = Delivery.query.options(joinedload(Delivery.order)).get(delivery_id)
             if not delivery:
                 raise NotFoundError("Delivery not found")
-            if delivery.order and delivery.order.user_id != customer_id:
+            if delivery.order and not self._scope_covers_order(scope, delivery.order):
                 raise ValidationError("Delivery does not belong to the selected customer")
             if order_id and delivery.order_id != order_id:
                 raise ValidationError("delivery_id does not match the selected order")
@@ -1711,7 +2909,7 @@ class CashCollectionService:
                 payment = Payment.query.options(joinedload(Payment.order)).get(payment_id)
                 if not payment:
                     raise NotFoundError("Payment not found for manual allocation")
-                if payment.user_id != customer_id:
+                if not scope.covers_payment(payment, payment.order):
                     raise ValidationError("Manual allocations must belong to the selected customer")
                 if payment.payment_method != PaymentMethod.CASH:
                     raise ValidationError("Manual allocations can only target COD payments")
@@ -1805,6 +3003,22 @@ class CashCollectionService:
         order_id: Optional[int],
         actor_user_id: Optional[int],
     ) -> Payment:
+        """Resolve (creating/converting if needed) the payment a personal card
+        transfer settles first.
+
+        Deliberately takes NO row lock of its own. ``post_collection`` calls
+        ``_lock_scoped_payments(scope=scope, order_id=order_id)`` immediately
+        BEFORE this resolver, and that batch already contains this row: the
+        scope's ``current_payment_id`` is resolved from ``Payment.order_id ==
+        order_id`` regardless of payment method, so an electronic order awaiting
+        conversion is in the batch too. Locking it here instead inverted the lock
+        order against every oldest-first post that also holds a lower-id debt of
+        the same customer.
+
+        The one row this resolver may touch that the batch cannot contain is a
+        payment it CREATES (a COD order with no payment yet) — that needs no
+        lock, because no other transaction can see our un-committed insert.
+        """
         if order_id is None:
             raise ValidationError("order_id is required for personal card transfer collections")
 
@@ -1832,10 +3046,7 @@ class CashCollectionService:
             )
             db.session.flush()
 
-        locked_payment = Payment.query.with_for_update(of=Payment).get(payment.id)
-        if not locked_payment:
-            raise NotFoundError("Payment not found")
-        return locked_payment
+        return payment
 
     def reverse_collection_event(
         self,
@@ -1948,7 +3159,38 @@ class CashCollectionService:
         if not reason:
             raise ValidationError("An adjustment reason is required")
 
-        event = CashCollectionEvent.query.with_for_update(of=CashCollectionEvent).get(event_id)
+        # Acquire the anchor cluster's event batch — the TARGET included — in ONE
+        # id-ordered FOR UPDATE before touching anything (spec 5.3 / R6). A bare
+        # single-row lock on the target here is a lock-order inversion: this
+        # transaction goes on to void the target and then repost, whose credit
+        # path locks the cluster batch {E3, ...}. Voiding first protects only
+        # OUR transaction from re-requesting the row — a concurrent post cannot
+        # see our uncommitted void, so its own batch still contains and blocks
+        # on the target (T1 holds E5, wants E3; T2 holds E3, blocks on E5).
+        #
+        # The anchor is read column-only, so the ORM row for the target is first
+        # materialised BY the locking query and its state (voided_at below) is
+        # therefore the post-lock version, not an identity-map leftover.
+        anchor_customer_id = (
+            db.session.query(CashCollectionEvent.customer_id).filter(CashCollectionEvent.id == event_id).scalar()
+        )
+        if anchor_customer_id is None:
+            raise NotFoundError("Cash collection event not found")
+        cluster_candidate_ids = [
+            r[0]
+            for r in db.session.query(CashCollectionEvent.id)
+            .filter(
+                CashCollectionEvent.customer_id.in_(self._credit_pool_for_anchor(anchor_customer_id)),
+                CashCollectionEvent.voided_at.is_(None),
+                CashCollectionEvent.unapplied_amount > 0,
+            )
+            .all()
+        ]
+        locked_events = self._lock_credit_events_by_ids(
+            cluster_candidate_ids,
+            must_hold_event_ids=[event_id],
+        )
+        event = locked_events.get(event_id)
         if not event:
             raise NotFoundError("Cash collection event not found")
         if event.voided_at:
@@ -1979,6 +3221,18 @@ class CashCollectionService:
             "notes": event.notes,
             "proof_data": dict(event.proof_data or {}),
         }
+
+        # Spec 5.6: the replacement replays the ORIGINAL event's FROZEN scope —
+        # never current topology. A link/group created between the collection and
+        # this correction must not re-route the money: without this the repost
+        # would re-resolve a (possibly widened) scope and settle a sibling's older
+        # debt instead of the order the cash was actually collected against. The
+        # scope-membership guard cannot catch that — the order's owner IS inside
+        # the widened scope. Captured HERE, before the reversal below, so no future
+        # change to the reversal path can hand us a mutated row to read.
+        from business_app.services.allocation_scope import AllocationScope
+
+        frozen_scope = AllocationScope.from_event(event)
 
         self.reverse_collection_event(
             event.id,
@@ -2013,6 +3267,7 @@ class CashCollectionService:
             occurred_at=original_context["occurred_at"],
             commit=False,
             bypass_driver_block_check=True,
+            replay_scope=frozen_scope,
         )
 
         replacement_metadata = dict(replacement.entry_metadata or {})
@@ -2055,26 +3310,119 @@ class CashCollectionService:
             db.session.commit()
         return replacement
 
-    def _cod_payments_ordered(self, customer_id: int, *, for_update: bool = False) -> List[Payment]:
+    def _cod_payments_ordered(self, customer_id: int) -> List[Payment]:
         """CASH payments on the customer's DELIVERED orders, oldest-first.
 
         Unlike _active_cod_payments_query this keeps settled rows, so a caller modelling a
         pending reversal can resurrect one whose outstanding is only zero because the event
-        being reversed paid it.
+        being reversed paid it. Read-only by construction — see
+        :meth:`_lock_payments_by_ids` for the one place payment locks are taken.
         """
-        query = (
+        return self._cod_payments_ordered_for_users([customer_id])
+
+    def _cod_payments_ordered_for_users(self, user_ids: List[int]) -> List[Payment]:
+        """Ring-2 keep-settled mirror of :meth:`_active_cod_payments_query_for_users`.
+
+        CASH payments on DELIVERED orders of these users, oldest-first, settled
+        rows INCLUDED — a projection modelling a pending reversal must be able to
+        resurrect a payment whose outstanding is only zero because the event
+        being reversed paid it.
+
+        Deliberately lock-free and deliberately WITHOUT a ``for_update`` option:
+        this query orders by ``Order.created_at``, and a locking variant of it
+        would be a second payment lock order alongside
+        :meth:`_lock_payments_by_ids` — precisely the deadlock pair that method's
+        docstring exists to prevent.
+        """
+        if not user_ids:
+            return []
+        return (
             Payment.query.join(Order, Payment.order_id == Order.id)
             .options(contains_eager(Payment.order))
             .filter(
-                Payment.user_id == customer_id,
+                Payment.user_id.in_(user_ids),
                 Payment.payment_method == PaymentMethod.CASH,
                 Order.status == OrderStatus.DELIVERED,
             )
             .order_by(Order.created_at.asc(), Payment.created_at.asc(), Payment.id.asc())
+            .all()
         )
-        if for_update:
-            query = query.with_for_update(of=Payment)
-        return query.all()
+
+    def _place_cod_payments_ordered(self, address_ids: List[int]) -> List[Payment]:
+        """Ring-1 keep-settled mirror of :meth:`_active_place_cod_payment_ids`.
+
+        CASH payments on DELIVERED orders at these addresses, ANY owner, pure
+        oldest-first (decision 6 — there is no "own order" at a workplace).
+        Settled rows kept, for the same reversal-modelling reason as
+        :meth:`_cod_payments_ordered_for_users`. Lock-free.
+        """
+        if not address_ids:
+            return []
+        return (
+            Payment.query.join(Order, Payment.order_id == Order.id)
+            .options(contains_eager(Payment.order))
+            .filter(
+                Order.delivery_address_id.in_(address_ids),
+                Payment.payment_method == PaymentMethod.CASH,
+                Order.status == OrderStatus.DELIVERED,
+            )
+            .order_by(Order.created_at.asc(), Payment.created_at.asc(), Payment.id.asc())
+            .all()
+        )
+
+    def _scoped_settled_candidates(
+        self,
+        scope: "AllocationScope",
+        order_id: Optional[int],
+        outstanding_of: Callable[[Payment], Decimal],
+    ) -> List[Payment]:
+        """Frozen-scope candidate universe for a projection (spec 5.6).
+
+        The read-only twin of :meth:`_allocate_scoped`'s phase-3 ring assembly:
+        same rings, same order, same current-order tail — but over keep-settled
+        rows and an arbitrary ``outstanding_of``, so a caller can model balances
+        as they would be AFTER a pending reversal.
+
+        This mirror is what makes preview == apply structural rather than
+        coincidental: a projection walking a different candidate universe from
+        the allocator means the admin approves one outcome and causes another.
+        Any change to ``_allocate_scoped``'s ring assembly must be made here too.
+        """
+        cluster_ids = list(scope.orderer_cluster_user_ids)
+        if scope.scope_type != "place":
+            # CLUSTER/PERSONAL: active debts oldest-first, current order last —
+            # the convention _allocate_scoped's non-place branch follows.
+            return self._allocation_candidates(
+                customer_id=cluster_ids[0] if cluster_ids else None,
+                order_id=order_id,
+                payments=self._cod_payments_ordered_for_users(cluster_ids),
+                outstanding_of=outstanding_of,
+            )
+
+        ring1 = [
+            payment
+            for payment in self._place_cod_payments_ordered(list(scope.address_ids))
+            if outstanding_of(payment) > Decimal("0.00")
+        ]
+        ring1_ids = {payment.id for payment in ring1}
+        ring2 = [
+            payment
+            for payment in self._cod_payments_ordered_for_users(cluster_ids)
+            if payment.id not in ring1_ids and outstanding_of(payment) > Decimal("0.00")
+        ]
+        candidates = ring1 + ring2
+        # The same defensive tail _allocate_scoped appends LAST for a place post
+        # whose own order is in neither ring (both rings filter DELIVERED).
+        if order_id:
+            current = Payment.query.options(joinedload(Payment.order)).filter_by(order_id=order_id).first()
+            if (
+                current is not None
+                and current.payment_method == PaymentMethod.CASH
+                and outstanding_of(current) > Decimal("0.00")
+                and current.id not in {payment.id for payment in candidates}
+            ):
+                candidates.append(current)
+        return candidates
 
     def _allocation_candidates(
         self,
@@ -2084,7 +3432,7 @@ class CashCollectionService:
         payments: List[Payment],
         outstanding_of: Callable[[Payment], Decimal],
     ) -> List[Payment]:
-        """Payments the oldest-first allocator walks, in order: the customer's active COD
+        """Payments the oldest-first allocator walks, in order: the scope's active COD
         debts oldest-first, then the current order's own payment.
 
         `outstanding_of` lets a projection model balances that differ from the stored rows.
@@ -2122,32 +3470,177 @@ class CashCollectionService:
             remaining -= allocatable
         return plan, remaining
 
-    def _allocate_oldest_first(
+    def _oldest_first_rank(self, payment_ids: List[int]) -> Dict[int, int]:
+        """SQL-derived oldest-first rank for a set of payment ids.
+
+        Ordering MUST come from the database: the tz-awareness of DateTime
+        columns is mixed within a session (flushed-but-not-reloaded rows are
+        aware, SQLite-reloaded rows are naive), so a Python sort over
+        Order.created_at / Payment.created_at can raise TypeError.
+        """
+        rows = (
+            db.session.query(Payment.id)
+            .join(Order, Payment.order_id == Order.id)
+            .filter(Payment.id.in_(payment_ids))
+            .order_by(Order.created_at.asc(), Payment.created_at.asc(), Payment.id.asc())
+            .all()
+        )
+        return {r[0]: idx for idx, r in enumerate(rows)}
+
+    def _scoped_candidate_payment_ids(
+        self,
+        *,
+        scope: "AllocationScope",
+        order_id: Optional[int],
+    ) -> Tuple[List[int], List[int], Optional[int]]:
+        """Phase 1 of the two-phase lock discipline: the full cross-ring
+        candidate id superset, with NO locks taken.
+
+        Returns ``(ring1_ids, ring2_ids, current_payment_id)``. Ring 1 is empty
+        for every non-place scope; PERSONAL is simply a cluster of one, so it
+        shares this path (and therefore the one lock order).
+        """
+        ring1_ids: List[int] = []
+        if scope.scope_type == "place":
+            ring1_ids = self._active_place_cod_payment_ids(list(scope.address_ids))
+        ring1_id_set = set(ring1_ids)
+        ring2_ids = [
+            pid
+            for pid in self._active_cod_payment_ids_for_users(list(scope.orderer_cluster_user_ids))
+            if pid not in ring1_id_set
+        ]
+        current_payment_id: Optional[int] = None
+        if order_id:
+            # Payment.order_id is UNIQUE, so this is at most one row.
+            current_payment_id = db.session.query(Payment.id).filter(Payment.order_id == order_id).scalar()
+        return ring1_ids, ring2_ids, current_payment_id
+
+    def _lock_scoped_payments(self, *, scope: "AllocationScope", order_id: Optional[int]) -> Dict[int, Payment]:
+        """Phases 1+2: resolve the scope's candidate ids, then acquire them all
+        in ONE id-ordered ``FOR UPDATE`` (see :meth:`_lock_payments_by_ids`).
+
+        Used on its own by the PERSONAL_CARD_TRANSFER path, which must hold the
+        whole batch (its target included, via ``current_payment_id``) before it
+        settles the target — that allocation runs before the ring walk, and
+        sometimes instead of it.
+        """
+        ring1_ids, ring2_ids, current_payment_id = self._scoped_candidate_payment_ids(scope=scope, order_id=order_id)
+        return self._lock_payments_by_ids(self._combine_candidate_ids(ring1_ids, ring2_ids, current_payment_id))
+
+    def lock_order_settlement_candidates(self, order: Order, *, source: Any) -> Dict[int, Payment]:
+        """Pre-acquire the id-ordered payment batch a settlement of ``order`` will
+        touch, resolving the same scope ``post_collection`` will resolve.
+
+        For callers that must write a single payment row BEFORE calling
+        ``post_collection`` in the same transaction — today
+        ``convert_electronic_order_to_cash`` on the staff delivery-completion
+        path, which returns a ROW-LOCKED payment. Without this, that lone lock is
+        taken ahead of the batch that follows, and if the customer has an older
+        debt with a lower payment id the transaction holds P_target then requests
+        a set containing lower ids: the exact inversion removed from the
+        PERSONAL_CARD_TRANSFER path, and it deadlocks against any concurrent post
+        walking the batch in id order. Holding the batch first makes the later
+        single-row lock a re-request of a row we already own.
+        """
+        scope = self.resolve_allocation_scope(
+            order.user_id,
+            delivery_address_id=order.delivery_address_id,
+            source=source,
+        )
+        return self._lock_scoped_payments(scope=scope, order_id=order.id)
+
+    @staticmethod
+    def _combine_candidate_ids(
+        ring1_ids: Iterable[int],
+        ring2_ids: Iterable[int],
+        current_payment_id: Optional[int],
+    ) -> set:
+        all_ids = set(ring1_ids) | set(ring2_ids)
+        if current_payment_id is not None:
+            all_ids.add(current_payment_id)
+        return all_ids
+
+    def _allocate_scoped(
         self,
         *,
         event: CashCollectionEvent,
-        customer_id: int,
+        scope: "AllocationScope",
         order_id: Optional[int],
         allocation_mode: str,
         trigger_completion_notification: bool = True,
     ) -> None:
+        """Scope-aware ring allocator (spec 5.2).
+
+        Every scope — PERSONAL included — follows the two-phase locking
+        discipline (spec 5.3): resolve the full cross-ring candidate id superset
+        first, lock every row in ONE query ordered by Payment.id ASC (so
+        concurrent posts over overlapping rows always acquire locks in the same
+        order), then apply ring/oldest-first ordering purely in memory over the
+        locked rows.
+
+        PERSONAL is a cluster of one and produces byte-identical allocations to
+        the as-built oldest-first path; it shares this path precisely so it
+        cannot lock in a different order from a place/cluster post touching the
+        same rows.
+        """
         if self._to_decimal(event.amount) <= Decimal("0.00"):
             return
+
+        # Phase 1 — candidate id superset (no locks).
+        ring1_ids, ring2_ids, current_payment_id = self._scoped_candidate_payment_ids(scope=scope, order_id=order_id)
+        all_ids = self._combine_candidate_ids(ring1_ids, ring2_ids, current_payment_id)
+        if not all_ids:
+            return
+
+        # Phase 2 — ONE deterministic lock query (deadlock avoidance).
+        by_id = self._lock_payments_by_ids(all_ids)
 
         def live_outstanding(payment: Payment) -> Decimal:
             return self._to_decimal(payment.outstanding_amount)
 
-        candidates = self._allocation_candidates(
-            customer_id=customer_id,
-            order_id=order_id,
-            payments=self.get_active_cod_payments_for_customer(customer_id, for_update=True),
-            outstanding_of=live_outstanding,
-        )
+        # Phase 3 — ring ordering in memory over the already-locked rows, using
+        # the SQL-derived rank (never a Python datetime sort — see
+        # _oldest_first_rank).
+        rank = self._oldest_first_rank(list(all_ids))
+        ring1 = sorted((by_id[i] for i in ring1_ids if i in by_id), key=lambda p: rank[p.id])
+        ring2 = sorted((by_id[i] for i in ring2_ids if i in by_id), key=lambda p: rank[p.id])
+
+        if scope.scope_type == "place":
+            # Decision 6: pure oldest-first — the just-delivered order
+            # participates by age; there is no "own order" at a workplace.
+            candidates = ring1 + ring2
+            # Defensive fallback, mirroring CLUSTER below: both rings filter
+            # Order.status == DELIVERED, so a place-scoped source posted against
+            # an order that is not (yet) DELIVERED — the order-status guard is
+            # skipped entirely in that shape — would otherwise send the
+            # just-collected order's cash to coworkers/credit. Appending LAST
+            # preserves pure oldest-first for every order that IS in ring 1.
+            if current_payment_id is not None and current_payment_id not in {p.id for p in candidates}:
+                current = by_id.get(current_payment_id)
+                if (
+                    current is not None
+                    and current.payment_method == PaymentMethod.CASH
+                    and live_outstanding(current) > Decimal("0.00")
+                ):
+                    candidates.append(current)
+        else:
+            # CLUSTER keeps the as-built _allocation_candidates convention:
+            # active debts oldest-first; the current order's payment appended
+            # only when not already among them (e.g. PCT posted pre-delivery).
+            candidates = list(ring2)
+            if current_payment_id is not None and current_payment_id not in {p.id for p in candidates}:
+                current = by_id.get(current_payment_id)
+                if (
+                    current is not None
+                    and current.payment_method == PaymentMethod.CASH
+                    and live_outstanding(current) > Decimal("0.00")
+                ):
+                    candidates.append(current)
+
+        candidates = [
+            p for p in candidates if p.payment_method == PaymentMethod.CASH and live_outstanding(p) > Decimal("0.00")
+        ]
         plan, _residual = self._plan_allocation(candidates, self._to_decimal(event.unapplied_amount), live_outstanding)
-        # Continue this event's existing numbering rather than restarting at 1:
-        # a personal card transfer allocates to its target order first and then
-        # spills the residual through here. On an event with no allocations yet
-        # this resolves to 1, so every other source is unaffected.
         base_allocation_order = self._next_allocation_order(event.id)
         for offset, (payment, allocatable) in enumerate(plan):
             self._allocate_to_payment(
@@ -2158,6 +3651,34 @@ class CashCollectionService:
                 allocation_mode=allocation_mode,
                 trigger_completion_notification=trigger_completion_notification,
             )
+
+    def _allocate_oldest_first(
+        self,
+        *,
+        event: CashCollectionEvent,
+        customer_id: int,
+        order_id: Optional[int],
+        allocation_mode: str,
+        trigger_completion_notification: bool = True,
+    ) -> None:
+        """Personal-scope oldest-first allocation.
+
+        Kept as a named entry point (``scripts/remediate_stranded_card_transfer_
+        surplus.py`` calls it) but delegating to :meth:`_allocate_scoped` so
+        there is exactly ONE payment lock order in the codebase. A personal post
+        by an unlinked user routinely targets the same rows as a place-scoped
+        post by a coworker; locking them in ``Order.created_at`` order here and
+        ``Payment.id`` order there is precisely the deadlock pair.
+        """
+        from business_app.services.allocation_scope import AllocationScope
+
+        self._allocate_scoped(
+            event=event,
+            scope=AllocationScope.personal(customer_id),
+            order_id=order_id,
+            allocation_mode=allocation_mode,
+            trigger_completion_notification=trigger_completion_notification,
+        )
 
     def preview_personal_card_transfer(
         self,
@@ -2196,10 +3717,24 @@ class CashCollectionService:
         residual = amount - applied_to_order
 
         # The target settles first, so it is excluded from the spill exactly as the
-        # live allocator excludes it (its outstanding is 0 by then).
+        # live allocator excludes it (its outstanding is 0 by then). The spill
+        # universe comes from the SAME entry point post_collection uses —
+        # resolve_allocation_scope + get_active_cod_payments_for_scope — rather
+        # than a cluster lookup of its own. Two divergences that cost:
+        # a preview reading only the single account under-reports where a linked
+        # person's money lands, and a preview reading the cluster directly
+        # bypasses the grocery backstop (spec 5.8 layer 3), promising a spill onto
+        # a linked account that the forced-PERSONAL post can never perform.
+        # PERSONAL_CARD_TRANSFER is not in _PLACE_SCOPE_SOURCES, so this resolves
+        # CLUSTER or PERSONAL and never a place — coworkers are not a wallet.
+        scope = self.resolve_allocation_scope(
+            order.user_id,
+            delivery_address_id=order.delivery_address_id,
+            source=CashCollectionSource.PERSONAL_CARD_TRANSFER,
+        )
         candidates = [
             candidate
-            for candidate in self._active_cod_payments_query(order.user_id).all()
+            for candidate in self.get_active_cod_payments_for_scope(scope)
             if candidate.id != target_payment_id
         ]
         plan, remaining_as_credit = self._plan_allocation(
@@ -2249,6 +3784,20 @@ class CashCollectionService:
         the truth an order-total-based estimate misses when the payment is already settled
         from another source (card transfer, prepaid credit), where nothing can be applied
         and the whole amount lands as customer credit.
+
+        The candidate universe is the event's FROZEN scope (spec 5.6) — exactly
+        what ``adjust_event_amount`` replays via ``replay_scope=`` — so the modal
+        cannot promise one outcome and the confirmation cause another. Resolving
+        it from the poster's single account under-reported every cluster/place
+        event: the admin was told "10 000 settles this order" while the
+        correction actually settled a sibling's or coworker's older debt first.
+
+        Boundary, stated deliberately: this projects rings 1-2 (debt settlement).
+        It does NOT model ring 3, the residual reservation sweep, whose
+        allocations are releasable forward-looking state rather than debt
+        payment — ``credit_after`` is therefore the credit BEFORE any of it is
+        reserved against pending orders, which is the figure the modal's
+        "customer credit" line has always meant.
         """
         new_amount = self._to_decimal(new_amount)
         restored: Dict[int, Decimal] = {}
@@ -2265,12 +3814,31 @@ class CashCollectionService:
             collected = min(amount, max(Decimal("0.00"), collected))
             return max(Decimal("0.00"), amount - collected)
 
-        candidates = self._allocation_candidates(
-            customer_id=event.customer_id,
-            order_id=order_id,
-            payments=self._cod_payments_ordered(event.customer_id),
-            outstanding_of=outstanding_after_reversal,
-        )
+        from business_app.services.allocation_scope import AllocationScope
+
+        scope = AllocationScope.from_event(event)
+        # Mirrors the grocery backstop in post_collection (spec 5.8 layer 3):
+        # if the event's customer is CURRENTLY a grocery store, the replay
+        # apply forces PERSONAL scope regardless of what was stamped at post
+        # time, so the projection must too — otherwise a customer converted
+        # to grocery AFTER a cluster/place-scoped event gets a preview that
+        # promises a spill the apply can never perform. Keep these two in
+        # sync: any change to one backstop needs the mirrored change here.
+        if event.customer is not None and event.customer.is_grocery_store:
+            scope = AllocationScope.personal(event.customer_id)
+        if scope.scope_type == "personal":
+            # Kept explicit rather than folded into _scoped_settled_candidates so
+            # the unlinked/ungrouped projection is structurally the as-built one
+            # (the two are equivalent — personal is a cluster of one — but this
+            # way "personal is unchanged" is readable, not inferred).
+            candidates = self._allocation_candidates(
+                customer_id=event.customer_id,
+                order_id=order_id,
+                payments=self._cod_payments_ordered(event.customer_id),
+                outstanding_of=outstanding_after_reversal,
+            )
+        else:
+            candidates = self._scoped_settled_candidates(scope, order_id, outstanding_after_reversal)
         plan, residual = self._plan_allocation(candidates, new_amount, outstanding_after_reversal)
 
         applied_to_order = sum(
@@ -2320,6 +3888,15 @@ class CashCollectionService:
             allocation_order=allocation_order,
             allocation_mode=allocation_mode,
             allocation_metadata=metadata,
+            # Denormalized at-allocation audit stamps (spec §4.3/R6). Captured
+            # here, at allocation time, precisely because payment.user_id is
+            # mutable — a later re-read would fabricate history. The FK pair
+            # (event_id, payment_id) remains the source of truth; pre-migration
+            # rows stay NULL by design. Once allocation widens beyond a single
+            # account these two may legitimately differ, and they are the only
+            # record of who paid for whom.
+            source_customer_id=event.customer_id,
+            beneficiary_user_id=payment.user_id,
         )
         db.session.add(allocation)
         event.unapplied_amount = self._to_decimal(event.unapplied_amount) - amount

@@ -22,6 +22,7 @@ import {
   Spin,
   Alert,
   Switch,
+  Checkbox,
   InputNumber,
 } from 'antd';
 import {
@@ -42,6 +43,11 @@ import {
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { formatDate, formatDateTimeShort } from '../utils/dateUtils';
 import { formatMoney } from '../utils/formatMoney';
+import {
+  describeAllocationScope,
+  describeCashEditWarning,
+  hasPlaceScopedAllocation,
+} from '../utils/cashScopeDisplay';
 import adminService from '../services/adminService';
 import api from '../services/api';
 import { useTranslation } from 'react-i18next';
@@ -205,6 +211,23 @@ const Orders = () => {
   const [paymentMethodForm] = Form.useForm();
   const watchedPaymentMethod = Form.useWatch('payment_method', createOrderForm);
   const watchedStatusValue = Form.useWatch('status', statusForm);
+  const watchedBypassCodCheck = Form.useWatch('bypass_cod_check', paymentMethodForm);
+
+  // allowed_target_methods comes from OrderPaymentMethodEditService.get_edit_metadata,
+  // which previews every target with bypass_cod_check=False. For a customer at the
+  // COD active-debt cap that silently drops `cash` from the list — exactly the
+  // correction an operator needs when a card payment fails and the driver took the
+  // cash anyway. The backend supports and audits the override, so re-offer `cash`
+  // once the admin ticks the box. `business_account` is the only method the
+  // transition table allows into `cash` (ALLOWED_TRANSITIONS), and a target the
+  // backend refuses for any OTHER reason still comes back blocked from preview, so
+  // Confirm stays disabled — this can only widen the list, never bypass a check.
+  const paymentMethodTargets = useMemo(() => {
+    const allowed = selectedOrder?.allowed_target_methods || [];
+    if (!watchedBypassCodCheck) return allowed;
+    if (allowed.includes('cash') || selectedOrder?.payment_method !== 'business_account') return allowed;
+    return [...allowed, 'cash'].sort();
+  }, [selectedOrder, watchedBypassCodCheck]);
 
   const { data, isLoading } = useQuery({
     queryKey: ['orders', pagination, searchText, statusFilter, dateRange, fiscalizationFailedOnly],
@@ -518,6 +541,16 @@ const Orders = () => {
     setIsCashEditModalVisible(true);
   };
 
+  // Which scope will the correction replay against? A place-funded order
+  // settles the PLACE's oldest unpaid order first (a coworker's included), not
+  // just this customer's — say so before the admin types an amount.
+  const cashEditScopeCopy = hasPlaceScopedAllocation(selectedOrder?.payment_timeline?.timeline)
+    ? t('ui.orders.cash_edit_scope_place', "Settles this place's oldest unpaid order first")
+    : t(
+      'ui.orders.cash_edit_scope_cluster',
+      "Settles the customer's (and linked accounts') oldest unpaid order first",
+    );
+
   const handleCashEditPreview = async () => {
     let values;
     try {
@@ -549,7 +582,10 @@ const Orders = () => {
       message.success(t('ui.orders.collected_cash_updated', 'Collected cash updated'));
       const warnings = resp?.data?.warnings || [];
       if (warnings.length) {
-        Modal.warning({ title: t('ui.orders.collected_cash_warnings', 'Please note'), content: warnings.join('\n') });
+        Modal.warning({
+          title: t('ui.orders.collected_cash_warnings', 'Please note'),
+          content: warnings.map((w) => describeCashEditWarning(w, t)).join('\n'),
+        });
       }
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       try {
@@ -585,6 +621,8 @@ const Orders = () => {
     paymentMethodForm.setFieldsValue({
       new_method: (selectedOrder.allowed_target_methods || [])[0],
       reason: '',
+      // Always OFF on open: the cap override must be a deliberate per-edit act.
+      bypass_cod_check: false,
     });
     setPaymentMethodPreviewData(null);
     setPendingPaymentMethodPayload(null);
@@ -605,9 +643,13 @@ const Orders = () => {
     try {
       const values = await paymentMethodForm.validateFields();
       setPaymentMethodPreviewLoading(true);
-      const payload = { new_method: values.new_method, reason: values.reason };
+      // The override has to reach BOTH calls: preview computes blocking_reasons
+      // (which gate the Confirm button) and apply re-runs the very same preview.
+      const bypassCodCheck = Boolean(values.bypass_cod_check);
+      const payload = { new_method: values.new_method, reason: values.reason, bypass_cod_check: bypassCodCheck };
       const response = await adminService.previewOrderPaymentMethod(selectedOrder.id, {
         new_method: payload.new_method,
+        bypass_cod_check: bypassCodCheck,
       });
       setPaymentMethodPreviewData(response?.data || null);
       // Cache the validated payload so handlePaymentMethodConfirm doesn't depend
@@ -1767,6 +1809,17 @@ const Orders = () => {
                       render: (_, record) => `${formatMoney(record.allocated_amount ?? record.amount)} UZS`,
                     },
                     {
+                      // Scope + dual attribution stamps (spec §9): a workplace
+                      // collection must not read as personal cash, and a
+                      // cross-customer settlement must be traceable.
+                      title: t('ui.orders.timeline_scope', 'Scope'),
+                      key: 'scope',
+                      render: (_, record) => {
+                        const label = describeAllocationScope(record, t);
+                        return label ? <Tag color="purple">{label}</Tag> : '—';
+                      },
+                    },
+                    {
                       title: t('ui.orders.timeline_notes', 'Notes'),
                       dataIndex: 'notes',
                       key: 'notes',
@@ -2476,7 +2529,8 @@ const Orders = () => {
           <Form form={cashEditForm} layout="vertical">
             <Alert type="info" showIcon style={{ marginBottom: 12 }}
               message={t('ui.orders.collected_cash_hint',
-                'Enter the actual cash the driver collected. Any surplus over the order total becomes the customer\'s prepaid credit.')} />
+                'Enter the actual cash the driver collected. Any surplus over the order total becomes the customer\'s prepaid credit.')}
+              description={cashEditScopeCopy} />
             <Descriptions column={2} size="small" bordered style={{ marginBottom: 12 }}>
               <Descriptions.Item label={t('ui.orders.total_amount', 'Total Amount')}>
                 {formatMoney(selectedOrder?.total_amount)} UZS
@@ -2521,11 +2575,18 @@ const Orders = () => {
                 {cashEditPreview?.session_will_reopen ? t('ui.common.yes', 'Yes') : t('ui.common.no', 'No')}
               </Descriptions.Item>
             </Descriptions>
+            <Alert type="info" showIcon style={{ marginBottom: 6 }} message={cashEditScopeCopy} />
             {(cashEditPreview?.blocking_reasons || []).map((r, i) => (
               <Alert key={i} type="error" showIcon message={r} style={{ marginBottom: 6 }} />
             ))}
             {(cashEditPreview?.warnings || []).map((w, i) => (
-              <Alert key={i} type="warning" showIcon message={w} style={{ marginBottom: 6 }} />
+              <Alert
+                key={i}
+                type="warning"
+                showIcon
+                message={describeCashEditWarning(w, t)}
+                style={{ marginBottom: 6 }}
+              />
             ))}
             <div style={{ textAlign: 'right' }}>
               <Button onClick={() => setCashEditStep(1)} style={{ marginRight: 8 }}>
@@ -2568,13 +2629,35 @@ const Orders = () => {
               rules={[{ required: true, message: t('ui.orders.payment_method_required', 'Please select a payment method') }]}
             >
               <Select placeholder={t('ui.orders.select_payment_method', 'Select a payment method')}>
-                {(selectedOrder?.allowed_target_methods || []).map((method) => (
+                {paymentMethodTargets.map((method) => (
                   <Option key={method} value={method}>
                     {t(`ui.orders.payment_${method}`, method)}
                   </Option>
                 ))}
               </Select>
             </Form.Item>
+            <Form.Item name="bypass_cod_check" valuePropName="checked" style={{ marginBottom: 8 }}>
+              <Checkbox
+                onChange={(event) => {
+                  // Un-ticking withdraws `cash` from the option list; don't leave
+                  // it selected as a value the dropdown no longer offers.
+                  if (!event.target.checked && paymentMethodForm.getFieldValue('new_method') === 'cash') {
+                    paymentMethodForm.setFieldsValue({ new_method: undefined });
+                  }
+                }}
+              >
+                {t('ui.orders.payment_method_cod_override', 'Override the cash-on-delivery debt cap')}
+              </Checkbox>
+            </Form.Item>
+            <Alert
+              type={watchedBypassCodCheck ? 'warning' : 'info'}
+              showIcon
+              style={{ marginBottom: 16 }}
+              message={t(
+                'ui.orders.payment_method_cod_override_hint',
+                'Tick this only to deliberately exceed the customer\'s COD active-debt cap — for example when a card payment failed and the driver already took the cash. It re-enables "cash" as a target and is recorded in the order audit trail.',
+              )}
+            />
             <Form.Item
               name="reason"
               label={t('ui.orders.edit_reason', 'Reason')}
@@ -2619,6 +2702,20 @@ const Orders = () => {
               />
             ) : null}
 
+            {(paymentMethodPreviewData?.blocking_reasons || []).some((reason) =>
+              String(reason).startsWith('cod_debt_limit_reached'),
+            ) ? (
+              <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 16 }}
+                message={t(
+                  'ui.orders.payment_method_cod_override_available',
+                  'This customer is at their cash-on-delivery debt cap. Go back and tick "Override the cash-on-delivery debt cap" to apply the change anyway — the override is recorded in the audit trail.',
+                )}
+              />
+            ) : null}
+
             {(paymentMethodPreviewData?.warnings || []).length ? (
               <Alert
                 type="warning"
@@ -2644,6 +2741,18 @@ const Orders = () => {
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.orders.order_delivered', 'Order delivered')} span={2}>
                 {paymentMethodPreviewData?.is_delivered ? t('ui.common.yes', 'Yes') : t('ui.common.no', 'No')}
+              </Descriptions.Item>
+              <Descriptions.Item
+                label={t('ui.orders.payment_method_cod_override', 'Override the cash-on-delivery debt cap')}
+                span={2}
+              >
+                {pendingPaymentMethodPayload?.bypass_cod_check ? (
+                  <Tag color="orange">
+                    {t('ui.orders.payment_method_cod_override_active', 'Applied — recorded in the audit trail')}
+                  </Tag>
+                ) : (
+                  t('ui.common.no', 'No')
+                )}
               </Descriptions.Item>
             </Descriptions>
 

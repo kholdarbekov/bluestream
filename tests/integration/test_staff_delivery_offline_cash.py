@@ -372,3 +372,230 @@ def test_non_numeric_cash_collected_metadata_safe(
     fresh_payment = Payment.query.get(payment_id)
     assert fresh_payment.payment_method == PaymentMethod.CLICK
     assert fresh_payment.status == PaymentStatus.PENDING
+
+
+@pytest.mark.integration
+def test_conversion_is_preceded_by_the_id_ordered_batch_lock(
+    app, db, delivery_driver, driver_profile, sample_order, monkeypatch
+):
+    """Lock-order regression (plan 2b, spec 5.3/R6).
+
+    ``convert_electronic_order_to_cash`` returns a ROW-LOCKED payment and
+    ``post_collection`` then locks the whole id-ordered candidate batch in the
+    SAME transaction. If the single row went first and the customer has an older
+    debt with a LOWER payment id, this transaction would hold P_target and then
+    request a set containing lower ids — the exact inversion removed from the
+    PERSONAL_CARD_TRANSFER path, deadlocking against any concurrent post walking
+    the batch in id order. The batch must be acquired FIRST.
+    """
+    from datetime import timedelta
+
+    from business_app.services.cash_collection_service import CashCollectionService
+    from business_app.services.staff_service import StaffService
+
+    # An older delivered COD debt, created BEFORE the click payment so it holds
+    # the LOWER payment id — the inversion this test pins.
+    older_order = Order(
+        user_id=sample_order.user_id,
+        order_number="ORD-LOCK-ORDER-OLD",
+        status=OrderStatus.DELIVERED,
+        subtotal=Decimal("5000.00"),
+        delivery_fee=Decimal("0.00"),
+        discount_amount=Decimal("0.00"),
+        loyalty_discount=Decimal("0.00"),
+        total_amount=Decimal("5000.00"),
+        payment_method=PaymentMethod.CASH,
+        created_at=datetime.now(UTC) - timedelta(days=3),
+    )
+    db.session.add(older_order)
+    db.session.flush()
+    older_payment = Payment(
+        order_id=older_order.id,
+        user_id=sample_order.user_id,
+        payment_method=PaymentMethod.CASH,
+        amount=Decimal("5000.00"),
+        currency="UZS",
+        status=PaymentStatus.PENDING,
+        payment_id="cod_older_debt_lock_order",
+        amount_collected=Decimal("0.00"),
+        outstanding_amount=Decimal("5000.00"),
+    )
+    db.session.add(older_payment)
+    db.session.commit()
+
+    payment, delivery = _setup_electronic_order(
+        db, sample_order, delivery_driver,
+        payment_status=PaymentStatus.PENDING,
+        payment_id_str="click_lock_order_test",
+    )
+    assert older_payment.id < payment.id
+
+    calls = []
+    original_lock = CashCollectionService._lock_payments_by_ids
+    original_convert = CashCollectionService.convert_electronic_order_to_cash
+
+    def lock_spy(self, payment_ids):
+        calls.append(("lock", sorted(int(pid) for pid in payment_ids)))
+        return original_lock(self, payment_ids)
+
+    def convert_spy(self, order, **kwargs):
+        calls.append(("convert", order.id))
+        return original_convert(self, order, **kwargs)
+
+    monkeypatch.setattr(CashCollectionService, "_lock_payments_by_ids", lock_spy)
+    monkeypatch.setattr(CashCollectionService, "convert_electronic_order_to_cash", convert_spy)
+
+    with patch("business_app.tasks.notification_tasks.send_delivery_update_task.delay"):
+        with patch("business_app.tasks.delivery_tasks.optimize_driver_route_task.delay"):
+            StaffService.update_delivery_status(
+                delivery_id=delivery.id,
+                new_status="delivered",
+                staff_user_id=delivery_driver.id,
+                metadata={"cash_collected": str(sample_order.total_amount)},
+            )
+
+    assert calls, "no payment locks were taken at all"
+    assert calls[0][0] == "lock", calls
+    convert_index = next(i for i, (kind, _) in enumerate(calls) if kind == "convert")
+    assert convert_index > 0, calls
+    # The batch held before the conversion's single-row lock covers BOTH the
+    # target and the lower-id older debt.
+    batch_before_convert = [ids for kind, ids in calls[:convert_index] if kind == "lock"]
+    assert batch_before_convert, calls
+    assert {older_payment.id, payment.id} <= set(batch_before_convert[-1]), calls
+
+
+@pytest.mark.integration
+def test_plain_cash_delivery_batch_locks_before_any_payment_write(
+    app, db, delivery_driver, driver_profile, sample_order, monkeypatch
+):
+    """Lock-order regression, plain-CASH branch (plan 2b, spec 5.3/R6).
+
+    A plain CASH order does NOT reach ``post_collection`` lock-free. Marking it
+    delivered runs ``OrderService.update_order_status(..., DELIVERED)`` first, and
+    that path calls ``consume_reserved_prepayment_for_payment`` and
+    ``apply_customer_prepaid_credit_to_payment`` — both write
+    ``payment.amount_collected``, taking a ROW EXCLUSIVE lock on the target at the
+    next autoflush, ahead of ``_allocate_scoped``'s id-ordered batch. T1 then
+    holds P_target and requests {P_older, P_target} while a concurrent admin
+    collection holds P_older and blocks on P_target. Cluster-fungible credit makes
+    it likelier still: a SIBLING's over-collection now triggers the same pre-batch
+    write. The abort is worse than a 500 — ``_allocate_to_payment`` may already
+    have enqueued ``send_payment_confirmation_task``, which does not roll back.
+
+    So the id-ordered batch must be held BEFORE the first payment write, exactly
+    as on the electronic-conversion branch above.
+    """
+    from datetime import timedelta
+
+    from business_app.models.payment import CashCollectionEvent
+    from business_app.services.cash_collection_service import CashCollectionService
+    from business_app.services.staff_service import StaffService
+    from shared.enums import CashCollectionSource
+
+    # An older delivered COD debt, created first so it holds the LOWER payment id
+    # — the inversion this test pins.
+    older_order = Order(
+        user_id=sample_order.user_id,
+        order_number="ORD-PLAIN-CASH-OLD",
+        status=OrderStatus.DELIVERED,
+        subtotal=Decimal("5000.00"),
+        delivery_fee=Decimal("0.00"),
+        discount_amount=Decimal("0.00"),
+        loyalty_discount=Decimal("0.00"),
+        total_amount=Decimal("5000.00"),
+        payment_method=PaymentMethod.CASH,
+        created_at=datetime.now(UTC) - timedelta(days=3),
+    )
+    db.session.add(older_order)
+    db.session.flush()
+    older_payment = Payment(
+        order_id=older_order.id,
+        user_id=sample_order.user_id,
+        payment_method=PaymentMethod.CASH,
+        amount=Decimal("5000.00"),
+        currency="UZS",
+        status=PaymentStatus.PENDING,
+        payment_id="cod_older_debt_plain_cash",
+        amount_collected=Decimal("0.00"),
+        outstanding_amount=Decimal("5000.00"),
+    )
+    db.session.add(older_payment)
+    # Parked credit, so the pre-batch write is real rather than a no-op call.
+    credit_event = CashCollectionEvent(
+        customer_id=sample_order.user_id,
+        recorded_by_user_id=delivery_driver.id,
+        amount=Decimal("2000.00"),
+        currency="UZS",
+        source=CashCollectionSource.ADMIN_ADJUSTMENT,
+        occurred_at=datetime.now(UTC) - timedelta(days=1),
+        unapplied_amount=Decimal("2000.00"),
+        notes="parked over-collection",
+    )
+    db.session.add(credit_event)
+    db.session.commit()
+
+    address = _make_address(db, sample_order.user_id)
+    sample_order.payment_method = PaymentMethod.CASH
+    sample_order.status = OrderStatus.OUT_FOR_DELIVERY
+    sample_order.delivery_address_id = address.id
+    db.session.flush()
+    cod_payment = Payment(
+        order_id=sample_order.id,
+        user_id=sample_order.user_id,
+        payment_method=PaymentMethod.CASH,
+        amount=sample_order.total_amount,
+        currency="UZS",
+        status=PaymentStatus.PENDING,
+        payment_id="cod_plain_cash_lock_order",
+        amount_collected=Decimal("0.00"),
+        outstanding_amount=sample_order.total_amount,
+    )
+    db.session.add(cod_payment)
+    delivery = Delivery(
+        order_id=sample_order.id,
+        delivery_person_id=delivery_driver.id,
+        status=DeliveryStatus.ARRIVED,
+        scheduled_date=datetime.now(UTC),
+        scheduled_time_slot="09:00-12:00",
+    )
+    db.session.add(delivery)
+    db.session.commit()
+
+    assert older_payment.id < cod_payment.id
+
+    calls = []
+    original_lock = CashCollectionService._lock_payments_by_ids
+    original_apply = CashCollectionService.apply_customer_prepaid_credit_to_payment
+
+    def lock_spy(self, payment_ids):
+        calls.append(("lock", sorted(int(pid) for pid in payment_ids)))
+        return original_lock(self, payment_ids)
+
+    def apply_spy(self, payment):
+        calls.append(("payment_write", payment.id))
+        return original_apply(self, payment)
+
+    monkeypatch.setattr(CashCollectionService, "_lock_payments_by_ids", lock_spy)
+    monkeypatch.setattr(CashCollectionService, "apply_customer_prepaid_credit_to_payment", apply_spy)
+
+    with patch("business_app.tasks.notification_tasks.send_delivery_update_task.delay"):
+        with patch("business_app.tasks.delivery_tasks.optimize_driver_route_task.delay"):
+            StaffService.update_delivery_status(
+                delivery_id=delivery.id,
+                new_status="delivered",
+                staff_user_id=delivery_driver.id,
+                metadata={"cash_collected": str(sample_order.total_amount)},
+            )
+
+    assert calls, "no payment locks were taken at all"
+    write_index = next(i for i, (kind, _) in enumerate(calls) if kind == "payment_write")
+    # The pre-batch credit application really does write the payment row...
+    db.session.refresh(credit_event)
+    assert Decimal(str(credit_event.unapplied_amount)) < Decimal("2000.00")
+    # ...so the full id-ordered batch — older debt included — must already be held.
+    assert calls[0][0] == "lock", calls
+    assert write_index > 0, calls
+    batch_before_write = [ids for kind, ids in calls[:write_index] if kind == "lock"]
+    assert batch_before_write, calls
+    assert {older_payment.id, cod_payment.id} <= set(batch_before_write[-1]), calls

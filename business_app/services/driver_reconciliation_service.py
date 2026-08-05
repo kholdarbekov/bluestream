@@ -234,7 +234,10 @@ class DriverReconciliationService:
         if include_events and "delivery_count" not in stats:
             payload["delivery_count"] = len({event.delivery_id for event in events if event.delivery_id})
         if include_events:
-            payload["events"] = [self._serialize_collection_event(event) for event in events]
+            group_label_cache: Dict[int, Optional[str]] = {}
+            payload["events"] = [
+                self._serialize_collection_event(event, group_label_cache=group_label_cache) for event in events
+            ]
             payload["handoffs"] = [
                 handoff.to_dict() for handoff in (session.handoffs or []) if handoff.voided_at is None
             ]
@@ -243,14 +246,48 @@ class DriverReconciliationService:
             ]
         return payload
 
-    def _serialize_collection_event(self, event: CashCollectionEvent) -> Dict[str, Any]:
+    def _serialize_collection_event(
+        self,
+        event: CashCollectionEvent,
+        *,
+        group_label_cache: Optional[Dict[int, Optional[str]]] = None,
+    ) -> Dict[str, Any]:
         """Enrich a collection event with customer/order identity and a
-        per-order settlement breakdown for the admin session-detail modal."""
+        per-order settlement breakdown for the admin session-detail modal.
+
+        ``group_label_cache`` is an optional per-render memo supplied by
+        ``_serialize_session`` so a session full of place-scoped events costs
+        one ``address_groups`` SELECT per DISTINCT group rather than one per
+        event. It is deliberately caller-scoped, never instance state: a stale
+        label must not survive a group rename between requests."""
         data = event.to_dict()
         customer = event.customer
         data["customer_name"] = customer.full_name if customer else None
         data["customer_phone"] = customer.phone if customer else None
         data["order_number"] = event.order.order_number if event.order else None
+
+        # Scope attribution (Phase 2, spec §4/§5.1). This view is ADMIN-facing,
+        # so nothing is redacted: an admin auditing a driver's cash must be able
+        # to tell a shared-workplace (place) collection from personal cash, and
+        # to see which group it settled. Personal/legacy events (scope_type NULL
+        # or 'personal') degrade to today's meaning with a NULL group.
+        scope_type = getattr(event, "scope_type", None) or "personal"
+        snapshot = getattr(event, "scope_snapshot", None) or {}
+        group_id = snapshot.get("group_id") if scope_type == "place" else None
+        group_label = None
+        if group_id is not None:
+            cache = group_label_cache if group_label_cache is not None else {}
+            if group_id in cache:
+                group_label = cache[group_id]
+            else:
+                from business_app.models.customer_link import AddressGroup
+
+                group = AddressGroup.query.get(group_id)
+                group_label = group.label if group else None
+                cache[group_id] = group_label
+        data["scope_type"] = scope_type
+        data["scope_group_id"] = group_id
+        data["scope_group_label"] = group_label
 
         allocations: List[Dict[str, Any]] = []
         for alloc in event.allocations or []:
@@ -279,6 +316,10 @@ class DriverReconciliationService:
                     "payment_status": payment_status,
                     "payment_outstanding_amount": (float(outstanding) if outstanding is not None else None),
                     "settlement": settlement,
+                    # Dual audit stamps (spec §4.3): who paid -> whose debt it
+                    # settled. NULL on pre-migration/personal rows by design.
+                    "source_customer_id": getattr(alloc, "source_customer_id", None),
+                    "beneficiary_user_id": getattr(alloc, "beneficiary_user_id", None),
                 }
             )
         data["allocations"] = allocations

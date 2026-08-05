@@ -23,6 +23,40 @@ class Translation:
         self.missing_keys: Dict[str, set] = {}  # Track missing keys by language
         self._missing_key_log_limit = 100  # Max missing keys to track
 
+    def normalize_language(self, language: Optional[str]) -> str:
+        """Normalize locale variants to one of the supported language codes.
+
+        ``preferred_language`` is written raw from the caller's Telegram
+        ``language_code`` (an IETF tag such as ``ru-RU``) and is also settable
+        through ``POST /api/v1/auth/sync-profile`` with no validation. Without
+        this, such a value misses the requested-language lookup in :meth:`get`
+        entirely and every string is served in the FALLBACK language instead —
+        silently, because from ``get()``'s point of view the fallback worked.
+
+        Kept behaviourally identical to ``staff_bot/i18n.py::normalize_language``
+        so one stored value cannot mean two different languages on the two bots.
+        """
+        if not language:
+            return config.localization.default_language
+
+        value = str(language).strip().lower().replace("_", "-")
+        if not value:
+            return config.localization.default_language
+
+        if value in self.supported_languages:
+            return value
+
+        base = value.split("-", 1)[0]
+        if base in self.supported_languages:
+            return base
+
+        aliases = {
+            "english": "en",
+            "uzbek": "uz",
+            "russian": "ru",
+        }
+        return aliases.get(value, config.localization.default_language)
+
     async def load_translations(self):
         """Load translations from database"""
         try:
@@ -37,7 +71,7 @@ class Translation:
 
             # Organize translations by language
             for row in rows:
-                language = row['language']
+                language = self.normalize_language(row['language'])
                 key = row['key']
                 value = row['value']
 
@@ -64,25 +98,40 @@ class Translation:
         await self.load_translations()
         logger.info("Translation reload complete")
 
+    @staticmethod
+    def humanised_missing_key(key: str) -> str:
+        """The placeholder text :meth:`get` returns for an UNSEEDED key.
+
+        ``telegram.orders.cod_restricted_place`` -> ``Cod restricted place``.
+
+        Exposed so a call site can distinguish "this key rendered" from "this
+        key is not seeded here" WITHOUT re-deriving the formula — a copy of it
+        would silently stop matching the day this one changes. The comparison
+        is exact even for keys that take kwargs, because the humanised text
+        carries no ``{...}`` placeholder, so :meth:`get`'s ``.format()`` step
+        leaves it byte-identical.
+        """
+        last_part = key.rsplit('.', 1)[-1] if '.' in key else key
+        return last_part.replace('_', ' ').capitalize()
+
     def get(self, key: str, language: str = None, *args, **kwargs) -> str:
         """Get translation for key in specified language"""
-        if not language:
-            language = config.localization.default_language
+        language = self.normalize_language(language)
+        fallback_language = self.normalize_language(self.fallback_language)
 
         # Try to get translation in requested language
         if language in self.translations and key in self.translations[language]:
             translation = self.translations[language][key]
         # Fallback to default language
-        elif self.fallback_language in self.translations and key in self.translations[self.fallback_language]:
-            translation = self.translations[self.fallback_language][key]
-            logger.debug(f"Using fallback language '{self.fallback_language}' for key '{key}'")
+        elif fallback_language in self.translations and key in self.translations[fallback_language]:
+            translation = self.translations[fallback_language][key]
+            logger.debug(f"Using fallback language '{fallback_language}' for key '{key}'")
         # Return user-friendly fallback when translation is missing
         else:
             self._track_missing_key(key, language)
             logger.warning(f"Translation not found for key '{key}' in language '{language}' or fallback '{self.fallback_language}'")
             # Derive a readable fallback from the key (e.g. "telegram.menu.products" -> "Products")
-            last_part = key.rsplit('.', 1)[-1] if '.' in key else key
-            translation = last_part.replace('_', ' ').capitalize()
+            translation = self.humanised_missing_key(key)
 
         # Format with kwargs if provided
         if args or kwargs:
@@ -180,7 +229,9 @@ class Translation:
         SELECT preferred_language FROM users WHERE telegram_id = $1
         """
         language = await db_manager.fetchval(query, str(telegram_id))
-        return language or config.localization.default_language
+        # Normalised here too: callers pass this straight into keyboards and
+        # date formatting, not only into `get()`.
+        return self.normalize_language(language)
 
     def get_language_flag(self, language_code: str) -> str:
         """Get flag emoji for language"""

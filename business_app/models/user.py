@@ -102,6 +102,15 @@ class User(db.Model, TimestampMixin):
     referral_code = Column(String(20), unique=True, nullable=True, index=True)
     referred_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
 
+    # Canonical-customer identity link (Phase 1, multi-phone customer linking):
+    # points at the CanonicalCustomer this User account is grouped under, if any.
+    canonical_customer_id = Column(
+        Integer,
+        ForeignKey("canonical_customers.id", name="fk_users_canonical_customer_id"),
+        nullable=True,
+        index=True,
+    )
+
     # Telegram/Bot-specific fields
     telegram_id = Column(String(50), unique=True, nullable=True, index=True)
     telegram_username = Column(String(255), nullable=True)
@@ -315,6 +324,14 @@ class UserAddress(db.Model, TimestampMixin):
 
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    # Canonical-customer identity link (Phase 1, multi-phone customer linking):
+    # marks "same physical place" within one canonical customer's addresses.
+    address_group_id = Column(
+        Integer,
+        ForeignKey("address_groups.id", name="fk_addresses_address_group_id"),
+        nullable=True,
+        index=True,
+    )
     title = Column(String(100), nullable=True)
     full_address = Column(Text, nullable=False)
     street_address = Column(String(255), nullable=True)

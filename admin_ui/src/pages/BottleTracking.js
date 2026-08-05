@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { DEFAULT_PAGE_SIZE } from '../utils/constants';
 import {
+  Alert,
   Button,
   Card,
   Col,
@@ -63,6 +64,12 @@ const EVENT_TYPE_LABELS = {
   initial_balance: 'Initial Balance',
 };
 
+// Page sizes for the two place-ledger drawers. They are part of each drawer's
+// query key (same endpoint, same place, different page size ⇒ different cache
+// entry), so they must stay named constants, not inline literals.
+const LEDGER_DRAWER_PAGE_SIZE = 50;
+const PLACE_DETAIL_PAGE_SIZE = 20;
+
 const FINE_STATUS_COLORS = {
   pending: 'orange',
   invoiced: 'blue',
@@ -87,8 +94,8 @@ const DashboardStats = ({ stats, loading }) => {
       <Col xs={12} sm={6}>
         <Card>
           <Statistic
-            title={t('customers_with_balance', { defaultValue: 'Customers with Balance' })}
-            value={stats?.customers_with_balance ?? 0}
+            title={t('places_with_balance', { defaultValue: 'Places with Balance' })}
+            value={stats?.places_with_balance ?? 0}
           />
         </Card>
       </Col>
@@ -115,58 +122,66 @@ const DashboardStats = ({ stats, loading }) => {
   );
 };
 
-// --- Reusable customer + address picker ---
-const formatCustomerLabel = (user) => {
-  const name = [user.first_name, user.last_name].filter(Boolean).join(' ').trim();
-  const primary = name || user.company_name || user.email || `User #${user.id}`;
-  const bits = [];
-  if (user.phone) bits.push(user.phone);
-  if (user.company_name && name) bits.push(user.company_name);
-  return bits.length ? `${primary} — ${bits.join(' · ')}` : primary;
+// --- Place picker for the write modals (Adjust / Initial Balance / Fine) ---
+//
+// There is no customer field here on purpose. An admin adjusts a PLACE, not a
+// member: `bottle_balances` has no `user_id` column, so a shared place's bottles
+// are one pool with no coworker slices, and the audit stamp the ledger still
+// needs is derived server-side from the place's representative address. Asking
+// "which coworker?" would be a choice with no consequence — and a choice with no
+// consequence still reads to an admin as if it had one.
+
+/** One option per PLACE, folded from the per-address search hits.
+ *
+ * `GET /admin/addresses/search` answers per ADDRESS, so a shared place comes
+ * back once per member. Offering those separately would put the deleted coworker
+ * choice straight back on screen, so they collapse to a single option keyed by
+ * `address_group_id` and valued with the LOWEST member id present — matching the
+ * backend's representative-address rule, though any member id resolves to the
+ * same place.
+ */
+export const foldSearchHitsToPlaces = (hits) => {
+  const byPlace = new Map();
+  (hits || []).forEach((hit) => {
+    const key = hit.address_group_id != null ? `group:${hit.address_group_id}` : `addr:${hit.address_id}`;
+    const kept = byPlace.get(key);
+    if (!kept || hit.address_id < kept.address_id) byPlace.set(key, hit);
+  });
+  return [...byPlace.values()];
 };
 
-const CustomerAddressFields = ({ form, userFieldName = 'user_id', addressFieldName = 'address_id' }) => {
+const PlaceField = ({ onSelect }) => {
   const { t } = useTranslation('bottle_tracking');
   const [searchTerm, setSearchTerm] = useState('');
   const debounceRef = useRef();
 
-  const selectedUserId = Form.useWatch(userFieldName, form);
-
-  const { data: usersData, isFetching: usersFetching } = useQuery({
-    queryKey: ['bottle-customer-search', searchTerm],
-    queryFn: () => adminService.getUsers({ search: searchTerm, per_page: DEFAULT_PAGE_SIZE }),
+  // `exclude_grouped` defaults to TRUE on this endpoint (it was built for the
+  // place-group picker, which must not offer an already-grouped address). Here
+  // the opposite is needed: a grouped address IS a shared place, and excluding
+  // them would make every shared place unreachable from these modals.
+  const { data, isFetching } = useQuery({
+    queryKey: ['bottle-place-search', searchTerm],
+    queryFn: () => adminService.searchAddresses(searchTerm, false),
     enabled: searchTerm.length >= 2,
     placeholderData: keepPreviousData,
   });
 
-  const { data: selectedUserData } = useQuery({
-    queryKey: ['bottle-customer-details', selectedUserId],
-    queryFn: () => adminService.getUserDetails(selectedUserId),
-    enabled: Boolean(selectedUserId),
-  });
-
-  const { data: addressesData, isFetching: addressesFetching } = useQuery({
-    queryKey: ['bottle-customer-addresses', selectedUserId],
-    queryFn: () => adminService.getUserAddresses(selectedUserId),
-    enabled: Boolean(selectedUserId),
-  });
-
-  const users = usersData?.data?.users || usersData?.data?.items || usersData?.data || [];
-  const selectedUser = selectedUserData?.data?.user || selectedUserData?.data || null;
-
-  const userOptions = useMemo(() => {
-    const options = users.map((u) => ({ value: u.id, label: formatCustomerLabel(u), user: u }));
-    if (selectedUser && !options.find((o) => o.value === selectedUser.id)) {
-      options.unshift({ value: selectedUser.id, label: formatCustomerLabel(selectedUser), user: selectedUser });
-    }
-    return options;
-  }, [users, selectedUser]);
-
-  const addresses = addressesData?.data?.addresses || addressesData?.data?.items || addressesData?.data || [];
-  const addressOptions = addresses.map((a) => ({
-    value: a.id,
-    label: a.title || a.label || a.address || `Address #${a.id}`,
-  }));
+  const options = useMemo(() => {
+    const places = foldSearchHitsToPlaces(data?.data?.addresses || []);
+    return places.map((place) => {
+      const where = [place.title, place.full_address].filter(Boolean).join(', ') || `Address #${place.address_id}`;
+      if (place.address_group_id != null) {
+        return { value: place.address_id, label: `${where} — ${t('shared_place_tag', { defaultValue: 'shared place' })}`, place };
+      }
+      const owner = place.owner || {};
+      const who = [owner.first_name, owner.last_name].filter(Boolean).join(' ').trim();
+      return {
+        value: place.address_id,
+        label: [[who, owner.phone].filter(Boolean).join(' · '), where].filter(Boolean).join(' — '),
+        place,
+      };
+    });
+  }, [data, t]);
 
   const handleSearch = (val) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -174,29 +189,73 @@ const CustomerAddressFields = ({ form, userFieldName = 'user_id', addressFieldNa
   };
 
   return (
-    <>
-      <Form.Item name={userFieldName} label={t('customer', { defaultValue: 'Customer' })} rules={[{ required: true, message: t('select_customer_required', { defaultValue: 'Select a customer' }) }]}>
-        <Select
-          showSearch
-          placeholder={t('search_customer_placeholder', { defaultValue: 'Search by phone, name, or company' })}
-          filterOption={false}
-          onSearch={handleSearch}
-          loading={usersFetching}
-          options={userOptions}
-          onChange={() => form.setFieldValue(addressFieldName, undefined)}
-          notFoundContent={searchTerm.length < 2 ? t('type_at_least_2_chars', { defaultValue: 'Type at least 2 characters' }) : (usersFetching ? t('searching', { defaultValue: 'Searching…' }) : t('no_matches', { defaultValue: 'No matches' }))}
-        />
-      </Form.Item>
-      <Form.Item name={addressFieldName} label={t('address', { defaultValue: 'Address' })} rules={[{ required: true, message: t('select_address_required', { defaultValue: 'Select an address' }) }]}>
-        <Select
-          placeholder={selectedUserId ? t('select_address_required', { defaultValue: 'Select an address' }) : t('select_customer_first', { defaultValue: 'Select customer first' })}
-          disabled={!selectedUserId}
-          loading={addressesFetching}
-          options={addressOptions}
-          notFoundContent={!selectedUserId ? t('select_customer_first', { defaultValue: 'Select customer first' }) : t('no_addresses', { defaultValue: 'No addresses' })}
-        />
-      </Form.Item>
-    </>
+    <Form.Item
+      name="address_id"
+      label={t('place', { defaultValue: 'Place' })}
+      rules={[{ required: true, message: t('select_place_required', { defaultValue: 'Select a place' }) }]}
+    >
+      <Select
+        showSearch
+        placeholder={t('search_place_placeholder', { defaultValue: 'Search by phone, name, or address' })}
+        filterOption={false}
+        onSearch={handleSearch}
+        loading={isFetching}
+        options={options}
+        onChange={(_value, option) => onSelect && onSelect(option?.place || null)}
+        notFoundContent={searchTerm.length < 2 ? t('type_at_least_2_chars', { defaultValue: 'Type at least 2 characters' }) : (isFetching ? t('searching', { defaultValue: 'Searching…' }) : t('no_matches', { defaultValue: 'No matches' }))}
+      />
+    </Form.Item>
+  );
+};
+
+// THE rule for turning a balance row into the address id every write/read
+// route takes. A shared place has `address_id === null`
+// (`ck_bottle_balance_scope`), so `representative_address_id` — any member
+// address, which the backend expands back to the whole place — is the only id
+// there is to send. Solo places carry `address_id` and no group.
+//
+// One exported helper, because the row actions and the write-modal prefill both
+// need it and two hand-written copies of "which id represents this place" can
+// drift apart into a shared place that opens the right drawer but writes to the
+// wrong scope.
+export const placeAddressIdOf = (record) =>
+  record.address_id ?? record.representative_address_id;
+
+// Prefill helper for the place write modals (Adjust / Initial Balance / Fine).
+// A balance row is a PLACE, so the address is the whole of the prefill — there
+// is no member to seed. (This used to write `user_id: undefined` FIRST, because
+// the old customer picker wiped `address_id` on every user change — hazard H8.
+// That control is gone, and so is the ordering hazard.)
+export const prefillPlaceWriteForm = (form, record) => {
+  form.setFieldValue('address_id', placeAddressIdOf(record));
+};
+
+// Shows the picked place's balance beneath the place field in the Fine modal.
+// There is one pool per place, so this single number is what an admin judges a
+// shortage against. Keyed off the picked place's own record (its owner is a
+// lookup key for the existing per-customer summary endpoint, not a member the
+// admin chose — the fine is still issued against the place).
+const FineBalanceContext = ({ place }) => {
+  const { t } = useTranslation('bottle_tracking');
+  const ownerId = place?.owner?.id;
+  const addressId = place?.address_id;
+
+  const { data: balancesData } = useQuery({
+    queryKey: ['bottle-fine-balance-context', ownerId],
+    queryFn: () => adminService.getCustomerPlaceSummary(ownerId),
+    enabled: Boolean(ownerId && addressId),
+  });
+
+  const addr = (balancesData?.data?.addresses || []).find((a) => a.address_id === addressId);
+  if (!addr) return null;
+
+  return (
+    <Space direction="vertical" size={2} style={{ display: 'block', marginBottom: 16 }}>
+      <Text>
+        {t('balance_label', { defaultValue: 'Balance' })}: {addr.place_balance ?? 0}
+        {addr.is_grouped && <Tag color="purple" style={{ marginLeft: 8 }}>{t('grouped_tag', { defaultValue: 'grouped' })}</Tag>}
+      </Text>
+    </Space>
   );
 };
 
@@ -243,8 +302,14 @@ const BottleTracking = () => {
   const [adjustmentOpen, setAdjustmentOpen] = useState(false);
   const [initialBalanceOpen, setInitialBalanceOpen] = useState(false);
   const [fineCreateOpen, setFineCreateOpen] = useState(false);
+  // The place record behind the fine form's picked address — its balance is the
+  // context an admin judges a shortage against. Form state holds the address id;
+  // this holds the rest of the row so the readout needs no second lookup.
+  const [finePlace, setFinePlace] = useState(null);
   const [ledgerDrawerOpen, setLedgerDrawerOpen] = useState(false);
   const [ledgerDrawerTarget, setLedgerDrawerTarget] = useState(null);
+  const [placeDetailOpen, setPlaceDetailOpen] = useState(false);
+  const [placeDetailTarget, setPlaceDetailTarget] = useState(null);
 
   // Forms
   const [adjustmentForm] = Form.useForm();
@@ -345,17 +410,39 @@ const BottleTracking = () => {
     enabled: activeTab === 'transfers',
   });
 
-  // Ledger drawer query
+  // Ledger drawer query — a place's ledger is address-keyed; the backend
+  // expands any member address back to the whole place.
+  //
+  // Both drawers below read the SAME place through the SAME endpoint, only at
+  // different page sizes, so `per_page` is part of the query key: on one shared
+  // key React Query would dedupe the in-flight fetch and whichever drawer
+  // mounted second would silently render the other's page size.
   const { data: addressLedgerData, isLoading: addressLedgerLoading } = useQuery({
-    queryKey: ['bottle-address-ledger', ledgerDrawerTarget?.user_id, ledgerDrawerTarget?.address_id],
+    queryKey: ['bottle-place-ledger', ledgerDrawerTarget?.address_id, LEDGER_DRAWER_PAGE_SIZE],
 
-    queryFn: () => adminService.getBottleLedgerForAddress(
-      ledgerDrawerTarget.user_id,
+    queryFn: () => adminService.getPlaceBottleLedger(
       ledgerDrawerTarget.address_id,
-      { per_page: 50 }
+      { per_page: LEDGER_DRAWER_PAGE_SIZE }
     ),
 
-    enabled: Boolean(ledgerDrawerTarget),
+    enabled: Boolean(ledgerDrawerTarget?.address_id),
+  });
+
+  // Place detail drawer: one pool + that place's own ledger. A balance row has
+  // no `user_id` (BLOCKER-2) and nothing user-keyed may hang off it, so the
+  // drawer renders the row it was opened from plus the PLACE ledger.
+  // `getClusterBottleLedger` — the people axis — is deliberately not used here:
+  // it heads a cluster-scoped table with a place total, so for unlinked
+  // coworkers it showed "7 at this place" above a ledger that summed to 6.
+  const { data: placeLedgerData, isLoading: placeLedgerLoading } = useQuery({
+    queryKey: ['bottle-place-ledger', placeDetailTarget?.address_id, PLACE_DETAIL_PAGE_SIZE],
+
+    queryFn: () => adminService.getPlaceBottleLedger(
+      placeDetailTarget.address_id,
+      { per_page: PLACE_DETAIL_PAGE_SIZE }
+    ),
+
+    enabled: Boolean(placeDetailOpen && placeDetailTarget?.address_id),
   });
 
   const dashboard = dashboardData?.data || {};
@@ -427,6 +514,7 @@ const BottleTracking = () => {
       message.success(t('fine_created', { defaultValue: 'Fine created' }));
       setFineCreateOpen(false);
       fineForm.resetFields();
+      setFinePlace(null);
       refreshAll();
     },
 
@@ -445,10 +533,12 @@ const BottleTracking = () => {
   });
 
   const reconcileMutation = useMutation({
-    mutationFn: ({ userId, addressId }) => adminService.reconcileBottleBalance(userId, addressId),
+    mutationFn: ({ addressId }) => adminService.reconcileBottleBalance(addressId),
 
     onSuccess: (res) => {
-      const diff = res?.data?.difference;
+      // `reconcile_balance` returns `discrepancy` — `difference` was never a
+      // backend key, so this warning branch had never once fired.
+      const diff = res?.data?.discrepancy;
       if (diff && diff !== 0) {
         message.warning(t('reconciled_corrected', { diff, defaultValue: 'Reconciled — balance corrected by {{diff}}' }));
       } else {
@@ -498,19 +588,30 @@ const BottleTracking = () => {
   // --- Balance columns ---
   const balanceColumns = [
     {
-      title: t('customer', { defaultValue: 'Customer' }),
-      key: 'customer',
+      // A balance row is a PLACE (the address group when grouped, else the
+      // address), so it has a label and members — never a single owner.
+      title: t('place', { defaultValue: 'Place' }),
+      key: 'place',
       render: (_, record) => (
         <Space direction="vertical" size={0}>
-          <Text strong>{record.customer_name || record.user_name || `User #${record.user_id}`}</Text>
-          <Text type="secondary">{record.customer_phone || record.user_phone || ''}</Text>
+          <Space size={4}>
+            <Text strong>{record.place_label}</Text>
+            {record.is_shared_place && (
+              <Tag color="purple">{t('shared_place_tag', { defaultValue: 'shared place' })}</Tag>
+            )}
+          </Space>
+          <Text type="secondary">{(record.member_names || []).join(', ')}</Text>
         </Space>
       ),
     },
     {
       title: t('address', { defaultValue: 'Address' }),
       key: 'address',
-      render: (_, record) => record.address_title || record.address_label || `Address #${record.address_id}`,
+      // A shared place spans several addresses and the serializer only carries
+      // address details for solo rows, so there is nothing to name here.
+      render: (_, record) => (
+        record.is_shared_place ? '—' : (record.full_address || record.address_title || '—')
+      ),
     },
     {
       title: t('balance', { defaultValue: 'Balance' }),
@@ -541,41 +642,64 @@ const BottleTracking = () => {
     {
       title: t('actions', { defaultValue: 'Actions' }),
       key: 'actions',
-      render: (_, record) => (
-        <Space>
-          <Button
-            size="small"
-            icon={<EyeOutlined />}
-            onClick={() => {
-              setLedgerDrawerTarget({ user_id: record.user_id, address_id: record.address_id });
-              setLedgerDrawerOpen(true);
-            }}
-          >
-            {t('ledger_button', { defaultValue: 'Ledger' })}
-          </Button>
-          <Button
-            size="small"
-            icon={<EditOutlined />}
-            onClick={() => {
-              adjustmentForm.setFieldsValue({
-                user_id: record.user_id,
-                address_id: record.address_id,
-              });
-              setAdjustmentOpen(true);
-            }}
-          >
-            {t('adjust_button', { defaultValue: 'Adjust' })}
-          </Button>
-          <Button
-            size="small"
-            icon={<SyncOutlined />}
-            loading={reconcileMutation.isPending}
-            onClick={() => reconcileMutation.mutate({ userId: record.user_id, addressId: record.address_id })}
-          >
-            {t('reconcile_button', { defaultValue: 'Reconcile' })}
-          </Button>
-        </Space>
-      ),
+      // Every action is address-keyed; `placeAddressIdOf` is the single rule for
+      // which id represents this place (see its definition above).
+      render: (_, record) => {
+        const placeAddressId = placeAddressIdOf(record);
+        return (
+          <Space>
+            <Button
+              size="small"
+              icon={<AuditOutlined />}
+              onClick={() => {
+                setPlaceDetailTarget({
+                  address_id: placeAddressId,
+                  address_group_id: record.address_group_id,
+                  place_label: record.place_label,
+                  member_names: record.member_names,
+                  member_address_ids: record.member_address_ids,
+                  is_shared_place: record.is_shared_place,
+                  balance: record.balance,
+                });
+                setPlaceDetailOpen(true);
+              }}
+            >
+              {t('details_button', { defaultValue: 'Details' })}
+            </Button>
+            <Button
+              size="small"
+              icon={<EyeOutlined />}
+              onClick={() => {
+                setLedgerDrawerTarget({ address_id: placeAddressId, place_label: record.place_label });
+                setLedgerDrawerOpen(true);
+              }}
+            >
+              {t('ledger_button', { defaultValue: 'Ledger' })}
+            </Button>
+            <Button
+              size="small"
+              icon={<EditOutlined />}
+              onClick={() => {
+                prefillPlaceWriteForm(adjustmentForm, record);
+                setAdjustmentOpen(true);
+              }}
+            >
+              {t('adjust_button', { defaultValue: 'Adjust' })}
+            </Button>
+            <Button
+              size="small"
+              icon={<SyncOutlined />}
+              loading={reconcileMutation.isPending}
+              // A group whose every member address has been deleted leaves no
+              // id to send; without this the POST goes to `/reconcile/undefined`.
+              disabled={!placeAddressId}
+              onClick={() => reconcileMutation.mutate({ addressId: placeAddressId })}
+            >
+              {t('reconcile_button', { defaultValue: 'Reconcile' })}
+            </Button>
+          </Space>
+        );
+      },
     },
   ];
 
@@ -619,12 +743,9 @@ const BottleTracking = () => {
         return <Text strong style={{ color }}>{num > 0 ? `+${num}` : num}</Text>;
       },
     },
-    {
-      title: t('balance_after', { defaultValue: 'Balance After' }),
-      dataIndex: 'balance_after',
-      key: 'balance_after',
-      render: (val) => Number(val) || 0,
-    },
+    // No `balance_after` here: this tab is the UNFILTERED ledger, so
+    // consecutive rows belong to different places and the column reads as a
+    // running total that never was one.
     {
       title: t('actor', { defaultValue: 'Actor' }),
       key: 'actor',
@@ -713,13 +834,20 @@ const BottleTracking = () => {
     },
   ];
 
-  // --- Address ledger columns (drawer) ---
+  // --- Place ledger columns (Ledger drawer) ---
   const addressLedgerColumns = [
     {
       title: t('date', { defaultValue: 'Date' }),
       dataIndex: 'occurred_at',
       key: 'occurred_at',
       render: (val) => (val ? formatDateTimeShort(val) : '—'),
+    },
+    {
+      // A place's rows come from different people at a shared address, so the
+      // ledger keeps names even though the balance above them does not.
+      title: t('member', { defaultValue: 'Member' }),
+      key: 'member',
+      render: (_, record) => record.user_name || `User #${record.user_id}`,
     },
     {
       title: t('event', { defaultValue: 'Event' }),
@@ -743,6 +871,8 @@ const BottleTracking = () => {
       },
     },
     {
+      // Kept here alone: this drawer paginates ONE place's full ledger, so the
+      // running balance is genuinely monotonic down the column.
       title: t('balance_after', { defaultValue: 'Balance After' }),
       dataIndex: 'balance_after',
       key: 'balance_after',
@@ -750,7 +880,59 @@ const BottleTracking = () => {
     { title: t('notes', { defaultValue: 'Notes' }), dataIndex: 'notes', key: 'notes', ellipsis: true },
   ];
 
+  // --- Place ledger columns (place detail drawer) — the same place ledger as
+  // above, shown as an unpaginated newest-first excerpt beside the place total.
+  const placeLedgerColumns = [
+    {
+      title: t('date', { defaultValue: 'Date' }),
+      dataIndex: 'occurred_at',
+      key: 'occurred_at',
+      render: (val) => (val ? formatDateTimeShort(val) : '—'),
+    },
+    {
+      title: t('member', { defaultValue: 'Member' }),
+      key: 'member',
+      render: (_, record) => record.user_name || `User #${record.user_id}`,
+    },
+    {
+      title: t('address', { defaultValue: 'Address' }),
+      key: 'address',
+      render: (_, record) => record.address_title || `Address #${record.address_id}`,
+    },
+    {
+      title: t('event', { defaultValue: 'Event' }),
+      dataIndex: 'event_type',
+      key: 'event_type',
+      render: (val) => (
+        // eslint-disable-next-line security/detect-object-injection
+        <Tag color={EVENT_TYPE_COLORS[val] || 'default'}>
+          {eventTypeLabel(val)}
+        </Tag>
+      ),
+    },
+    {
+      title: t('qty', { defaultValue: 'Qty' }),
+      dataIndex: 'quantity',
+      key: 'quantity',
+      render: (val) => {
+        const num = Number(val) || 0;
+        const color = num > 0 ? '#cf1322' : num < 0 ? '#389e0d' : undefined;
+        return <Text strong style={{ color }}>{num > 0 ? `+${num}` : num}</Text>;
+      },
+    },
+    // No `balance_after`, per the plan's §3.4 (Q4) ruling. NOT because the
+    // number would be wrong here: both drawers now read the same newest-first
+    // place ledger via `getPlaceBottleLedger`, so this excerpt's top row IS the
+    // newest entry and its `balance_after` IS the place total shown above. The
+    // reason is editorial — the paginated ledger drawer is the canonical
+    // place-ledger view and owns the running-balance column; this panel is a
+    // glance at recent activity beside the total, and repeating the total in a
+    // column invites reading the excerpt as a complete ledger.
+    { title: t('notes', { defaultValue: 'Notes' }), dataIndex: 'notes', key: 'notes', ellipsis: true },
+  ];
+
   const addressLedgerEntries = addressLedgerData?.data?.items || addressLedgerData?.data || [];
+  const placeLedgerEntries = placeLedgerData?.data?.items || placeLedgerData?.data || [];
 
   // --- Tab items ---
   const tabItems = [
@@ -761,7 +943,7 @@ const BottleTracking = () => {
         <>
           <Space style={{ marginBottom: 16 }} wrap>
             <Input.Search
-              placeholder={t('search_customer_balance_placeholder', { defaultValue: 'Search customer...' })}
+              placeholder={t('search_customer_balance_placeholder', { defaultValue: 'Search by any member (name or phone)…' })}
               allowClear
               style={{ width: 250 }}
               onSearch={(val) => {
@@ -788,7 +970,7 @@ const BottleTracking = () => {
           <Table
             columns={balanceColumns}
             dataSource={balances}
-            rowKey={(r) => r.id || `${r.user_id}_${r.address_id}`}
+            rowKey={(r) => r.id}
             loading={balancesLoading}
             pagination={{
               current: balancePagination.page,
@@ -1062,7 +1244,7 @@ const BottleTracking = () => {
           layout="vertical"
           onFinish={(values) => adjustmentMutation.mutate(values)}
         >
-          <CustomerAddressFields form={adjustmentForm} />
+          <PlaceField />
           <Form.Item
             name="adjustment"
             label={t('adjustment_label', { defaultValue: 'Adjustment (positive = add bottles to customer, negative = remove)' })}
@@ -1089,7 +1271,7 @@ const BottleTracking = () => {
           layout="vertical"
           onFinish={(values) => initialBalanceMutation.mutate(values)}
         >
-          <CustomerAddressFields form={initialBalanceForm} />
+          <PlaceField />
           <Form.Item name="quantity" label={t('bottle_quantity_label', { defaultValue: 'Bottle Quantity' })} rules={[{ required: true }]}>
             <InputNumber style={{ width: '100%' }} min={0} />
           </Form.Item>
@@ -1103,7 +1285,7 @@ const BottleTracking = () => {
       <Modal
         title={t('create_fine_title', { defaultValue: 'Create Bottle Fine' })}
         open={fineCreateOpen}
-        onCancel={() => { setFineCreateOpen(false); fineForm.resetFields(); }}
+        onCancel={() => { setFineCreateOpen(false); fineForm.resetFields(); setFinePlace(null); }}
         onOk={() => fineForm.submit()}
         confirmLoading={fineCreateMutation.isPending}
       >
@@ -1112,7 +1294,8 @@ const BottleTracking = () => {
           layout="vertical"
           onFinish={(values) => fineCreateMutation.mutate(values)}
         >
-          <CustomerAddressFields form={fineForm} />
+          <PlaceField onSelect={setFinePlace} />
+          <FineBalanceContext place={finePlace} />
           <Form.Item name="quantity" label={t('bottles_to_fine_label', { defaultValue: 'Bottles to Fine For' })} rules={[{ required: true }]}>
             <InputNumber style={{ width: '100%' }} min={1} />
           </Form.Item>
@@ -1125,16 +1308,18 @@ const BottleTracking = () => {
         </Form>
       </Modal>
 
-      {/* Address Ledger Drawer */}
+      {/* Place Ledger Drawer — every member's movements at one place */}
       <Drawer
-        title={t('address_ledger_title', { defaultValue: 'Address Bottle Ledger' })}
+        title={t('place_ledger_title', { defaultValue: 'Place Bottle Ledger' })}
         open={ledgerDrawerOpen}
         onClose={() => { setLedgerDrawerOpen(false); setLedgerDrawerTarget(null); }}
         width={700}
       >
         {ledgerDrawerTarget && (
           <Descriptions column={2} size="small" style={{ marginBottom: 16 }}>
-            <Descriptions.Item label={t('user_id_label', { defaultValue: 'User ID' })}>{ledgerDrawerTarget.user_id}</Descriptions.Item>
+            {/* No user in scope: the ledger is keyed by the place, and the
+                address id is the member address it was resolved from. */}
+            <Descriptions.Item label={t('place', { defaultValue: 'Place' })}>{ledgerDrawerTarget.place_label}</Descriptions.Item>
             <Descriptions.Item label={t('address_id_label', { defaultValue: 'Address ID' })}>{ledgerDrawerTarget.address_id}</Descriptions.Item>
           </Descriptions>
         )}
@@ -1146,6 +1331,75 @@ const BottleTracking = () => {
           pagination={false}
           size="small"
         />
+      </Drawer>
+
+      {/* Place Bottle Detail Drawer — ONE pool + that place's own ledger */}
+      <Drawer
+        title={t('customer_detail_title', { defaultValue: 'Customer Bottle Detail' })}
+        open={placeDetailOpen}
+        onClose={() => { setPlaceDetailOpen(false); setPlaceDetailTarget(null); }}
+        width={760}
+      >
+        {placeDetailTarget && (
+          <>
+            <Descriptions column={2} size="small" style={{ marginBottom: 16 }}>
+              <Descriptions.Item label={t('place', { defaultValue: 'Place' })}>
+                {placeDetailTarget.place_label}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('members', { defaultValue: 'Members' })}>
+                {(placeDetailTarget.member_names || []).join(', ') || '—'}
+              </Descriptions.Item>
+            </Descriptions>
+
+            {placeDetailTarget.is_shared_place && (
+              <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 16 }}
+                message={t('linked_accounts_alert_title', { defaultValue: 'Shared place' })}
+                description={t('linked_member_count_label', {
+                  count: (placeDetailTarget.member_names || []).length,
+                  defaultValue: 'Shared place — one pool across {{count}} accounts',
+                })}
+              />
+            )}
+
+            {/* ONE statistic, not two: there is no scalar per-person bottle
+                total any more, so a second number could only be a fiction. */}
+            <Card size="small" style={{ marginBottom: 16 }}>
+              <Statistic
+                title={t('place_balance_label', { defaultValue: 'Bottles at this place' })}
+                value={placeDetailTarget.balance ?? 0}
+              />
+            </Card>
+
+            <Text strong style={{ display: 'block', marginBottom: 8 }}>
+              {t('addresses_heading', { defaultValue: 'Addresses' })}
+            </Text>
+            <Space direction="vertical" style={{ width: '100%', marginBottom: 16 }} size={2}>
+              {/* The member addresses this place is made of. They carry no
+                  balance of their own — the pool above is the whole place. */}
+              {(placeDetailTarget.member_address_ids || []).map((addressId) => (
+                <Text key={addressId} type="secondary">{`Address #${addressId}`}</Text>
+              ))}
+              {!(placeDetailTarget.member_address_ids || []).length && (
+                <Text type="secondary">{t('no_addresses', { defaultValue: 'No addresses' })}</Text>
+              )}
+            </Space>
+
+            <Text strong style={{ display: 'block', marginBottom: 8 }}>
+              {t('place_ledger_heading', { defaultValue: 'Place Ledger' })}
+            </Text>
+            <Table
+              columns={placeLedgerColumns}
+              dataSource={placeLedgerEntries}
+              rowKey={(r) => r.id}
+              loading={placeLedgerLoading}
+              pagination={false}
+              size="small"
+            />
+          </>
+        )}
       </Drawer>
 
       {/* Session Detail Drawer */}

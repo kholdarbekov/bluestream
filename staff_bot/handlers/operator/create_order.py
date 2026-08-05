@@ -25,6 +25,170 @@ SELECT_CLIENT, SELECT_ADDRESS, SELECT_PRODUCTS, SELECT_QUANTITY, \
 class CreateOrderHandler(BaseHandler):
     """Handle order creation flow for operators"""
 
+    # The key `_with_display_price` stamps the SERVER's client-scoped quote onto
+    # each catalogue product under. Kept distinct from `price` so the two can
+    # never be confused: `price` is what the keyboard renders, this is where it
+    # came from.
+    CLIENT_QUOTE_KEY = 'client_unit_price'
+
+    @staticmethod
+    def _display_unit_price(product: dict) -> float:
+        """🔴 THE ONE PLACE A PRODUCT PRICE IS READ IN THE OPERATOR FLOW.
+
+        ``serialize_product`` publishes price NESTED under ``pricing``
+        (``business_app/serializers/product_serializers.py:366-377``); there is
+        no top-level ``price`` key on the payload at all. Three screens each
+        read one independently — the detail line, the cart line and
+        ``OperatorKeyboards.product_list`` — and every one of them read
+        ``.get('price', 0)``, which on that payload can only ever return **0**.
+        Operators quoted 0 UZS down the phone while
+        ``StaffService.create_phone_order`` charged the real price. Three reads
+        is how one of them ended up on a key that does not exist, so resolve
+        here and let everything downstream read the result.
+
+        The candidate order mirrors the customer bot's established SSOT
+        (``telegram_bot/handlers/products.py:_get_effective_unit_price`` and
+        ``telegram_bot/keyboards.py:get_product_display_price``) so the two bots
+        cannot drift apart on payload shape. ``price`` is last, for an already
+        normalised dict (see :meth:`_with_display_price`) and for any legacy
+        payload that really does carry one.
+
+        ``client_unit_price`` is FIRST and outranks everything, because it is the
+        only candidate priced for the CUSTOMER. ``/api/v1/products/`` prices for
+        the CALLER (``business_app/api/products.py:100-111``), and here the
+        caller is the OPERATOR: a corporate-contract client was quoted the
+        generic 45 000 and charged the contract 27 000, and a VIP/tiered operator
+        leaked their own discount into the quote. The client-scoped figure comes
+        from ``POST /staff/operator/users/<id>/order-estimate``, which replays
+        the very loop ``StaffService.create_phone_order`` charges from
+        (:meth:`_client_unit_prices`). The catalogue candidates below survive
+        only as the 0-UZS guard they were written as — they must never be what a
+        screen quotes when a client is known.
+        """
+        pricing = (product or {}).get('pricing') or {}
+        for candidate in (
+            (product or {}).get(CreateOrderHandler.CLIENT_QUOTE_KEY),
+            pricing.get('current_price'),
+            (product or {}).get('current_price'),
+            pricing.get('base_price'),
+            (product or {}).get('base_price'),
+            (product or {}).get('price'),
+        ):
+            if candidate is None:
+                continue
+            try:
+                return float(candidate)
+            except (TypeError, ValueError):
+                continue
+        return 0.0
+
+    @classmethod
+    def _with_display_price(cls, products: list, client_unit_prices: dict = None) -> list:
+        """Stamp the client-scoped unit price onto each product as ``price``.
+
+        ``OperatorKeyboards.product_list`` renders ``product.get('price', 0)``
+        into every button label. Normalising here means the keyboard, the detail
+        screen and the cart all render the SAME resolved number without three
+        modules each re-deriving it from the nested payload.
+
+        ``client_unit_prices`` maps ``product_id -> unit_price`` and comes off
+        the order-estimate endpoint, i.e. off the loop that will CHARGE this
+        client. It is stamped under :attr:`CLIENT_QUOTE_KEY`, which
+        :meth:`_display_unit_price` reads before any catalogue field, so a
+        contract client's screen states the contract price.
+        """
+        quotes = client_unit_prices or {}
+        stamped = []
+        for product in (products or []):
+            row = {**(product or {})}
+            quoted = quotes.get(row.get('id'))
+            if quoted is not None:
+                row[cls.CLIENT_QUOTE_KEY] = quoted
+            row['price'] = cls._display_unit_price(row)
+            stamped.append(row)
+        return stamped
+
+    async def _client_unit_prices(self, token: str, client_id, products: list):
+        """Ask the server what THIS CLIENT pays per unit, for the whole catalogue.
+
+        Returns ``(prices_by_product_id, error_response_or_None)``. On failure it
+        returns NO prices rather than the catalogue's own — falling back to
+        operator-scoped money is the defect this endpoint exists to remove, and a
+        plausible wrong number read down the phone with confidence is worse than
+        an error the operator can see.
+        """
+        product_ids = [p.get('id') for p in (products or []) if (p or {}).get('id') is not None]
+        if not product_ids or not client_id:
+            return {}, None
+
+        # Quantity is irrelevant to the unit price (`Product.calculate_price`
+        # ignores it, and contract rows are per-unit), so 1 is the honest
+        # per-unit question to ask for a button label.
+        async with api_client as client:
+            response = await client.get_operator_order_estimate(
+                token, client_id,
+                [{'product_id': pid, 'quantity': 1} for pid in product_ids],
+            )
+
+        if not response.success:
+            return {}, response
+
+        lines = (response.data or {}).get('items') or []
+        return {line.get('product_id'): line.get('unit_price') for line in lines}, None
+
+    async def _quote_cart(self, context, token):
+        """Re-price the CART server-side and store the quote for the screens.
+
+        Every money figure the operator reads out — each line total and the
+        subtotal — comes from this one response, so there is nothing left on
+        this screen for a second expression to disagree with. Returns the failed
+        ``APIResponse`` when the quote could not be obtained, in which case
+        NOTHING is stored: a stale quote beside a changed basket is the same
+        defect wearing a different hat.
+        """
+        order_data = context.user_data.get('new_order', {})
+        items = order_data.get('items') or []
+        if not items:
+            order_data.pop('estimate', None)
+            return None
+
+        async with api_client as client:
+            response = await client.get_operator_order_estimate(
+                token,
+                order_data.get('client_id'),
+                [{'product_id': i['product_id'], 'quantity': i['quantity']} for i in items],
+            )
+
+        if not response.success:
+            return response
+
+        order_data['estimate'] = response.data or {}
+        return None
+
+    @staticmethod
+    def _cod_restriction_notice(restrictions: dict, language: str) -> str:
+        """Copy for a blocked COD order — naming the arm that actually fired.
+
+        The cap has two arms (spec 5.5): the customer's own linked cluster is at
+        the limit (``restriction_scope == 'person'``), or the grouped WORKPLACE
+        this order ships to is (``'place'`` — a COWORKER's unpaid orders). The
+        operator reads this text out to the customer on the phone, so telling
+        someone with a clean personal record "you have unpaid orders" is simply
+        false. Branch on the discriminator, exactly as the customer bot does
+        (telegram_bot/handlers/orders.py).
+
+        Only a COUNT crosses over — never a coworker's name or phone (spec 7).
+        Payloads without a scope (legacy, or no delivery address supplied) keep
+        today's copy, so unlinked + ungrouped customers are unaffected.
+        """
+        if (restrictions or {}).get('restriction_scope') == 'place':
+            return i18n.get(
+                'staff.operator.cod_restricted_place',
+                language,
+                place_active_cod_debt_count=(restrictions.get('place_active_cod_debt_count') or 0),
+            )
+        return i18n.get('staff.operator.cod_restricted', language)
+
     @require_auth
     @require_operator
     async def start_create_order(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -184,6 +348,16 @@ class CreateOrderHandler(BaseHandler):
                 )
                 return
 
+            # Resolve the price ONCE, here, before anything renders it — and
+            # resolve it FOR THE CLIENT, not for the operator holding the token.
+            client_prices, quote_error = await self._client_unit_prices(
+                token, context.user_data.get('new_order', {}).get('client_id'), products,
+            )
+            if quote_error is not None:
+                await self._handle_api_response_error(update, quote_error, language)
+                return
+            products = self._with_display_price(products, client_prices)
+
             # Store products for reference
             context.user_data['available_products'] = {
                 str(p.get('id')): p for p in products
@@ -223,7 +397,7 @@ class CreateOrderHandler(BaseHandler):
 
             text = (
                 f"📦 <b>{escape_html(product.get('name', ''))}</b>\n"
-                f"💰 {format_currency(product.get('price', 0), language=language)}\n\n"
+                f"💰 {format_currency(self._display_unit_price(product), language=language)}\n\n"
                 f"{i18n.get('staff.operator.select_quantity', language)}"
             )
 
@@ -243,6 +417,10 @@ class CreateOrderHandler(BaseHandler):
         query = update.callback_query
         await query.answer()
         language = await self._get_language(update, context)
+        token = await self._get_auth_token(update, context)
+        if not token:
+            await self._handle_auth_error(update, language)
+            return ConversationHandler.END
 
         try:
             # Parse: staff_op_qty_{product_id}_{qty}
@@ -261,9 +439,21 @@ class CreateOrderHandler(BaseHandler):
                 'product_id': product_id,
                 'quantity': quantity,
                 'name': product.get('name', ''),
-                'price': product.get('price', 0),
+                'price': self._display_unit_price(product),
             })
             context.user_data['new_order'] = order_data
+
+            # Re-price the whole basket server-side. The basket and its quote
+            # move together or not at all — on failure the line just added is
+            # rolled back, so the screen never states a total for a basket the
+            # server has not priced.
+            quote_error = await self._quote_cart(context, token)
+            if quote_error is not None:
+                # `_quote_cart` stores nothing on failure, so popping the new
+                # line leaves the previous basket beside its own valid quote.
+                order_data['items'].pop()
+                await self._handle_api_response_error(update, quote_error, language)
+                return SELECT_PRODUCTS
 
             # Show updated cart + product list
             text = self._format_cart_summary(context, language)
@@ -303,8 +493,15 @@ class CreateOrderHandler(BaseHandler):
             return
 
         client_id = order_data.get('client_id')
+        # The destination address is already chosen at this point (SELECT_ADDRESS
+        # precedes SELECT_PRODUCTS), so pass it: the backend then evaluates the
+        # COD cap's PLACE arm too and the restriction copy below can name the
+        # workplace that actually caused a block instead of blaming the customer.
         async with api_client as client:
-            response = await client.get_operator_payment_methods(token, client_id)
+            response = await client.get_operator_payment_methods(
+                token, client_id,
+                delivery_address_id=order_data.get('delivery_address_id'),
+            )
 
         if not response.success:
             await self._handle_api_response_error(update, response, language)
@@ -327,10 +524,7 @@ class CreateOrderHandler(BaseHandler):
 
         text = self._format_cart_summary(context, language)
         if restrictions.get('cod_restricted'):
-            text += (
-                f"\n\n⚠️ "
-                f"{i18n.get('staff.operator.cod_restricted', language)}"
-            )
+            text += f"\n\n⚠️ {self._cod_restriction_notice(restrictions, language)}"
         text += f"\n\n{i18n.get('staff.operator.select_payment', language)}"
 
         if not available_methods:
@@ -420,7 +614,7 @@ class CreateOrderHandler(BaseHandler):
 
         restrictions = order_data.get('payment_restrictions') or {}
         if restrictions.get('cod_restricted'):
-            text += f"\n⚠️ {i18n.get('staff.operator.cod_restricted', language)}"
+            text += f"\n⚠️ {self._cod_restriction_notice(restrictions, language)}"
 
         notes = order_data.get('delivery_notes')
         if notes:
@@ -494,27 +688,49 @@ class CreateOrderHandler(BaseHandler):
         return ConversationHandler.END
 
     def _format_cart_summary(self, context, language):
-        """Format current cart as text summary"""
+        """Format current cart as text summary.
+
+        🔴 THIS SCREEN COMPUTES NO MONEY. Every line total and the subtotal are
+        read straight off the server's quote (``_quote_cart`` ->
+        ``POST /staff/operator/users/<id>/order-estimate`` ->
+        ``StaffService.price_phone_order``) — the same call
+        ``create_phone_order`` prices the real order with. It used to multiply
+        ``price * qty`` and accumulate its own subtotal from an
+        OPERATOR-scoped catalogue price; that is how 45 000 got read down the
+        phone for an order that charged 27 000. Do not reintroduce arithmetic
+        here: if a figure is missing from the quote, the fix is to publish it
+        from the endpoint, not to derive it on the screen.
+        """
         order_data = context.user_data.get('new_order', {})
         items = order_data.get('items', [])
 
         if not items:
             return f"🛒 {i18n.get('staff.operator.cart_empty', language)}"
 
-        lines = [f"🛒 <b>{i18n.get('staff.operator.cart', language)}</b>\n"]
-        subtotal = 0
+        quoted_lines = (order_data.get('estimate') or {}).get('items') or []
+        if len(quoted_lines) != len(items):
+            # The basket moved without its quote. Refuse to state a number
+            # rather than invent one; every cart mutation re-quotes or rolls
+            # back, so this is a bug report, not a routine branch.
+            logger.error(
+                "Operator cart has %s lines but the server quote has %s — refusing to state money",
+                len(items), len(quoted_lines),
+            )
+            return f"🛒 {i18n.get('staff.error_occurred', language)}"
 
-        for item in items:
-            name = escape_html(item.get('name', ''))
-            qty = item.get('quantity', 1)
-            price = item.get('price', 0)
-            item_total = price * qty
-            subtotal += item_total
-            lines.append(f"  • {name} x{qty} — {format_currency(item_total, language=language)}")
+        lines = [f"🛒 <b>{i18n.get('staff.operator.cart', language)}</b>\n"]
+
+        for item, quoted in zip(items, quoted_lines):
+            name = escape_html(item.get('name') or quoted.get('product_name') or '')
+            qty = quoted.get('quantity', 1)
+            lines.append(
+                f"  • {name} x{qty} — "
+                f"{format_currency(quoted.get('total_price'), language=language)}"
+            )
 
         lines.append(
             f"\n💰 {i18n.get('staff.operator.subtotal', language)}: "
-            f"{format_currency(subtotal, language=language)}"
+            f"{format_currency((order_data.get('estimate') or {}).get('subtotal'), language=language)}"
         )
 
         return '\n'.join(lines)

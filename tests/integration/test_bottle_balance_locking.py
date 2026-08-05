@@ -3,11 +3,16 @@
 ``get_or_create_balance`` funnels every bottle-balance mutation (delivery,
 return, standalone collection, admin adjustment). Under READ COMMITTED, a
 plain SELECT-then-read-modify-write lets two concurrent events on the same
-``(user_id, address_id)`` read the same balance and the later commit silently
-overwrites the earlier delta (lost update — bottles vanish). The fix adds
-``SELECT ... FOR UPDATE`` locking plus a conflict-safe ``INSERT ... ON
-CONFLICT DO NOTHING`` create path (backed by the existing
-``uq_bottle_balance_user_address`` unique constraint).
+PLACE read the same balance and the later commit silently overwrites the
+earlier delta (lost update — bottles vanish). The fix adds ``SELECT ... FOR
+UPDATE`` locking plus a conflict-safe ``INSERT ... ON CONFLICT DO NOTHING``
+create path (backed by the existing ``uq_bottle_balance_addr`` /
+``uq_bottle_balance_group`` unique constraints — exactly one of the two is
+active per place, per ``BottleScope``).
+
+Every address here is deliberately left UNGROUPED, so its place is the
+address itself (``BottleScope.for_address``) and ``get_or_create_balance``
+takes a single ``address_id`` argument.
 
 These tests run against a real, fully-migrated Postgres database (``pg_app``/
 ``pg_db``) because SQLite silently accepts ``FOR UPDATE`` as a no-op and has
@@ -25,7 +30,7 @@ from business_app.models.bottle import BottleBalance
 from business_app.models.user import User, UserAddress
 from business_app.services.bottle_tracking_service import BottleTrackingService
 from business_app.utils.password_security import hash_password
-from shared.enums import UserRole, UserType
+from shared.enums import BottleLedgerEventType, UserRole, UserType
 
 
 def _make_customer(pg_db, *, phone="+998900000301"):
@@ -73,9 +78,15 @@ class TestGetOrCreateBalanceLocking:
         """
         customer = _make_customer(pg_db)
         address = _make_address(pg_db, customer)
-        existing = BottleBalance(user_id=customer.id, address_id=address.id, balance=Decimal("2.00"))
-        pg_db.session.add(existing)
+        # Seed one existing place balance through the real ledger-write path
+        # (not a bare ORM construction) so the row is exactly what production
+        # would leave behind.
+        BottleTrackingService()._create_ledger_entry(
+            user_id=customer.id, address_id=address.id,
+            event_type=BottleLedgerEventType.DELIVERY, quantity=Decimal("2.00"),
+        )
         pg_db.session.commit()
+        existing = BottleBalance.query.filter_by(address_id=address.id).one()
         existing_id = existing.id
 
         statements = []
@@ -86,7 +97,7 @@ class TestGetOrCreateBalanceLocking:
         engine = pg_db.engine
         event.listen(engine, "before_cursor_execute", _capture)
         try:
-            result = BottleTrackingService.get_or_create_balance(customer.id, address.id)
+            result = BottleTrackingService.get_or_create_balance(address.id)
             pg_db.session.commit()
         finally:
             event.remove(engine, "before_cursor_execute", _capture)
@@ -104,25 +115,25 @@ class TestGetOrCreateBalanceLocking:
         )
 
     def test_creates_zero_balance_row_exactly_once(self, pg_app, pg_db):
-        """A brand-new (user, address) pair gets a single zero-balance row,
-        and a second call returns that same row (no duplicate, no error) —
-        the ON CONFLICT DO NOTHING + re-select path is idempotent."""
+        """A brand-new place gets a single zero-balance row, and a second call
+        returns that same row (no duplicate, no error) — the ON CONFLICT DO
+        NOTHING + re-select path is idempotent."""
         customer = _make_customer(pg_db)
         address = _make_address(pg_db, customer)
         pg_db.session.commit()
 
-        first = BottleTrackingService.get_or_create_balance(customer.id, address.id)
+        first = BottleTrackingService.get_or_create_balance(address.id)
         pg_db.session.commit()
 
         assert first.balance == Decimal("0.00")
-        rows = BottleBalance.query.filter_by(user_id=customer.id, address_id=address.id).all()
+        rows = BottleBalance.query.filter_by(address_id=address.id).all()
         assert len(rows) == 1
 
-        second = BottleTrackingService.get_or_create_balance(customer.id, address.id)
+        second = BottleTrackingService.get_or_create_balance(address.id)
         pg_db.session.commit()
 
         assert second.id == first.id
-        rows_after = BottleBalance.query.filter_by(user_id=customer.id, address_id=address.id).all()
+        rows_after = BottleBalance.query.filter_by(address_id=address.id).all()
         assert len(rows_after) == 1
 
     def test_concurrent_creates_do_not_raise_or_duplicate(self, pg_app, pg_db):
@@ -143,7 +154,7 @@ class TestGetOrCreateBalanceLocking:
 
                 try:
                     barrier.wait(timeout=5)
-                    BottleTrackingService.get_or_create_balance(customer.id, address.id)
+                    BottleTrackingService.get_or_create_balance(address.id)
                     thread_db.session.commit()
                 except Exception as exc:  # pragma: no cover - failure path asserted below
                     thread_db.session.rollback()
@@ -160,7 +171,7 @@ class TestGetOrCreateBalanceLocking:
         assert errors == [], f"Unexpected errors from concurrent create: {errors}"
 
         pg_db.session.expire_all()
-        rows = BottleBalance.query.filter_by(user_id=customer.id, address_id=address.id).all()
+        rows = BottleBalance.query.filter_by(address_id=address.id).all()
         assert len(rows) == 1
 
     def test_sequential_ledger_writes_sum_to_correct_balance(self, pg_app, pg_db):
@@ -181,7 +192,7 @@ class TestGetOrCreateBalanceLocking:
         )
 
         pg_db.session.expire_all()
-        balance = BottleBalance.query.filter_by(user_id=customer.id, address_id=address.id).first()
+        balance = BottleBalance.query.filter_by(address_id=address.id).first()
         assert balance.balance == Decimal("6.00")  # 5 + 3 - 2
 
     def test_concurrent_adjustments_do_not_lose_updates(self, pg_app, pg_db):
@@ -227,5 +238,5 @@ class TestGetOrCreateBalanceLocking:
         assert errors == [], f"Unexpected errors from concurrent adjustment: {errors}"
 
         pg_db.session.expire_all()
-        balance = BottleBalance.query.filter_by(user_id=customer.id, address_id=address.id).first()
+        balance = BottleBalance.query.filter_by(address_id=address.id).first()
         assert balance.balance == Decimal("18.00")  # 10 + 3 + 5, no lost update

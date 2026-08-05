@@ -70,7 +70,39 @@ def test_admin_get_user_payment_methods_route_delegates_to_staff_service(
     payload = response.get_json()
     assert payload['success'] is True
     assert payload['data']['payment_restrictions']['cod_restricted'] is True
-    mocked_method.assert_called_once_with(sample_user.id)
+    # Phase 2b: the route forwards the optional destination address so the COD
+    # cap's PLACE arm is evaluated too. With no query param it is None, i.e. the
+    # person-arm-only behaviour this test originally pinned.
+    mocked_method.assert_called_once_with(sample_user.id, delivery_address_id=None)
+
+
+def test_admin_get_user_payment_methods_route_forwards_delivery_address_id(
+    client,
+    app,
+    admin_user,
+    sample_user,
+    monkeypatch,
+):
+    """?delivery_address_id=N must reach StaffService so the place arm can fire."""
+    mocked_method = Mock(
+        return_value={
+            'customer_id': sample_user.id,
+            'available_methods': [],
+            'payment_restrictions': {'cod_restricted': True, 'restriction_scope': 'place'},
+        }
+    )
+    monkeypatch.setattr(
+        'business_app.services.staff_service.StaffService.get_client_payment_methods',
+        mocked_method,
+    )
+
+    response = client.get(
+        f'/api/v1/admin/users/{sample_user.id}/payment-methods?delivery_address_id=4242',
+        headers=_admin_headers(app, admin_user.id),
+    )
+
+    assert response.status_code == 200
+    mocked_method.assert_called_once_with(sample_user.id, delivery_address_id=4242)
 
 
 def test_non_manager_cannot_get_user_payment_methods(

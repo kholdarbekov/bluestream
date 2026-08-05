@@ -290,19 +290,48 @@ def update_location(delivery_id):
 
 
 def _customer_bottle_balance(order) -> float:
-    """Empties the customer currently holds at this delivery's address (0 if none).
+    """Empties the customer currently holds at this delivery's PHYSICAL place (0 if none).
 
-    Per-address balance for the exact (user, delivery-address) pair the delivery
-    writes to. Negative (over-credited) or missing balances read as 0.
+    One place, one pool: the address group when the delivery address is grouped,
+    else the address itself. A customer ordering the same home from a second
+    phone therefore still surfaces the true total of empties the driver should
+    collect. Negative/over-credited places read as 0.
     """
     if not order or not order.delivery_address_id:
         return 0.0
     from business_app.services.bottle_tracking_service import BottleTrackingService
 
-    balance = BottleTrackingService.get_balance(order.user_id, order.delivery_address_id)
-    if not balance:
+    place_balance = BottleTrackingService.get_place_balance(order.delivery_address_id)
+    return max(0.0, float(place_balance or 0))
+
+
+def _place_bottle_balance_signed(order) -> float:
+    """The place's SIGNED balance — negative means over-returned.
+
+    `_customer_bottle_balance` clamps to 0 on purpose: the "All N returned"
+    anchor must never offer a negative quantity. This is an additional field so
+    the driver can be TOLD the place is over-returned, not a change to that one.
+    """
+    if not order or not order.delivery_address_id:
         return 0.0
-    return max(0.0, float(balance.balance or 0))
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+
+    return float(BottleTrackingService.get_place_balance(order.delivery_address_id) or 0)
+
+
+def _place_cod_context(order) -> dict:
+    """Place-group COD context for a delivery card (spec 8).
+
+    Thin adapter over ``CashCollectionService.get_place_cod_context`` — the
+    lookup lives in the service layer so this module stays free of model
+    imports and direct ORM access (API boundary budget). Zeroed for ungrouped
+    addresses so ungrouped customers' payloads are byte-identical to today
+    plus constant-false fields.
+    """
+    from business_app.services.cash_collection_service import CashCollectionService
+
+    address_id = getattr(order, "delivery_address_id", None) if order else None
+    return CashCollectionService().get_place_cod_context(address_id)
 
 
 @staff_bp.route("/delivery/active", methods=["GET"])
@@ -380,6 +409,11 @@ def get_active_deliveries():
                 ),
                 # Empties the customer currently holds at this address (return anchor).
                 "customer_bottle_balance": _customer_bottle_balance(order),
+                # The place's SIGNED balance — additional to the clamped anchor above,
+                # so the driver can be told when the place is over-returned.
+                "place_bottle_balance_signed": _place_bottle_balance_signed(order),
+                # Place-group COD context (spec 8) — zeros when ungrouped.
+                **_place_cod_context(order),
             }
         )
 
@@ -587,6 +621,20 @@ def record_cash_collection():
         recorded_by_user_id=current_user_id,
         order_id=data.get("order_id"),
         delivery_id=data.get("delivery_id"),
+        # Seeds PLACE scope for order-less standalone collections (spec 8):
+        # without it a driver collecting at a grouped address can never settle
+        # a coworker's debt. Order/delivery context still overrides it.
+        #
+        # GATED, exactly as api/admin.py:12199 is. The gate is the rollback
+        # switch for the whole place feature (plan C0): with it off, PLACE scope
+        # must be unreachable, and forwarding a client-supplied address made it
+        # reachable from a direct API call or any future client — a scope input
+        # no gate and no published ceiling authorises. The shipped staff bot
+        # already sends None here when the gate is off (`_scoped_ceiling`), so
+        # this closes the non-bot paths rather than changing bot behaviour.
+        delivery_address_id=(
+            data.get("delivery_address_id") if current_app.config.get("PLACE_COD_COLLECTION_ENABLED") else None
+        ),
         notes=data.get("notes"),
         proof_data=data.get("proof_data") or {},
         occurred_at=data.get("occurred_at"),
@@ -654,10 +702,26 @@ def submit_reconciliation_session():
 @jwt_required()
 @require_staff_roles("delivery_driver", "operator")
 def get_staff_customer_cod_statement(customer_id):
-    """Get COD receivable statement for a customer in staff workflows."""
+    """Get COD receivable statement for a customer in staff workflows.
+
+    Served through StaffService, not the engine directly, because the driver's
+    collect ceiling must be the SAME figure their debtor row advertises (owner
+    ruling A6/R-B) and that union is composed outside the frozen engine. Gate
+    off, this is a verbatim pass-through of ``get_customer_cod_statement``.
+    """
+    statement = StaffService().get_customer_cod_statement_for_staff(customer_id)
+    return success_response(statement)
+
+
+@staff_bp.route("/place-groups/<int:group_id>/cod-statement", methods=["GET"])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles("delivery_driver", "operator")
+def get_staff_place_cod_statement(group_id):
+    """Unified COD statement for a place group (any member's open debts)."""
     from business_app.services.cash_collection_service import CashCollectionService
 
-    statement = CashCollectionService().get_customer_cod_statement(customer_id)
+    statement = CashCollectionService().get_place_cod_statement(group_id)
     return success_response(statement)
 
 
@@ -688,9 +752,12 @@ def list_customers_with_open_cod():
     page = request.args.get("page", 1, type=int) or 1
     per_page = request.args.get("per_page", 10, type=int) or 10
 
-    from business_app.services.cash_collection_service import CashCollectionService
+    # Plan E R3: person rows carry their grouped place's whole debt. The
+    # composition lives in StaffService because the allocation engine is frozen
+    # (plan C1); with the gate off it delegates verbatim to the engine.
+    from business_app.services.staff_service import StaffService
 
-    result = CashCollectionService().paginate_users_with_open_cod_debts(page=page, per_page=per_page)
+    result = StaffService().paginate_cod_debtors_for_staff(page=page, per_page=per_page)
     return success_response(result)
 
 
@@ -850,13 +917,41 @@ def get_client_addresses(user_id):
     return success_response({"items": items, "total": len(items)})
 
 
+@staff_bp.route("/operator/users/<int:user_id>/order-estimate", methods=["POST"])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles("operator")
+def get_client_order_estimate(user_id):
+    """Client-scoped price quote for a phone-order basket. READ-ONLY.
+
+    POST rather than GET because the basket is a structured body, not a query
+    string — this endpoint creates NOTHING (no order, no item, no reservation,
+    no activity log); it only replays `StaffService.price_phone_order`, the same
+    call `create_phone_order` makes.
+
+    It exists because `GET /api/v1/products/` prices for the CALLER
+    (`business_app/api/products.py:100-111`), and on the operator's screen the
+    caller is the OPERATOR. A corporate-contract client was quoted the generic
+    price and charged the contract one (measured 45 000 vs 27 000). Never render
+    operator-scoped catalogue money on a screen that quotes a client.
+    """
+    data = request.get_json(silent=True)
+    if not data:
+        raise ValidationError("Request body is required", error_code="STAFF_REQUEST_BODY_REQUIRED")
+
+    return success_response(StaffService.estimate_phone_order(user_id, data))
+
+
 @staff_bp.route("/operator/users/<int:user_id>/payment-methods", methods=["GET"])
 @handle_api_exception
 @jwt_required()
 @require_staff_roles("operator")
 def get_client_payment_methods(user_id):
     """Get debt-aware payment methods for an operator-created client order."""
-    return success_response(StaffService.get_client_payment_methods(user_id))
+    # Optional: when the operator has already picked the destination address,
+    # the COD cap's PLACE arm is evaluated too (spec 5.5).
+    delivery_address_id = request.args.get("delivery_address_id", type=int)
+    return success_response(StaffService.get_client_payment_methods(user_id, delivery_address_id=delivery_address_id))
 
 
 @staff_bp.route("/operator/users/<int:user_id>/corporate-balance", methods=["GET"])
@@ -929,23 +1024,15 @@ def get_customer_bottle_summary(user_id):
 @jwt_required()
 @require_staff_roles("delivery_driver", "operator")
 def get_customer_bottle_addresses(user_id):
-    """Get customer addresses with bottle balances."""
+    """Get the customer's DISTINCT places, each with the place's bottle balance.
+
+    Thin adapter over ``BottleTrackingService.get_customer_place_rows`` — the
+    place-to-owned-address mapping needs model access, which this module's
+    boundary budget forbids (see tests/unit/test_structure_boundary_regressions).
+    """
     from business_app.services.bottle_tracking_service import BottleTrackingService
 
-    service = BottleTrackingService()
-    balances = service.get_customer_balances(user_id)
-    return success_response(
-        [
-            {
-                "address_id": b.address_id,
-                "address_title": b.address.title if b.address else None,
-                "full_address": b.address.full_address if b.address else None,
-                "balance": float(b.balance or 0),
-                "bottle_balance_id": b.id,
-            }
-            for b in balances
-        ]
-    )
+    return success_response(BottleTrackingService.get_customer_place_rows(user_id))
 
 
 @staff_bp.route("/bottles/collection", methods=["POST"])
@@ -963,7 +1050,19 @@ def record_bottle_collection():
     address_id = data.get("address_id")
     quantity = data.get("quantity")
     notes = data.get("notes")
+    # The driver's PER-INTENT retry token. Forwarded RAW: it is validated and
+    # namespaced in the service (`compose_client_idempotency_key`), which is
+    # where this module's boundary budget requires all validation to live.
+    idempotency_key = data.get("idempotency_key")
 
+    # NOTE: this is still TRUTHINESS, not presence — deliberately, and unlike
+    # the sibling fine route below. A `quantity` of 0 therefore reports
+    # "are required" rather than the service's "must be positive", which is the
+    # same wrong-reason shape the fine route was fixed for. It is left alone
+    # because `test_collection_quantity_zero_negative_and_string_are_handled_at
+    # _the_boundary` (test_staff_bot_place_full_e2e.py) asserts the "required"
+    # wording for a zero as intended behaviour; changing it needs that pin
+    # re-pointed, which is an owner decision.
     if not customer_id or not address_id or not quantity:
         raise ValidationError("customer_id, address_id, and quantity are required")
 
@@ -974,9 +1073,13 @@ def record_bottle_collection():
         quantity=quantity,
         actor_user_id=current_user_id,
         notes=notes,
+        idempotency_key=idempotency_key,
     )
 
-    balance = service.get_balance(customer_id, address_id)
+    # The PLACE's remaining empties — the same number the driver was offered to
+    # collect against. Reading the (user, address) pair here is what printed a
+    # negative remainder after a driver collected a whole shared place's empties.
+    balance = service.get_place_balance_row(address_id)
     return success_response(
         {
             "ledger_entry_id": entry.id,
@@ -998,22 +1101,31 @@ def create_bottle_fine_staff():
     data = request.get_json() or {}
 
     customer_id = data.get("customer_id")
-    bottle_balance_id = data.get("bottle_balance_id")
+    address_id = data.get("address_id")
     quantity = data.get("quantity")
     fine_amount = data.get("fine_amount")
     notes = data.get("notes")
+    # See the sibling collection route: forwarded RAW, validated in the service.
+    idempotency_key = data.get("idempotency_key")
 
-    if not all([customer_id, bottle_balance_id, quantity, fine_amount]):
-        raise ValidationError("customer_id, bottle_balance_id, quantity, and fine_amount are required")
+    # PRESENCE, not truthiness. `not all([...])` made a quantity of 0 or a
+    # fine_amount of 0 read as MISSING, so the driver was told the four fields
+    # "are required" instead of the service's "must be positive" — and a client
+    # retrying with a nonzero placeholder issues a REAL money-denominated fine.
+    # The admin route's `BottleFineCreateRequest` never had this bug, so the two
+    # entry points rejected the same input for different reasons.
+    if any(value is None for value in (customer_id, address_id, quantity, fine_amount)):
+        raise ValidationError("customer_id, address_id, quantity, and fine_amount are required")
 
     service = BottleTrackingService()
     fine = service.issue_fine(
         user_id=customer_id,
-        bottle_balance_id=bottle_balance_id,
+        address_id=address_id,
         quantity=quantity,
         fine_amount=fine_amount,
         actor_user_id=current_user_id,
         notes=notes,
+        idempotency_key=idempotency_key,
     )
     return success_response(fine.to_dict())
 

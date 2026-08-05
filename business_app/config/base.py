@@ -148,6 +148,32 @@ class BaseConfig:
     # in-flight deliveries. Flip to True in PR 2 to enforce.
     BOTTLE_SESSION_ENFORCEMENT_STRICT = os.environ.get("BOTTLE_SESSION_ENFORCEMENT_STRICT", "False").lower() == "true"
 
+    # How long a BOTTLE WRITER may wait for the place-scope lock ladder before
+    # Postgres aborts it with 55P03 (lock_not_available).
+    #
+    # SCOPE IS THE WHOLE POINT: this bounds the WAITER, never the HOLDER. It is
+    # applied as `SET LOCAL` inside `BottleTrackingService.resolve_scope_for_write`
+    # — the single funnel through which a delivery / return / collection /
+    # order-edit cascade takes rung 1 (`addresses` FOR SHARE) — and NOWHERE else.
+    # The place lifecycle (grouping, ungrouping) and the account-merge path are
+    # deliberately left unbounded: they are the holders, they are doing bounded
+    # legitimate work, and aborting them mid-merge frees nothing the waiter
+    # could not get by simply retrying.
+    #
+    # Why a driver-side bound is needed at all: `_absorb_joiners_into_group`
+    # ends in `recompute_balance_after`, which loads and rewrites a place's
+    # ENTIRE ledger timeline as ORM objects inside the lock window. Measured on
+    # a fresh Postgres 17 (see tests/integration/test_bottle_scope_lock_timeout.py):
+    # 0 entries -> ~36ms, 500 -> ~250ms, 2000 -> ~700ms, 5000 -> ~3.9s. Prod runs
+    # on a Raspberry Pi 5, so the real figures are worse. Without this, a driver
+    # standing at a door waits for all of it with no bound and no rendering.
+    #
+    # 5s is chosen ABOVE the realistic p99 admin window (so an ordinary grouping
+    # is simply waited out and the delivery still succeeds) and far BELOW the
+    # point where gunicorn workers starve or a driver gives up. On timeout the
+    # driver gets a translated, explicitly retryable message, not a 500.
+    BOTTLE_SCOPE_LOCK_TIMEOUT_MS = int(os.environ.get("BOTTLE_SCOPE_LOCK_TIMEOUT_MS", "5000"))
+
     # Database Configuration
     @property
     def SQLALCHEMY_DATABASE_URI(self):
@@ -469,6 +495,15 @@ class BaseConfig:
     CUSTOMER_SEGMENT_HIGH_VALUE_UZS = business_config.CUSTOMER_SEGMENT_HIGH_VALUE_UZS
     CUSTOMER_SEGMENT_MEDIUM_VALUE_UZS = business_config.CUSTOMER_SEGMENT_MEDIUM_VALUE_UZS
 
+    # Multi-phone customer link suggestions (Phase 1C)
+    CUSTOMER_LINK_SUGGESTION_RADIUS_KM = business_config.CUSTOMER_LINK_SUGGESTION_RADIUS_KM
+    CUSTOMER_LINK_SHARED_GEO_DAMPEN_CUTOFF = business_config.CUSTOMER_LINK_SHARED_GEO_DAMPEN_CUTOFF
+
+    # Place-group ("same office") proximity suggestions — METRES (PLACE channel,
+    # unrelated to CUSTOMER_LINK_SUGGESTION_RADIUS_KM above, which is the LINK
+    # channel). Converted to km once, at the single point of use.
+    PLACE_SUGGESTION_RADIUS_M = business_config.PLACE_SUGGESTION_RADIUS_M
+
     # Security Configuration
     PASSWORD_MIN_LENGTH = business_config.PASSWORD_MIN_LENGTH
     MAX_LOGIN_ATTEMPTS = business_config.MAX_LOGIN_ATTEMPTS
@@ -606,6 +641,8 @@ For complete documentation, examples, and SDKs visit: [API Documentation](/docs/
     # COD reconciliation and custody controls
     COD_CASH_WARNING_THRESHOLD_UZS = business_config.COD_CASH_WARNING_THRESHOLD_UZS
     COD_CASH_ESCALATION_THRESHOLD_UZS = business_config.COD_CASH_ESCALATION_THRESHOLD_UZS
+    # Plan E: place COD attribution. Ships ON; see shared/business_config.py.
+    PLACE_COD_COLLECTION_ENABLED = business_config.PLACE_COD_COLLECTION_ENABLED
     COD_RECONCILIATION_CUTOFF_LOCAL = os.environ.get("COD_RECONCILIATION_CUTOFF_LOCAL", "23:00")
     COD_REMINDER_INTERVAL_MINUTES = int(os.environ.get("COD_REMINDER_INTERVAL_MINUTES", 60))
     COD_RECONCILIATION_WARNING_DAYS = int(os.environ.get("COD_RECONCILIATION_WARNING_DAYS", 7))

@@ -51,6 +51,7 @@ from business_app.services.admin_loyalty_service import AdminLoyaltyService
 from business_app.services.product_fiscal_service import ProductFiscalService
 from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
 from business_app.services.customer_map_service import CustomerMapService
+from business_app.services.customer_link_service import CustomerLinkService
 from business_app.serializers.admin_serializers import (
     serialize_user_admin,
     serialize_order_admin,
@@ -1219,7 +1220,11 @@ def get_user_payment_methods_admin(user_id):
     try:
         from business_app.services.staff_service import StaffService
 
-        payload = StaffService.get_client_payment_methods(user_id)
+        # Same optional param as the operator route: with the destination
+        # address the COD cap's PLACE arm is evaluated too, so this menu can
+        # never offer cash that admin order creation would then refuse.
+        delivery_address_id = request.args.get("delivery_address_id", type=int)
+        payload = StaffService.get_client_payment_methods(user_id, delivery_address_id=delivery_address_id)
         return success_response(data=payload)
     except NotFoundError:
         return not_found_response(resource_type="User")
@@ -1552,8 +1557,21 @@ def get_user_addresses(user_id):
             .all()
         )
 
+        # Admin-only: surface the "same physical place" grouping (Task 11, multi-phone
+        # customer linking) alongside the base address dict. Not added to
+        # UserAddress.to_dict() itself since that method also backs customer-facing
+        # endpoints (auth.py/addresses.py) where this admin concept has no business.
+        def _serialize_admin_address(addr):
+            data = addr.to_dict()
+            data["address_group_id"] = addr.address_group_id
+            return data
+
         return success_response(
-            data={"addresses": [addr.to_dict() for addr in addresses], "user_id": user_id, "total": len(addresses)}
+            data={
+                "addresses": [_serialize_admin_address(addr) for addr in addresses],
+                "user_id": user_id,
+                "total": len(addresses),
+            }
         )
 
     except Exception as e:
@@ -1737,6 +1755,12 @@ def delete_user_address(user_id, address_id):
         if not address:
             return not_found_response(resource_type="Address")
 
+        # Spec §7.3: a grouped address has no balance row of its own, so the
+        # IntegrityError arm below never fires for exactly the members who share
+        # a pool. Returned early — the `except Exception` arm at the bottom would
+        # otherwise turn this fence into a 500.
+        CustomerLinkService.assert_address_not_in_place_group(address_id)
+
         # Check if this is the only address
         address_count = UserAddress.query.filter_by(user_id=user_id).count()
         if address_count == 1:
@@ -1773,6 +1797,11 @@ def delete_user_address(user_id, address_id):
     except IntegrityError:
         db.session.rollback()
         return validation_error_response("Cannot delete an address referenced by existing records")
+    except ValidationError as e:
+        # Ahead of `except Exception` so the §7.3 place-group fence surfaces its
+        # machine-readable code as a 400 instead of a generic 500.
+        _rollback_db_session()
+        return validation_error_response(getattr(e, "message", str(e)), error_code=getattr(e, "error_code", None))
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Delete user address error: {e}")
@@ -2343,7 +2372,11 @@ def preview_order_payment_method_edit(order_id):
         data = request.get_json(silent=True) or {}
         if not data.get("new_method"):
             return validation_error_response("new_method is required")
-        plan = OrderPaymentMethodEditService().preview(order_id=order_id, new_method=data.get("new_method"))
+        plan = OrderPaymentMethodEditService().preview(
+            order_id=order_id,
+            new_method=data.get("new_method"),
+            bypass_cod_check=bool(data.get("bypass_cod_check", False)),
+        )
         return success_response(data=plan.to_summary())
     except NotFoundError as exc:
         return not_found_response(resource_type="Order", message=str(exc))
@@ -2375,6 +2408,9 @@ def apply_order_payment_method_edit(order_id):
             new_method=data.get("new_method"),
             reason=reason,
             actor_user_id=current_user_id,
+            # Explicit, audited override of the COD active-debt cap when an
+            # admin knowingly converts an order to cash past the limit.
+            bypass_cod_check=bool(data.get("bypass_cod_check", False)),
         )
 
         response_data = {
@@ -12102,7 +12138,7 @@ def get_cash_reconciliation_report():
 @manager_or_higher_required
 def preview_personal_card_transfer(order_id):
     """Dry-run a personal card transfer: show what settles this order, what spills onto
-    the customer's other delivered COD debts, and what is left as customer credit."""
+    the scope's other delivered COD debts, and what is left as customer credit."""
     try:
         from business_app.services.cash_collection_service import CashCollectionService
 
@@ -12148,6 +12184,19 @@ def record_cash_collection_admin():
             recorded_by_user_id=actor_user_id,
             order_id=data.get("order_id"),
             delivery_id=data.get("delivery_id"),
+            # Plan E R2/R3: the ONLY scope input an order-less standalone
+            # collection has. Without it, "the office paid 40 000 in cash" posts
+            # CLUSTER/PERSONAL scope and parks the money as the payer's prepaid
+            # credit instead of settling the place's debt. The staff endpoint
+            # already forwards it (api/staff.py:627); this reaches the SAME
+            # decision, it does not widen what counts as a place (spec 2.2).
+            # Client-supplied, and safe because resolve_allocation_scope's
+            # membership intersection rejects an address whose place the customer
+            # is not part of; non-door-cash sources are refused by
+            # _PLACE_SCOPE_SOURCES regardless of what is forwarded.
+            delivery_address_id=(
+                data.get("delivery_address_id") if current_app.config.get("PLACE_COD_COLLECTION_ENABLED") else None
+            ),
             driver_cash_session_id=data.get("driver_cash_session_id"),
             notes=data.get("notes"),
             proof_data=data.get("proof_data") or {},
@@ -12406,11 +12455,19 @@ def force_close_cash_reconciliation_session(session_id):
 @jwt_required()
 @manager_or_higher_required
 def get_customer_cod_statement_admin(customer_id):
-    """Get COD statement for a customer."""
-    try:
-        from business_app.services.cash_collection_service import CashCollectionService
+    """Get COD statement for a customer, with the resolved collect scope.
 
-        statement = CashCollectionService().get_customer_cod_statement(customer_id)
+    🔴 Serves ``StaffService.get_customer_cod_statement_for_admin``, NOT the raw
+    engine statement. The raw payload carries no ``place_collect_ceiling_amount``
+    (it is composed outside the frozen engine), so the modal that posts
+    ``delivery_address_id`` was displaying a figure describing a different set of
+    debts than the one its own submit settles — see that method's docstring for
+    the measured numbers.
+    """
+    try:
+        from business_app.services.staff_service import StaffService
+
+        statement = StaffService().get_customer_cod_statement_for_admin(customer_id)
         return success_response(data=statement)
     except NotFoundError:
         return not_found_response("Customer not found")
@@ -13012,3 +13069,666 @@ def start_support_conversation():
     except Exception:  # noqa: BLE001
         current_app.logger.exception("start support conversation failed")
         return internal_error_response("Failed to send message")
+
+
+@admin_bp.route("/users/<int:user_id>/link-suggestions", methods=["GET"])
+@jwt_required()
+@validate_admin_action(["view_users"])
+def get_user_link_suggestions(user_id):
+    """Ranked geolocation-proximity 'possible same customer' suggestions for review."""
+    try:
+        if not CustomerLinkService().user_exists(user_id):
+            return not_found_response(resource_type="User", message="User not found")
+        suggestions = CustomerLinkService().get_link_suggestions(user_id)
+        return success_response(data={"suggestions": suggestions})
+    except Exception as e:  # noqa: BLE001
+        current_app.logger.error(f"Link suggestions error: {e}")
+        return internal_error_response("Failed to load link suggestions")
+
+
+@admin_bp.route("/users/<int:user_id>/linked-accounts", methods=["GET"])
+@jwt_required()
+@validate_admin_action(["view_users"])
+def get_user_linked_accounts(user_id):
+    """The cluster this user belongs to: members + primary (empty if unlinked)."""
+    try:
+        if not CustomerLinkService().user_exists(user_id):
+            return not_found_response(resource_type="User", message="User not found")
+        return success_response(data=CustomerLinkService().get_linked_accounts(user_id))
+    except Exception as e:  # noqa: BLE001
+        current_app.logger.error(f"Linked accounts error: {e}")
+        return internal_error_response("Failed to load linked accounts")
+
+
+@admin_bp.route("/users/<int:user_id>/link", methods=["POST"])
+@jwt_required()
+@validate_admin_action(["manage_users"])
+def link_user_account(user_id):
+    """Link another account into this user's customer cluster (admin-confirmed)."""
+    try:
+        body = request.get_json(silent=True) or {}
+        secondary_user_id = body.get("secondaryUserId")
+        reason = (body.get("reason") or "").strip()
+        if not secondary_user_id:
+            return validation_error_response("secondaryUserId is required")
+        if not reason:
+            return validation_error_response("reason is required")
+        result = CustomerLinkService().link_accounts(
+            user_id, int(secondary_user_id), actor_admin_id=_acting_admin_id(), reason=reason
+        )
+        return created_response(data=result, message="Accounts linked")
+    except ValidationError as e:
+        _rollback_db_session()
+        return validation_error_response(getattr(e, "message", str(e)), error_code=getattr(e, "error_code", None))
+    except Exception as e:  # noqa: BLE001
+        _rollback_db_session()
+        current_app.logger.error(f"Link accounts error: {e}")
+        return internal_error_response("Failed to link accounts")
+
+
+@admin_bp.route("/users/<int:user_id>/unlink", methods=["POST"])
+@jwt_required()
+@validate_admin_action(["manage_users"])
+def unlink_user_account(user_id):
+    """Detach this account from its customer cluster."""
+    try:
+        body = request.get_json(silent=True) or {}
+        reason = (body.get("reason") or "").strip()
+        if not reason:
+            return validation_error_response("reason is required")
+        result = CustomerLinkService().unlink_account(user_id, actor_admin_id=_acting_admin_id(), reason=reason)
+        return success_response(data=result, message="Account unlinked")
+    except ValidationError as e:
+        _rollback_db_session()
+        return validation_error_response(getattr(e, "message", str(e)), error_code=getattr(e, "error_code", None))
+    except Exception as e:  # noqa: BLE001
+        _rollback_db_session()
+        current_app.logger.error(f"Unlink account error: {e}")
+        return internal_error_response("Failed to unlink account")
+
+
+@admin_bp.route("/customer-links/dismiss", methods=["POST"])
+@jwt_required()
+@validate_admin_action(["manage_users"])
+def dismiss_customer_link_suggestion():
+    """Mark two accounts as different people (sticky; suppresses re-suggestion)."""
+    try:
+        body = request.get_json(silent=True) or {}
+        user_id_a, user_id_b = body.get("userIdA"), body.get("userIdB")
+        if not user_id_a or not user_id_b:
+            return validation_error_response("userIdA and userIdB are required")
+        result = CustomerLinkService().dismiss_suggestion(
+            int(user_id_a), int(user_id_b), actor_admin_id=_acting_admin_id()
+        )
+        return success_response(data=result, message="Marked as different customers")
+    except ValidationError as e:
+        _rollback_db_session()
+        return validation_error_response(getattr(e, "message", str(e)), error_code=getattr(e, "error_code", None))
+    except Exception as e:  # noqa: BLE001
+        _rollback_db_session()
+        current_app.logger.error(f"Dismiss suggestion error: {e}")
+        return internal_error_response("Failed to dismiss suggestion")
+
+
+@admin_bp.route("/canonical-customers/<int:canonical_id>/address-groups", methods=["POST"])
+@jwt_required()
+@validate_admin_action(["manage_users"])
+def create_address_group(canonical_id):
+    """Create a place group from a set of addresses.
+
+    Phase 2: place groups are ownerless (may span customers) — canonical_id is
+    retained in the URL for route compatibility only and no longer scopes the
+    group. First-class /place-groups routes arrive with the admin panel (2c).
+    """
+    try:
+        body = request.get_json(silent=True) or {}
+        address_ids = body.get("addressIds") or []
+        reason = (body.get("reason") or "").strip()
+        if not address_ids:
+            return validation_error_response("addressIds is required")
+        address_ids = _coerce_address_id_list(address_ids)
+        group = CustomerLinkService().create_place_group(
+            address_ids,
+            acting_admin_id=_acting_admin_id(),
+            reason=reason,
+            label=body.get("label"),
+        )
+        result = {
+            "address_group_id": group.id,
+            "address_ids": sorted(set(address_ids)),
+        }
+        return created_response(data=result, message="Address group created")
+    except ValidationError as e:
+        _rollback_db_session()
+        return validation_error_response(getattr(e, "message", str(e)), error_code=getattr(e, "error_code", None))
+    except Exception as e:  # noqa: BLE001
+        _rollback_db_session()
+        current_app.logger.error(f"Address group error: {e}")
+        return internal_error_response("Failed to create address group")
+
+
+# --------------------------------------------------------------------------- #
+# Place groups (spec §9): first-class, ownerless "same physical place" groups
+# that may span customers. Every handler below is a thin delegation — the
+# model access lives in CustomerLinkService / CashCollectionService so this
+# module's API/model boundary-coupling budget stays flat.
+# --------------------------------------------------------------------------- #
+
+
+def _parse_id_list_arg(name: str):
+    """Comma-separated ints from a query string, or None when absent.
+
+    Raises ValidationError (400, not a 500 through the bare `except`) on any
+    non-integer member, so `?address_ids=44,abc` is a client error with a
+    message rather than an opaque failure.
+    """
+    raw = request.args.get(name)
+    if raw is None or not raw.strip():
+        return None
+    try:
+        return [int(part) for part in raw.split(",") if part.strip()]
+    except (TypeError, ValueError):
+        raise ValidationError(f"{name} must be a comma-separated list of integers")
+
+
+def _parse_int_arg(name: str):
+    """One optional integer query arg — REFUSED when malformed, never dropped.
+
+    `request.args.get(name, type=int)` swallows the conversion error and returns
+    the default, which for an optional arg is `None` — indistinguishable from
+    "absent". On the merge preview that meant `?group_id=abc` silently answered
+    the CREATE preview (a different candidate set, a different drift, a
+    different projection) under a dialog the panel had already labelled
+    "add to place 9". A request that cannot be understood is a 400.
+    """
+    raw = request.args.get(name)
+    if raw is None or not raw.strip():
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        raise ValidationError(f"{name} must be an integer")
+
+
+def _coerce_address_id(value, field: str) -> int:
+    """ONE address id as an int, or a `ValidationError` the routes' existing
+    `except ValidationError` arm forwards as a 400.
+
+    `bool` is excluded on purpose (`int(True) == 1` would name address 1) and so
+    is `float` (`int(1.9) == 1` would silently name a DIFFERENT address);
+    `str` stays accepted, matching the deliberate string-int tolerance the
+    §7.4 body keys already carry.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise ValidationError(f"{field} must be an address id")
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise ValidationError(f"{field} must be an address id")
+
+
+def _coerce_address_id_list(address_ids):
+    """`addressIds` as a list of ints, or a `ValidationError` the routes'
+    existing `except ValidationError` arm forwards as a 400.
+
+    This used to be an inline `[int(a) for a in address_ids]` in each join
+    route's try block: a malformed member raised `ValueError`/`TypeError`,
+    which no `except ValidationError` catches, so the bare `except Exception`
+    reported a plain client mistake as a 500.
+
+    The per-member rule lives in `_coerce_address_id`, so the join routes and
+    the dismissal route cannot drift into accepting different spellings of an
+    address id.
+    """
+    if not isinstance(address_ids, (list, tuple)):
+        raise ValidationError("addressIds must be a list of address ids")
+    coerced = []
+    for value in address_ids:
+        try:
+            coerced.append(_coerce_address_id(value, "addressIds"))
+        except ValidationError:
+            raise ValidationError("addressIds must be a list of address ids")
+    return coerced
+
+
+def _acting_admin_id() -> int:
+    """The acting admin's id as an INT.
+
+    `g.current_user_id` is `get_jwt_identity()` — over HTTP that is the JWT
+    subject STRING. Every Integer column it lands in coerces it silently
+    (`bottle_ledger.actor_user_id`, `customer_link_events.acting_admin_id`), but
+    `entry_metadata` is JSON and stores `"1"`, so one and the same audit row
+    carried `actor_user_id=1` beside `acting_admin_id="1"` and a consumer
+    joining metadata to `users.id` got nothing back. An audit record that
+    changes shape depending on whether the caller was HTTP or a service is a bad
+    record — the same discipline the quantized figures beside it already follow.
+    """
+    try:
+        return int(g.current_user_id)
+    except (TypeError, ValueError):
+        raise ValidationError("Invalid authenticated user identity")
+
+
+def _merge_review_kwargs(body: dict) -> dict:
+    """Spec §7.4's three optional body keys, shared by both join routes so the
+    two cannot drift into accepting different spellings.
+
+    Deliberately a pure passthrough: coercion and rejection (non-numeric,
+    NaN/Infinity, non-integer ids) live in `CustomerLinkService`, which is the
+    SSOT every caller shares, and its `ValidationError` is already forwarded as
+    a 400 by both routes' existing `except ValidationError` arm.
+    """
+    return {
+        "excluded_ledger_entry_ids": body.get("excludedLedgerEntryIds") or None,
+        "resulting_balance": body.get("resultingBalance"),
+        "preview_entry_ids": body.get("previewEntryIds"),
+    }
+
+
+@admin_bp.route("/place-groups/merge-preview", methods=["GET"])
+@jwt_required()
+@validate_admin_action(["view_users"])
+def get_place_group_merge_preview():
+    """The merged bottle ledger an admin reviews before joining (spec §7.4).
+
+    `GET /admin/place-groups/merge-preview?address_ids=44,45[&group_id=9][&exclude=41,...]`
+
+    Read-only. `resulting_balance` is `computed_balance - excluded_total` — the
+    figure the mutating call's `resultingBalance` override is measured against,
+    so the two can never double-count an exclusion. `entry_ids` comes back so
+    the client can hand it straight to `previewEntryIds` and get
+    `MERGE_PREVIEW_STALE` instead of a silently wrong correction.
+
+    `stored_balance` / `drift` expose what the joining places actually hold
+    versus what their merged ledger explains — the divergence the review
+    exists to repair — and `projected_place_balance` is what the place will
+    hold once this is committed, so the dialog predicts its own outcome.
+
+    A missing address or group is 404, not 500 (spec §13's last line); an
+    `exclude` id outside this merge is a 400 carrying
+    `MERGE_EXCLUSION_NOT_ELIGIBLE`, the same rejection the committing call
+    makes, so the decision aid and the committer never disagree.
+    """
+    # Local imports, matching `get_place_group_detail` below: this module is
+    # already the codebase's largest, and its API/model coupling budget is flat.
+    # No model import here on purpose — `build_merge_preview` owns the
+    # missing-address / missing-group check, so this handler stays a thin
+    # delegation and adds nothing to that budget.
+    from business_app.serializers.bottle_serializers import serialize_bottle_ledger_entry
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+
+    try:
+        address_ids = _parse_id_list_arg("address_ids")
+        if not address_ids:
+            return validation_error_response("address_ids is required")
+        group_id = _parse_int_arg("group_id")
+        excluded = _parse_id_list_arg("exclude") or []
+
+        preview = BottleTrackingService.build_merge_preview(
+            address_ids, group_id=group_id, excluded_ledger_entry_ids=excluded
+        )
+        if len(preview["entries"]) > BottleTrackingService.MERGE_PREVIEW_MAX_ENTRIES:
+            # Rejected rather than paged: a merge decided against a partial
+            # ledger is exactly the mistake the review exists to prevent.
+            return validation_error_response(
+                f"This merge spans {len(preview['entries'])} ledger entries, above the "
+                f"{BottleTrackingService.MERGE_PREVIEW_MAX_ENTRIES} this preview renders. "
+                "Narrow the merge or reconcile the place first."
+            )
+
+        # Decimals cross this boundary as JSON NUMBERS: Flask's provider renders
+        # a bare Decimal as the string "7.00", which breaks the panel's
+        # arithmetic — the same trap `place_balance` already carries a note on.
+        excluded_ids = set(excluded)  # hoisted: rebuilding it per entry is O(n*m)
+        return success_response(
+            data={
+                "entries": [
+                    {
+                        **serialize_bottle_ledger_entry(entry),
+                        "preview_balance_after": float(entry.preview_balance_after),
+                        "excluded": entry.id in excluded_ids,
+                    }
+                    for entry in preview["entries"]
+                ],
+                "entry_ids": preview["entry_ids"],
+                "computed_balance": float(preview["computed_balance"]),
+                # What the joining places actually HOLD today, and how far that
+                # is from what their merged ledger explains. The panel needs
+                # both: the drift is what the admin is being asked to repair.
+                "stored_balance": float(preview["stored_balance"]),
+                "drift": float(preview["drift"]),
+                "excluded_total": float(preview["excluded_total"]),
+                "resulting_balance": float(preview["resulting_balance"]),
+                # What the place will hold if this is committed as previewed —
+                # so the dialog can state the outcome instead of implying one.
+                "projected_place_balance": float(preview["projected_place_balance"]),
+            }
+        )
+    except ValidationError as e:
+        return validation_error_response(getattr(e, "message", str(e)), error_code=getattr(e, "error_code", None))
+    except NotFoundError as e:
+        # Ahead of the bare `except`, which would otherwise turn a missing
+        # address or group into the 500 spec §13's last line forbids.
+        return not_found_response(resource_type="PlaceGroupMergePreview", message=str(e))
+    except Exception as e:  # noqa: BLE001
+        current_app.logger.error(f"Place group merge preview error: {e}")
+        return internal_error_response("Failed to build merge preview")
+
+
+@admin_bp.route("/place-groups", methods=["GET"])
+@jwt_required()
+@validate_admin_action(["view_users"])
+def list_place_groups_admin():
+    """Every place group with the exposure it carries ("Grouped Addresses").
+
+    `GET /admin/place-groups[?page=&per_page=&search=]`
+
+    🔴 READ-ONLY, and deliberately so. Grouping two addresses has money
+    consequences once place-scoped COD collection is on, so this route only
+    shows what already exists — creating a group stays the explicit
+    `POST /admin/place-groups` below, with its mandatory `reason`.
+
+    Both halves of that exposure ride along per row — the open COD debt the
+    place OWES (`place_open_cod_debt_total` / `active_cod_debt_count`) and the
+    bottles it HOLDS (`bottle_exposure`) — because grouping pools the two
+    alike, and an admin seeing only the money sees half the consequence.
+
+    Until this existed the only door into a group was one customer's detail
+    drawer, so an admin had to already know whom to look up. `per_page` is
+    clamped to the project's 100 cap inside the service, which is the SSOT for
+    both the clamp and the payload shape.
+    """
+    try:
+        return success_response(
+            data=CustomerLinkService().list_place_groups(
+                page=request.args.get("page", 1, type=int) or 1,
+                per_page=request.args.get("per_page", 20, type=int) or 20,
+                search=request.args.get("search"),
+            )
+        )
+    except Exception as e:  # noqa: BLE001
+        current_app.logger.error(f"List place groups error: {e}")
+        return internal_error_response("Failed to load place groups")
+
+
+@admin_bp.route("/place-groups", methods=["POST"])
+@jwt_required()
+@validate_admin_action(["manage_users"])
+def create_place_group_admin():
+    """Create an ownerless place group from any customers' addresses (spec §9).
+
+    Accepts spec §7.4's merge review: `excludedLedgerEntryIds`,
+    `resultingBalance` and `previewEntryIds`. The `except ValidationError` arm
+    already forwards `error_code`, so `MERGE_EXCLUSION_NOT_ELIGIBLE`,
+    `MERGE_PREVIEW_STALE` and `MERGE_REASON_REQUIRED` reach the client unchanged.
+    """
+    try:
+        body = request.get_json(silent=True) or {}
+        address_ids = body.get("addressIds") or []
+        reason = (body.get("reason") or "").strip()
+        if len(address_ids) < 2:
+            return validation_error_response("At least 2 addressIds are required")
+        if not reason:
+            return validation_error_response("reason is required")
+        service = CustomerLinkService()
+        group = service.create_place_group(
+            _coerce_address_id_list(address_ids),
+            acting_admin_id=_acting_admin_id(),
+            reason=reason,
+            label=body.get("label"),
+            **_merge_review_kwargs(body),
+        )
+        return created_response(
+            data={
+                "place_group_id": group.id,
+                "address_ids": service.get_place_group_address_ids(group.id),
+            },
+            message="Place group created",
+        )
+    except ValidationError as e:
+        _rollback_db_session()
+        return validation_error_response(getattr(e, "message", str(e)), error_code=getattr(e, "error_code", None))
+    except Exception as e:  # noqa: BLE001
+        _rollback_db_session()
+        current_app.logger.error(f"Create place group error: {e}")
+        return internal_error_response("Failed to create place group")
+
+
+@admin_bp.route("/place-groups/<int:group_id>", methods=["GET"])
+@jwt_required()
+@validate_admin_action(["view_users"])
+def get_place_group_detail(group_id):
+    """Place-group detail: members with owners, bottle union, COD statement, audit."""
+    try:
+        from business_app.services.cash_collection_service import CashCollectionService
+
+        detail = CustomerLinkService().get_place_group_detail(group_id)
+        if detail is None:
+            return not_found_response(resource_type="PlaceGroup", message="Place group not found")
+        # The service keeps Decimal; Flask's JSON provider renders Decimal as a
+        # STRING ("4.00"), which breaks the admin UI's arithmetic. Bottle
+        # quantities cross this boundary as JSON numbers. Members carry no
+        # balance any more — a place's pool has no per-coworker slice — but they
+        # do carry the remove dialog's `bottles_leaving` pre-fill, which is a
+        # quantity and so needs the same float() treatment (spec §7.1).
+        return success_response(
+            data={
+                "place_group_id": detail["place_group_id"],
+                "label": detail["label"],
+                "place_balance": float(detail["place_balance"]),
+                "members": [
+                    {**m, "suggested_bottles_leaving": float(m["suggested_bottles_leaving"])} for m in detail["members"]
+                ],
+                "cod": CashCollectionService().get_place_cod_statement(group_id),
+                "events": detail["events"],
+            }
+        )
+    except NotFoundError:
+        return not_found_response(resource_type="PlaceGroup", message="Place group not found")
+    except Exception as e:  # noqa: BLE001
+        current_app.logger.error(f"Place group detail error: {e}")
+        return internal_error_response("Failed to load place group")
+
+
+@admin_bp.route("/place-groups/<int:group_id>/addresses", methods=["POST"])
+@jwt_required()
+@validate_admin_action(["manage_users"])
+def add_place_group_addresses(group_id):
+    """Add addresses to an existing place group.
+
+    Accepts spec §7.4's merge review on the same three body keys as
+    `create_place_group_admin`, forwarded through the same shared parser.
+    """
+    try:
+        body = request.get_json(silent=True) or {}
+        address_ids = body.get("addressIds") or []
+        reason = (body.get("reason") or "").strip()
+        if not address_ids:
+            return validation_error_response("addressIds is required")
+        if not reason:
+            return validation_error_response("reason is required")
+        service = CustomerLinkService()
+        group = service.add_addresses_to_group(
+            group_id,
+            _coerce_address_id_list(address_ids),
+            acting_admin_id=_acting_admin_id(),
+            reason=reason,
+            **_merge_review_kwargs(body),
+        )
+        return success_response(
+            data={
+                "place_group_id": group.id,
+                "address_ids": service.get_place_group_address_ids(group.id),
+            },
+            message="Addresses added to place group",
+        )
+    except ValidationError as e:
+        _rollback_db_session()
+        if getattr(e, "error_code", None) == "PLACE_GROUP_NOT_FOUND":
+            return not_found_response(resource_type="PlaceGroup", message="Place group not found")
+        return validation_error_response(getattr(e, "message", str(e)), error_code=getattr(e, "error_code", None))
+    except Exception as e:  # noqa: BLE001
+        _rollback_db_session()
+        current_app.logger.error(f"Add place group addresses error: {e}")
+        return internal_error_response("Failed to add addresses")
+
+
+@admin_bp.route("/place-groups/<int:group_id>/addresses/<int:address_id>", methods=["DELETE"])
+@jwt_required()
+@validate_admin_action(["manage_users"])
+def remove_place_group_address(group_id, address_id):
+    """Remove one address from a place group (spec §7.1).
+
+    By default the bottles stay with the PLACE and the departing address starts
+    a fresh scope at 0. Removal never NETS bottles between people:
+    `bottle_balances` has one row per place, so a negative per-person "pair"
+    inside a place is not representable and the old ungroup-netting mechanism is
+    retired (spec §8).
+
+    The optional `bottlesLeaving` body field is the deliberate alternative: that
+    many bottles leave WITH the address as one conserving move. An impossible
+    quantity is rejected with `PLACE_SPLIT_INVALID` (never silently clamped) via
+    the `except ValidationError` arm below, which already forwards `error_code`.
+    """
+    try:
+        body = request.get_json(silent=True) or {}
+        reason = (body.get("reason") or "").strip()
+        if not reason:
+            return validation_error_response("reason is required")
+        service = CustomerLinkService()
+        # Missing address and "grouped somewhere else" both fail this check —
+        # the URL must name the group the address actually belongs to.
+        if service.get_address_place_group_id(address_id) != group_id:
+            return not_found_response(resource_type="PlaceGroupAddress", message="Address is not in this place group")
+        result = service.remove_address_from_group(
+            address_id,
+            acting_admin_id=_acting_admin_id(),
+            reason=reason,
+            bottles_leaving=body.get("bottlesLeaving"),
+        )
+        return success_response(
+            data={
+                "place_group_id": result["group_id"],
+                # Decimal would render as the STRING "2.00" and break the panel's
+                # arithmetic, same trap as `place_balance` above.
+                "bottles_leaving": float(result["bottles_leaving"]),
+                # Spec §7.3: the removal left exactly one member, so the place
+                # dissolved onto it in the same transaction. The panel must be
+                # told, because the group it was editing no longer has members.
+                "dissolved": result["dissolved"],
+            },
+            message="Address removed from place group",
+        )
+    except ValidationError as e:
+        _rollback_db_session()
+        return validation_error_response(getattr(e, "message", str(e)), error_code=getattr(e, "error_code", None))
+    except Exception as e:  # noqa: BLE001
+        _rollback_db_session()
+        current_app.logger.error(f"Remove place group address error: {e}")
+        return internal_error_response("Failed to remove address")
+
+
+@admin_bp.route("/addresses/search", methods=["GET"])
+@jwt_required()
+@validate_admin_action(["view_users"])
+def search_addresses_for_place_group():
+    """Cross-user address search for the manual place-group picker (spec §9).
+
+    Without this an admin can only group pairs the suggestion engine happened
+    to surface. ``exclude_grouped`` defaults to 1 so the picker never offers an
+    address that is already in a group (the fences would reject it anyway).
+    """
+    try:
+        addresses = CustomerLinkService().search_addresses(
+            request.args.get("q", ""),
+            limit=request.args.get("limit", 20, type=int) or 20,
+            exclude_grouped=parse_bool_arg("exclude_grouped", default=True),
+        )
+        return success_response(data={"addresses": addresses})
+    except Exception as e:  # noqa: BLE001
+        current_app.logger.error(f"Address search error: {e}")
+        return internal_error_response("Failed to search addresses")
+
+
+@admin_bp.route("/place-group-suggestions", methods=["GET"])
+@jwt_required()
+@validate_admin_action(["view_users"])
+def list_place_group_suggestions():
+    """Estate-wide co-located 'possible same place' candidates — no anchor.
+
+    `GET /admin/place-group-suggestions[?limit=]`
+
+    The per-user route below can only answer "who might share a place with THIS
+    customer", so an admin had to suspect someone before they could look. The
+    service already supported the un-anchored case (`user_id=None`); only this
+    door was missing.
+
+    🔴 A SUGGESTION IS NOT A GROUPING. This route never writes: every row is a
+    candidate an admin must confirm through `POST /admin/place-groups` with a
+    `reason`, or reject through the dismissal route below (spec §2.1 — seven
+    ways auto-grouping fails dangerously).
+
+    `limit` is clamped to the project's 100 cap so an un-anchored read cannot be
+    asked to serialise the whole estate in one response.
+    """
+    try:
+        limit = request.args.get("limit", 20, type=int) or 20
+        suggestions = CustomerLinkService().get_place_group_suggestions(limit=max(1, min(limit, 100)))
+        return success_response(data=suggestions)
+    except Exception as e:  # noqa: BLE001
+        current_app.logger.error(f"Global place group suggestions error: {e}")
+        return internal_error_response("Failed to load place group suggestions")
+
+
+@admin_bp.route("/users/<int:user_id>/place-group-suggestions", methods=["GET"])
+@jwt_required()
+@validate_admin_action(["view_users"])
+def get_user_place_group_suggestions(user_id):
+    """Co-located 'possible same place' suggestions anchored on this user."""
+    try:
+        service = CustomerLinkService()
+        if not service.user_exists(user_id):
+            return not_found_response(resource_type="User", message="User not found")
+        suggestions = service.get_place_group_suggestions(user_id=user_id)
+        return success_response(data={"suggestions": suggestions})
+    except Exception as e:  # noqa: BLE001
+        current_app.logger.error(f"Place group suggestions error: {e}")
+        return internal_error_response("Failed to load place group suggestions")
+
+
+@admin_bp.route("/place-group-suggestions/dismiss", methods=["POST"])
+@jwt_required()
+@validate_admin_action(["manage_users"])
+def dismiss_place_group_suggestion():
+    """'Not the same place' — pairwise, re-surfaced on new signal; never a
+    CustomerDistinctPair write."""
+    try:
+        body = request.get_json(silent=True) or {}
+        address_id_a, address_id_b = body.get("addressIdA"), body.get("addressIdB")
+        reason = (body.get("reason") or "").strip()
+        if not address_id_a or not address_id_b:
+            return validation_error_response("addressIdA and addressIdB are required")
+        if not reason:
+            return validation_error_response("reason is required")
+        # Coerced through the shared helper, NOT with a bare `int()`: an inline
+        # `int(...)` inside this try block raises ValueError/TypeError, which no
+        # `except ValidationError` catches, so `{"addressIdA": "abc"}` — a plain
+        # client mistake — came back as a 500 from the bare `except Exception`.
+        # Same defect the join routes' `[int(a) for a in address_ids]` had.
+        row = CustomerLinkService().dismiss_place_suggestion(
+            _coerce_address_id(address_id_a, "addressIdA"),
+            _coerce_address_id(address_id_b, "addressIdB"),
+            acting_admin_id=_acting_admin_id(),
+            reason=reason,
+        )
+        return success_response(
+            data={"address_id_low": row.address_id_low, "address_id_high": row.address_id_high},
+            message="Place suggestion dismissed",
+        )
+    except ValidationError as e:
+        _rollback_db_session()
+        return validation_error_response(getattr(e, "message", str(e)), error_code=getattr(e, "error_code", None))
+    except Exception as e:  # noqa: BLE001
+        _rollback_db_session()
+        current_app.logger.error(f"Dismiss place suggestion error: {e}")
+        return internal_error_response("Failed to dismiss place suggestion")

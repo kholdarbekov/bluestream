@@ -597,11 +597,18 @@ class TestCashCollectionService:
             assert page1['items'][0]['total_outstanding_amount'] == 30000.0
             assert page1['items'][1]['total_outstanding_amount'] == 20000.0
             assert page1['pagination'] == {'page': 1, 'per_page': 2, 'total': 3, 'pages': 2}
-            # Row shape parity with the admin list serialization.
+            # Row shape parity with the admin list serialization. Plan 2c made
+            # the list mixed (place rows + cluster-collapsed person rows), so an
+            # unlinked debtor keeps every pre-existing key and gains exactly the
+            # three additive cluster keys.
             assert set(page1['items'][0]) == {
                 'id', 'first_name', 'last_name', 'phone', 'role', 'user_type',
                 'active_cod_debt_count', 'total_outstanding_amount', 'cod_restricted',
+                'row_type', 'cluster_member_count', 'member_user_ids',
             }
+            assert page1['items'][0]['row_type'] == 'person'
+            assert page1['items'][0]['cluster_member_count'] == 1
+            assert page1['items'][0]['member_user_ids'] == [u_high.id]
 
             page2 = service.paginate_users_with_open_cod_debts(page=2, per_page=2)
             assert [item['id'] for item in page2['items']] == [u_low.id]

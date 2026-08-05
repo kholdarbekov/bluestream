@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   daysSince, colorForDays, DEFAULT_THRESHOLDS,
-  loadThresholds, saveThresholds, applyFilters,
+  loadThresholds, saveThresholds, applyFilters, heatWeight,
 } from './customerMapLogic';
 
 const NOW = new Date('2026-07-14T00:00:00Z');
@@ -88,5 +88,78 @@ describe('applyFilters', () => {
   });
   it('combines two filters with AND', () => {
     expect(applyFilters(pins, { bottleOnly: true, type: 'individual' }, NOW).map((p) => p.userId)).toEqual([2]);
+  });
+});
+
+describe('heatWeight', () => {
+  // The layer answers "where are my customers?", so a pin's weight is about the
+  // PLACE it belongs to, never about how many empties that place happens to hold.
+  // `bottleBalance` is the place POOL repeated on every coworker's pin, so it can
+  // only be used to de-duplicate — and using it as the magnitude deleted every
+  // zero-balance customer from the map.
+  it('keeps a zero-balance customer on the map', () => {
+    // The regression this test exists for: weighting by `bottleBalance` returned
+    // EXACTLY 0 here, and leaflet.heat neither accumulates 0 nor survives merging
+    // two of them in one grid cell (0/0 -> NaN coordinates -> the cell is never
+    // drawn, taking any positive pin that joins it down too).
+    const w = heatWeight({ bottleBalance: 0, placeMemberCount: 1 });
+    expect(w).toBeGreaterThan(0);
+    expect(Number.isFinite(w)).toBe(true);
+  });
+
+  it('does not let the bottle balance scale the layer at all', () => {
+    // An empty-handed customer and a 40-bottle grocery store are one place each.
+    // `HeatLayer.js` passes no `max`, so simpleheat clamps every cell at 1.0 —
+    // magnitudes above the zoom scale are indistinguishable anyway.
+    const empty = heatWeight({ bottleBalance: 0, placeMemberCount: 1 });
+    const stocked = heatWeight({ bottleBalance: 40, placeMemberCount: 1 });
+    expect(empty).toBe(stocked);
+    // Over-returned (negative) balances are not special either — still one place.
+    expect(heatWeight({ bottleBalance: -4, placeMemberCount: 1 })).toBe(empty);
+  });
+
+  it('splits one shared place across its pins so a cluster cannot dominate by count', () => {
+    // addressCount is deliberately a DIFFERENT number: dividing by the per-user
+    // address counter instead of the place member count yields 1/5, not 1/3.
+    expect(heatWeight({ bottleBalance: 7, placeMemberCount: 3, addressCount: 5 })).toBeCloseTo(1 / 3);
+  });
+
+  it('makes the three pins of one shared place sum to a single place', () => {
+    const office = { bottleBalance: 7, placeMemberCount: 3, isSharedPlace: true };
+    const total = [office, office, office].reduce((acc, p) => acc + heatWeight(p), 0);
+    expect(total).toBeCloseTo(1);
+    // ...i.e. exactly as hot as ONE solo neighbour, not three.
+    expect(total).toBeCloseTo(heatWeight({ bottleBalance: 0, placeMemberCount: 1 }));
+  });
+
+  it('still lets a genuinely dense block read as dense', () => {
+    // De-duplication must not flatten real density: five UNRELATED solo customers
+    // in one block are five places and sum to five, while five coworkers at one
+    // address sum to one.
+    const neighbours = Array.from({ length: 5 }, (_, i) => ({ userId: i, placeMemberCount: 1 }));
+    const coworkers = Array.from({ length: 5 }, (_, i) => ({ userId: i, placeMemberCount: 5 }));
+    const sum = (pins) => pins.reduce((acc, p) => acc + heatWeight(p), 0);
+    expect(sum(neighbours)).toBeCloseTo(5);
+    expect(sum(coworkers)).toBeCloseTo(1);
+  });
+
+  it('never divides by zero or emits NaN/Infinity for a missing or degenerate member count', () => {
+    for (const count of [0, undefined, null, -3, NaN, 'three']) {
+      const w = heatWeight({ bottleBalance: 7, placeMemberCount: count });
+      expect(Number.isFinite(w)).toBe(true);
+      expect(w).toBe(1);
+    }
+  });
+
+  it('is positive for every shape of pin the backend or a filter can hand it', () => {
+    for (const pin of [{}, undefined, null, { placeMemberCount: 2 }, { bottleBalance: 0 }]) {
+      const w = heatWeight(pin);
+      expect(Number.isFinite(w)).toBe(true);
+      expect(w).toBeGreaterThan(0);
+    }
+  });
+
+  it('accepts the numeric strings a JSON payload can carry', () => {
+    expect(heatWeight({ bottleBalance: '7', placeMemberCount: '3' })).toBeCloseTo(1 / 3);
   });
 });

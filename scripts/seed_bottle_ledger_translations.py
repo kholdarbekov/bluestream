@@ -39,10 +39,17 @@ KEYS = {
         "uz": "♻️ Qaytarib olingan bo'sh 18.9 litrli idishlar: {count}",
         "ru": "♻️ Пустых бутылей забрано: {count}",
     },
+    # PLACE-scoped, not address-scoped: `get_order_bottle_summary` reports the
+    # balance of the place the delivery address belongs to (the address group
+    # when one exists), so at a shared workplace this number can include empties
+    # standing at a coworker's DIFFERENT address in the same group. The copy must
+    # therefore say "place", and it must never say WHOSE (spec §7) — the count is
+    # the only thing allowed across that boundary. `{count}` is pinned by
+    # PARAM_KEYS in tests/unit/test_bottle_translation_keys.py.
     "telegram.delivery_summary.balance": {
-        "en": "📊 Number of bottles at this address: {count}",
-        "uz": "📊 Ushbu manzildagi 18.9 litrli idishlar soni: {count}",
-        "ru": "📊 Количество бутылей по этому адресу: {count}",
+        "en": "📊 Bottles at this place: {count}",
+        "uz": "📊 Ushbu joydagi 18.9 litrli idishlar: {count}",
+        "ru": "📊 Бутылей в этом месте: {count}",
     },
     "telegram.delivery_summary.report_button": {
         "en": "⚠️ Report an issue",

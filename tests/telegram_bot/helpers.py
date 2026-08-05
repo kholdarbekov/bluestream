@@ -5,6 +5,75 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 
+# ---------------------------------------------------------------------------
+# Customer /bottles overview payload — THE single fabrication point
+#
+# ANTI-BLIND-SPOT NOTE. `BottleTrackingService.get_customer_bottle_overview` is
+# the payload behind the customer bot's My-bottles screen. Every test that feeds
+# that screen a fabricated dict builds it HERE and nowhere else, because a
+# literal dict written inline is invisible to the contract guard
+# `test_fabricated_overview_matches_the_real_customer_overview`
+# (tests/unit/test_customer_bot_bottles_place.py), which asserts these keys are
+# a subset of the real service's output.
+#
+# That guard is the thing that was missing while the (user, address) -> PLACE
+# re-key shipped: both bot test modules fabricated `balance`,
+# `place_union_balance` and `cluster_total_balance`, stayed green, and the live
+# screen rendered 0 for every customer.
+# ---------------------------------------------------------------------------
+
+
+def overview_balance_row(address_id, title, place_balance, **overrides):
+    """One row of the overview payload, defaulting to a solo customer's own,
+    ungrouped address (the unlinked baseline).
+
+    One row per distinct PLACE — the address group when grouped, else the
+    address — whose only number is ``place_balance``. There is deliberately no
+    per-person ``balance`` and no ``place_union_balance``: grouped or not, a
+    place has ONE pool. ``place_members`` rows carry NAMES ONLY.
+    """
+    row = {
+        "address_id": address_id,
+        "address_title": title,
+        "full_address": f"{title} street",
+        "owner_user_id": 11,
+        "owner_name": "Alice Member",
+        "is_own": True,
+        "is_grouped": False,
+        "place_group_id": None,
+        "place_balance": place_balance,
+        "place_members": [],
+    }
+    # The "single fabrication point" claim above is only true if this function
+    # cannot itself fabricate. `**overrides` is a hole: `overview_balance_row(
+    # ..., place_union_balance=3)` would mint a dead key THROUGH the guarded
+    # door and stay green, which is precisely the failure this module exists to
+    # close. Overrides may only re-value keys the row already declares.
+    unknown = set(overrides) - set(row)
+    assert not unknown, (
+        f"overview_balance_row() cannot invent keys: {sorted(unknown)}. "
+        "Add them to the row above (and to the real payload) instead — see "
+        "test_fabricated_overview_matches_the_real_customer_overview."
+    )
+    row.update(overrides)
+    return row
+
+
+def overview_place_member(member_name, *, is_own=False):
+    """One ``place_members`` entry. Names only — the pool is indivisible, so a
+    per-member number could only ever be a fiction (spec decision 4)."""
+    return {"member_name": member_name, "is_own": is_own}
+
+
+def overview_payload(rows, *, is_linked=False):
+    """The whole overview envelope.
+
+    It carries NO cluster total: the bot computes that client-side as the sum of
+    ``place_balance`` over these (already scope-deduped) rows.
+    """
+    return {"is_linked": is_linked, "balances": list(rows)}
+
+
 class DummyMessage:
     def __init__(self):
         self.reply_text = AsyncMock()

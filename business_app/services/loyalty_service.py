@@ -1123,6 +1123,17 @@ class LoyaltyService:
         if referrer.id == referee_user_id:
             raise ValidationError("Cannot refer yourself")
 
+        # Refuse a referral that would self-link across a canonical customer:
+        # sharing a non-null canonical_customer_id means the "referrer" and
+        # "referee" are the same real person (linked by an admin). Loyalty stays
+        # separate per account, but referral bonuses must not cross a person's
+        # own phones.
+        if (
+            referrer.canonical_customer_id is not None
+            and referrer.canonical_customer_id == referee.canonical_customer_id
+        ):
+            raise ValidationError("Cannot refer yourself")
+
         if referee.referred_by_user_id:
             raise ConflictError("User has already used a referral code")
 

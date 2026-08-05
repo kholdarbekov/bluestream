@@ -89,7 +89,10 @@ def test_staff_cod_callback_and_reconciliation_wiring_present():
         'CallbackQueryHandler(status_update_handler.start_partial_cash_collection, pattern=r"^staff_cash_partial_\\d+$")',
         'CallbackQueryHandler(status_update_handler.start_no_cash_collection, pattern=r"^staff_cash_none_\\d+$")',
         'CallbackQueryHandler(status_update_handler.show_reconciliation_session, pattern="^staff_reconcile_session$")',
-        'CallbackQueryHandler(status_update_handler.submit_reconciliation_all, pattern="^staff_reconcile_submit_all$")',
+        # The handoff callback carries the frozen amount it displayed
+        # ("staff_reconcile_submit_all:120000.00"), so the pattern must not be
+        # end-anchored. See tests/unit/test_reconciliation_handoff_shows_what_it_records.py.
+        'CallbackQueryHandler(status_update_handler.submit_reconciliation_all, pattern=r"^staff_reconcile_submit_all(:|$)")',
         'CallbackQueryHandler(status_update_handler.start_reconciliation_submit, pattern="^staff_reconcile_submit$")',
         'CallbackQueryHandler(cash_collection_handler.show_debtor_list, pattern="^staff_cod_collect_menu$")',
         'CallbackQueryHandler(cash_collection_handler.paginate_debtor_list, pattern=r"^staff_cod_list_page_\\d+$")',

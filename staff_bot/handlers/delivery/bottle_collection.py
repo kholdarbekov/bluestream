@@ -1,18 +1,26 @@
 """Standalone bottle collection and fine creation flow for delivery drivers."""
 
 import logging
+import math
+import uuid
+from decimal import Decimal, InvalidOperation
 
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 
-from staff_bot.api_client import api_client
+from staff_bot.api_client import TRANSPORT_AMBIGUOUS_ERROR_CODE, api_client
 from staff_bot.handlers.base import BaseHandler
 from staff_bot.i18n import i18n
 from staff_bot.keyboards.common import CommonKeyboards
 from staff_bot.keyboards.delivery import DeliveryKeyboards
 from staff_bot.permissions import require_auth, require_delivery_driver
 from staff_bot.utils import flow_state
-from staff_bot.utils.formatters import escape_html, format_currency, format_user_card
+from staff_bot.utils.formatters import (
+    escape_html,
+    format_currency,
+    format_quantity,
+    format_user_card,
+)
 from staff_bot.utils.search import detect_search_type
 
 logger = logging.getLogger(__name__)
@@ -52,15 +60,314 @@ class BottleCollectionHandler(BaseHandler):
             )
 
     @staticmethod
+    def _begin_flow(
+        context: ContextTypes.DEFAULT_TYPE,
+        *,
+        customer_id: int,
+        address_id: int,
+        action: str = None,
+    ) -> dict:
+        """Start a FRESH standalone-bottle flow at (customer, address).
+
+        CLEAR-ON-ENTRY, the counterpart to `_finalize_collection`'s
+        clear-in-finally. The flow dict is the only record of what the driver is
+        doing and the global text router (staff_bot/bot.py) dispatches purely on
+        which keys it carries: with `action == 'collect'` and `quantity` set, ANY
+        typed text finalises a collection. Mutating the previous dict in place —
+        which is what `flow.setdefault`-style entry did — meant an abandoned
+        pick left `quantity` armed, so re-entering Collect (possibly at a
+        DIFFERENT door) turned the driver's next message into a completed
+        collection of a quantity they never picked.
+
+        Only the two cached lookup maps survive: `place_balances` (the fine
+        prompt's grouped-place hint) and `picker_place_balances` (the picker's
+        can-collect decision). Both are read-only views of the statement that was
+        on screen, never step state.
+
+        Deliberately NOT `flow_state.clear_pending_flows`: that SSOT is for
+        LEAVING a flow (it drains the deferred pool-suggestion queue, which would
+        push an Accept keyboard at a driver in the middle of entering one) and it
+        drops the delivery/cash flows this handler has no business touching.
+        """
+        previous = context.user_data.get('pending_bottle_collection_flow') or {}
+        flow = {'customer_id': customer_id, 'address_id': address_id}
+        if action:
+            flow['action'] = action
+        for cached in ('place_balances', 'picker_place_balances'):
+            if cached in previous:
+                flow[cached] = previous[cached]
+        context.user_data['pending_bottle_collection_flow'] = flow
+        return flow
+
+    @staticmethod
+    def _new_intent_token() -> str:
+        """A retry token for ONE decision, reused by every transmission of it.
+
+        Minted when the driver reaches the confirm step — `pick_collection_qty`
+        for a collection, `receive_fine_amount` for a fine (a fine has no
+        confirm button; the note message IS the confirm) — stored in the flow
+        dict, and sent on every submit of that intent.
+
+        It is a SERVER-SIDE FENCE, not a patch for any one transport: the
+        backend cannot otherwise tell a duplicate delivery of one POST from a
+        second real collection, and duplicates can arrive from a retrying
+        client, a proxy, a replayed request from outside this bot, or a future
+        client with its own retry loop. (`StaffAPIClient` no longer re-POSTs an
+        ambiguous failure — see `RETRY_SAFE_METHODS` in staff_bot/api_client.py
+        — so do NOT justify this token by citing that loop.)
+
+        Minted at the CONFIRM step and nowhere else:
+          * not at submit time — a token minted per attempt buys exactly
+            nothing, and it would also break the token-less body an older flow
+            dict must still be able to post;
+          * not in `_begin_flow`, where the intent does not exist yet because no
+            quantity/amount has been chosen.
+
+        It dies with the flow: `_clear_flow` pops the whole dict from BOTH
+        submit paths' `finally`, `_begin_flow` replaces the dict on every
+        re-entry (carrying over only the two read-only balance maps — do NOT add
+        this key to that allow-list), and `flow_state.clear_pending_flows` drops
+        the key outright. A token that OUTLIVED its intent would be worse than a
+        duplicate: the backend would swallow the driver's next genuine
+        collection at HTTP 200 with no ledger row and no session-tally bump —
+        an invisible loss instead of a visible double.
+
+        `uuid4().hex` is 32 lowercase hex chars, which satisfies the backend's
+        `\\A[A-Za-z0-9_-]{8,64}\\Z` fullmatch; the server prepends the namespace
+        and the authenticated actor id, so the client never controls the whole
+        stored key.
+
+        `context.user_data` is in-memory only (staff_bot/bot.py builds the
+        Application with no `.persistence(...)`), so a bot restart mid-flow
+        loses the token. That is safe rather than lucky: with the flow gone the
+        submit paths fail their "do we still know what this is?" guard and never
+        POST at all.
+        """
+        return uuid.uuid4().hex
+
+    async def _handle_submit_failure(self, update: Update, response, language: str):
+        """Render a failed collection/fine submit, warning the driver when the
+        write MAY already have landed.
+
+        `TRANSPORT_AMBIGUOUS` is stamped by `StaffAPIClient._make_request` on
+        the terminal give-up response when the failure happened in a phase where
+        the request may already have reached the backend (read/write timeout,
+        read/write error, server closing mid-exchange). Everything else — a
+        connect-phase exhaustion, a named 4xx, a 5xx — keeps today's copy.
+
+        Why this exists, and why it is not optional: a driver who redoes the
+        flow BY HAND mints a NEW token, so the per-intent token cannot dedup
+        that path. RULING 1's verb-only retry policy makes that path MORE likely
+        (the transport now gives up after ONE ambiguous send instead of three),
+        which is exactly why the warning is required. See
+        `.superpowers/sdd/2026-08-03-retry-safety/RULINGS.md` RULING 2.
+
+        Scoped to the ambiguous phase ALONE. A connect-phase failure provably
+        never reached the backend, so "this may already have been recorded"
+        would be a lie there — and a warning that cries wolf is one the driver
+        stops reading. Note the default copy is actively the wrong advice here:
+        `BaseHandler.API_ERROR_MESSAGE_KEY_MAP` maps the transport's
+        "Request failed after retries" to `staff.error.api.service_unavailable`
+        ("please try later"), i.e. "do it again" — the one instruction that
+        turns a possible duplicate into a certain one.
+        """
+        error_code = getattr(response, 'error_code', None)
+        if error_code == TRANSPORT_AMBIGUOUS_ERROR_CODE:
+            logger.warning(
+                "Ambiguous transport failure on a bottle write; the driver was "
+                "warned it may already be recorded: user=%s error=%s",
+                getattr(update.effective_user, 'id', None),
+                getattr(response, 'error', None),
+            )
+            await self._notify_user(
+                update,
+                f"⚠️ {i18n.get('staff.error.api.maybe_recorded', language)}",
+                show_alert=True,
+            )
+            return
+        await self._handle_api_response_error(update, response, language)
+
+    @staticmethod
+    def _parse_positive_amount(raw_text: str) -> float:
+        """Coerce a driver-typed money amount, fencing NON-FINITE values.
+
+        `float(text)` happily returns `nan` / `inf` for the literals "nan",
+        "inf" and "Infinity", and neither survives a `<= 0` sign check:
+        `nan <= 0` is False and `inf <= 0` is False, so both used to be accepted
+        and posted as the non-standard JSON literals Python's json module both
+        emits AND re-parses. Downstream they diverge and NEITHER outcome is
+        acceptable — `Decimal('NaN') <= 0` raises `decimal.InvalidOperation`
+        (a 500 at the customer's door) while `Decimal('Infinity') <= 0` is merely
+        False, so an infinite fine was committed and read back to the next driver
+        as "Active fines: 1 (inf Uzs)".
+
+        Decimal is the same coercion the backend's SSOT fence
+        (`BottleTrackingService._as_decimal`) uses, and `is_finite()` is checked
+        BEFORE any ordering comparison because Python's decimal is not
+        IEEE-754: comparing `Decimal('NaN')` with a number RAISES.
+
+        Raises ``ValueError`` for anything non-numeric, non-finite or <= 0.
+        """
+        text = (raw_text or '').strip().replace(',', '').replace(' ', '')
+        try:
+            amount = Decimal(text)
+        except (InvalidOperation, TypeError, ValueError):
+            raise ValueError("not a number")
+        if not amount.is_finite():
+            raise ValueError("non-finite amount")
+        if amount <= 0:
+            raise ValueError("non-positive amount")
+        value = float(amount)
+        # `Decimal('1e400')` is perfectly finite until `float()` overflows it.
+        if not math.isfinite(value):
+            raise ValueError("amount overflows to infinity")
+        return value
+
+    @staticmethod
+    def _place_key(addr: dict) -> tuple:
+        """Scope identity of a payload row: the address GROUP when the row is
+        grouped, else the address itself.
+
+        ``get_customer_summary``'s ``addresses[]`` rows name the group
+        ``address_group_id``; ``get_customer_place_rows`` names it
+        ``place_group_id``. Both are the same ``AddressGroup`` — one PLACE, one
+        pool of empties.
+        """
+        if addr.get('is_grouped'):
+            group_id = addr.get('address_group_id')
+            if group_id is None:
+                group_id = addr.get('place_group_id')
+            if group_id is not None:
+                return ('g', group_id)
+        return ('a', addr.get('address_id'))
+
+    @staticmethod
+    def _place_balances(summary: dict) -> dict:
+        """``{address_id: place_balance}`` for the customer's GROUPED addresses.
+
+        ``place_balance`` IS the empties standing at that door, whoever's
+        account they sit on, so there is nothing left to union. Ungrouped
+        addresses are omitted entirely — an empty map means "nothing to say".
+
+        Zero and NEGATIVE (over-returned) places are deliberately kept: the
+        caller decides what to say about them.
+        """
+        return {
+            addr['address_id']: float(addr.get('place_balance') or 0)
+            for addr in (summary.get('addresses') or [])
+            if addr.get('is_grouped') and addr.get('address_id') is not None
+        }
+
+    @staticmethod
+    def _actionable_places(summary: dict) -> list:
+        """The DISTINCT places the driver can still act on — one row per place.
+
+        Accepts anything shaped like ``{'addresses': [<place-ish row>, …]}``:
+        both ``get_customer_summary()['addresses']`` and the
+        ``get_customer_place_rows()`` list qualify.
+
+        Deduped by scope first, because ``addresses`` is keyed by the addresses
+        the customer OWNS — two owned addresses in one group are the same
+        physical place twice (``get_customer_summary`` warns about this in its
+        own docstring).
+
+        Filtered on ``!= 0``, not ``> 0``: an over-returned place has nothing
+        left to collect, but a fine is still issuable there, so it must stay
+        reachable from the statement screen.
+        """
+        rows = []
+        seen = set()
+        for addr in (summary.get('addresses') or []):
+            if addr.get('address_id') is None:
+                continue
+            key = BottleCollectionHandler._place_key(addr)
+            if key in seen:
+                continue
+            seen.add(key)
+            if float(addr.get('place_balance') or 0) != 0:
+                rows.append(addr)
+        return rows
+
+    @staticmethod
+    def _build_fine_payload(flow: dict, quantity, fine_amount, notes) -> dict:
+        """POST body for ``/api/v1/staff/bottles/fine``.
+
+        A fine is keyed by ADDRESS: ``BottleFine`` carries ``address_id`` plus a
+        frozen ``address_group_id`` and has no ``bottle_balance_id`` at all
+        (migration ``a3e7d1f9c204`` dropped the column), and the route requires
+        ``customer_id``, ``address_id``, ``quantity`` and ``fine_amount``.
+        """
+        payload = {
+            'customer_id': flow.get('customer_id'),
+            'address_id': flow.get('address_id'),
+            'quantity': quantity,
+            'fine_amount': fine_amount,
+            'notes': notes,
+        }
+        # CONDITIONAL for the same reason as the collection body: a flow without
+        # a token posts byte-identically to today, so nothing about the un-keyed
+        # backend path changes.
+        retry_token = flow.get('idempotency_key')
+        if retry_token:
+            payload['idempotency_key'] = retry_token
+        return payload
+
+    @staticmethod
+    def _over_returned_line(language: str, value) -> str:
+        """Driver-facing "over-returned by N" copy for a NEGATIVE balance.
+
+        One helper for all three call sites (statement total, statement body,
+        quantity guard) so the magnitude convention cannot drift at one of them:
+        the copy supplies the direction, so what crosses is always
+        ``abs(value)`` — never a minus sign the driver has to interpret at the
+        door. Callers branch on the sign; this only renders.
+
+        ``format_quantity`` rather than ``int()``: int() truncates toward zero,
+        so a place at -0.5 survives the ``!= 0`` actionable filter and would
+        otherwise announce "over-returned by 0".
+        """
+        return i18n.get(
+            'staff.delivery.place_over_returned', language,
+            count=format_quantity(abs(value)),
+        )
+
+    @staticmethod
     def _format_bottle_statement(summary: dict, language: str) -> str:
-        addresses = summary.get('addresses') or []
-        total = summary.get('total_balance', 0)
+        """The driver-facing bottle statement, one line per distinct PLACE.
+
+        ``get_customer_summary`` returns no scalar total by design — summing
+        ``place_balance`` across ``addresses`` reports a place once per owned
+        address. ``cluster_scopes`` is the backend's own one-row-per-place list,
+        and its rows are keyed ``balance``, NOT ``place_balance``.
+
+        The total is a SIGNED sum, so it goes negative once the over-returned
+        places outweigh the rest. It is named the same way the body lines are —
+        a bare minus sign on the header of a driver's screen reads as a bug.
+        """
+        scopes = summary.get('cluster_scopes') or []
+        # Summed as Decimal, not float: 1.1 + 2.2 is 3.3000000000000003 in
+        # binary floating point, and that noise would land on the header of a
+        # driver's screen. Decimal(str(x)) keeps each scope's decimal value
+        # exact, so only real fractions survive.
+        total = sum(
+            (Decimal(str(scope.get('balance') or 0)) for scope in scopes),
+            Decimal('0'),
+        )
         fines = summary.get('active_fines_count', 0)
         fine_amount = summary.get('total_fine_amount', 0)
 
+        if total < 0:
+            # Deliberately the SAME key as the per-place body line below: both
+            # say "over-returned by N" about a signed bottle figure, and the
+            # only difference is scope. If you re-word this for one caller, it
+            # re-words for the other — add a second key instead.
+            total_text = BottleCollectionHandler._over_returned_line(language, total)
+        else:
+            total_text = format_quantity(total)
+
         lines = [
             f"📊 <b>{i18n.get('staff.delivery.bottle_statement_title', language)}</b>",
-            f"📦 {i18n.get('staff.delivery.total_bottles', language)}: {int(total)}",
+            f"📦 {i18n.get('staff.delivery.total_bottles', language)}: {total_text}",
         ]
         if fines > 0:
             lines.append(
@@ -68,18 +375,36 @@ class BottleCollectionHandler(BaseHandler):
                 f"({format_currency(fine_amount, language=language)})"
             )
 
-        if not addresses:
+        body = []
+        seen = set()
+        for addr in (summary.get('addresses') or []):
+            key = BottleCollectionHandler._place_key(addr)
+            if key in seen:
+                continue
+            seen.add(key)
+            balance = float(addr.get('place_balance') or 0)
+            if balance == 0:
+                continue
+            title = addr.get('address_title') or addr.get('full_address', '')[:30]
+            marker = ' 👥' if addr.get('is_grouped') else ''
+            # An over-returned place is a real record, not a data error — name
+            # the state instead of printing a bare "-3" the driver has to
+            # interpret at the door.
+            if balance < 0:
+                detail = BottleCollectionHandler._over_returned_line(language, balance)
+            else:
+                detail = format_quantity(balance)
+            body.append(f"• {escape_html(title)}{marker}: {detail}")
+
+        # The empty state must key off what was RENDERED, not off owning zero
+        # addresses: a customer with addresses whose places are all at zero used
+        # to get a header and nothing else.
+        if not body:
             lines.append(i18n.get('staff.delivery.no_bottle_balance', language))
             return '\n'.join(lines)
 
         lines.append('')
-        for addr in addresses:
-            balance = addr.get('balance', 0)
-            if balance <= 0:
-                continue
-            title = addr.get('address_title') or addr.get('full_address', '')[:30]
-            lines.append(f"• {escape_html(title)}: {int(balance)}")
-
+        lines.extend(body)
         return '\n'.join(lines)
 
     # ------------------------------------------------------------------
@@ -192,24 +517,62 @@ class BottleCollectionHandler(BaseHandler):
 
             summary = response.data or {}
             flow = {'customer_id': customer_id}
+            # Capture each grouped place's balance while the summary is on
+            # screen: the fine prompt then states the empties physically at the
+            # place without an extra round trip. Ungrouped addresses are absent
+            # from the map, so nothing changes for them.
+            flow['place_balances'] = self._place_balances(summary)
             context.user_data['pending_bottle_collection_flow'] = flow
 
             text = self._format_bottle_statement(summary, language)
-            addresses = [a for a in (summary.get('addresses') or []) if a.get('balance', 0) > 0]
 
-            if len(addresses) == 1:
-                # Auto-skip the address picker: pre-select the single address
-                # with positive balance and jump straight to the action picker
+            # The buttons and the qty cap must read the SAME endpoint (D7).
+            # `/summary` lists one row per address the customer OWNS, while
+            # `/addresses` lists one row per PLACE — a group is represented by
+            # the lowest-id owned address. Building the picker from `/summary`
+            # therefore offered addresses the cap lookup could never match, and
+            # tapping them dead-ended on a place that has empties.
+            async with api_client as client:
+                addr_response = await client.get_customer_bottle_addresses(token, customer_id)
+
+            # "The call failed" and "the call succeeded with nothing actionable"
+            # are different screens and must stay different. Swallowing a
+            # timeout / 500 / expired token into an empty list would print the
+            # balance above a bare Back button — the exact unexplained dead end
+            # this handler exists to eliminate.
+            if not addr_response.success:
+                await self._handle_api_response_error(update, addr_response, language)
+                return
+
+            actionable = self._actionable_places({'addresses': addr_response.data or []})
+
+            # Remember each OFFERED place's balance so `select_address` can
+            # decide whether Collect is meaningful without a second round trip.
+            # Distinct from `place_balances` above, which is the fine prompt's
+            # grouped-only map: this one covers every place in the picker,
+            # grouped or not.
+            flow['picker_place_balances'] = {
+                row.get('address_id'): float(row.get('place_balance') or 0)
+                for row in actionable
+            }
+            context.user_data['pending_bottle_collection_flow'] = flow
+
+            if len(actionable) == 1:
+                # Auto-skip the address picker: pre-select the single place with
+                # a non-zero balance and jump straight to the action picker
                 # (driver still chooses Collect vs. Fine).
-                only_addr = addresses[0]
+                only_addr = actionable[0]
                 flow['address_id'] = only_addr.get('address_id')
                 context.user_data['pending_bottle_collection_flow'] = flow
                 keyboard = DeliveryKeyboards.bottle_statement_actions(
-                    language, customer_id, only_addr.get('address_id')
+                    language, customer_id, only_addr.get('address_id'),
+                    # Nothing to collect at an over-returned place, but a fine
+                    # is still issuable — the screen must stay actionable.
+                    can_collect=float(only_addr.get('place_balance') or 0) > 0,
                 )
-            elif addresses:
+            elif actionable:
                 keyboard = DeliveryKeyboards.bottle_address_selection(
-                    language, customer_id, addresses
+                    language, customer_id, actionable
                 )
             else:
                 keyboard = CommonKeyboards.back_button(language)
@@ -222,7 +585,13 @@ class BottleCollectionHandler(BaseHandler):
     @require_auth
     @require_delivery_driver
     async def select_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Driver selects which address they're collecting from."""
+        """Driver selects which place they're collecting from.
+
+        The multi-place path lands here; the single-place shortcut in
+        :meth:`show_customer_bottle_statement` skips it. Both must apply the
+        same rule: an over-returned place has nothing left to collect, so
+        offering Collect only dead-ends the driver on the quantity guard.
+        """
         query = update.callback_query
         await query.answer()
         language = await self._get_language(update, context)
@@ -238,8 +607,13 @@ class BottleCollectionHandler(BaseHandler):
             flow['address_id'] = address_id
             context.user_data['pending_bottle_collection_flow'] = flow
 
+            # Fail OPEN when the map is missing (cleared user_data, restarted
+            # bot): hiding Collect on a place that actually has empties is the
+            # worse failure, and `start_collection` re-reads the live balance.
+            known_balance = (flow.get('picker_place_balances') or {}).get(address_id)
             keyboard = DeliveryKeyboards.bottle_statement_actions(
-                language, customer_id, address_id
+                language, customer_id, address_id,
+                can_collect=True if known_balance is None else float(known_balance) > 0,
             )
             await query.edit_message_text(
                 i18n.get('staff.delivery.bottle_address_selected', language),
@@ -274,29 +648,60 @@ class BottleCollectionHandler(BaseHandler):
             customer_id = int(parts[3])
             address_id = int(parts[4])
 
-            # Look up the per-address bottle balance so we can size the picker.
-            balance = 0
+            # CLEAR ON ENTRY, before anything can go wrong or the driver can
+            # type: a stale `quantity` from an abandoned pick would otherwise
+            # still be armed while this screen — including both dead-end arms
+            # below — is on display, and the text router would finalise it.
+            flow = self._begin_flow(
+                context, customer_id=customer_id, address_id=address_id
+            )
+
+            # Look up the PLACE's bottle balance so we can size the picker.
+            # One place, one pool — grouped or not — so `place_balance` is the
+            # only number there is: the empties standing at this door, whichever
+            # member's account they sit on (spec 8).
+            place_balance = 0.0
             async with api_client as client:
                 addr_response = await client.get_customer_bottle_addresses(token, customer_id)
             if addr_response.success and addr_response.data:
                 for addr in addr_response.data:
                     if addr.get('address_id') == address_id:
-                        balance = int(addr.get('balance', 0) or 0)
+                        place_balance = float(addr.get('place_balance') or 0)
                         break
 
-            if balance <= 0:
-                # Defensive: the prior screen should have filtered these out,
-                # but if balance dropped to zero we don't show a useless picker.
+            # Over-returned and empty are DIFFERENT states and must be branched
+            # apart here — before `bottle_collection_qty_picker`, whose
+            # `max(0, int(balance))` clamp would render a picker with nothing on
+            # it but Cancel and no word of explanation.
+            if place_balance < 0:
+                # Nothing to collect, but a fine is still issuable: keep the
+                # actions on screen instead of dead-ending on a Back button.
                 await query.edit_message_text(
-                    i18n.get('staff.delivery.no_bottle_balance', language),
-                    reply_markup=CommonKeyboards.back_button(language, "staff_cash_hub"),
+                    self._over_returned_line(language, place_balance),
+                    reply_markup=DeliveryKeyboards.bottle_statement_actions(
+                        language, customer_id, address_id, can_collect=False,
+                    ),
                     parse_mode='HTML',
                 )
                 return
 
-            flow = context.user_data.get('pending_bottle_collection_flow') or {}
-            flow['customer_id'] = customer_id
-            flow['address_id'] = address_id
+            balance = int(place_balance)
+            if balance <= 0:
+                # Distinct copy from the negative arm, but the SAME actions: a
+                # fine is issuable at a place with no empties too. This arm also
+                # catches 0 < balance < 1 — the picker can label a place "(0.5)"
+                # yet int() truncates it to 0 here — so without the actions the
+                # positive fractional case would dead-end where its negative
+                # mirror does not.
+                await query.edit_message_text(
+                    i18n.get('staff.delivery.no_bottle_balance', language),
+                    reply_markup=DeliveryKeyboards.bottle_statement_actions(
+                        language, customer_id, address_id, can_collect=False,
+                    ),
+                    parse_mode='HTML',
+                )
+                return
+
             flow['action'] = 'collect'
             flow['balance'] = balance
             context.user_data['pending_bottle_collection_flow'] = flow
@@ -352,6 +757,10 @@ class BottleCollectionHandler(BaseHandler):
         flow['customer_id'] = customer_id
         flow['address_id'] = address_id
         flow['quantity'] = qty
+        # THE CONFIRM STEP: the decision now exists, and the note prompt below
+        # is what the driver confirms it from. One token for this decision,
+        # reused by every transmission of it — see `_new_intent_token`.
+        flow['idempotency_key'] = self._new_intent_token()
         context.user_data['pending_bottle_collection_flow'] = flow
 
         await query.edit_message_text(
@@ -372,12 +781,15 @@ class BottleCollectionHandler(BaseHandler):
         Shared by :meth:`receive_collection_note` (typed note) and
         :meth:`save_collection_no_note` (button). Renders the success message
         on whichever update channel triggered it (``message`` vs. ``callback_query``).
-        """
-        token = await self._get_auth_token(update, context)
-        if not token:
-            await self._handle_auth_error(update, language)
-            return
 
+        CLEAR IN FINALLY, the counterpart to `_begin_flow`'s clear-on-entry.
+        This used to clear the flow only on SUCCESS, so after a failed POST the
+        flow still carried ``action='collect'`` + ``quantity`` and the global
+        text router (staff_bot/bot.py) finalised a collection for the driver's
+        NEXT message — a silent re-post of a collection nobody confirmed. A
+        collection that did not land must cost the driver one re-pick, never a
+        phantom debit at the customer's door.
+        """
         flow = context.user_data.get('pending_bottle_collection_flow') or {}
         customer_id = flow.get('customer_id')
         address_id = flow.get('address_id')
@@ -394,40 +806,66 @@ class BottleCollectionHandler(BaseHandler):
                     text, reply_markup=reply_markup, parse_mode='HTML'
                 )
 
-        if not all([customer_id, address_id, quantity]):
-            await _say(i18n.get('staff.error_occurred', language))
-            await self._clear_flow(context, update)
-            return
-
         try:
+            # Inside the try so an expired session ends the flow too: leaving it
+            # armed would post the collection on whatever the driver types after
+            # re-authenticating.
+            token = await self._get_auth_token(update, context)
+            if not token:
+                await self._handle_auth_error(update, language)
+                return
+
+            if not all([customer_id, address_id, quantity]):
+                await _say(i18n.get('staff.error_occurred', language))
+                return
+
+            payload = {
+                'customer_id': customer_id,
+                'address_id': address_id,
+                'quantity': quantity,
+                'notes': notes,
+            }
+            # CONDITIONAL, and that is load-bearing: a flow dict without a token
+            # — one minted by an older bot process, or by any caller that does
+            # not mint — must post the exact four route keys it posts today, so
+            # the backend takes its un-keyed path unchanged.
+            retry_token = flow.get('idempotency_key')
+            if retry_token:
+                payload['idempotency_key'] = retry_token
+
             async with api_client as client:
-                response = await client.record_bottle_collection(
-                    token,
-                    {
-                        'customer_id': customer_id,
-                        'address_id': address_id,
-                        'quantity': quantity,
-                        'notes': notes,
-                    },
-                )
+                response = await client.record_bottle_collection(token, payload)
 
             if not response.success:
-                await self._handle_api_response_error(update, response, language)
+                await self._handle_submit_failure(update, response, language)
                 return
 
             result = response.data or {}
-            await self._clear_flow(context, update)
-            await _say(
-                i18n.get(
+            # `remaining_balance` is the PLACE's balance and is NOT clamped
+            # (business_app/api/staff.py), so a collection can leave the place
+            # over-returned. Handing a driver "Remaining balance: -3" reads as
+            # an error; name the state and pass the magnitude.
+            remaining = float(result.get('remaining_balance', 0) or 0)
+            if remaining < 0:
+                receipt = i18n.get(
+                    'staff.delivery.bottle_collection_recorded_over_returned', language,
+                    quantity=quantity,
+                    remaining=format_quantity(abs(remaining)),
+                )
+            else:
+                receipt = i18n.get(
                     'staff.delivery.bottle_collection_recorded', language,
                     quantity=quantity,
-                    remaining=int(result.get('remaining_balance', 0)),
-                ),
-                reply_markup=CommonKeyboards.back_button(language),
-            )
+                    remaining=format_quantity(remaining),
+                )
+            await _say(receipt, reply_markup=CommonKeyboards.back_button(language))
         except Exception as exc:
             logger.error("Error recording bottle collection: %s", exc, exc_info=True)
             await self._handle_error(update, context)
+        finally:
+            # Success, refusal, backend failure or crash — the collect flow is
+            # over either way and must never be left armed for the next text.
+            await self._clear_flow(context, update)
 
     @require_auth
     @require_delivery_driver
@@ -463,17 +901,40 @@ class BottleCollectionHandler(BaseHandler):
             customer_id = int(parts[3])
             address_id = int(parts[4])
 
-            flow = context.user_data.get('pending_bottle_collection_flow') or {}
-            flow['customer_id'] = customer_id
-            flow['address_id'] = address_id
-            flow['action'] = 'fine'
-            context.user_data['pending_bottle_collection_flow'] = flow
+            # Clear on entry: `start_collection` and `start_fine` share ONE flow
+            # dict and the text router dispatches on which keys are set, so a
+            # quantity left by an abandoned pick must not survive into the fine
+            # steps (and vice versa).
+            flow = self._begin_flow(
+                context, customer_id=customer_id, address_id=address_id, action='fine'
+            )
             await flow_state.mark_active(
                 update.effective_user.id, 'pending_bottle_collection_flow'
             )
 
+            prompt = i18n.get('staff.delivery.enter_fine_bottle_qty', language)
+            # Fining at a grouped place: the empties are pooled across the
+            # members, so the driver fines against the PLACE's balance, not one
+            # account's slice (spec 8). A zero place says nothing — there is no
+            # figure to quote — but an over-returned one has plenty to say, and
+            # going silent there was the whole reason a driver could not tell a
+            # negative place from a missing one. Both branches keep the `{union}`
+            # kwarg name: renaming it would make `str.format` raise, and
+            # staff_bot/i18n.py catches that and prints the RAW template.
+            place_balance = (flow.get('place_balances') or {}).get(address_id)
+            if place_balance and place_balance < 0:
+                prompt += "\n" + i18n.get(
+                    'staff.delivery.fine_place_over_returned_hint', language,
+                    union=format_quantity(abs(place_balance)),
+                )
+            elif place_balance and place_balance > 0:
+                prompt += "\n" + i18n.get(
+                    'staff.delivery.fine_place_union_hint', language,
+                    union=format_quantity(place_balance),
+                )
+
             await query.edit_message_text(
-                i18n.get('staff.delivery.enter_fine_bottle_qty', language),
+                prompt,
                 reply_markup=CommonKeyboards.flow_cancel(language),
                 parse_mode='HTML',
             )
@@ -520,9 +981,9 @@ class BottleCollectionHandler(BaseHandler):
             return ConversationHandler.END
 
         try:
-            amount = float(update.message.text.strip().replace(',', '').replace(' ', ''))
-            if amount <= 0:
-                raise ValueError
+            # `_parse_positive_amount` fences non-finite input by name; a bare
+            # `float()` + `<= 0` check lets NaN and Infinity straight through.
+            amount = self._parse_positive_amount(update.message.text)
         except (TypeError, ValueError):
             await update.message.reply_text(
                 i18n.get('staff.delivery.invalid_amount', language)
@@ -530,6 +991,12 @@ class BottleCollectionHandler(BaseHandler):
             return BOTTLE_FINE_AMOUNT_INPUT
 
         flow['fine_amount'] = amount
+        # THE CONFIRM STEP for a fine: there is no confirm BUTTON — the driver
+        # types qty, then amount, then a note, and the note message IS the
+        # confirm — so this is the last state before the money-carrying POST.
+        # Minting in `receive_fine_note` would mint a fresh token per typed
+        # message. See `_new_intent_token`.
+        flow['idempotency_key'] = self._new_intent_token()
         context.user_data['pending_bottle_collection_flow'] = flow
         await update.message.reply_text(
             i18n.get('staff.delivery.enter_fine_note', language),
@@ -541,58 +1008,52 @@ class BottleCollectionHandler(BaseHandler):
     @require_auth
     @require_delivery_driver
     async def receive_fine_note(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Submit fine creation."""
-        language = await self._get_language(update, context)
-        token = await self._get_auth_token(update, context)
-        if not token:
-            await self._handle_auth_error(update, language)
-            return ConversationHandler.END
+        """Submit fine creation.
 
+        Clears the flow in a ``finally`` for the same reason
+        :meth:`_finalize_collection` does: the text router sends the driver's
+        next message straight back here once ``fine_quantity`` and
+        ``fine_amount`` are both set, so a flow left armed by a failed POST
+        re-issues a real, money-carrying fine on the next thing they type.
+        """
+        language = await self._get_language(update, context)
         flow = context.user_data.get('pending_bottle_collection_flow') or {}
         notes = update.message.text.strip()
 
         try:
-            # We need the bottle_balance_id. Fetch it from the customer summary.
+            # Inside the try so an expired session ends the fine flow too.
+            token = await self._get_auth_token(update, context)
+            if not token:
+                await self._handle_auth_error(update, language)
+                return ConversationHandler.END
+
+            # The fine is keyed by ADDRESS, and `start_fine` already put one in
+            # the flow — no round trip needed. (This used to re-fetch `/summary`
+            # purely to look up a `bottle_balance_id`, a column dropped by
+            # migration a3e7d1f9c204; the lookup always failed, so every
+            # driver-issued fine bailed to a generic error.)
             customer_id = flow.get('customer_id')
             address_id = flow.get('address_id')
 
-            async with api_client as client:
-                summary_response = await client.get_customer_bottle_summary(token, customer_id)
-
-            if not summary_response.success:
-                await self._handle_api_response_error(update, summary_response, language)
-                return ConversationHandler.END
-
-            # Find bottle_balance_id for this address
-            addresses = (summary_response.data or {}).get('addresses', [])
-            bottle_balance_id = None
-            for addr in addresses:
-                if addr.get('address_id') == address_id:
-                    bottle_balance_id = addr.get('bottle_balance_id')
-                    break
-
-            if not bottle_balance_id:
+            if not customer_id or not address_id:
                 await update.message.reply_text(i18n.get('staff.error_occurred', language))
-                await self._clear_flow(context, update)
                 return ConversationHandler.END
 
             async with api_client as client:
                 response = await client.create_bottle_fine(
                     token,
-                    {
-                        'customer_id': customer_id,
-                        'bottle_balance_id': bottle_balance_id,
-                        'quantity': flow.get('fine_quantity'),
-                        'fine_amount': flow.get('fine_amount'),
-                        'notes': notes,
-                    },
+                    self._build_fine_payload(
+                        flow,
+                        flow.get('fine_quantity'),
+                        flow.get('fine_amount'),
+                        notes,
+                    ),
                 )
 
             if not response.success:
-                await self._handle_api_response_error(update, response, language)
+                await self._handle_submit_failure(update, response, language)
                 return ConversationHandler.END
 
-            await self._clear_flow(context, update)
             await update.message.reply_text(
                 i18n.get(
                     'staff.delivery.bottle_fine_created', language,
@@ -607,6 +1068,10 @@ class BottleCollectionHandler(BaseHandler):
             logger.error("Error creating bottle fine: %s", exc, exc_info=True)
             await self._handle_error(update, context)
             return ConversationHandler.END
+        finally:
+            # `flow` is a local reference, so the receipt above still reads the
+            # submitted figures after the flow itself is gone.
+            await self._clear_flow(context, update)
 
     # ------------------------------------------------------------------
     # Session formatting helpers

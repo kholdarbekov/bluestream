@@ -20,6 +20,24 @@ def _i18n_get(key, language, *args, **kwargs):
     return f"{key}:{language}"
 
 
+# The unrestricted /payments/methods payload shape, matching
+# test_address_handler_stores_selected_address's inline fixture. Shared by the
+# Plan E checkout tests, which need the SAME success payload from two different
+# awaits of the same mock.
+_PAYMENT_METHODS_OK = {
+    "data": {
+        "available_methods": [
+            {"method": "cash", "is_active": True},
+            {"method": "click", "is_active": True},
+        ],
+        "payment_restrictions": {
+            "cod_restricted": False,
+            "active_cod_debt_count": 0,
+        },
+    }
+}
+
+
 @pytest.mark.unit
 @pytest.mark.anyio
 class TestProductHandlerDeepFlows:
@@ -468,6 +486,79 @@ class TestOrderHandlerDeepFlows:
         # Notice text now flows through i18n; the test mock returns
         # "<key>:<language>", so we assert on the key the bot used.
         assert "telegram.orders.cod_restricted_has_debts:en" in call_kwargs["text"]
+
+    async def test_checkout_sends_the_selected_address_to_payment_methods(self, monkeypatch):
+        """Plan E R3: the place arm of the COD cap can only fire when the address
+        reaches the endpoint. Without this the coworker is silently offered Cash
+        and then rejected at order creation with a generic error."""
+        handler = orders_module.OrderHandlers()
+        update = DummyUpdate()
+        update.callback_query = DummyCallbackQuery(data="address_55")
+        context = make_context()
+
+        monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)
+        monkeypatch.setattr(orders_module, "get_auth_token", AsyncMock(return_value="jwt"))
+        monkeypatch.setattr(orders_module.OrderKeyboards, "payment_methods", lambda _methods, _lang: "pay-kbd")
+        # FakeAPIClientContext.get_payment_methods swallows its arguments
+        # (tests/telegram_bot/helpers.py:180-181), so it cannot observe the new
+        # kwarg. Bind an AsyncMock for that one method instead — the assertion
+        # is on the PAYLOAD, not on call-occurrence.
+        methods = AsyncMock(return_value=_resp(success=True, data=_PAYMENT_METHODS_OK))
+        fake = FakeAPIClientContext()
+        fake.get_payment_methods = methods
+        monkeypatch.setattr(orders_module, "api_client", fake)
+
+        await handler.address_handler(update, context)
+
+        assert context.user_data["selected_address_id"] == 55
+        assert methods.await_args.kwargs["delivery_address_id"] == 55
+
+    async def test_checkout_survives_a_stale_selected_address(self, monkeypatch):
+        """🔴 THE UNGATED REGRESSION. Do not delete this test.
+
+        GET /payments/methods returns 400 for a delivery_address_id that is
+        foreign OR NO LONGER EXISTS (business_app/api/payments.py:158-172 ->
+        order_service.py:547-553). Today the bot never sends the parameter, so
+        this cannot happen; after this task it can, Task 6 is UNGATED (E11), and
+        orders.py:742-744 aborts the WHOLE payment screen on any non-success.
+
+        Reachable without malice: the address is deleted between selection and
+        checkout, or Quick Order pre-fills selected_address_id from a prior
+        order whose address is gone (_show_payment_picker docstring, :719-724).
+
+        Degrade, never dead-end: retry once WITHOUT the address. The place arm
+        does not apply for that request -- which is exactly today's behaviour --
+        and the customer still gets a payment keyboard.
+        """
+        handler = orders_module.OrderHandlers()
+        update = DummyUpdate()
+        update.callback_query = DummyCallbackQuery(data="address_55")
+        context = make_context()
+
+        monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)
+        monkeypatch.setattr(orders_module, "get_auth_token", AsyncMock(return_value="jwt"))
+        monkeypatch.setattr(orders_module.OrderKeyboards, "payment_methods", lambda _methods, _lang: "pay-kbd")
+        # First await = the 400 the endpoint returns for a stale/foreign address;
+        # second await = the normal success payload the address-less retry gets.
+        methods = AsyncMock(
+            side_effect=[
+                _resp(success=False, error="Address not found", status_code=400),
+                _resp(success=True, data=_PAYMENT_METHODS_OK),
+            ]
+        )
+        fake = FakeAPIClientContext()
+        fake.get_payment_methods = methods
+        monkeypatch.setattr(orders_module, "api_client", fake)
+
+        await handler.address_handler(update, context)
+
+        assert methods.await_count == 2
+        # The retry drops the address entirely — it does not send None.
+        assert "delivery_address_id" not in methods.await_args_list[1].kwargs
+        # And the customer reached the payment keyboard, not an error.
+        update.callback_query.edit_message_text.assert_awaited()
 
 
 @pytest.mark.unit

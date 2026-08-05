@@ -28,18 +28,22 @@ UI_BOTTLE_TRACKING_CATEGORY = "ui_bottle_tracking"
 UI_BOTTLE_TRACKING_TRANSLATIONS = {
     "en": {
         "total_bottles_out": "Total Bottles Out",
-        "customers_with_balance": "Customers with Balance",
+        # A balances row is a PLACE, not a person: `customers_with_balance` was
+        # renamed with its call site (BottleTracking.js:97). Counting customers
+        # double-counted every coworker at a shared workplace.
+        "places_with_balance": "Places with Balance",
         "active_fines": "Active Fines",
         "total_fine_amount": "Total Fine Amount",
         "customer": "Customer",
-        "select_customer_required": "Select a customer",
-        "search_customer_placeholder": "Search by phone, name, or company",
+        # The write modals pick a PLACE, never a member — there is no coworker
+        # selection anywhere, so the customer/address pair of pickers is gone and
+        # `select_customer_*` / `select_address_required` went with it.
+        "select_place_required": "Select a place",
+        "search_place_placeholder": "Search by phone, name, or address",
         "type_at_least_2_chars": "Type at least 2 characters",
         "searching": "Searching…",
         "no_matches": "No matches",
         "address": "Address",
-        "select_address_required": "Select an address",
-        "select_customer_first": "Select customer first",
         "no_addresses": "No addresses",
         "balance_adjusted": "Balance adjusted",
         "adjust_failed": "Failed to adjust balance",
@@ -56,6 +60,14 @@ UI_BOTTLE_TRACKING_TRANSLATIONS = {
         "force_close_failed": "Failed to force-close session",
         "transfer_resolved": "Transfer dispute resolved",
         "resolve_failed": "Failed to resolve dispute",
+        # Balances-table columns. The first column is the PLACE (BottleTracking.js:578)
+        # and `shared_place_tag` badges the rows where the pool is shared between
+        # accounts — without it an admin reads three coincident rows as three
+        # independent balances. Both render as raw identifiers when unseeded:
+        # admin_ui/src/i18n.js:71-76 returns the bare key outside development, so
+        # the JSX defaultValue does NOT rescue them.
+        "place": "Place",
+        "shared_place_tag": "shared place",
         "balance": "Balance",
         "last_delivery": "Last Delivery",
         "last_return": "Last Return",
@@ -77,7 +89,9 @@ UI_BOTTLE_TRACKING_TRANSLATIONS = {
         "waive": "Waive",
         "qty": "Qty",
         "tab_balances": "Balances",
-        "search_customer_balance_placeholder": "Search customer...",
+        # The balances filter matches ANY member of a place, so "Search customer"
+        # under-described it: typing a coworker's phone surfaces the shared place.
+        "search_customer_balance_placeholder": "Search by any member (name or phone)…",
         "min_balance_placeholder": "Min balance",
         "set_initial_balance": "Set Initial Balance",
         "adjust_balance": "Adjust Balance",
@@ -126,8 +140,11 @@ UI_BOTTLE_TRACKING_TRANSLATIONS = {
         "bottle_quantity_label": "Bottle Quantity",
         "create_fine_title": "Create Bottle Fine",
         "bottles_to_fine_label": "Bottles to Fine For",
-        "address_ledger_title": "Address Bottle Ledger",
-        "user_id_label": "User ID",
+        # The ledger drawer is keyed by the PLACE now, and it holds no user in
+        # scope, so `address_ledger_title`/`user_id_label` went with their call
+        # sites. `address_id_label` stays: it labels the member address the place
+        # was resolved from (BottleTracking.js:1304).
+        "place_ledger_title": "Place Bottle Ledger",
         "address_id_label": "Address ID",
         "session_detail_title": "Session Detail",
         "transferred_out": "Transferred Out",
@@ -167,18 +184,16 @@ UI_BOTTLE_TRACKING_TRANSLATIONS = {
     },
     "uz": {
         "total_bottles_out": "Jami chiqarilgan butilkalar",
-        "customers_with_balance": "Balansga ega mijozlar",
+        "places_with_balance": "Balansga ega joylar",
         "active_fines": "Faol jarimalar",
         "total_fine_amount": "Jami jarima summasi",
         "customer": "Mijoz",
-        "select_customer_required": "Mijozni tanlang",
-        "search_customer_placeholder": "Telefon, ism yoki kompaniya bo'yicha qidirish",
+        "select_place_required": "Joyni tanlang",
+        "search_place_placeholder": "Telefon, ism yoki manzil bo'yicha qidirish",
         "type_at_least_2_chars": "Kamida 2 ta belgi kiriting",
         "searching": "Qidirilmoqda…",
         "no_matches": "Mos kelmadi",
         "address": "Manzil",
-        "select_address_required": "Manzilni tanlang",
-        "select_customer_first": "Avval mijozni tanlang",
         "no_addresses": "Manzillar yo'q",
         "balance_adjusted": "Balans o'zgartirildi",
         "adjust_failed": "Balansni o'zgartirib bo'lmadi",
@@ -195,6 +210,8 @@ UI_BOTTLE_TRACKING_TRANSLATIONS = {
         "force_close_failed": "Sessiyani majburan yopib bo'lmadi",
         "transfer_resolved": "O'tkazma bo'yicha nizo hal qilindi",
         "resolve_failed": "Nizoni hal qilib bo'lmadi",
+        "place": "Joy",
+        "shared_place_tag": "umumiy joy",
         "balance": "Balans",
         "last_delivery": "Oxirgi yetkazib berish",
         "last_return": "Oxirgi qaytarish",
@@ -216,7 +233,7 @@ UI_BOTTLE_TRACKING_TRANSLATIONS = {
         "waive": "Bekor qilish",
         "qty": "Soni",
         "tab_balances": "Balanslar",
-        "search_customer_balance_placeholder": "Mijozni qidirish...",
+        "search_customer_balance_placeholder": "Istalgan a'zo bo'yicha qidirish (ism yoki telefon)…",
         "min_balance_placeholder": "Min balans",
         "set_initial_balance": "Boshlang'ich balansni o'rnatish",
         "adjust_balance": "Balansni o'zgartirish",
@@ -265,8 +282,7 @@ UI_BOTTLE_TRACKING_TRANSLATIONS = {
         "bottle_quantity_label": "Butilkalar soni",
         "create_fine_title": "Butilka jarimasini yaratish",
         "bottles_to_fine_label": "Jarima uchun butilkalar soni",
-        "address_ledger_title": "Manzil butilka reestri",
-        "user_id_label": "Foydalanuvchi ID",
+        "place_ledger_title": "Joy butilka reestri",
         "address_id_label": "Manzil ID",
         "session_detail_title": "Sessiya tafsilotlari",
         "transferred_out": "Chiqarib yuborilgan",
@@ -306,18 +322,16 @@ UI_BOTTLE_TRACKING_TRANSLATIONS = {
     },
     "ru": {
         "total_bottles_out": "Всего бутылок на руках",
-        "customers_with_balance": "Клиенты с балансом",
+        "places_with_balance": "Места с балансом",
         "active_fines": "Активные штрафы",
         "total_fine_amount": "Общая сумма штрафов",
         "customer": "Клиент",
-        "select_customer_required": "Выберите клиента",
-        "search_customer_placeholder": "Поиск по телефону, имени или компании",
+        "select_place_required": "Выберите место",
+        "search_place_placeholder": "Поиск по телефону, имени или адресу",
         "type_at_least_2_chars": "Введите минимум 2 символа",
         "searching": "Поиск…",
         "no_matches": "Совпадений нет",
         "address": "Адрес",
-        "select_address_required": "Выберите адрес",
-        "select_customer_first": "Сначала выберите клиента",
         "no_addresses": "Адресов нет",
         "balance_adjusted": "Баланс скорректирован",
         "adjust_failed": "Не удалось скорректировать баланс",
@@ -334,6 +348,8 @@ UI_BOTTLE_TRACKING_TRANSLATIONS = {
         "force_close_failed": "Не удалось принудительно закрыть сессию",
         "transfer_resolved": "Спор по передаче разрешён",
         "resolve_failed": "Не удалось разрешить спор",
+        "place": "Место",
+        "shared_place_tag": "общее место",
         "balance": "Баланс",
         "last_delivery": "Последняя доставка",
         "last_return": "Последний возврат",
@@ -355,7 +371,7 @@ UI_BOTTLE_TRACKING_TRANSLATIONS = {
         "waive": "Списать",
         "qty": "Кол-во",
         "tab_balances": "Балансы",
-        "search_customer_balance_placeholder": "Поиск клиента...",
+        "search_customer_balance_placeholder": "Поиск по любому участнику (имя или телефон)…",
         "min_balance_placeholder": "Мин. баланс",
         "set_initial_balance": "Установить начальный баланс",
         "adjust_balance": "Скорректировать баланс",
@@ -404,8 +420,7 @@ UI_BOTTLE_TRACKING_TRANSLATIONS = {
         "bottle_quantity_label": "Количество бутылок",
         "create_fine_title": "Создать штраф за бутылки",
         "bottles_to_fine_label": "Количество бутылок для штрафа",
-        "address_ledger_title": "Журнал бутылок по адресу",
-        "user_id_label": "ID пользователя",
+        "place_ledger_title": "Журнал бутылок по месту",
         "address_id_label": "ID адреса",
         "session_detail_title": "Детали сессии",
         "transferred_out": "Передано",

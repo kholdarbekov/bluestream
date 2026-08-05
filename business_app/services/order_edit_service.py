@@ -22,7 +22,7 @@ from flask import current_app
 from sqlalchemy.orm import joinedload
 
 from business_app import db
-from business_app.models.bottle import DriverBottleSession, DriverBottleSessionOrder
+from business_app.models.bottle import BottleLedger, DriverBottleSession, DriverBottleSessionOrder
 from business_app.models.order import Order, OrderEditHistory, OrderItem
 from business_app.models.payment import Payment
 from business_app.models.product import Product
@@ -233,8 +233,14 @@ class OrderEditService:
             self._apply_items(order, plan, actor_user_id)
             self._cascade_inventory(order, plan)
             self._cascade_corporate(order, plan, actor_user_id)
-            self._cascade_bottle(order, plan, actor_user_id)
+            # Lock order (spec section 5.2): the bottle scope row is a PLACE-wide
+            # lock shared by every member, so it must be taken AFTER every payment
+            # lock — matching the delivery path, which holds the id-ordered
+            # settlement batch first (staff_service.py:1283). Swapping these two
+            # re-opens a cross-resource deadlock between an admin edit and a
+            # concurrent delivery at the same place.
             self._cascade_cash(order, plan, actor_user_id)
+            self._cascade_bottle(order, plan, actor_user_id)
             self._cascade_loyalty(order, plan)
             self._recompute_totals(order, plan, actor_user_id)
 
@@ -847,6 +853,63 @@ class OrderEditService:
             summary["reserved_count"] = len(reserved or [])
         plan.cascade_summary["corporate"] = summary
 
+    @staticmethod
+    def _frozen_bottle_scope(order: Order):
+        """The scope the DELIVERY this edit corrects was booked to — FROZEN.
+
+        A correction belongs to the EPISODE it corrects, not to today's
+        geography. Re-resolving the place live means an edit to an already
+        DELIVERED order books into whatever place the address belongs to NOW: if
+        the address joined a shared place after the delivery, the correction
+        lands in the coworkers' pool; if it left one, the correction lands in
+        the departed address's own scope while the original delivery stays in
+        the place. Either way the `+n` and the `-n` of one physical handover sit
+        in two different ledgers.
+
+        This is the same policy `bottle_fines` has always had (frozen at issue
+        time), and the two are now consistent: the lifecycle CARRIES frozen
+        references — `absorb_address_into_group` and
+        `release_group_history_to_address` re-stamp `bottle_fines` alongside
+        `bottle_ledger` — so freezing does not strand anything a live place
+        still owns.
+
+        Returns None when the order has no `delivery:{id}` ledger row (an edit
+        to an order whose delivery booked no bottles). There is then no episode
+        to belong to, and the caller resolves live.
+
+        THE ARM THAT USED TO BE UNBOOKABLE — a frozen scope whose group has since
+        DISSOLVED onto a DIFFERENT survivor — now FOLLOWS the place's history
+        instead of refusing. The delivery row still carries a group whose balance
+        row was deleted, and booking THERE would re-mint the orphan §7.3's
+        dissolve exists to eliminate; `address_groups.dissolved_onto_address_id`
+        records which address that place was released onto, so
+        `resolve_frozen_scope_for_write` re-resolves that address's LIVE scope —
+        the scope that actually holds the crates — and the correction lands where
+        the delivery's bottles went. RUNG 1 comes with it, on both addresses in
+        one ascending statement, which is why this is called BEFORE
+        `_cascade_bottle`'s own acquisition rather than after it.
+
+        THE REFUSAL STAYS for the case that genuinely has no destination: a place
+        that dissolved before the pointer column existed and whose audit row
+        could not be backfilled, or one whose survivor address has since been
+        deleted (the FK is ON DELETE SET NULL). Inventing a scope for those would
+        be the silent corruption the refusal was introduced to replace.
+        """
+        entry = (
+            BottleLedger.query.filter_by(idempotency_key=f"delivery:{order.id}").order_by(BottleLedger.id.asc()).first()
+        )
+        if entry is None:
+            return None
+        target = BottleTrackingService.resolve_frozen_scope_for_write(entry.address_id, entry.address_group_id)
+        if target.unreachable:
+            raise ValidationError(
+                f"Order #{order.id} was delivered to a place that has since been "
+                "dissolved with no forwarding address; its bottle correction has "
+                "nowhere to be booked",
+                error_code="BOTTLE_CORRECTION_SCOPE_NOT_LIVE",
+            )
+        return target
+
     def _cascade_bottle(self, order: Order, plan: OrderEditPlan, actor_user_id: int) -> None:
         """Apply forward-dated customer-balance adjustments + session re-tally.
 
@@ -874,6 +937,38 @@ class OrderEditService:
         if order.status != OrderStatus.DELIVERED:
             plan.cascade_summary["bottle"] = {"adjustments": [], "skipped": "not_delivered"}
             return
+
+        # RUNG 1 of the bottle ladder, taken HERE — at the start of the bottle
+        # work — and never at the top of `apply_edit`. Hoisting it above
+        # `_cascade_cash` builds a brand-new cross-resource deadlock against the
+        # delivery path; see the comment in `apply_edit` and the pins in
+        # tests/integration/test_bottle_place_lock_order.py.
+        #
+        # THE FUNNEL GOES FIRST, and the order is load-bearing. When the frozen
+        # place has DISSOLVED, `resolve_frozen_scope_for_write` must lock THIS
+        # address and the dissolve's SURVIVOR in ONE ascending statement (spec
+        # §5.2). Taking `addresses(anchor)` here and letting the funnel take
+        # `addresses(survivor)` afterwards is a textbook ABBA against the
+        # lifecycle, which takes its whole member set ascending — it deadlocks
+        # for real the moment `survivor_id < anchor_id`. `_frozen_bottle_scope`
+        # already takes rung 1 on the anchor on every arm that returns a target,
+        # so the explicit acquisition below is for the ONE arm that returns None
+        # (an order whose delivery booked no bottles, hence no frozen episode
+        # and nothing for the funnel to resolve).
+        target = self._frozen_bottle_scope(order)
+        if target is None:
+            self.bottle_service.resolve_scope_for_write(order.delivery_address_id)
+
+        # UNWRAP the funnel's answer. `FrozenScopeTarget` carries a scope AND an
+        # attribution address, and they are ONE fact, not two: an address scope's
+        # ledger predicate is `address_id = X AND address_group_id IS NULL`, so
+        # writing the survivor's scope while attributing the row to the anchor
+        # would put the entry and the balance it moves in two different scopes.
+        # `audit()` keeps the door the episode actually came through — empty
+        # unless the write was forwarded past a dissolve.
+        frozen_scope = target.scope if target is not None else None
+        booking_address_id = target.address_id if target is not None else order.delivery_address_id
+        forwarding_audit = target.audit() if target is not None else {}
 
         adjustments: List[Dict[str, Any]] = []
         affected_session_id: Optional[int] = None
@@ -911,7 +1006,7 @@ class OrderEditService:
             try:
                 ledger_entry = self.bottle_service._create_ledger_entry(
                     user_id=order.user_id,
-                    address_id=order.delivery_address_id,
+                    address_id=booking_address_id,
                     event_type=BottleLedgerEventType.ADMIN_ADJUSTMENT,
                     quantity=bottle_delta,
                     actor_user_id=actor_user_id,
@@ -920,7 +1015,12 @@ class OrderEditService:
                         f"Order #{order.id} edit: product {change.product_id} qty "
                         f"{change.old_quantity} → {change.new_quantity}"
                     ),
-                    metadata={"source": "order_edit", "product_id": change.product_id},
+                    scope=frozen_scope,
+                    metadata={
+                        "source": "order_edit",
+                        "product_id": change.product_id,
+                        **forwarding_audit,
+                    },
                 )
             except ValidationError:
                 raise

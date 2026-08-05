@@ -717,6 +717,11 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Bu manzil hozir faol obuna tomonidan ishlatilmoqda va o\'chirib bo\'lmaydi.',
         'ru': 'Этот адрес используется активной подпиской и не может быть удалён.'
     },
+    'api.addresses.error.in_place_group': {
+        'en': 'This address belongs to a shared place and cannot be deleted. Remove it from the place first.',
+        'uz': 'Bu manzil umumiy joyga tegishli va o\'chirib bo\'lmaydi. Avval uni joydan chiqaring.',
+        'ru': 'Этот адрес принадлежит общему месту и не может быть удалён. Сначала удалите его из места.'
+    },
     'api.addresses.region.tashkent_city': {
         'en': 'Tashkent City',
         'uz': 'Toshkent shahri',
@@ -5172,15 +5177,15 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Mening idish balansim',
         'ru': 'Мой баланс тары'
     },
+    # Empty state of the /bottles screen. Since bottle balances were re-keyed
+    # onto the PLACE, `_build_balance_lines` renders one row per distinct place
+    # and this string is reached ONLY when there are no rows at all — i.e. the
+    # cluster has no saved delivery addresses. It no longer means "zero
+    # bottles": a saved address with zero empties still gets a row.
     'telegram.bottles.no_balance': {
-        'en': 'You have no returnable bottles on record.',
-        'uz': 'Sizda qaytariladigan idish topilmadi.',
-        'ru': 'У вас нет возвратной тары на балансе.'
-    },
-    'telegram.bottles.total': {
-        'en': 'Total bottles',
-        'uz': 'Jami idishlar',
-        'ru': 'Всего тара'
+        'en': 'No delivery addresses saved yet — add one and your bottle balance will appear here.',
+        'uz': "Hozircha saqlangan yetkazib berish manzili yo'q — manzil qo'shsangiz, idish balansingiz shu yerda ko'rinadi.",
+        'ru': 'Сохранённых адресов доставки пока нет — добавьте адрес, и баланс тары появится здесь.'
     },
     'telegram.bottles.load_error': {
         'en': 'Could not load bottle balance. Please try again.',

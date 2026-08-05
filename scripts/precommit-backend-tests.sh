@@ -110,6 +110,25 @@ fi
 # tests/conftest.py pins the same values in-process (see the hermetic
 # containment block there); these -e flags keep the container boundary sealed
 # even if conftest is bypassed.
+#
+# UPDATE_API_SNAPSHOT is forwarded (empty when unset) for the same reason as
+# PLACE_COD_COLLECTION_ENABLED below: `docker run` inherits nothing from the
+# calling shell, so
+#   UPDATE_API_SNAPSHOT=1 bash scripts/precommit-backend-tests.sh tests/contract/
+# would otherwise run with the variable UNSET and leave
+# tests/contract/snapshots/api_routes.json stale — the documented way to
+# regenerate it (tests/contract/test_openapi_snapshot.py:21) simply would not
+# work through this runner. Empty means "not set": the test compares
+# `os.environ.get('UPDATE_API_SNAPSHOT') == '1'`, so forwarding "" is a no-op.
+#
+# PLACE_COD_COLLECTION_ENABLED is forwarded (empty when unset) so a two-state
+# measurement is possible from the host shell:
+#   PLACE_COD_COLLECTION_ENABLED=false bash scripts/precommit-backend-tests.sh ...
+# Without this line the assignment is silently swallowed by `docker run` and the
+# container falls back to the shipped default (True), producing a run LABELLED
+# "gate off" that actually ran gate ON. `.env` does not define the key, and
+# shared/business_config.py::_bool treats unset AND empty as "no opinion" —
+# i.e. the shipped default — so forwarding an empty value is a no-op.
 
 # Argument passthrough. With no args we run the whole suite sharded across 4
 # workers (the pre-commit behaviour). With args we forward them verbatim and
@@ -138,5 +157,7 @@ exec docker run --rm \
     -e STAFF_BOT_WEBHOOK_URL="http://staff-bot-must-be-mocked.invalid" \
     -e BOT_WEBHOOK_URL="http://telegram-bot-must-be-mocked.invalid" \
     -e BUSINESS_APP_URL="http://api-must-be-mocked.invalid" \
+    -e PLACE_COD_COLLECTION_ENABLED="${PLACE_COD_COLLECTION_ENABLED:-}" \
+    -e UPDATE_API_SNAPSHOT="${UPDATE_API_SNAPSHOT:-}" \
     "${image}" \
     sh -c "python -c 'import xdist' 2>/dev/null || pip install -q pytest-xdist==3.6.1 pytest-timeout==2.3.1 >&2; pytest ${pytest_args}"

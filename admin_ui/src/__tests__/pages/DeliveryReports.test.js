@@ -33,7 +33,17 @@ vi.mock('../../services/api', () => ({
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key, fallback) => fallback || key,
+    // Interpolates `{{var}}` like real i18next does. Without this the summary
+    // alert renders its template literally and the FIGURE THE ADMIN SEES — the
+    // half of the collect decision that was wrong — cannot be asserted at all.
+    t: (key, fallback, vars) => {
+      const template = fallback || key;
+      if (!vars) return template;
+      const values = new Map(Object.entries(vars));
+      return String(template).replace(/{{\s*(\w+)\s*}}/g, (match, name) => (
+        values.has(name) ? String(values.get(name)) : match
+      ));
+    },
   }),
 }));
 
@@ -506,6 +516,89 @@ describe('DeliveryReports page', () => {
     expect(await screen.findByText('Reversed')).toBeInTheDocument();
   });
 
+  it('labels a place-scoped collection event and shows the payer → beneficiary stamps', async () => {
+    staffService.getCashReconciliationSession.mockResolvedValue({
+      data: {
+        data: {
+          id: 101,
+          driver_name: 'Driver One',
+          status: 'submitted',
+          session_started_at: '2026-03-06T08:00:00Z',
+          session_ended_at: '2026-03-06T11:30:00Z',
+          expected_cash: 100000,
+          expected_cash_on_hand: 100000,
+          declared_cash: 100000,
+          verified_cash: null,
+          declared_variance: 0,
+          verified_variance: null,
+          block_reason: null,
+          blocked_from_cod: false,
+          event_count: 1,
+          events: [
+            {
+              id: 9003,
+              occurred_at: '2026-03-06T09:00:00Z',
+              source: 'delivery',
+              amount: 60000,
+              notes: null,
+              customer_id: 7,
+              customer_name: 'Ali Buyer',
+              customer_phone: '+998901234500',
+              order_id: null,
+              order_number: null,
+              scope_type: 'place',
+              scope_group_id: 3,
+              scope_group_label: 'Acme office',
+              allocations: [
+                {
+                  order_id: 456,
+                  order_number: 'ORD-PLACE-456',
+                  allocated_amount: 60000,
+                  allocation_mode: 'auto',
+                  reversed: false,
+                  payment_status: 'completed',
+                  payment_outstanding_amount: 0,
+                  settlement: 'fully',
+                  source_customer_id: 7,
+                  beneficiary_user_id: 9,
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+
+    const user = userEvent.setup();
+    render(<DeliveryReports />, { wrapper: createWrapper() });
+
+    await waitFor(() => expect(staffService.getCashReconciliation).toHaveBeenCalled());
+    await user.click((await screen.findAllByText('View'))[0]);
+
+    // Event row carries the place label — a workplace collection must not read
+    // as personal cash.
+    expect(await screen.findByText(/Acme office/)).toBeInTheDocument();
+
+    const expandButton = document.querySelector('.ant-table-row-expand-icon');
+    await user.click(expandButton);
+
+    expect(await screen.findByText('ORD-PLACE-456')).toBeInTheDocument();
+    expect(screen.getByText(/#7 → #9/)).toBeInTheDocument();
+  });
+
+  it('leaves personal collection events unlabelled (unlinked baseline)', async () => {
+    const user = userEvent.setup();
+    render(<DeliveryReports />, { wrapper: createWrapper() });
+
+    await waitFor(() => expect(staffService.getCashReconciliation).toHaveBeenCalled());
+    await user.click((await screen.findAllByText('View'))[0]);
+
+    await screen.findByText('Ali Buyer');
+    expect(screen.queryByText(/Place collection/)).toBeNull();
+    expect(screen.queryByText(/Linked-accounts collection/)).toBeNull();
+    expect(screen.queryByText(/→ #/)).toBeNull();
+  });
+
   it('shows customer identity in the Customer Statement and Payment Timeline modals', async () => {
     const user = userEvent.setup();
     render(<DeliveryReports />, { wrapper: createWrapper() });
@@ -533,5 +626,309 @@ describe('DeliveryReports page', () => {
     expect(timelineDialog).toBeTruthy();
     expect(within(timelineDialog).getByText('Ali Buyer')).toBeInTheDocument();
     expect(within(timelineDialog).getByText(/\+998901234500/)).toBeInTheDocument();
+  });
+
+  // ── Plan E: the place address is DERIVED, and no per-person debt gate ──────
+  //
+  // A statement for a coworker who personally owes NOTHING but whose workplace
+  // owes 40 000. `active_cod_debt_count: 0` is exactly the state the old
+  // per-person submit guard refused, and exactly the person a driver or admin
+  // most often collects the office's cash from.
+  const statementWithPlaces = (places, collectScope) => ({
+    data: {
+      data: {
+        first_name: 'Ali',
+        last_name: 'Buyer',
+        phone: '+998901234500',
+        active_cod_debt_count: 0,
+        account_active_cod_debt_count: 0,
+        total_outstanding_amount: 0,
+        cluster_member_count: 1,
+        cluster_delivered_outstanding_amount: 0,
+        places,
+        items: [],
+        collect_scope: collectScope,
+      },
+    },
+  });
+
+  // 🔴 `collect_scope` is the ONE object the modal both displays and posts —
+  // `StaffService.get_customer_cod_statement_for_admin` resolves it server-side
+  // with the same calculation the driver's debtor row and the staff bot's
+  // collect ceiling use. Note how far the place figure is from the per-account
+  // one on THIS statement: Ali owes 0 personally and his workplace owes 40 000.
+  // The old modal rendered the 0 and posted the place address anyway.
+  const PLACE_SCOPE = {
+    scope_type: 'place',
+    delivery_address_id: 44,
+    amount: 40000,
+    debt_count: 1,
+    cluster_amount: 0,
+    cluster_debt_count: 0,
+  };
+
+  const CLUSTER_SCOPE = {
+    scope_type: 'cluster',
+    delivery_address_id: null,
+    amount: 0,
+    debt_count: 0,
+    cluster_amount: 0,
+    cluster_debt_count: 0,
+  };
+
+  const ONE_PLACE = [
+    {
+      address_id: 44,
+      place_group_id: 9,
+      label: 'Acme office',
+      place_open_cod_debt_total: 40000,
+      place_active_cod_debt_count: 1,
+    },
+  ];
+
+  const TWO_PLACES = [
+    ...ONE_PLACE,
+    {
+      address_id: 45,
+      place_group_id: 10,
+      label: 'Beta office',
+      place_open_cod_debt_total: 15000,
+      place_active_cod_debt_count: 1,
+    },
+  ];
+
+  const openRecordCollectionModal = async (user) => {
+    const recordCollectionButton = (await screen.findAllByRole('button')).find((button) =>
+      /Record Collection|staff:record_cash_collection/i.test(button.textContent || '')
+    );
+    expect(recordCollectionButton).toBeTruthy();
+    await user.click(recordCollectionButton);
+  };
+
+  const fillAndSubmitCollection = async (user, source) => {
+    await user.selectOptions(screen.getByLabelText('Customer'), '77');
+    await user.selectOptions(screen.getByLabelText('Collection Type'), source);
+
+    const amountInput = screen.getByRole('spinbutton');
+    fireEvent.change(amountInput, { target: { value: '40000' } });
+    await user.type(screen.getByLabelText('Notes'), 'Office cash');
+    await user.click(screen.getByRole('button', { name: 'OK' }));
+  };
+
+  it('submits a standalone collection for a customer with no personal COD debt', async () => {
+    // Plan E R1: a coworker holding the office's cash has active_cod_debt_count
+    // 0. The old per-person submit guard blocked the admin before the request
+    // was even built. Deleting it is the fix; this is its regression pin.
+    staffService.getCustomerCodStatement.mockResolvedValue(
+      statementWithPlaces(ONE_PLACE, PLACE_SCOPE)
+    );
+
+    const user = userEvent.setup();
+    render(<DeliveryReports />, { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(staffService.getCashReconciliation).toHaveBeenCalled();
+    });
+
+    await openRecordCollectionModal(user);
+    await fillAndSubmitCollection(user, 'standalone_meeting');
+
+    // Assert the mutation fired at all — under the old guard it never did.
+    await waitFor(() => {
+      expect(staffService.recordCashCollection).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('sends the single grouped place address with a standalone collection', async () => {
+    // Same stub as above. The derived address is the customer's ONE grouped
+    // place; the admin is never asked to pick it (plan E9).
+    staffService.getCustomerCodStatement.mockResolvedValue(
+      statementWithPlaces(ONE_PLACE, PLACE_SCOPE)
+    );
+
+    const user = userEvent.setup();
+    render(<DeliveryReports />, { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(staffService.getCashReconciliation).toHaveBeenCalled();
+    });
+
+    await openRecordCollectionModal(user);
+    await fillAndSubmitCollection(user, 'standalone_meeting');
+
+    await waitFor(() => {
+      expect(staffService.recordCashCollection).toHaveBeenCalledTimes(1);
+    });
+
+    const payload = staffService.recordCashCollection.mock.calls[0][0];
+    expect(Number(payload.customer_id)).toBe(77);
+    expect(Number(payload.amount)).toBe(40000);
+    expect(payload.source).toBe('standalone_meeting');
+    expect(payload.delivery_address_id).toBe(44);
+  });
+
+  it('sends no place address when the customer belongs to two places', async () => {
+    // Two entries in `places` => ambiguous. Guessing would spread the cash over
+    // the wrong workplace, so we send null and the backend keeps cluster scope
+    // (plan E7, mirroring the staff bot's _resolve_scope_address_id).
+    // The backend resolves the ambiguity, not the UI: two places => it
+    // publishes cluster scope with no address.
+    staffService.getCustomerCodStatement.mockResolvedValue(
+      statementWithPlaces(TWO_PLACES, CLUSTER_SCOPE)
+    );
+
+    const user = userEvent.setup();
+    render(<DeliveryReports />, { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(staffService.getCashReconciliation).toHaveBeenCalled();
+    });
+
+    await openRecordCollectionModal(user);
+    await fillAndSubmitCollection(user, 'standalone_meeting');
+
+    await waitFor(() => {
+      expect(staffService.recordCashCollection).toHaveBeenCalledTimes(1);
+    });
+
+    expect(staffService.recordCashCollection.mock.calls[0][0].delivery_address_id).toBeNull();
+  });
+
+  it('sends no place address for an admin correction', async () => {
+    // C5.3: admin_adjustment / backfill / personal_card_transfer can never be
+    // place-scoped, so the field must not be sent for them. The stub still
+    // publishes a place scope, so a missing source check would show up as 44.
+    staffService.getCustomerCodStatement.mockResolvedValue(
+      statementWithPlaces(ONE_PLACE, PLACE_SCOPE)
+    );
+
+    const user = userEvent.setup();
+    render(<DeliveryReports />, { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(staffService.getCashReconciliation).toHaveBeenCalled();
+    });
+
+    await openRecordCollectionModal(user);
+    await fillAndSubmitCollection(user, 'admin_adjustment');
+
+    await waitFor(() => {
+      expect(staffService.recordCashCollection).toHaveBeenCalledTimes(1);
+    });
+
+    expect(staffService.recordCashCollection.mock.calls[0][0].delivery_address_id).toBeNull();
+  });
+
+  // ── 🔴 THE ADMIN SPLIT: the figure SHOWN and the scope POSTED are ONE ──────
+  //
+  // The modal posted `places[0].address_id` — PLACE scope, settling the whole
+  // workplace — while rendering the raw per-account `total_outstanding_amount`.
+  // Measured on real rows: shown 25 000, true ceiling 45 000; the admin
+  // collected the 25 000 they were shown, the customer was still 10 000 down
+  // and 10 000 of a COWORKER'S debt had been paid. Each test below asserts BOTH
+  // halves in one act, so neither can be verified in isolation again.
+
+  const selectCustomerAndSource = async (user, source) => {
+    await user.selectOptions(screen.getByLabelText('Customer'), '77');
+    await user.selectOptions(screen.getByLabelText('Collection Type'), source);
+  };
+
+  const submitCollection = async (user) => {
+    const amountInput = screen.getByRole('spinbutton');
+    fireEvent.change(amountInput, { target: { value: '40000' } });
+    await user.type(screen.getByLabelText('Notes'), 'Office cash');
+    await user.click(screen.getByRole('button', { name: 'OK' }));
+  };
+
+  it('shows the figure its own submit settles, not the raw account total', async () => {
+    // Ali owes 0 personally; his workplace owes 40 000 and a place-scoped
+    // collection from him settles all of it. The old alert rendered the 0.
+    staffService.getCustomerCodStatement.mockResolvedValue(
+      statementWithPlaces(ONE_PLACE, PLACE_SCOPE)
+    );
+
+    const user = userEvent.setup();
+    render(<DeliveryReports />, { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(staffService.getCashReconciliation).toHaveBeenCalled();
+    });
+
+    await openRecordCollectionModal(user);
+    await selectCustomerAndSource(user, 'standalone_meeting');
+
+    expect(
+      await screen.findByText('Active COD debts: 1 | Outstanding: 40,000 UZS')
+    ).toBeInTheDocument();
+    // …and the admin is told WHY that figure is bigger than this person's own.
+    expect(screen.getByText(/scoped to the customer's workplace/)).toBeInTheDocument();
+
+    // The other half of the same decision, in the same test.
+    await submitCollection(user);
+    await waitFor(() => {
+      expect(staffService.recordCashCollection).toHaveBeenCalledTimes(1);
+    });
+    expect(staffService.recordCashCollection.mock.calls[0][0].delivery_address_id).toBe(44);
+  });
+
+  it('drops the place address when the backend publishes no collect scope', async () => {
+    // 🔴 The degraded branch, on the admin surface. A business_app older than
+    // this bundle serves no `collect_scope`, and the gate-off rollback serves
+    // none either. Keeping the address while falling back on the figure is
+    // precisely the shape that promised a surplus which did not exist and
+    // cleared a coworker's debt instead — so the address goes with it.
+    staffService.getCustomerCodStatement.mockResolvedValue(
+      statementWithPlaces(ONE_PLACE, undefined)
+    );
+
+    const user = userEvent.setup();
+    render(<DeliveryReports />, { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(staffService.getCashReconciliation).toHaveBeenCalled();
+    });
+
+    await openRecordCollectionModal(user);
+    await selectCustomerAndSource(user, 'standalone_meeting');
+
+    expect(
+      await screen.findByText('Active COD debts: 0 | Outstanding: 0 UZS')
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/scoped to the customer's workplace/)).not.toBeInTheDocument();
+
+    await submitCollection(user);
+    await waitFor(() => {
+      expect(staffService.recordCashCollection).toHaveBeenCalledTimes(1);
+    });
+    expect(staffService.recordCashCollection.mock.calls[0][0].delivery_address_id).toBeNull();
+  });
+
+  it('shows the cluster figure for a source that can never be place-scoped', async () => {
+    // A place ceiling IS published, but `admin_adjustment` is a book correction
+    // — `_PLACE_SCOPE_SOURCES` refuses it place scope. Showing 40 000 here would
+    // promise a settlement the backend will not perform.
+    staffService.getCustomerCodStatement.mockResolvedValue(
+      statementWithPlaces(ONE_PLACE, PLACE_SCOPE)
+    );
+
+    const user = userEvent.setup();
+    render(<DeliveryReports />, { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(staffService.getCashReconciliation).toHaveBeenCalled();
+    });
+
+    await openRecordCollectionModal(user);
+    await selectCustomerAndSource(user, 'admin_adjustment');
+
+    expect(
+      await screen.findByText('Active COD debts: 0 | Outstanding: 0 UZS')
+    ).toBeInTheDocument();
+
+    await submitCollection(user);
+    await waitFor(() => {
+      expect(staffService.recordCashCollection).toHaveBeenCalledTimes(1);
+    });
+    expect(staffService.recordCashCollection.mock.calls[0][0].delivery_address_id).toBeNull();
   });
 });

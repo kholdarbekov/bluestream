@@ -11,33 +11,52 @@ from pydantic.alias_generators import to_camel
 # ------------------------------------------------------------------
 
 
+# The three admin place-write bodies. `user_id` is OPTIONAL on all three: an
+# admin adjusts a PLACE, not a member (there is no coworker selection anywhere),
+# so the service derives the audit attribution from the place's representative
+# address. It stays accepted — not forbidden — for callers that still name one.
+#
+# `allow_inf_nan: False` is NOT boilerplate. Python's own `json` parser accepts
+# the BARE `NaN` / `Infinity` / `-Infinity` literals, and pydantic's default
+# `float` happily carries them through — so without this a non-finite bottle
+# quantity/amount reaches the DATABASE, where Postgres `numeric` ACCEPTS 'NaN'
+# and the place's stored balance is poisoned permanently (`reconcile_balance`
+# re-writes the same poison, because the ledger sum is non-finite too). This is
+# the request boundary; `BottleTrackingService._as_decimal` carries the same
+# refusal as the SSOT backstop for every non-HTTP caller.
+_PLACE_WRITE_CONFIG = {
+    "alias_generator": to_camel,
+    "populate_by_name": True,
+    "allow_inf_nan": False,
+}
+
+
 class BottleAdjustmentRequest(BaseModel):
-    user_id: int
+    user_id: Optional[int] = None
     address_id: int
     adjustment: float
     notes: str
 
-    model_config = {"alias_generator": to_camel, "populate_by_name": True}
+    model_config = _PLACE_WRITE_CONFIG
 
 
 class BottleInitialBalanceRequest(BaseModel):
-    user_id: int
+    user_id: Optional[int] = None
     address_id: int
     quantity: float
     notes: Optional[str] = None
 
-    model_config = {"alias_generator": to_camel, "populate_by_name": True}
+    model_config = _PLACE_WRITE_CONFIG
 
 
 class BottleFineCreateRequest(BaseModel):
-    user_id: int
-    bottle_balance_id: Optional[int] = None
-    address_id: Optional[int] = None
+    user_id: Optional[int] = None
+    address_id: int
     quantity: float
     fine_amount: float
     notes: Optional[str] = None
 
-    model_config = {"alias_generator": to_camel, "populate_by_name": True}
+    model_config = _PLACE_WRITE_CONFIG
 
 
 class BottleFineUpdateRequest(BaseModel):
@@ -105,23 +124,55 @@ class AdminResolveTransferRequest(BaseModel):
 
 
 def serialize_bottle_balance(balance, include_user: bool = False) -> Dict[str, Any]:
-    """Serialize a BottleBalance with optional user/address details."""
-    data = balance.to_dict()
+    """Serialize a place's BottleBalance.
 
+    A place row has no single owner, so identity is `place_label` plus
+    `member_names` rather than a user. `include_user` is retained for call-site
+    compatibility and ignored.
+    """
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+
+    data = balance.to_dict()
+    data["place_label"] = BottleTrackingService._scope_label(balance)
+    data["member_names"] = BottleTrackingService._scope_member_names(balance)
+    data["is_shared_place"] = balance.address_group_id is not None
     if balance.address:
         data["address_title"] = balance.address.title
         data["full_address"] = balance.address.full_address
 
-    if include_user and balance.user:
-        data["user_name"] = f"{balance.user.first_name or ''} {balance.user.last_name or ''}".strip()
-        data["user_phone"] = balance.user.phone
-
+    member_ids = BottleTrackingService._scope_member_address_ids(balance)
+    data["member_address_ids"] = member_ids
+    data["representative_address_id"] = member_ids[0] if member_ids else None
     return data
 
 
 def serialize_bottle_balance_list(balances: List, include_user: bool = True) -> List[Dict[str, Any]]:
     """Serialize a list of BottleBalance records."""
     return [serialize_bottle_balance(b, include_user=include_user) for b in balances]
+
+
+def serialize_bottle_fine_row(fine) -> Dict[str, Any]:
+    """Admin-facing fine row: names instead of raw ids.
+
+    `place_label` resolves the fine's FROZEN scope (`address_group_id` /
+    `address_id` as recorded at issue time — never re-resolved, see
+    `BottleTrackingService._fine_scope`) to its balance row and labels it the
+    same way a balance row is labeled elsewhere. If that place has no balance
+    row (yet), falls back to the fine's own address title.
+    """
+    from business_app.models.bottle import BottleBalance
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+
+    data = fine.to_dict()
+    data["user_name"] = f"{fine.user.first_name or ''} {fine.user.last_name or ''}".strip() if fine.user else None
+    data["address_title"] = fine.address.title if fine.address else None
+
+    scope = BottleTrackingService._fine_scope(fine)
+    place_row = BottleBalance.query.filter(*scope.balance_filter()).first()
+    data["place_label"] = (
+        BottleTrackingService._scope_label(place_row) if place_row is not None else data["address_title"]
+    )
+    return data
 
 
 def serialize_bottle_ledger_entry(entry) -> Dict[str, Any]:
@@ -142,22 +193,46 @@ def serialize_bottle_ledger_entry(entry) -> Dict[str, Any]:
     return data
 
 
-def serialize_bottle_fine(fine) -> Dict[str, Any]:
-    """Serialize a BottleFine with related details."""
-    data = fine.to_dict()
+def serialize_customer_place_ledger_entry(entry, viewer_user_id: int) -> Dict[str, Any]:
+    """Customer-facing place-ledger row (spec §7): member names only — no
+    phones, no internal actor ids, no idempotency/metadata/notes/balance
+    internals. `is_own` lets the bot mark the viewer's own entries.
 
-    if fine.user:
-        data["user_name"] = f"{fine.user.first_name or ''} {fine.user.last_name or ''}".strip()
-        data["user_phone"] = fine.user.phone
+    PLACE-LEVEL CORRECTIONS ARE NOT ATTRIBUTED TO A MEMBER (spec §7.4). A
+    `merge_correction` / `merge_backfill` entry carries a member's
+    `(user_id, address_id)` only because `bottle_ledger` requires both NOT
+    NULL; it describes the PLACE. This view deliberately suppresses `notes`,
+    so leaving the attribution in place would show one coworker an unexplained
+    +/-N flagged `is_own` — a number they did not cause and cannot account for.
+    `member_name` is dropped and `is_own` is forced False for those.
 
-    if fine.issuer:
-        data["issuer_name"] = f"{fine.issuer.first_name or ''} {fine.issuer.last_name or ''}".strip()
+    `merge_exclude` reversals are attributed correctly (to the very entry they
+    neutralise) and are deliberately left alone.
 
-    if fine.bottle_balance and fine.bottle_balance.address:
-        data["address_title"] = fine.bottle_balance.address.title
-        data["full_address"] = fine.bottle_balance.address.full_address
+    NO new key is emitted for this. The row shape is pinned as a WHITELIST by
+    `tests/unit/test_customer_place_ledger_gate.py` — a redaction fence from an
+    earlier task — and widening it to advertise "this is a place-level row"
+    would weaken that fence for a label the renderer does not need: with
+    `member_name` None and `is_own` False, `telegram_bot/handlers/bottles.py`
+    already prints the line with no attribution at all.
+    """
+    from business_app.services.bottle_tracking_service import PLACE_LEVEL_LEDGER_SOURCES
 
-    return data
+    is_place_level = (entry.entry_metadata or {}).get("source") in PLACE_LEVEL_LEDGER_SOURCES
+    member_name = None
+    if entry.user and not is_place_level:
+        member_name = f"{entry.user.first_name or ''} {entry.user.last_name or ''}".strip() or None
+    return {
+        "id": entry.id,
+        "address_id": entry.address_id,
+        "event_type": entry.event_type.value if hasattr(entry.event_type, "value") else entry.event_type,
+        "quantity": float(entry.quantity or 0),
+        "occurred_at": entry.occurred_at.isoformat() if entry.occurred_at else None,
+        "order_id": entry.order_id,
+        "order_number": entry.order.order_number if entry.order else None,
+        "member_name": member_name,
+        "is_own": (not is_place_level) and entry.user_id == viewer_user_id,
+    }
 
 
 def serialize_bottle_session(

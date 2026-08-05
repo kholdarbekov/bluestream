@@ -247,16 +247,60 @@ class OrderCashEditService:
             warnings.append("surplus_credited_to_customer - auto-applies to the customer's other unpaid orders if any")
 
         if event is not None:
+            from business_app.services.allocation_scope import AllocationScope
+
+            # The correction replays the event's FROZEN scope (spec 5.6), so the
+            # "other unpaid orders" the corrected cash may land on are the
+            # scope's — a coworker's or a linked sibling's debt included. Reading
+            # the single account here told the admin "no other unpaid orders"
+            # while the correction went on to settle someone else's order first.
+            stored_scope = AllocationScope.from_event(event)
             other_active = [
-                p
-                for p in self.cash_service.get_active_cod_payments_for_customer(order.user_id)
-                if p.order_id != order.id
+                p for p in self.cash_service.get_active_cod_payments_for_scope(stored_scope) if p.order_id != order.id
             ]
             if other_active:
                 warnings.append(
-                    "customer_has_other_unpaid_cod_orders: corrected cash settles the customer's "
-                    "oldest unpaid order first, so the per-order figures above are approximate"
+                    "customer_has_other_unpaid_cod_orders: corrected cash settles the "
+                    "scope's oldest unpaid order first, so the per-order figures above "
+                    "are approximate"
                 )
+
+            # Spec 5.6: a correction that pushes the cluster or place back over
+            # the COD cap does not block — the cash really was miscounted and the
+            # books must say so — but the preview carries a warning flag so the
+            # admin knows the customer will not be able to order COD afterwards.
+            #
+            # Unlike the replay above this reads CURRENT topology on purpose: the
+            # cap is a forward-looking gate on the NEXT order (the same reason
+            # ring 3 is carved out of the frozen replay), so it must be evaluated
+            # against the cluster and place that exist now.
+            if projected_outstanding > Decimal("0.00"):
+                order_payment = order.payment
+                # Already-open debts are inside the counts below; only an order
+                # that is settled TODAY and re-opens adds one.
+                becomes_open_debt = order_payment is not None and to_dec(order_payment.outstanding_amount) <= Decimal(
+                    "0.00"
+                )
+                ctx = self.cash_service.get_cod_restriction_context(
+                    order.user_id, delivery_address_id=order.delivery_address_id
+                )
+                # A COD-exempt or grocery cluster can never actually be capped
+                # (get_cod_restriction_context returns cod_restricted=False
+                # outright for both), so warning off the raw debt counts here
+                # would tell the admin the customer will be locked out of COD
+                # when they never were. Read the exemption straight off the
+                # context this service already computed — never re-derive it.
+                if not ctx["cod_exempt"] and not ctx["is_grocery_store"]:
+                    limit = self.cash_service.COD_ACTIVE_DEBT_LIMIT
+                    extra = 1 if becomes_open_debt else 0
+                    projected_cluster = ctx["active_cod_debt_count"] + extra
+                    place_count = ctx.get("place_active_cod_debt_count")
+                    projected_place = (place_count + extra) if place_count is not None else None
+                    if projected_cluster >= limit or (projected_place is not None and projected_place >= limit):
+                        warnings.append(
+                            "correction_pushes_cod_over_cap - the customer's cluster or this "
+                            "place will be at/over the COD active-debt limit after this edit"
+                        )
 
         return CashEditPlan(
             order_id=order.id,

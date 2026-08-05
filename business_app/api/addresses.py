@@ -218,6 +218,16 @@ def delete_address(address_id):
     if not address:
         return not_found_response(message=get_translation("api.addresses.error.not_found"))
 
+    # Spec §7.3: a grouped address has no balance row of its own, so the
+    # IntegrityError below never fires for exactly the members who share a pool.
+    from business_app.services.customer_link_service import CustomerLinkService
+    from business_app.utils.exceptions import ValidationError as ServiceValidationError
+
+    try:
+        CustomerLinkService.assert_address_not_in_place_group(address_id)
+    except ServiceValidationError as exc:
+        return validation_error_response(errors={"address": exc.message}, error_code=exc.error_code)
+
     # Don't allow deleting if it's the only address
     address_count = UserAddress.query.filter_by(user_id=user_id).count()
     if address_count == 1:

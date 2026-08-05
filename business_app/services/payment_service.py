@@ -133,6 +133,7 @@ class PaymentService:
         *,
         context: PaymentContext = PaymentContext.ORDER,
         items: Optional[List[Dict[str, Any]]] = None,
+        delivery_address_id: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """Which payment methods may THIS user be offered in THIS context.
 
@@ -140,6 +141,11 @@ class PaymentService:
         web subscription constructor, and the admin UI. Payme and
         loyalty_points are excluded by ``CUSTOMER_SELECTABLE_METHODS`` and
         never appear.
+
+        ``delivery_address_id`` is optional: supply the destination address and
+        the COD cap's PLACE arm is evaluated too (spec 5.5), so cash disappears
+        from the menu exactly when order creation would refuse it. Omitted (or
+        an ungrouped address) ⇒ person arm only, unchanged from before.
         """
         from business_app.services.cash_collection_service import CashCollectionService
         from business_app.services.corporate_contract_service import CorporateContractService
@@ -159,7 +165,9 @@ class PaymentService:
             # shared/payment_methods.py declares the catalog read-only.
             available.append({**copy.deepcopy(entry), "is_active": True})
 
-        cod_context = CashCollectionService().get_cod_restriction_context(user.id)
+        cod_context = CashCollectionService().get_cod_restriction_context(
+            user.id, delivery_address_id=delivery_address_id
+        )
         if cod_context.get("cod_restricted"):
             available = [entry for entry in available if entry["method"] != PaymentMethod.CASH.value]
 

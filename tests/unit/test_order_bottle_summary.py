@@ -103,7 +103,8 @@ def test_get_order_bottle_summary_balance_is_scoped_to_order_address(db, sample_
         db, sample_user, sample_product, user_address,
         order_number="ORD-SUM-004", per_unit="2", quantity=2,
     )
-    # A second address carrying an unrelated balance that must NOT leak in.
+    # A second PLACE (ungrouped, so address-keyed) carrying an unrelated balance
+    # that must NOT leak into the order's place.
     other_address = UserAddress(
         user_id=sample_user.id,
         full_address="2 Other St, Tashkent",
@@ -114,9 +115,7 @@ def test_get_order_bottle_summary_balance_is_scoped_to_order_address(db, sample_
     )
     db.session.add(other_address)
     db.session.flush()
-    db.session.add(
-        BottleBalance(user_id=sample_user.id, address_id=other_address.id, balance=Decimal("99"))
-    )
+    db.session.add(BottleBalance(address_id=other_address.id, balance=Decimal("99")))
     service = BottleTrackingService()
     service.record_bottles_delivered(order.id, sample_user.id, user_address.id, Decimal("4"))
     db.session.commit()

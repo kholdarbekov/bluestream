@@ -753,4 +753,228 @@ describe('AdminService', () => {
       ).rejects.toThrow('Entity type is required');
     });
   });
+
+  // Place groups are ownerless (may span customers) — none of these URLs is
+  // scoped by a canonical customer id, unlike the legacy address-group route.
+  describe('place groups', () => {
+    it('creates a place group from any customers addresses', async () => {
+      api.post.mockResolvedValue({ data: { success: true, data: { place_group_id: 7 } } });
+
+      const result = await adminService.createPlaceGroup([2, 9], 'Acme office', 'coworkers');
+
+      expect(api.post).toHaveBeenCalledWith('/admin/place-groups', {
+        addressIds: [2, 9],
+        label: 'Acme office',
+        reason: 'coworkers'
+      });
+      expect(result).toEqual({ success: true, data: { place_group_id: 7 } });
+    });
+
+    it('fetches one place group detail', async () => {
+      api.get.mockResolvedValue({ data: { success: true, data: { place_group_id: 7 } } });
+
+      await adminService.getPlaceGroup(7);
+
+      expect(api.get).toHaveBeenCalledWith('/admin/place-groups/7');
+    });
+
+    it('adds addresses to an existing place group', async () => {
+      api.post.mockResolvedValue({ data: { success: true } });
+
+      await adminService.addPlaceGroupAddresses(7, [9], 'new hire');
+
+      expect(api.post).toHaveBeenCalledWith('/admin/place-groups/7/addresses', {
+        addressIds: [9],
+        reason: 'new hire'
+      });
+    });
+
+    it('removes one address, sending the reason in the DELETE body', async () => {
+      api.delete.mockResolvedValue({ data: { success: true } });
+
+      await adminService.removePlaceGroupAddress(7, 3, 'moved out');
+
+      // `bottlesLeaving` defaults to 0 — the bottles stay with the PLACE and the
+      // departing address starts a fresh scope (spec 7.1).
+      expect(api.delete).toHaveBeenCalledWith('/admin/place-groups/7/addresses/3', {
+        data: { reason: 'moved out', bottlesLeaving: 0 }
+      });
+    });
+
+    it('sends bottlesLeaving in the remove body', async () => {
+      api.delete.mockResolvedValue({ data: { data: {} } });
+
+      await adminService.removePlaceGroupAddress(9, 44, 'left', 2);
+
+      expect(api.delete).toHaveBeenCalledWith('/admin/place-groups/9/addresses/44',
+        { data: { reason: 'left', bottlesLeaving: 2 } });
+    });
+
+    // Spec 7.4's merge review. The preview takes the exclusions so the figures
+    // it returns are the ones the admin is actually deciding against.
+    it('fetches the merge preview from the address-keyed route', async () => {
+      api.get.mockResolvedValue({ data: { data: {} } });
+
+      await adminService.getPlaceGroupMergePreview([44, 45], { groupId: 9, exclude: [41] });
+
+      expect(api.get).toHaveBeenCalledWith('/admin/place-groups/merge-preview',
+        { params: { address_ids: '44,45', group_id: 9, exclude: '41' } });
+    });
+
+    it('omits group_id and exclude from the preview when there are none', async () => {
+      api.get.mockResolvedValue({ data: { data: {} } });
+
+      await adminService.getPlaceGroupMergePreview([45, 44]);
+
+      expect(api.get).toHaveBeenCalledWith('/admin/place-groups/merge-preview',
+        { params: { address_ids: '45,44' } });
+    });
+
+    it('forwards the reviewed merge on the create body', async () => {
+      api.post.mockResolvedValue({ data: { success: true } });
+
+      await adminService.createPlaceGroup([44, 45], null, 'counted them', {
+        excludedLedgerEntryIds: [41],
+        resultingBalance: 5,
+        previewEntryIds: [41]
+      });
+
+      expect(api.post).toHaveBeenCalledWith('/admin/place-groups', {
+        addressIds: [44, 45],
+        label: null,
+        reason: 'counted them',
+        excludedLedgerEntryIds: [41],
+        resultingBalance: 5,
+        previewEntryIds: [41]
+      });
+    });
+
+    it('forwards the reviewed merge on the add body', async () => {
+      api.post.mockResolvedValue({ data: { success: true } });
+
+      await adminService.addPlaceGroupAddresses(9, [44], 'new hire', {
+        excludedLedgerEntryIds: [41],
+        previewEntryIds: [41, 42]
+      });
+
+      expect(api.post).toHaveBeenCalledWith('/admin/place-groups/9/addresses', {
+        addressIds: [44],
+        reason: 'new hire',
+        excludedLedgerEntryIds: [41],
+        previewEntryIds: [41, 42]
+      });
+    });
+
+    it('fetches place-group suggestions for a user', async () => {
+      api.get.mockResolvedValue({ data: { success: true, data: { suggestions: [] } } });
+
+      await adminService.getPlaceGroupSuggestions(11);
+
+      expect(api.get).toHaveBeenCalledWith('/admin/users/11/place-group-suggestions');
+    });
+
+    it('dismisses a place suggestion pairwise (never the person-dismiss route)', async () => {
+      api.post.mockResolvedValue({ data: { success: true } });
+
+      await adminService.dismissPlaceGroupSuggestion(2, 9, 'different buildings');
+
+      expect(api.post).toHaveBeenCalledWith('/admin/place-group-suggestions/dismiss', {
+        addressIdA: 2,
+        addressIdB: 9,
+        reason: 'different buildings'
+      });
+    });
+
+    it('searches addresses across users, excluding grouped ones by default', async () => {
+      api.get.mockResolvedValue({ data: { success: true, data: { addresses: [] } } });
+
+      await adminService.searchAddresses('Carol');
+
+      expect(api.get).toHaveBeenCalledWith('/admin/addresses/search', {
+        params: { q: 'Carol', exclude_grouped: 1 }
+      });
+    });
+
+    it('can include already-grouped addresses in the search', async () => {
+      api.get.mockResolvedValue({ data: { success: true, data: { addresses: [] } } });
+
+      await adminService.searchAddresses('Carol', false);
+
+      expect(api.get).toHaveBeenCalledWith('/admin/addresses/search', {
+        params: { q: 'Carol', exclude_grouped: 0 }
+      });
+    });
+  });
+
+  // Bottle balances were re-keyed from (user_id, address_id) to the PLACE
+  // (address group when set, else the address). These pins exist because two
+  // routes 404ed against the current backend with zero coverage catching it.
+  describe('bottle tracking — place-keyed routes', () => {
+    it('places the bottle ledger on the address-keyed route', async () => {
+      api.get.mockResolvedValue({ data: { data: { items: [] } } });
+
+      await adminService.getPlaceBottleLedger(44, { page: 1 });
+
+      expect(api.get).toHaveBeenCalledWith('/admin/bottles/ledger/44', { params: { page: 1 } });
+    });
+
+    it('reconciles by address, not by user+address', async () => {
+      api.post.mockResolvedValue({ data: { data: {} } });
+
+      await adminService.reconcileBottleBalance(44);
+
+      expect(api.post).toHaveBeenCalledWith('/admin/bottles/reconcile/44');
+    });
+
+    it('fetches the customer place summary by user id, on the unchanged URL', async () => {
+      api.get.mockResolvedValue({ data: { data: {} } });
+
+      await adminService.getCustomerPlaceSummary(42);
+
+      expect(api.get).toHaveBeenCalledWith('/admin/bottles/balances/42');
+    });
+  });
+
+  // The COD active-debt cap override must survive BOTH hops: preview owns the
+  // blocking_reasons that gate Confirm, and apply re-runs the same preview
+  // server-side.
+  describe('order payment-method edit', () => {
+    it('forwards bypass_cod_check on the preview call', async () => {
+      api.post.mockResolvedValue({ data: { success: true, data: { blocking_reasons: [] } } });
+
+      await adminService.previewOrderPaymentMethod(771, { new_method: 'cash', bypass_cod_check: true });
+
+      expect(api.post).toHaveBeenCalledWith('/admin/orders/771/payment-method/preview', {
+        new_method: 'cash',
+        bypass_cod_check: true
+      });
+    });
+
+    it('forwards bypass_cod_check on the apply call', async () => {
+      api.post.mockResolvedValue({ data: { success: true, data: { order_id: 771 } } });
+
+      await adminService.submitOrderPaymentMethod(771, {
+        new_method: 'cash',
+        reason: 'card payment failed, driver took cash',
+        bypass_cod_check: true
+      });
+
+      expect(api.post).toHaveBeenCalledWith('/admin/orders/771/payment-method', {
+        new_method: 'cash',
+        reason: 'card payment failed, driver took cash',
+        bypass_cod_check: true
+      });
+    });
+
+    it('always sends an explicit false when the override is absent', async () => {
+      api.post.mockResolvedValue({ data: { success: true, data: {} } });
+
+      await adminService.previewOrderPaymentMethod(771, { new_method: 'click' });
+
+      expect(api.post).toHaveBeenCalledWith('/admin/orders/771/payment-method/preview', {
+        new_method: 'click',
+        bypass_cod_check: false
+      });
+    });
+  });
 });

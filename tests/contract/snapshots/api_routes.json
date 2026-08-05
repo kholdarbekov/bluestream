@@ -70,6 +70,13 @@
     "rule": "/api/v1/addresses/reverse-geocode"
   },
   {
+    "endpoint": "admin.search_addresses_for_place_group",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/addresses/search"
+  },
+  {
     "endpoint": "admin.get_inactive_customers",
     "methods": [
       "GET"
@@ -235,14 +242,21 @@
     "methods": [
       "GET"
     ],
-    "rule": "/api/v1/admin/bottles/ledger/<int:user_id>/<int:address_id>"
+    "rule": "/api/v1/admin/bottles/ledger/<int:address_id>"
+  },
+  {
+    "endpoint": "admin_bottles.get_cluster_bottle_ledger",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/bottles/ledger/cluster/<int:user_id>"
   },
   {
     "endpoint": "admin_bottles.reconcile_bottle_balance",
     "methods": [
       "POST"
     ],
-    "rule": "/api/v1/admin/bottles/reconcile/<int:user_id>/<int:address_id>"
+    "rule": "/api/v1/admin/bottles/reconcile/<int:address_id>"
   },
   {
     "endpoint": "admin_bottles.list_bottle_sessions",
@@ -334,6 +348,13 @@
       "GET"
     ],
     "rule": "/api/v1/admin/campaigns/<int:campaign_id>/usage"
+  },
+  {
+    "endpoint": "admin.create_address_group",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/canonical-customers/<int:canonical_id>/address-groups"
   },
   {
     "endpoint": "admin.create_category",
@@ -446,6 +467,13 @@
       "POST"
     ],
     "rule": "/api/v1/admin/corporate/contracts/overlap-preview"
+  },
+  {
+    "endpoint": "admin.dismiss_customer_link_suggestion",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/customer-links/dismiss"
   },
   {
     "endpoint": "admin.get_customer_map_pins",
@@ -1104,6 +1132,62 @@
       "GET"
     ],
     "rule": "/api/v1/admin/payments/transactions"
+  },
+  {
+    "endpoint": "admin.list_place_group_suggestions",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/place-group-suggestions"
+  },
+  {
+    "endpoint": "admin.dismiss_place_group_suggestion",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/place-group-suggestions/dismiss"
+  },
+  {
+    "endpoint": "admin.create_place_group_admin",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/place-groups"
+  },
+  {
+    "endpoint": "admin.list_place_groups_admin",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/place-groups"
+  },
+  {
+    "endpoint": "admin.get_place_group_detail",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/place-groups/<int:group_id>"
+  },
+  {
+    "endpoint": "admin.add_place_group_addresses",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/place-groups/<int:group_id>/addresses"
+  },
+  {
+    "endpoint": "admin.remove_place_group_address",
+    "methods": [
+      "DELETE"
+    ],
+    "rule": "/api/v1/admin/place-groups/<int:group_id>/addresses/<int:address_id>"
+  },
+  {
+    "endpoint": "admin.get_place_group_merge_preview",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/place-groups/merge-preview"
   },
   {
     "endpoint": "admin.create_price_rule",
@@ -1848,6 +1932,27 @@
     "rule": "/api/v1/admin/users/<int:user_id>/cart"
   },
   {
+    "endpoint": "admin.link_user_account",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/users/<int:user_id>/link"
+  },
+  {
+    "endpoint": "admin.get_user_link_suggestions",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/users/<int:user_id>/link-suggestions"
+  },
+  {
+    "endpoint": "admin.get_user_linked_accounts",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/users/<int:user_id>/linked-accounts"
+  },
+  {
     "endpoint": "admin.get_user_notification_settings",
     "methods": [
       "GET"
@@ -1869,11 +1974,25 @@
     "rule": "/api/v1/admin/users/<int:user_id>/payment-methods"
   },
   {
+    "endpoint": "admin.get_user_place_group_suggestions",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/users/<int:user_id>/place-group-suggestions"
+  },
+  {
     "endpoint": "admin.update_user_status",
     "methods": [
       "PUT"
     ],
     "rule": "/api/v1/admin/users/<int:user_id>/status"
+  },
+  {
+    "endpoint": "admin.unlink_user_account",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/users/<int:user_id>/unlink"
   },
   {
     "endpoint": "admin.unlock_user_account",
@@ -3053,6 +3172,13 @@
     "rule": "/api/v1/payments/methods"
   },
   {
+    "endpoint": "payments.get_my_cod_summary",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/payments/my-cod-summary"
+  },
+  {
     "endpoint": "payments.get_order_payment_timeline",
     "methods": [
       "GET"
@@ -3522,6 +3648,13 @@
     "rule": "/api/v1/staff/operator/users/<int:user_id>/corporate-balance"
   },
   {
+    "endpoint": "staff.get_client_order_estimate",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/operator/users/<int:user_id>/order-estimate"
+  },
+  {
     "endpoint": "staff.get_client_payment_methods",
     "methods": [
       "GET"
@@ -3541,6 +3674,13 @@
       "PUT"
     ],
     "rule": "/api/v1/staff/orders/<int:order_id>/preparing"
+  },
+  {
+    "endpoint": "staff.get_staff_place_cod_statement",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/place-groups/<int:group_id>/cod-statement"
   },
   {
     "endpoint": "staff.get_reconciliation_session",

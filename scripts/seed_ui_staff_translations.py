@@ -6,6 +6,12 @@ keys added for the cash-reconciliation session-detail modal. English values here
 MUST match the inline t(key, 'fallback') strings in
 admin_ui/src/pages/DeliveryReports.js exactly.
 
+`scope` / `attribution` belong to the Phase-2c place-group work but live here,
+not in scripts/seed_place_group_ui_translations.py: DeliveryReports.js reads
+them through the `staff:` namespace (`t('staff:scope', …)`), which is served
+from category 'ui_staff' with BARE keys. Seeding them as dotted `ui.*` rows
+would leave both column headers permanently English.
+
 Run inside the business_app container (scripts/ is not mounted, so pipe it in):
     docker compose exec -T business_app python - < scripts/seed_ui_staff_translations.py
 """
@@ -23,6 +29,9 @@ UI_STAFF_TRANSLATIONS = {
         "fully_paid": "✓ Fully paid",
         "partially_paid": "◐ Partially paid",
         "reversed": "Reversed",
+        # Phase 2c: place/cluster money attribution in the session-detail modal.
+        "scope": "Scope",
+        "attribution": "Paid by → settles",
     },
     "uz": {
         "customer_phone": "Telefon",
@@ -31,6 +40,8 @@ UI_STAFF_TRANSLATIONS = {
         "fully_paid": "✓ To'liq to'langan",
         "partially_paid": "◐ Qisman to'langan",
         "reversed": "Bekor qilingan",
+        "scope": "Qamrov",
+        "attribution": "To'lovchi → yopiladi",
     },
     "ru": {
         "customer_phone": "Телефон",
@@ -39,6 +50,8 @@ UI_STAFF_TRANSLATIONS = {
         "fully_paid": "✓ Полностью оплачено",
         "partially_paid": "◐ Частично оплачено",
         "reversed": "Отменено",
+        "scope": "Область",
+        "attribution": "Платит → погашает",
     },
 }
 

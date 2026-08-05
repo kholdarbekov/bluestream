@@ -76,7 +76,9 @@ def test_per_address_bottle_balance(app, db):
         u = _customer("bottles@ex.com", "+998900000005")
         a = _addr(u.id, 41.31, 69.28)
         _order(u.id, OrderStatus.DELIVERED)
-        db.session.add(BottleBalance(user_id=u.id, address_id=a.id, balance=Decimal("4")))
+        # Ungrouped address => the place IS the address, so the balance row is
+        # address-keyed and the pin reads it via the query's `solo_balance` arm.
+        db.session.add(BottleBalance(address_id=a.id, balance=Decimal("4")))
         db.session.commit()
 
         pin = next(p for p in CustomerMapService.get_customer_map_pins() if p["user_id"] == u.id)

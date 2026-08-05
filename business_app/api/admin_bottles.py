@@ -20,6 +20,7 @@ from business_app.serializers.bottle_serializers import (
 )
 from business_app.services.bottle_tracking_service import BottleTrackingService
 from business_app.utils.api_responses import success_response, validation_error_response
+from business_app.utils.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from business_app.utils.decorators import validate_admin_action
 from business_app.utils.error_handlers import handle_api_exception
 
@@ -32,6 +33,36 @@ def _validated_payload(schema_cls):
         return schema_cls(**payload).model_dump(exclude_none=True)
     except PydanticValidationError as exc:
         return validation_error_response(exc.errors())
+
+
+def _pagination_args() -> dict:
+    """`page` / `per_page` from the query string, CLAMPED — the ONE place every
+    paginated bottle route gets them.
+
+    Unclamped, these went straight into `.offset((page - 1) * per_page)
+    .limit(per_page)`:
+
+    * `?page=0` produced `OFFSET -20`, which real Postgres refuses ("OFFSET must
+      not be negative") — a stale pagination state in the admin panel became a
+      500 on all seven routes. SQLite silently clamps a negative OFFSET, which
+      is why the SQLite half of the suite is structurally blind to it.
+    * `?per_page=100000` was honoured verbatim and pulled the entire
+      `bottle_ledger` table into one response, well above the project's
+      documented pagination cap (`MAX_PAGE_SIZE`) — the same unbounded-ledger-
+      read hazard `MERGE_PREVIEW_MAX_ENTRIES` already fences elsewhere.
+
+    Clamped, not rejected: an out-of-range page is a navigation mistake, and the
+    routes' existing behaviour for a page past the end is an empty item list
+    with the real `total`/`pages`, which stays true here.
+    """
+    # `type=int` returns the default on a conversion failure, so `?page=abc`
+    # still falls back to page 1 exactly as it did before.
+    page = request.args.get("page", 1, type=int)
+    per_page = request.args.get("per_page", DEFAULT_PAGE_SIZE, type=int)
+    return {
+        "page": max(1, page if page is not None else 1),
+        "per_page": max(1, min(per_page if per_page is not None else DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE)),
+    }
 
 
 # ------------------------------------------------------------------
@@ -63,8 +94,7 @@ def list_bottle_balances():
     """Get paginated list of all bottle balances."""
     service = BottleTrackingService()
     result = service.get_all_balances(
-        page=request.args.get("page", 1, type=int),
-        per_page=request.args.get("per_page", 20, type=int),
+        **_pagination_args(),
         min_balance=request.args.get("min_balance", type=float),
         user_id=request.args.get("user_id", type=int),
         search=request.args.get("search"),
@@ -104,8 +134,7 @@ def list_bottle_ledger():
     """Get paginated ledger entries with optional filters."""
     service = BottleTrackingService()
     result = service.get_all_ledger_entries(
-        page=request.args.get("page", 1, type=int),
-        per_page=request.args.get("per_page", 20, type=int),
+        **_pagination_args(),
         user_id=request.args.get("user_id", type=int),
         address_id=request.args.get("address_id", type=int),
         event_type=request.args.get("event_type"),
@@ -114,19 +143,33 @@ def list_bottle_ledger():
     return success_response(data=result)
 
 
-@admin_bottles_bp.route("/bottles/ledger/<int:user_id>/<int:address_id>", methods=["GET"])
+@admin_bottles_bp.route("/bottles/ledger/<int:address_id>", methods=["GET"])
 @handle_api_exception
 @jwt_required()
 @validate_admin_action(["view_orders", "manage_orders"])
-def get_bottle_ledger(user_id, address_id):
-    """Get paginated ledger for a specific user+address."""
+def get_bottle_ledger(address_id):
+    """Get the paginated ledger for the place this address belongs to."""
     service = BottleTrackingService()
-    result = service.get_address_ledger(
-        user_id=user_id,
+    result = service.get_place_ledger(
         address_id=address_id,
-        page=request.args.get("page", 1, type=int),
-        per_page=request.args.get("per_page", 20, type=int),
+        **_pagination_args(),
     )
+    result["items"] = [serialize_bottle_ledger_entry(e) for e in result["items"]]
+    return success_response(data=result)
+
+
+@admin_bottles_bp.route("/bottles/ledger/cluster/<int:user_id>", methods=["GET"])
+@handle_api_exception
+@jwt_required()
+@validate_admin_action(["view_orders", "manage_orders"])
+def get_cluster_bottle_ledger(user_id):
+    """Get paginated ledger across all of a customer's linked cluster members."""
+    service = BottleTrackingService()
+    result = service.get_cluster_ledger(
+        user_id=user_id,
+        **_pagination_args(),
+    )
+    result["items"] = [serialize_bottle_ledger_entry(e) for e in result["items"]]
     return success_response(data=result)
 
 
@@ -147,12 +190,20 @@ def create_bottle_adjustment():
 
     current_user_id = get_jwt_identity()
     service = BottleTrackingService()
+    # `user_id` is optional: the admin adjusts a place, not a member. Absent, the
+    # service derives the audit attribution from the place's representative
+    # address; present, it is still honoured and still scope-checked.
+    #
+    # `notes` is STRIPPED here, exactly as every place-group route strips its
+    # `reason`: the service's `if not notes` fence only rejected a FALSY value,
+    # so "   " passed as the justification for an unbounded balance write. A
+    # whitespace-only note is not a note.
     entry = service.admin_adjust_balance(
-        user_id=data["user_id"],
+        user_id=data.get("user_id"),
         address_id=data["address_id"],
         adjustment=data["adjustment"],
         actor_user_id=current_user_id,
-        notes=data["notes"],
+        notes=data["notes"].strip(),
     )
     return success_response(data=entry.to_dict(), message="Balance adjusted successfully")
 
@@ -170,7 +221,7 @@ def set_bottle_initial_balance():
     current_user_id = get_jwt_identity()
     service = BottleTrackingService()
     entry = service.set_initial_balance(
-        user_id=data["user_id"],
+        user_id=data.get("user_id"),
         address_id=data["address_id"],
         quantity=data["quantity"],
         actor_user_id=current_user_id,
@@ -192,8 +243,7 @@ def list_bottle_fines():
     """Get paginated list of bottle fines."""
     service = BottleTrackingService()
     result = service.get_all_fines(
-        page=request.args.get("page", 1, type=int),
-        per_page=request.args.get("per_page", 20, type=int),
+        **_pagination_args(),
         status=request.args.get("status"),
         user_id=request.args.get("user_id", type=int),
     )
@@ -213,17 +263,12 @@ def create_bottle_fine():
     current_user_id = get_jwt_identity()
     service = BottleTrackingService()
 
-    bottle_balance_id = data.get("bottle_balance_id")
-    if not bottle_balance_id:
-        address_id = data.get("address_id")
-        if not address_id:
-            return validation_error_response("Either bottle_balance_id or address_id is required")
-        balance = service.get_balance(data["user_id"], address_id)
-        bottle_balance_id = balance.id
-
+    address_id = data.get("address_id")
+    if not address_id:
+        return validation_error_response("address_id is required")
     fine = service.issue_fine(
-        user_id=data["user_id"],
-        bottle_balance_id=bottle_balance_id,
+        user_id=data.get("user_id"),
+        address_id=address_id,
         quantity=data["quantity"],
         fine_amount=data["fine_amount"],
         actor_user_id=current_user_id,
@@ -258,14 +303,14 @@ def update_bottle_fine(fine_id):
 # ------------------------------------------------------------------
 
 
-@admin_bottles_bp.route("/bottles/reconcile/<int:user_id>/<int:address_id>", methods=["POST"])
+@admin_bottles_bp.route("/bottles/reconcile/<int:address_id>", methods=["POST"])
 @handle_api_exception
 @jwt_required()
 @validate_admin_action(["manage_orders"])
-def reconcile_bottle_balance(user_id, address_id):
-    """Recalculate a balance from ledger entries and fix discrepancy."""
+def reconcile_bottle_balance(address_id):
+    """Recalculate a place's balance from its ledger and fix any discrepancy."""
     service = BottleTrackingService()
-    result = service.reconcile_balance(user_id, address_id)
+    result = service.reconcile_balance(address_id)
     return success_response(data=result)
 
 
@@ -286,8 +331,7 @@ def list_bottle_sessions():
     end_date = request.args.get("end_date")
 
     result = service.get_all_sessions(
-        page=request.args.get("page", 1, type=int),
-        per_page=request.args.get("per_page", 20, type=int),
+        **_pagination_args(),
         driver_user_id=request.args.get("driver_user_id", type=int),
         status=request.args.get("status"),
         only_discrepancies=request.args.get("only_discrepancies", "false").lower() == "true",
@@ -359,8 +403,7 @@ def list_bottle_transfers():
     """Get paginated bottle transfers (filter by status, driver)."""
     service = BottleTrackingService()
     result = service.get_all_transfers(
-        page=request.args.get("page", 1, type=int),
-        per_page=request.args.get("per_page", 20, type=int),
+        **_pagination_args(),
         status=request.args.get("status"),
         driver_user_id=request.args.get("driver_user_id", type=int),
     )

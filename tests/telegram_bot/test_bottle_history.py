@@ -6,6 +6,27 @@ Rendering reworked per live-testing feedback:
 - one line per order (delivery + return_on_delivery grouped by order_id)
 - non-order rows: ``{label} ({date}): {qty}``
 - single 📜 title (emoji comes from the seeded string, not a hardcoded prefix)
+
+The balances endpoint serves the place-aware OVERVIEW dict
+(``{is_linked, balances: [...]}``) instead of a bare list, with one row per
+distinct PLACE — the address group when grouped, else the address. A row's
+number is ``place_balance``; there is deliberately NO ``balance``, no
+``place_union_balance`` and no server-side ``cluster_total_balance`` (a shared
+place's pool has no per-member slice, so summing it per member would count the
+same bottles once per coworker — the bot sums ``place_balance`` across the
+already-deduped rows itself). ``place_members`` rows carry NAMES ONLY.
+
+The history endpoint serves the PLACE ledger for grouped addresses (404 instead
+of an empty 200 for a foreign address) — see
+``tests/unit/test_customer_bot_bottles_place.py`` for the pure-formatter tests.
+
+Every balance fixture below is built by ``overview_balance_row`` /
+``overview_payload`` in ``tests/telegram_bot/helpers.py`` — the ONE fabrication
+point for this payload, shared with the pure-formatter module and pinned against
+the real service by
+``test_fabricated_overview_matches_the_real_customer_overview``. A literal row
+written inline here is invisible to that guard, which is precisely how this file
+stayed green while the live screen showed 0 for every customer.
 """
 
 from unittest.mock import AsyncMock
@@ -14,7 +35,14 @@ import pytest
 
 from api_client import APIResponse
 from handlers import bottles as bottles_module
-from tests.telegram_bot.helpers import DummyCallbackQuery, DummyUpdate, make_context
+from tests.telegram_bot.helpers import (
+    DummyCallbackQuery,
+    DummyUpdate,
+    make_context,
+    overview_balance_row as _balance_row,
+    overview_payload,
+    overview_place_member,
+)
 
 
 # All eight BottleLedgerEventType values (shared/enums.py:230-239).
@@ -60,10 +88,24 @@ def _patch_common(monkeypatch, labels=None):
     monkeypatch.setattr(bottles_module.i18n, "get_user_language", AsyncMock(return_value="en"))
     # Echo the key verbatim so tests assert exact i18n keys / event labels, unless
     # `labels` maps a key to a human string (used to assert human-facing formatting).
+    # Keys called WITH kwargs also echo the interpolated values: the real
+    # `i18n.get` returns a humanised last key segment on a miss and then silently
+    # DROPS every kwarg (telegram_bot/i18n.py:80-93), which would hide member
+    # names and balances from these assertions in an unseeded test process.
     mapping = labels or {}
-    monkeypatch.setattr(
-        bottles_module.i18n, "get", lambda key, language, *a, **k: mapping.get(key, key)
-    )
+
+    def _get(key, language=None, *args, **kwargs):
+        if key in mapping:
+            template = mapping[key]
+            if not args and not kwargs:
+                return template
+            try:
+                return template.format(*args, **kwargs)
+            except (KeyError, IndexError, ValueError):
+                return template
+        return " ".join([key] + [str(v) for v in kwargs.values()])
+
+    monkeypatch.setattr(bottles_module.i18n, "get", _get)
 
 
 def _callback_datas(markup):
@@ -91,33 +133,41 @@ async def _run_history(monkeypatch, ledger, *, data="bottle_history_5_1", labels
     return update.callback_query
 
 
+def _balances_response(rows, *, is_linked=False):
+    """The overview envelope, wrapped in the API envelope the bot unwraps.
+
+    ``_balance_row`` / ``overview_payload`` live in ``tests/telegram_bot/helpers``
+    so this module and ``tests/unit/test_customer_bot_bottles_place.py`` share ONE
+    fabrication point, which
+    ``test_fabricated_overview_matches_the_real_customer_overview`` pins against
+    the real ``get_customer_bottle_overview`` payload. Do not inline a literal
+    row here — the guard cannot see it.
+    """
+    return APIResponse(success=True, data={"data": overview_payload(rows, is_linked=is_linked)})
+
+
+async def _run_balances(monkeypatch, balances, *, labels=None):
+    _patch_common(monkeypatch, labels=labels)
+    monkeypatch.setattr(bottles_module, "api_client", _FakeBottleClient(balances=balances))
+    handler = bottles_module.BottleBalanceHandler()
+    update = DummyUpdate()
+    update.callback_query = DummyCallbackQuery(data="my_bottles")
+    await handler.show_bottle_balance(update, make_context())
+    return update.callback_query
+
+
 # --------------------------------------------------------------------------- #
-# Balance screen (unchanged behavior)
+# Balance screen — solo customer (unlinked + ungrouped baseline)
 # --------------------------------------------------------------------------- #
 @pytest.mark.unit
 @pytest.mark.anyio
 async def test_zero_balance_address_listed_with_history_button(monkeypatch):
-    _patch_common(monkeypatch)
-    monkeypatch.setattr(
-        bottles_module,
-        "api_client",
-        _FakeBottleClient(
-            balances=APIResponse(
-                success=True,
-                data={"data": [
-                    {"address_id": 5, "address_title": "Home", "balance": 0},
-                    {"address_id": 6, "address_title": "Work", "balance": 3},
-                ]},
-            )
-        ),
-    )
-    handler = bottles_module.BottleBalanceHandler()
-    update = DummyUpdate()
-    update.callback_query = DummyCallbackQuery(data="my_bottles")
+    query = await _run_balances(monkeypatch, _balances_response([
+        _balance_row(5, "Home", 0),
+        _balance_row(6, "Work", 3),
+    ]))
 
-    await handler.show_bottle_balance(update, make_context())
-
-    kwargs = _last_edit_kwargs(update.callback_query)
+    kwargs = _last_edit_kwargs(query)
     datas = _callback_datas(kwargs["reply_markup"])
     assert "bottle_history_5_1" in datas
     assert "bottle_history_6_1" in datas
@@ -127,20 +177,43 @@ async def test_zero_balance_address_listed_with_history_button(monkeypatch):
 
 @pytest.mark.unit
 @pytest.mark.anyio
+async def test_solo_customer_screen_has_no_place_or_cluster_lines(monkeypatch):
+    """Global regression baseline: an unlinked + ungrouped customer sees exactly
+    what they saw before linking — one plain line per address, nothing else."""
+    query = await _run_balances(monkeypatch, _balances_response([
+        _balance_row(5, "Home", 4),
+    ]))
+    kwargs = _last_edit_kwargs(query)
+    text = kwargs["text"]
+
+    assert "• Home: <b>4</b>" in text
+    for key in ("place_total", "member_line", "cluster_total", "linked_account_line"):
+        assert f"telegram.bottles.{key}" not in text
+    # Exactly one History button (own address) + Back.
+    assert _callback_datas(kwargs["reply_markup"]) == ["bottle_history_5_1", "back_to_main"]
+    assert "Alice Member" not in text
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
 async def test_empty_bottles_shows_empty_state(monkeypatch):
-    _patch_common(monkeypatch)
-    monkeypatch.setattr(
-        bottles_module,
-        "api_client",
-        _FakeBottleClient(balances=APIResponse(success=True, data={"data": []})),
+    query = await _run_balances(monkeypatch, _balances_response([]))
+
+    kwargs = _last_edit_kwargs(query)
+    assert "telegram.bottles.no_balance" in kwargs["text"]
+    assert _callback_datas(kwargs["reply_markup"]) == ["back_to_main"]
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_non_dict_balances_payload_falls_back_to_empty_state(monkeypatch):
+    """Defensive: a stale bot talking to a pre-Task-5 backend (bare list) must
+    show the empty state, not crash the whole My-bottles screen."""
+    query = await _run_balances(
+        monkeypatch,
+        APIResponse(success=True, data={"data": [{"address_id": 5, "balance": 2}]}),
     )
-    handler = bottles_module.BottleBalanceHandler()
-    update = DummyUpdate()
-    update.callback_query = DummyCallbackQuery(data="my_bottles")
-
-    await handler.show_bottle_balance(update, make_context())
-
-    kwargs = _last_edit_kwargs(update.callback_query)
+    kwargs = _last_edit_kwargs(query)
     assert "telegram.bottles.no_balance" in kwargs["text"]
     assert _callback_datas(kwargs["reply_markup"]) == ["back_to_main"]
 
@@ -150,29 +223,107 @@ async def test_empty_bottles_shows_empty_state(monkeypatch):
 async def test_balance_screen_html_escapes_address_title(monkeypatch):
     # The balance screen is sent with parse_mode='HTML'; an unescaped title
     # containing '<' or '&' would make Telegram reject the whole message.
-    _patch_common(monkeypatch)
-    monkeypatch.setattr(
-        bottles_module,
-        "api_client",
-        _FakeBottleClient(
-            balances=APIResponse(
-                success=True,
-                data={"data": [
-                    {"address_id": 5, "address_title": "Home <3 & Co", "balance": 2},
-                ]},
-            )
-        ),
-    )
-    handler = bottles_module.BottleBalanceHandler()
-    update = DummyUpdate()
-    update.callback_query = DummyCallbackQuery(data="my_bottles")
+    query = await _run_balances(monkeypatch, _balances_response([
+        _balance_row(5, "Home <3 & Co", 2),
+    ]))
 
-    await handler.show_bottle_balance(update, make_context())
-
-    text = _last_edit_kwargs(update.callback_query)["text"]
+    text = _last_edit_kwargs(query)["text"]
     assert "Home &lt;3 &amp; Co" in text
     # The raw, unescaped title must NOT leak into the HTML-parsed message body.
     assert "Home <3 & Co" not in text
+
+
+# --------------------------------------------------------------------------- #
+# Balance screen — grouped / linked customer
+# --------------------------------------------------------------------------- #
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_grouped_linked_customer_sees_place_total_named_members_and_cluster(monkeypatch):
+    """The full linked screen: the grouped place's total + its named member list,
+    the sibling account's place listed and labelled, and a cluster total.
+
+    Every assertion is line-exact rather than substring, because the pre-re-key
+    renderings ("• Office: <b>2</b>", "member_line Alice Member 2",
+    "cluster_total 0") are substrings of, or otherwise confusable with, the
+    correct output — a loose `in` here is what let this file stay green while the
+    live screen showed 0 for every customer."""
+    query = await _run_balances(
+        monkeypatch,
+        _balances_response(
+            [
+                _balance_row(
+                    5, "Office", 5,
+                    is_grouped=True, place_group_id=7,
+                    place_members=[
+                        overview_place_member("Alice Member", is_own=True),
+                        overview_place_member("Bob Coworker"),
+                    ],
+                ),
+                _balance_row(
+                    9, "Home", 4,
+                    is_own=False, owner_user_id=12, owner_name="AliceTwo Member",
+                ),
+            ],
+            is_linked=True,
+        ),
+    )
+
+    kwargs = _last_edit_kwargs(query)
+    text = kwargs["text"]
+    lines = text.splitlines()
+
+    # D6: a grouped place prints its number ONCE, on the place_total line — the
+    # row above it carries the label alone.
+    assert "• Office" in lines
+    assert not any(line.startswith("• Office:") for line in lines)
+    assert [line.strip() for line in lines if "telegram.bottles.place_total" in line] == [
+        "telegram.bottles.place_total 5"
+    ]
+
+    # Member breakdown is NAMES ONLY — no per-member number exists any more.
+    assert [line.strip() for line in lines if "telegram.bottles.member_line" in line] == [
+        "telegram.bottles.member_line Alice Member",
+        "telegram.bottles.member_line Bob Coworker",
+    ]
+
+    # The sibling account's place is listed, attributed to its owner, and — being
+    # ungrouped — keeps its own number on the row line.
+    assert (
+        "• telegram.bottles.linked_account_line Home AliceTwo Member: <b>4</b>" in lines
+    )
+
+    # Cluster footer = client-side sum of place_balance across the deduped rows.
+    assert [line for line in lines if "telegram.bottles.cluster_total" in line] == [
+        "telegram.bottles.cluster_total 9"
+    ]
+
+    # Both places are browsable; the sibling's button is disambiguated.
+    datas = _callback_datas(kwargs["reply_markup"])
+    assert datas == ["bottle_history_5_1", "bottle_history_9_1", "back_to_main"]
+    labels = [
+        btn.text for row in kwargs["reply_markup"].inline_keyboard for btn in row
+    ]
+    assert any("AliceTwo Member" in label for label in labels)
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_grouped_screen_escapes_member_and_owner_names(monkeypatch):
+    query = await _run_balances(
+        monkeypatch,
+        _balances_response(
+            [_balance_row(
+                5, "Office", 1,
+                is_own=False, owner_name="Bob <b>",
+                is_grouped=True, place_group_id=7,
+                place_members=[overview_place_member("Eve <i>")],
+            )],
+            is_linked=True,
+        ),
+    )
+    text = _last_edit_kwargs(query)["text"]
+    assert "Bob &lt;b&gt;" in text and "Bob <b>" not in text
+    assert "Eve &lt;i&gt;" in text and "Eve <i>" not in text
 
 
 # --------------------------------------------------------------------------- #
@@ -479,3 +630,54 @@ async def test_history_empty_state(monkeypatch):
     assert "telegram.bottles.history_empty" in kwargs["text"]
     # No pagination when empty — Back only.
     assert _callback_datas(kwargs["reply_markup"]) == ["my_bottles"]
+
+
+# --------------------------------------------------------------------------- #
+# Place ledger: member attribution + the new 404 contract
+# --------------------------------------------------------------------------- #
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_history_attributes_other_members_rows_only(monkeypatch):
+    """A grouped address's page mixes members: foreign rows carry the acting
+    member's name, the viewer's own rows stay unprefixed."""
+    items = [
+        {"event_type": "standalone_collection", "quantity": 2, "order_id": None,
+         "order_number": None, "occurred_at": "2026-07-20T10:00:00+00:00",
+         "member_name": "Bob Coworker", "is_own": False},
+        {"event_type": "standalone_collection", "quantity": 1, "order_id": None,
+         "order_number": None, "occurred_at": "2026-07-19T10:00:00+00:00",
+         "member_name": "Alice Member", "is_own": True},
+    ]
+    query = await _run_history(monkeypatch, _ledger_response(items, total=2, page=1))
+    lines = _last_edit_kwargs(query)["text"].splitlines()
+    foreign = next(line for line in lines if line.endswith("(20.07.2026): 2"))
+    own = next(line for line in lines if line.endswith("(19.07.2026): 1"))
+    assert foreign.startswith("Bob Coworker — ")
+    assert "Alice Member" not in own
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_history_404_for_a_no_longer_visible_address_is_handled(monkeypatch):
+    """The endpoint now 404s (instead of an empty 200) when the caller may not
+    see the address — e.g. a stale callback kept after an unlink/ungroup. The
+    screen must degrade to the load-error toast, never raise."""
+    _patch_common(monkeypatch)
+    monkeypatch.setattr(
+        bottles_module,
+        "api_client",
+        _FakeBottleClient(
+            ledger=APIResponse(success=False, error="Not found", status_code=404)
+        ),
+    )
+    handler = bottles_module.BottleBalanceHandler()
+    update = DummyUpdate()
+    update.callback_query = DummyCallbackQuery(data="bottle_history_5_1")
+
+    await handler.show_bottle_history(update, make_context())
+
+    # No message is rendered from a failed response...
+    update.callback_query.edit_message_text.assert_not_called()
+    # ...the user gets the localized load-error instead.
+    answers = [c.args[0] for c in update.callback_query.answer.call_args_list if c.args]
+    assert any("telegram.bottles.load_error" in a for a in answers)

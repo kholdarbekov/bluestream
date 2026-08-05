@@ -194,3 +194,36 @@ def test_dispatch_does_not_raise_when_bot_webhook_unconfigured(db):
     assert result["success"] is False
     assert result["reason"] == "bot_webhook_unconfigured"
     fake_redis.delete.assert_called_once_with("notif:bottle_summary:102")
+
+
+@pytest.mark.integration
+def test_the_fabricated_summary_matches_the_real_order_bottle_summary(db, sample_user, user_address):
+    """Anti-blind-spot pin for `_summary()`.
+
+    Every test above patches `get_order_bottle_summary` with a fabricated dict,
+    so none of them can notice the real one changing shape — the same blind spot
+    that let the customer bot and the driver statement ship broken. The keys did
+    NOT move in the place re-key (only the MEANING of `balance` did: it is the
+    whole place's pool now), which is precisely why the pin has to exist before
+    the next change rather than after it.
+    """
+    from business_app.models.order import Order
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+    from shared.enums import OrderStatus
+
+    order = Order(
+        user_id=sample_user.id,
+        status=OrderStatus.DELIVERED,
+        total_amount=Decimal("50000.00"),
+        delivery_address_id=user_address.id,
+    )
+    db.session.add(order)
+    db.session.flush()
+
+    real = BottleTrackingService.get_order_bottle_summary(order)
+
+    assert set(_summary()) <= set(real)
+    # The webhook renders these; a str/Decimal flip would reach the customer.
+    for key in ("expected_bottles", "bottles_delivered", "bottles_collected", "balance"):
+        assert isinstance(real[key], Decimal), key
+    assert isinstance(real["delivery_recorded"], bool)

@@ -84,6 +84,39 @@ def is_unsettled_electronic(payload: Dict[str, Any]) -> bool:
     return method in _ELECTRONIC_METHODS and status not in _SETTLED_PAYMENT_STATUSES
 
 
+def format_place_cod_lines(payload: Dict[str, Any], language: str) -> list:
+    """Place-group COD block for a delivery payload (spec 8), or [].
+
+    A "place" is a grouped delivery address — one physical workplace reached
+    from several phone numbers. When this order ships to one, the driver must
+    see the WHOLE place's open COD total, not just this customer's slice, so
+    they know what is collectable at the door. SSOT shared by the order card
+    and the at-door cash prompt (``status_update``).
+
+    Returns an empty list for ungrouped addresses (``is_place_grouped`` false /
+    absent) and for grouped places with nothing outstanding, so an ungrouped
+    customer's card is byte-identical to today's.
+    """
+    if not payload.get('is_place_grouped'):
+        return []
+    try:
+        place_total = float(payload.get('place_outstanding_cod_total') or 0)
+    except (TypeError, ValueError):
+        return []
+    if place_total <= 0:
+        return []
+
+    label = payload.get('place_group_label') or ''
+    line = (
+        f"🏢 {i18n.get('staff.delivery.place_cod_total', language)}: "
+        f"{format_currency(place_total, language=language)}"
+        f" ({payload.get('place_active_cod_debt_count') or 0})"
+    )
+    if label:
+        line += f" — {escape_html(label)}"
+    return [line]
+
+
 def format_order_card(order: Dict[str, Any], language: str) -> str:
     """
     Format order details as a compact card for Telegram message.
@@ -135,6 +168,7 @@ def format_order_card(order: Dict[str, Any], language: str) -> str:
             f"💵 {i18n.get('staff.delivery.cash_to_collect_now', language)}: "
             f"{format_currency(cod_projection['expected_cash_to_collect'], language=language)}"
         )
+        lines.extend(format_place_cod_lines(order, language))
         payment_status = str(order.get('payment_status') or '').lower()
         if payment_status == 'completed' or cod_projection['expected_cash_to_collect'] <= 0:
             lines.append(f"✅ {i18n.get('staff.delivery.cash_already_collected', language)}")

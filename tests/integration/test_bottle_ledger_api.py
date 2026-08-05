@@ -1,7 +1,13 @@
 """Customer bottle ledger endpoint: GET /api/v1/orders/bottles/my-ledger/<address_id>.
 
 Guards the additive ``order_number`` field, caller-scoping, auth, and the
-eager-load N+1 fix in ``BottleTrackingService.get_address_ledger``.
+eager-load N+1 fix in ``BottleTrackingService.get_place_ledger``.
+
+Since plan 2c Task 5 the endpoint serves the PLACE ledger behind
+``CustomerLinkService.can_view_address_history``; a caller with no claim on
+the address gets 404 rather than the old silent-empty-200. The place-group /
+cluster arms of that gate are covered in
+``tests/integration/test_customer_bottle_endpoints_place.py``.
 """
 
 from decimal import Decimal
@@ -95,13 +101,14 @@ def test_my_ledger_scoped_to_caller(app, db):
     bob_order = _order(db, bob, bob_addr, "ORD-BOB-1")
     _ledger_row(db, bob, bob_addr, BottleLedgerEventType.DELIVERY, "3", "3", order=bob_order)
 
-    # Alice probes Bob's address id — the (user_id, address_id) filter must
-    # return nothing rather than leak Bob's ledger.
+    # Alice probes Bob's address id. Bob's address is ungrouped and Bob is not
+    # in Alice's cluster, so the gate denies and the endpoint 404s instead of
+    # leaking (or silently emptying) Bob's ledger.
     client = app.test_client()
     resp = client.get(f"/api/v1/orders/bottles/my-ledger/{bob_addr.id}", headers=_auth(alice))
 
-    assert resp.status_code == 200, resp.get_json()
-    assert resp.get_json()["data"]["items"] == []
+    assert resp.status_code == 404, resp.get_json()
+    assert "data" not in resp.get_json()
 
 
 @pytest.mark.integration
@@ -119,18 +126,20 @@ def test_my_ledger_no_n_plus_one_on_order_number(app, db, count_queries):
         order = _order(db, user, address, f"ORD-NP-{i}")
         _ledger_row(db, user, address, BottleLedgerEventType.DELIVERY, "4", "4", order=order)
 
-    user_id = user.id
     address_id = address.id
     # Detach every instance so the many-to-one ``order`` load cannot be served
     # from the identity map — a missing eager load then emits one SELECT per row.
     db.session.expunge_all()
 
     with count_queries() as counter:
-        result = BottleTrackingService.get_address_ledger(user_id, address_id, per_page=20)
+        # get_address_ledger(user_id, address_id) -> get_place_ledger(address_id):
+        # the ledger is keyed by PLACE now, so the owner argument is gone and the
+        # rows come back as ORM objects for the redacting serializer.
+        result = BottleTrackingService.get_place_ledger(address_id, per_page=20)
 
-    assert sorted(r["order_number"] for r in result["items"]) == [f"ORD-NP-{i}" for i in range(6)]
-    # Eager load => count() + one joined SELECT, independent of row count.
-    # Lazy load => 2 + 6 = 8 queries. Bound cleanly separates the two.
+    assert sorted(r.order.order_number for r in result["items"]) == [f"ORD-NP-{i}" for i in range(6)]
+    # Eager load => resolve_scope + count() + one joined SELECT, independent of
+    # row count. Lazy load => 3 + 6 = 9 queries. Bound cleanly separates the two.
     assert counter.count <= 4, "N+1 detected: {} queries\n{}".format(
         counter.count, "\n".join(counter.statements)
     )

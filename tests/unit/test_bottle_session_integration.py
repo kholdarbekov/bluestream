@@ -137,8 +137,9 @@ def test_standalone_collection_updates_session_tally(db, sample_user):
 
     # Pre-seed a positive balance so the collection doesn't go below zero
     from business_app.models.bottle import BottleBalance
+    # Ungrouped address => the place IS the address, so the row is address-keyed
+    # (bottle_balances has no user_id since the 2026-07-27 place re-key).
     balance = BottleBalance(
-        user_id=sample_user.id,
         address_id=address.id,
         balance=Decimal("5.00"),
     )
@@ -173,8 +174,9 @@ def test_standalone_collection_no_session_is_noop(db, sample_user):
     db.session.flush()
 
     from business_app.models.bottle import BottleBalance
+    # Ungrouped address => the place IS the address, so the row is address-keyed
+    # (bottle_balances has no user_id since the 2026-07-27 place re-key).
     balance = BottleBalance(
-        user_id=sample_user.id,
         address_id=address.id,
         balance=Decimal("5.00"),
     )

@@ -38,6 +38,12 @@ class Order(db.Model, TimestampMixin):
         Index("idx_orders_status_created", "status", "created_at"),
         Index("idx_orders_user_created", "user_id", "created_at"),
         Index("idx_orders_delivery_slot_date", "delivery_time_slot", "delivery_date"),
+        # Place (address-group) queries join orders on delivery_address_id and
+        # filter on status: ring-1 candidates inside the FOR UPDATE window, the
+        # COD cap check on every cash order creation, the place debtor list and
+        # correction replay. Without this the cap check seq-scans orders while
+        # holding a row lock. Created in migration f7c3b9e1d5a2.
+        Index("idx_orders_delivery_address_status", "delivery_address_id", "status"),
     )
 
     id = Column(Integer, primary_key=True)

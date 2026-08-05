@@ -77,12 +77,21 @@ async def test_show_order_confirmation_business_account_label(monkeypatch):
     context.user_data["selected_address_id"] = 5
     context.user_data["selected_payment_method"] = "business_account"
 
+    # `total_price` / `subtotal` are what `CartService.get_cart_details` serves
+    # and what the confirmation screen reads; a cart literal without them
+    # exercises a zero total. See
+    # tests/integration/test_checkout_total_is_server_authoritative.py.
     cart_data = {
         "data": {
             "cart": {
                 "cart_items": [
-                    {"product": {"name": "Bottle", "current_price": 12000}, "quantity": 1},
-                ]
+                    {
+                        "product": {"name": "Bottle", "current_price": 12000},
+                        "quantity": 1,
+                        "total_price": 12000,
+                    },
+                ],
+                "subtotal": 12000,
             }
         }
     }

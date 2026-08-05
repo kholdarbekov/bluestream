@@ -42,6 +42,11 @@ class BaseHandler:
         'STAFF_DELIVERY_PERSON_EXISTS': 'staff.error.api.conflict',
         'STAFF_EMPLOYEE_ID_EXISTS': 'staff.error.api.conflict',
         'STAFF_DELIVERY_ALREADY_TAKEN': 'staff.error.api.already_taken',
+        # The place-scope lock ladder timed out (Postgres 55P03) — an admin is
+        # regrouping this address right now. Transient and RETRYABLE, so it gets
+        # its own "try again in a moment" copy instead of the generic conflict
+        # text, which reads as a permanent refusal.
+        'BOTTLE_SCOPE_LOCK_TIMEOUT': 'staff.error.api.scope_busy',
         'STAFF_DRIVER_COD_BLOCKED': 'staff.error.api.driver_cod_blocked',
         'COD_DRIVER_BLOCKED': 'staff.error.api.driver_cod_blocked',
         'COD_DEBT_LIMIT_REACHED': 'staff.error.api.cod_debt_limit_reached',

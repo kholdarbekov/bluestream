@@ -14,13 +14,14 @@ from flask_jwt_extended.exceptions import (
     InvalidHeaderError,
     InvalidQueryParamError,
     JWTDecodeError,
+    JWTExtendedException,
     NoAuthorizationError,
     RevokedTokenError,
     UserClaimsVerificationError,
     UserLookupError,
     WrongTokenError,
 )
-from jwt.exceptions import DecodeError
+from jwt.exceptions import DecodeError, PyJWTError
 from datetime import datetime, timezone
 
 from .exceptions import (
@@ -244,6 +245,23 @@ def handle_api_exception(f):
                 g.trace_id = str(uuid.uuid4())
 
             return f(*args, **kwargs)
+
+        except (JWTExtendedException, PyJWTError):
+            # Authentication failures belong to flask-jwt-extended's own registered
+            # handlers (`setup_jwt_handlers`, business_app/__init__.py), which return
+            # a clean 401 and log routine expiry/absence at INFO.
+            #
+            # This clause MUST stay first. Decorators apply bottom-up, so the 84 routes
+            # that write `@handle_api_exception` ABOVE `@jwt_required()` have this
+            # wrapper OUTSIDE the JWT check: the blanket `except Exception` below used
+            # to swallow the JWT exception before Flask could route it to those
+            # handlers. `ExpiredSignatureError` is not in `EXCEPTION_MAPPING` (only
+            # PyJWT's `DecodeError` is), so every lapsed token on those routes mapped
+            # to 500 + a CRITICAL log — which also meant client-side refresh-on-401
+            # never fired. Re-raising here is the one-line, route-count-independent
+            # fix; it deliberately runs BEFORE the `verify_jwt_in_request(optional=True)`
+            # identity lookup below, which would be pointless on an auth failure.
+            raise
 
         except Exception as e:
             # Get user ID if available

@@ -3,9 +3,13 @@ Translation models for database-backed multi-language support
 This file should be placed in business_app/models/translation_models.py
 """
 
+import logging
+
 from datetime import datetime, UTC
 from sqlalchemy import Index
 from business_app import db
+
+logger = logging.getLogger(__name__)
 
 
 class Translation(db.Model):
@@ -103,6 +107,56 @@ class Translation(db.Model):
                     db.session.add(new_translation)
 
         db.session.commit()
+
+        # Every seed script writes through this one method, so this is the only
+        # place the Redis translation cache can be invalidated for a seed.
+        cls._invalidate_translation_cache(translations_data)
+
+    # Languages whose cache entry is dropped for every key a bulk write touches.
+    # Mirrors TranslationService.set_translation, which clears the other two as
+    # well so a key that changed cannot be served from a sibling's entry.
+    _CACHE_INVALIDATION_LANGUAGES = ("uz", "en", "ru")
+
+    @classmethod
+    def _invalidate_translation_cache(cls, translations_data: dict):
+        """Drop the cached value of every ``(key, language)`` a bulk write touched.
+
+        ``TranslationService.set_translation`` already clears Redis after it
+        commits; ``bulk_create_or_update`` did not, and EVERY seed script uses
+        this path. A key whose copy CHANGED therefore kept serving the pre-seed
+        value for up to the category TTL (3600s for ``api.*``/``telegram.*``,
+        86400s for ``ui.*``), and the documented deploy step
+        ``docker compose restart business_app`` does not clear Redis.
+
+        Deliberately best-effort and batched into a single ``DELETE``: a seed
+        must not fail because Redis is unreachable, and a per-key round trip
+        would add thousands of calls to a full re-seed.
+        """
+        try:
+            from business_app.utils.translations import translation_service
+
+            redis_client = translation_service._get_redis_client()
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(f"Translation cache invalidation unavailable: {exc}")
+            return
+
+        if not redis_client:
+            return
+
+        prefix = translation_service.cache_prefix
+        cache_keys = set()
+        for language, translations in (translations_data or {}).items():
+            for key in translations:
+                for lang in {language, *cls._CACHE_INVALIDATION_LANGUAGES}:
+                    cache_keys.add(f"{prefix}:{lang}:{key}")
+
+        if not cache_keys:
+            return
+
+        try:
+            redis_client.delete(*sorted(cache_keys))
+        except Exception as exc:
+            logger.warning(f"Failed to invalidate {len(cache_keys)} translation cache keys: {exc}")
 
     # Entity Translation Methods (for TranslatableContent functionality)
 

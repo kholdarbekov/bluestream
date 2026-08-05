@@ -20,6 +20,39 @@ def _i18n_get(key, language, *args, **kwargs):
     return f"{key}:{language}"
 
 
+def served_cart(*lines, **cart_extra):
+    """A ``GET /api/v1/cart`` payload shaped like ``CartService.get_cart_details``.
+
+    THE SINGLE FABRICATION POINT for cart payloads fed to the checkout screens.
+    The real service publishes an authoritative per-line ``total_price`` and an
+    authoritative cart-level ``subtotal`` — both composed by
+    ``CartService.get_cart_summary`` from the SAME contract-aware unit prices
+    order creation charges — and those are the two keys the confirmation screen
+    and the reward picker read.
+
+    A cart literal that omits them is a payload the backend never serves, and a
+    test built on one silently exercises a zero total. See
+    ``tests/integration/test_checkout_total_is_server_authoritative.py`` for the
+    parity pin over the REAL service.
+
+    ``lines`` are ``(product_dict, quantity)`` pairs.
+    """
+    items = [
+        {
+            "product": product,
+            "quantity": quantity,
+            "total_price": product["current_price"] * quantity,
+        }
+        for product, quantity in lines
+    ]
+    cart = {
+        "cart_items": items,
+        "subtotal": sum(item["total_price"] for item in items),
+    }
+    cart.update(cart_extra)
+    return {"data": {"cart": cart}}
+
+
 @pytest.mark.unit
 @pytest.mark.anyio
 class TestProductHandlerWave2:
@@ -166,15 +199,10 @@ class TestProductHandlerWave2:
             captured["args"] = (lang, cart_is_empty, meets_minimum)
             return "cart-kbd"
 
-        cart_payload = {
-            "data": {
-                "cart": {
-                    "cart_items": [
-                        {"product": {"name": "Bottle", "current_price": 5000}, "quantity": 2},
-                    ]
-                }
-            }
-        }
+        # `served_cart` publishes the server's `total_price`/`subtotal`, which is
+        # what the cart screen reads since the sweep-#7 fix. A literal without
+        # them exercises a zero total and would pass for the wrong reason.
+        cart_payload = served_cart(({"name": "Bottle", "current_price": 5000}, 2))
         monkeypatch.setattr(products_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(products_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(products_module, "get_auth_token", AsyncMock(return_value="jwt"))
@@ -192,20 +220,14 @@ class TestProductHandlerWave2:
         update.callback_query = DummyCallbackQuery(data="cart_view")
         context = make_context()
 
-        cart_payload = {
-            "data": {
-                "cart": {
-                    "cart_items": [
-                        {"product": {"name": "Bottle", "current_price": 25000}, "quantity": 1},
-                    ],
-                    "cod_prepayment": {
-                        "available_balance": 40000,
-                        "potential_applied_amount": 25000,
-                        "estimated_payable_after_prepayment": 0,
-                    },
-                }
-            }
-        }
+        cart_payload = served_cart(
+            ({"name": "Bottle", "current_price": 25000}, 1),
+            cod_prepayment={
+                "available_balance": 40000,
+                "potential_applied_amount": 25000,
+                "estimated_payable_after_prepayment": 0,
+            },
+        )
         monkeypatch.setattr(products_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(products_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(products_module, "get_auth_token", AsyncMock(return_value="jwt"))
@@ -429,15 +451,7 @@ class TestOrderHandlerWave2:
         context.user_data["selected_address_id"] = 5
         context.user_data["selected_payment_method"] = "card"
 
-        cart_data = {
-            "data": {
-                "cart": {
-                    "cart_items": [
-                        {"product": {"name": "Bottle", "current_price": 12000}, "quantity": 2},
-                    ]
-                }
-            }
-        }
+        cart_data = served_cart(({"name": "Bottle", "current_price": 12000}, 2))
         monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(eligibility, "is_loyalty_eligible", AsyncMock(return_value=True))
         monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)
@@ -452,6 +466,8 @@ class TestOrderHandlerWave2:
         assert "telegram.orders.confirmation_title:en" in text
         assert "telegram.orders.items_header:en" in text
         assert "telegram.orders.payment_info:en" in text
+        # The money on screen is the server's, both per line and in total.
+        assert "24,000" in text
         update.callback_query.answer.assert_awaited_once()
 
     async def test_show_order_confirmation_includes_cod_prepayment_summary(self, monkeypatch):
@@ -462,20 +478,14 @@ class TestOrderHandlerWave2:
         context.user_data["selected_address_id"] = 5
         context.user_data["selected_payment_method"] = "cash"
 
-        cart_data = {
-            "data": {
-                "cart": {
-                    "cart_items": [
-                        {"product": {"name": "Bottle", "current_price": 12000}, "quantity": 2},
-                    ],
-                    "cod_prepayment": {
-                        "available_balance": 40000,
-                        "potential_applied_amount": 24000,
-                        "estimated_payable_after_prepayment": 0,
-                    },
-                }
-            }
-        }
+        cart_data = served_cart(
+            ({"name": "Bottle", "current_price": 12000}, 2),
+            cod_prepayment={
+                "available_balance": 40000,
+                "potential_applied_amount": 24000,
+                "estimated_payable_after_prepayment": 0,
+            },
+        )
         monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(eligibility, "is_loyalty_eligible", AsyncMock(return_value=True))
         monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)
@@ -501,9 +511,8 @@ class TestOrderHandlerWave2:
         context.user_data["selected_payment_method"] = "card"
         context.user_data["selected_reward_id"] = 7
 
-        cart_data = {"data": {"cart": {"cart_items": [
-            {"product": {"name": "Bottle", "current_price": 12000}, "quantity": 2},  # subtotal 24000
-        ]}}}
+        # subtotal 24000, published by the server (see served_cart)
+        cart_data = served_cart(({"name": "Bottle", "current_price": 12000}, 2))
         rewards_data = {"data": {"rewards": [
             {"id": 7, "name": "10k Off", "reward_type": "discount",
              "discount_type": "fixed", "discount_value": 10000, "min_order_value": 0},
@@ -535,9 +544,8 @@ class TestOrderHandlerWave2:
         context.user_data["selected_payment_method"] = "card"
         context.user_data["selected_reward_id"] = 9
 
-        cart_data = {"data": {"cart": {"cart_items": [
-            {"product": {"name": "Bottle", "current_price": 12000}, "quantity": 2},
-        ]}}}
+        # subtotal 24000, published by the server (see served_cart)
+        cart_data = served_cart(({"name": "Bottle", "current_price": 12000}, 2))
         rewards_data = {"data": {"rewards": [
             {"id": 9, "name": "Free Bottle", "reward_type": "free_product",
              "free_product_id": 2, "free_product_quantity": 2, "min_order_value": 0},
@@ -591,9 +599,8 @@ class TestCheckoutRewardSelection:
         context = make_context()
         context.user_data["selected_address_id"] = 5
 
-        cart_data = {"data": {"cart": {"cart_items": [
-            {"product": {"name": "Bottle", "current_price": 12000}, "quantity": 2},  # subtotal 24000
-        ]}}}
+        # subtotal 24000, published by the server (see served_cart)
+        cart_data = served_cart(({"name": "Bottle", "current_price": 12000}, 2))
         rewards_data = {"data": {
             "user_points_balance": 0,
             "rewards": [
@@ -641,9 +648,8 @@ class TestCheckoutRewardSelection:
         context = make_context()
         context.user_data["selected_address_id"] = 5
 
-        cart_data = {"data": {"cart": {"cart_items": [
-            {"product": {"name": "Bottle", "current_price": 12000}, "quantity": 2},  # subtotal 24000
-        ]}}}
+        # subtotal 24000, published by the server (see served_cart)
+        cart_data = served_cart(({"name": "Bottle", "current_price": 12000}, 2))
         rewards_data = {"data": {
             "user_points_balance": 500,
             "rewards": [

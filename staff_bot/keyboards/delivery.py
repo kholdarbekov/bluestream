@@ -1,13 +1,14 @@
 """
 Delivery-related keyboards for Staff Bot
 """
+from decimal import Decimal, InvalidOperation
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 from staff_bot.i18n import i18n
 from shared.staff_constants import DELIVERY_STATUS_TRANSITIONS, FAILED_DELIVERY_REASONS
 from staff_bot.keyboards.common import CommonKeyboards
-from staff_bot.utils.formatters import format_currency
+from staff_bot.utils.formatters import format_currency, format_quantity
 
 
 class DeliveryKeyboards:
@@ -177,6 +178,63 @@ class DeliveryKeyboards:
             )],
         ])
 
+    # ------------------------------------------------------------------
+    # Driver cash handoff — ONE DECISION. Do not split this in two.
+    # ------------------------------------------------------------------
+    HANDOFF_ALL_CALLBACK = "staff_reconcile_submit_all"
+
+    @staticmethod
+    def freeze_handoff_amount(remaining_amount) -> Optional[Decimal]:
+        """Freeze the server's ``remaining_cash_to_submit`` at money precision.
+
+        Returns ``None`` when there is nothing to hand off. That is not a
+        formatting detail: a handoff button that names no amount has nothing to
+        record, and the only way for the tap to acquire an amount would be to
+        let the server re-derive one from live data at tap time — which is the
+        defect this whole surface exists to prevent.
+        """
+        if remaining_amount is None:
+            return None
+        try:
+            amount = Decimal(str(remaining_amount)).quantize(Decimal("0.01"))
+        except (InvalidOperation, TypeError, ValueError):
+            return None
+        return amount if amount > Decimal("0.00") else None
+
+    @staticmethod
+    def format_handoff_amount(amount: Decimal) -> str:
+        """Render the frozen figure WITHOUT rounding any of it away.
+
+        Whole amounts keep today's ``120,000`` look; a fractional remainder is
+        shown in full rather than silently dropped, because this string is the
+        number the driver agrees to hand over and the number that is recorded.
+        """
+        if amount == amount.to_integral_value():
+            return f"{amount:,.0f}"
+        return f"{amount:,.2f}"
+
+    @staticmethod
+    def parse_handoff_callback(data) -> Optional[Decimal]:
+        """Read back the figure the tapped handoff button displayed.
+
+        The inverse of the callback minted in :meth:`reconciliation_actions`.
+        Returns ``None`` for a button that carries no amount (one rendered
+        before this became a frozen figure, or a malformed payload) — the
+        caller must then refuse to write rather than let the amount be
+        invented downstream.
+        """
+        if not data:
+            return None
+        prefix = f"{DeliveryKeyboards.HANDOFF_ALL_CALLBACK}:"
+        text = str(data)
+        if not text.startswith(prefix):
+            return None
+        try:
+            amount = Decimal(text[len(prefix):]).quantize(Decimal("0.01"))
+        except (InvalidOperation, ValueError):
+            return None
+        return amount if amount > Decimal("0.00") else None
+
     @staticmethod
     def reconciliation_actions(
         language: str,
@@ -185,25 +243,36 @@ class DeliveryKeyboards:
     ) -> InlineKeyboardMarkup:
         """Actions for the driver's reconciliation session view.
 
-        When ``remaining_amount`` is provided (i.e. the session is PARTIAL with
-        a known unpaid balance), the primary button reads "Submit remaining
-        {amount}" instead of "Submit expected cash" so the driver sees how much
-        is left to hand off.
+        ONE DECISION — the handoff button's label and its callback payload are
+        minted from a SINGLE frozen value, the ``remaining_cash_to_submit`` of
+        the very session payload this screen was drawn from. The amount the
+        driver reads and the amount the tap posts are the same object; they
+        cannot drift apart on a later edit because there is only one of them.
+
+        Do NOT restore an amount-less ``staff_reconcile_submit_all`` callback.
+        That button posted ``{}``, which made the server recompute the handoff
+        from live ``CashCollectionEvent``s at tap time — so a COD collection
+        landing between the render and the tap was written into a cash-custody
+        record for an amount the driver never saw (sweep #8: shown 120,000,
+        recorded 150,000). If there is nothing to hand off there is no button;
+        if there is, the button names its own amount.
         """
         keyboard = []
         if can_submit:
-            if remaining_amount and remaining_amount > 0:
+            frozen_amount = DeliveryKeyboards.freeze_handoff_amount(remaining_amount)
+            if frozen_amount is not None:
                 label = i18n.get(
                     'staff.delivery.handoff_remaining_cash',
                     language,
-                    amount=f"{remaining_amount:,.0f}",
+                    amount=DeliveryKeyboards.format_handoff_amount(frozen_amount),
                 )
-            else:
-                label = i18n.get('staff.delivery.handoff_expected_cash', language)
-            keyboard.append([InlineKeyboardButton(
-                f"💵 {label}",
-                callback_data="staff_reconcile_submit_all"
-            )])
+                keyboard.append([InlineKeyboardButton(
+                    f"💵 {label}",
+                    # The literal prefix stays inline so the static routing
+                    # guard in tests/unit/test_staff_bot_routing_regressions.py
+                    # keeps seeing this callback.
+                    callback_data=f"staff_reconcile_submit_all:{frozen_amount}"
+                )])
             keyboard.append([InlineKeyboardButton(
                 f"✏️ {i18n.get('staff.delivery.edit_reconciliation_cash', language)}",
                 callback_data="staff_reconcile_submit"
@@ -218,20 +287,48 @@ class DeliveryKeyboards:
     def cod_debtor_list(
         language: str, customers: List[Dict], page: int, total_pages: int
     ) -> InlineKeyboardMarkup:
-        """Inline list of customers with outstanding COD debt.
+        """Inline list of COD debtors — **USER ROWS ONLY** (owner ruling A7).
 
-        Reuses the existing ``staff_cod_customer_<id>`` callback so tapping a
-        row opens the same statement view the old search flow used. Page
-        flips go through ``staff_cod_list_page_<n>``.
+        A7, verbatim: *"in staff bot there won't be any 'office' row in debtors
+        list. The debtors list only shows the users, and the office debt is
+        included in each coworker's debt."* There is no 🏢 place row and no
+        place screen behind it; the office's debt reaches the driver through
+        every coworker's row instead (A6/R-A), composed by
+        ``StaffService.paginate_cod_debtors_for_staff``.
+
+        WHY THE ``row_type`` DISPATCH SURVIVES THE DELETION. A place row is
+        keyed on ``place_group_id`` and carries NO ``id``, so reading ``c['id']``
+        unconditionally crashed the WHOLE list with ``KeyError: 'id'`` as soon as
+        one place group existed. The service no longer emits such a row, but a
+        staff_bot newer than its business_app (the documented deploy-skew window)
+        can still be handed one — so anything that is not a person row is SKIPPED
+        rather than rendered, and never subscripted.
+
+        Person rows keep the existing ``staff_cod_customer_<id>`` callback (same
+        statement view as before) and gain a ``👥xN`` marker only when the row
+        represents several linked accounts. Page flips go through
+        ``staff_cod_list_page_<n>``.
         """
         keyboard = []
         for c in customers:
+            # A7: no place doorway. Skip defensively — never subscript a row
+            # whose family we do not render.
+            if c.get('row_type') == 'place' or c.get('id') is None:
+                continue
             first = c.get('first_name') or ''
             last = c.get('last_name') or ''
             # Single-line name + amount. Telegram inline buttons render on one
             # line and truncate, so the phone is NOT crammed here — it's shown
             # on the customer's statement page once a row is tapped.
             name = (f"{first} {last}".strip() or c.get('phone') or '—')[:40]
+            try:
+                cluster_size = int(c.get('cluster_member_count') or 1)
+            except (TypeError, ValueError):
+                cluster_size = 1
+            if cluster_size > 1:
+                # One person, several phone accounts — the amount is the sum
+                # across them, so say so rather than looking like a wrong total.
+                name = f"{name} 👥x{cluster_size}"
             amount = format_currency(c.get('total_outstanding_amount') or 0, language=language)
             keyboard.append([InlineKeyboardButton(
                 f"👤 {name} — 💰 {amount}",
@@ -278,7 +375,10 @@ class DeliveryKeyboards:
     def bottle_return_options(language: str, delivery_id: int, suggested_bottles: int) -> InlineKeyboardMarkup:
         """Options for bottle return during delivery completion.
 
-        Anchored on the customer's current bottle balance (`suggested_bottles`):
+        Anchored on the PLACE's current bottle balance (`suggested_bottles`) —
+        the empties standing at this door, which at a shared workplace includes
+        a coworker's. The backend clamps that anchor at 0 so "All N returned"
+        can never offer a negative count:
         - balance > 0  → "All N returned" / "Enter count" / "None returned"
         - balance == 0 → "0 bottles returned" / "Enter count" (the "None returned"
           row would duplicate the zero default, so it is dropped).
@@ -321,14 +421,31 @@ class DeliveryKeyboards:
     def bottle_address_selection(
         language: str, customer_id: int, addresses: list
     ) -> InlineKeyboardMarkup:
-        """Select address for standalone bottle collection."""
+        """Select the PLACE for a standalone bottle collection.
+
+        One button per distinct place, labelled with that place's balance —
+        every member's empties at that door, not one account's slice. A shared
+        place is marked 👥; an over-returned place reads ``(↩N)`` rather than a
+        bare minus sign.
+
+        The caller decides which places are listed; this only renders them (see
+        ``BottleCollectionHandler._actionable_places``).
+        """
         keyboard = []
         for addr in addresses:
             addr_id = addr.get('address_id')
             title = addr.get('address_title') or addr.get('full_address', '')[:30]
-            balance = addr.get('balance', 0)
+            place_balance = float(addr.get('place_balance') or 0)
+            marker = ' 👥' if addr.get('is_grouped') else ''
+            # `format_quantity`, not `int()`: int() truncates toward zero, so a
+            # place at -0.5 survives the caller's `!= 0` filter and would be
+            # labelled "(↩0)".
+            count = (
+                f"↩{format_quantity(abs(place_balance))}" if place_balance < 0
+                else format_quantity(place_balance)
+            )
             keyboard.append([InlineKeyboardButton(
-                f"📍 {title} ({int(balance)})",
+                f"📍 {title}{marker} ({count})",
                 callback_data=f"staff_bottle_addr_{customer_id}_{addr_id}"
             )])
         keyboard.append([InlineKeyboardButton(

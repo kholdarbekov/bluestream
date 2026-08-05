@@ -20,6 +20,14 @@ def _i18n_get(key, language, *args, **kwargs):
 
 
 def _cart_items_response():
+    """A ``GET /cart`` payload shaped like ``CartService.get_cart_details``.
+
+    The server publishes the per-line ``total_price`` and the cart ``subtotal``,
+    and the cart screen READS them (sweep #7). A literal that omits them serves a
+    cart the backend never serves — and, because ``cart_is_empty`` is decided by
+    the subtotal, it would render this cart as empty and hide the very per-item
+    controls this module exists to assert on.
+    """
     return APIResponse(
         success=True,
         data={
@@ -29,6 +37,7 @@ def _cart_items_response():
                         {
                             "product_id": 7,
                             "quantity": 3,
+                            "total_price": 54000,
                             "product": {
                                 "id": 7,
                                 "name": "Aqua Element 18.9 l",
@@ -36,7 +45,8 @@ def _cart_items_response():
                                 "inventory": {"min_order_quantity": 1, "stock_quantity": 100},
                             },
                         }
-                    ]
+                    ],
+                    "subtotal": 54000,
                 }
             }
         },

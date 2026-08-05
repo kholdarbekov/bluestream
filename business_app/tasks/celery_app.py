@@ -46,6 +46,7 @@ def make_celery(app=None):
             "business_app.tasks.marking_code_tasks",
             "business_app.tasks.staff_tasks",
             "business_app.tasks.inventory_tasks",
+            "business_app.tasks.customer_link_tasks",
         ],
     )
 
@@ -338,6 +339,18 @@ def make_celery(app=None):
         "pre-register-marking-codes": {
             "task": "business_app.tasks.marking_code_tasks.pre_register_marking_codes_daily",
             "schedule": crontab(hour=0, minute=0),
+        },
+        # Nightly invariant sweep over the canonical-customer link layer.
+        # Checks negative and orphaned PLACE balances, stranded address-keyed
+        # balances, invalid balance scopes, orphaned canonical_customer_id
+        # pointers and the money-event invariants — see the module docstring of
+        # business_app/tasks/customer_link_tasks.py for the current list.
+        # (Cross-customer place groups are SANCTIONED and the per-group union
+        # check is gone; do not reinstate either.) Read-only; logs violations
+        # via logger.error.
+        "reconcile-customer-link-invariants": {
+            "task": "business_app.tasks.customer_link_tasks.reconcile_customer_link_invariants_task",
+            "schedule": crontab(hour=3, minute=30),
         },
     }
 

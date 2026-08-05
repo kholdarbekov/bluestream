@@ -403,6 +403,21 @@ class ActiveDeliveryHandler(BaseHandler):
                 # Returnable bottles
                 'expected_returnable_bottles': delivery.get('expected_returnable_bottles', 0),
                 'customer_bottle_balance': delivery.get('customer_bottle_balance', 0),
+                # SIGNED place balance — the clamped anchor above can never go
+                # below 0, so this is the only way the at-door prompt can tell
+                # "over-returned" from "no empties on record". This snapshot is
+                # an explicit whitelist (see the note below): omit the key and
+                # the over-returned prompt silently never fires.
+                'place_bottle_balance_signed': delivery.get('place_bottle_balance_signed', 0),
+                # Place-group COD context (spec 8). This snapshot WHITELISTS
+                # keys, so the at-door cash prompt — which reads only
+                # current_delivery — sees the place block just when it's copied
+                # here. Zeros/False for ungrouped addresses.
+                'is_place_grouped': delivery.get('is_place_grouped', False),
+                'place_group_id': delivery.get('place_group_id'),
+                'place_group_label': delivery.get('place_group_label'),
+                'place_outstanding_cod_total': delivery.get('place_outstanding_cod_total', 0),
+                'place_active_cod_debt_count': delivery.get('place_active_cod_debt_count', 0),
             }
 
             keyboard = DeliveryKeyboards.active_delivery_actions(language, delivery_id, status)

@@ -308,4 +308,75 @@ describe('Users page COD statement enrichment', () => {
     const netSummaryCol = netLabel.closest('.ant-col') || netLabel.parentElement;
     expect(netSummaryCol).toHaveTextContent('0 UZS');
   });
+
+  it('shows cluster-wide outstanding and shared-place COD debt for a linked customer', async () => {
+    const user = userEvent.setup();
+
+    staffService.getCustomerCodStatement.mockResolvedValue({
+      data: {
+        data: {
+          active_cod_debt_count: 3,
+          account_active_cod_debt_count: 1,
+          cod_restricted: true,
+          gross_outstanding_amount: 40000,
+          total_outstanding_amount: 40000,
+          reserved_prepayment_total: 0,
+          net_outstanding_amount: 40000,
+          unreserved_prepayment_balance: 0,
+          available_prepayment_balance: 0,
+          cluster_member_count: 2,
+          cluster_delivered_outstanding_amount: 95000,
+          places: [
+            {
+              address_id: 51,
+              place_group_id: 12,
+              label: 'Acme office',
+              place_open_cod_debt_total: 120000,
+              place_active_cod_debt_count: 2,
+            },
+          ],
+          items: [],
+        },
+      },
+    });
+
+    await openUserDetails(user);
+
+    const clusterLabel = await screen.findByText(/Across linked accounts:/i);
+    const clusterCol = clusterLabel.closest('.ant-col') || clusterLabel.parentElement;
+    expect(clusterCol).toHaveTextContent('95,000 UZS');
+
+    const placesLabel = screen.getByText(/Shared places:/i);
+    const placesBlock = placesLabel.closest('div');
+    expect(placesBlock).toHaveTextContent('Acme office');
+    expect(placesBlock).toHaveTextContent('120,000 UZS');
+    expect(placesBlock).toHaveTextContent('2 active COD debts');
+  });
+
+  it('hides cluster and place lines for an unlinked, ungrouped customer', async () => {
+    const user = userEvent.setup();
+
+    staffService.getCustomerCodStatement.mockResolvedValue({
+      data: {
+        data: {
+          active_cod_debt_count: 1,
+          cod_restricted: false,
+          gross_outstanding_amount: 10000,
+          total_outstanding_amount: 10000,
+          reserved_prepayment_total: 0,
+          net_outstanding_amount: 10000,
+          cluster_member_count: 1,
+          cluster_delivered_outstanding_amount: 10000,
+          places: [],
+          items: [],
+        },
+      },
+    });
+
+    await openUserDetails(user);
+
+    await screen.findByText(/Active COD debts:/i);
+    expect(screen.queryByText(/Across linked accounts:/i)).toBeNull();
+    expect(screen.queryByText(/Shared places:/i)).toBeNull();
+  });
 });

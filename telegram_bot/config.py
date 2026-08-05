@@ -327,6 +327,11 @@ class BotConfig:
 
         self.localization = LocalizationConfig(
             default_language=os.getenv('DEFAULT_LANGUAGE', 'en'),
+            # Read from the environment rather than left at the dataclass
+            # default: the fallback decides what a customer reads when their
+            # own language has no row, and it was previously impossible to
+            # deploy anything other than English.
+            fallback_language=os.getenv('FALLBACK_LANGUAGE', 'en'),
         )
 
         self.features = FeatureConfig()

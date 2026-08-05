@@ -320,6 +320,116 @@ class AdminService {
     return response.data;
   }
 
+  // Multi-phone customer linking
+  async getLinkSuggestions(userId) {
+    const response = await api.get(`/admin/users/${userId}/link-suggestions`);
+    return response.data;
+  }
+
+  async getLinkedAccounts(userId) {
+    const response = await api.get(`/admin/users/${userId}/linked-accounts`);
+    return response.data;
+  }
+
+  async linkAccounts(userId, secondaryUserId, reason) {
+    const response = await api.post(`/admin/users/${userId}/link`, { secondaryUserId, reason });
+    return response.data;
+  }
+
+  async unlinkAccount(userId, reason) {
+    const response = await api.post(`/admin/users/${userId}/unlink`, { reason });
+    return response.data;
+  }
+
+  async dismissCustomerLink(userIdA, userIdB) {
+    const response = await api.post('/admin/customer-links/dismiss', { userIdA, userIdB });
+    return response.data;
+  }
+
+  async createAddressGroup(canonicalId, addressIds, label, reason) {
+    const response = await api.post(`/admin/canonical-customers/${canonicalId}/address-groups`, { addressIds, label, reason });
+    return response.data;
+  }
+
+  // Place groups (Phase 2c): ownerless "same physical place" groups that may
+  // span customers — the WHERE axis, independent of identity linking.
+  //
+  // `merge` is spec 7.4's review — `{ excludedLedgerEntryIds, resultingBalance,
+  // previewEntryIds }` — and defaults to `{}` so a plain join stays byte for
+  // byte the request it always was. Widened, never re-ordered: every existing
+  // call site keeps working unchanged.
+  async createPlaceGroup(addressIds, label, reason, merge = {}) {
+    const response = await api.post('/admin/place-groups', { addressIds, label, reason, ...merge });
+    return response.data;
+  }
+
+  async getPlaceGroup(groupId) {
+    const response = await api.get(`/admin/place-groups/${groupId}`);
+    return response.data;
+  }
+
+  // Every place group, estate-wide, with the COD exposure it carries — the
+  // reader behind the "Grouped Addresses" tab. READ-ONLY: creating a group
+  // stays `createPlaceGroup` above, with its mandatory `reason`. `per_page` is
+  // clamped to 100 by the backend, which is the SSOT for the cap.
+  async listPlaceGroups({ page = 1, perPage = 20, search = '' } = {}) {
+    const params = { page, per_page: perPage };
+    if (search) params.search = search;
+    const response = await api.get('/admin/place-groups', { params });
+    return response.data;
+  }
+
+  // Co-located candidates with NO user anchor. `getPlaceGroupSuggestions`
+  // below can only answer "who might share a place with THIS customer", so an
+  // admin had to suspect someone before they could look. A suggestion is not a
+  // grouping: every row still needs `createPlaceGroup` with a reason.
+  async getGlobalPlaceGroupSuggestions({ limit = 20 } = {}) {
+    const response = await api.get('/admin/place-group-suggestions', { params: { limit } });
+    return response.data;
+  }
+
+  async addPlaceGroupAddresses(groupId, addressIds, reason, merge = {}) {
+    const response = await api.post(`/admin/place-groups/${groupId}/addresses`, { addressIds, reason, ...merge });
+    return response.data;
+  }
+
+  // `bottlesLeaving` is spec 7.1's split: that many bottles leave WITH the
+  // address as one conserving move. 0 keeps them all with the PLACE. An
+  // impossible quantity is REJECTED by the backend (PLACE_SPLIT_INVALID), never
+  // clamped, so the panel must send what the admin actually confirmed.
+  async removePlaceGroupAddress(groupId, addressId, reason, bottlesLeaving = 0) {
+    const response = await api.delete(`/admin/place-groups/${groupId}/addresses/${addressId}`, { data: { reason, bottlesLeaving } });
+    return response.data;
+  }
+
+  // The merged bottle history an admin reviews before joining (spec 7.4). The
+  // preview accepts the exclusions so the figures it returns are the ones the
+  // admin is actually deciding against.
+  async getPlaceGroupMergePreview(addressIds, { groupId, exclude } = {}) {
+    const params = { address_ids: addressIds.join(',') };
+    if (groupId != null) params.group_id = groupId;
+    if (exclude?.length) params.exclude = exclude.join(',');
+    const response = await api.get('/admin/place-groups/merge-preview', { params });
+    return response.data;
+  }
+
+  async getPlaceGroupSuggestions(userId) {
+    const response = await api.get(`/admin/users/${userId}/place-group-suggestions`);
+    return response.data;
+  }
+
+  async dismissPlaceGroupSuggestion(addressIdA, addressIdB, reason) {
+    const response = await api.post('/admin/place-group-suggestions/dismiss', { addressIdA, addressIdB, reason });
+    return response.data;
+  }
+
+  // Cross-user address search powering the manual place-group picker: without
+  // it an admin can only act on pairs the co-location engine surfaced.
+  async searchAddresses(q, excludeGrouped = true) {
+    const response = await api.get('/admin/addresses/search', { params: { q, exclude_grouped: excludeGrouped ? 1 : 0 } });
+    return response.data;
+  }
+
   // User address management
   async getUserAddresses(userId) {
     const response = await api.get(`/admin/users/${userId}/addresses`);
@@ -411,13 +521,25 @@ class AdminService {
     return response.data;
   }
 
-  async previewOrderPaymentMethod(orderId, payload) {
-    const response = await api.post(`/admin/orders/${orderId}/payment-method/preview`, payload);
+  // `bypass_cod_check` is the explicit, audited admin override of the customer's
+  // COD active-debt cap. It MUST be sent on BOTH calls: preview owns
+  // blocking_reasons (which gate the Confirm button and the target dropdown) and
+  // apply re-runs the very same preview server-side, so dropping it on either
+  // call silently loses the override. Normalised to a boolean here so it is never
+  // absent from the request body.
+  async previewOrderPaymentMethod(orderId, payload = {}) {
+    const response = await api.post(`/admin/orders/${orderId}/payment-method/preview`, {
+      ...payload,
+      bypass_cod_check: Boolean(payload.bypass_cod_check),
+    });
     return response.data;
   }
 
-  async submitOrderPaymentMethod(orderId, payload) {
-    const response = await api.post(`/admin/orders/${orderId}/payment-method`, payload);
+  async submitOrderPaymentMethod(orderId, payload = {}) {
+    const response = await api.post(`/admin/orders/${orderId}/payment-method`, {
+      ...payload,
+      bypass_cod_check: Boolean(payload.bypass_cod_check),
+    });
     return response.data;
   }
 
@@ -1216,7 +1338,7 @@ class AdminService {
     return response.data;
   }
 
-  async getCustomerBottleBalances(userId) {
+  async getCustomerPlaceSummary(userId) {
     const response = await api.get(`/admin/bottles/balances/${userId}`);
     return response.data;
   }
@@ -1226,8 +1348,13 @@ class AdminService {
     return response.data;
   }
 
-  async getBottleLedgerForAddress(userId, addressId, params = {}) {
-    const response = await api.get(`/admin/bottles/ledger/${userId}/${addressId}`, { params });
+  async getPlaceBottleLedger(addressId, params = {}) {
+    const response = await api.get(`/admin/bottles/ledger/${addressId}`, { params });
+    return response.data;
+  }
+
+  async getClusterBottleLedger(userId, params = {}) {
+    const response = await api.get(`/admin/bottles/ledger/cluster/${userId}`, { params });
     return response.data;
   }
 
@@ -1256,8 +1383,8 @@ class AdminService {
     return response.data;
   }
 
-  async reconcileBottleBalance(userId, addressId) {
-    const response = await api.post(`/admin/bottles/reconcile/${userId}/${addressId}`);
+  async reconcileBottleBalance(addressId) {
+    const response = await api.post(`/admin/bottles/reconcile/${addressId}`);
     return response.data;
   }
 

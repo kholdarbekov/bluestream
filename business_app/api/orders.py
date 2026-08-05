@@ -118,7 +118,9 @@ def get_order(order_id):
         from business_app.services.cash_collection_service import CashCollectionService
 
         cash_collection_service = CashCollectionService()
-        payment_timeline = cash_collection_service.get_order_payment_timeline(order.id)
+        payment_timeline = cash_collection_service.get_order_payment_timeline(
+            order.id, viewer_user_id=int(current_user_id)
+        )
 
         return success_response(
             data={
@@ -450,7 +452,11 @@ def create_order():
         if (order.payment_method.value if hasattr(order.payment_method, "value") else order.payment_method) == "cash":
             from business_app.services.cash_collection_service import CashCollectionService
 
-            response_data["payment_restrictions"] = CashCollectionService().get_cod_restriction_context(current_user_id)
+            # Place-aware: report the cap against the address this order is
+            # actually going to, not just the customer's own cluster (spec 5.5).
+            response_data["payment_restrictions"] = CashCollectionService().get_cod_restriction_context(
+                current_user_id, delivery_address_id=order.delivery_address_id
+            )
 
         return created_response(data=response_data, message=get_translation("api.orders.created"))
 
@@ -701,7 +707,12 @@ def retry_order_with_cash(order_id):
         response_data = {"order": serialize_order(order, include_items=True, include_payment=True)}
         from business_app.services.cash_collection_service import CashCollectionService
 
-        response_data["payment_restrictions"] = CashCollectionService().get_cod_restriction_context(current_user_id)
+        # Place-aware (spec 5.5). The rescue itself deliberately bypasses the cap
+        # (see rescue_order_after_psp_failure), but the payload must still report
+        # the real restriction state of the destination place.
+        response_data["payment_restrictions"] = CashCollectionService().get_cod_restriction_context(
+            current_user_id, delivery_address_id=order.delivery_address_id
+        )
         return created_response(data=response_data, message=get_translation("api.orders.created"))
     except NotFoundError:
         return not_found_response(message=get_translation("api.orders.not_found"))
@@ -770,7 +781,9 @@ def track_order(order_id):
                 "delivery": delivery_info,
                 "timeline": tracking["timeline"],
                 "estimated_time_remaining": tracking["estimated_time_remaining"],
-                "payment_timeline": cash_collection_service.get_order_payment_timeline(order.id),
+                "payment_timeline": cash_collection_service.get_order_payment_timeline(
+                    order.id, viewer_user_id=int(current_user_id)
+                ),
             },
             message=get_translation("api.orders.retrieved"),
         )
@@ -1036,34 +1049,35 @@ def get_order_statuses():
 @jwt_required()
 @handle_api_exception
 def get_my_bottle_balances():
-    """Get the current customer's bottle balances across all addresses."""
+    """Bottle overview for the customer: all linked accounts' addresses,
+    place unions + member breakdowns for grouped addresses (spec §7)."""
     from business_app.services.bottle_tracking_service import BottleTrackingService
-    from business_app.serializers.bottle_serializers import serialize_bottle_balance
 
     user_id = get_jwt_identity()
-    service = BottleTrackingService()
-    balances = service.get_customer_balances(user_id)
-    return success_response(
-        data=[serialize_bottle_balance(b) for b in balances],
-    )
+    overview = BottleTrackingService().get_customer_bottle_overview(int(user_id))
+    return success_response(data=overview)
 
 
 @orders_bp.route("/bottles/my-ledger/<int:address_id>", methods=["GET"])
 @jwt_required()
 @handle_api_exception
 def get_my_bottle_ledger(address_id):
-    """Get the current customer's bottle ledger for a specific address."""
+    """Place ledger for an address the customer may see (three-arm gate,
+    spec §7). 404 replaces the old silent-empty-200 for foreign addresses."""
+    from business_app.serializers.bottle_serializers import serialize_customer_place_ledger_entry
     from business_app.services.bottle_tracking_service import BottleTrackingService
+    from business_app.services.customer_link_service import CustomerLinkService
 
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
+    if not CustomerLinkService().can_view_address_history(user_id, address_id):
+        return not_found_response(message=get_translation("api.orders.not_found"))
+
     page = request.args.get("page", 1, type=int)
     per_page = min(request.args.get("per_page", 20, type=int), 50)
-
-    service = BottleTrackingService()
-    result = service.get_address_ledger(user_id, address_id, page=page, per_page=per_page)
+    result = BottleTrackingService.get_place_ledger(address_id, page=page, per_page=per_page)
     return success_response(
         data={
-            "items": result["items"],
+            "items": [serialize_customer_place_ledger_entry(e, viewer_user_id=user_id) for e in result["items"]],
             "total": result["total"],
             "page": result["page"],
             "per_page": result["per_page"],

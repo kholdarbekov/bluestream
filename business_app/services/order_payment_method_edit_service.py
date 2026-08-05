@@ -121,7 +121,7 @@ class OrderPaymentMethodEditService:
             "allowed_target_methods": editable_targets,
         }
 
-    def preview(self, *, order_id: int, new_method: str) -> PaymentMethodEditPlan:
+    def preview(self, *, order_id: int, new_method: str, bypass_cod_check: bool = False) -> PaymentMethodEditPlan:
         order = Order.query.get(order_id)
         if not order:
             raise NotFoundError("Order not found")
@@ -162,6 +162,32 @@ class OrderPaymentMethodEditService:
             if reversed_exists:
                 blocking.append("corporate_settlement_previously_reversed")
 
+        # Switching an order TO cash mints a brand-new COD obligation, so it must
+        # clear the same two-armed cap (person cluster OR destination place) that
+        # gates COD at order creation. Before Phase 2b this path was a silent cap
+        # bypass: an order flipped to CASH after creation never passed the cap at
+        # all. Admin/staff keep an explicit, audited override.
+        #
+        # NOTE: this is deliberately NOT applied to
+        # CashCollectionService.convert_electronic_order_to_cash — that
+        # conversion's debt is settled by the same personal-card transfer inside
+        # the same transaction, so no open debt is ever created.
+        if target == "cash" and not bypass_cod_check:
+            from business_app.services.cash_collection_service import CashCollectionService
+
+            try:
+                CashCollectionService().validate_customer_can_use_cod(
+                    order.user_id, delivery_address_id=order.delivery_address_id
+                )
+            except ValidationError as exc:
+                if getattr(exc, "error_code", None) == "COD_DEBT_LIMIT_REACHED":
+                    blocking.append(
+                        "cod_debt_limit_reached: converting this order to cash would "
+                        "exceed the COD active-debt cap (pass bypass_cod_check to override)"
+                    )
+                else:
+                    raise
+
         if target == "business_account" and is_delivered:
             warnings.append("delivered_order_will_consume_prepaid_units")
         if current == "business_account" and is_delivered:
@@ -179,7 +205,13 @@ class OrderPaymentMethodEditService:
 
     # ---- apply (transactional) ----
     def apply_edit(
-        self, *, order_id: int, new_method: str, reason: str, actor_user_id: int
+        self,
+        *,
+        order_id: int,
+        new_method: str,
+        reason: str,
+        actor_user_id: int,
+        bypass_cod_check: bool = False,
     ) -> PaymentMethodEditResult:
         reason = (reason or "").strip()
         if len(reason) < 5:
@@ -189,17 +221,21 @@ class OrderPaymentMethodEditService:
         if not order:
             raise NotFoundError("Order not found")
 
-        plan = self.preview(order_id=order_id, new_method=new_method)
+        plan = self.preview(order_id=order_id, new_method=new_method, bypass_cod_check=bypass_cod_check)
         if plan.blocking_reasons:
             raise ValidationError("; ".join(plan.blocking_reasons))
 
         target = _NORMALIZE.get(plan.new_method, plan.new_method)
         if target == "business_account":
-            return self._settle_as_business_account(
-                order=order, plan=plan, reason=reason, actor_user_id=actor_user_id
-            )
+            return self._settle_as_business_account(order=order, plan=plan, reason=reason, actor_user_id=actor_user_id)
         if target == "cash":
-            return self._unwind_to_cash(order=order, plan=plan, reason=reason, actor_user_id=actor_user_id)
+            return self._unwind_to_cash(
+                order=order,
+                plan=plan,
+                reason=reason,
+                actor_user_id=actor_user_id,
+                bypass_cod_check=bypass_cod_check,
+            )
         if target == "click":
             return self._unwind_to_click(order=order, plan=plan, reason=reason, actor_user_id=actor_user_id)
         raise ValidationError(f"transition_not_implemented: {plan.transition}")
@@ -289,9 +325,7 @@ class OrderPaymentMethodEditService:
             warnings=list(plan.warnings),
         )
 
-    def _reverse_collected_cash(
-        self, *, order: Order, payment, reason: str, actor_user_id: int
-    ) -> str:
+    def _reverse_collected_cash(self, *, order: Order, payment, reason: str, actor_user_id: int) -> str:
         """Turn this order's collected COD cash into unapplied customer credit.
 
         Reverses every live allocation this order's payment received from a
@@ -332,9 +366,7 @@ class OrderPaymentMethodEditService:
             )
         return "cash_credited"
 
-    def _release_online_reservation(
-        self, *, order: Order, payment, reason: str, actor_user_id: int
-    ) -> None:
+    def _release_online_reservation(self, *, order: Order, payment, reason: str, actor_user_id: int) -> None:
         if payment is None:
             return
         from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
@@ -368,7 +400,13 @@ class OrderPaymentMethodEditService:
         return []
 
     def _unwind_to_cash(
-        self, *, order: Order, plan: PaymentMethodEditPlan, reason: str, actor_user_id: int
+        self,
+        *,
+        order: Order,
+        plan: PaymentMethodEditPlan,
+        reason: str,
+        actor_user_id: int,
+        bypass_cod_check: bool = False,
     ) -> PaymentMethodEditResult:
         from business_app.services.cash_collection_service import CashCollectionService
         from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
@@ -379,9 +417,7 @@ class OrderPaymentMethodEditService:
         with atomic_transaction():
             # 1. Return prepaid units to availability first (idempotent; no-op if
             #    this order never reserved/consumed any).
-            self.corporate_service.reverse_order_prepayment(
-                order.id, reason=reason, actor_user_id=actor_user_id
-            )
+            self.corporate_service.reverse_order_prepayment(order.id, reason=reason, actor_user_id=actor_user_id)
 
             # 2. Flip method and reset the payment to a fresh COD obligation.
             #    ensure_cod_payment_for_order requires order.payment_method ==
@@ -405,9 +441,7 @@ class OrderPaymentMethodEditService:
             #    rather than leaving a stale fiscalization row behind. Never let
             #    a fiscal hiccup abort an otherwise valid unwind.
             try:
-                PaymentFiscalizationService().queue_click_fiscalization(
-                    payment.id, actor_user_id=actor_user_id
-                )
+                PaymentFiscalizationService().queue_click_fiscalization(payment.id, actor_user_id=actor_user_id)
             except Exception as exc:  # pragma: no cover - defensive
                 logger.error("Failed to mark fiscalization NOT_REQUIRED for order %s: %s", order.id, exc)
 
@@ -423,6 +457,9 @@ class OrderPaymentMethodEditService:
                 "to_method": "cash",
                 "money_action": "cod_obligation_created",
                 "reason": reason,
+                # Records that an admin/operator overrode the COD active-debt cap
+                # for this conversion — the override must never be silent.
+                "bypass_cod_check": bypass_cod_check,
             },
         )
 
@@ -445,9 +482,7 @@ class OrderPaymentMethodEditService:
 
         with atomic_transaction():
             # 1. Return prepaid units to availability first.
-            self.corporate_service.reverse_order_prepayment(
-                order.id, reason=reason, actor_user_id=actor_user_id
-            )
+            self.corporate_service.reverse_order_prepayment(order.id, reason=reason, actor_user_id=actor_user_id)
 
             # 2. Flip method and reset the payment to a fresh online obligation.
             order.payment_method = PaymentMethod.CLICK

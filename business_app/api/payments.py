@@ -20,7 +20,7 @@ except ImportError:
 
     UTC = timezone.utc
 
-from business_app.utils.service_factory import get_payment_service, get_notification_service
+from business_app.utils.service_factory import get_payment_service, get_notification_service, get_order_service
 from business_app.utils.helpers import get_current_language
 from business_app.utils.translations import get_translation
 from shared.redis_keyspace import RedisKeyspace
@@ -152,8 +152,31 @@ def get_payment_methods():
                 status_code=400,
             )
 
-        available_methods = get_payment_service().get_available_payment_methods(user, context=context)
-        cod_context = CashCollectionService().get_cod_restriction_context(current_user_id)
+        # Optional: the address the customer is checking out to. When supplied,
+        # the COD cap's PLACE arm is evaluated as well as the person arm, so the
+        # menu and the restrictions payload match what create_order will accept.
+        delivery_address_id = request.args.get("delivery_address_id", type=int)
+        if delivery_address_id is not None:
+            # Ownership check, same shape as POST /orders (get_user_and_address_for_order):
+            # without this, any authenticated customer could pass ANY address id and
+            # have place_active_cod_debt_count reveal how many open COD debts exist at
+            # a stranger's home/workplace. A foreign or non-existent id is treated as a
+            # validation error (400), matching this endpoint's own convention for bad
+            # query input (see the `context` check above) and the POST /orders precedent.
+            try:
+                get_order_service().get_user_and_address_for_order(current_user_id, delivery_address_id)
+            except ValidationError:
+                return error_response(
+                    message=get_translation("api.addresses.not_found"),
+                    status_code=400,
+                )
+
+        available_methods = get_payment_service().get_available_payment_methods(
+            user, context=context, delivery_address_id=delivery_address_id
+        )
+        cod_context = CashCollectionService().get_cod_restriction_context(
+            current_user_id, delivery_address_id=delivery_address_id
+        )
         saved_cards = CreditCard.query.filter_by(user_id=current_user_id, is_active=True).all()
 
         return success_response(
@@ -181,6 +204,33 @@ def get_cod_statement():
     return success_response(data=statement)
 
 
+@payments_bp.route("/my-cod-summary", methods=["GET"])
+@jwt_required()
+@handle_api_exception
+def get_my_cod_summary():
+    """Customer wallet surface (spec §7): the linked cluster's delivered-unpaid
+    COD total and prepaid credit shown as ONE customer, plus each grouped
+    address's unified place COD total with a per-order breakdown.
+
+    Scoping is derived, never requested: the place groups come from the
+    AUTHENTICATED user's own statement, so there is no id a caller could supply
+    to reach another person's cluster or a stranger's workplace. Member NAMES
+    only — the redaction lives in the serializer.
+    """
+    from business_app.serializers.payment_serializers import serialize_customer_cod_summary
+    from business_app.services.cash_collection_service import CashCollectionService
+
+    user_id = int(get_jwt_identity())
+    service = CashCollectionService()
+    statement = service.get_customer_cod_statement(user_id)
+    place_statements = {
+        place["place_group_id"]: service.get_place_cod_statement(place["place_group_id"])
+        for place in (statement.get("places") or [])
+        if place.get("place_group_id")
+    }
+    return success_response(data=serialize_customer_cod_summary(statement, place_statements))
+
+
 @payments_bp.route("/orders/<int:order_id>/timeline", methods=["GET"])
 @jwt_required()
 @handle_api_exception
@@ -193,7 +243,7 @@ def get_order_payment_timeline(order_id):
 
     from business_app.services.cash_collection_service import CashCollectionService
 
-    timeline = CashCollectionService().get_order_payment_timeline(order_id)
+    timeline = CashCollectionService().get_order_payment_timeline(order_id, viewer_user_id=int(current_user_id))
     return success_response(data=timeline)
 
 

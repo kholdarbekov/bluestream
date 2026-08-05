@@ -32,6 +32,7 @@ import {
   MessageOutlined,
   CheckCircleOutlined,
   EnvironmentOutlined,
+  ClusterOutlined,
   EditOutlined,
   DeleteOutlined,
   PhoneOutlined,
@@ -44,6 +45,9 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import adminService from '../services/adminService';
 import staffService from '../services/staffService';
+import LinkedAccountsPanel from '../components/LinkedAccountsPanel';
+import PlaceGroupPanel from '../components/PlaceGroupPanel';
+import GroupedAddressesPanel from '../components/GroupedAddressesPanel';
 import api from '../services/api';
 import useResponsive from '../hooks/useResponsive';
 import AddressMapPicker from '../components/AddressMapPicker';
@@ -1061,6 +1065,19 @@ const Users = () => {
               </Suspense>
             ) : null,
           },
+          {
+            key: 'grouped-addresses',
+            label: (
+              <Space>
+                <ClusterOutlined />
+                {t('ui.users.grouped_addresses.tab', 'Grouped Addresses')}
+              </Space>
+            ),
+            // Lazy, exactly like the map tab above: this panel's suggestion
+            // query is the UN-ANCHORED co-location clusterer over the whole
+            // estate, which must not run on every Users page load.
+            children: activeTab === 'grouped-addresses' ? <GroupedAddressesPanel /> : null,
+          },
         ]}
       />
 
@@ -1191,6 +1208,12 @@ const Users = () => {
               </Row>
             </Card>
 
+            {/* Linked accounts (multi-phone customer linking) — the WHO axis */}
+            <LinkedAccountsPanel user={selectedUser} />
+
+            {/* Place groups (same physical place, may span customers) — the WHERE axis */}
+            <PlaceGroupPanel user={selectedUser} />
+
             {selectedUser.role === 'customer' && (
               <Card
                 title={t('ui.users.cod_statement', 'COD Statement')}
@@ -1214,7 +1237,40 @@ const Users = () => {
                           {userCodStatement.cod_restricted ? t('ui.common.yes', 'Yes') : t('ui.common.no', 'No')}
                         </Tag>
                       </Col>
+                      {/* Cluster context: the cap and the debt count are
+                          cluster-wide, so show what the linked accounts owe
+                          together. Unlinked customers (count 1) see nothing new. */}
+                      {userCodStatement.cluster_member_count > 1 && (
+                        <Col xs={24} sm={12}>
+                          <strong>{t('ui.users.cluster_outstanding', 'Across linked accounts')}:</strong>{' '}
+                          {(userCodStatement.cluster_delivered_outstanding_amount ?? 0).toLocaleString()} UZS
+                          <Tag color="purple" style={{ marginLeft: 8 }}>
+                            {userCodStatement.cluster_member_count}
+                          </Tag>
+                        </Col>
+                      )}
                     </Row>
+
+                    {/* Place (shared workplace) context — the WHERE axis of the
+                        COD cap. Ungrouped customers get an empty list. */}
+                    {(userCodStatement.places || []).length > 0 && (
+                      <div style={{ marginBottom: 12 }}>
+                        <strong>{t('ui.users.places_heading', 'Shared places')}:</strong>
+                        <ul style={{ margin: '4px 0 0 18px', padding: 0 }}>
+                          {userCodStatement.places.map((place) => (
+                            <li key={place.place_group_id}>
+                              {place.label || `${t('ui.users.place_unnamed', 'Place')} #${place.place_group_id}`}
+                              {': '}
+                              {(place.place_open_cod_debt_total ?? 0).toLocaleString()} UZS
+                              <Tag style={{ marginLeft: 8 }}>
+                                {place.place_active_cod_debt_count ?? 0}{' '}
+                                {t('ui.users.place_active_cod_debts', 'active COD debts')}
+                              </Tag>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
 
                     {(userCodStatement.items && userCodStatement.items.length > 0) && (
                       <Row gutter={[16, 12]} style={{ marginBottom: 12 }}>

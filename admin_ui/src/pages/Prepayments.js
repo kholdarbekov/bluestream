@@ -162,7 +162,17 @@ const Prepayments = () => {
       key: 'customer',
       render: (_, row) => (
         <Space direction="vertical" size={0}>
-          <Text strong>{`${row.first_name || ''} ${row.last_name || ''}`.trim() || `#${row.id}`}</Text>
+          <Space size={4}>
+            <Text strong>{`${row.first_name || ''} ${row.last_name || ''}`.trim() || `#${row.id}`}</Text>
+            {/* Prepaid credit is cluster-fungible, so linked accounts arrive
+                collapsed into ONE row carrying the summed balance — say so,
+                otherwise the figure looks wrong against a single account. */}
+            {(row.member_user_ids?.length || 1) > 1 && (
+              <Tag color="purple">
+                {row.member_user_ids.length} {t('ui.prepayments.linked_accounts', 'linked accounts')}
+              </Tag>
+            )}
+          </Space>
           <Text type="secondary" style={{ fontSize: 12 }}>{row.phone}</Text>
         </Space>
       ),

@@ -278,6 +278,36 @@ class AdminService {
     return response.data;
   }
 
+  async getDispatchSnapshot(params = {}) {
+    const response = await api.get('/admin/dispatch/snapshot', { params });
+    return response.data;
+  }
+
+  async getDispatchRouteGeometry(driverId) {
+    const response = await api.get(`/admin/dispatch/routes/${driverId}/geometry`);
+    return response.data;
+  }
+
+  async setDispatchStops(driverId, payload) {
+    const response = await api.put(`/admin/dispatch/routes/${driverId}/stops`, payload);
+    return response.data;
+  }
+
+  async reoptimizeDispatchRoute(driverId) {
+    const response = await api.post(`/admin/dispatch/routes/${driverId}/reoptimize`);
+    return response.data;
+  }
+
+  async assignDispatchStop(deliveryId, body) {
+    const response = await api.post(`/admin/dispatch/stops/${deliveryId}/assign`, body);
+    return response.data;
+  }
+
+  async unassignDispatchStop(deliveryId, body) {
+    const response = await api.post(`/admin/dispatch/stops/${deliveryId}/unassign`, body);
+    return response.data;
+  }
+
   async getUserDetails(userId) {
     const response = await api.get(`/admin/users/${userId}`);
     return response.data;

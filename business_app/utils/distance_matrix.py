@@ -273,6 +273,53 @@ def _osrm_table_matrix(points: List[Point]) -> Matrix:
     return matrix
 
 
+def _yandex_step_metric(raw: object) -> Optional[float]:
+    """Extract a numeric value from a Yandex Router API step field.
+
+    Per Yandex's documented Router API response shape (route.legs[].steps[]),
+    `length`/`duration` are plain numbers, not `{"value": ...}` wrapper
+    objects (unlike Google's Directions API). Handled defensively so a
+    response variant that DOES wrap the number doesn't silently zero out —
+    accept either shape rather than assuming one.
+    """
+    if isinstance(raw, dict):
+        raw = raw.get("value")
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    return None
+
+
+def yandex_route_totals(route: Dict) -> Tuple[float, float]:
+    """Sum per-step distance (metres) and duration (seconds) from a Yandex
+    Router API `route` object, across every leg and every step.
+
+    Per Yandex's Router API docs (confirmed during this fix), there is no
+    route-level or leg-level distance/duration aggregate — `route.distance`
+    and `route.duration` do not exist. Only `route.legs[].steps[]` entries
+    carry the real per-step `length` (metres) / `duration` (seconds).
+    Mirrors the `route.legs[].steps[]` traversal `_yandex_route_geometry`
+    (in `business_app.services.maps_service`) already uses for
+    `steps[].polyline.points`.
+
+    Returns (0.0, 0.0) when the route carries no legs/steps or no usable
+    numeric fields — callers must treat that as "no data", never invent a
+    non-zero number for it.
+    """
+    total_distance_m = 0.0
+    total_duration_s = 0.0
+    for leg in route.get("legs") or []:
+        for step in leg.get("steps") or []:
+            distance_val = _yandex_step_metric(step.get("length"))
+            duration_val = _yandex_step_metric(step.get("duration"))
+            if distance_val is not None:
+                total_distance_m += distance_val
+            if duration_val is not None:
+                total_duration_s += duration_val
+    return total_distance_m, total_duration_s
+
+
 def _haversine_matrix(points: List[Point]) -> Matrix:
     matrix: Matrix = {}
     n = len(points)
@@ -388,8 +435,15 @@ def _yandex_pairwise(points: List[Point], api_key: str, traffic: bool) -> Tuple[
                     raise ValueError(f"status={response.status_code} body={response.text[:120]}")
                 data = response.json()
                 route = data.get("route") or {}
-                distance_m = (route.get("distance") or {}).get("value", 0)
-                duration_s = (route.get("duration") or {}).get("value", 0)
+                # `route.distance`/`route.duration` do NOT exist in Yandex's
+                # documented Router API response — only the per-step
+                # `length`/`duration` inside `route.legs[].steps[]` do. Sum
+                # them instead of reading a top-level key that was always
+                # absent (see `yandex_route_totals` docstring). The guard
+                # below is unchanged: a summed 0 (missing legs/steps/metrics)
+                # still raises so the per-cell Haversine fallback runs and a
+                # bad Yandex response can't poison the optimiser.
+                distance_m, duration_s = yandex_route_totals(route)
                 if not distance_m or not duration_s:
                     raise ValueError("route missing distance/duration")
                 matrix[(i, j)] = {
@@ -481,6 +535,12 @@ def get_distance_matrix(
                 if total > 0 and success / total >= 0.5:
                     matrix = pairwise_matrix
                     source = "yandex_pairwise"
+                    logger.info(
+                        "Yandex pairwise succeeded (%d/%d pairs ok) — using "
+                        "traffic-aware Yandex routing as the matrix source",
+                        success,
+                        total,
+                    )
                 else:
                     logger.warning(
                         "Yandex pairwise mostly failed (%d/%d pairs ok) — trying OSRM",

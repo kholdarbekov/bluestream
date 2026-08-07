@@ -117,6 +117,7 @@ class AssignmentSource(Enum):
     ADMIN_ASSIGN = "admin_assign"
     ADMIN_BULK = "admin_bulk"
     AUTO = "auto"
+    ADMIN_DISPATCH = "admin_dispatch"
     REASSIGN = "reassign"
 
 

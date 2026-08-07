@@ -5,10 +5,11 @@ Supports Google Maps, Yandex Maps, and OpenStreetMap
 
 import logging
 import requests
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Optional, Tuple
 from flask import current_app
 
 from business_app.utils.distance_matrix import get_distance_matrix as _get_distance_matrix
+from business_app.utils.distance_matrix import yandex_route_totals
 from business_app.utils.exceptions import (
     ConfigurationError,
     ExternalServiceError,
@@ -17,6 +18,7 @@ from business_app.utils.exceptions import (
 )
 from business_app.utils.helpers import calculate_distance
 from business_app.utils.http_client import RetryConfig, request_with_retry
+from business_app.utils.polyline import decode_polyline
 
 logger = logging.getLogger(__name__)
 
@@ -290,7 +292,15 @@ class MapsService:
             "duration_minutes": leg["duration"]["value"] / 60,
             "duration_text": leg["duration"]["text"],
             "duration_in_traffic_minutes": leg.get("duration_in_traffic", {}).get("value", 0) / 60,
-            "polyline": route["overview_polyline"]["points"],
+            # `overview_polyline.points` is an ENCODED polyline STRING, always
+            # precision 5 for Google's Directions API — decode it here so
+            # every `get_route()` caller sees the same normalised
+            # `[[lat, lng], ...] | None` shape regardless of provider. This
+            # used to be handed back raw under "polyline" and forwarded
+            # straight to Leaflet's <Polyline positions={...}> by
+            # admin_dispatch.py, which happily accepted a string where it
+            # expected an array of coordinate pairs.
+            "geometry": decode_polyline(route["overview_polyline"]["points"]),
             "steps": [
                 {
                     "instruction": step["html_instructions"],
@@ -411,7 +421,7 @@ class MapsService:
                 "duration_minutes": distance * 2.4,  # ~25 km/h city default
                 "duration_in_traffic_minutes": None,
                 "estimated_arrival": None,
-                "polyline": None,
+                "geometry": None,
                 "fallback": True,
             }
 
@@ -427,14 +437,28 @@ class MapsService:
                 "duration_minutes": distance * 2.4,
                 "duration_in_traffic_minutes": None,
                 "estimated_arrival": None,
-                "polyline": None,
+                "geometry": None,
                 "fallback": True,
             }
 
         data = response.json()
         route = data.get("route") or {}
-        distance_m = (route.get("distance") or {}).get("value", 0)
-        duration_s = (route.get("duration") or {}).get("value", 0)
+        # NOTE (Task 12, 2026-08): `route.distance`/`route.duration` do NOT
+        # exist in Yandex's documented Router API response (confirmed against
+        # yandex.com/maps-api/docs/router-api/response.html) — there is no
+        # route-level or leg-level distance/duration aggregate at all. The
+        # real per-request totals must be summed from the per-step
+        # `length`(m)/`duration`(s) inside `route.legs[].steps[]`, which is
+        # exactly what `yandex_route_totals` (in
+        # `business_app.utils.distance_matrix`) does, mirroring the
+        # `legs[].steps[]` traversal `_yandex_route_geometry` below already
+        # uses for `steps[].polyline.points`. `route.duration_in_traffic`
+        # (top-level) is not part of the documented shape either — real-time
+        # traffic, when requested via `departure_time`, is already reflected
+        # in each step's own `duration`; this read is kept only as a
+        # defensive no-op (resolves to `None`, same as before) in case some
+        # response variant does carry it.
+        distance_m, duration_s = yandex_route_totals(route)
         duration_traffic_s = (route.get("duration_in_traffic") or {}).get("value")
 
         return {
@@ -442,8 +466,42 @@ class MapsService:
             "duration_minutes": duration_s / 60.0,
             "duration_in_traffic_minutes": (duration_traffic_s / 60.0) if duration_traffic_s else None,
             "estimated_arrival": None,
-            "polyline": route.get("geometry"),
+            "geometry": self._yandex_route_geometry(route),
         }
+
+    @staticmethod
+    def _yandex_route_geometry(route: Dict[str, Any]) -> Optional[List[List[float]]]:
+        """Real road geometry from a Yandex Router API `route` object.
+
+        There is no top-level `route.geometry` (unlike this method's own
+        pre-fix code assumed, and unlike Google/OSRM's `overview_polyline`).
+        Per Yandex's documented response shape, the path lives nested under
+        `route.legs[].steps[].polyline.points`, and each `points` entry is
+        already a `[latitude, longitude]` pair — Yandex does NOT encode this
+        as a compressed string the way Google/OSRM do, so no decoding step is
+        needed here, only concatenation across every leg and step in order.
+
+        This is based on Yandex's public Router API docs (fetched during this
+        fix: yandex.com/maps-api/docs/router-api/response.html and
+        .../examples.html), not a captured live response — this codebase has
+        no test Yandex API key to call the real endpoint from. Written
+        defensively (every level is `.get(...) or []`) so if the real shape
+        turns out to differ in some way this doc reading missed, the result
+        is `None` (the existing honest dashed-fallback), never a crash or a
+        malformed positions array.
+        """
+        points: List[List[float]] = []
+        for leg in route.get("legs") or []:
+            for step in leg.get("steps") or []:
+                step_points = (step.get("polyline") or {}).get("points") or []
+                for point in step_points:
+                    if (
+                        isinstance(point, (list, tuple))
+                        and len(point) == 2
+                        and all(isinstance(coord, (int, float)) for coord in point)
+                    ):
+                        points.append([float(point[0]), float(point[1])])
+        return points or None
 
     def get_distance_matrix(
         self,
@@ -526,6 +584,10 @@ class MapsService:
             coords = f"{start_lon},{start_lat};{waypoint_coords};{end_lon},{end_lat}"
 
         url = f"{self.osm_routing_url}/{coords}"
+        # `geometries=polyline` (NOT `polyline6`) — precision 5, identical to
+        # Google's overview_polyline encoding. If this is ever changed to
+        # `polyline6`, `decode_polyline` below must be called with
+        # `precision=6` or every decoded point will be off by 10x.
         params = {"overview": "full", "geometries": "polyline", "steps": "true"}
 
         response = requests.get(url, params=params, timeout=self.request_timeout)
@@ -540,7 +602,11 @@ class MapsService:
         return {
             "distance_km": route["distance"] / 1000,
             "duration_minutes": route["duration"] / 60,
-            "polyline": route["geometry"],
+            # `route["geometry"]` is OSRM's raw encoded-polyline STRING (see
+            # the `params` comment above) — decode it into the same
+            # normalised `[[lat, lng], ...] | None` shape every provider now
+            # returns under "geometry".
+            "geometry": decode_polyline(route["geometry"]),
             "steps": [
                 {
                     "instruction": step["maneuver"]["instruction"],

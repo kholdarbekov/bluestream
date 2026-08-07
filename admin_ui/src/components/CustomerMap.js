@@ -1,21 +1,20 @@
-import React, { useMemo, useState } from 'react';
-import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet';
-import 'leaflet/dist/leaflet.css';
+import React, {
+  useCallback, useMemo, useState,
+} from 'react';
 import {
   Card, Space, InputNumber, Segmented, Checkbox, Button, Tag, Typography, Empty, Spin,
 } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
+import { Link, useInRouterContext } from 'react-router-dom';
 import adminService from '../services/adminService';
-import HeatLayer from './HeatLayer';
+import OperationsMap from './OperationsMap';
 import {
-  daysSince, colorForDays, loadThresholds, saveThresholds, applyFilters, heatWeight,
+  loadThresholds, saveThresholds, applyFilters, heatWeight,
 } from '../utils/customerMapLogic';
 import { formatMoney } from '../utils/formatMoney';
 
 const { Text } = Typography;
-const CENTER = [41.2995, 69.2401];
-const ZOOM = 11;
 
 // Same translation keys as this component's type filter (Segmented options above);
 // defensive fallback to the raw value if an unknown enum slips through.
@@ -35,12 +34,32 @@ const entitySubtypeLabel = (tt, subtype) => {
 
 const CustomerMap = ({ onViewUser, height = 640 }) => {
   const { t } = useTranslation('users');
+  // CustomerMap is unit-tested standalone (CustomerMap.test.jsx) without a
+  // Router context, where react-router's <Link> throws. In the real app it
+  // always renders under <BrowserRouter> (see src/index.js), so this lets it
+  // do real client-side navigation there while degrading to a full-navigation
+  // <a> in the Router-less test instead of crashing.
+  const inRouterContext = useInRouterContext();
   const { data, isLoading } = useQuery({
     queryKey: ['customerMapPins'],
     queryFn: () => adminService.getCustomerMapPins(),
     staleTime: 5 * 60 * 1000,
   });
   const pins = data?.data?.pins || [];
+
+  const [showOrders, setShowOrders] = useState(false);
+  const [showDrivers, setShowDrivers] = useState(false);
+
+  // Read-only overlay. Only fetched once a layer is actually switched on, so
+  // the CRM view stays exactly as cheap as it is today for anyone who doesn't
+  // want it.
+  const { data: dispatchData } = useQuery({
+    queryKey: ['dispatchSnapshotOverlay'],
+    queryFn: () => adminService.getDispatchSnapshot(),
+    enabled: showOrders || showDrivers,
+    staleTime: 30 * 1000,
+  });
+  const snapshot = dispatchData?.data || {};
 
   const [{ t1, t2 }, setThresholds] = useState(loadThresholds());
   const [viewMode, setViewMode] = useState('pins'); // 'pins' | 'heat'
@@ -68,6 +87,50 @@ const CustomerMap = ({ onViewUser, height = 640 }) => {
     setThresholds(clean);
     saveThresholds(clean);
   };
+
+  const renderCustomerPopup = useCallback((p, d, color) => (
+    <Space direction="vertical" size={2}>
+      <Text strong>{p.fullName}</Text>
+      <Space size={4}>
+        <Tag>
+          {userTypeLabel(t, p.userType)}
+          {p.entitySubtype ? ` · ${entitySubtypeLabel(t, p.entitySubtype)}` : ''}
+        </Tag>
+        {p.codRestricted && <Tag color="red">{t('ui.users.map.cod_restricted', 'COD restricted')}</Tag>}
+      </Space>
+      <Text copyable>{p.phone}</Text>
+      <Text>
+        {t('ui.users.map.last_order', 'Last order')}:{' '}
+        {d === null ? '—' : `${d} ${t('ui.users.map.days_ago', 'days ago')}`}
+        <span style={{ display: 'inline-block', width: 10, height: 10, marginLeft: 6,
+          borderRadius: 5, background: color }} />
+      </Text>
+      {p.lastOrderDate && (
+        <Text type="secondary" style={{ fontSize: 11 }}>
+          {new Date(p.lastOrderDate).toLocaleDateString()} · {p.orderCount} {t('ui.users.map.orders', 'orders')}
+        </Text>
+      )}
+      <Text>
+        {t('ui.users.map.bottles', 'Bottles')}: {p.bottleBalance}
+        {p.addressCount > 1 && (
+          <Text type="secondary"> ({t('ui.users.map.address', 'address')} {p.addressIndex}/{p.addressCount})</Text>
+        )}
+        {/* This number is the whole PLACE's pool, repeated verbatim on every
+            coworker's pin. Without the badge an admin reading a 3-member office
+            totals 7+7+7 = 21 bottles that do not exist. */}
+        {p.isSharedPlace && (
+          <Tag color="purple" style={{ marginLeft: 6 }}>
+            {t('ui.users.map.shared_place', 'shared place — one pool')}
+          </Tag>
+        )}
+      </Text>
+      <Text>{t('ui.users.map.debt', 'Debt')}: {formatMoney(p.outstandingDebt)} UZS</Text>
+      <Button type="link" size="small" style={{ padding: 0 }}
+        onClick={() => onViewUser && onViewUser(p.userId)}>
+        {t('ui.users.map.view_profile', 'View full profile')}
+      </Button>
+    </Space>
+  ), [t, onViewUser]);
 
   return (
     <Card styles={{ body: { padding: 12 } }}>
@@ -114,6 +177,17 @@ const CustomerMap = ({ onViewUser, height = 640 }) => {
           value={type}
           onChange={setType}
         />
+        <Checkbox checked={showOrders} onChange={(e) => setShowOrders(e.target.checked)}>
+          {t('ui.users.map.layer_orders', 'Active orders')}
+        </Checkbox>
+        <Checkbox checked={showDrivers} onChange={(e) => setShowDrivers(e.target.checked)}>
+          {t('ui.users.map.layer_drivers', 'Drivers & routes')}
+        </Checkbox>
+        {inRouterContext ? (
+          <Link to="/delivery/dispatch">{t('ui.users.map.open_dispatch', 'Open in Dispatch ↗')}</Link>
+        ) : (
+          <a href="/delivery/dispatch">{t('ui.users.map.open_dispatch', 'Open in Dispatch ↗')}</a>
+        )}
       </Space>
 
       {/* Gradient legend */}
@@ -136,81 +210,17 @@ const CustomerMap = ({ onViewUser, height = 640 }) => {
       ) : pins.length === 0 ? (
         <Empty description={t('ui.users.map.empty', 'No customers to display')} />
       ) : (
-        <MapContainer center={CENTER} zoom={ZOOM} style={{ height, width: '100%' }} preferCanvas scrollWheelZoom>
-          <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
-          {viewMode === 'pins' && visible.map((p) => {
-            const d = daysSince(p.lastOrderDate, now);
-            const color = colorForDays(d, t1, t2);
-            return (
-              <CircleMarker
-                key={p.addressId}
-                center={[p.lat, p.lng]}
-                radius={8}
-                pathOptions={{
-                  color,
-                  fillColor: color,
-                  fillOpacity: 0.85,
-                  // Shared-place pins are coincident with their coworkers', so the
-                  // glyph has to say "one pool" before anyone opens a popup.
-                  weight: p.isSharedPlace ? 3 : 1,
-                  dashArray: p.isSharedPlace ? '3' : undefined,
-                }}
-              >
-                <Popup>
-                  <Space direction="vertical" size={2}>
-                    <Text strong>{p.fullName}</Text>
-                    <Space size={4}>
-                      <Tag>
-                        {userTypeLabel(t, p.userType)}
-                        {p.entitySubtype ? ` · ${entitySubtypeLabel(t, p.entitySubtype)}` : ''}
-                      </Tag>
-                      {p.codRestricted && <Tag color="red">{t('ui.users.map.cod_restricted', 'COD restricted')}</Tag>}
-                    </Space>
-                    <Text copyable>{p.phone}</Text>
-                    <Text>
-                      {t('ui.users.map.last_order', 'Last order')}:{' '}
-                      {d === null ? '—' : `${d} ${t('ui.users.map.days_ago', 'days ago')}`}
-                      <span style={{ display: 'inline-block', width: 10, height: 10, marginLeft: 6,
-                        borderRadius: 5, background: color }} />
-                    </Text>
-                    {p.lastOrderDate && (
-                      <Text type="secondary" style={{ fontSize: 11 }}>
-                        {new Date(p.lastOrderDate).toLocaleDateString()} · {p.orderCount} {t('ui.users.map.orders', 'orders')}
-                      </Text>
-                    )}
-                    <Text>
-                      {t('ui.users.map.bottles', 'Bottles')}: {p.bottleBalance}
-                      {p.addressCount > 1 && (
-                        <Text type="secondary"> ({t('ui.users.map.address', 'address')} {p.addressIndex}/{p.addressCount})</Text>
-                      )}
-                      {/* This number is the whole PLACE's pool, repeated verbatim on
-                          every coworker's pin. Without the badge an admin reading a
-                          3-member office totals 7+7+7 = 21 bottles that do not exist.
-                          `addressIndex/addressCount` cannot disambiguate it: that is
-                          the per-USER address counter, so all three read 1/1. */}
-                      {p.isSharedPlace && (
-                        <Tag color="purple" style={{ marginLeft: 6 }}>
-                          {t('ui.users.map.shared_place', 'shared place — one pool')}
-                        </Tag>
-                      )}
-                    </Text>
-                    <Text>{t('ui.users.map.debt', 'Debt')}: {formatMoney(p.outstandingDebt)} UZS</Text>
-                    <Button type="link" size="small" style={{ padding: 0 }}
-                      onClick={() => onViewUser && onViewUser(p.userId)}>
-                      {t('ui.users.map.view_profile', 'View full profile')}
-                    </Button>
-                  </Space>
-                </Popup>
-              </CircleMarker>
-            );
-          })}
-          {(viewMode === 'heat' || (viewMode === 'pins' && heatOverlay)) && (
-            <HeatLayer points={heatPoints} />
-          )}
-        </MapContainer>
+        <OperationsMap
+          height={height}
+          customers={visible}
+          orders={snapshot.orders || []}
+          drivers={snapshot.drivers || []}
+          routes={snapshot.routes || []}
+          visibleLayers={{ customers: viewMode === 'pins', orders: showOrders, drivers: showDrivers }}
+          thresholds={{ t1, t2 }}
+          heatPoints={(viewMode === 'heat' || (viewMode === 'pins' && heatOverlay)) ? heatPoints : null}
+          renderCustomerPopup={renderCustomerPopup}
+        />
       )}
     </Card>
   );

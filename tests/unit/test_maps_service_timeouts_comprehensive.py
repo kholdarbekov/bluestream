@@ -100,11 +100,20 @@ _YANDEX_GEOCODE_OK = {
 }
 
 _YANDEX_ROUTE_OK = {
+    # Realistic Yandex Router API shape (Task 12): NO top-level
+    # `route.distance`/`route.duration` — those keys don't exist. Totals live
+    # only in `route.legs[].steps[]` as per-step `length` (m) / `duration`
+    # (s). Sums to 5000 m / 600 s here to match this file's `distance_km ==
+    # 5.0` canary assertion.
     "route": {
-        "distance": {"value": 5000},
-        "duration": {"value": 600},
-        "duration_in_traffic": {"value": 720},
-        "geometry": "yandex-poly",
+        "legs": [
+            {
+                "steps": [
+                    {"length": 3000, "duration": 400},
+                    {"length": 2000, "duration": 200},
+                ]
+            }
+        ]
     }
 }
 

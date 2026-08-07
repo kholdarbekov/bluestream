@@ -78,6 +78,7 @@ from business_app.models.user import User
 from business_app.models.product import Product, ProductCategory
 from business_app.models.order import Order
 from business_app.models.payment import Payment
+from business_app.models.delivery import DeliveryPerson
 from shared.enums import UserRole, UserType, OrderStatus, PaymentStatus, PaymentMethod
 from business_app.utils.password_security import hash_password
 
@@ -442,6 +443,67 @@ def delivery_driver(db):
 
 
 @pytest.fixture
+def second_delivery_driver(db):
+    """A second, independent delivery driver for tests that move a stop
+    between two drivers. Includes a matching active DeliveryPerson row so
+    it can stand in for a real assignment target, unlike the bare-User
+    `delivery_driver` fixture.
+
+    The phone deliberately avoids '+998901234570', which `second_sample_user`
+    already owns: `users.phone` is UNIQUE, so any test combining both fixtures
+    would otherwise die at setup with an IntegrityError before reaching its
+    assertions (the same hazard `second_sample_user`'s own docstring documents).
+    """
+    user = User(
+        email='driver2@example.com',
+        phone='+998901234572',
+        password_hash=hash_password('DriverPassword123!'),
+        first_name='Second',
+        last_name='Driver',
+        user_type=UserType.STAFF,
+        role=UserRole.DELIVERY_DRIVER,
+        is_verified=True,
+        created_at=datetime.now(UTC)
+    )
+    db.session.add(user)
+    db.session.flush()
+    person = DeliveryPerson(
+        user_id=user.id,
+        full_name="Second Driver",
+        phone="+998901234572",
+        is_active=True,
+        is_available=True,
+    )
+    db.session.add(person)
+    db.session.commit()
+    return user
+
+
+@pytest.fixture
+def driver_with_location(db, delivery_driver):
+    """`delivery_driver` with a fresh, real DeliveryPerson.current_location —
+    the hard precondition RouteOptimizationService.optimize_for_driver needs
+    before it will produce a sequence. Shared by route-optimization unit
+    tests and the staff-API integration tests that exercise the same driver.
+    """
+    person = DeliveryPerson.query.filter_by(user_id=delivery_driver.id).first()
+    if person is None:
+        person = DeliveryPerson(
+            user_id=delivery_driver.id,
+            full_name="Route Driver",
+            phone="+998901112233",
+            is_active=True,
+            is_available=True,
+        )
+        db.session.add(person)
+    person.current_location_lat = 41.30
+    person.current_location_lng = 69.24
+    person.last_location_update = datetime.now(UTC)
+    db.session.commit()
+    return delivery_driver
+
+
+@pytest.fixture
 def sample_category(db):
     """Create a sample product category for testing."""
     category = ProductCategory(
@@ -547,6 +609,69 @@ def admin_auth_headers(admin_token):
     """Create admin authentication headers for API testing"""
     return {
         'Authorization': f'Bearer {admin_token}',
+        'Content-Type': 'application/json'
+    }
+
+
+@pytest.fixture
+def operator_user(db):
+    """Create an operator user for testing.
+
+    Phone +998901234571 fills the one gap left in the admin/driver phone
+    sequence (568 admin_user, 569 delivery_driver, 570 second_sample_user,
+    572 second_delivery_driver/driver2's DeliveryPerson) — `users.phone` is
+    UNIQUE, so reusing any of those would fail fixture setup with an
+    IntegrityError before a test combining this with them ever reached its
+    assertions.
+    """
+    user = User(
+        email='operator@example.com',
+        phone='+998901234571',
+        password_hash=hash_password('OperatorPassword123!'),
+        first_name='Operator',
+        last_name='User',
+        user_type=UserType.STAFF,
+        role=UserRole.OPERATOR,
+        is_verified=True,
+        created_at=datetime.now(UTC)
+    )
+    db.session.add(user)
+    db.session.commit()
+    return user
+
+
+@pytest.fixture
+def operator_token(app, operator_user):
+    """Create a valid JWT access token for an operator user."""
+    from flask_jwt_extended import create_access_token
+
+    with app.app_context():
+        return create_access_token(identity=str(operator_user.id))
+
+
+@pytest.fixture
+def operator_auth_headers(operator_token):
+    """Create operator authentication headers for API testing"""
+    return {
+        'Authorization': f'Bearer {operator_token}',
+        'Content-Type': 'application/json'
+    }
+
+
+@pytest.fixture
+def driver_token(app, delivery_driver):
+    """Create a valid JWT access token for a delivery-driver user."""
+    from flask_jwt_extended import create_access_token
+
+    with app.app_context():
+        return create_access_token(identity=str(delivery_driver.id))
+
+
+@pytest.fixture
+def driver_auth_headers(driver_token):
+    """Create delivery-driver authentication headers for API testing"""
+    return {
+        'Authorization': f'Bearer {driver_token}',
         'Content-Type': 'application/json'
     }
 

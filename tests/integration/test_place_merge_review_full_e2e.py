@@ -2958,7 +2958,15 @@ def test_the_api_contract_snapshot_still_lists_the_merge_preview_route(db):
     # 27,000. The estimate delegates to the same item-pricing loop
     # `create_phone_order` uses, so the figure shown and the figure charged are
     # ONE decision. Read-only; it creates no order.
-    assert len(routes) == 560
+    #
+    # 560 -> 566: the admin Dispatch map backend (`admin_dispatch` blueprint)
+    # added six new /api/v1/admin/dispatch/* routes -- GET .../snapshot, GET
+    # .../routes/<int:driver_id>/geometry, PUT .../routes/<int:driver_id>/stops,
+    # POST .../routes/<int:driver_id>/reoptimize, POST
+    # .../stops/<int:delivery_id>/assign, POST
+    # .../stops/<int:delivery_id>/unassign. Unrelated to place-merge; only the
+    # estate-wide count moved.
+    assert len(routes) == 566
     entry = next(r for r in routes if r["rule"] == "/api/v1/admin/place-groups/merge-preview")
     assert entry["methods"] == ["GET"]
     assert entry["endpoint"] == "admin.get_place_group_merge_preview"

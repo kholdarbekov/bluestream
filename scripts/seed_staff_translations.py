@@ -310,6 +310,11 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "#{number} buyurtma bekor qilindi.",
         "ru": "Заказ #{number} отменен.",
     },
+    "staff.notification.order_unassigned": {
+        "uz": "➖ {number}-buyurtma dispetcher tomonidan marshrutingizdan olib tashlandi. U yana umumiy ro'yxatga qaytdi.",
+        "ru": "➖ Заказ {number} снят с вашего маршрута диспетчером и возвращён в общий пул.",
+        "en": "➖ Order {number} was removed from your route by dispatch and returned to the pool.",
+    },
     "staff.delivery.next_stop": {
         "en": "Next stop",
         "uz": "Keyingi manzil",
@@ -334,6 +339,11 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "Route updated",
         "uz": "Yo'nalish yangilandi",
         "ru": "Маршрут обновлён",
+    },
+    "staff.route.locked_by_dispatch": {
+        "uz": "🗺 Marshrutingiz dispetcher tomonidan belgilangan, shuning uchun tartib o'zgarmadi.",
+        "ru": "🗺 Ваш маршрут задан диспетчером, поэтому порядок не изменился.",
+        "en": "🗺 Your route was set by dispatch, so the order is unchanged.",
     },
     "staff.delivery.share_location_prompt": {
         "en": "Tap the button below to share your current location — one tap is enough, you don't need live location. Share again whenever you accept a new order so the route stays accurate.",

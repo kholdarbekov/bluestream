@@ -123,6 +123,10 @@ const AdminLayout = ({ children }) => {
           label: t('ui.nav.delivery_reports', 'Reports')
         },
         {
+          key: '/delivery/dispatch',
+          label: t('ui.nav.dispatch', 'Dispatch')
+        },
+        {
           key: '/delivery-time-slots',
           label: t('ui.nav.time_slots')
         },

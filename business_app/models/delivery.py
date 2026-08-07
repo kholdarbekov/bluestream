@@ -211,7 +211,23 @@ class DeliveryRoute(db.Model, TimestampMixin):
     extra_data = Column(JSON, default={})
     notes = Column(Text, nullable=True)
 
-    delivery_person = relationship("User", backref="delivery_routes")
+    # --- Manual dispatch override -------------------------------------------
+    # Set when an admin edits the sequence by hand in the Dispatch map. While
+    # true, RouteOptimizationService.optimize_for_driver refuses to re-sequence
+    # the route unless the driver's ACTIVE DELIVERY SET itself changed.
+    manual_override = Column(Boolean, nullable=False, default=False, server_default="false")
+    # {"<delivery_id>": <0-based position in optimized_order>} — stops the admin
+    # locked to a slot. The optimiser sequences everything else around them.
+    pinned_stops = Column(JSON, default=dict)
+    overridden_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    overridden_at = Column(DateTime(timezone=True), nullable=True)
+
+    # `overridden_by` is the SECOND FK from this table to users, so neither
+    # relationship can infer its join condition any more. Without explicit
+    # foreign_keys= SQLAlchemy raises AmbiguousForeignKeysError at mapper
+    # configuration time and the whole app fails to boot.
+    delivery_person = relationship("User", foreign_keys=[delivery_person_id], backref="delivery_routes")
+    overridden_by_user = relationship("User", foreign_keys=[overridden_by])
 
     def get_completion_rate(self):
         """Calculate route completion rate"""
@@ -236,6 +252,12 @@ class DeliveryRoute(db.Model, TimestampMixin):
             "completion_rate": self.get_completion_rate(),
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "manual_override": bool(self.manual_override),
+            "pinned_stops": self.pinned_stops or {},
+            "optimized_order": self.optimized_order or [],
+            "overridden_by": self.overridden_by,
+            "overridden_by_name": (self.overridden_by_user.full_name if self.overridden_by_user else None),
+            "overridden_at": self.overridden_at.isoformat() if self.overridden_at else None,
             "delivery_person": (
                 {
                     "id": self.delivery_person.id,

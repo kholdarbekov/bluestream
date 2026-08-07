@@ -602,6 +602,48 @@
     "rule": "/api/v1/admin/delivery/time-slots/<int:slot_id>"
   },
   {
+    "endpoint": "admin_dispatch.dispatch_route_geometry",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/dispatch/routes/<int:driver_id>/geometry"
+  },
+  {
+    "endpoint": "admin_dispatch.dispatch_reoptimize",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/dispatch/routes/<int:driver_id>/reoptimize"
+  },
+  {
+    "endpoint": "admin_dispatch.dispatch_set_stops",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/dispatch/routes/<int:driver_id>/stops"
+  },
+  {
+    "endpoint": "admin_dispatch.dispatch_snapshot",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/dispatch/snapshot"
+  },
+  {
+    "endpoint": "admin_dispatch.dispatch_assign_stop",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/dispatch/stops/<int:delivery_id>/assign"
+  },
+  {
+    "endpoint": "admin_dispatch.dispatch_unassign_stop",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/dispatch/stops/<int:delivery_id>/unassign"
+  },
+  {
     "endpoint": "admin.adjust_inventory",
     "methods": [
       "POST"

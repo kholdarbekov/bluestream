@@ -517,10 +517,16 @@ def manual_optimize_route():
             412,
         )
 
-    service.optimize_for_driver(current_user_id, trigger="manual")
+    route = service.optimize_for_driver(current_user_id, trigger="manual")
 
-    # Reuse /delivery/active's response shape for a consistent UX.
-    return get_active_deliveries()
+    # Reuse /delivery/active's response shape for a consistent UX, plus one
+    # flag: when dispatch has locked the route the optimiser deliberately did
+    # nothing, and the bot must say so rather than render an unchanged list
+    # that looks like a failed tap.
+    response, status_code = get_active_deliveries()
+    payload = response.get_json()
+    payload.setdefault("data", {})["route_locked"] = bool(route is not None and route.manual_override)
+    return jsonify(payload), status_code
 
 
 @staff_bp.route("/delivery/history", methods=["GET"])

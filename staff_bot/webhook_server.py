@@ -253,6 +253,7 @@ class StaffWebhookServer:
             '/internal/order-assigned': _TokenBucket(rate_per_sec=20, burst=60),
             '/internal/order-reassigned': _TokenBucket(rate_per_sec=20, burst=60),
             '/internal/order-cancelled': _TokenBucket(rate_per_sec=20, burst=60),
+            '/internal/order-unassigned': _TokenBucket(rate_per_sec=20, burst=60),
             '/internal/route-updated': _TokenBucket(rate_per_sec=50, burst=120),
             '/internal/pool-insertion-suggestion': _TokenBucket(rate_per_sec=50, burst=120),
             '/internal/reload-translations': _TokenBucket(rate_per_sec=1, burst=5),
@@ -289,6 +290,7 @@ class StaffWebhookServer:
         self.app.router.add_post('/internal/order-assigned', self.order_assigned_handler)
         self.app.router.add_post('/internal/order-reassigned', self.order_reassigned_handler)
         self.app.router.add_post('/internal/order-cancelled', self.order_cancelled_handler)
+        self.app.router.add_post('/internal/order-unassigned', self.order_unassigned_handler)
         self.app.router.add_post('/internal/reload-translations', reload_translations_handler)
         self.app.router.add_post('/internal/route-updated', self.route_updated_handler)
         self.app.router.add_post('/internal/pool-insertion-suggestion', self.pool_insertion_suggestion_handler)
@@ -613,6 +615,49 @@ class StaffWebhookServer:
             return web.json_response({'success': True, 'message': 'Cancellation notification sent'})
         except Exception as e:
             logger.error(f"Error handling order cancelled notification: {e}", exc_info=True)
+            return web.json_response({'success': False, 'message': 'Internal server error'}, status=500)
+
+    async def order_unassigned_handler(self, request):
+        """
+        Tell a driver that dispatch removed an order from their route.
+        POST /internal/order-unassigned
+
+        Deliberately separate from /internal/order-cancelled: the order is not
+        cancelled, it is back in the pool for another driver. Same copy would be
+        a lie to the driver.
+        """
+        try:
+            if not await verify_webhook_signature(request):
+                return web.json_response({'success': False, 'message': 'Invalid signature'}, status=401)
+            limited = await self._check_rate_limit(request)
+            if limited:
+                return limited
+            if not self.bot_app:
+                return web.json_response({'success': False, 'message': 'Bot not initialized'}, status=503)
+
+            data, parse_error = await _parse_json_body(request)
+            if parse_error:
+                return parse_error
+            telegram_id = data.get('telegram_id')
+            order_info = data.get('order_info', {})
+            event_id = data.get('event_id')
+
+            if await self._is_duplicate_event(
+                event_id, f"order_unassigned:{telegram_id}:{order_info.get('order_number', '')}"
+            ):
+                return web.json_response({'success': True, 'message': 'Already processed'})
+
+            if not telegram_id:
+                return web.json_response({'success': True, 'message': 'No delivery person to notify'})
+
+            language = await i18n.get_user_language(int(telegram_id))
+            message = i18n.get('staff.notification.order_unassigned', language,
+                               number=order_info.get('order_number', ''))
+            await self.bot_app.bot.send_message(chat_id=telegram_id, text=message)
+
+            return web.json_response({'success': True, 'message': 'Unassignment notification sent'})
+        except Exception as e:
+            logger.error(f"Error handling order unassigned notification: {e}", exc_info=True)
             return web.json_response({'success': False, 'message': 'Internal server error'}, status=500)
 
     async def route_updated_handler(self, request):

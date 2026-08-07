@@ -72,6 +72,7 @@ class RouteOptimizationService:
         *,
         traffic: bool = True,
         trigger: str = "auto",
+        respect_override: bool = True,
     ) -> Optional[DeliveryRoute]:
         """Compute and persist the optimal sequence for `driver_id`.
 
@@ -84,10 +85,25 @@ class RouteOptimizationService:
             route optimization — without it any sequence we produce is just
             a guess. Caller is expected to prompt the driver to share
             location and try again.
+
+        When the route carries a dispatch override (`manual_override`) and
+        `respect_override` is True, the admin's sequence wins: see
+        `_apply_override_policy`. Pass `respect_override=False` for the
+        explicit "Reset to optimal" action, which clears the override.
         """
         deliveries = self._load_active_deliveries(driver_id)
         if not deliveries:
             logger.info("route_optimize: driver=%s has no active deliveries", driver_id)
+            # A spent override — every stop it locked has completed — must not
+            # outlive its delivery set and silently bind a future, unrelated one.
+            existing_route = self.current_route(driver_id)
+            if existing_route is not None and existing_route.manual_override:
+                existing_route.optimized_order = []
+                existing_route.manual_override = False
+                existing_route.pinned_stops = {}
+                existing_route.overridden_by = None
+                existing_route.overridden_at = None
+                db.session.commit()
             return None
 
         # Hard precondition: we need a real driver location. We accept both
@@ -102,6 +118,26 @@ class RouteOptimizationService:
             )
             return None
 
+        existing_route = self.current_route(driver_id)
+        pinned_by_delivery: Dict[str, int] = {}
+        keep_override = False
+
+        if existing_route is not None and existing_route.manual_override:
+            if respect_override:
+                settled = self._apply_override_policy(existing_route, deliveries)
+                if settled is not None:
+                    return settled
+                # Falls through: the set GREW, so we re-solve the unpinned
+                # stops and splice the admin's pins back into their slots.
+                pinned_by_delivery = dict(existing_route.pinned_stops or {})
+                keep_override = True
+            else:
+                existing_route.manual_override = False
+                existing_route.pinned_stops = {}
+                existing_route.overridden_by = None
+                existing_route.overridden_at = None
+                db.session.commit()
+
         self._geocode_missing_addresses(deliveries)
         deliveries = [d for d in deliveries if self._delivery_point(d) is not None]
         if not deliveries:
@@ -113,7 +149,18 @@ class RouteOptimizationService:
         all_points = [start_point] + delivery_points
 
         matrix, source = self.maps.get_distance_matrix(all_points, traffic=traffic)
-        order = self._solve_tsp(matrix, start_idx=0)
+
+        # Translate delivery-id pins into matrix indices (index 0 is the start).
+        pinned_positions = {
+            idx + 1: int(pinned_by_delivery[str(d.id)])
+            for idx, d in enumerate(deliveries)
+            if str(d.id) in pinned_by_delivery
+        }
+        if pinned_positions:
+            order = self._solve_with_pins(matrix, pinned_positions, start_idx=0)
+        else:
+            order = self._solve_tsp(matrix, start_idx=0)
+
         # `order` includes index 0 (start). Strip it; the rest are delivery indices in [1..N].
         route_indices = [i - 1 for i in order if i != 0]
         optimized_delivery_ids = [deliveries[i].id for i in route_indices]
@@ -126,6 +173,7 @@ class RouteOptimizationService:
             optimized_delivery_ids=optimized_delivery_ids,
             total_km=total_km,
             total_min=total_min,
+            keep_override=keep_override,
             extra={
                 "matrix_source": source,
                 "start_source": start_source,
@@ -136,7 +184,7 @@ class RouteOptimizationService:
         )
 
         logger.info(
-            "route_optimized driver=%s n=%d total_km=%.2f total_min=%.1f matrix=%s start=%s trigger=%s",
+            "route_optimized driver=%s n=%d total_km=%.2f total_min=%.1f matrix=%s start=%s trigger=%s pins=%d",
             driver_id,
             len(optimized_delivery_ids),
             total_km,
@@ -144,8 +192,55 @@ class RouteOptimizationService:
             source,
             start_source,
             trigger,
+            len(pinned_positions),
         )
         return route
+
+    def _apply_override_policy(
+        self,
+        route: DeliveryRoute,
+        deliveries: List[Delivery],
+    ) -> Optional[DeliveryRoute]:
+        """Decide what an overridden route does about the current delivery set.
+
+        Returns the settled route when nothing further is needed, or None when
+        the caller must continue into a real re-solve (the set GREW).
+
+        - Set unchanged  -> skip; the admin's sequence stands.
+        - Set only shrank -> drop the departed stops, keep the remaining order
+          verbatim, clamp the pins. No solver and no distance-matrix call: the
+          admin ordered these stops deliberately and re-solving would discard
+          that for a stop that simply completed.
+        """
+        active_ids = {d.id for d in deliveries}
+        existing = [int(did) for did in (route.optimized_order or [])]
+        existing_set = set(existing)
+
+        if existing_set == active_ids:
+            logger.info(
+                "route_optimize_skipped_manual_override driver=%s route=%s n=%d",
+                route.delivery_person_id,
+                route.id,
+                len(existing),
+            )
+            return route
+
+        added = active_ids - existing_set
+        if not added:
+            surviving = [did for did in existing if did in active_ids]
+            route.optimized_order = surviving
+            route.pinned_stops = self.clamp_pins(route.pinned_stops, surviving)
+            db.session.commit()
+            logger.info(
+                "route_override_shrunk driver=%s route=%s removed=%s remaining=%d",
+                route.delivery_person_id,
+                route.id,
+                sorted(existing_set - active_ids),
+                len(surviving),
+            )
+            return route
+
+        return None
 
     def compute_insertion_cost(
         self,
@@ -238,6 +333,53 @@ class RouteOptimizationService:
             .order_by(Delivery.id.asc())
             .all()
         )
+
+    def current_route(self, driver_id: int) -> Optional[DeliveryRoute]:
+        """Today's route row for this driver, newest first. Public: the dispatch
+        read/write services need the same row this service upserts into."""
+        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        return (
+            DeliveryRoute.query.filter(
+                DeliveryRoute.delivery_person_id == driver_id,
+                DeliveryRoute.route_date >= today_start,
+            )
+            .order_by(DeliveryRoute.created_at.desc())
+            .first()
+        )
+
+    def active_deliveries(self, driver_id: int) -> List[Delivery]:
+        """The driver's active delivery set — public.
+
+        RouteEditService's staleness guard MUST use the same definition of
+        "active" this service optimises over. A second, divergent copy of that
+        filter is a correctness bug waiting to happen, so it is exposed rather
+        than reimplemented.
+        """
+        return self._load_active_deliveries(driver_id)
+
+    def delivery_point(self, delivery: Delivery) -> Optional[Point]:
+        """A delivery's destination coordinates, or None — public for the same
+        reason as `active_deliveries`."""
+        return self._delivery_point(delivery)
+
+    @staticmethod
+    def clamp_pins(pinned: Optional[Dict[str, Any]], ordered_ids: List[int]) -> Dict[str, int]:
+        """Drop pins whose delivery left the route, then re-anchor each
+        surviving pin to its actual 0-based index within `ordered_ids`.
+
+        Pin values are a literal position within `optimized_order` (Task 1's
+        contract), so after a shrink the correct new value is wherever that
+        delivery actually landed in the shrunk sequence — NOT a rank among
+        the other surviving pins. Without this, a pin recorded at slot 2 on
+        a 3-stop route would point past the end of a 2-stop one, and
+        `_solve_with_pins` would clamp it to "last" — silently promoting a
+        mid-route pin to the final stop.
+        """
+        if not pinned:
+            return {}
+        alive = {str(did) for did in ordered_ids}
+        index_of = {str(did): idx for idx, did in enumerate(ordered_ids)}
+        return {k: index_of[str(k)] for k in pinned if str(k) in alive}
 
     def _delivery_point(self, delivery: Delivery) -> Optional[Point]:
         order = delivery.order
@@ -496,6 +638,106 @@ class RouteOptimizationService:
             best_cost = candidate_cost
         return best
 
+    @classmethod
+    def _solve_with_pins(
+        cls,
+        matrix: Dict[Tuple[int, int], Dict[str, float]],
+        pinned_positions: Dict[int, int],
+        *,
+        start_idx: int = 0,
+        weight: str = "duration_minutes",
+    ) -> List[int]:
+        """Open-path TSP that honours fixed positions for pinned nodes.
+
+        `pinned_positions` maps a matrix index to its 0-based slot among the
+        DELIVERY nodes (start excluded). Returns a path beginning with
+        `start_idx`, so a node pinned to slot 0 lands at path[1].
+
+        With no pins this delegates straight to `_solve_tsp` and is therefore
+        byte-identical to the unconstrained behaviour. With pins it is an
+        explicitly approximate three-step construction — solve the free nodes
+        optimally, splice the pinned ones into their slots, then improve with a
+        2-opt that may not move a pinned element. It is NOT a claimed optimum
+        under the constraint; honouring the admin's pin is the point.
+        """
+        n = max(i for i, _ in matrix.keys()) + 1 if matrix else 0
+        if n <= 1:
+            return [start_idx] if n == 1 else []
+        if not pinned_positions:
+            return cls._solve_tsp(matrix, start_idx=start_idx, weight=weight)
+
+        pinned_nodes = {int(node) for node in pinned_positions}
+        free_nodes = [v for v in range(n) if v != start_idx and v not in pinned_nodes]
+
+        # 1. Optimal sequence over start + free nodes. `_solve_tsp` infers its
+        #    node count from max(matrix key), so the sub-problem is re-indexed
+        #    into a compact 0..k space rather than passed sparsely.
+        if free_nodes:
+            local_nodes = [start_idx] + free_nodes
+            local_of = {g: i for i, g in enumerate(local_nodes)}
+            local_matrix = {
+                (local_of[a], local_of[b]): matrix[(a, b)] for a in local_nodes for b in local_nodes if a != b
+            }
+            local_order = cls._solve_tsp(local_matrix, start_idx=0, weight=weight)
+            sequence = [local_nodes[i] for i in local_order if i != 0]
+        else:
+            sequence = []
+
+        # 2. Splice pinned nodes into their slots, lowest slot first so each
+        #    insertion index means what the admin saw. Out-of-range slots clamp.
+        #    Skip pins whose keys are start_idx or out of matrix range; a
+        #    duplicate start_idx in sequence would violate the path invariant.
+        for node, pos in sorted(pinned_positions.items(), key=lambda kv: (kv[1], kv[0])):
+            node = int(node)
+            if node == start_idx or node < 0 or node >= n:
+                continue
+            idx = max(0, min(int(pos), len(sequence)))
+            sequence.insert(idx, node)
+
+        # 3. Constrained 2-opt over the whole path with pinned slots frozen.
+        path = [start_idx] + sequence
+        frozen = {i + 1 for i, node in enumerate(sequence) if node in pinned_nodes}
+        return cls._two_opt_frozen(matrix, path, frozen_positions=frozen, weight=weight)
+
+    @staticmethod
+    def _two_opt_frozen(
+        matrix: Dict[Tuple[int, int], Dict[str, float]],
+        path: List[int],
+        frozen_positions: set,
+        weight: str = "duration_minutes",
+    ) -> List[int]:
+        """Best-improvement 2-opt that never relocates a frozen position.
+
+        `frozen_positions` are indices INTO `path`. A 2-opt move reverses the
+        slice [i..k]; any element inside that slice moves, so a candidate whose
+        slice covers a frozen index is rejected outright. Elements outside the
+        slice keep their index, which is exactly the invariant pins need.
+        """
+
+        def path_cost(p: List[int]) -> float:
+            return sum(matrix[(p[i], p[i + 1])][weight] for i in range(len(p) - 1))
+
+        best = list(path)
+        best_cost = path_cost(best)
+        max_passes = 20
+        for _ in range(max_passes):
+            candidate: Optional[List[int]] = None
+            candidate_cost = best_cost
+            for i in range(1, len(best) - 1):
+                for k in range(i + 1, len(best)):
+                    if any(pos in frozen_positions for pos in range(i, k + 1)):
+                        continue
+                    new_path = best[:i] + best[i : k + 1][::-1] + best[k + 1 :]
+                    new_cost = path_cost(new_path)
+                    if new_cost + 1e-9 < candidate_cost:
+                        candidate = new_path
+                        candidate_cost = new_cost
+            if candidate is None:
+                break
+            best = candidate
+            best_cost = candidate_cost
+        return best
+
     @staticmethod
     def _sum_path_km(matrix: Dict[Tuple[int, int], Dict[str, float]], path: List[int]) -> float:
         return sum(matrix[(path[i], path[i + 1])]["distance_km"] for i in range(len(path) - 1))
@@ -523,6 +765,7 @@ class RouteOptimizationService:
         total_km: float,
         total_min: float,
         extra: Dict[str, Any],
+        keep_override: bool = False,
     ) -> DeliveryRoute:
         today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
         route = (
@@ -549,6 +792,17 @@ class RouteOptimizationService:
         route.optimized_order = optimized_delivery_ids
         route.total_distance_km = total_km
         route.estimated_duration_minutes = int(round(total_min))
+        if keep_override:
+            # The admin's pins were honoured in the sequence above; keep the
+            # lock (and re-clamp, since the set changed) so the next trigger
+            # doesn't quietly re-sequence what dispatch decided.
+            route.manual_override = True
+            route.pinned_stops = self.clamp_pins(route.pinned_stops, optimized_delivery_ids)
+        else:
+            route.manual_override = False
+            route.pinned_stops = {}
+            route.overridden_by = None
+            route.overridden_at = None
         merged_extra = dict(route.extra_data or {})
         merged_extra.update(extra)
         merged_extra["last_optimized_at"] = datetime.now(timezone.utc).isoformat()
@@ -613,6 +867,20 @@ class RouteOptimizationService:
 
     def _location_status(self, driver_id: int) -> str:
         person = DeliveryPerson.query.filter_by(user_id=driver_id).first()
+        return self.location_status_for_person(person)
+
+    @staticmethod
+    def location_status_for_person(person: Optional[DeliveryPerson]) -> str:
+        """Freshness status for an ALREADY-LOADED `DeliveryPerson` row.
+
+        Same rule as `_location_status`/`location_status` — factored out so a
+        caller that already has the row in hand (e.g. DispatchService._drivers,
+        which loads every active driver in one query) doesn't pay a second
+        per-driver query just to reach the same three values. `_location_status`
+        delegates here too, so there is exactly one implementation of this rule;
+        if it ever drifted, the dispatch map would silently disagree with what
+        the driver's own bot shows.
+        """
         if not person or person.current_location_lat is None or person.last_location_update is None:
             return "missing"
         fresh_seconds = current_app.config.get("DRIVER_LOCATION_FRESH_SECONDS", LOCATION_FRESH_DEFAULT_SECONDS)

@@ -194,3 +194,23 @@ def notify_staff_order_cancelled(self, telegram_id: str, order_info: dict):
             "order_info": order_info,
         },
     )
+
+
+@shared_task(name="staff.notify_order_unassigned", bind=True)
+def notify_staff_order_unassigned(self, telegram_id: str, order_info: dict):
+    """Tell a driver that dispatch took an order off their route.
+
+    Distinct from `notify_staff_order_cancelled`: the order is NOT cancelled —
+    it went back to the pool at CONFIRMED and someone else will take it. Reusing
+    the cancellation copy here would tell the driver something false.
+    """
+    if not telegram_id:
+        return
+    _send_staff_webhook(
+        "/internal/order-unassigned",
+        {
+            "event_id": f"order_unassigned:{self.request.id}",
+            "telegram_id": telegram_id,
+            "order_info": order_info,
+        },
+    )

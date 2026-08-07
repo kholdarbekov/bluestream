@@ -476,6 +476,17 @@ class ActiveDeliveryHandler(BaseHandler):
                     await self._handle_api_response_error(update, response, language)
                 return
 
+            # Dispatch has locked this route, so the backend deliberately did
+            # nothing. Say so: an unchanged list after a deliberate tap
+            # otherwise reads as the button being broken.
+            if (response.data or {}).get("route_locked"):
+                await query.answer(
+                    i18n.get('staff.route.locked_by_dispatch', language),
+                    show_alert=True,
+                )
+                await self.show_active_deliveries(update, context)
+                return
+
             # Optimization ran successfully — confirm and re-render.
             await query.answer(
                 i18n.get('staff.delivery.route_updated_toast', language)

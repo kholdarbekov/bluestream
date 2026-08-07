@@ -113,6 +113,7 @@ from business_app.utils.api_responses import (
 from business_app.utils.bot_webhook import trigger_translation_reload
 from business_app.utils.pydantic_helpers import validate_json_with_model
 from business_app.utils.request_helpers import parse_bool_arg
+from business_app.utils.staff_order_info import build_staff_order_info as _build_staff_order_info
 from business_app.serializers.subscription_serializers import (
     AdminCreateSubscriptionRequest,
     AdminUpdateSubscriptionRequest,
@@ -3906,7 +3907,12 @@ def get_delivery_route(route_id):
 
         # Get deliveries for this route
         if route.optimized_order:
-            deliveries = Delivery.query.filter(Delivery.order_id.in_(route.optimized_order)).all()
+            # optimized_order holds DELIVERY ids (see RouteOptimizationService
+            # ._upsert_route), not order ids. Matching them against
+            # Delivery.order_id returned the wrong rows — or none at all.
+            deliveries = Delivery.query.filter(Delivery.id.in_(route.optimized_order)).all()
+            by_id = {d.id: d for d in deliveries}
+            ordered = [by_id[did] for did in route.optimized_order if did in by_id]
 
             route_dict["deliveries"] = [
                 {
@@ -3920,7 +3926,7 @@ def get_delivery_route(route_id):
                     "customer_phone": d.order.user.phone if d.order and d.order.user else None,
                     "delivered_at": d.delivered_at.isoformat() if d.delivered_at else None,
                 }
-                for d in deliveries
+                for d in ordered
             ]
         else:
             route_dict["deliveries"] = []
@@ -11609,24 +11615,6 @@ def _serialize_delivery_person_admin_items(delivery_people):
         )
         for person in delivery_people
     ]
-
-
-def _build_staff_order_info(delivery: Delivery) -> dict:
-    """Build compact order payload for staff assignment notifications."""
-    order = delivery.order
-    if not order:
-        return {"delivery_id": delivery.id, "order_id": delivery.order_id}
-
-    address = order.delivery_address.full_address if order.delivery_address else None
-    return {
-        "delivery_id": delivery.id,
-        "order_id": order.id,
-        "order_number": order.order_number,
-        "status": order.status.value if hasattr(order.status, "value") else order.status,
-        "total_amount": float(order.total_amount or 0),
-        "payment_method": order.payment_method.value if getattr(order, "payment_method", None) else None,
-        "delivery_address": address,
-    }
 
 
 @admin_bp.route("/staff/delivery-persons", methods=["POST"])

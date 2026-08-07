@@ -618,8 +618,14 @@ class OrderHandlers(BaseHandler):
 
             # Quick Order auto-selected an address (last order's or default).
             # Read it before deciding whether to show a picker.
-            quick_order_address_id = context.user_data.get('quick_order_address_id')
-            checkout_source = context.user_data.get('checkout_source', 'cart')
+            # Quick Order hands these over for exactly ONE checkout render, so
+            # they are consumed here — in the only place that reads them —
+            # rather than cleared by each caller. `cart_handler` used to do the
+            # clearing, but the cart's own button emits `checkout`, which bot.py
+            # routes straight here; that route bypassed the cleanup and let a
+            # Quick Order's address hijack the next cart checkout.
+            quick_order_address_id = context.user_data.pop('quick_order_address_id', None)
+            checkout_source = context.user_data.pop('checkout_source', 'cart')
 
             # Quick Order semantics (per UX requirements):
             #   * Use the implicit address (from prior order / default).
@@ -644,6 +650,7 @@ class OrderHandlers(BaseHandler):
                 await self._show_address_confirmation(
                     update, context, selected_address, language,
                     back_callback='menu_products',
+                    show_change=True,
                 )
                 return
 
@@ -682,6 +689,21 @@ class OrderHandlers(BaseHandler):
         except Exception as e:
             await self._handle_error(update, exc=e, operation="address_handler")
 
+    async def checkout_change_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Leave the auto-selected address behind and show the full picker.
+
+        The Quick Order card names one address; this is how a customer reaches
+        the others. Dropping the Quick Order pick FIRST is load-bearing —
+        checkout_handler would otherwise consume it and re-render the very card
+        the customer is trying to escape.
+        """
+        try:
+            context.user_data.pop('quick_order_address_id', None)
+            context.user_data.pop('checkout_source', None)
+            await self.checkout_handler(update, context)
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="checkout_change_address")
+
     async def _show_address_confirmation(
         self,
         update: Update,
@@ -690,6 +712,7 @@ class OrderHandlers(BaseHandler):
         language: str,
         *,
         back_callback: str,
+        show_change: bool = False,
     ) -> None:
         """Render the 'Delivering to: …' confirmation step.
 
@@ -698,6 +721,10 @@ class OrderHandlers(BaseHandler):
         addresses. `back_callback` controls where Back navigates — for the
         cart-driven flow it's 'back_to_cart'; for Quick Order it's the
         products menu, since that's the screen the user actually came from.
+
+        `show_change` adds the 'Change address' button. It belongs only on the
+        Quick Order variant: with a single saved address there is nothing to
+        change to, and the button would dead-end on the same address.
         """
         title = address.get('title') or i18n.get('telegram.address.default_title', language)
         full_address = address.get('full_address') or ''
@@ -706,7 +733,7 @@ class OrderHandlers(BaseHandler):
         if full_address:
             address_text += f"\n{full_address}"
         keyboard = OrderKeyboards.single_address_confirm(
-            address, language, back_callback=back_callback,
+            address, language, back_callback=back_callback, show_change=show_change,
         )
 
         if update.callback_query:

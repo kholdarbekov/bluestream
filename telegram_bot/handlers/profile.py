@@ -4,8 +4,8 @@ User profile and registration handlers
 import logging
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from typing import Dict, Any
-from telegram import constants, Update, ReplyKeyboardRemove
+from typing import Callable, Dict, Any, NamedTuple
+from telegram import constants, InlineKeyboardMarkup, Update, ReplyKeyboardRemove
 from telegram.helpers import escape_markdown
 from telegram.ext import ContextTypes, ConversationHandler
 from telegram.error import BadRequest
@@ -36,15 +36,100 @@ from handlers.base import BaseHandler
 
 logger = logging.getLogger('handlers')
 
-# Conversation states
-# NOTE: REGISTER_OTP is APPENDED as the last element so every pre-existing
-# constant keeps its integer value (purely additive — see Task 12).
+# Conversation states.
+# NOTE: renumbering these is safe. No `persistence` is configured on the
+# Application (see telegram_bot/bot.py), so conversation state lives only in
+# memory and already resets on every restart — no stored state can survive a
+# deploy carrying a different numbering.
 (SELECT_LANGUAGE, PHONE, ADDRESS_LOCATION, ADDRESS_TITLE,
  ADDRESS_REGION, ADDRESS_DISTRICT, ADDRESS_STREET, ADDRESS_BUILDING,
- ADDRESS_APARTMENT, ADDRESS_FLOOR, ADDRESS_ENTRANCE,
+ ADDRESS_APARTMENT, ADDRESS_FLOOR,
  ADDRESS_DELIVERY_INSTRUCTIONS, ADDRESS_GEOCODE_CONFIRM,
  PHONE_VERIFY_PHONE, PHONE_VERIFY_NAME,
- LINK_ACCOUNT_CONFIRM, LINK_ACCOUNT_OTP, REGISTER_OTP) = range(18)
+ LINK_ACCOUNT_CONFIRM, LINK_ACCOUNT_OTP, REGISTER_OTP) = range(17)
+
+# Column widths of UserAddress.apartment_number / floor_number (both String(20)).
+# A longer answer reaches Postgres as a DataError -> 500, and the customer loses
+# the whole address after five steps, so the bot rejects it first.
+ADDRESS_DETAIL_MAX_LENGTH = 20
+
+class AddressStep(NamedTuple):
+    """One step of the optional address-detail chain.
+
+    Named rather than a bare tuple because all three members are read at
+    unrelated call sites: the prompt key by the prompt helper, the keyboard by
+    both the prompt and the too-long re-prompt, and the state by every caller
+    that returns it to the ConversationHandler.
+    """
+
+    prompt_key: str
+    keyboard: Callable[[str], InlineKeyboardMarkup]
+    state: int
+
+
+# SSOT for the optional-detail chain both address flows converge on.
+# There is deliberately no 'entrance' step. UserAddress has no entrance column,
+# so entrance is captured as free text by the delivery-instructions prompt.
+_ADDRESS_STEPS = {
+    'building': AddressStep(
+        'telegram.address.enter_building',
+        lambda language: ProfileKeyboards.optional_field_keyboard('building', language),
+        ADDRESS_BUILDING,
+    ),
+    'apartment': AddressStep(
+        'telegram.address.enter_apartment',
+        lambda language: ProfileKeyboards.optional_field_keyboard('apartment', language),
+        ADDRESS_APARTMENT,
+    ),
+    'floor': AddressStep(
+        'telegram.address.enter_floor',
+        lambda language: ProfileKeyboards.optional_field_keyboard('floor', language),
+        ADDRESS_FLOOR,
+    ),
+    'delivery_instructions': AddressStep(
+        'telegram.address.enter_delivery_instructions',
+        ProfileKeyboards.delivery_instructions_keyboard,
+        ADDRESS_DELIVERY_INSTRUCTIONS,
+    ),
+}
+
+# Where a Skip tap lands. Skipping the building number means there is no building
+# to be inside, so apartment and floor are skipped along with it (private house).
+# Street is required and renders no Skip button; it stays here as a safety net.
+_SKIP_TARGETS = {
+    'street': 'building',
+    'building': 'delivery_instructions',
+    'apartment': 'floor',
+    'floor': 'delivery_instructions',
+}
+
+# Which key in temp_address_data each step writes. Skip CLEARS it, so Skip means
+# what it says: retry_geocode reruns the whole chain, so a value typed before the
+# retry would otherwise survive a later Skip and still be saved.
+_ADDRESS_FIELD_DATA_KEYS = {
+    'street': 'street_address',
+    'building': 'building_number',
+    'apartment': 'apartment_number',
+    'floor': 'floor_number',
+    'delivery_instructions': 'delivery_instructions',
+}
+
+
+def _is_shared_pin_address(context) -> bool:
+    """True when this address came from a shared map pin rather than manual entry.
+
+    The two flows meet at several steps but diverge on what comes next, and this
+    is the single fact that tells them apart. It decides whether the title step
+    continues into the detail chain or saves, and whether the terminal step saves
+    directly or geocodes first — so it is defined once, here.
+
+    Checking coordinates alongside this would be redundant: `location_source`
+    is set to 'shared' in exactly one place (`location_received`), in the same
+    block that stores latitude and longitude, and only after the delivery-zone
+    guard has rejected a (0, 0)-style falsy pin.
+    """
+    addr_data = context.user_data.get('temp_address_data', {})
+    return addr_data.get('location_source') == 'shared'
 
 
 class ProfileHandlers(BaseHandler):
@@ -1804,29 +1889,8 @@ class ProfileHandlers(BaseHandler):
             logger.error(f"Full traceback: {traceback.format_exc()}")
             return ConversationHandler.END
 
-    async def address_text_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle address as text"""
-        try:
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
-            address_text = update.message.text.strip()
-
-            # Store address text temporarily
-            context.user_data['temp_address'] = address_text
-
-            await update.message.reply_text(
-                i18n.get('telegram.address.title_received', language),
-                reply_markup=ReplyKeyboardRemove()
-            )
-
-            return ADDRESS_TITLE
-
-        except Exception as e:
-            logger.error(f"Error handling address text: {e}")
-            return ConversationHandler.END
-
     async def address_title_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle address title from text input"""
+        """Handle address title typed as free text"""
         try:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
@@ -1834,62 +1898,19 @@ class ProfileHandlers(BaseHandler):
 
             logger.info(f"User {user_id} entered title: {title}")
 
-            # Store title in temp address data
             if 'temp_address_data' not in context.user_data:
                 context.user_data['temp_address_data'] = {}
             context.user_data['temp_address_data']['title'] = title
 
-            # Check if this is from location sharing flow (has coordinates already)
-            addr_data = context.user_data['temp_address_data']
-            if addr_data.get('latitude') and addr_data.get('longitude'):
-                # Location already set, ask for delivery instructions
-                instructions_prompt = i18n.get('telegram.address.enter_delivery_instructions', language)
-                keyboard = ProfileKeyboards.delivery_instructions_keyboard(language)
+            # The title step sits at a different position in each flow: a
+            # shared pin asks for the title early, right after the location,
+            # so titling here still has apartment/floor/instructions ahead
+            # of it. A manually typed address only reaches this step LAST,
+            # after geocode confirmation, so titling here is the save.
+            if _is_shared_pin_address(context):
+                return await self._prompt_address_step(update, language, 'apartment')
 
-                await update.message.reply_text(
-                    instructions_prompt,
-                    reply_markup=keyboard
-                )
-
-                return ADDRESS_DELIVERY_INSTRUCTIONS
-            else:
-                # Legacy flow - save directly
-                # Prepare address data
-                address_data = {
-                    'title': title,
-                    'full_address': context.user_data.get('temp_address', i18n.get('telegram.address.location_based_fallback', language))
-                }
-
-                # Add coordinates if available from old flow
-                if 'temp_location' in context.user_data:
-                    loc = context.user_data['temp_location']
-                    address_data['latitude'] = loc['latitude']
-                    address_data['longitude'] = loc['longitude']
-
-                # Save address via API
-                async with api_client as client:
-                    user_token = await get_auth_token(update, context, client)
-                    if user_token:
-                        response = await client.add_user_address(user_token, address_data)
-                        if response.success:
-                            success_text = i18n.get('telegram.address.added_successfully', language, title=title)
-                        else:
-                            success_text = i18n.get('telegram.address.add_failed', language)
-                    else:
-                        success_text = i18n.get('telegram.auth.failed', language)
-
-                keyboard = await main_menu_for(update.effective_user.id, language)
-                await update.message.reply_text(
-                    text=success_text,
-                    reply_markup=keyboard
-                )
-
-                # Clear temporary data
-                context.user_data.pop('temp_location', None)
-                context.user_data.pop('temp_address', None)
-                context.user_data.pop('temp_address_data', None)
-
-                return ConversationHandler.END
+            return await self.save_address_final(update, context)
 
         except Exception as e:
             logger.error(f"Error handling address title: {e}")
@@ -2109,6 +2130,44 @@ class ProfileHandlers(BaseHandler):
             logger.error(f"Traceback: {traceback.format_exc()}")
             return ConversationHandler.END
 
+    async def _prompt_address_step(self, update: Update, language: str, field: str):
+        """Send one optional address step's prompt and return its state.
+
+        Both address flows converge on this chain, and every step is reachable
+        from either a typed answer (message) or a Skip tap (callback), so the
+        send path is derived from the update rather than passed by each caller.
+        """
+        step = _ADDRESS_STEPS[field]
+
+        text = i18n.get(step.prompt_key, language)
+        keyboard = step.keyboard(language)
+
+        if update.callback_query is not None:
+            await update.callback_query.edit_message_text(text, reply_markup=keyboard)
+        else:
+            await update.message.reply_text(text, reply_markup=keyboard)
+
+        return step.state
+
+    async def _reject_overlong_detail(self, update: Update, language: str, field: str):
+        """Re-prompt the same step when an answer is too long for its column.
+
+        Without this the value reaches Postgres as a DataError, the save 500s,
+        and the customer loses every answer they gave.
+        """
+        step = _ADDRESS_STEPS[field]
+
+        await update.message.reply_text(
+            i18n.get(
+                'telegram.address.field_too_long',
+                language,
+                max_length=ADDRESS_DETAIL_MAX_LENGTH,
+            ),
+            reply_markup=step.keyboard(language),
+        )
+
+        return step.state
+
     async def street_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle street name input"""
         try:
@@ -2119,16 +2178,7 @@ class ProfileHandlers(BaseHandler):
             logger.info(f"User {user_id} entered street: {street}")
             context.user_data['temp_address_data']['street_address'] = street
 
-            # Ask for building number
-            building_prompt = i18n.get('telegram.address.enter_building', language)
-            keyboard = ProfileKeyboards.optional_field_keyboard('building', language)
-
-            await update.message.reply_text(
-                building_prompt,
-                reply_markup=keyboard
-            )
-
-            return ADDRESS_BUILDING
+            return await self._prompt_address_step(update, language, 'building')
 
         except Exception as e:
             logger.error(f"Error in street_received: {e}")
@@ -2144,16 +2194,7 @@ class ProfileHandlers(BaseHandler):
             logger.info(f"User {user_id} entered building: {building}")
             context.user_data['temp_address_data']['building_number'] = building
 
-            # Ask for apartment number
-            apartment_prompt = i18n.get('telegram.address.enter_apartment', language)
-            keyboard = ProfileKeyboards.optional_field_keyboard('apartment', language)
-
-            await update.message.reply_text(
-                apartment_prompt,
-                reply_markup=keyboard
-            )
-
-            return ADDRESS_APARTMENT
+            return await self._prompt_address_step(update, language, 'apartment')
 
         except Exception as e:
             logger.error(f"Error in building_received: {e}")
@@ -2166,19 +2207,14 @@ class ProfileHandlers(BaseHandler):
             language = await i18n.get_user_language(user_id)
             apartment = update.message.text.strip()
 
+            if len(apartment) > ADDRESS_DETAIL_MAX_LENGTH:
+                logger.info(f"User {user_id} gave an over-long apartment ({len(apartment)} chars)")
+                return await self._reject_overlong_detail(update, language, 'apartment')
+
             logger.info(f"User {user_id} entered apartment: {apartment}")
             context.user_data['temp_address_data']['apartment_number'] = apartment
 
-            # Ask for floor number
-            floor_prompt = i18n.get('telegram.address.enter_floor', language)
-            keyboard = ProfileKeyboards.optional_field_keyboard('floor', language)
-
-            await update.message.reply_text(
-                floor_prompt,
-                reply_markup=keyboard
-            )
-
-            return ADDRESS_FLOOR
+            return await self._prompt_address_step(update, language, 'floor')
 
         except Exception as e:
             logger.error(f"Error in apartment_received: {e}")
@@ -2191,47 +2227,17 @@ class ProfileHandlers(BaseHandler):
             language = await i18n.get_user_language(user_id)
             floor = update.message.text.strip()
 
+            if len(floor) > ADDRESS_DETAIL_MAX_LENGTH:
+                logger.info(f"User {user_id} gave an over-long floor ({len(floor)} chars)")
+                return await self._reject_overlong_detail(update, language, 'floor')
+
             logger.info(f"User {user_id} entered floor: {floor}")
             context.user_data['temp_address_data']['floor_number'] = floor
 
-            # Ask for entrance number
-            entrance_prompt = i18n.get('telegram.address.enter_entrance', language)
-            keyboard = ProfileKeyboards.optional_field_keyboard('entrance', language)
-
-            await update.message.reply_text(
-                entrance_prompt,
-                reply_markup=keyboard
-            )
-
-            return ADDRESS_ENTRANCE
+            return await self._prompt_address_step(update, language, 'delivery_instructions')
 
         except Exception as e:
             logger.error(f"Error in floor_received: {e}")
-            return ConversationHandler.END
-
-    async def entrance_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle entrance number input"""
-        try:
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
-            entrance = update.message.text.strip()
-
-            logger.info(f"User {user_id} entered entrance: {entrance}")
-            context.user_data['temp_address_data']['entrance'] = entrance
-
-            # Ask for delivery instructions
-            instructions_prompt = i18n.get('telegram.address.enter_delivery_instructions', language)
-            keyboard = ProfileKeyboards.delivery_instructions_keyboard(language)
-
-            await update.message.reply_text(
-                instructions_prompt,
-                reply_markup=keyboard
-            )
-
-            return ADDRESS_DELIVERY_INSTRUCTIONS
-
-        except Exception as e:
-            logger.error(f"Error in entrance_received: {e}")
             return ConversationHandler.END
 
     async def delivery_instructions_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2244,10 +2250,9 @@ class ProfileHandlers(BaseHandler):
             logger.info(f"User {user_id} entered delivery instructions")
             context.user_data['temp_address_data']['delivery_instructions'] = instructions
 
-            # Check if we already have coordinates from location sharing
-            addr_data = context.user_data.get('temp_address_data', {})
-            if addr_data.get('latitude') and addr_data.get('longitude') and addr_data.get('location_source') == 'shared':
-                # Location was shared - save directly without geocoding
+            # A shared pin is already an exact coordinate, so it saves straight
+            # away; a manually typed address still has to be geocoded first.
+            if _is_shared_pin_address(context):
                 logger.info(f"Location already set from sharing, saving address directly")
                 return await self.save_address_final(update, context)
             else:
@@ -2259,68 +2264,39 @@ class ProfileHandlers(BaseHandler):
             return ConversationHandler.END
 
     async def skip_field_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle skip button for optional fields"""
+        """Handle the Skip button on an optional address field"""
         try:
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            # Extract field name from callback data
             field_name = query.data.replace('skip_', '')
             logger.info(f"User {user_id} skipped field: {field_name}")
 
             await query.answer()
 
-            # Determine next state based on skipped field
-            # Note: Street field is no longer skippable - it's required
-            if field_name == 'street':
-                # This case should not happen anymore since street has no skip button
-                # But keep it here for safety - redirect to building
-                logger.warning(f"Street skip attempted but street is required")
-                building_prompt = i18n.get('telegram.address.enter_building', language)
-                keyboard = ProfileKeyboards.optional_field_keyboard('building', language)
-                await query.edit_message_text(building_prompt, reply_markup=keyboard)
-                return ADDRESS_BUILDING
+            # Skip means "I have no value for this". retry_geocode reruns the
+            # whole chain, so an answer typed before the retry would otherwise
+            # survive the Skip and still be saved.
+            data_key = _ADDRESS_FIELD_DATA_KEYS.get(field_name)
+            if data_key:
+                context.user_data.get('temp_address_data', {}).pop(data_key, None)
 
-            elif field_name == 'building':
-                # Skip to delivery instructions
-                instructions_prompt = i18n.get('telegram.address.enter_delivery_instructions', language)
-                keyboard = ProfileKeyboards.delivery_instructions_keyboard(language)
-                await query.edit_message_text(instructions_prompt, reply_markup=keyboard)
-                return ADDRESS_DELIVERY_INSTRUCTIONS
-
-            elif field_name == 'apartment':
-                floor_prompt = i18n.get('telegram.address.enter_floor', language)
-                keyboard = ProfileKeyboards.optional_field_keyboard('floor', language)
-                await query.edit_message_text(floor_prompt, reply_markup=keyboard)
-                return ADDRESS_FLOOR
-
-            elif field_name == 'floor':
-                entrance_prompt = i18n.get('telegram.address.enter_entrance', language)
-                keyboard = ProfileKeyboards.optional_field_keyboard('entrance', language)
-                await query.edit_message_text(entrance_prompt, reply_markup=keyboard)
-                return ADDRESS_ENTRANCE
-
-            elif field_name == 'entrance':
-                instructions_prompt = i18n.get('telegram.address.enter_delivery_instructions', language)
-                keyboard = ProfileKeyboards.delivery_instructions_keyboard(language)
-                await query.edit_message_text(instructions_prompt, reply_markup=keyboard)
-                return ADDRESS_DELIVERY_INSTRUCTIONS
-
-            elif field_name == 'delivery_instructions':
-                # Check if we already have coordinates from location sharing
-                addr_data = context.user_data.get('temp_address_data', {})
-                if addr_data.get('latitude') and addr_data.get('longitude') and addr_data.get('location_source') == 'shared':
-                    # Location was shared - save directly without geocoding
-                    logger.info(f"Location already set from sharing, saving address directly")
+            if field_name == 'delivery_instructions':
+                # Terminal step. A shared pin is already an exact coordinate, so
+                # it saves straight away; a manually typed address still has to
+                # be geocoded and confirmed first.
+                if _is_shared_pin_address(context):
+                    logger.info("Location already set from sharing, saving address directly")
                     return await self.save_address_final(update, context, is_callback=True)
-                else:
-                    # Manual entry flow - proceed to geocoding
-                    return await self.geocode_and_confirm_callback(update, context)
+                return await self.geocode_and_confirm_callback(update, context)
 
-            else:
+            next_field = _SKIP_TARGETS.get(field_name)
+            if next_field is None:
                 logger.warning(f"Unknown field skipped: {field_name}")
                 return ConversationHandler.END
+
+            return await self._prompt_address_step(update, language, next_field)
 
         except Exception as e:
             logger.error(f"Error in skip_field_handler: {e}")
@@ -2586,7 +2562,14 @@ class ProfileHandlers(BaseHandler):
 
             await query.answer()
 
-            # Save the address
+            # The title step sits at a different position in each flow: a
+            # shared pin asks for the title early, right after the location,
+            # so titling here still has apartment/floor/instructions ahead
+            # of it. A manually typed address only reaches this step LAST,
+            # after geocode confirmation, so titling here is the save.
+            if _is_shared_pin_address(context):
+                return await self._prompt_address_step(update, language, 'apartment')
+
             return await self.save_address_final(update, context, is_callback=True)
 
         except Exception as e:
@@ -3417,7 +3400,6 @@ profile_handlers.ADDRESS_STREET = ADDRESS_STREET
 profile_handlers.ADDRESS_BUILDING = ADDRESS_BUILDING
 profile_handlers.ADDRESS_APARTMENT = ADDRESS_APARTMENT
 profile_handlers.ADDRESS_FLOOR = ADDRESS_FLOOR
-profile_handlers.ADDRESS_ENTRANCE = ADDRESS_ENTRANCE
 profile_handlers.ADDRESS_DELIVERY_INSTRUCTIONS = ADDRESS_DELIVERY_INSTRUCTIONS
 profile_handlers.ADDRESS_GEOCODE_CONFIRM = ADDRESS_GEOCODE_CONFIRM
 profile_handlers.PHONE_VERIFY_PHONE = PHONE_VERIFY_PHONE

@@ -3427,9 +3427,14 @@ BACKEND_TRANSLATIONS = {
         'ru': 'Пожалуйста, введите номер подъезда или пропустите:'
     },
     'telegram.address.enter_delivery_instructions': {
-        'en': 'Any special delivery instructions?\n(e.g., door code, call before arriving, preferred delivery times)\n\nOr skip if none:',
-        'uz': 'Yetkazib berish bo\'yicha maxsus ko\'rsatmalar bormi?\n(masalan, eshik kodi, kelishdan oldin qo\'ng\'iroq qiling)\n\nYoki o\'tkazib yuboring:',
-        'ru': 'Есть особые инструкции по доставке?\n(например, код домофона, позвонить перед приездом)\n\nИли пропустите:'
+        'en': 'Any special delivery instructions?\n(e.g. entrance/podyezd number, gate or intercom code, call before arriving)\n\nOr skip if none:',
+        'uz': 'Yetkazib berish bo\'yicha maxsus ko\'rsatmalar bormi?\n(masalan, kirish/podyezd raqami, darvoza yoki domofon kodi, kelishdan oldin qo\'ng\'iroq qiling)\n\nYoki o\'tkazib yuboring:',
+        'ru': 'Есть особые инструкции по доставке?\n(например, номер подъезда, код ворот или домофона, позвонить перед приездом)\n\nИли пропустите:'
+    },
+    'telegram.address.field_too_long': {
+        'en': 'That\'s a bit long — please keep it under {max_length} characters and try again, or skip:',
+        'uz': 'Bu juda uzun — iltimos, {max_length} belgidan oshmasin, qayta kiriting yoki o\'tkazib yuboring:',
+        'ru': 'Слишком длинно — пожалуйста, не более {max_length} символов. Попробуйте снова или пропустите:'
     },
     'telegram.address.skip_field': {
         'en': '⏭️ Skip',
@@ -5404,6 +5409,11 @@ BACKEND_TRANSLATIONS = {
         'en': '✅ Continue',
         'uz': '✅ Davom etish',
         'ru': '✅ Продолжить'
+    },
+    'telegram.checkout.change_address': {
+        'en': '🔁 Change address',
+        'uz': '🔁 Manzilni o\'zgartirish',
+        'ru': '🔁 Изменить адрес'
     },
 
     # ============================================================================

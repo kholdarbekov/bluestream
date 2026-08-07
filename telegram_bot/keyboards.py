@@ -506,7 +506,8 @@ class OrderKeyboards:
 
     @staticmethod
     def single_address_confirm(address: Dict, language: str = 'en',
-                              *, back_callback: str = 'back_to_cart') -> InlineKeyboardMarkup:
+                              *, back_callback: str = 'back_to_cart',
+                              show_change: bool = False) -> InlineKeyboardMarkup:
         """Confirmation step showing the auto-selected delivery address.
 
         Used when:
@@ -518,15 +519,28 @@ class OrderKeyboards:
 
         The Continue button uses the existing `address_{id}` callback so the
         downstream payment flow is unchanged.
+
+        `show_change` adds a 'Change address' button that returns to the full
+        picker. Pass it only when the customer HAS other saved addresses — the
+        Quick Order case. Without it that customer can only accept the
+        auto-selected address or add another one, never pick one they already
+        have.
         """
         address_id = address['id']
         buttons = [
             [{'text': i18n.get('telegram.checkout.continue', language),
               'callback_data': f'address_{address_id}'}],
+        ]
+
+        if show_change:
+            buttons.append([{'text': i18n.get('telegram.checkout.change_address', language),
+                             'callback_data': 'checkout_change_address'}])
+
+        buttons.extend([
             [{'text': i18n.get('telegram.address.add_new', language),
               'callback_data': 'add_new_address_checkout'}],
             [{'text': i18n.get('telegram.back', language), 'callback_data': back_callback}],
-        ]
+        ])
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod

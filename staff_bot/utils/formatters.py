@@ -228,6 +228,19 @@ def format_active_delivery_summary(
     address = escape_html(delivery.get('address', ''))
     if address:
         lines.append(f"    {address}")
+    # Structured door details from the customer bot. Most addresses carry
+    # neither, so both collapse into ONE line that is omitted entirely when
+    # empty — drivers read this card on a phone.
+    door_parts = []
+    apartment = escape_html(delivery.get('apartment_number', ''))
+    if apartment:
+        door_parts.append(f"{i18n.get('staff.delivery.apartment_label', language)} {apartment}")
+    floor = escape_html(delivery.get('floor_number', ''))
+    if floor:
+        door_parts.append(f"{i18n.get('staff.delivery.floor_label', language)} {floor}")
+    if door_parts:
+        lines.append(f"    🏢 {', '.join(door_parts)}")
+
     instructions = escape_html(delivery.get('delivery_instructions', ''))
     if instructions:
         lines.append(f"    📝 {instructions}")

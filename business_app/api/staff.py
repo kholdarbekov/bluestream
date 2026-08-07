@@ -159,6 +159,11 @@ def get_order_pool():
                 "items": order_items,
                 "delivery_notes": order.delivery_notes or "",
                 "delivery_instructions": address.delivery_instructions or "" if address else "",
+                # Structured door details the customer bot collects. Without
+                # these the driver only ever sees the street line and has to
+                # phone the customer for the flat/floor.
+                "apartment_number": address.apartment_number or "" if address else "",
+                "floor_number": address.floor_number or "" if address else "",
                 "time_slot": order.delivery_time_slot if order else "",
                 "created_at": order.created_at.isoformat() if order and order.created_at else None,
                 "delivery_person_id": delivery.delivery_person_id,
@@ -391,6 +396,11 @@ def get_active_deliveries():
                 "items": item_list,
                 "delivery_notes": order.delivery_notes or "",
                 "delivery_instructions": address.delivery_instructions or "" if address else "",
+                # Structured door details the customer bot collects. Without
+                # these the driver only ever sees the street line and has to
+                # phone the customer for the flat/floor.
+                "apartment_number": address.apartment_number or "" if address else "",
+                "floor_number": address.floor_number or "" if address else "",
                 # Destination coordinates (order address)
                 "destination_latitude": address.latitude if address else None,
                 "destination_longitude": address.longitude if address else None,

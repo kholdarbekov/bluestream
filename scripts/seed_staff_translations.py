@@ -420,6 +420,16 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Naqd talab qilinmaydi",
         "ru": "Наличные не требуются",
     },
+    "staff.delivery.apartment_label": {
+        "en": "Apt.",
+        "uz": "Xonadon",
+        "ru": "Кв.",
+    },
+    "staff.delivery.floor_label": {
+        "en": "Floor",
+        "uz": "Qavat",
+        "ru": "Этаж",
+    },
     "staff.delivery.cash_outstanding_label": {
         "en": "Outstanding",
         "uz": "Qoldiq qarz",

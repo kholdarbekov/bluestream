@@ -384,6 +384,8 @@ class ActiveDeliveryHandler(BaseHandler):
                 'status': status,
                 'district': delivery.get('district'),
                 'address': delivery.get('address'),
+                'apartment_number': delivery.get('apartment_number'),
+                'floor_number': delivery.get('floor_number'),
                 'delivery_instructions': delivery.get('delivery_instructions'),
                 'delivery_notes': delivery.get('delivery_notes'),
                 'items': delivery.get('items', []),

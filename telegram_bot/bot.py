@@ -68,7 +68,7 @@ from handlers.profile import (
     SELECT_LANGUAGE, PHONE, LINK_ACCOUNT_CONFIRM, LINK_ACCOUNT_OTP, REGISTER_OTP,
     ADDRESS_LOCATION, ADDRESS_TITLE, ADDRESS_REGION, ADDRESS_DISTRICT,
     ADDRESS_STREET, ADDRESS_BUILDING, ADDRESS_APARTMENT, ADDRESS_FLOOR,
-    ADDRESS_ENTRANCE, ADDRESS_DELIVERY_INSTRUCTIONS, ADDRESS_GEOCODE_CONFIRM
+    ADDRESS_DELIVERY_INSTRUCTIONS, ADDRESS_GEOCODE_CONFIRM
 )
 from eligibility import main_menu_for
 from utils import error_handler, rate_limiter, user_middleware, get_auth_token
@@ -290,6 +290,7 @@ class WaterBusinessBot:
             CallbackQueryHandler(order_handlers.checkout_choose_reward, pattern="^checkout_choose_reward$"),
             CallbackQueryHandler(order_handlers.checkout_apply_reward, pattern="^checkout_apply_reward_\\d+$"),
             CallbackQueryHandler(order_handlers.checkout_remove_reward, pattern="^checkout_remove_reward$"),
+            CallbackQueryHandler(order_handlers.checkout_change_address, pattern="^checkout_change_address$"),
             CallbackQueryHandler(order_handlers.back_to_payment, pattern="^back_to_payment$"),
             CallbackQueryHandler(order_handlers.checkout_handler, pattern="^checkout"),
             CallbackQueryHandler(order_handlers.address_handler, pattern="^address_"),
@@ -508,11 +509,6 @@ class WaterBusinessBot:
                 ADDRESS_FLOOR: [
                     CallbackQueryHandler(profile_handlers.skip_field_handler, pattern="^skip_floor$"),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.floor_received),
-                ],
-                # Manual entry flow - Entrance input
-                ADDRESS_ENTRANCE: [
-                    CallbackQueryHandler(profile_handlers.skip_field_handler, pattern="^skip_entrance$"),
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.entrance_received),
                 ],
                 # Delivery instructions input
                 ADDRESS_DELIVERY_INSTRUCTIONS: [

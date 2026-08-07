@@ -143,11 +143,38 @@ const DriverRoutePanel = ({
           >
             <HolderOutlined style={{ opacity: 0.4 }} />
             <Text strong style={{ minWidth: 18 }}>{index + 1}</Text>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <Text ellipsis>{stop.order_number} · {stop.customer_name}</Text>
-              <div><Text type="secondary" style={{ fontSize: 11 }}>{stop.address_label}</Text></div>
+            {/* `overflow: hidden` gives the ellipsis span something bounded to
+                clip against; `flex: 1, minWidth: 0` alone lets the flex
+                algorithm shrink this column, but without a hard bound the
+                text itself still dictates the row's min content size. */}
+            <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+              {/* antd's `ellipsis` boolean only switches on CSS ellipsis
+                  after a layout effect measures `text-overflow` support; it
+                  does nothing without `white-space: nowrap` actually applied,
+                  which is why this line wrapped one character per line
+                  instead of truncating. Setting the properties explicitly
+                  does not depend on that timing. */}
+              <Text
+                ellipsis
+                style={{ display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+              >
+                {stop.order_number} · {stop.customer_name}
+              </Text>
+              <Text
+                type="secondary"
+                ellipsis
+                style={{
+                  display: 'block', fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                }}
+              >
+                {stop.address_label}
+              </Text>
             </div>
-            <Space size={2}>
+            {/* `flexShrink: 0`: without it the flex algorithm satisfies this
+                row's width by collapsing the text column above to near-zero
+                instead of shrinking this fixed-content button group — the
+                actual cause of the one-character-per-line rendering. */}
+            <Space size={2} data-testid={`stop-actions-${stop.delivery_id}`} style={{ flexShrink: 0 }}>
               <Button
                 data-testid={`stop-up-${stop.delivery_id}`}
                 size="small" type="text" icon={<ArrowUpOutlined />}

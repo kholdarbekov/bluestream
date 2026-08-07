@@ -136,4 +136,27 @@ describe('DriverRoutePanel', () => {
     fireEvent.click(button);
     expect(onMove).not.toHaveBeenCalled();
   });
+
+  // Regression for the production bug: the button group (`Space`, no
+  // `flexShrink: 0`) had no defense against being squeezed by its
+  // `flex: 1, minWidth: 0` sibling, so the flex algorithm collapsed the text
+  // column to near-zero and the browser wrapped it one character per line.
+  // jsdom performs no real layout, so nothing here can assert on rendered
+  // geometry (an actual collapsed width, actual line count) — that would be
+  // a test that always passes regardless of the bug. What IS meaningfully
+  // assertable, and what actually regresses if someone removes the fix, is
+  // the applied styling contract: the action-button group is marked
+  // non-shrinking, and both text lines are marked non-wrapping +
+  // ellipsis-truncating rather than left to wrap.
+  it('marks the action-button group as non-shrinking so it cannot be squeezed into the text column', () => {
+    render(<DriverRoutePanel {...baseProps} />);
+    expect(screen.getByTestId('stop-actions-11')).toHaveStyle({ flexShrink: '0' });
+  });
+
+  it('marks both stop text lines to truncate instead of wrap', () => {
+    render(<DriverRoutePanel {...baseProps} />);
+    const expectedTruncation = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
+    expect(screen.getByText('A-1 · Ann')).toHaveStyle(expectedTruncation);
+    expect(screen.getByText('Chilonzor')).toHaveStyle(expectedTruncation);
+  });
 });

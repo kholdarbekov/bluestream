@@ -95,6 +95,46 @@ describe('Dispatch page', () => {
     expect(await screen.findByTestId('unmapped-count')).toHaveTextContent('1');
   });
 
+  // Regression for bug #5: the unmapped card used to hardcode "no
+  // coordinates" for every row, which was false for orders that were simply
+  // unscheduled. `DispatchService` now emits a `reason` per row
+  // (`not_scheduled` / `no_coordinates`) and the panel must show which one
+  // actually applies, not a single blanket claim.
+  it('shows the per-row reason instead of a single hardcoded "no coordinates" claim', async () => {
+    adminService.getDispatchSnapshot.mockResolvedValueOnce({
+      data: {
+        ...SNAPSHOT.data,
+        unmapped: [
+          { order_id: 4, order_number: 'A-9', customer_name: 'Zed', address_label: '', reason: 'no_coordinates' },
+          { order_id: 8, order_number: 'A-11', customer_name: 'Wex', address_label: '', reason: 'not_scheduled' },
+        ],
+      },
+    });
+    renderPage();
+
+    await waitFor(() => expect(screen.getByTestId('unmapped-reason-4')).toHaveTextContent('No coordinates'));
+    expect(screen.getByTestId('unmapped-reason-8')).toHaveTextContent('Not scheduled');
+  });
+
+  // A reason that is neither of the two the backend currently emits must not
+  // be relabelled as one of them with false confidence — that mislabelling
+  // IS bug #5 (a row shown under a heading that doesn't describe it). Proves
+  // the match is an explicit two-way check with a neutral fallback, not a
+  // ternary that defaults anything unrecognised to "Not scheduled".
+  it('shows a neutral fallback for a reason the frontend does not recognise', async () => {
+    adminService.getDispatchSnapshot.mockResolvedValueOnce({
+      data: {
+        ...SNAPSHOT.data,
+        unmapped: [
+          { order_id: 9, order_number: 'A-12', customer_name: 'Yui', address_label: '', reason: 'some_future_reason' },
+        ],
+      },
+    });
+    renderPage();
+
+    await waitFor(() => expect(screen.getByTestId('unmapped-reason-9')).toHaveTextContent('Unknown reason'));
+  });
+
   it('saving a reorder sends the draft order and the server set as the guard', async () => {
     renderPage();
     fireEvent.click(await screen.findByTestId('stop-down-11'));
@@ -184,33 +224,59 @@ describe('Dispatch page pool panel', () => {
   });
 });
 
-describe('Dispatch page route geometry (per-selected-driver fetch)', () => {
-  it('does not fetch geometry when no driver is selected', async () => {
+describe('Dispatch page route geometry (fetched for every visible route)', () => {
+  // The bug: geometry fetching was gated on `selectedDriverId != null`, and
+  // nothing selects a driver by default, so every route always rendered the
+  // dashed straight-leg fallback. The fix fetches geometry for every route in
+  // the snapshot's `routes`, independent of selection — proven here by NOT
+  // selecting a driver at all.
+  it('fetches geometry for a rendered route without any driver being selected', async () => {
     renderPage();
-    await screen.findByTestId('unmapped-count');
-
-    expect(adminService.getDispatchRouteGeometry).not.toHaveBeenCalled();
-  });
-
-  it('fetches geometry for the selected driver once one is picked', async () => {
-    renderPage();
-    fireEvent.click(await screen.findByTestId('ops-map-select-driver'));
+    await screen.findByTestId('stop-row-11');
 
     await waitFor(() => expect(adminService.getDispatchRouteGeometry).toHaveBeenCalledWith(5));
   });
 
+  it('fetches geometry for every route when more than one is visible, not just one', async () => {
+    adminService.getDispatchSnapshot.mockResolvedValueOnce({
+      data: {
+        ...SNAPSHOT.data,
+        routes: [
+          ...SNAPSHOT.data.routes,
+          {
+            route_id: 2,
+            driver_id: 6,
+            manual_override: false,
+            total_distance_km: 5.4,
+            estimated_duration_minutes: 21,
+            stops: [
+              {
+                delivery_id: 77, position: 0, order_number: 'A-7', customer_name: 'Gia',
+                address_label: 'g', pinned: false, lat: 41.33, lng: 69.23, delivery_status: 'assigned',
+              },
+            ],
+          },
+        ],
+      },
+    });
+    renderPage();
+    await screen.findByTestId('stop-row-77');
+
+    await waitFor(() => expect(adminService.getDispatchRouteGeometry).toHaveBeenCalledWith(5));
+    await waitFor(() => expect(adminService.getDispatchRouteGeometry).toHaveBeenCalledWith(6));
+  });
+
   it('feeds the fetched geometry to OperationsMap keyed by driver id', async () => {
     renderPage();
-    fireEvent.click(await screen.findByTestId('ops-map-select-driver'));
+    await screen.findByTestId('stop-row-11');
 
     await waitFor(() => expect(screen.getByTestId('ops-map-geometry')).toHaveTextContent(
       JSON.stringify({ 5: { geometry: null, approximate: false } }),
     ));
   });
 
-  it('re-fetches the selected driver route geometry after a successful save', async () => {
+  it('re-fetches every visible route geometry after a successful save', async () => {
     renderPage();
-    fireEvent.click(await screen.findByTestId('ops-map-select-driver'));
     await waitFor(() => expect(adminService.getDispatchRouteGeometry).toHaveBeenCalledTimes(1));
 
     fireEvent.click(await screen.findByTestId('stop-down-11'));

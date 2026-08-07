@@ -1,8 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import {
-  Alert, Badge, Button, Card, Checkbox, Col, DatePicker, Empty, List, Row, Space, Spin, Typography,
+  Alert, Badge, Button, Card, Checkbox, Col, DatePicker, Empty, List, Row, Space, Spin, Tag, Typography,
 } from 'antd';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  useMutation, useQueries, useQuery, useQueryClient,
+} from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import dayjs from 'dayjs';
 import toast from 'react-hot-toast';
@@ -53,19 +55,32 @@ const Dispatch = () => {
   );
 
   // Real road geometry is a separate, per-driver endpoint (see
-  // admin_dispatch.py's dispatch_route_geometry / DispatchService's module
-  // docstring: "geometry is polled per selected driver" precisely so the map
-  // + 30s poll never has to pay for N routing calls at once). We only ever
-  // resolve it for the currently-selected driver; every other route keeps
-  // OperationsMap's honest dashed-straight-line fallback until picked.
-  const { data: geometryData } = useQuery({
-    queryKey: ['dispatchRouteGeometry', selectedDriverId],
-    queryFn: () => adminService.getDispatchRouteGeometry(selectedDriverId),
-    enabled: selectedDriverId != null,
+  // admin_dispatch.py's dispatch_route_geometry). Fetched for EVERY visible
+  // route, not just a selected one — the product decision is always real
+  // road geometry, and the backend caches on a sequence hash with a 15-minute
+  // TTL, so panning and the 30s snapshot poll are free; only a real sequence
+  // change re-fetches. No `refetchInterval` here for the same reason — it
+  // would just be noise on an endpoint that rarely changes. The query key
+  // stays the exact per-driver shape (`['dispatchRouteGeometry', driverId]`)
+  // `invalidate()` below already targets by prefix, so save/reoptimize/
+  // assign/unassign keeps invalidating every route's geometry, not only the
+  // one that changed.
+  const geometryQueries = useQueries({
+    queries: routes.map((route) => ({
+      queryKey: ['dispatchRouteGeometry', route.driver_id],
+      queryFn: () => adminService.getDispatchRouteGeometry(route.driver_id),
+    })),
   });
   const geometry = useMemo(
-    () => (selectedDriverId != null && geometryData?.data ? { [selectedDriverId]: geometryData.data } : {}),
-    [selectedDriverId, geometryData],
+    () => Object.fromEntries(
+      routes
+        // `.at(index)`, not `geometryQueries[index]`: a computed member
+        // expression trips `security/detect-object-injection` even though
+        // `index` only ever comes from this same `.map()`, never caller data.
+        .map((route, index) => [route.driver_id, geometryQueries.at(index)?.data?.data])
+        .filter(([, payload]) => payload != null),
+    ),
+    [routes, geometryQueries],
   );
 
   // Both the snapshot and the currently-fetched road geometry describe the
@@ -186,7 +201,7 @@ const Dispatch = () => {
         <Badge count={(snapshot.unmapped || []).length} showZero>
           <Text data-testid="unmapped-count">{(snapshot.unmapped || []).length}</Text>
         </Badge>
-        <Text type="secondary">{t('ui.dispatch.unmapped', 'orders without coordinates')}</Text>
+        <Text type="secondary">{t('ui.dispatch.unmapped', 'orders not on the map')}</Text>
       </Space>
 
       <Row gutter={12}>
@@ -270,15 +285,41 @@ const Dispatch = () => {
             })}
 
             {(snapshot.unmapped || []).length > 0 && (
-              <Card size="small" title={t('ui.dispatch.unmapped_title', 'Not on the map (no coordinates)')}>
+              <Card size="small" title={t('ui.dispatch.unmapped_title', 'Not on the map')}>
                 <List
                   size="small"
                   dataSource={snapshot.unmapped}
-                  renderItem={(item) => (
-                    <List.Item>
-                      <Text>{item.order_number} · {item.customer_name}</Text>
-                    </List.Item>
-                  )}
+                  renderItem={(item) => {
+                    // `DispatchService` emits exactly two reasons today (see
+                    // business_app/services/dispatch_service.py):
+                    // `not_scheduled` takes precedence over `no_coordinates`
+                    // when both would apply. An explicit two-way match — not
+                    // a ternary that defaults anything unrecognised to one of
+                    // the two known labels, and not an object keyed by the
+                    // server string (which would also trip
+                    // `security/detect-object-injection` on a computed member
+                    // lookup) — so a future third reason (or a malformed
+                    // payload) renders as neutrally "unknown" instead of
+                    // being confidently mislabelled. A silently-wrong label
+                    // here is exactly bug #5 this task fixed: a row shown
+                    // under a heading that doesn't describe it.
+                    let reasonLabel;
+                    if (item.reason === 'no_coordinates') {
+                      reasonLabel = t('ui.dispatch.reason_no_coordinates', 'No coordinates');
+                    } else if (item.reason === 'not_scheduled') {
+                      reasonLabel = t('ui.dispatch.reason_not_scheduled', 'Not scheduled');
+                    } else {
+                      reasonLabel = t('ui.dispatch.reason_unknown', 'Unknown reason');
+                    }
+                    return (
+                      <List.Item>
+                        <Space size={8} wrap>
+                          <Text>{item.order_number} · {item.customer_name}</Text>
+                          <Tag data-testid={`unmapped-reason-${item.order_id}`}>{reasonLabel}</Tag>
+                        </Space>
+                      </List.Item>
+                    );
+                  }}
                 />
               </Card>
             )}

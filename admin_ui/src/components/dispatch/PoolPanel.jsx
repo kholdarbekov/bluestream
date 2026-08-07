@@ -70,19 +70,38 @@ const PoolPanel = ({
             background: selectedDeliveryId === stop.delivery_id ? 'rgba(22,119,255,.1)' : undefined,
           }}
         >
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <Text ellipsis>{stop.order_number} · {stop.customer_name}</Text>
-            <div><Text type="secondary" style={{ fontSize: 11 }}>{stop.address_label}</Text></div>
+          {/* `overflow: hidden` gives the ellipsis text something bounded to
+              clip against; see DriverRoutePanel for the full explanation —
+              this row hits the identical flexbox constraint. */}
+          <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+            <Text
+              ellipsis
+              style={{ display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+            >
+              {stop.order_number} · {stop.customer_name}
+            </Text>
+            <Text
+              type="secondary"
+              ellipsis
+              style={{
+                display: 'block', fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              }}
+            >
+              {stop.address_label}
+            </Text>
             <Space size={4}>
               {stop.is_cod && <Tag color="gold">COD</Tag>}
               {stop.is_overdue && <Tag color="red">{t('ui.dispatch.overdue', 'Overdue')}</Tag>}
             </Space>
           </div>
+          {/* `flexShrink: 0`: without it the flex algorithm shrinks the text
+              column above to near-zero instead of this fixed-content button —
+              the actual cause of the one-character-per-line rendering. */}
           <Tooltip title={noDrivers ? t('ui.dispatch.no_drivers_available', 'No drivers available') : undefined}>
             {/* antd disabled Buttons don't fire hover events on their own —
                 the Tooltip needs a wrapping element to attach its listeners
                 to. */}
-            <span>
+            <span style={{ flexShrink: 0 }}>
               <Dropdown menu={assignTargets(stop.delivery_id)} trigger={['click']} disabled={noDrivers}>
                 <Button
                   data-testid={`pool-assign-${stop.delivery_id}`}

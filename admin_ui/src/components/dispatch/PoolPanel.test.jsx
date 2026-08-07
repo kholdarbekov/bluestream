@@ -88,4 +88,17 @@ describe('PoolPanel', () => {
     fireEvent.click(button);
     expect(onAssign).not.toHaveBeenCalled();
   });
+
+  // Same flexbox squeeze DriverRoutePanel hits (see its test for the full
+  // explanation): the text column and the Assign control sit in the same
+  // row, in the same left-hand panel column. jsdom does no real layout, so
+  // this asserts the applied styling contract rather than rendered geometry
+  // — the part that actually regresses if the fix is reverted.
+  it('marks the assign control as non-shrinking and both text lines as truncating', () => {
+    render(<PoolPanel {...baseProps} />);
+    expect(screen.getByTestId('pool-assign-101').closest('span')).toHaveStyle({ flexShrink: '0' });
+    const expectedTruncation = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
+    expect(screen.getByText('B-1 · Dee')).toHaveStyle(expectedTruncation);
+    expect(screen.getByText('Chilonzor 5')).toHaveStyle(expectedTruncation);
+  });
 });

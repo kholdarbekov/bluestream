@@ -2,10 +2,17 @@
 
 One call returns everything the map draws for a single day: the active orders,
 the drivers and where they are, each driver's planned stop sequence, the
-unassigned pool, and — deliberately — the orders that CANNOT be drawn because
-their address has no coordinates. A map that silently omits those implies it is
-showing all the work, and an ungeocoded order is exactly the one that gets
-forgotten.
+unassigned pool, and — deliberately — the orders that CANNOT be drawn, split
+into WHY: no resolved schedule at all (`not_scheduled`) or a schedule but no
+address coordinates (`no_coordinates`). A map that silently omits those
+implies it is showing all the work, and an order with neither reason surfaced
+is exactly the one that gets forgotten.
+
+An order's schedule is resolved as `order.delivery_date` if set, else its
+`delivery.scheduled_date` — `order.delivery_date` is nullable and, in
+production, NULL on every active order; `Delivery.scheduled_date` is the
+field that is actually populated (`nullable=False` by schema) and the one the
+rest of the delivery system already runs on.
 
 Read-only: no writes, no external API calls. Route geometry is a separate,
 cached endpoint precisely so this stays cheap enough to poll.
@@ -16,7 +23,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from flask import current_app
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import joinedload
 
 from business_app.models.delivery import Delivery, DeliveryPerson, DeliveryRoute
@@ -57,6 +64,13 @@ class DispatchService:
         end_of_day = cls._day_bounds(target_date)[1]
         today_start = cls._day_bounds(cls.today())[0]
 
+        # `order.delivery_date` if set, else `delivery.scheduled_date` — see
+        # module docstring. COALESCE at the SQL level (not a Python filter
+        # after a narrower query) so a row whose `orders.delivery_date` is
+        # NULL but whose `deliveries.scheduled_date` is set is never dropped
+        # before it reaches Python.
+        resolved_schedule = func.coalesce(Order.delivery_date, Delivery.scheduled_date)
+
         rows = (
             Order.query.options(
                 joinedload(Order.user),
@@ -67,17 +81,18 @@ class DispatchService:
             # join(User) either raises or silently resolves the wrong one.
             .join(User, Order.user_id == User.id)
             .outerjoin(UserAddress, Order.delivery_address_id == UserAddress.id)
+            .outerjoin(Delivery, Delivery.order_id == Order.id)
             .filter(
                 Order.status.in_(cls.ACTIVE_ORDER_STATUSES),
-                # `delivery_date` is nullable (Order.delivery_date, nullable=True).
-                # SQL `NULL <= x` is falsy, so a bare `Order.delivery_date <=
-                # end_of_day` silently drops any active-but-unscheduled order —
-                # it would never reach `orders` OR `unmapped`. Fetch it
-                # regardless of the selected day; the loop below routes it to
-                # `unmapped` instead of pretending it doesn't exist.
-                or_(Order.delivery_date.is_(None), Order.delivery_date <= end_of_day),
+                # SQL `NULL <= x` is falsy, so a bare `resolved_schedule <=
+                # end_of_day` silently drops any active order with no
+                # resolved schedule at all — it would never reach `orders` OR
+                # `unmapped`. Fetch it regardless of the selected day; the
+                # loop below routes it to `unmapped` (reason `not_scheduled`)
+                # instead of pretending it doesn't exist.
+                or_(resolved_schedule.is_(None), resolved_schedule <= end_of_day),
             )
-            .order_by(Order.delivery_date.asc(), Order.id.asc())
+            .order_by(resolved_schedule.asc(), Order.id.asc())
             .all()
         )
 
@@ -85,32 +100,15 @@ class DispatchService:
         unmapped: List[Dict[str, Any]] = []
         for order in rows:
             address = order.delivery_address
-            if order.delivery_date is None:
-                unmapped.append(
-                    {
-                        "order_id": order.id,
-                        "order_number": order.order_number,
-                        "status": cls._value(order.status),
-                        "customer_name": order.user.full_name if order.user else "",
-                        "customer_phone": order.user.phone if order.user else "",
-                        "address_label": cls._address_label(address),
-                        "reason": "no_delivery_date",
-                    }
-                )
+            schedule = cls._resolved_schedule(order)
+            if schedule is None:
+                # Precedence: an unscheduled order is not on any day's board,
+                # regardless of whether its address happens to be geocoded.
+                unmapped.append(cls._unmapped_entry(order, address, "not_scheduled"))
                 continue
-            entry = cls._order_entry(order, today_start)
+            entry = cls._order_entry(order, today_start, schedule)
             if address is None or address.latitude is None or address.longitude is None:
-                unmapped.append(
-                    {
-                        "order_id": order.id,
-                        "order_number": order.order_number,
-                        "status": cls._value(order.status),
-                        "customer_name": order.user.full_name if order.user else "",
-                        "customer_phone": order.user.phone if order.user else "",
-                        "address_label": cls._address_label(address),
-                        "reason": "no_coordinates",
-                    }
-                )
+                unmapped.append(cls._unmapped_entry(order, address, "no_coordinates"))
                 continue
             orders.append(entry)
 
@@ -193,14 +191,38 @@ class DispatchService:
             return ""
         return address.full_address or address.street_address or address.district or ""
 
+    @staticmethod
+    def _resolved_schedule(order: Order) -> Optional[datetime]:
+        """`order.delivery_date` if set, else `order.delivery.scheduled_date`.
+
+        `Order.delivery` is an existing one-to-one relationship, already
+        eager-loaded by `get_snapshot`'s query — this does not issue a query
+        of its own.
+        """
+        if order.delivery_date is not None:
+            return order.delivery_date
+        delivery = order.delivery
+        return delivery.scheduled_date if delivery else None
+
     @classmethod
-    def _order_entry(cls, order: Order, today_start: datetime) -> Dict[str, Any]:
+    def _unmapped_entry(cls, order: Order, address: Optional[UserAddress], reason: str) -> Dict[str, Any]:
+        return {
+            "order_id": order.id,
+            "order_number": order.order_number,
+            "status": cls._value(order.status),
+            "customer_name": order.user.full_name if order.user else "",
+            "customer_phone": order.user.phone if order.user else "",
+            "address_label": cls._address_label(address),
+            "reason": reason,
+        }
+
+    @classmethod
+    def _order_entry(cls, order: Order, today_start: datetime, schedule: datetime) -> Dict[str, Any]:
         address = order.delivery_address
         delivery = order.delivery
         payment_method = cls._value(order.payment_method)
-        delivery_date = order.delivery_date
-        if delivery_date is not None and delivery_date.tzinfo is None:
-            delivery_date = delivery_date.replace(tzinfo=timezone.utc)
+        if schedule.tzinfo is None:
+            schedule = schedule.replace(tzinfo=timezone.utc)
         return {
             "order_id": order.id,
             "order_number": order.order_number,
@@ -218,8 +240,8 @@ class DispatchService:
             "payment_method": payment_method,
             "is_cod": payment_method == PaymentMethod.CASH.value,
             "time_slot": order.delivery_time_slot,
-            "delivery_date": delivery_date.isoformat() if delivery_date else None,
-            "is_overdue": bool(delivery_date is not None and delivery_date < today_start),
+            "delivery_date": schedule.isoformat(),
+            "is_overdue": bool(schedule < today_start),
         }
 
     @classmethod

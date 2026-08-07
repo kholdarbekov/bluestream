@@ -87,6 +87,82 @@ class TestOrderLayer:
 
         assert DispatchService.get_snapshot(date.today())["orders"] == []
 
+    def test_tomorrows_order_scheduled_only_via_delivery_is_excluded_from_todays_snapshot(
+        self, db, sample_user, sample_order
+    ):
+        """Exact inverse of `test_order_scheduled_only_via_delivery_is_included_on_the_right_day`
+        below, and of `test_tomorrows_order_is_excluded_from_todays_snapshot` above: the day
+        filter must exclude a delivery-only schedule from a day it doesn't belong to, not just
+        include one that belongs. A regression that widened the SQL filter to admit any row with
+        EITHER a resolved schedule OR none at all (instead of `<= end_of_day` OR none) would pass
+        every other test in this file — including the inclusion tests — while wrongly showing
+        tomorrow's delivery-only order on today's board. `order.delivery_date` stays unset here on
+        purpose: the exclusion path for `order.delivery_date` itself is already covered above, and
+        this fixture would previously have been silently dropped rather than tested at all."""
+        order = make_order(db, sample_user, sample_order, status=OrderStatus.CONFIRMED,
+                           delivery_date=datetime.now(timezone.utc))
+        order.delivery_date = None
+        delivery = Delivery(
+            order_id=order.id,
+            delivery_person_id=None,
+            status=DeliveryStatus.SCHEDULED,
+            scheduled_date=datetime.now(timezone.utc) + timedelta(days=1),
+            scheduled_time_slot="09:00-12:00",
+        )
+        db.session.add(delivery)
+        db.session.commit()
+
+        snapshot = DispatchService.get_snapshot(date.today())
+        assert order.id not in {o["order_id"] for o in snapshot["orders"]}
+        assert order.order_number not in {u["order_number"] for u in snapshot["unmapped"]}
+
+    def test_order_scheduled_only_via_delivery_is_included_on_the_right_day(self, db, sample_user, sample_order):
+        """`Order.delivery_date` is NULL on every active order in production;
+        `Delivery.scheduled_date` is the field that is actually populated and
+        `nullable=False`. An order with no `delivery_date` but a scheduled
+        `Delivery` row must still land in `orders` for the right day — that
+        is the single root cause behind the empty-map bugs this task fixes."""
+        order = make_order(db, sample_user, sample_order, status=OrderStatus.CONFIRMED,
+                           delivery_date=datetime.now(timezone.utc))
+        order.delivery_date = None
+        delivery = Delivery(
+            order_id=order.id,
+            delivery_person_id=None,
+            status=DeliveryStatus.SCHEDULED,
+            scheduled_date=datetime.now(timezone.utc),
+            scheduled_time_slot="09:00-12:00",
+        )
+        db.session.add(delivery)
+        db.session.commit()
+
+        orders = DispatchService.get_snapshot(date.today())["orders"]
+        matching = [o for o in orders if o["order_id"] == order.id]
+        assert len(matching) == 1
+        assert matching[0]["is_overdue"] is False
+
+    def test_order_scheduled_only_via_delivery_is_flagged_overdue_when_in_the_past(
+        self, db, sample_user, sample_order
+    ):
+        """`is_overdue` must compute from the RESOLVED schedule, not the raw
+        (always-NULL-in-production) `order.delivery_date`."""
+        order = make_order(db, sample_user, sample_order, status=OrderStatus.CONFIRMED,
+                           delivery_date=datetime.now(timezone.utc))
+        order.delivery_date = None
+        delivery = Delivery(
+            order_id=order.id,
+            delivery_person_id=None,
+            status=DeliveryStatus.SCHEDULED,
+            scheduled_date=datetime.now(timezone.utc) - timedelta(days=1),
+            scheduled_time_slot="09:00-12:00",
+        )
+        db.session.add(delivery)
+        db.session.commit()
+
+        orders = DispatchService.get_snapshot(date.today())["orders"]
+        matching = [o for o in orders if o["order_id"] == order.id]
+        assert len(matching) == 1
+        assert matching[0]["is_overdue"] is True
+
     def test_customer_name_comes_from_the_order_owner(self, db, sample_user, sample_order):
         """orders has two FKs to users; an unpinned join(User) picks the wrong one."""
         make_order(db, sample_user, sample_order, status=OrderStatus.CONFIRMED,
@@ -110,20 +186,25 @@ class TestUnmapped:
         assert snapshot["orders"] == []
         # Filtered by order_number rather than asserting `unmapped` is exactly
         # one item: the `sample_order` fixture itself is an active order with
-        # no `delivery_date` and no address, so — correctly, per the
-        # `no_delivery_date` fix below — it now ALSO appears in `unmapped`
-        # alongside the order under test. Asserting the whole list would make
-        # this test depend on the fixture's shape rather than on the behavior
-        # being tested here (a set-but-uncoordinatable address).
+        # no `delivery_date`, no `Delivery` row, and no address, so —
+        # correctly, per the `not_scheduled` fix below — it now ALSO appears
+        # in `unmapped` alongside the order under test. Asserting the whole
+        # list would make this test depend on the fixture's shape rather than
+        # on the behavior being tested here (a set-but-uncoordinatable
+        # address on an order that DOES have a resolved schedule).
         unmapped_entries = [u for u in snapshot["unmapped"] if u["order_number"] == order.order_number]
         assert len(unmapped_entries) == 1
         assert unmapped_entries[0]["reason"] == "no_coordinates"
 
-    def test_active_order_without_delivery_date_is_reported_not_dropped(self, db, sample_user, sample_order):
-        """`Order.delivery_date` is nullable. SQL `NULL <= x` is falsy, so a naive
-        `delivery_date <= end_of_day` filter drops an unscheduled active order
-        entirely — it never reaches `orders` OR `unmapped`. It must surface in
-        `unmapped` (reason `no_delivery_date`), not disappear."""
+    def test_active_order_with_no_resolved_schedule_is_reported_not_dropped(self, db, sample_user, sample_order):
+        """`Order.delivery_date` is nullable and there may be no `Delivery` row
+        yet either. SQL `NULL <= x` is falsy, so a naive `delivery_date <=
+        end_of_day` filter drops an unscheduled active order entirely — it
+        never reaches `orders` OR `unmapped`. It must surface in `unmapped`
+        (reason `not_scheduled`), not disappear. `not_scheduled` takes
+        precedence over `no_coordinates`: an order with no schedule at all is
+        not on any day's board, regardless of whether its address is
+        geocoded."""
         order = make_order(db, sample_user, sample_order, status=OrderStatus.CONFIRMED,
                            delivery_date=datetime.now(timezone.utc))
         order.delivery_date = None
@@ -133,13 +214,65 @@ class TestUnmapped:
         assert snapshot["orders"] == []
         unmapped_entries = [u for u in snapshot["unmapped"] if u["order_number"] == order.order_number]
         assert len(unmapped_entries) == 1
-        assert unmapped_entries[0]["reason"] == "no_delivery_date"
+        assert unmapped_entries[0]["reason"] == "not_scheduled"
+
+    def test_order_scheduled_only_via_delivery_no_coordinates_is_still_no_coordinates_not_not_scheduled(
+        self, db, sample_user, sample_order
+    ):
+        """A resolved schedule can come from `delivery.scheduled_date` alone.
+        That still counts as "scheduled" for the purposes of picking a reason:
+        the missing-coordinates case must not be misreported as
+        `not_scheduled` just because `order.delivery_date` itself is NULL."""
+        order = make_order(db, sample_user, sample_order, status=OrderStatus.CONFIRMED,
+                           delivery_date=datetime.now(timezone.utc))
+        order.delivery_date = None
+        order.delivery_address.latitude = None
+        order.delivery_address.longitude = None
+        delivery = Delivery(
+            order_id=order.id,
+            delivery_person_id=None,
+            status=DeliveryStatus.SCHEDULED,
+            scheduled_date=datetime.now(timezone.utc),
+            scheduled_time_slot="09:00-12:00",
+        )
+        db.session.add(delivery)
+        db.session.commit()
+
+        snapshot = DispatchService.get_snapshot(date.today())
+        unmapped_entries = [u for u in snapshot["unmapped"] if u["order_number"] == order.order_number]
+        assert len(unmapped_entries) == 1
+        assert unmapped_entries[0]["reason"] == "no_coordinates"
 
 
 class TestPoolAndRoutes:
     def test_unassigned_claimable_delivery_lands_in_pool(self, db, sample_user, sample_order):
         order = make_order(db, sample_user, sample_order, status=OrderStatus.CONFIRMED,
                            delivery_date=datetime.now(timezone.utc))
+        delivery = Delivery(
+            order_id=order.id,
+            delivery_person_id=None,
+            status=DeliveryStatus.SCHEDULED,
+            scheduled_date=datetime.now(timezone.utc),
+            scheduled_time_slot="09:00-12:00",
+        )
+        db.session.add(delivery)
+        db.session.commit()
+
+        snapshot = DispatchService.get_snapshot(date.today())
+        assert [p["delivery_id"] for p in snapshot["pool"]] == [delivery.id]
+
+    def test_pool_repopulates_for_claimable_delivery_whose_order_has_no_delivery_date(
+        self, db, sample_user, sample_order
+    ):
+        """`pool` is derived from `orders`. Before the fix, an order with no
+        `order.delivery_date` never reached `orders` at all (it was diverted
+        to `unmapped` unconditionally), so a genuinely unassigned, claimable
+        delivery silently vanished from the pool even though its `Delivery`
+        row was scheduled and unassigned. This is real production shape: 22/22
+        active orders have `delivery_date IS NULL`."""
+        order = make_order(db, sample_user, sample_order, status=OrderStatus.CONFIRMED,
+                           delivery_date=datetime.now(timezone.utc))
+        order.delivery_date = None
         delivery = Delivery(
             order_id=order.id,
             delivery_person_id=None,

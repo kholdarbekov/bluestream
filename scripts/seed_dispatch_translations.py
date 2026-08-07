@@ -57,12 +57,17 @@ KEYS = {
         "Автообновление приостановлено — есть несохранённые изменения",
         "Auto-refresh paused — unsaved changes",
     ),
-    "ui.dispatch.unmapped": ("koordinatasiz buyurtmalar", "заказы без координат", "orders without coordinates"),
-    "ui.dispatch.unmapped_title": (
-        "Xaritada yo'q (koordinata yo'q)",
-        "Нет на карте (нет координат)",
-        "Not on the map (no coordinates)",
-    ),
+    # `unmapped` entries now cover two distinct reasons (`not_scheduled` /
+    # `no_coordinates` — see DispatchService.get_snapshot); neither the
+    # header badge label nor the card title may claim "no coordinates" as if
+    # it were the only one.
+    "ui.dispatch.unmapped": ("xaritada yo'q buyurtmalar", "заказы вне карты", "orders not on the map"),
+    "ui.dispatch.unmapped_title": ("Xaritada yo'q", "Нет на карте", "Not on the map"),
+    "ui.dispatch.reason_not_scheduled": ("Sana belgilanmagan", "Дата не назначена", "Not scheduled"),
+    "ui.dispatch.reason_no_coordinates": ("Koordinata yo'q", "Нет координат", "No coordinates"),
+    # Neutral fallback for a reason value that is neither of the two the
+    # backend currently emits — never silently relabelled as one of them.
+    "ui.dispatch.reason_unknown": ("Noma'lum sabab", "Неизвестная причина", "Unknown reason"),
     "ui.dispatch.no_routes": ("Bugun rejalashtirilgan marshrut yo'q", "На сегодня нет маршрутов", "No planned routes today"),
     "ui.dispatch.conflict_title": (
         "Siz tahrirlayotganda marshrut o'zgardi",

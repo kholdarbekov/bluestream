@@ -1837,9 +1837,18 @@ const Orders = () => {
                     {t('ui.orders.open_payment_link', 'Open Payment Link')}
                   </Button>
                 ) : null}
+                {/* Rail-agnostic: any order that still owes money can be settled.
+                    Was `payment_method === 'cash' || (electronic && payment_status
+                    in pending|cancelled|failed)`, which hid this button for a
+                    `partially_paid` electronic order — exactly the case the
+                    order-edit cascade tells the admin to use it for. Prod order
+                    961: a Click order edited upward at the door had a real
+                    30,000 outstanding and no way to settle it anywhere in the UI.
+                    Backend settles it in place, leaving the rail and the fiscal
+                    receipt untouched.
+                    See docs/superpowers/plans/2026-08-08-open-receivable-ssot.md */}
                 {(selectedOrder.payment_method === 'cash' ||
-                  (['click', 'payme', 'card'].includes(selectedOrder.payment_method) &&
-                   ['pending', 'cancelled', 'failed'].includes(selectedOrder.payment_status))) ? (
+                  Number(selectedOrder.outstanding_amount) > 0) ? (
                   <Button
                     icon={<DollarOutlined />}
                     disabled={['cancelled', 'returned'].includes(selectedOrder.status)}

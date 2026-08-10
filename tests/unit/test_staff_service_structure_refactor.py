@@ -121,6 +121,21 @@ def test_get_cod_collection_projection_subtracts_reserved_prepayment(db, sample_
 
 
 def test_get_cod_collection_projection_clamps_reserved_prepayment_to_outstanding(db, sample_order):
+    # The row is deliberately SELF-CONSISTENT: amount - amount_collected ==
+    # outstanding_amount. That equality is a system invariant — every writer of
+    # `payment.outstanding_amount` maintains it (sync_payment_projection:2466,
+    # order_edit_service:1272, and _sync_payment_status_for_terminal_order_state,
+    # which sets `payment.amount = collected` precisely "so outstanding stays 0
+    # through any later re-projection"). Prepayment RESERVATION does not break it
+    # either: it allocates with affect_payment_projection=False and records the
+    # figure in provider_data, which is what this test clamps against.
+    #
+    # This fixture used to hand-set outstanding=5000 over amount=90000/collected=0,
+    # a row nothing in production can produce. That mattered once
+    # get_cod_collection_projection became rail-agnostic and started deriving the
+    # figure arithmetically (plan 2026-08-08-open-receivable-ssot) rather than
+    # trusting the column, which is stale on a gateway-cancelled electronic
+    # payment. The clamp under test is unchanged.
     sample_order.payment_method = PaymentMethod.CASH
     sample_order.total_amount = Decimal("90000")
 
@@ -129,11 +144,14 @@ def test_get_cod_collection_projection_clamps_reserved_prepayment_to_outstanding
         user_id=sample_order.user_id,
         amount=Decimal("90000"),
         payment_method=PaymentMethod.CASH,
-        status=PaymentStatus.PENDING,
-        amount_collected=Decimal("0"),
+        status=PaymentStatus.PARTIALLY_PAID,
+        amount_collected=Decimal("85000"),
         outstanding_amount=Decimal("5000"),
         provider_data={},
     )
+    payment.amount = Decimal("90000")
+    payment.amount_collected = Decimal("85000")
+    payment.status = PaymentStatus.PARTIALLY_PAID
     payment.provider_data = {"cod_prepayment_reserved_amount": 15000}
     payment.outstanding_amount = Decimal("5000")
     if sample_order.payment is None:

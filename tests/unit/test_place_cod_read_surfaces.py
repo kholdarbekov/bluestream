@@ -136,7 +136,8 @@ class TestPlaceCodStatement:
 
         assert CashCollectionService().get_place_cod_statement(group.id)["member_count"] == 2
 
-    def test_place_statement_excludes_undelivered_and_non_cash(self, db):
+    def test_place_statement_excludes_undelivered(self, db):
+        """Cash offered against a PENDING order settles nothing, so it is not debt."""
         admin = _user(db, "adm@example.com", "+998900000009")
         u1 = _user(db, "a@example.com", "+998900000001")
         u2 = _user(db, "b@example.com", "+998900000002")
@@ -144,8 +145,76 @@ class TestPlaceCodStatement:
         group = _place(db, [a1, a2], admin)
         order, payment = _delivered_cod_debt(db, u1, "ORD-PENDING", address=a1)
         order.status = OrderStatus.PENDING
+        db.session.commit()
+
+        stmt = CashCollectionService().get_place_cod_statement(group.id)
+        assert stmt["items"] == []
+        assert stmt["total_outstanding_amount"] == 0.0
+
+    def test_place_statement_includes_a_repriced_electronic_receivable(self, db):
+        """A card order edited upward after settlement IS collectible debt.
+
+        Inverted on 2026-08-08 from the old
+        `test_place_statement_excludes_undelivered_and_non_cash`, which asserted
+        that a CLICK payment with a real outstanding on a delivered order was
+        excluded from the workplace statement — the driver standing at that
+        office was shown nothing owed and collected nothing (prod order 961).
+
+        PARTIALLY_PAID is the *only* electronic state that qualifies: the card
+        already settled and the order then grew. An unpaid Click order is
+        deliberately NOT here — see the sibling test below and
+        `open_receivable_clause`'s docstring.
+        """
+        admin = _user(db, "adm@example.com", "+998900000009")
+        u1 = _user(db, "a@example.com", "+998900000001")
+        u2 = _user(db, "b@example.com", "+998900000002")
+        a1, a2 = _address(db, u1), _address(db, u2)
+        group = _place(db, [a1, a2], admin)
         card_order, card_payment = _delivered_cod_debt(db, u2, "ORD-CARD", address=a2)
         card_payment.payment_method = PaymentMethod.CLICK
+        card_payment.status = PaymentStatus.PARTIALLY_PAID
+        card_payment.amount_collected = Decimal("5000.00")
+        card_payment.amount = Decimal("20000.00")
+        db.session.commit()
+
+        stmt = CashCollectionService().get_place_cod_statement(group.id)
+        assert {i["order_number"] for i in stmt["items"]} == {"ORD-CARD"}
+        assert stmt["total_outstanding_amount"] == 15000.0
+
+    def test_place_statement_excludes_an_unpaid_electronic_order(self, db):
+        """🔴 Money-safety guard: a live gateway payment is not ledger debt.
+
+        Every unpaid Click row carries a positive `outstanding_amount` (seeded by
+        `Payment.__init__`). If such a row entered the place statement it would
+        also enter the allocation rings, and a COWORKER's cash at this very
+        office could be absorbed by it — then destroyed when the customer paid
+        the Click link. Those orders are settled through an explicit target
+        (conversion), never a ring walk.
+        """
+        admin = _user(db, "adm@example.com", "+998900000009")
+        u1 = _user(db, "a@example.com", "+998900000001")
+        u2 = _user(db, "b@example.com", "+998900000002")
+        a1, a2 = _address(db, u1), _address(db, u2)
+        group = _place(db, [a1, a2], admin)
+        card_order, card_payment = _delivered_cod_debt(db, u2, "ORD-UNPAID", address=a2)
+        card_payment.payment_method = PaymentMethod.CLICK
+        card_payment.status = PaymentStatus.PENDING
+        db.session.commit()
+
+        stmt = CashCollectionService().get_place_cod_statement(group.id)
+        assert stmt["items"] == []
+        assert stmt["total_outstanding_amount"] == 0.0
+
+    def test_place_statement_excludes_a_settled_electronic_payment(self, db):
+        """Guard rail: a COMPLETED prepaid payment is never debt, stale column or not."""
+        admin = _user(db, "adm@example.com", "+998900000009")
+        u1 = _user(db, "a@example.com", "+998900000001")
+        u2 = _user(db, "b@example.com", "+998900000002")
+        a1, a2 = _address(db, u1), _address(db, u2)
+        group = _place(db, [a1, a2], admin)
+        card_order, card_payment = _delivered_cod_debt(db, u2, "ORD-SETTLED", address=a2)
+        card_payment.payment_method = PaymentMethod.CLICK
+        card_payment.status = PaymentStatus.COMPLETED
         db.session.commit()
 
         stmt = CashCollectionService().get_place_cod_statement(group.id)

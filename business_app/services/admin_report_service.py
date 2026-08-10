@@ -14,6 +14,7 @@ from business_app.models.payment import CashCollectionAllocation, CashCollection
 from business_app.models.product import Product
 from business_app.models.subscription import Subscription
 from business_app.models.user import User
+from business_app.utils.payment_projection import open_receivable_clause
 from business_app.utils.api_responses import success_response
 from shared.enums import (
     DeliveryStatus,
@@ -24,6 +25,18 @@ from shared.enums import (
     UserRole,
 )
 from business_app.utils.exceptions import ValidationError
+
+# Statuses whose `amount_collected` is stale money that must never be reported
+# as revenue. `PaymentService.process_refund` sets CANCELLED (full refund) or
+# PARTIALLY_REFUNDED (partial) and deliberately leaves `amount_collected` and
+# `paid_at` untouched as an audit trail, so a collected-based revenue sum has to
+# exclude them explicitly. FAILED is included for the same reason.
+_NON_REVENUE_PAYMENT_STATUSES = (
+    PaymentStatus.REFUNDED,
+    PaymentStatus.PARTIALLY_REFUNDED,
+    PaymentStatus.CANCELLED,
+    PaymentStatus.FAILED,
+)
 
 
 class AdminReportService:
@@ -317,13 +330,58 @@ class AdminReportService:
         """Generate financial summary report from ledger/session truth."""
         settled_at = func.coalesce(Payment.paid_at, Payment.created_at)
 
+        # Sum what was COLLECTED, not the face amount of COMPLETED rows.
+        # An order edited upward after settlement flips COMPLETED ->
+        # PARTIALLY_PAID (`order_edit_service._recompute_totals`), which used to
+        # delete the WHOLE already-collected amount from revenue — the report
+        # lost money on both sides of prod order 961 (the collected part vanished
+        # here, the owed part was filtered out of `outstanding_cod_total` below
+        # by a `payment_method == CASH` conjunct). `amount_collected` is
+        # rail-truthful in every status. See plan 2026-08-08-open-receivable-ssot.
+        #
+        # 🔴 NETTED AGAINST CASH ALLOCATIONS, and that subtraction is load-bearing.
+        # Settle-in-place lets a CASH collection raise `amount_collected` on an
+        # ELECTRONIC payment, and `cash_allocations_query` below has no
+        # payment-method filter — so without this the same money sits in
+        # `total_cash_collected` AND `total_electronic_collected`, and
+        # `total_revenue` (their sum) reports 120,000 on a 90,000 order.
+        # `prepaid_reservation` allocations are excluded because they never move
+        # `amount_collected` (`_allocation_affects_payment_projection`).
+        cash_on_payment = (
+            db.session.query(
+                CashCollectionAllocation.payment_id.label("payment_id"),
+                func.coalesce(func.sum(CashCollectionAllocation.allocated_amount), 0).label("cash_amount"),
+            )
+            .join(
+                CashCollectionEvent,
+                CashCollectionAllocation.cash_collection_event_id == CashCollectionEvent.id,
+            )
+            .filter(
+                CashCollectionAllocation.reversed_at.is_(None),
+                CashCollectionEvent.voided_at.is_(None),
+                CashCollectionAllocation.allocation_mode != "prepaid_reservation",
+            )
+            .group_by(CashCollectionAllocation.payment_id)
+            .subquery()
+        )
+
+        electronic_collected_expr = Payment.amount_collected - func.coalesce(cash_on_payment.c.cash_amount, 0)
+
         electronic_total = (
-            db.session.query(func.sum(Payment.amount))
+            db.session.query(func.sum(electronic_collected_expr))
+            .outerjoin(cash_on_payment, cash_on_payment.c.payment_id == Payment.id)
             .filter(
                 settled_at >= start_dt,
                 settled_at <= end_dt,
                 Payment.payment_method != PaymentMethod.CASH,
-                Payment.status == PaymentStatus.COMPLETED,
+                Payment.amount_collected > 0,
+                # Refunds and cancellations never reset `amount_collected` and
+                # leave `paid_at` intact (PaymentService.process_refund), so
+                # without this a fully refunded card payment would report its
+                # whole value as revenue forever. The old query was implicitly
+                # protected by `status == COMPLETED`; summing what was actually
+                # collected means the exclusion has to be stated.
+                Payment.status.notin_(_NON_REVENUE_PAYMENT_STATUSES),
             )
             .scalar()
             or 0
@@ -333,13 +391,21 @@ class AdminReportService:
             db.session.query(
                 Payment.payment_method,
                 func.count(Payment.id),
-                func.sum(Payment.amount),
+                func.sum(electronic_collected_expr),
             )
+            .outerjoin(cash_on_payment, cash_on_payment.c.payment_id == Payment.id)
             .filter(
                 settled_at >= start_dt,
                 settled_at <= end_dt,
                 Payment.payment_method != PaymentMethod.CASH,
-                Payment.status == PaymentStatus.COMPLETED,
+                Payment.amount_collected > 0,
+                # Refunds and cancellations never reset `amount_collected` and
+                # leave `paid_at` intact (PaymentService.process_refund), so
+                # without this a fully refunded card payment would report its
+                # whole value as revenue forever. The old query was implicitly
+                # protected by `status == COMPLETED`; summing what was actually
+                # collected means the exclusion has to be stated.
+                Payment.status.notin_(_NON_REVENUE_PAYMENT_STATUSES),
             )
             .group_by(Payment.payment_method)
             .all()
@@ -395,8 +461,13 @@ class AdminReportService:
             .join(Order, Payment.order_id == Order.id)
             .join(Delivery, Delivery.order_id == Order.id)
             .filter(
-                Payment.payment_method == PaymentMethod.CASH,
-                Payment.outstanding_amount > 0,
+                # Rail-agnostic; see plan 2026-08-08-open-receivable-ssot.
+                # NB this query keys DELIVERED off `Delivery.status`, unlike
+                # every cash_collection_service query which keys off
+                # `Order.status`. That divergence predates this change and is
+                # left as-is deliberately — moving report semantics in the same
+                # change would make the money movement impossible to attribute.
+                open_receivable_clause(),
                 Delivery.status == DeliveryStatus.DELIVERED,
             )
             .all()

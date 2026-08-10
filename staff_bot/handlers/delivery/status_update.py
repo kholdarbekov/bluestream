@@ -21,7 +21,7 @@ from staff_bot.utils.formatters import (
     format_active_delivery_summary,
     format_place_cod_lines,
     format_quantity,
-    is_unsettled_electronic,
+    has_cash_due,
 )
 from staff_bot.permissions import require_auth, require_delivery_driver
 from staff_bot.i18n import i18n
@@ -406,21 +406,24 @@ class StatusUpdateHandler(BaseHandler):
                 return
 
             if new_status == 'delivered':
-                payment_method = delivery_info.get('payment_method', '')
                 cash_due_amount = self._get_expected_cash_to_collect(delivery_info)
                 reserved_prepayment = float(delivery_info.get('cod_reserved_prepayment_amount') or 0)
 
-                # Detect unsuccessful-electronic orders: online payment method but
-                # payment not completed (pending/cancelled/failed) — driver pays cash
-                # at the door to settle the order (Task 5, plan 2026-06-22).
-                unsettled_electronic = is_unsettled_electronic(delivery_info)
-                if unsettled_electronic:
-                    # For an unsettled electronic order the full order amount is due
-                    # in cash; outstanding_amount / total_amount are equivalent here
-                    # (no partial cash collected yet) — use total_amount as the prompt.
-                    cash_due_amount = float(delivery_info.get('total_amount') or 0)
-
-                if (payment_method == 'cash' and cash_due_amount > 0) or unsettled_electronic:
+                # RAIL-AGNOSTIC (plan 2026-08-08-open-receivable-ssot).
+                #
+                # The gate used to be `(payment_method == 'cash' and due > 0) or
+                # is_unsettled_electronic(...)`, and it then OVERRODE the amount
+                # with the full `total_amount` on the stated grounds that
+                # "outstanding_amount / total_amount are equivalent here (no
+                # partial cash collected yet)". That premise is FALSE for an
+                # order edited upward after an online settlement — the customer
+                # has already paid most of it — so the override is deleted.
+                #
+                # The amount now comes from `_get_expected_cash_to_collect` ONLY,
+                # which is the same seam that feeds the submitted
+                # `cash_collected` in `_complete_delivery_with_cash`. One call,
+                # so what the driver is shown and what is recorded cannot diverge.
+                if has_cash_due(delivery_info):
                     keyboard = DeliveryKeyboards.cash_collection_options(
                         language, delivery_id, cash_due_amount
                     )

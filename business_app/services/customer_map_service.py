@@ -12,13 +12,8 @@ from business_app.models.user import User, UserAddress
 from business_app.models.order import Order
 from business_app.models.bottle import BottleBalance
 from business_app.models.payment import Payment
-from shared.enums import (
-    UserRole,
-    UserType,
-    EntitySubtype,
-    OrderStatus,
-    PaymentMethod,
-)
+from business_app.utils.payment_projection import open_receivable_clause
+from shared.enums import UserRole, UserType, EntitySubtype, OrderStatus
 
 # SSOT threshold used to flag COD-restricted customers (class attr, cash_collection_service.py:40).
 from business_app.services.cash_collection_service import CashCollectionService
@@ -41,7 +36,9 @@ class CustomerMapService:
             .subquery()
         )
 
-        # Open delivered COD debt per user.
+        # Open delivered receivables per user — ANY payment rail. Shares the SSOT
+        # clause with cash_collection_service rather than keeping a fourth
+        # hand-rolled copy of the predicate (plan 2026-08-08-open-receivable-ssot).
         cod_debt = (
             db.session.query(
                 Payment.user_id.label("user_id"),
@@ -50,8 +47,7 @@ class CustomerMapService:
             )
             .join(Order, Order.id == Payment.order_id)
             .filter(
-                Payment.payment_method == PaymentMethod.CASH,
-                Payment.outstanding_amount > 0,
+                open_receivable_clause(),
                 Order.status == OrderStatus.DELIVERED,
             )
             .group_by(Payment.user_id)

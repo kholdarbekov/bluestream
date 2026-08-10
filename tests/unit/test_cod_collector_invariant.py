@@ -865,3 +865,56 @@ class TestDeliverySettlementEndToEnd:
         db.session.add(address)
         db.session.flush()
         return address.id
+
+
+@pytest.mark.unit
+def test_electronic_payment_completed_by_cash_records_the_collector(
+    app, db, sample_user, delivery_driver
+):
+    """Stamping follows the MONEY; asserting follows the RAIL.
+
+    A Click receivable settled with physical cash (an order edited upward at the
+    door — prod 961) must still record WHO took the cash, even though
+    ck_payments_cash_completed_requires_collector exempts non-cash rows by its
+    first disjunct. Before this split the whole stamping branch was CASH-gated,
+    so the audit trail silently lost the collector.
+
+    Plan: docs/superpowers/plans/2026-08-08-open-receivable-ssot.md (Task 6)
+    """
+    with app.app_context():
+        order = Order(
+            user_id=sample_user.id,
+            order_number="ORD-SYNC-CLICK-COLLECTOR",
+            status=OrderStatus.DELIVERED,
+            subtotal=Decimal("90000.00"),
+            delivery_fee=Decimal("0.00"),
+            discount_amount=Decimal("0.00"),
+            loyalty_discount=Decimal("0.00"),
+            total_amount=Decimal("90000.00"),
+            payment_method=PaymentMethod.CLICK,
+            created_at=datetime.now(UTC),
+        )
+        db.session.add(order)
+        db.session.flush()
+        payment = Payment(
+            order_id=order.id,
+            user_id=sample_user.id,
+            payment_method=PaymentMethod.CLICK,
+            amount=Decimal("90000.00"),
+            amount_collected=Decimal("90000.00"),
+            outstanding_amount=Decimal("0.00"),
+            status=PaymentStatus.PARTIALLY_PAID,
+            currency="UZS",
+            payment_id="pay-click-collector",
+        )
+        db.session.add(payment)
+        db.session.commit()
+
+        CashCollectionService().sync_payment_projection(
+            payment, collected_by=delivery_driver.id
+        )
+        db.session.commit()
+        db.session.refresh(payment)
+
+        assert payment.status == PaymentStatus.COMPLETED
+        assert payment.collected_by == delivery_driver.id

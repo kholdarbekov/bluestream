@@ -16,35 +16,23 @@ They mirror the style of test_staff_bot_cod_collection_clarity.py.
 """
 
 from staff_bot.handlers.delivery.status_update import StatusUpdateHandler
-from staff_bot.utils.formatters import get_cod_cash_projection
-
-
-# ---------------------------------------------------------------------------
-# Helper: replicate the trigger logic from initiate_status_change so we can
-# unit-test it without mocking PTB context objects.
-# ---------------------------------------------------------------------------
-
-_ELECTRONIC_METHODS = {'click', 'payme', 'card'}
-_SETTLED_STATUSES = {'completed', 'paid', 'partially_paid'}
+from staff_bot.utils.formatters import get_cod_cash_projection, has_cash_due
 
 
 def _should_prompt_for_cash(delivery_info: dict) -> tuple[bool, float]:
-    """
-    Return (should_prompt, cash_due_amount) following the logic in
-    StatusUpdateHandler.initiate_status_change.
-    """
-    payment_method = delivery_info.get('payment_method', '')
-    cash_due_amount = StatusUpdateHandler._get_expected_cash_to_collect(delivery_info)
-    payment_status_lower = str(delivery_info.get('payment_status') or '').lower()
-    is_unsettled_electronic = (
-        payment_method in _ELECTRONIC_METHODS
-        and payment_status_lower not in _SETTLED_STATUSES
-    )
-    if is_unsettled_electronic:
-        cash_due_amount = float(delivery_info.get('total_amount') or 0)
+    """Return (should_prompt, cash_due_amount) exactly as initiate_status_change does.
 
-    should_prompt = (payment_method == 'cash' and cash_due_amount > 0) or is_unsettled_electronic
-    return should_prompt, cash_due_amount
+    🔴 THIS CALLS THE PRODUCTION PREDICATE. It used to RE-IMPLEMENT it — a local
+    copy of `_ELECTRONIC_METHODS`, `_SETTLED_STATUSES` and the boolean — which
+    meant every test in this file kept passing while production diverged from
+    them. One of them (`test_payme_partially_paid_no_extra_cash_prompt`) pinned
+    the prod-961 defect as CORRECT behaviour: a payme order with 10,000
+    outstanding asserted to produce no cash prompt.
+
+    Never inline the rule here again.
+    """
+    cash_due_amount = StatusUpdateHandler._get_expected_cash_to_collect(delivery_info)
+    return has_cash_due(delivery_info), cash_due_amount
 
 
 # ---------------------------------------------------------------------------
@@ -89,7 +77,7 @@ def test_click_pending_payment_prompts_for_cash():
         'payment_status': 'pending',
         'total_amount': 36000,
         'outstanding_amount': 36000,
-        'expected_cash_to_collect': 0,  # no COD projection set
+        'expected_cash_to_collect': 36000,
         'cod_reserved_prepayment_amount': 0,
     })
     assert should is True
@@ -103,7 +91,7 @@ def test_click_cancelled_payment_prompts_for_cash():
         'payment_status': 'cancelled',
         'total_amount': 45000,
         'outstanding_amount': 45000,
-        'expected_cash_to_collect': 0,
+        'expected_cash_to_collect': 45000,
         'cod_reserved_prepayment_amount': 0,
     })
     assert should is True
@@ -117,7 +105,7 @@ def test_payme_failed_payment_prompts_for_cash():
         'payment_status': 'failed',
         'total_amount': 25000,
         'outstanding_amount': 25000,
-        'expected_cash_to_collect': 0,
+        'expected_cash_to_collect': 25000,
         'cod_reserved_prepayment_amount': 0,
     })
     assert should is True
@@ -131,7 +119,7 @@ def test_card_pending_payment_prompts_for_cash():
         'payment_status': 'pending',
         'total_amount': 18000,
         'outstanding_amount': 18000,
-        'expected_cash_to_collect': 0,
+        'expected_cash_to_collect': 18000,
         'cod_reserved_prepayment_amount': 0,
     })
     assert should is True
@@ -151,17 +139,24 @@ def test_click_completed_payment_no_cash_prompt():
     assert should is False
 
 
-def test_payme_partially_paid_no_extra_cash_prompt():
-    """Payme partially_paid → still treated as settled; no cash-at-door prompt."""
-    should, _ = _should_prompt_for_cash({
+def test_payme_partially_paid_prompts_for_the_outstanding_delta():
+    """Prod order 961 shape: part-paid online, the rest due in cash at the door.
+
+    Asserted the OTHER WAY ROUND until 2026-08-08 — this exact payload is what
+    the defect looked like, pinned as correct behaviour. The backend now sends a
+    truthful `expected_cash_to_collect` for every rail, so the prompt fires for
+    the delta and only the delta.
+    """
+    should, amount = _should_prompt_for_cash({
         'payment_method': 'payme',
         'payment_status': 'partially_paid',
         'total_amount': 50000,
         'outstanding_amount': 10000,
-        'expected_cash_to_collect': 0,
+        'expected_cash_to_collect': 10000,
         'cod_reserved_prepayment_amount': 0,
     })
-    assert should is False
+    assert should is True
+    assert amount == 10000
 
 
 def test_empty_payment_status_treated_as_unsettled():
@@ -171,24 +166,34 @@ def test_empty_payment_status_treated_as_unsettled():
         'payment_status': None,
         'total_amount': 30000,
         'outstanding_amount': 30000,
-        'expected_cash_to_collect': 0,
+        'expected_cash_to_collect': 30000,
         'cod_reserved_prepayment_amount': 0,
     })
     assert should is True
     assert amount == 30000
 
 
-def test_cash_amount_uses_total_amount_for_electronic():
-    """For electronic orders the prompt amount comes from total_amount, not projection."""
+def test_cash_amount_never_falls_back_to_total_amount_for_electronic():
+    """The prompt amount is the SERVER figure, never `total_amount`.
+
+    Inverted on 2026-08-08. This used to assert the opposite — that an
+    electronic order's prompt amount comes from `total_amount` — because the API
+    sent `expected_cash_to_collect: 0` for every non-COD order and the bot
+    compensated with an override. `StaffService.get_cod_collection_projection`
+    is now rail-truthful, so the override is gone: keeping it would ask a
+    customer who already paid 60,000 of a 90,000 order by card to hand over
+    90,000 in cash at the door.
+
+    Here the server says nothing is due, so nothing is prompted — even though
+    `total_amount` is 72,000.
+    """
     should, amount = _should_prompt_for_cash({
         'payment_method': 'click',
-        'payment_status': 'pending',
+        'payment_status': 'completed',
         'total_amount': 72000,
-        # outstanding_amount and expected_cash_to_collect are both 0
-        # (as the API sends them for non-COD orders)
         'outstanding_amount': 0,
         'expected_cash_to_collect': 0,
         'cod_reserved_prepayment_amount': 0,
     })
-    assert should is True
-    assert amount == 72000
+    assert should is False
+    assert amount == 0

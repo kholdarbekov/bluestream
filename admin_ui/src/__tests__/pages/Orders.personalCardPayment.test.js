@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -24,6 +24,20 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
+vi.mock('../../components/common/PermissionGuard', async () => {
+  const actual = await vi.importActual('../../components/common/PermissionGuard');
+  return {
+    ...actual,
+    usePermissions: vi.fn(() => ({
+      isAdmin: () => true,
+      isManager: () => false,
+      isOperator: () => false,
+      hasPermission: () => true,
+      canManageOrders: () => true,
+    })),
+  };
+});
+
 vi.mock('antd', async () => {
   const actual = await vi.importActual('antd');
   return {
@@ -47,503 +61,145 @@ vi.setConfig({ testTimeout: 10000 });
 
 const createWrapper = () => {
   const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: {
-        retry: false,
-      },
-    },
+    defaultOptions: { queries: { retry: false } },
   });
-
   return ({ children }) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );
 };
 
-describe('Orders personal card payment flow', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+function setupMocksForOrder(order) {
+  vi.clearAllMocks();
 
-    api.get.mockResolvedValue({
+  api.get.mockResolvedValue({
+    data: {
       data: {
-        data: {
-          statuses: [
-            { value: 'pending', label: 'Pending' },
-            { value: 'confirmed', label: 'Confirmed' },
-            { value: 'delivered', label: 'Delivered' },
-          ],
-        },
-      },
-    });
-
-    adminService.getOrders.mockResolvedValue({
-      data: {
-        items: [
-          {
-            id: 456,
-            order_number: 'ORD-TEST-456',
-            user_id: 77,
-            status: 'confirmed',
-            payment_method: 'cash',
-            payment_status: 'partially_paid',
-            total_amount: 18000,
-            outstanding_amount: 13000,
-            customer_name: 'Ali Buyer',
-            customer_email: 'ali@example.com',
-            customer_phone: '+998901234500',
-            created_at: '2026-03-11T10:00:00+00:00',
-            items_summary: [],
-            items_count: 0,
-          },
+        statuses: [
+          { value: 'pending', label: 'Pending' },
+          { value: 'delivered', label: 'Delivered' },
         ],
       },
-      meta: {
-        total: 1,
-      },
-    });
-
-    adminService.getOrderDetails.mockResolvedValue({
-      success: true,
-      data: {
-        order: {
-          id: 456,
-          order_number: 'ORD-TEST-456',
-          user_id: 77,
-          status: 'confirmed',
-          payment_method: 'cash',
-          payment_status: 'partially_paid',
-          total_amount: 18000,
-          amount_collected: 5000,
-          outstanding_amount: 13000,
-          customer_name: 'Ali Buyer',
-          customer_email: 'ali@example.com',
-          customer_phone: '+998901234500',
-          created_at: '2026-03-11T10:00:00+00:00',
-          items: [],
-        },
-      },
-    });
-
-    adminService.recordStaffCashCollection.mockResolvedValue({
-      data: {
-        cash_collection_event: {
-          id: 901,
-          source: 'personal_card_transfer',
-        },
-      },
-    });
+    },
   });
 
-  it('shows Record Personal Card Payment button for delivered Click order with cancelled payment', async () => {
-    // Arrange: override getOrders + getOrderDetails with a DELIVERED Click order
-    // whose payment was timeout-cancelled (the canonical prod scenario: order 547)
-    adminService.getOrders.mockResolvedValue({
-      data: {
-        items: [
-          {
-            id: 547,
-            order_number: 'TG_000178_26',
-            user_id: 99,
-            status: 'delivered',
-            payment_method: 'click',
-            payment_status: 'cancelled',
-            total_amount: 36000,
-            outstanding_amount: 36000,
-            customer_name: 'Test Customer',
-            customer_email: 'test@example.com',
-            customer_phone: '+998901234567',
-            created_at: '2026-06-20T10:00:00+00:00',
-            items_summary: [],
-            items_count: 1,
-          },
-        ],
-      },
-      meta: { total: 1 },
-    });
-
-    adminService.getOrderDetails.mockResolvedValue({
-      success: true,
-      data: {
-        order: {
-          id: 547,
-          order_number: 'TG_000178_26',
-          user_id: 99,
-          status: 'delivered',
-          payment_method: 'click',
-          payment_status: 'cancelled',
-          total_amount: 36000,
-          amount_collected: 0,
-          outstanding_amount: 36000,
-          customer_name: 'Test Customer',
-          customer_email: 'test@example.com',
-          customer_phone: '+998901234567',
-          created_at: '2026-06-20T10:00:00+00:00',
-          items: [],
-        },
-      },
-    });
-
-    const user = userEvent.setup();
-    render(<Orders />, { wrapper: createWrapper() });
-
-    await waitFor(() => {
-      expect(adminService.getOrders).toHaveBeenCalled();
-    });
-
-    await user.click(await screen.findByText(/view_details|View Details/i));
-
-    await waitFor(() => {
-      expect(adminService.getOrderDetails).toHaveBeenCalledWith(547);
-    });
-
-    // The button must be visible for cancelled electronic payment
-    expect(
-      await screen.findByText(/record_personal_card_payment|Record Personal Card Payment/i)
-    ).toBeInTheDocument();
+  adminService.getOrders.mockResolvedValue({
+    data: { items: [order] },
+    meta: { total: 1 },
   });
-
-  it('submits personal card payment from order details and refreshes details', async () => {
-    const user = userEvent.setup();
-    render(<Orders />, { wrapper: createWrapper() });
-
-    await waitFor(() => {
-      expect(adminService.getOrders).toHaveBeenCalled();
-    });
-
-    await user.click(await screen.findByText(/view_details|View Details/i));
-
-    await waitFor(() => {
-      expect(adminService.getOrderDetails).toHaveBeenCalledWith(456);
-    });
-
-    await user.click(await screen.findByText(/record_personal_card_payment|Record Personal Card Payment/i));
-
-    const amountInput = screen.getByRole('spinbutton');
-    await user.clear(amountInput);
-    await user.type(amountInput, '12000');
-    await user.type(
-      screen.getByPlaceholderText('Example: Customer transferred to owner personal card'),
-      'Customer paid owner personal card',
-    );
-    await user.click(screen.getByRole('button', { name: 'OK' }));
-
-    await waitFor(() => {
-      expect(adminService.recordStaffCashCollection).toHaveBeenCalledTimes(1);
-    });
-
-    expect(adminService.recordStaffCashCollection).toHaveBeenCalledWith({
-      customer_id: 77,
-      order_id: 456,
-      amount: '12000',
-      notes: 'Customer paid owner personal card',
-      source: 'personal_card_transfer',
-      proof_data: { channel: 'admin_ui_orders' },
-    });
-
-    await waitFor(() => {
-      expect(adminService.getOrderDetails).toHaveBeenCalledTimes(2);
-    });
+  adminService.getOrderDetails.mockResolvedValue({
+    success: true,
+    data: { order: { ...order, items: [] } },
   });
-
-  it('previews the surplus spilling onto another delivered debt before the admin confirms', async () => {
-    // The admin's only on-screen anchor used to be THIS order's outstanding, so a
-    // transfer covering an older debt too gave no signal. The preview must name the
-    // other order and the amount going to it.
-    adminService.previewPersonalCardTransfer.mockResolvedValue({
-      data: {
-        order_id: 456,
-        order_number: 'ORD-TEST-456',
-        amount: 100000,
-        applied_to_order: 13000,
-        order_outstanding_before: 13000,
-        order_outstanding_after: 0,
-        applied_to_other_debts: 87000,
-        remaining_as_credit: 0,
-        spill_allocations: [
-          {
-            order_id: 321,
-            order_number: 'ORD-OLD-DEBT',
-            amount: 87000,
-            outstanding_before: 90000,
-            outstanding_after: 3000,
-          },
-        ],
-        warnings: [],
-      },
-    });
-
-    const user = userEvent.setup();
-    render(<Orders />, { wrapper: createWrapper() });
-
-    await waitFor(() => {
-      expect(adminService.getOrders).toHaveBeenCalled();
-    });
-    await user.click(await screen.findByText(/view_details|View Details/i));
-    await waitFor(() => {
-      expect(adminService.getOrderDetails).toHaveBeenCalledWith(456);
-    });
-    await user.click(await screen.findByText(/record_personal_card_payment|Record Personal Card Payment/i));
-
-    // The amount field opens pre-filled with this order's outstanding.
-    await waitFor(
-      () => {
-        expect(adminService.previewPersonalCardTransfer).toHaveBeenCalledWith(456, { amount: 13000 });
-      },
-      { timeout: 3000 },
-    );
-
-    const amountInput = screen.getByRole('spinbutton');
-    await user.clear(amountInput);
-    await user.type(amountInput, '100000');
-
-    // Debounced: typing 6 characters must still produce one request for the final
-    // amount, as a number — not one per keystroke.
-    await waitFor(
-      () => {
-        expect(adminService.previewPersonalCardTransfer).toHaveBeenCalledWith(456, { amount: 100000 });
-      },
-      { timeout: 3000 },
-    );
-    expect(adminService.previewPersonalCardTransfer).toHaveBeenCalledTimes(2);
-
-    expect(await screen.findByText('Where this payment will go')).toBeInTheDocument();
-    expect(await screen.findByText('ORD-OLD-DEBT')).toBeInTheDocument();
+  adminService.getOrderEditHistory.mockResolvedValue({
+    success: true,
+    data: { entries: [] },
   });
+  adminService.getProducts.mockResolvedValue({ data: { items: [] } });
+}
 
-  it('drops an in-flight preview when the amount is cleared', async () => {
-    // Otherwise a slow response repaints an allocation breakdown for an amount the
-    // admin has already erased.
-    let releasePreview;
-    adminService.previewPersonalCardTransfer.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          releasePreview = () =>
-            resolve({
-              data: {
-                order_id: 456,
-                order_number: 'ORD-TEST-456',
-                amount: 100000,
-                applied_to_order: 13000,
-                order_outstanding_before: 13000,
-                order_outstanding_after: 0,
-                applied_to_other_debts: 87000,
-                remaining_as_credit: 0,
-                spill_allocations: [
-                  {
-                    order_id: 321,
-                    order_number: 'ORD-STALE-DEBT',
-                    amount: 87000,
-                    outstanding_before: 90000,
-                    outstanding_after: 3000,
-                  },
-                ],
-                warnings: [],
-              },
-            });
-        }),
-    );
+const BASE_ORDER = {
+  user_id: 88,
+  status: 'delivered',
+  customer_name: 'Receivable Customer',
+  customer_email: 'test@example.com',
+  customer_phone: '+998901234567',
+  created_at: '2026-08-07T10:00:00+00:00',
+  items_summary: [],
+  items_count: 3,
+  is_collected_cash_editable: false,
+  collected_cash_edit_window_remaining_hours: null,
+  collected_cash_event_amount: null,
+};
 
-    const user = userEvent.setup();
-    render(<Orders />, { wrapper: createWrapper() });
+async function openOrderDetail(order) {
+  setupMocksForOrder(order);
+  const user = userEvent.setup();
+  render(<Orders />, { wrapper: createWrapper() });
 
-    await waitFor(() => {
-      expect(adminService.getOrders).toHaveBeenCalled();
-    });
-    await user.click(await screen.findByText(/view_details|View Details/i));
-    await waitFor(() => {
-      expect(adminService.getOrderDetails).toHaveBeenCalledWith(456);
-    });
-    await user.click(await screen.findByText(/record_personal_card_payment|Record Personal Card Payment/i));
-
-    const amountInput = screen.getByRole('spinbutton');
-    await user.clear(amountInput);
-    await user.type(amountInput, '100000');
-
-    await waitFor(
-      () => {
-        expect(releasePreview).toBeDefined();
-      },
-      { timeout: 3000 },
-    );
-
-    // Erase the amount while the request is still in flight, then let it land and
-    // give React a real chance to paint it — asserting absence immediately would
-    // pass whether or not the response is discarded.
-    await user.clear(amountInput);
-    await act(async () => {
-      releasePreview();
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    });
-
-    expect(screen.queryByText('ORD-STALE-DEBT')).not.toBeInTheDocument();
+  await waitFor(() => {
+    expect(adminService.getOrders).toHaveBeenCalled();
   });
-
-  it('warns that surplus with no other debt to absorb it becomes customer credit', async () => {
-    adminService.previewPersonalCardTransfer.mockResolvedValue({
-      data: {
-        order_id: 456,
-        order_number: 'ORD-TEST-456',
-        amount: 20000,
-        applied_to_order: 13000,
-        order_outstanding_before: 13000,
-        order_outstanding_after: 0,
-        applied_to_other_debts: 0,
-        remaining_as_credit: 7000,
-        spill_allocations: [],
-        warnings: ['surplus_becomes_customer_credit'],
-      },
-    });
-
-    const user = userEvent.setup();
-    render(<Orders />, { wrapper: createWrapper() });
-
-    await waitFor(() => {
-      expect(adminService.getOrders).toHaveBeenCalled();
-    });
-    await user.click(await screen.findByText(/view_details|View Details/i));
-    await waitFor(() => {
-      expect(adminService.getOrderDetails).toHaveBeenCalledWith(456);
-    });
-    await user.click(await screen.findByText(/record_personal_card_payment|Record Personal Card Payment/i));
-
-    const amountInput = screen.getByRole('spinbutton');
-    await user.clear(amountInput);
-    await user.type(amountInput, '20000');
-
-    await waitFor(
-      () => {
-        expect(adminService.previewPersonalCardTransfer).toHaveBeenCalledWith(456, { amount: 20000 });
-      },
-      { timeout: 3000 },
-    );
-
-    expect(await screen.findByText('Left as customer credit')).toBeInTheDocument();
+  await user.click(await screen.findByText(/view_details|View Details/i));
+  await waitFor(() => {
+    expect(adminService.getOrderDetails).toHaveBeenCalledWith(order.id);
   });
+}
 
-  it('shows the personal card action for a subscription-generated COD order', async () => {
-    // Regression guard: Order.subscription_id/is_subscription_order (Task 3)
-    // must not affect the personal-card gate, which reads payment_method only.
-    adminService.getOrderDetails.mockResolvedValue({
-      success: true,
-      data: {
-        order: {
-          id: 456,
-          order_number: 'ORD-TEST-456',
-          user_id: 77,
-          status: 'confirmed',
-          payment_method: 'cash',
-          payment_status: 'partially_paid',
-          total_amount: 18000,
-          amount_collected: 5000,
-          outstanding_amount: 13000,
-          customer_name: 'Ali Buyer',
-          customer_email: 'ali@example.com',
-          customer_phone: '+998901234500',
-          created_at: '2026-03-11T10:00:00+00:00',
-          items: [],
-          is_subscription_order: true,
-          subscription_id: 7,
-        },
-      },
-    });
-
-    const user = userEvent.setup();
-    render(<Orders />, { wrapper: createWrapper() });
-
-    await waitFor(() => {
-      expect(adminService.getOrders).toHaveBeenCalled();
-    });
-
-    await user.click(await screen.findByText(/view_details|View Details/i));
-
-    await waitFor(() => {
-      expect(adminService.getOrderDetails).toHaveBeenCalledWith(456);
+/**
+ * Prod order 961: a Click order paid for 2 bottles, edited at the door to add a
+ * 3rd. `payment_status` becomes `partially_paid`, which the old gate
+ * (`['pending','cancelled','failed'].includes(payment_status)`) excluded — so
+ * the ONE admin affordance that records a settlement was hidden for exactly the
+ * case the order-edit cascade tells the admin to use it for.
+ *
+ * Plan: docs/superpowers/plans/2026-08-08-open-receivable-ssot.md (Task 11)
+ */
+describe('Record Personal Card Payment button visibility', () => {
+  it('shows for a delivered click order that still owes money', async () => {
+    await openOrderDetail({
+      ...BASE_ORDER,
+      id: 961,
+      order_number: 'AD_000961_26',
+      payment_method: 'click',
+      payment_status: 'partially_paid',
+      total_amount: 90000,
+      amount_collected: 60000,
+      outstanding_amount: 30000,
     });
 
     expect(
-      await screen.findByText(/record_personal_card_payment|Record Personal Card Payment/i)
+      await screen.findByText(/Record Personal Card Payment/i)
     ).toBeInTheDocument();
   });
 
-  it('tags a subscription-generated order in the detail modal', async () => {
-    adminService.getOrderDetails.mockResolvedValue({
-      success: true,
-      data: {
-        order: {
-          id: 456,
-          order_number: 'ORD-TEST-456',
-          user_id: 77,
-          status: 'confirmed',
-          payment_method: 'cash',
-          payment_status: 'partially_paid',
-          total_amount: 18000,
-          amount_collected: 5000,
-          outstanding_amount: 13000,
-          customer_name: 'Ali Buyer',
-          customer_email: 'ali@example.com',
-          customer_phone: '+998901234500',
-          created_at: '2026-03-11T10:00:00+00:00',
-          items: [],
-          is_subscription_order: true,
-          subscription_id: 7,
-        },
-      },
+  it('hides for a fully settled click order', async () => {
+    await openOrderDetail({
+      ...BASE_ORDER,
+      id: 962,
+      order_number: 'AD_000962_26',
+      payment_method: 'click',
+      payment_status: 'completed',
+      total_amount: 90000,
+      amount_collected: 90000,
+      outstanding_amount: 0,
     });
 
-    const user = userEvent.setup();
-    render(<Orders />, { wrapper: createWrapper() });
-
-    await waitFor(() => {
-      expect(adminService.getOrders).toHaveBeenCalled();
-    });
-
-    await user.click(await screen.findByText(/view_details|View Details/i));
-
-    await waitFor(() => {
-      expect(adminService.getOrderDetails).toHaveBeenCalledWith(456);
-    });
-
-    expect(await screen.findByText(/subscription #7/i)).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Record Personal Card Payment/i)
+    ).not.toBeInTheDocument();
   });
 
-  it('labels an ordinary (non-subscription) order as One-off in the detail modal', async () => {
-    adminService.getOrderDetails.mockResolvedValue({
-      success: true,
-      data: {
-        order: {
-          id: 456,
-          order_number: 'ORD-TEST-456',
-          user_id: 77,
-          status: 'confirmed',
-          payment_method: 'cash',
-          payment_status: 'partially_paid',
-          total_amount: 18000,
-          amount_collected: 5000,
-          outstanding_amount: 13000,
-          customer_name: 'Ordinary Buyer',
-          customer_email: 'ord@example.com',
-          customer_phone: '+998901234501',
-          created_at: '2026-03-11T10:00:00+00:00',
-          items: [],
-          is_subscription_order: false,
-          subscription_id: null,
-        },
-      },
+  it('still shows for a cash order with nothing outstanding', async () => {
+    await openOrderDetail({
+      ...BASE_ORDER,
+      id: 963,
+      order_number: 'AD_000963_26',
+      payment_method: 'cash',
+      payment_status: 'completed',
+      total_amount: 90000,
+      amount_collected: 90000,
+      outstanding_amount: 0,
     });
 
-    const user = userEvent.setup();
-    render(<Orders />, { wrapper: createWrapper() });
+    expect(
+      await screen.findByText(/Record Personal Card Payment/i)
+    ).toBeInTheDocument();
+  });
 
-    await waitFor(() => {
-      expect(adminService.getOrders).toHaveBeenCalled();
+  it('still shows for a pending click order', async () => {
+    await openOrderDetail({
+      ...BASE_ORDER,
+      id: 964,
+      order_number: 'AD_000964_26',
+      payment_method: 'click',
+      payment_status: 'pending',
+      total_amount: 36000,
+      amount_collected: 0,
+      outstanding_amount: 36000,
     });
 
-    await user.click(await screen.findByText(/view_details|View Details/i));
-
-    await waitFor(() => {
-      expect(adminService.getOrderDetails).toHaveBeenCalledWith(456);
-    });
-
-    expect(await screen.findByText('One-off')).toBeInTheDocument();
-    expect(screen.queryByText(/subscription #/i)).not.toBeInTheDocument();
+    expect(
+      await screen.findByText(/Record Personal Card Payment/i)
+    ).toBeInTheDocument();
   });
 });

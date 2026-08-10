@@ -2907,3 +2907,179 @@ class TestCodStatementExcludesCancelledReturnedDebt:
             statement = service.get_customer_cod_statement(debtor.id)
 
             assert statement['total_outstanding_amount'] == 207000.0
+
+
+# ---------------------------------------------------------------------------
+# Settle-in-place: an electronic receivable is settled WITHOUT flipping the rail.
+# Plan: docs/superpowers/plans/2026-08-08-open-receivable-ssot.md (Task 5)
+# ---------------------------------------------------------------------------
+
+
+def _delivered_electronic_receivable(db, user, *, total, collected, status, suffix):
+    """Delivered CLICK order that still owes `total - collected`."""
+    order = Order(
+        user_id=user.id,
+        order_number=f"ORD-SIP-{suffix}",
+        status=OrderStatus.DELIVERED,
+        subtotal=Decimal(str(total)),
+        delivery_fee=Decimal("0.00"),
+        discount_amount=Decimal("0.00"),
+        loyalty_discount=Decimal("0.00"),
+        total_amount=Decimal(str(total)),
+        payment_method=PaymentMethod.CLICK,
+    )
+    db.session.add(order)
+    db.session.flush()
+    payment = Payment(
+        order_id=order.id,
+        user_id=user.id,
+        payment_method=PaymentMethod.CLICK,
+        amount=Decimal(str(total)),
+        amount_collected=Decimal(str(collected)),
+        outstanding_amount=Decimal(str(total - collected)),
+        status=status,
+        currency="UZS",
+        payment_id=f"pay-sip-{suffix}",
+    )
+    db.session.add(payment)
+    db.session.commit()
+    return order, payment
+
+
+@pytest.mark.unit
+class TestSettleElectronicReceivableInPlace:
+    """Prod order 961: settle the delta without touching the rail.
+
+    Converting to CASH would call queue_click_fiscalization, which has NO
+    completed-guard, and would erase the fiscal record of the card-paid part —
+    the part the owner's policy says must stay fiscalized.
+    """
+
+    def test_settles_only_the_delta_and_keeps_the_click_rail(self, app, db, admin_user, sample_user):
+        order, payment = _delivered_electronic_receivable(
+            db, sample_user, total=90000, collected=60000,
+            status=PaymentStatus.PARTIALLY_PAID, suffix="delta",
+        )
+        CashCollectionService().post_collection(
+            customer_id=sample_user.id,
+            amount=Decimal("30000.00"),
+            source="personal_card_transfer",
+            recorded_by_user_id=admin_user.id,
+            order_id=order.id,
+            notes="customer transferred the delta",
+        )
+        db.session.refresh(payment)
+        db.session.refresh(order)
+        assert payment.payment_method == PaymentMethod.CLICK
+        assert payment.status == PaymentStatus.COMPLETED
+        assert Decimal(str(payment.amount_collected)) == Decimal("90000.00")
+        assert Decimal(str(payment.outstanding_amount)) == Decimal("0.00")
+        assert order.is_paid is True
+
+    def test_does_not_touch_the_fiscalization_record(self, app, db, admin_user, sample_user):
+        from business_app.models.payment import PaymentFiscalization
+        from shared.enums import FiscalizationStatus
+
+        order, payment = _delivered_electronic_receivable(
+            db, sample_user, total=90000, collected=60000,
+            status=PaymentStatus.PARTIALLY_PAID, suffix="fiscal",
+        )
+        fiscalization = PaymentFiscalization(
+            payment_id=payment.id,
+            status=FiscalizationStatus.COMPLETED,
+        )
+        db.session.add(fiscalization)
+        db.session.commit()
+
+        CashCollectionService().post_collection(
+            customer_id=sample_user.id,
+            amount=Decimal("30000.00"),
+            source="personal_card_transfer",
+            recorded_by_user_id=admin_user.id,
+            order_id=order.id,
+            notes="customer transferred the delta",
+        )
+        db.session.refresh(fiscalization)
+        assert fiscalization.status == FiscalizationStatus.COMPLETED
+
+    def test_pending_click_still_converts_to_cash(self, app, db, admin_user, sample_user):
+        """Unchanged behaviour — the convert branch is tested FIRST."""
+        order, payment = _delivered_electronic_receivable(
+            db, sample_user, total=36000, collected=0,
+            status=PaymentStatus.PENDING, suffix="pending",
+        )
+        CashCollectionService().post_collection(
+            customer_id=sample_user.id,
+            amount=Decimal("36000.00"),
+            source="personal_card_transfer",
+            recorded_by_user_id=admin_user.id,
+            order_id=order.id,
+            notes="paid at the door",
+        )
+        db.session.refresh(payment)
+        assert payment.payment_method == PaymentMethod.CASH
+
+    def test_cancelled_click_with_zeroed_column_can_still_be_settled(
+        self, app, db, admin_user, sample_user
+    ):
+        """The gateway zeroes outstanding on cancel; allocation must not refuse.
+
+        This one takes the CONVERT branch (CANCELLED is offline-settleable), so
+        it also proves the branch ordering is right.
+        """
+        order, payment = _delivered_electronic_receivable(
+            db, sample_user, total=45000, collected=0,
+            status=PaymentStatus.CANCELLED, suffix="cancelled",
+        )
+        payment.outstanding_amount = Decimal("0.00")
+        db.session.commit()
+
+        CashCollectionService().post_collection(
+            customer_id=sample_user.id,
+            amount=Decimal("45000.00"),
+            source="personal_card_transfer",
+            recorded_by_user_id=admin_user.id,
+            order_id=order.id,
+            notes="collected after gateway cancel",
+        )
+        db.session.refresh(payment)
+        assert Decimal(str(payment.amount_collected)) == Decimal("45000.00")
+
+    def test_fully_settled_click_is_still_refused(self, app, db, admin_user, sample_user):
+        order, payment = _delivered_electronic_receivable(
+            db, sample_user, total=50000, collected=50000,
+            status=PaymentStatus.COMPLETED, suffix="settled",
+        )
+        with pytest.raises(ValidationError, match="pending, cancelled or failed"):
+            CashCollectionService().post_collection(
+                customer_id=sample_user.id,
+                amount=Decimal("1000.00"),
+                source="personal_card_transfer",
+                recorded_by_user_id=admin_user.id,
+                order_id=order.id,
+                notes="should not be possible",
+            )
+
+
+@pytest.mark.unit
+class TestPersonalCardTransferPreviewParity:
+    def test_preview_quotes_the_delta_not_the_order_total(self, app, db, sample_user):
+        order, _payment = _delivered_electronic_receivable(
+            db, sample_user, total=90000, collected=60000,
+            status=PaymentStatus.PARTIALLY_PAID, suffix="prev-delta",
+        )
+        plan = CashCollectionService().preview_personal_card_transfer(
+            order_id=order.id, amount=Decimal("30000.00")
+        )
+        assert plan.applied_to_order == Decimal("30000.00")
+        assert "order_will_convert_to_cash" not in plan.warnings
+
+    def test_preview_still_warns_about_conversion_for_a_pending_click(self, app, db, sample_user):
+        order, _payment = _delivered_electronic_receivable(
+            db, sample_user, total=36000, collected=0,
+            status=PaymentStatus.PENDING, suffix="prev-pending",
+        )
+        plan = CashCollectionService().preview_personal_card_transfer(
+            order_id=order.id, amount=Decimal("36000.00")
+        )
+        assert "order_will_convert_to_cash" in plan.warnings

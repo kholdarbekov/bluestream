@@ -32,6 +32,7 @@ from business_app.services.corporate_contract_service import CorporateContractSe
 from business_app.services.inventory_service import InventoryService
 from business_app.services.loyalty_service import LoyaltyService
 from business_app.utils.exceptions import NotFoundError, ValidationError
+from business_app.utils.payment_projection import has_open_receivable
 from business_app.utils.transactions import atomic_transaction
 from shared.enums import (
     BottleLedgerEventType,
@@ -376,7 +377,23 @@ class OrderEditService:
         total_delta_preview = Decimal(str(plan.totals_after["total_amount"])) - Decimal(
             str(plan.totals_before["total_amount"])
         )
-        if is_card and bool(order.is_paid):
+        # Anchored on `is_paid` OR an open receivable, not on `is_paid` alone.
+        # `_recompute_totals` flips `order.is_paid` to False on the FIRST upward
+        # edit, so an is_paid-only anchor silently stopped warning on every
+        # SUBSEQUENT edit of the same order — exactly when the accumulated debt
+        # is largest (plan 2026-08-08-open-receivable-ssot).
+        #
+        # FISCALIZATION POLICY (owner ruling 2026-08-08): we fiscalize strictly
+        # what the customer paid BY CARD. Items added at the door and paid in
+        # cash are deliberately NOT fiscalized and get no marking code — that is
+        # intended behaviour, not a gap to close. It is also why the cash for
+        # those items is settled IN PLACE against the electronic payment rather
+        # than by converting the order to CASH: conversion routes through
+        # `queue_click_fiscalization`, which has no completed-guard and would
+        # rewrite an issued receipt's status — erasing the fiscal record of the
+        # card-paid portion, the one part that must be kept.
+        card_settlement_pending = is_card and (bool(order.is_paid) or has_open_receivable(order.payment))
+        if card_settlement_pending:
             if total_delta_preview < 0:
                 plan.warnings.append(
                     "card_paid_decrease_creates_prepayment: card payment will NOT be "
@@ -386,15 +403,19 @@ class OrderEditService:
             elif total_delta_preview > 0:
                 plan.warnings.append(
                     "card_paid_increase_requires_cash: the additional "
-                    f"{total_delta_preview} UZS must be collected in CASH via the "
-                    "Record Personal Card Payment flow — card will not be re-charged."
+                    f"{total_delta_preview} UZS must be collected in CASH — either by "
+                    "the driver at the door, or via the Record Personal Card Payment "
+                    "flow on this order. The card will not be re-charged and the "
+                    "existing fiscal receipt is left intact."
                 )
 
         # ---- Marking codes: golden rule notice ----
         # We never revert marking codes once submitted (USED / UTILISED) or
         # even once RESERVED on a paid card order. The plan-side "release
         # RESERVED" branch was dropped in favour of a simpler universal rule.
-        if is_card and bool(order.is_paid):
+        # Same anchor as the cash warning above: a repriced card order has
+        # is_paid == False but its marking codes are just as unrevertible.
+        if card_settlement_pending:
             for change in plan.item_changes:
                 if change.direction in {"decrease", "remove"} and change.existing_item:
                     allocs = change.existing_item.marking_code_allocations or []

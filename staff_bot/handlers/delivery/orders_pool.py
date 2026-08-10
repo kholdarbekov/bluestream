@@ -10,7 +10,12 @@ from staff_bot.handlers.base import BaseHandler
 from staff_bot.api_client import api_client
 from staff_bot.keyboards.delivery import DeliveryKeyboards
 from staff_bot.keyboards.common import CommonKeyboards
-from staff_bot.utils.formatters import format_order_card, format_currency, escape_html, get_cod_cash_projection
+from staff_bot.utils.formatters import (
+    escape_html,
+    format_currency,
+    format_money_block,
+    format_order_card,
+)
 from staff_bot.permissions import require_auth, require_delivery_driver
 from staff_bot.i18n import i18n
 
@@ -251,26 +256,11 @@ class OrdersPoolHandler(BaseHandler):
                 payment_label = i18n.get(f'staff.delivery.payment.{payment}', language)
                 payment_info += f" ({payment_label})"
             lines.append(payment_info)
-            if payment == 'cash':
-                cod_projection = get_cod_cash_projection(order)
-                lines.append(
-                    f"💸 {i18n.get('staff.delivery.cash_outstanding_label', language)}: "
-                    f"{format_currency(order.get('outstanding_amount'), language=language)}"
-                )
-                if cod_projection['cod_reserved_prepayment_amount'] > 0:
-                    lines.append(
-                        f"💳 {i18n.get('staff.delivery.cod_prepaid_reserved', language)}: "
-                        f"{format_currency(cod_projection['cod_reserved_prepayment_amount'], language=language)}"
-                    )
-                lines.append(
-                    f"💵 {i18n.get('staff.delivery.cash_to_collect_now', language)}: "
-                    f"{format_currency(cod_projection['expected_cash_to_collect'], language=language)}"
-                )
-                payment_status = str(order.get('payment_status') or '').lower()
-                if payment_status == 'completed' or cod_projection['expected_cash_to_collect'] <= 0:
-                    lines.append(f"✅ {i18n.get('staff.delivery.cash_already_collected', language)}")
-                elif payment_status == 'partially_paid':
-                    lines.append(f"ℹ️ {i18n.get('staff.delivery.cash_partially_collected', language)}")
+            # SSOT: the same money block format_order_card renders. This used to
+            # be a third hand-rolled copy gated on `payment == 'cash'`, so
+            # widening the formatter left the pool showing nothing owed on an
+            # order that owed money (plan 2026-08-08-open-receivable-ssot).
+            lines.extend(format_money_block(order, language))
 
             # Delivery notes
             notes = order.get('delivery_notes', '')

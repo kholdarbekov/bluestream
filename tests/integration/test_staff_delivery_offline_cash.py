@@ -599,3 +599,208 @@ def test_plain_cash_delivery_batch_locks_before_any_payment_write(
     batch_before_write = [ids for kind, ids in calls[:write_index] if kind == "lock"]
     assert batch_before_write, calls
     assert {older_payment.id, cod_payment.id} <= set(batch_before_write[-1]), calls
+
+
+# ---------------------------------------------------------------------------
+# Settle-in-place at the door: an order edited UPWARD after an online settlement.
+# Plan: docs/superpowers/plans/2026-08-08-open-receivable-ssot.md (Task 7)
+# ---------------------------------------------------------------------------
+
+
+def _setup_partially_paid_click_order(
+    db, sample_order, delivery_driver, *, total, collected, payment_id_str
+):
+    """Prod order 961: Click settled for `collected`, then repriced up to `total`.
+
+    That is exactly what `order_edit_service._recompute_totals` produces when an
+    admin adds an item to a paid card order: amount = new total, amount_collected
+    = what the gateway took, status = PARTIALLY_PAID, order.is_paid = False.
+    """
+    address = _make_address(db, sample_order.user_id)
+    sample_order.payment_method = PaymentMethod.CLICK
+    sample_order.status = OrderStatus.OUT_FOR_DELIVERY
+    sample_order.delivery_address_id = address.id
+    sample_order.total_amount = Decimal(str(total))
+    sample_order.subtotal = Decimal(str(total))
+    sample_order.is_paid = False
+    db.session.flush()
+
+    payment = Payment(
+        order_id=sample_order.id,
+        user_id=sample_order.user_id,
+        payment_method=PaymentMethod.CLICK,
+        status=PaymentStatus.PARTIALLY_PAID,
+        amount=Decimal(str(total)),
+        amount_collected=Decimal(str(collected)),
+        outstanding_amount=Decimal(str(total - collected)),
+        currency="UZS",
+        payment_id=payment_id_str,
+    )
+    db.session.add(payment)
+
+    delivery = Delivery(
+        order_id=sample_order.id,
+        delivery_person_id=delivery_driver.id,
+        status=DeliveryStatus.ARRIVED,
+        scheduled_date=datetime.now(UTC),
+        scheduled_time_slot="09:00-12:00",
+    )
+    db.session.add(delivery)
+    db.session.commit()
+    return payment, delivery
+
+
+@pytest.mark.integration
+def test_door_cash_on_repriced_click_order_creates_a_collection_event(
+    app, db, delivery_driver, driver_profile, sample_order
+):
+    """The driver's cash must reach the ledger.
+
+    Before this arm existed the PUT returned 200 OK and the money was silently
+    discarded: the order is neither `is_cash_order` (rail is CLICK) nor
+    `settle_electronic_as_cash` (PARTIALLY_PAID is not offline-settleable).
+    """
+    from business_app.models.payment import CashCollectionEvent
+    from business_app.services.staff_service import StaffService
+
+    payment, delivery = _setup_partially_paid_click_order(
+        db, sample_order, delivery_driver,
+        total=90000, collected=60000, payment_id_str="click_repriced_event",
+    )
+    order_id = sample_order.id
+
+    with patch("business_app.tasks.notification_tasks.send_delivery_update_task.delay"):
+        with patch("business_app.tasks.delivery_tasks.optimize_driver_route_task.delay"):
+            StaffService.update_delivery_status(
+                delivery_id=delivery.id,
+                new_status="delivered",
+                staff_user_id=delivery_driver.id,
+                metadata={"cash_collected": "30000", "notes": "extra bottle at the door"},
+            )
+
+    events = CashCollectionEvent.query.filter_by(order_id=order_id).all()
+    assert len(events) == 1
+    assert Decimal(str(events[0].amount)) == Decimal("30000.00")
+    assert events[0].collector_user_id == delivery_driver.id
+    assert events[0].driver_cash_session_id is not None
+
+
+@pytest.mark.integration
+def test_door_cash_on_repriced_click_order_settles_without_flipping_the_rail(
+    app, db, delivery_driver, driver_profile, sample_order
+):
+    from business_app.services.staff_service import StaffService
+
+    payment, delivery = _setup_partially_paid_click_order(
+        db, sample_order, delivery_driver,
+        total=90000, collected=60000, payment_id_str="click_repriced_settle",
+    )
+    payment_id = payment.id
+    order_id = sample_order.id
+
+    with patch("business_app.tasks.notification_tasks.send_delivery_update_task.delay"):
+        with patch("business_app.tasks.delivery_tasks.optimize_driver_route_task.delay"):
+            StaffService.update_delivery_status(
+                delivery_id=delivery.id,
+                new_status="delivered",
+                staff_user_id=delivery_driver.id,
+                metadata={"cash_collected": "30000", "notes": "extra bottle at the door"},
+            )
+
+    fresh_payment = Payment.query.get(payment_id)
+    fresh_order = Order.query.get(order_id)
+    assert fresh_payment.payment_method == PaymentMethod.CLICK
+    assert Decimal(str(fresh_payment.amount_collected)) == Decimal("90000.00")
+    assert Decimal(str(fresh_payment.outstanding_amount)) == Decimal("0.00")
+    assert fresh_payment.collected_by == delivery_driver.id
+    assert fresh_order.is_paid is True
+
+
+@pytest.mark.integration
+def test_fully_paid_click_order_creates_no_collection_event(
+    app, db, delivery_driver, driver_profile, sample_order
+):
+    """Guard rail: a settled card order must not post a zero collection."""
+    from business_app.models.payment import CashCollectionEvent
+    from business_app.services.staff_service import StaffService
+
+    payment, delivery = _setup_partially_paid_click_order(
+        db, sample_order, delivery_driver,
+        total=90000, collected=90000, payment_id_str="click_fully_paid",
+    )
+    payment.status = PaymentStatus.COMPLETED
+    db.session.commit()
+    order_id = sample_order.id
+
+    with patch("business_app.tasks.notification_tasks.send_delivery_update_task.delay"):
+        with patch("business_app.tasks.delivery_tasks.optimize_driver_route_task.delay"):
+            StaffService.update_delivery_status(
+                delivery_id=delivery.id,
+                new_status="delivered",
+                staff_user_id=delivery_driver.id,
+                metadata={},
+            )
+
+    assert CashCollectionEvent.query.filter_by(order_id=order_id).count() == 0
+
+
+@pytest.mark.integration
+def test_business_account_order_edited_up_does_not_block_delivery_completion(
+    app, db, delivery_driver, driver_profile, sample_order
+):
+    """🔴 Adversarial-review finding, 2026-08-08.
+
+    `settle_receivable_in_place` must not fire on a rail
+    `_validate_collection_context` refuses. BUSINESS_ACCOUNT is in
+    PREPAID_METHOD_VALUES but NOT in {CLICK, PAYME, CARD}, so a contract-billed
+    order edited upward at the door would raise ValidationError inside
+    post_collection and the driver could not mark the delivery delivered AT ALL.
+
+    Contract billing is settled against the corporate contract, never as cash.
+    """
+    from business_app.services.staff_service import StaffService
+
+    address = _make_address(db, sample_order.user_id)
+    sample_order.payment_method = PaymentMethod.BUSINESS_ACCOUNT
+    sample_order.status = OrderStatus.OUT_FOR_DELIVERY
+    sample_order.delivery_address_id = address.id
+    sample_order.total_amount = Decimal("120000.00")
+    sample_order.subtotal = Decimal("120000.00")
+    sample_order.is_paid = False
+    db.session.flush()
+
+    payment = Payment(
+        order_id=sample_order.id,
+        user_id=sample_order.user_id,
+        payment_method=PaymentMethod.BUSINESS_ACCOUNT,
+        status=PaymentStatus.PARTIALLY_PAID,
+        amount=Decimal("120000.00"),
+        amount_collected=Decimal("100000.00"),
+        outstanding_amount=Decimal("20000.00"),
+        currency="UZS",
+        payment_id="business_account_repriced",
+    )
+    db.session.add(payment)
+    delivery = Delivery(
+        order_id=sample_order.id,
+        delivery_person_id=delivery_driver.id,
+        status=DeliveryStatus.ARRIVED,
+        scheduled_date=datetime.now(UTC),
+        scheduled_time_slot="09:00-12:00",
+    )
+    db.session.add(delivery)
+    db.session.commit()
+    delivery_id = delivery.id
+
+    with patch("business_app.tasks.notification_tasks.send_delivery_update_task.delay"):
+        with patch("business_app.tasks.delivery_tasks.optimize_driver_route_task.delay"):
+            # Must not raise.
+            StaffService.update_delivery_status(
+                delivery_id=delivery_id,
+                new_status="delivered",
+                staff_user_id=delivery_driver.id,
+                metadata={"cash_collected": "20000", "notes": "extra bottle"},
+            )
+
+    fresh = Delivery.query.get(delivery_id)
+    assert fresh.status == DeliveryStatus.DELIVERED

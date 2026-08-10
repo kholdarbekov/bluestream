@@ -50,7 +50,18 @@ class TestFormatActiveDeliverySummary:
         assert "40,000" in out                            # to-collect < outstanding
 
     def test_non_cash_shows_total_and_no_cash_line_no_collected(self):
-        d = _cash_delivery(payment_method="click")
+        # Payload must actually describe an order with nothing due. The
+        # `_cash_delivery` base hardcodes expected_cash_to_collect = 57,000, and
+        # overriding only payment_method left this asserting "no cash due" over
+        # a payload that said 57,000 was owed — invisible while the money block
+        # was gated on payment == 'cash'.
+        d = _cash_delivery(
+            payment_method="click",
+            payment_status="completed",
+            amount_collected=57000,
+            outstanding_amount=0,
+            expected_cash_to_collect=0,
+        )
         out = format_active_delivery_summary(d, "uz")
         assert "💰" in out                                # total present
         assert "💵" in out                                # single to-collect(0) line
@@ -99,10 +110,54 @@ class TestFormatActiveDeliverySummary:
         assert "🧾" not in out                     # not treated as a partial-cash order
 
     def test_settled_electronic_shows_no_cash_to_collect(self):
-        d = _cash_delivery(payment_method="click", payment_status="completed")
+        # The payload must actually DESCRIBE a settled order. `_cash_delivery`
+        # hardcodes outstanding_amount/expected_cash_to_collect = 57,000, and
+        # this case used to override only payment_method/payment_status — so it
+        # asserted "settled" over a payload that said 57,000 was still owed, and
+        # passed only because the money block was gated on payment == 'cash'.
+        # Now that the gate is the server-computed figure, state the intent.
+        d = _cash_delivery(
+            payment_method="click",
+            payment_status="completed",
+            amount_collected=57000,
+            outstanding_amount=0,
+            expected_cash_to_collect=0,
+        )
         out = format_active_delivery_summary(d, "uz")
         collect_line = [l for l in out.splitlines() if l.startswith("💵")][0]
         assert collect_line.split(":", 1)[1].strip().startswith("0")   # 0 Uzs (no cash note)
+
+    def test_partially_paid_click_shows_the_outstanding_delta(self):
+        """Prod order 961: 2 bottles paid by Click, a 3rd added at the door.
+
+        This printed "To collect now: 0 (no cash)" over a real 30,000 debt —
+        the driver was actively told there was nothing to collect.
+        """
+        d = _cash_delivery(
+            payment_method="click",
+            payment_status="partially_paid",
+            total_amount=90000,
+            amount_collected=60000,
+            outstanding_amount=30000,
+            expected_cash_to_collect=30000,
+        )
+        out = format_active_delivery_summary(d, "uz")
+        collect_line = [l for l in out.splitlines() if l.startswith("💵")][0]
+        assert "30,000" in collect_line
+        assert "0 Uzs (" not in collect_line
+
+    def test_pending_click_still_shows_the_full_amount(self):
+        d = _cash_delivery(
+            payment_method="click",
+            payment_status="pending",
+            total_amount=36000,
+            amount_collected=0,
+            outstanding_amount=36000,
+            expected_cash_to_collect=36000,
+        )
+        out = format_active_delivery_summary(d, "uz")
+        collect_line = [l for l in out.splitlines() if l.startswith("💵")][0]
+        assert "36,000" in collect_line
 
     def test_missing_order_number_uses_fallback(self):
         d = _cash_delivery()

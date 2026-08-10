@@ -88,7 +88,16 @@ def delivered_cod_order(
     outstanding=None,
     status=OrderStatus.DELIVERED,
     created_at=None,
+    payment_method=PaymentMethod.CASH,
+    payment_status=PaymentStatus.PENDING,
 ):
+    """Delivered order + payment. Defaults to COD, so existing callers are unchanged.
+
+    `payment_method` / `payment_status` exist so the electronic-receivable shape
+    can be expressed: a CLICK payment, PARTIALLY_PAID, amount > amount_collected
+    (plan 2026-08-08-open-receivable-ssot). Both are threaded onto the order AND
+    the payment row, because the receivable queries join the two.
+    """
     n = _next()
     ts = created_at or datetime.now(UTC)
     order = Order(
@@ -100,7 +109,7 @@ def delivered_cod_order(
         discount_amount=Decimal("0.00"),
         loyalty_discount=Decimal("0.00"),
         total_amount=total,
-        payment_method=PaymentMethod.CASH,
+        payment_method=payment_method,
         delivery_address_id=address.id if address is not None else None,
         created_at=ts,
     )
@@ -110,14 +119,22 @@ def delivered_cod_order(
     payment = Payment(
         order_id=order.id,
         user_id=user.id,
-        payment_method=PaymentMethod.CASH,
+        payment_method=payment_method,
         amount=total,
         currency="UZS",
-        status=PaymentStatus.PENDING,
+        status=payment_status,
         payment_id=f"pay-2b-{n}",
         amount_collected=total - out,
         outstanding_amount=out,
         created_at=ts,
+        # ck_payments_cash_completed_requires_collector: only the CASH rail needs
+        # a collector to reach COMPLETED; non-cash rows are exempt by the
+        # constraint's first disjunct.
+        collected_by=(
+            user.id
+            if payment_method == PaymentMethod.CASH and payment_status == PaymentStatus.COMPLETED
+            else None
+        ),
     )
     db.session.add(payment)
     db.session.commit()

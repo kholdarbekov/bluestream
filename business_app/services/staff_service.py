@@ -24,6 +24,7 @@ from business_app.services.cod_collect_ceiling import (
 )
 from business_app.utils.exceptions import ValidationError, NotFoundError, ForbiddenError, ConflictError
 from business_app.utils.geo_validation import ensure_within_delivery_zone
+from business_app.utils.payment_projection import has_open_receivable, open_receivable_amount
 from business_app.utils.state_validators import (
     assert_order_address_for_status,
     assert_order_creator_for_source,
@@ -147,7 +148,18 @@ class StaffService:
 
     @staticmethod
     def get_cod_collection_projection(order: Optional[Order]) -> Dict[str, float]:
-        """Compute COD cash collection projection for driver-facing workflows."""
+        """Compute the cash-collection projection for driver-facing workflows.
+
+        RAIL-AGNOSTIC since 2026-08-08 (plan 2026-08-08-open-receivable-ssot).
+
+        This used to early-return the FULL order total for any non-CASH order.
+        That was harmless only because every bot surface hid the value behind
+        `payment_method == 'cash'`. Now that the bot shows it, returning the
+        total would make a driver collect the whole order from a customer who
+        had already paid most of it by card — strictly worse than the invisible
+        receivable it replaces. `open_receivable_amount` is the single decision
+        and there is no per-rail branch left.
+        """
         total_amount = Decimal(str(getattr(order, "total_amount", 0) or 0))
         if not order:
             return {
@@ -155,19 +167,13 @@ class StaffService:
                 "expected_cash_to_collect": float(total_amount),
             }
 
-        payment_method = order.payment_method.value if hasattr(order.payment_method, "value") else order.payment_method
-        if payment_method != PaymentMethod.CASH.value:
-            return {
-                "cod_reserved_prepayment_amount": 0.0,
-                "expected_cash_to_collect": float(total_amount),
-            }
-
         payment = getattr(order, "payment", None)
-        raw_outstanding_amount = getattr(payment, "outstanding_amount", None)
-        if raw_outstanding_amount is None:
+        if payment is None:
+            # No payment row yet — the whole order is due. Same fallback the
+            # CASH arm has always used.
             outstanding_amount = total_amount
         else:
-            outstanding_amount = Decimal(str(raw_outstanding_amount))
+            outstanding_amount = open_receivable_amount(payment)
         provider_data = dict(getattr(payment, "provider_data", {}) or {})
         reserved_amount = Decimal(str(provider_data.get("cod_prepayment_reserved_amount") or 0))
 
@@ -1149,7 +1155,35 @@ class StaffService:
             driver_collected_cash = False
         settle_electronic_as_cash = new_status == "delivered" and is_unsettled_electronic and driver_collected_cash
 
-        if is_cash_order or settle_electronic_as_cash:
+        # THIRD SETTLEMENT SHAPE (plan 2026-08-08-open-receivable-ssot). A
+        # successfully-settled electronic order whose total was edited upward at
+        # the door owes the delta in cash. It is neither `is_cash_order` (the
+        # rail is CLICK) nor `settle_electronic_as_cash` (the payment is
+        # PARTIALLY_PAID, which is not in _OFFLINE_SETTLEABLE_STATUSES), so
+        # before this arm existed the driver's cash was silently discarded and
+        # the endpoint still returned 200 OK — prod order 961.
+        #
+        # No conversion happens here: the money is allocated onto the ELECTRONIC
+        # payment so the card-paid portion keeps its fiscal record.
+        # 🔴 THE RAIL CHECK IS LOAD-BEARING, not defensive tidiness.
+        # `_validate_collection_context` permits a DELIVERY_COMPLETION against a
+        # non-CASH order ONLY for `_electronic_methods`. Without the same
+        # restriction here, a BUSINESS_ACCOUNT (contract-billed) or
+        # LOYALTY_POINTS order edited upward at the door would enter this arm,
+        # hit that validator, raise, and the driver could not mark the delivery
+        # delivered AT ALL — a hard field blocker, not a money bug. Contract
+        # billing settles against the corporate contract, never as door cash.
+        settle_receivable_in_place = bool(
+            new_status == "delivered"
+            and driver_collected_cash
+            and not is_cash_order
+            and not settle_electronic_as_cash
+            and order is not None
+            and order.payment_method in _electronic_methods
+            and has_open_receivable(order_payment)
+        )
+
+        if is_cash_order or settle_electronic_as_cash or settle_receivable_in_place:
             from business_app.services.cash_collection_service import CashCollectionService
 
             cash_collection_service = CashCollectionService()
@@ -1284,7 +1318,11 @@ class StaffService:
             # not roll back, so the customer is told a rolled-back payment was
             # confirmed. Holding the batch first makes every later single-row lock
             # a re-request of a row we already own.
-            if new_status == "delivered" and (is_cash_order or settle_electronic_as_cash) and cash_collection_service:
+            if (
+                new_status == "delivered"
+                and (is_cash_order or settle_electronic_as_cash or settle_receivable_in_place)
+                and cash_collection_service
+            ):
                 cash_collection_service.lock_order_settlement_candidates(
                     delivery.order,
                     source="delivery_completion",
@@ -1324,7 +1362,11 @@ class StaffService:
             # Cash collection runs in the same transaction as the status update so
             # a downstream failure rolls the delivery state back rather than
             # leaving the system half-applied.
-            if new_status == "delivered" and (is_cash_order or settle_electronic_as_cash) and cash_collection_service:
+            if (
+                new_status == "delivered"
+                and (is_cash_order or settle_electronic_as_cash or settle_receivable_in_place)
+                and cash_collection_service
+            ):
                 # For unsuccessful electronic orders, convert to CASH first so the
                 # existing delivery_completion collection can post against a CASH payment.
                 if settle_electronic_as_cash:

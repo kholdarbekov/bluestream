@@ -28,7 +28,13 @@ from shared.enums import (
     UserRole,
 )
 from business_app.utils.exceptions import NotFoundError, ValidationError
-from business_app.utils.payment_projection import get_payment_projection
+from business_app.utils.payment_projection import (
+    get_payment_projection,
+    has_open_receivable,
+    is_ledger_receivable,
+    open_receivable_amount,
+    open_receivable_clause,
+)
 from business_app.utils.state_validators import assert_cash_payment_collector
 
 
@@ -168,13 +174,39 @@ class CashCollectionService:
         return self._active_cod_payments_query_for_users([customer_id])
 
     def _active_cod_payments_query_for_users(self, user_ids: List[int]):
+        """Open delivered receivables for a set of users, oldest-first.
+
+        🔴 RAIL-AGNOSTIC SINCE 2026-08-08 — read this before touching any of the
+        eleven queries in this module that now call `open_receivable_clause()`.
+
+        These used to read `Payment.payment_method == PaymentMethod.CASH` AND
+        `outstanding_amount > 0`. The method conjunct was a PROXY for "is this a
+        receivable" — the other two conjuncts already ARE the test — and the
+        proxy silently hid every card-paid order whose total was edited upward
+        after settlement. Prod order 961 (2026-08-07): 2 bottles paid by Click,
+        a 3rd added at the door, `_recompute_totals` re-priced the payment
+        correctly to PARTIALLY_PAID with a real outstanding, and the debt was
+        then invisible to the debtor list, the driver's screen, the financial
+        report and every collection flow simultaneously.
+
+        `open_receivable_clause()` is the SSOT (business_app/utils/payment_projection.py).
+        The `Order.status == DELIVERED` conjunct is NOT part of it and must stay
+        at each call site — it is the only thing keeping a repriced-then-cancelled
+        order out of these results.
+
+        WHAT DID NOT WIDEN, deliberately: `auto_reserve_against_pending_payments`
+        (a different axis — RESERVABLE_ORDER_STATUSES), the terminal allocator
+        filter in `_plan_allocation` and its keep-settled preview mirrors (so an
+        unrelated cash collection can never drift onto an electronic payment; the
+        electronic receivable is reachable only through the explicit target
+        path), and the whole customer-credit family (credit is cash-only-usable).
+        """
         return (
             Payment.query.join(Order, Payment.order_id == Order.id)
             .options(contains_eager(Payment.order))
             .filter(
                 Payment.user_id.in_(user_ids),
-                Payment.payment_method == PaymentMethod.CASH,
-                Payment.outstanding_amount > 0,
+                open_receivable_clause(),
                 Order.status == OrderStatus.DELIVERED,
             )
             .order_by(Order.created_at.asc(), Payment.created_at.asc(), Payment.id.asc())
@@ -187,8 +219,7 @@ class CashCollectionService:
             .join(Order, Payment.order_id == Order.id)
             .filter(
                 Payment.user_id.in_(user_ids),
-                Payment.payment_method == PaymentMethod.CASH,
-                Payment.outstanding_amount > 0,
+                open_receivable_clause(),
                 Order.status == OrderStatus.DELIVERED,
             )
             .all()
@@ -250,8 +281,7 @@ class CashCollectionService:
             .join(Order, Payment.order_id == Order.id)
             .filter(
                 Order.delivery_address_id.in_(address_ids),
-                Payment.payment_method == PaymentMethod.CASH,
-                Payment.outstanding_amount > 0,
+                open_receivable_clause(),
                 Order.status == OrderStatus.DELIVERED,
             )
             .all()
@@ -324,8 +354,7 @@ class CashCollectionService:
             .join(Order, Payment.order_id == Order.id)
             .filter(
                 Payment.user_id.in_(cluster_ids),
-                Payment.payment_method == PaymentMethod.CASH,
-                Payment.outstanding_amount > 0,
+                open_receivable_clause(),
                 Order.status == OrderStatus.DELIVERED,
             )
             .scalar()
@@ -344,8 +373,7 @@ class CashCollectionService:
             .join(Order, Payment.order_id == Order.id)
             .filter(
                 Order.delivery_address_id.in_(member_ids),
-                Payment.payment_method == PaymentMethod.CASH,
-                Payment.outstanding_amount > 0,
+                open_receivable_clause(),
                 Order.status == OrderStatus.DELIVERED,
             )
             .scalar()
@@ -363,8 +391,7 @@ class CashCollectionService:
             Payment
         ).join(Order, Payment.order_id == Order.id).filter(
             Order.delivery_address_id.in_(address_ids),
-            Payment.payment_method == PaymentMethod.CASH,
-            Payment.outstanding_amount > 0,
+            open_receivable_clause(),
             Order.status == OrderStatus.DELIVERED,
         ).scalar() or Decimal(
             "0.00"
@@ -478,8 +505,7 @@ class CashCollectionService:
                 .join(Order, Payment.order_id == Order.id)
                 .filter(
                     Payment.user_id.in_(member_ids),
-                    Payment.payment_method == PaymentMethod.CASH,
-                    Payment.outstanding_amount > 0,
+                    open_receivable_clause(),
                     Order.status == OrderStatus.DELIVERED,
                 )
                 .group_by(Payment.user_id)
@@ -1555,8 +1581,7 @@ class CashCollectionService:
             .join(Payment, Payment.user_id == User.id)
             .join(Order, Order.id == Payment.order_id)
             .filter(
-                Payment.payment_method == PaymentMethod.CASH,
-                Payment.outstanding_amount > 0,
+                open_receivable_clause(),
                 Order.status == OrderStatus.DELIVERED,
             )
             .group_by(
@@ -1625,8 +1650,7 @@ class CashCollectionService:
                 .options(joinedload(Payment.order))
                 .filter(
                     Order.delivery_address_id.in_(member_address_ids),
-                    Payment.payment_method == PaymentMethod.CASH,
-                    Payment.outstanding_amount > 0,
+                    open_receivable_clause(),
                     Order.status == OrderStatus.DELIVERED,
                 )
                 .order_by(Order.created_at.asc(), Payment.id.asc())
@@ -1694,8 +1718,7 @@ class CashCollectionService:
             .join(UserAddress, UserAddress.id == Order.delivery_address_id)
             .filter(
                 UserAddress.address_group_id.isnot(None),
-                Payment.payment_method == PaymentMethod.CASH,
-                Payment.outstanding_amount > 0,
+                open_receivable_clause(),
                 Order.status == OrderStatus.DELIVERED,
             )
             .group_by(UserAddress.address_group_id)
@@ -1841,6 +1864,20 @@ class CashCollectionService:
         return context
 
     def get_customer_cod_statement(self, customer_id: int) -> Dict[str, Any]:
+        """Full per-payment statement for a customer — ALL RAILS.
+
+        Deliberately the one receivable query with no `outstanding > 0` conjunct:
+        it is a statement, not a debtor list, so settled rows stay for context.
+        Since 2026-08-08 it is also the one with no `payment_method` conjunct.
+        An electronic order that still owes money is a receivable exactly like a
+        COD one, and the owner's ruling is that the statement shows both rails in
+        full rather than an asymmetric "cash in full, card only when owing".
+
+        The driver's at-door screen renders only rows with
+        `outstanding_amount > 0` (`staff_bot/handlers/delivery/cash_collection.py`
+        skips the rest and slices to five), so the longer list does not reach
+        that surface. See plan 2026-08-08-open-receivable-ssot.
+        """
         customer = User.query.get(customer_id)
         if not customer:
             raise NotFoundError("Customer not found")
@@ -1850,7 +1887,6 @@ class CashCollectionService:
             .options(joinedload(Payment.order))
             .filter(
                 Payment.user_id == customer_id,
-                Payment.payment_method == PaymentMethod.CASH,
             )
             .order_by(Order.created_at.desc(), Payment.id.desc())
             .all()
@@ -1881,6 +1917,13 @@ class CashCollectionService:
                         payment.order.status.value
                         if payment.order and hasattr(payment.order.status, "value")
                         else getattr(payment.order, "status", None)
+                    ),
+                    # The statement carries both rails now, so the consumer must
+                    # be able to tell them apart.
+                    "payment_method": (
+                        payment.payment_method.value
+                        if hasattr(payment.payment_method, "value")
+                        else payment.payment_method
                     ),
                     "amount": float(payment.amount or 0),
                     "amount_collected": float(payment.amount_collected or 0),
@@ -1936,8 +1979,7 @@ class CashCollectionService:
             func.coalesce(func.sum(Payment.outstanding_amount), Decimal("0.00"))
         ).join(Order, Payment.order_id == Order.id).filter(
             Payment.user_id.in_(cluster_ids),
-            Payment.payment_method == PaymentMethod.CASH,
-            Payment.outstanding_amount > 0,
+            open_receivable_clause(),
             Order.status == OrderStatus.DELIVERED,
         ).scalar() or Decimal(
             "0.00"
@@ -2478,14 +2520,25 @@ class CashCollectionService:
         if payment.amount_collected > Decimal("0.00"):
             payment.last_collected_at = collected_at or payment.last_collected_at or datetime.now(UTC)
 
-        # ARCH-006: a cash payment may only become COMPLETED with a recorded
-        # collector. This is the single authoritative point — stamp the supplied
-        # collector (if not already set) and enforce the invariant so the row
-        # never violates ck_payments_cash_completed_requires_collector.
-        if payment.status == PaymentStatus.COMPLETED and payment.payment_method == PaymentMethod.CASH:
+        # ARCH-006, split into its two halves (plan 2026-08-08-open-receivable-ssot).
+        #
+        # STAMPING follows the MONEY: whoever handed over the cash that completed
+        # this payment is recorded, on ANY rail. An electronic receivable settled
+        # with physical cash — an order edited upward at the door — used to leave
+        # `collected_by` NULL because the whole branch was CASH-gated, silently
+        # losing the audit trail for exactly the case where a driver is holding
+        # someone's banknotes.
+        #
+        # ASSERTING follows the RAIL: ck_payments_cash_completed_requires_collector
+        # exempts non-cash rows by its first disjunct (`payment_method <> 'cash'`),
+        # so enforcing the invariant on them would be wrong — see
+        # test_non_cash_completing_needs_no_collector, which pins that a completed
+        # CARD/CLICK payment needs no collector.
+        if payment.status == PaymentStatus.COMPLETED:
             if not payment.collected_by and collected_by is not None:
                 payment.collected_by = collected_by
-            assert_cash_payment_collector(payment, payment.status)
+            if payment.payment_method == PaymentMethod.CASH:
+                assert_cash_payment_collector(payment, payment.status)
 
         if payment.order:
             order = payment.order
@@ -2870,13 +2923,26 @@ class CashCollectionService:
                 # order-edit cascade creates when an admin reduces a card-
                 # paid order (the card is never refunded — the value lives
                 # as cash-only-usable customer credit).
-                if (
-                    not (
+                #
+                # DELIVERY_COMPLETION joins them for settle-in-place: a driver
+                # collecting the unpaid delta of an edited-up electronic order at
+                # the door (plan 2026-08-08-open-receivable-ssot). Guarded on an
+                # ACTUAL open receivable so this can never widen into a general
+                # "post cash against any card order" hole — a settled card order
+                # still raises here.
+                allowed_non_cash = (
+                    (
                         source == CashCollectionSource.PERSONAL_CARD_TRANSFER
                         and order.payment_method in _electronic_methods
                     )
-                    and source != CashCollectionSource.ADMIN_ADJUSTMENT
-                ):
+                    or source == CashCollectionSource.ADMIN_ADJUSTMENT
+                    or (
+                        source == CashCollectionSource.DELIVERY_COMPLETION
+                        and order.payment_method in _electronic_methods
+                        and has_open_receivable(order.payment)
+                    )
+                )
+                if not allowed_non_cash:
                     raise ValidationError("Only COD orders can be targeted for COD collections")
             order_status = order.status.value if hasattr(order.status, "value") else str(order.status or "")
             if source == CashCollectionSource.PERSONAL_CARD_TRANSFER:
@@ -3028,10 +3094,52 @@ class CashCollectionService:
 
         _electronic_methods = {PaymentMethod.CLICK, PaymentMethod.PAYME, PaymentMethod.CARD}
         if order.payment_method in _electronic_methods:
-            return self.convert_electronic_order_to_cash(
-                order,
-                actor_user_id=actor_user_id,
-                reason="converted_to_cash_personal_card",
+            payment = order.payment
+            if payment is None:
+                raise NotFoundError("Order has no payment to settle")
+
+            # ORDER MATTERS. A PENDING/CANCELLED/FAILED electronic payment ALSO
+            # has an open receivable, and CONVERTING it is the correct, pinned
+            # behaviour (tests/integration/test_staff_delivery_offline_cash.py).
+            # So the convert test comes first; settle-in-place is the residual.
+            if payment.status in self._OFFLINE_SETTLEABLE_STATUSES:
+                return self.convert_electronic_order_to_cash(
+                    order,
+                    actor_user_id=actor_user_id,
+                    reason="converted_to_cash_personal_card",
+                )
+
+            # SETTLE IN PLACE (plan 2026-08-08-open-receivable-ssot). A
+            # successfully-settled electronic order whose total was later edited
+            # upward owes the delta. We allocate onto the ELECTRONIC payment and
+            # never flip payment_method, because converting would:
+            #   * call queue_click_fiscalization, which has NO completed-guard
+            #     and would rewrite an issued receipt's status to NOT_REQUIRED —
+            #     erasing the fiscal record of the CARD-PAID portion. Owner
+            #     policy 2026-08-08: we fiscalize strictly what was paid by card;
+            #     items added at the door and paid in cash are deliberately not
+            #     fiscalized. Converting destroys the half that must be kept.
+            #   * move the whole `payment.amount` out of the electronic revenue
+            #     bucket rather than just the delta;
+            #   * disarm the Click duplicate-charge auto-reversal, which
+            #     recomputes `electronic` from the live payment_method.
+            #
+            # `_allocate_to_payment` has no payment_method predicate, and this
+            # row is already inside the id-ordered batch `post_collection` locked
+            # before calling us (`_scoped_candidate_payment_ids` resolves
+            # `current_payment_id` from `Payment.order_id` with no method
+            # filter), so no new lock order is introduced.
+            if has_open_receivable(payment):
+                # The stored column is stale on a gateway-cancelled payment —
+                # the same shape `convert_electronic_order_to_cash` re-derives.
+                # `_allocate_to_payment` refuses an amount above
+                # `payment.outstanding_amount`, so normalise before returning.
+                payment.outstanding_amount = open_receivable_amount(payment)
+                db.session.flush()
+                return payment
+
+            raise ValidationError(
+                "Only orders with a pending, cancelled or failed electronic payment " "can be settled offline"
             )
 
         if order.payment_method != PaymentMethod.CASH:
@@ -3341,7 +3449,6 @@ class CashCollectionService:
             .options(contains_eager(Payment.order))
             .filter(
                 Payment.user_id.in_(user_ids),
-                Payment.payment_method == PaymentMethod.CASH,
                 Order.status == OrderStatus.DELIVERED,
             )
             .order_by(Order.created_at.asc(), Payment.created_at.asc(), Payment.id.asc())
@@ -3363,7 +3470,6 @@ class CashCollectionService:
             .options(contains_eager(Payment.order))
             .filter(
                 Order.delivery_address_id.in_(address_ids),
-                Payment.payment_method == PaymentMethod.CASH,
                 Order.status == OrderStatus.DELIVERED,
             )
             .order_by(Order.created_at.asc(), Payment.created_at.asc(), Payment.id.asc())
@@ -3417,8 +3523,8 @@ class CashCollectionService:
             current = Payment.query.options(joinedload(Payment.order)).filter_by(order_id=order_id).first()
             if (
                 current is not None
-                and current.payment_method == PaymentMethod.CASH
                 and outstanding_of(current) > Decimal("0.00")
+                and is_ledger_receivable(current)
                 and current.id not in {payment.id for payment in candidates}
             ):
                 candidates.append(current)
@@ -3444,8 +3550,8 @@ class CashCollectionService:
             )
             if (
                 current_order_payment
-                and current_order_payment.payment_method == PaymentMethod.CASH
                 and outstanding_of(current_order_payment) > Decimal("0.00")
+                and is_ledger_receivable(current_order_payment)
                 and current_order_payment.id not in {payment.id for payment in candidates}
             ):
                 candidates.append(current_order_payment)
@@ -3619,8 +3725,8 @@ class CashCollectionService:
                 current = by_id.get(current_payment_id)
                 if (
                     current is not None
-                    and current.payment_method == PaymentMethod.CASH
                     and live_outstanding(current) > Decimal("0.00")
+                    and is_ledger_receivable(current)
                 ):
                     candidates.append(current)
         else:
@@ -3632,14 +3738,30 @@ class CashCollectionService:
                 current = by_id.get(current_payment_id)
                 if (
                     current is not None
-                    and current.payment_method == PaymentMethod.CASH
                     and live_outstanding(current) > Decimal("0.00")
+                    and is_ledger_receivable(current)
                 ):
                     candidates.append(current)
 
-        candidates = [
-            p for p in candidates if p.payment_method == PaymentMethod.CASH and live_outstanding(p) > Decimal("0.00")
-        ]
+        # RAIL-AGNOSTIC TERMINAL FILTER (plan 2026-08-08-open-receivable-ssot).
+        #
+        # This used to end `and p.payment_method == PaymentMethod.CASH`. It HAD to
+        # widen in lockstep with the ring queries above, and this is the sixth
+        # instance of the show-vs-settle defect class if it does not:
+        # `cluster_delivered_outstanding_amount` and the debtor rows now count an
+        # electronic receivable as collectible debt, so a driver offered "collect
+        # 50 000" against 20 000 COD + 30 000 electronic would have had the
+        # 30 000 silently become prepaid credit while the electronic debt stayed
+        # open forever — a figure advertised and then refused, which is strictly
+        # worse than the invisible receivable this plan set out to fix.
+        #
+        # Safety is unchanged in substance: every candidate here already had to
+        # clear `Order.status == DELIVERED` plus a positive live outstanding, and
+        # `_allocate_to_payment` still refuses to over-allocate. What did NOT
+        # widen is the customer-CREDIT family — reserving/spending prepaid credit
+        # stays CASH-only, so no card order can ever consume a customer's cash
+        # credit.
+        candidates = [p for p in candidates if live_outstanding(p) > Decimal("0.00")]
         plan, _residual = self._plan_allocation(candidates, self._to_decimal(event.unapplied_amount), live_outstanding)
         base_allocation_order = self._next_allocation_order(event.id)
         for offset, (payment, allocatable) in enumerate(plan):
@@ -3704,10 +3826,19 @@ class CashCollectionService:
         if payment and payment.payment_method == PaymentMethod.CASH:
             target_outstanding = self._to_decimal(payment.outstanding_amount)
             target_payment_id = payment.id
+        elif payment and payment.status not in self._OFFLINE_SETTLEABLE_STATUSES and has_open_receivable(payment):
+            # SETTLE IN PLACE: the rail is preserved and only the unpaid delta is
+            # collectable. Quoting `order.total_amount` here would advertise
+            # collecting the whole order from a customer who has already paid
+            # most of it by card — exactly the preview/apply drift this method's
+            # docstring exists to prevent. Mirrors the branch order in
+            # `_resolve_target_payment_for_personal_card_transfer`.
+            target_outstanding = open_receivable_amount(payment)
+            target_payment_id = payment.id
         else:
-            # An electronic order is converted to COD when the transfer is recorded,
-            # and a COD order with no payment row yet gets one; either way the target
-            # starts out owing the full order total.
+            # An unsettled electronic order is converted to COD when the transfer
+            # is recorded, and a COD order with no payment row yet gets one;
+            # either way the target starts out owing the full order total.
             if order.payment_method in {PaymentMethod.CLICK, PaymentMethod.PAYME, PaymentMethod.CARD}:
                 warnings.append("order_will_convert_to_cash")
             target_outstanding = self._to_decimal(order.total_amount)

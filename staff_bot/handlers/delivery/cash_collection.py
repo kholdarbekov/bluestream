@@ -399,10 +399,32 @@ class CashCollectionHandler(BaseHandler):
             lines.append(i18n.get('staff.delivery.no_cod_debt', language))
             return '\n'.join(lines)
 
+        # FILTER FIRST, THEN SLICE. Slicing first silently dropped real debt
+        # lines whenever five non-collectible rows happened to sort ahead of
+        # them — and the statement now lists every payment rail in full (owner
+        # ruling 2026-08-08), so settled card orders are exactly the rows that
+        # would crowd the driver's screen.
+        #
+        # `is_collectible_target` is the server's own answer to "may a collection
+        # settle this", computed with the same predicate the collect endpoint
+        # validates against, so these lines can never advertise a debt the flow
+        # refuses. The `outstanding_amount` fallback keeps this bot working
+        # against a business_app older than that field.
+        collectible = [
+            item
+            for item in items
+            if (
+                item.get('is_collectible_target')
+                if item.get('is_collectible_target') is not None
+                else float(item.get('outstanding_amount') or 0) > 0
+            )
+        ]
+        if not collectible:
+            lines.append(i18n.get('staff.delivery.no_cod_debt', language))
+            return '\n'.join(lines)
+
         lines.append('')
-        for item in items[:5]:
-            if float(item.get('outstanding_amount') or 0) <= 0:
-                continue
+        for item in collectible[:5]:
             lines.append(
                 f"• {escape_html(item.get('order_number') or i18n.get('staff.order.unknown', language))}: "
                 f"{format_currency(item.get('outstanding_amount') or 0, language=language)}"

@@ -1466,8 +1466,20 @@ const DeliveryReports = () => {
               placeholder={t('staff:auto_allocate_oldest_first', 'Leave blank to auto-allocate oldest debt first')}
               disabled={!recordCollectionStatement?.items?.length}
             >
+              {/* Filter on the server's `is_collectible_target`, NOT on
+                  outstanding_amount. The statement lists every payment rail in
+                  full, so a positive outstanding also matches settled rows and
+                  live gateway payments that the endpoint refuses with "Only COD
+                  orders can be targeted for COD collections" — a 400 it does not
+                  log. The flag is computed by the same predicate the validator
+                  uses. Falls back to the old test for a backend older than this
+                  build. */}
               {(recordCollectionStatement?.items || [])
-                .filter((item) => Number(item.outstanding_amount || 0) > 0)
+                .filter((item) => (
+                  item.is_collectible_target === undefined
+                    ? Number(item.outstanding_amount || 0) > 0
+                    : item.is_collectible_target
+                ))
                 .map((item) => (
                   <Option key={item.order_id} value={item.order_id}>
                     {item.order_number} - {money(item.outstanding_amount)}

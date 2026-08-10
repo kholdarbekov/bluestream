@@ -24,7 +24,10 @@ from business_app.services.cod_collect_ceiling import (
 )
 from business_app.utils.exceptions import ValidationError, NotFoundError, ForbiddenError, ConflictError
 from business_app.utils.geo_validation import ensure_within_delivery_zone
-from business_app.utils.payment_projection import has_open_receivable, open_receivable_amount
+from business_app.utils.payment_projection import (
+    is_ledger_receivable,
+    open_receivable_amount,
+)
 from business_app.utils.state_validators import (
     assert_order_address_for_status,
     assert_order_creator_for_source,
@@ -1180,7 +1183,11 @@ class StaffService:
             and not settle_electronic_as_cash
             and order is not None
             and order.payment_method in _electronic_methods
-            and has_open_receivable(order_payment)
+            # `is_ledger_receivable`, not `has_open_receivable`: this must be the
+            # SAME predicate `_validate_collection_context` applies downstream,
+            # or this arm fires and post_collection then refuses — which would
+            # block the driver from completing the delivery at all.
+            and is_ledger_receivable(order_payment)
         )
 
         if is_cash_order or settle_electronic_as_cash or settle_receivable_in_place:

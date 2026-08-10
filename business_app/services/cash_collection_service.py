@@ -1925,6 +1925,16 @@ class CashCollectionService:
                         if hasattr(payment.payment_method, "value")
                         else payment.payment_method
                     ),
+                    # 🔴 THE ONLY FLAG A COLLECT SURFACE MAY FILTER ON.
+                    # `outstanding_amount > 0` is NOT sufficient: this statement
+                    # lists every rail in full (owner ruling 2026-08-08), so it
+                    # includes settled rows and live gateway payments that
+                    # `_validate_collection_context` will refuse. The admin
+                    # Record Collection dropdown and the driver's at-door
+                    # statement both key on this flag, so what a human is offered
+                    # and what the endpoint accepts are one decision — the
+                    # show-vs-settle rule this codebase keeps relearning.
+                    "is_collectible_target": is_ledger_receivable(payment),
                     "amount": float(payment.amount or 0),
                     "amount_collected": float(payment.amount_collected or 0),
                     "outstanding_amount": float(outstanding_amount),
@@ -2930,17 +2940,28 @@ class CashCollectionService:
                 # ACTUAL open receivable so this can never widen into a general
                 # "post cash against any card order" hole — a settled card order
                 # still raises here.
+                # 🔴 THE THIRD CLAUSE IS THE CONTRACT WITH EVERY COLLECT SURFACE.
+                # It is source-AGNOSTIC on purpose: `get_customer_cod_statement`
+                # marks a row `is_collectible_target` with the SAME
+                # `is_ledger_receivable` predicate, and the admin Record
+                # Collection modal offers exactly those rows against ANY source
+                # (standalone_meeting, next_delivery, backfill…). Restricting
+                # this to DELIVERY_COMPLETION shipped a modal that offered an
+                # order the endpoint then refused with "Only COD orders can be
+                # targeted for COD collections" — a 400 the endpoint does not
+                # even log, so it was invisible in prod.
+                #
+                # `is_ledger_receivable` (not `has_open_receivable`) is what
+                # keeps this safe: for an electronic rail it is true ONLY for
+                # PARTIALLY_PAID, so a live gateway payment can never be settled
+                # by a cash collection — that path still converts.
                 allowed_non_cash = (
                     (
                         source == CashCollectionSource.PERSONAL_CARD_TRANSFER
                         and order.payment_method in _electronic_methods
                     )
                     or source == CashCollectionSource.ADMIN_ADJUSTMENT
-                    or (
-                        source == CashCollectionSource.DELIVERY_COMPLETION
-                        and order.payment_method in _electronic_methods
-                        and has_open_receivable(order.payment)
-                    )
+                    or (order.payment_method in _electronic_methods and is_ledger_receivable(order.payment))
                 )
                 if not allowed_non_cash:
                     raise ValidationError("Only COD orders can be targeted for COD collections")

@@ -9,6 +9,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import joinedload, selectinload
 
 from business_app import db
+from business_app.models.delivery import DeliveryPerson
 from business_app.models.product import Product
 from business_app.models.tryout import (
     ProductTryout,
@@ -42,6 +43,57 @@ class TryoutService:
     @staticmethod
     def _as_decimal(value: Any) -> Decimal:
         return Decimal(str(value or 0))
+
+    @staticmethod
+    def _is_delivery_driver(user_id: Any) -> bool:
+        """True when `user_id` is the users.id of someone with a delivery profile."""
+        if user_id is None or user_id == "":
+            return False
+        return db.session.query(DeliveryPerson.id).filter(DeliveryPerson.user_id == int(user_id)).first() is not None
+
+    @staticmethod
+    def _resolve_driver_user_id(value: Any) -> Optional[int]:
+        """Validate an inbound `assigned_driver_user_id` before it reaches the column.
+
+        `tryout_tasks.assigned_driver_user_id` is FK'd to `users.id`, but the admin
+        UI used to post a `delivery_persons.id` — a different, much smaller id space
+        that silently resolved to whichever early-registered account happened to own
+        that users.id, i.e. a customer. The FK could not catch it (both are valid
+        `users.id` values) so the wrong person was rendered as the driver and the
+        task became invisible to every real driver. Reject the wrong space loudly.
+
+        Inactive drivers are accepted so existing assignments to deactivated staff
+        stay editable rather than 500-ing on the next save.
+        """
+        if value is None or value == "":
+            return None
+        user_id = int(value)
+        if not TryoutService._is_delivery_driver(user_id):
+            raise ValidationError("assigned_driver_user_id must be the user id of a delivery driver")
+        return user_id
+
+    @staticmethod
+    def _driver_user_id_or_actor(value: Any, actor_user_id: Any) -> Optional[int]:
+        """Resolve the driver for a task, falling back to the actor only if they drive.
+
+        The staff-bot flow relies on the fallback: a driver creating a try-out in the
+        bot sends no driver and expects to be assigned to it. An admin doing the same
+        must NOT be written in — a task pinned to a non-driver matches nobody in
+        `list_tasks_for_driver` and is excluded from the open pool (which only widens
+        to `assigned_driver_user_id IS NULL`), stranding the bottles. Returning None
+        leaves the task in the pool where a driver can accept it.
+
+        Deliberately LENIENT, unlike `_resolve_driver_user_id`: every caller passes
+        either an already-validated payload value or a value already persisted on the
+        row. Re-rejecting stored data would make every task the old code corrupted
+        impossible to complete — an outage strictly worse than the display bug. A bad
+        stored value is dropped here instead, which self-heals the row.
+        """
+        if TryoutService._is_delivery_driver(value):
+            return int(value)
+        if TryoutService._is_delivery_driver(actor_user_id):
+            return int(actor_user_id)
+        return None
 
     @staticmethod
     def _status_value(value: Any) -> str:
@@ -572,7 +624,7 @@ class TryoutService:
             )
         db.session.flush()
 
-        assigned_driver_user_id = payload.get("assigned_driver_user_id")
+        assigned_driver_user_id = TryoutService._resolve_driver_user_id(payload.get("assigned_driver_user_id"))
         complete_handoff = bool(payload.get("complete_handoff"))
 
         if complete_handoff:
@@ -580,7 +632,7 @@ class TryoutService:
                 tryout,
                 TryoutTaskType.HANDOFF,
                 actor_user_id,
-                assigned_driver_user_id=assigned_driver_user_id or actor_user_id,
+                assigned_driver_user_id=TryoutService._driver_user_id_or_actor(assigned_driver_user_id, actor_user_id),
                 notes="Completed on create",
                 status=TryoutTaskStatus.COMPLETED,
             )
@@ -686,7 +738,9 @@ class TryoutService:
         task.status = TryoutTaskStatus.COMPLETED
         task.completed_at = datetime.now(UTC)
         task.completed_by_user_id = actor_user_id
-        task.assigned_driver_user_id = task.assigned_driver_user_id or actor_user_id
+        task.assigned_driver_user_id = TryoutService._driver_user_id_or_actor(
+            task.assigned_driver_user_id, actor_user_id
+        )
         task.notes = notes or task.notes
         TryoutService._apply_handoff(task.tryout, task, actor_user_id, notes)
         db.session.commit()
@@ -703,7 +757,7 @@ class TryoutService:
             tryout,
             task_type,
             actor_user_id,
-            assigned_driver_user_id=payload.get("assigned_driver_user_id"),
+            assigned_driver_user_id=TryoutService._resolve_driver_user_id(payload.get("assigned_driver_user_id")),
             due_at=due_at,
             notes=payload.get("notes"),
         )
@@ -715,7 +769,7 @@ class TryoutService:
         task = TryoutService._load_task(task_id)
         if TryoutService._status_value(task.status) == TryoutTaskStatus.COMPLETED.value:
             raise ConflictError("Completed task cannot be reassigned")
-        task.assigned_driver_user_id = driver_user_id
+        task.assigned_driver_user_id = TryoutService._resolve_driver_user_id(driver_user_id)
         task.status = TryoutTaskStatus.ASSIGNED
         db.session.commit()
         return TryoutService._load_task(task.id)
@@ -747,7 +801,9 @@ class TryoutService:
         if TryoutService._status_value(task.status) == TryoutTaskStatus.COMPLETED.value:
             raise ConflictError("Pickup task already completed")
 
-        task.assigned_driver_user_id = task.assigned_driver_user_id or actor_user_id
+        task.assigned_driver_user_id = TryoutService._driver_user_id_or_actor(
+            task.assigned_driver_user_id, actor_user_id
+        )
         task.status = TryoutTaskStatus.ASSIGNED
 
         tryout = task.tryout
@@ -911,7 +967,7 @@ class TryoutService:
             )
             tryout.address_snapshot = snapshot
 
-        assigned_driver_user_id = payload.get("assigned_driver_user_id")
+        assigned_driver_user_id = TryoutService._resolve_driver_user_id(payload.get("assigned_driver_user_id"))
         if assigned_driver_user_id:
             task = TryoutService._get_open_handoff_task(tryout) or TryoutService._get_open_pickup_task(tryout)
             if task:
@@ -925,11 +981,13 @@ class TryoutService:
                     tryout,
                     TryoutTaskType.HANDOFF,
                     actor_user_id,
-                    assigned_driver_user_id=assigned_driver_user_id or actor_user_id,
+                    assigned_driver_user_id=TryoutService._driver_user_id_or_actor(
+                        assigned_driver_user_id, actor_user_id
+                    ),
                     notes="Completed from edit",
                 )
-            handoff_task.assigned_driver_user_id = (
-                handoff_task.assigned_driver_user_id or assigned_driver_user_id or actor_user_id
+            handoff_task.assigned_driver_user_id = TryoutService._driver_user_id_or_actor(
+                handoff_task.assigned_driver_user_id or assigned_driver_user_id, actor_user_id
             )
             handoff_task.status = TryoutTaskStatus.COMPLETED
             handoff_task.completed_at = datetime.now(UTC)

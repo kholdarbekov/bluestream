@@ -208,7 +208,11 @@ const Tryouts = () => {
   });
 
   const products = (productsData || []).filter((product) => product.is_tryout_eligible !== false);
-  const drivers = driversData || [];
+  // Drivers are addressed by `user_id` (users.id) everywhere — `id` is the
+  // delivery_persons PK, and the two id spaces overlap numerically, so falling
+  // back to it silently targets an unrelated account. Drop any row the API
+  // failed to publish a user_id for instead of guessing.
+  const drivers = (driversData || []).filter((driver) => driver.user_id != null);
   const tryouts = data?.items || [];
   const summary = data?.summary || {};
 
@@ -534,7 +538,7 @@ const Tryouts = () => {
         <Col span={6}>
             <Select allowClear placeholder={t('driver', { defaultValue: 'Driver' })} style={{ width: '100%' }} value={driverId} onChange={setDriverId}>
               {drivers.map((driver) => (
-                <Select.Option key={driver.user_id || driver.id} value={driver.user_id || driver.id}>
+                <Select.Option key={driver.user_id} value={driver.user_id}>
                   {driver.full_name || driver.name || driver.phone}
                 </Select.Option>
               ))}
@@ -709,7 +713,7 @@ const Tryouts = () => {
           <Row gutter={16}>
             <Col span={8}><Form.Item name="company_name" label={t('company', { defaultValue: 'Company' })}><Input /></Form.Item></Col>
             <Col span={8}><Form.Item name="preferred_language" label={t('language', { defaultValue: 'Language' })}><Select options={[{ value: 'uz', label: t('lang_uz', { defaultValue: 'Uzbek' }) }, { value: 'ru', label: t('lang_ru', { defaultValue: 'Russian' }) }, { value: 'en', label: t('lang_en', { defaultValue: 'English' }) }]} /></Form.Item></Col>
-            <Col span={8}><Form.Item name="assigned_driver_user_id" label={t('assign_driver', { defaultValue: 'Assign Driver' })}><Select allowClear options={drivers.map((driver) => ({ value: driver.user_id || driver.id, label: driver.full_name || driver.name || driver.phone }))} /></Form.Item></Col>
+            <Col span={8}><Form.Item name="assigned_driver_user_id" label={t('assign_driver', { defaultValue: 'Assign Driver' })}><Select allowClear options={drivers.map((driver) => ({ value: driver.user_id, label: driver.full_name || driver.name || driver.phone }))} /></Form.Item></Col>
           </Row>
           <Row gutter={16}>
             <Col span={12}><Form.Item name="full_address" label={t('full_address', { defaultValue: 'Full Address' })} rules={[{ required: true }]}><Input.TextArea rows={2} /></Form.Item></Col>
@@ -817,7 +821,7 @@ const Tryouts = () => {
             />
           </Form.Item>
           <Form.Item name="assignedDriverUserId" label={t('driver', { defaultValue: 'Driver' })} rules={[{ required: true }]}>
-            <Select options={drivers.map((driver) => ({ value: driver.user_id || driver.id, label: driver.full_name || driver.name || driver.phone }))} />
+            <Select options={drivers.map((driver) => ({ value: driver.user_id, label: driver.full_name || driver.name || driver.phone }))} />
           </Form.Item>
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>

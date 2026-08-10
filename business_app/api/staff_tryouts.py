@@ -36,9 +36,11 @@ def create_staff_tryout():
         return payload
 
     payload["complete_handoff"] = True
-    if not payload.get("assigned_driver_user_id"):
-        payload["assigned_driver_user_id"] = _current_actor_id()
-
+    # Who drives this task is decided in one place — TryoutService, which assigns
+    # the actor when (and only when) they hold a delivery profile, and otherwise
+    # leaves the task in the open pool. Injecting the actor here too would route
+    # it through the strict inbound validator and reject a driver whose profile
+    # row is missing, which `require_staff_roles` deliberately still admits.
     tryout = TryoutService.create_tryout(payload, _current_actor_id(), source="driver")
     return success_response(data={"tryout": TryoutService.serialize_tryout(tryout)}, status_code=201)
 

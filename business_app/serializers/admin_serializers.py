@@ -220,6 +220,7 @@ class DeliveryPersonAdminSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True, alias_generator=to_camel)
 
     id: int
+    user_id: int
     full_name: str
     phone: str
     email: Optional[str] = None
@@ -888,6 +889,10 @@ def serialize_delivery_person_admin(person, current_active_deliveries: Optional[
         vehicle_type = person.vehicle_type.value if hasattr(person.vehicle_type, "value") else person.vehicle_type
         data = {
             "id": person.id,
+            # `user_id` is what every *_user_id column FKs to. Clients must assign by
+            # this, never by `id` (the delivery_persons PK) — the two id spaces overlap
+            # numerically, so confusing them silently targets an unrelated account.
+            "user_id": person.user_id,
             "full_name": person.full_name,
             "phone": person.phone,
             "email": getattr(person, "email", None),
@@ -919,6 +924,7 @@ def serialize_delivery_person_admin(person, current_active_deliveries: Optional[
         vehicle_type = person.vehicle_type.value if hasattr(person.vehicle_type, "value") else person.vehicle_type
         return {
             "id": person.id,
+            "user_id": person.user_id,
             "full_name": person.full_name,
             "phone": person.phone,
             "vehicle_type": vehicle_type,

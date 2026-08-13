@@ -582,7 +582,8 @@ class StaffAPIClient:
 
     async def update_driver_location(
         self, token: str,
-        latitude: float, longitude: float
+        latitude: float, longitude: float,
+        horizontal_accuracy: Optional[float] = None,
     ) -> APIResponse:
         """Update the driver's own current location (driver-level, no delivery
         required). Used for route-optimization purposes — accepts any one-shot
@@ -592,12 +593,22 @@ class StaffAPIClient:
         reflects the last persisted sequence, not necessarily one computed
         from this share; a freshly-optimized order (when the backend didn't
         debounce it away) arrives via a separate silent webhook refresh, not
-        in this response."""
+        in this response.
+
+        `horizontal_accuracy` is Telegram's uncertainty radius in metres and is
+        omitted from the body when the client did not report one — the backend
+        treats a missing value as "unknown", never as "coarse". A value worse
+        than the backend's maximum comes back as an error with
+        `error_code="LOCATION_TOO_COARSE"` and nothing is written.
+        """
+        data = {'latitude': latitude, 'longitude': longitude}
+        if horizontal_accuracy is not None:
+            data['horizontal_accuracy'] = horizontal_accuracy
         return await self._make_request(
             'POST',
             f'{config.business_api.delivery_endpoint}/me/location',
             token=token,
-            data={'latitude': latitude, 'longitude': longitude}
+            data=data,
         )
 
     async def get_active_deliveries(self, token: str) -> APIResponse:

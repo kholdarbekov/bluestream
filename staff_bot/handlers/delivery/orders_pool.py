@@ -382,32 +382,11 @@ class OrdersPoolHandler(BaseHandler):
                 parse_mode='HTML'
             )
 
-            # Driver location is the single trigger for re-optimization from
-            # THIS flow (pool self-accept does not itself enqueue an
-            # optimize). We always prompt for a fresh share after an accept
-            # — even when the previous share was "fresh" — because the
-            # driver has likely moved since then and we want the new route
-            # based on their current position, not their position N minutes
-            # ago. Once the location update arrives, the backend's
-            # POST /me/location endpoint ENQUEUES a (debounced) route
-            # re-optimization off its request thread — it does not run it
-            # inline. The set-changed guard in
-            # RouteOptimizationService._should_debounce_location_trigger's
-            # caller (business_app/services/route_optimization_service.py)
-            # is what stops this share from being debounced away just
-            # because a `delivery` solve happened moments earlier at the
-            # same spot: the just-accepted stop makes the active set differ
-            # from what's already published, so the debounce is bypassed and
-            # this share always re-solves.
-            try:
-                prompt = i18n.get('staff.delivery.share_location_after_accept', language)
-                button_text = i18n.get('staff.delivery.share_location_button', language)
-                await query.message.reply_text(
-                    prompt,
-                    reply_markup=CommonKeyboards.location_request(language, button_text),
-                )
-            except Exception as prompt_exc:
-                logger.warning(f"Failed to send share-location prompt: {prompt_exc}")
+            # No location prompt here. Accepting an order used to send a second
+            # message whose reply keyboard replaced the driver's entire main
+            # menu, on every single accept. The route card refreshes itself via
+            # the silent route-updated webhook, and a driver whose fix has aged
+            # taps "Optimize route" on the card — one tap, on their terms.
 
         except Exception as e:
             logger.error(f"Error confirming order acceptance: {e}", exc_info=True)

@@ -145,7 +145,8 @@ class TestNextView:
         callbacks = [c for _, c, _ in btns if c]
         assert "staff_view_active_11" in callbacks           # Start this stop
         assert "staff_route_view_all" in callbacks           # All stops
-        assert "staff_share_location_prompt" in callbacks
+        assert "staff_optimize_routes" in callbacks           # Optimize route
+        assert "staff_share_location_prompt" not in callbacks  # the reveal step is gone
         urls = [u for _, _, u in btns if u]
         assert len(urls) == 1 and urls[0].startswith("https://yandex.ru/maps/?rtext=~")
 
@@ -278,7 +279,10 @@ class TestEmptyAndNav:
         )
         assert "🚚" in text
         callbacks = [c for _, c, _ in _buttons(kb) if c]
-        assert "staff_share_location_prompt" in callbacks
+        # All stops done: there is no route left to optimize, so the card
+        # offers only the way back rather than a button that would no-op.
+        assert "staff_optimize_routes" not in callbacks
+        assert "staff_share_location_prompt" not in callbacks
         assert "staff_back_to_main" in callbacks
 
     def test_nav_url_multi_stop_in_route_order_capped(self):

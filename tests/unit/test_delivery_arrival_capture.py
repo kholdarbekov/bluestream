@@ -262,3 +262,38 @@ class TestArrivalPositionCapture:
                 )
 
             mock_delay.assert_not_called()
+
+    def test_address_derived_refresh_clears_the_stale_gps_accuracy(
+        self, app, db, driver_user, customer_user, driver_with_stale_location
+    ):
+        """An address-derived position must not inherit the previous fix's accuracy.
+
+        `location_accuracy_m` is the uncertainty radius of a MEASURED GPS
+        reading. When the arrival capture replaces a stale fix with the
+        delivery address's coordinates, that number no longer describes the
+        stored position — leaving it in place attaches a precise-looking
+        radius to a point it was never measured at. An address centroid has
+        no measured accuracy, so the honest value is NULL.
+        """
+        with app.app_context():
+            person = DeliveryPerson.query.filter_by(user_id=driver_user.id).first()
+            person.location_accuracy_m = 12.0
+            db.session.commit()
+
+            dest_lat, dest_lng = 41.3123, 69.2456
+            addr = _make_address(db, customer_user.id, dest_lat, dest_lng)
+            delivery = _make_in_transit_delivery(db, customer_user.id, driver_user.id, addr)
+            with patch(
+                "business_app.tasks.delivery_tasks.optimize_driver_route_task.delay"
+            ):
+                DeliveryService().mark_delivery_arrived(
+                    delivery.id, actor_user_id=driver_user.id
+                )
+
+            db.session.expire_all()
+            person = DeliveryPerson.query.filter_by(user_id=driver_user.id).first()
+            assert person.current_location_lat == pytest.approx(dest_lat)
+            assert person.location_accuracy_m is None, (
+                "a 12m radius measured at the driver's PREVIOUS position must not "
+                "survive onto an address-derived one"
+            )

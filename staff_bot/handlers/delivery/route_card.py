@@ -148,9 +148,13 @@ def build_next_view(payload: Dict[str, Any], language: str) -> Tuple[str, Inline
             f"📋 {i18n.get('staff.route.all_stops_button', language, count=len(items))}",
             callback_data="staff_route_view_all",
         ),
+        # One tap: the backend optimizes from the driver's stored position and
+        # only asks for a fresh location when that position is stale or absent.
+        # `request_location` cannot live on an inline button, which is why the
+        # location step is a fallback rather than this button's job.
         InlineKeyboardButton(
-            f"📍 {i18n.get('staff.delivery.share_location_button', language)}",
-            callback_data="staff_share_location_prompt",
+            f"🔄 {i18n.get('staff.delivery.optimize_routes_button', language)}",
+            callback_data="staff_optimize_routes",
         ),
     ]
     return text, InlineKeyboardMarkup([row1, row2])
@@ -196,10 +200,6 @@ def build_empty_view(payload: Dict[str, Any], language: str) -> Tuple[str, Inlin
         f"{i18n.get('staff.route.updated_at', language, time=format_local_time())}"
     )
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(
-            f"📍 {i18n.get('staff.delivery.share_location_button', language)}",
-            callback_data="staff_share_location_prompt",
-        )],
         [InlineKeyboardButton(
             f"⬅️ {i18n.get('staff.back', language)}", callback_data="staff_back_to_main"
         )],

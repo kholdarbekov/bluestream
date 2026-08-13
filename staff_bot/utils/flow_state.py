@@ -63,6 +63,12 @@ PENDING_FLOW_USER_DATA_KEYS = (
     'pending_reconciliation_flow',
     'pending_cod_collection_flow',
     'pending_bottle_collection_flow',
+    # Set when the optimize tap was refused for a stale/missing fix and we asked
+    # for a location. The pin that follows optimizes and renders on its own, so
+    # the driver never taps "optimize" twice. Registered here so a menu tap in
+    # between disarms it — an armed flag plus an unrelated later pin would
+    # otherwise re-render the route card out of nowhere.
+    'pending_optimize_after_location',
     'tryout_pickup_task_id',
     'tryout_pickup_products',
     'tryout_pickup_state',

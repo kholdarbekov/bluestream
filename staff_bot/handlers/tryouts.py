@@ -4,7 +4,7 @@ import logging
 from decimal import Decimal, InvalidOperation
 from typing import Dict, Optional
 
-from telegram import ReplyKeyboardRemove, Update
+from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 
 from shared.constants import is_within_tashkent
@@ -112,7 +112,7 @@ class TryoutHandler(BaseHandler):
         context.user_data['new_tryout']['full_address'] = address
         await update.message.reply_text(
             i18n.get('staff.tryout.address_received', language),
-            reply_markup=ReplyKeyboardRemove(),
+            reply_markup=MenuKeyboards.main_menu(language, context.user_data.get('staff_roles', [])),
         )
         await self._show_product_selection(update, context, use_message=True)
         return ConversationHandler.END
@@ -148,7 +148,9 @@ class TryoutHandler(BaseHandler):
         if not response.success or not isinstance(response.data, dict) or not response.data.get('formatted_address'):
             await update.message.reply_text(
                 i18n.get('staff.tryout.location_geocode_failed', language),
-                reply_markup=ReplyKeyboardRemove(),
+                reply_markup=CommonKeyboards.location_request(
+                    language, i18n.get('staff.tryout.send_location', language)
+                ),
             )
             return ENTER_TRYOUT_ADDRESS
 
@@ -157,7 +159,7 @@ class TryoutHandler(BaseHandler):
         context.user_data['new_tryout']['city'] = response.data.get('city') or 'Tashkent'
         await update.message.reply_text(
             i18n.get('staff.tryout.location_received', language, address=response.data['formatted_address']),
-            reply_markup=ReplyKeyboardRemove(),
+            reply_markup=MenuKeyboards.main_menu(language, context.user_data.get('staff_roles', [])),
         )
         await self._show_product_selection(update, context, use_message=True)
         return ConversationHandler.END

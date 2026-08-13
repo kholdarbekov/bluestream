@@ -1125,12 +1125,20 @@ class ProductHandlers(BaseHandler):
             edit_return=context.user_data.get('cart_edit_return'),
         )
 
-        await self._edit_or_replace_callback_message(
-            update.callback_query,
-            cart_text,
-            reply_markup=keyboard,
-        )
-        await update.callback_query.answer()
+        if update.callback_query:
+            await self._edit_or_replace_callback_message(
+                update.callback_query,
+                cart_text,
+                reply_markup=keyboard,
+            )
+            await update.callback_query.answer()
+        else:
+            # Message-only caller (e.g. cancel_address_text from zero-address
+            # checkout): there is no callback message to edit, so send the
+            # cart as a fresh reply. `_edit_or_replace_callback_message`
+            # requires a `query` and re-raises when one isn't there — never
+            # call it from here.
+            await update.message.reply_text(cart_text, reply_markup=keyboard)
 
     async def _clear_cart(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Clear shopping cart"""

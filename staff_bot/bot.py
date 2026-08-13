@@ -122,6 +122,62 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
             pass
 
 
+class TimedApplication(Application):
+    """`Application` subclass that measures how long each update takes end to end.
+
+    Why this exists: on 2026-08-13 staff_bot was reported slow and it was
+    IMPOSSIBLE to confirm from telemetry — the bot logged `Update: ...` on
+    arrival and then nothing. No elapsed time, no completion marker, so
+    "slow" could not be distinguished from "idle". This closes that gap.
+
+    It overrides `process_update` rather than adding another handler because
+    that is the only point that sees the WHOLE update: a `TypeHandler` in
+    group -10 returns before the real handlers run, and a last-group handler
+    is skipped entirely when something raises `ApplicationHandlerStop` or
+    when an earlier group errors. The override reports from a `finally:`, so
+    a failed update is still measured.
+
+    Emits WARNING above `STAFF_BOT_SLOW_UPDATE_SECONDS` so slow updates are
+    greppable in Loki (`slow_update elapsed=`) without turning normal traffic
+    into noise at INFO.
+
+    Implementation note: PTB's `Application` defines `__slots__`, so it is
+    impossible to install this as an instance attribute
+    (`application.process_update = ...` raises `AttributeError: 'Application'
+    object attribute 'process_update' is read-only`). Subclassing and wiring
+    the subclass in via `ApplicationBuilder.application_class(...)` is the
+    supported hook for exactly this.
+    """
+
+    async def process_update(self, update):
+        started = time.perf_counter()
+        try:
+            return await super().process_update(update)
+        finally:
+            elapsed = time.perf_counter() - started
+            slow_threshold = float(os.environ.get("STAFF_BOT_SLOW_UPDATE_SECONDS", "3.0"))
+            try:
+                user_id = update.effective_user.id if getattr(update, "effective_user", None) else "N/A"
+                if getattr(update, "callback_query", None):
+                    kind = f"callback_query={update.callback_query.data}"
+                elif getattr(update, "message", None):
+                    kind = "message"
+                else:
+                    kind = "other"
+                if elapsed >= slow_threshold:
+                    logger.warning(
+                        "slow_update elapsed=%.2fs user=%s %s "
+                        "(threshold %.1fs; with concurrent_updates disabled this "
+                        "also delays every other staff member's update)",
+                        elapsed, user_id, kind, slow_threshold,
+                    )
+                else:
+                    logger.info("update_processed elapsed=%.3fs user=%s %s", elapsed, user_id, kind)
+            except Exception:  # noqa: BLE001
+                # Instrumentation must never break update processing.
+                logger.debug("update timing log failed", exc_info=True)
+
+
 class StaffBot:
     """Main staff bot application class"""
 
@@ -226,6 +282,7 @@ class StaffBot:
             # actual fix. Concurrency stays bounded by max_concurrent_updates.
             self.application = (
                 Application.builder()
+                .application_class(TimedApplication)
                 .token(config.telegram.bot_token)
                 .request(request)
                 .get_updates_request(get_updates_request)
@@ -269,65 +326,11 @@ class StaffBot:
 
             self.application.add_handler(TypeHandler(Update, log_updates), group=-10)
 
-            self._install_update_timing()
-
             logger.info("Staff Bot initialization completed successfully")
 
         except Exception as e:
             logger.error(f"Failed to initialize staff bot: {e}", exc_info=True)
             raise
-
-    def _install_update_timing(self):
-        """Measure how long each update takes end to end.
-
-        Why this exists: on 2026-08-13 staff_bot was reported slow and it was
-        IMPOSSIBLE to confirm from telemetry — the bot logged `Update: ...` on
-        arrival and then nothing. No elapsed time, no completion marker, so
-        "slow" could not be distinguished from "idle". This closes that gap.
-
-        It wraps `process_update` rather than adding another handler because
-        that is the only point that sees the WHOLE update: a `TypeHandler` in
-        group -10 returns before the real handlers run, and a last-group
-        handler is skipped entirely when something raises
-        `ApplicationHandlerStop` or when an earlier group errors. The wrapper
-        reports from a `finally:`, so a failed update is still measured.
-
-        Emits WARNING above `STAFF_BOT_SLOW_UPDATE_SECONDS` so slow updates
-        are greppable in Loki (`slow_update elapsed=`) without turning normal
-        traffic into noise at INFO.
-        """
-        application = self.application
-        original_process_update = application.process_update
-        slow_threshold = float(os.environ.get("STAFF_BOT_SLOW_UPDATE_SECONDS", "3.0"))
-
-        async def timed_process_update(update):
-            started = time.perf_counter()
-            try:
-                return await original_process_update(update)
-            finally:
-                elapsed = time.perf_counter() - started
-                try:
-                    user_id = update.effective_user.id if getattr(update, "effective_user", None) else "N/A"
-                    if getattr(update, "callback_query", None):
-                        kind = f"callback_query={update.callback_query.data}"
-                    elif getattr(update, "message", None):
-                        kind = "message"
-                    else:
-                        kind = "other"
-                    if elapsed >= slow_threshold:
-                        logger.warning(
-                            "slow_update elapsed=%.2fs user=%s %s "
-                            "(threshold %.1fs; with concurrent_updates disabled this "
-                            "also delays every other staff member's update)",
-                            elapsed, user_id, kind, slow_threshold,
-                        )
-                    else:
-                        logger.info("update_processed elapsed=%.3fs user=%s %s", elapsed, user_id, kind)
-                except Exception:  # noqa: BLE001
-                    # Instrumentation must never break update processing.
-                    logger.debug("update timing log failed", exc_info=True)
-
-        application.process_update = timed_process_update
 
     async def _validate_database_schema(self):
         """Validate required DB schema for staff bot startup."""
@@ -520,7 +523,6 @@ class StaffBot:
             CallbackQueryHandler(active_delivery_handler.view_active_delivery, pattern=r"^staff_view_active_\d+$"),
             CallbackQueryHandler(active_delivery_handler.navigate_to_address, pattern=r"^staff_navigate_\d+$"),
             CallbackQueryHandler(active_delivery_handler.optimize_routes, pattern="^staff_optimize_routes$"),
-            CallbackQueryHandler(active_delivery_handler.share_location_prompt, pattern="^staff_share_location_prompt$"),
             CallbackQueryHandler(active_delivery_handler.decline_suggestion, pattern=r"^staff_decline_suggestion_\d+$"),
 
             # Try-outs
@@ -1005,9 +1007,14 @@ class StaffBot:
             CallbackQueryHandler(_handle_flow_cancel, pattern="^staff_flow_cancel$")
         )
 
-        # Location handler for live location updates
+        # Location handler for live location updates. Private chats only:
+        # request_location buttons are inert in groups, and a group member's
+        # stray pin must never be written as a driver's position.
         self.application.add_handler(
-            MessageHandler(filters.LOCATION, location_handler.handle_location_update)
+            MessageHandler(
+                filters.LOCATION & filters.ChatType.PRIVATE,
+                location_handler.handle_location_update,
+            )
         )
 
         # Catch-all text handler for menu button presses

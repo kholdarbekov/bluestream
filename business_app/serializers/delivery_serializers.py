@@ -508,6 +508,7 @@ def serialize_delivery_person(person, include_sensitive: bool = False, include_s
                 "latitude": person.current_location_lat,
                 "longitude": person.current_location_lng,
                 "last_update": getattr(person, "last_location_update", None),
+                "accuracy_m": getattr(person, "location_accuracy_m", None),
             }
 
         # Add delivery statistics

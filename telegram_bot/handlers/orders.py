@@ -11,7 +11,7 @@ from telegram.helpers import escape_markdown
 
 from eligibility import main_menu_for
 from i18n import i18n
-from keyboards import OrderKeyboards, MenuKeyboards, PaymentKeyboards
+from keyboards import OrderKeyboards, MenuKeyboards, PaymentKeyboards, ProfileKeyboards
 from api_client import api_client
 from database import db_manager, BotUserRepository
 from utils import user_middleware, format_price, MessageBuilder, get_auth_token
@@ -598,22 +598,36 @@ class OrderHandlers(BaseHandler):
             }
 
             if not addresses:
-                # No addresses, prompt to add one
+                # One tap: the location keyboard rides THIS message instead of
+                # an inline card whose only real button led to the same prompt.
+                # The pin is a conversation ENTRY POINT (telegram_bot/bot.py),
+                # so it starts the address flow rather than falling through to
+                # the group-0 catch-all and being filed as a support ticket.
                 add_address_text = i18n.get('telegram.orders.no_address_prompt', language)
-                keyboard = OrderKeyboards.delivery_addresses([], language)
+                keyboard = ProfileKeyboards.location_request(
+                    language,
+                    extra_rows=(
+                        i18n.get('telegram.address.enter_manually_button', language),
+                        i18n.get('telegram.cancel', language),
+                    ),
+                )
+
+                # Read by the address flow on save to route back into checkout
+                # instead of dumping the customer on the main menu with a full
+                # cart (profile.py:2640-2649).
+                context.user_data['address_flow_origin'] = 'checkout'
+
                 if update.callback_query:
-                    await self._edit_or_replace_callback_message(
-                        update.callback_query, add_address_text, reply_markup=keyboard,
-                    )
                     await update.callback_query.answer()
+                    await update.callback_query.message.reply_text(
+                        text=add_address_text,
+                        reply_markup=keyboard,
+                    )
                 else:
                     await update.message.reply_text(
                         text=add_address_text,
-                        reply_markup=keyboard
+                        reply_markup=keyboard,
                     )
-
-                # Set state for address input
-                await self.user_repo.update_user_state(user_id, {'awaiting_input': 'address_location'})
                 return
 
             # Quick Order auto-selected an address (last order's or default).

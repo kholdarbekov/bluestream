@@ -259,7 +259,22 @@ def update_my_location():
             error_code="STAFF_INVALID_COORDINATES",
         )
 
-    StaffService.update_driver_location(current_user_id, lat, lng)
+    # Optional: Telegram only sends horizontal_accuracy on clients that
+    # measure it. Absent stays absent — the service treats None as "unknown",
+    # never as "coarse".
+    raw_accuracy = data.get("horizontal_accuracy")
+    if raw_accuracy is None:
+        accuracy_m = None
+    else:
+        try:
+            accuracy_m = float(raw_accuracy)
+        except (TypeError, ValueError):
+            raise ValidationError(
+                "horizontal_accuracy must be numeric",
+                error_code="STAFF_INVALID_COORDINATES",
+            )
+
+    StaffService.update_driver_location(current_user_id, lat, lng, accuracy_m)
 
     # Re-optimize OFF the request thread (plan §4.5). The task debounces
     # per-driver inside the service; the response below simply reflects the
@@ -512,10 +527,12 @@ def manual_optimize_route():
     Runs synchronously (small N, fits in <2s) and returns the freshly sorted
     active-deliveries payload so the bot can edit its message in place.
 
-    Refuses with 412 + LOCATION_REQUIRED when the driver has never shared
-    location — without a real start point any sequence we produce is just a
-    guess. The bot is expected to surface the share-location prompt rather
-    than silently proceeding.
+    Refuses with 412 + LOCATION_REQUIRED when the driver's stored position is
+    missing OR stale — without a start point that reflects where the driver
+    actually is, any sequence we produce is a guess. Staleness uses the single
+    location-freshness rule (RouteOptimizationService.location_status); do not
+    introduce a second threshold here. The bot is expected to surface the
+    share-location prompt rather than silently proceeding.
     """
     from flask import jsonify
     from business_app.services.route_optimization_service import RouteOptimizationService
@@ -523,7 +540,7 @@ def manual_optimize_route():
     current_user_id = int(get_jwt_identity())
     service = RouteOptimizationService()
 
-    if service.location_status(current_user_id) == "missing":
+    if service.location_status(current_user_id) in ("missing", "stale"):
         return (
             jsonify(
                 {

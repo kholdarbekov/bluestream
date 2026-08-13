@@ -31,11 +31,31 @@ from telegram.ext import ContextTypes
 
 from staff_bot.handlers.base import BaseHandler
 from staff_bot.api_client import api_client
+from staff_bot.keyboards.common import CommonKeyboards
 from staff_bot.keyboards.menu import MenuKeyboards
 from staff_bot.permissions import require_auth, require_delivery_driver
 from staff_bot.i18n import i18n
 
 logger = logging.getLogger(__name__)
+
+
+async def _run_optimize_after_location(update, context, language, token) -> bool:
+    """Run the shared optimize-and-render path after a fallback location share.
+
+    Module-level and late-importing on purpose: `active_delivery` imports the
+    card renderer which imports this package, so a top-level import here would
+    be circular. Tests patch this name.
+
+    Leading underscore is load-bearing: `tests/unit/test_staff_handler_guards.py`
+    treats any PUBLIC async function in `staff_bot/handlers/` whose first arg is
+    `update` as a handler needing a role guard. This is an internal helper; the
+    guard lives on `ActiveDeliveryHandler.run_optimize_and_render`.
+    """
+    from staff_bot.handlers.delivery.active_delivery import ActiveDeliveryHandler
+
+    return await ActiveDeliveryHandler().run_optimize_and_render(
+        update, context, language, token
+    )
 
 
 class LocationHandler(BaseHandler):
@@ -77,7 +97,10 @@ class LocationHandler(BaseHandler):
 
             async with api_client as client:
                 response = await client.update_driver_location(
-                    token, loc.latitude, loc.longitude
+                    token,
+                    loc.latitude,
+                    loc.longitude,
+                    horizontal_accuracy=getattr(loc, "horizontal_accuracy", None),
                 )
 
             if not response.success:
@@ -88,9 +111,28 @@ class LocationHandler(BaseHandler):
                 # Don't spam ACKs for live-location stream errors either.
                 if is_one_shot:
                     msg = update.message
-                    await msg.reply_text(
-                        f"⚠️ {i18n.get('staff.delivery.location_update_failed', language)}",
-                    )
+                    if response.error_code == "LOCATION_TOO_COARSE":
+                        # Keep the armed flag: the driver asked to optimize and
+                        # has not got it yet. Stepping outdoors and tapping the
+                        # keyboard again finishes the original request.
+                        button_text = i18n.get('staff.delivery.share_location_button', language)
+                        await msg.reply_text(
+                            f"📡 {i18n.get('staff.delivery.location_too_coarse', language)}",
+                            reply_markup=CommonKeyboards.location_request(language, button_text),
+                        )
+                    else:
+                        # Non-coarse failure: spec §4.2 says the armed flag
+                        # clears here too. Leaving it armed would let an
+                        # unrelated future pin silently fire an optimize the
+                        # driver never got this turn. The location-request
+                        # keyboard also collapsed the driver's menu, and this
+                        # reply is the only thing that can bring it back.
+                        context.user_data.pop('pending_optimize_after_location', None)
+                        staff_roles = context.user_data.get('staff_roles', [])
+                        await msg.reply_text(
+                            f"⚠️ {i18n.get('staff.delivery.location_update_failed', language)}",
+                            reply_markup=MenuKeyboards.main_menu(language, staff_roles),
+                        )
                 return
 
             logger.info(
@@ -103,40 +145,68 @@ class LocationHandler(BaseHandler):
             # use user_data to remember we've already ACKed for this stream.
             already_acked_live = context.user_data.get('live_location_ack_sent', False)
 
+            # A one-shot share that we asked for because an optimize tap was
+            # refused finishes that optimize here. Live-location edits never
+            # do: a synchronous solve on every GPS tick would hammer OSRM.
+            wants_optimize = is_one_shot and context.user_data.pop(
+                'pending_optimize_after_location', False
+            )
+
             if is_one_shot or (is_live_edit and not already_acked_live):
-                ack_text = (
-                    f"✅ <b>{i18n.get('staff.delivery.location_received', language)}</b>\n"
-                    f"{i18n.get('staff.delivery.route_recalculated', language)}"
-                )
-                view_button = InlineKeyboardMarkup([[
-                    InlineKeyboardButton(
-                        f"🚚 {i18n.get('staff.menu.active_deliveries', language)}",
-                        callback_data="staff_active_deliveries",
-                    )
-                ]])
-                # Re-attach the driver's persistent main-menu reply keyboard
-                # here instead of removing it. The location-request keyboard
-                # (CommonKeyboards.location_request) is `one_time_keyboard`,
-                # which only auto-hides *itself* on use — it does not bring
-                # back whatever keyboard was showing before it, so without
-                # this the driver's recallable keyboard stays the stale
-                # "Share Location / Cancel" one rather than the main menu
-                # (route-UX plan 2026-08-11 Task 15; recovery used to require
-                # discovering /menu).
                 staff_roles = context.user_data.get('staff_roles', [])
                 msg = update.message or update.edited_message
                 if msg is not None:
-                    await msg.reply_text(
-                        ack_text,
-                        reply_markup=MenuKeyboards.main_menu(language, staff_roles),
-                        parse_mode='HTML',
-                    )
-                    await msg.reply_text(
-                        f"🔍 {i18n.get('staff.delivery.tap_to_see_optimized', language)}",
-                        reply_markup=view_button,
-                    )
+                    if wants_optimize:
+                        # The route card is EDITED in place, and an edited
+                        # message cannot carry a reply keyboard — so this
+                        # message is the only thing that can bring the driver's
+                        # main menu back after the location keyboard replaced
+                        # it. Without it they are left holding a collapsed
+                        # "Share location / Cancel" panel (route-UX plan
+                        # 2026-08-11 Task 15).
+                        await msg.reply_text(
+                            f"✅ <b>{i18n.get('staff.delivery.location_received', language)}</b>",
+                            reply_markup=MenuKeyboards.main_menu(language, staff_roles),
+                            parse_mode='HTML',
+                        )
+                        await _run_optimize_after_location(update, context, language, token)
+                    else:
+                        ack_text = (
+                            f"✅ <b>{i18n.get('staff.delivery.location_received', language)}</b>\n"
+                            f"{i18n.get('staff.delivery.route_recalculated', language)}"
+                        )
+                        view_button = InlineKeyboardMarkup([[
+                            InlineKeyboardButton(
+                                f"🚚 {i18n.get('staff.menu.active_deliveries', language)}",
+                                callback_data="staff_active_deliveries",
+                            )
+                        ]])
+                        # Re-attach the driver's persistent main-menu reply
+                        # keyboard here instead of removing it. The
+                        # location-request keyboard (CommonKeyboards.location_request)
+                        # is `one_time_keyboard`, which only auto-hides
+                        # *itself* on use — it does not bring back whatever
+                        # keyboard was showing before it, so without this the
+                        # driver's recallable keyboard stays the stale "Share
+                        # Location / Cancel" one rather than the main menu
+                        # (route-UX plan 2026-08-11 Task 15; recovery used to
+                        # require discovering /menu).
+                        await msg.reply_text(
+                            ack_text,
+                            reply_markup=MenuKeyboards.main_menu(language, staff_roles),
+                            parse_mode='HTML',
+                        )
+                        await msg.reply_text(
+                            f"🔍 {i18n.get('staff.delivery.tap_to_see_optimized', language)}",
+                            reply_markup=view_button,
+                        )
                 if is_live_edit:
                     context.user_data['live_location_ack_sent'] = True
+                elif is_one_shot:
+                    # A one-shot share ends any live stream's ACK suppression;
+                    # without this the first edit of the driver's NEXT live
+                    # stream is silently un-ACKed (spec §4.4).
+                    context.user_data.pop('live_location_ack_sent', None)
 
         except Exception as e:
             logger.error(f"Error handling location update: {e}", exc_info=True)

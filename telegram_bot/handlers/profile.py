@@ -1763,7 +1763,10 @@ class ProfileHandlers(BaseHandler):
 
             # Use enhanced location request with skip option
             location_text = i18n.get('telegram.address.location_prompt_enhanced', language)
-            keyboard = ProfileKeyboards.location_request_with_skip(language)
+            keyboard = ProfileKeyboards.location_request(
+                language,
+                extra_rows=(i18n.get('telegram.address.enter_manually_button', language),),
+            )
 
             if update.callback_query:
                 logger.info(f"Editing message via callback query")
@@ -1834,7 +1837,10 @@ class ProfileHandlers(BaseHandler):
                 )
                 await update.message.reply_text(
                     i18n.get('telegram.address.outside_delivery_area', language),
-                    reply_markup=ProfileKeyboards.location_request_with_skip(language)
+                    reply_markup=ProfileKeyboards.location_request(
+                        language,
+                        extra_rows=(i18n.get('telegram.address.enter_manually_button', language),),
+                    )
                 )
                 return ADDRESS_LOCATION
 
@@ -1960,18 +1966,29 @@ class ProfileHandlers(BaseHandler):
 
             cancel_text = i18n.get('telegram.action_cancelled', language)
 
+            # Read before the pop below consumes it.
+            origin = context.user_data.get('address_flow_origin')
+
             # First remove the reply keyboard
             await update.message.reply_text(
                 i18n.get('telegram.action_cancelled_short', language),
                 reply_markup=ReplyKeyboardRemove()
             )
 
-            # Then show main menu
-            keyboard = await main_menu_for(update.effective_user.id, language)
-            await update.message.reply_text(
-                text=cancel_text,
-                reply_markup=keyboard
-            )
+            if origin == 'checkout':
+                # The customer has a full cart. Dropping them on the main menu
+                # makes them navigate back for no reason. Return to the CART,
+                # not to checkout — checkout would re-render the very
+                # zero-address prompt they just cancelled, which is a loop.
+                from handlers.products import product_handlers
+
+                await product_handlers.show_cart(update, context)
+            else:
+                keyboard = await main_menu_for(update.effective_user.id, language)
+                await update.message.reply_text(
+                    text=cancel_text,
+                    reply_markup=keyboard
+                )
 
             # Clear all temporary address data
             context.user_data.pop('temp_location', None)
@@ -2364,7 +2381,10 @@ class ProfileHandlers(BaseHandler):
                 logger.info(f"User {user_id} geocoded to out-of-zone point: {final_lat}, {final_lng}")
                 await update.message.reply_text(
                     i18n.get('telegram.address.outside_delivery_area', language),
-                    reply_markup=ProfileKeyboards.location_request_with_skip(language)
+                    reply_markup=ProfileKeyboards.location_request(
+                        language,
+                        extra_rows=(i18n.get('telegram.address.enter_manually_button', language),),
+                    )
                 )
                 return ADDRESS_LOCATION
 
@@ -2528,7 +2548,13 @@ class ProfileHandlers(BaseHandler):
             # Offer location sharing or manual re-entry
             retry_text = i18n.get('telegram.address.retry_location', language)
 
-            keyboard = ProfileKeyboards.location_request_with_retry(language)
+            keyboard = ProfileKeyboards.location_request(
+                language,
+                extra_rows=(
+                    i18n.get('telegram.address.reenter_manually_button', language),
+                    i18n.get('telegram.cancel', language),
+                ),
+            )
 
             await query.message.reply_text(
                 retry_text,

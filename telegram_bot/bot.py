@@ -4,6 +4,7 @@ Comprehensive water business bot with full feature integration
 """
 import asyncio
 import logging
+import re
 import signal
 import sys
 import os
@@ -86,6 +87,31 @@ class WaterBusinessBot:
         self.is_running = False
         self.user_repository = BotUserRepository(db_manager)
         self.token_manager: Optional[TokenManager] = None
+
+    @staticmethod
+    def _label_pattern(translation_key: str) -> str:
+        """Regex matching a reply-keyboard label in ANY supported language.
+
+        Modelled on staff_bot/bot.py:_menu_text_pattern. Anchored on purpose:
+        the substring patterns this replaces matched an English word that only
+        appears in the English copy, so Cancel was dead in uz/ru — and an
+        unmatched tap in ADDRESS_LOCATION escapes to the group-0 catch-all and
+        is filed as a support ticket with no reply.
+
+        Compiled at handler-build time, so a translation reload alone does not
+        pick up new copy — the bot must be restarted.
+        """
+        labels = []
+        for lang_code in i18n.supported_languages:
+            label = i18n.get(translation_key, lang_code).strip()
+            if label:
+                labels.append(re.escape(label))
+
+        unique_labels = sorted(set(labels), key=len, reverse=True)
+        if not unique_labels:
+            return r"$a"  # never match
+
+        return r"^\s*(?:\S+\s+)?(?:%s)\s*$" % "|".join(unique_labels)
 
     async def initialize(self):
         """Initialize bot and all dependencies"""
@@ -488,20 +514,46 @@ class WaterBusinessBot:
 
         # Address input conversation - Enhanced flow with manual entry support
         address_handler = ConversationHandler(
-            entry_points=[CallbackQueryHandler(profile_handlers.add_address, pattern="^add_new_address(_checkout)?$")],
+            entry_points=[
+                CallbackQueryHandler(profile_handlers.add_address, pattern="^add_new_address(_checkout)?$"),
+                # A pin (or a manual/cancel tap) can arrive BEFORE the flow has
+                # started, because zero-address checkout arms the keyboard
+                # itself. Without these the tap escapes to the group-0 catch-all
+                # and is silently filed as a support ticket.
+                MessageHandler(filters.LOCATION, profile_handlers.location_received),
+                MessageHandler(
+                    filters.TEXT & filters.Regex(
+                        self._label_pattern('telegram.address.enter_manually_button')
+                    ),
+                    profile_handlers.skip_location_sharing,
+                ),
+                MessageHandler(
+                    filters.TEXT & filters.Regex(self._label_pattern('telegram.cancel')),
+                    profile_handlers.cancel_address_text,
+                ),
+            ],
             states={
                 # Location sharing or manual entry choice
                 ADDRESS_LOCATION: [
                     MessageHandler(filters.LOCATION, profile_handlers.location_received),
-                    # Handle "Enter Manually" or "Re-enter Address" text buttons
+                    # Handle "Enter Manually" text button (initial choice)
                     MessageHandler(
-                        filters.TEXT & filters.Regex(r"(?i).*(manual|enter manually|re-enter|✏️).*"),
-                        profile_handlers.skip_location_sharing
+                        filters.TEXT & filters.Regex(
+                            self._label_pattern('telegram.address.enter_manually_button')
+                        ),
+                        profile_handlers.skip_location_sharing,
+                    ),
+                    # Handle "Re-enter Address" text button (retry keyboard)
+                    MessageHandler(
+                        filters.TEXT & filters.Regex(
+                            self._label_pattern('telegram.address.reenter_manually_button')
+                        ),
+                        profile_handlers.skip_location_sharing,
                     ),
                     # Handle "Cancel" text button from retry keyboard
                     MessageHandler(
-                        filters.TEXT & filters.Regex(r"(?i).*(cancel|❌ cancel).*"),
-                        profile_handlers.cancel_address_text
+                        filters.TEXT & filters.Regex(self._label_pattern('telegram.cancel')),
+                        profile_handlers.cancel_address_text,
                     ),
                 ],
                 # Address title input

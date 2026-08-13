@@ -251,12 +251,13 @@ class ActiveDeliveryHandler(BaseHandler):
     @require_auth
     @require_delivery_driver
     async def optimize_routes(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Manually re-run route optimization and re-render the active list.
+        """Driver tapped 'Optimize route' on the card.
 
-        If the driver has never shared their location, the backend refuses
-        with 412 LOCATION_REQUIRED — we surface a clear "share your location
-        first" message + the location-request keyboard rather than silently
-        rendering a city-centre fallback.
+        The backend answers from the driver's stored position, so this is a
+        single tap whenever that position is still fresh. When it is stale or
+        absent the backend refuses and `run_optimize_and_render` asks for a
+        location once — the pin that follows finishes the optimization itself
+        (see LocationHandler), so the driver never taps this button twice.
         """
         query = update.callback_query
         language = await self._get_language(update, context)
@@ -266,71 +267,112 @@ class ActiveDeliveryHandler(BaseHandler):
             await self._handle_auth_error(update, language)
             return
 
+        await self.run_optimize_and_render(update, context, language, token)
+
+    @require_auth
+    @require_delivery_driver
+    async def run_optimize_and_render(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        language: str,
+        token: str,
+    ) -> Optional[bool]:
+        """Run optimization and show the result.
+
+        Three-valued return, and the distinction is load-bearing for callers
+        that check `is False` rather than plain truthiness:
+        - `True` — ran, and the optimization (or a route-locked alert) landed.
+        - `False` — ran, but did not optimize for a business reason (412
+          LOCATION_REQUIRED, or another API failure).
+        - `None` — did NOT run: `@require_auth`/`@require_delivery_driver`
+          rejected the caller before the body ever executed (their early-return
+          paths at `staff_bot/permissions.py:73` and `:115` are bare `return`,
+          i.e. `None`). Distinct from `False` on purpose — a rejected caller
+          is not the same event as "ran and declined".
+
+        The ONE implementation of "optimize, handle a dispatch lock, render the
+        card". Called by the card button and, after a fallback location share,
+        by LocationHandler — a second copy would let the two paths disagree
+        about what a locked route or a 412 means.
+
+        `update` may have no `callback_query` (the post-location path), so every
+        callback interaction here goes through `_safe_callback_answer` or is
+        guarded.
+
+        Carries the guard decorators even though its only callers are already
+        guarded: `tests/unit/test_staff_handler_guards.py` AST-walks
+        `staff_bot/handlers/` and treats any public async function whose first
+        arg is `self`/`update` as a handler. The role re-check is also genuinely
+        wanted on the location path, where the update did not come from the
+        button that was authorised a moment ago — the `None` branch above is
+        reachable there, not theoretical.
+        """
+        query = update.callback_query
+
         try:
             async with api_client as client:
                 response = await client.optimize_route(token)
 
             # Driver location precondition not met — prompt to share rather
-            # than silently optimizing from a fallback origin.
+            # than silently optimizing from a fallback origin. Arm the flag so
+            # the incoming pin re-runs this method instead of just ACKing.
             if (
                 not response.success
                 and response.status_code == 412
                 and (response.error_code == "LOCATION_REQUIRED" or "LOCATION" in (response.error or "").upper())
             ):
-                await query.answer(
-                    i18n.get('staff.delivery.share_location_first_toast', language),
-                    show_alert=True,
-                )
+                if query is not None:
+                    await self._safe_callback_answer(
+                        query,
+                        i18n.get('staff.delivery.share_location_first_toast', language),
+                        show_alert=True,
+                    )
+                context.user_data['pending_optimize_after_location'] = True
                 prompt = i18n.get('staff.delivery.share_location_prompt', language)
                 button_text = i18n.get('staff.delivery.share_location_button', language)
-                await query.message.reply_text(
+                target = query.message if query is not None else update.message
+                await target.reply_text(
                     prompt,
                     reply_markup=CommonKeyboards.location_request(language, button_text),
                 )
-                return
+                return False
 
             if not response.success:
-                await query.answer()
+                if query is not None:
+                    await self._safe_callback_answer(query, "", show_alert=False)
                 if response.status_code == 401:
                     await self._handle_auth_error(update, language)
                 else:
                     await self._handle_api_response_error(update, response, language)
-                return
+                return False
 
             # Dispatch has locked this route, so the backend deliberately did
             # nothing. Say so: an unchanged list after a deliberate tap
             # otherwise reads as the button being broken.
             if (response.data or {}).get("route_locked"):
-                await query.answer(
-                    i18n.get('staff.route.locked_by_dispatch', language),
-                    show_alert=True,
-                )
+                if query is not None:
+                    await self._safe_callback_answer(
+                        query,
+                        i18n.get('staff.route.locked_by_dispatch', language),
+                        show_alert=True,
+                    )
                 await self.show_active_deliveries(update, context)
-                return
+                return True
 
             # Optimization ran successfully — confirm and re-render.
-            await query.answer(
-                i18n.get('staff.delivery.route_updated_toast', language)
-            )
+            if query is not None:
+                await self._safe_callback_answer(
+                    query,
+                    i18n.get('staff.delivery.route_updated_toast', language),
+                    show_alert=False,
+                )
             await self.show_active_deliveries(update, context)
+            return True
         except Exception as e:
-            logger.error(f"Error in optimize_routes: {e}", exc_info=True)
+            logger.error(f"Error in run_optimize_and_render: {e}", exc_info=True)
             await self._handle_error(update, context)
-
-    @require_auth
-    @require_delivery_driver
-    async def share_location_prompt(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Reply with a Telegram location-request keyboard so the driver can
-        share their current location in one tap. Also explains how to enable
-        live-location sharing for the rest of the route.
-        """
-        query = update.callback_query
-        await query.answer()
-        language = await self._get_language(update, context)
-        prompt = i18n.get('staff.delivery.share_location_prompt', language)
-        button_text = i18n.get('staff.delivery.share_location_button', language)
-        keyboard = CommonKeyboards.location_request(language, button_text)
-        await query.message.reply_text(prompt, reply_markup=keyboard)
+            return False
 
     @require_auth
     @require_delivery_driver

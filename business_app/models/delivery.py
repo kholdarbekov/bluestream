@@ -360,6 +360,12 @@ class DeliveryPerson(db.Model, TimestampMixin):
     current_location_lat = Column(Float, nullable=True)
     current_location_lng = Column(Float, nullable=True)
     last_location_update = Column(DateTime(timezone=True), nullable=True)
+    # Uncertainty radius in metres for the fix above, as reported by the client
+    # (Telegram's Location.horizontal_accuracy). NULL when the client did not
+    # report one — that is accepted, not punished. A fix coarser than
+    # LOCATION_MAX_ACCURACY_DEFAULT_METERS is refused before it is ever stored,
+    # so this column only ever holds accuracies we were willing to route from.
+    location_accuracy_m = Column(Float, nullable=True)
 
     # Status and metrics
     is_active = Column(Boolean, default=True, index=True)
@@ -422,10 +428,19 @@ class DeliveryPerson(db.Model, TimestampMixin):
         else:  # Night shift (crosses midnight)
             return now >= start_time or now <= end_time
 
-    def update_location(self, lat: float, lng: float):
-        """Update current location"""
+    def update_location(self, lat: float, lng: float, accuracy_m: float = None):
+        """Update current location.
+
+        `accuracy_m` is the uncertainty radius of a MEASURED reading, and it is
+        written unconditionally — including the `None` default. That is
+        deliberate: it describes THIS position, so a caller with no measurement
+        (an address-derived position, say) must clear whatever radius the
+        previous fix left behind rather than let a precise-looking number stay
+        attached to a point it was never measured at.
+        """
         self.current_location_lat = lat
         self.current_location_lng = lng
+        self.location_accuracy_m = accuracy_m
         self.last_location_update = datetime.now(UTC)
 
     def calculate_distance_to(self, dest_lat: float, dest_lng: float) -> float:

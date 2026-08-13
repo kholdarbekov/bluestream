@@ -67,6 +67,13 @@ EXPLICIT_REQUEST_TRIGGERS = ("manual", "admin_dispatch_reset")
 
 LOCATION_FRESH_DEFAULT_SECONDS = 1800  # 30 min
 
+# Uncertainty radius, in metres, beyond which a reported fix is refused outright
+# rather than stored. Re-sorting a route around a point that could be half a
+# kilometre away yields a worse sequence than keeping the older-but-precise fix
+# we already hold, so the write is rejected and the previous position survives.
+# Override per-environment with DRIVER_LOCATION_MAX_ACCURACY_METERS.
+LOCATION_MAX_ACCURACY_DEFAULT_METERS = 500
+
 # At/below this many *deliveries* (matrix size N+1 including start), `_solve_tsp`
 # uses Held-Karp DP for a provably optimal sequence under the supplied matrix.
 # 12 deliveries -> n=13, 2^12*12 ~= 49K states, sub-second on commodity hardware.

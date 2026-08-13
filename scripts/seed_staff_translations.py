@@ -365,6 +365,11 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Yaxshiroq taklif uchun jonli joylashuvni yoqing",
         "ru": "Включите трансляцию геопозиции для точных подсказок",
     },
+    "staff.delivery.location_too_coarse": {
+        "en": "Weak GPS signal — your position is too imprecise to re-sort the route. Step outside and share again.",
+        "uz": "GPS signali kuchsiz — joylashuvingiz marshrutni qayta tartiblash uchun juda noaniq. Tashqariga chiqib, qaytadan yuboring.",
+        "ru": "Слабый сигнал GPS — ваша позиция слишком неточная для пересборки маршрута. Выйдите на улицу и отправьте снова.",
+    },
     # Review fix (route-UX plan 2026-08-11, Task 13): this key is now used
     # ONLY for the §7 diversion offer (compute_insertion_cost's old "fits
     # your route, +detour" suggestion was removed). The old "+{km} km,

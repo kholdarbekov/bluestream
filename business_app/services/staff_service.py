@@ -5,6 +5,7 @@ operator actions, and staff analytics.
 """
 
 import json
+import math
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, List, Tuple
 from flask import current_app
@@ -1526,17 +1527,65 @@ class StaffService:
             )
 
     @staticmethod
-    def update_driver_location(user_id: int, lat: float, lng: float) -> DeliveryPerson:
+    def update_driver_location(
+        user_id: int,
+        lat: float,
+        lng: float,
+        accuracy_m: Optional[float] = None,
+    ) -> DeliveryPerson:
         """
         Update the driver's own current location (driver-level, not tied to a
         specific delivery). Use this when the driver shares a one-shot or
         live location for route optimization purposes — no in-progress
         delivery is required.
 
+        `accuracy_m` is the client-reported uncertainty radius in metres
+        (Telegram's `Location.horizontal_accuracy`). It is OPTIONAL: `None`
+        means the client did not report one and is accepted, because not every
+        Telegram client sends it and a driver must not be blocked by their app
+        version. A reported accuracy WORSE than the configured maximum is
+        refused and nothing is written — the previous fix, however old, is a
+        better routing origin than a known-bad one. A non-finite value (NaN or
+        +/-infinity) is refused outright rather than treated as "not reported":
+        `nan < 0` and `nan > max_accuracy` are both `False` in Python, so
+        without an explicit `math.isfinite` check a broken reading would slip
+        past both the negative-value guard and the coarse-fix guard and get
+        persisted (and `jsonify` would later emit the non-standard `NaN`
+        token). A client sending NaN is reporting a broken measurement, not
+        omitting the field — it must not masquerade as a good fix.
+
+        The rule lives here rather than in the endpoint so every caller
+        inherits it (CLAUDE.md: service layer first).
+
         Returns the updated DeliveryPerson.
         """
+        from business_app.services.route_optimization_service import (
+            LOCATION_MAX_ACCURACY_DEFAULT_METERS,
+        )
+
         if not (-90 <= lat <= 90) or not (-180 <= lng <= 180):
             raise ValidationError("Invalid coordinates", error_code="STAFF_INVALID_COORDINATES")
+
+        if accuracy_m is not None:
+            if not math.isfinite(accuracy_m):
+                raise ValidationError(
+                    "horizontal_accuracy must be a finite number",
+                    error_code="STAFF_INVALID_ACCURACY",
+                )
+            if accuracy_m < 0:
+                raise ValidationError(
+                    "horizontal_accuracy must not be negative",
+                    error_code="STAFF_INVALID_ACCURACY",
+                )
+            max_accuracy = current_app.config.get(
+                "DRIVER_LOCATION_MAX_ACCURACY_METERS",
+                LOCATION_MAX_ACCURACY_DEFAULT_METERS,
+            )
+            if accuracy_m > max_accuracy:
+                raise ValidationError(
+                    f"Location accuracy {accuracy_m}m exceeds the {max_accuracy}m " "maximum for route optimization",
+                    error_code="LOCATION_TOO_COARSE",
+                )
 
         dp = DeliveryPerson.query.filter_by(user_id=user_id).first()
         if not dp:
@@ -1544,6 +1593,7 @@ class StaffService:
 
         dp.current_location_lat = lat
         dp.current_location_lng = lng
+        dp.location_accuracy_m = accuracy_m
         dp.last_location_update = datetime.now(timezone.utc)
 
         db.session.commit()

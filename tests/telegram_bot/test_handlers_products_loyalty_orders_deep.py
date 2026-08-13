@@ -378,7 +378,7 @@ class TestOrderHandlerDeepFlows:
         assert "+998901112233" not in rendered_text
         assert "telegram.orders.driver:en" not in rendered_text
 
-    async def test_checkout_handler_no_addresses_sets_waiting_state(self, monkeypatch):
+    async def test_checkout_handler_no_addresses_arms_location_keyboard(self, monkeypatch):
         handler = orders_module.OrderHandlers()
         handler.user_repo = SimpleNamespace(update_user_state=AsyncMock())
         update = DummyUpdate()
@@ -389,7 +389,7 @@ class TestOrderHandlerDeepFlows:
         monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(orders_module, "get_auth_token", AsyncMock(return_value="jwt"))
-        monkeypatch.setattr(orders_module.OrderKeyboards, "delivery_addresses", lambda _a, _l: "address-kbd")
+        monkeypatch.setattr(orders_module.ProfileKeyboards, "location_request", lambda _lang, **_kw: "loc-kbd")
         monkeypatch.setattr(
             orders_module,
             "api_client",
@@ -398,11 +398,18 @@ class TestOrderHandlerDeepFlows:
 
         await handler.checkout_handler(update, context)
 
-        update.callback_query.edit_message_text.assert_awaited_once_with(
-            text="telegram.orders.no_address_prompt:en",
-            reply_markup="address-kbd",
-        )
-        handler.user_repo.update_user_state.assert_awaited_once_with(update.effective_user.id, {"awaiting_input": "address_location"})
+        # Zero-address checkout now arms the location keyboard directly: the inline
+        # card's only real button led here anyway (spec §6). The orphan
+        # awaiting_input='address_location' write is gone — its only consumer
+        # was WaterBusinessBot._handle_location, which is registered nowhere.
+        # Assert specifically on that write rather than on call-occurrence:
+        # checkout may legitimately write user state for unrelated reasons.
+        for call in handler.user_repo.update_user_state.await_args_list:
+            _, written_state = call.args
+            assert written_state.get("awaiting_input") != "address_location"
+        sent_markup = update.callback_query.message.reply_text.await_args.kwargs["reply_markup"]
+        assert sent_markup == "loc-kbd"
+        assert context.user_data["address_flow_origin"] == "checkout"
 
     async def test_address_handler_stores_selected_address(self, monkeypatch):
         handler = orders_module.OrderHandlers()

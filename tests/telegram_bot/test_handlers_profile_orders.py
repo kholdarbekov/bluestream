@@ -556,7 +556,9 @@ class TestProfileAddressHandlerFlows:
 
         monkeypatch.setattr(profile_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
-        monkeypatch.setattr(profile_module.ProfileKeyboards, "location_request_with_skip", lambda _lang: "loc-kbd")
+        monkeypatch.setattr(
+            profile_module.ProfileKeyboards, "location_request", lambda _lang, **_kw: "loc-kbd"
+        )
 
         state = await handler.add_address(update, context)
 
@@ -582,7 +584,9 @@ class TestProfileAddressHandlerFlows:
 
         monkeypatch.setattr(profile_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
-        monkeypatch.setattr(profile_module.ProfileKeyboards, "location_request_with_skip", lambda _lang: "loc-kbd")
+        monkeypatch.setattr(
+            profile_module.ProfileKeyboards, "location_request", lambda _lang, **_kw: "loc-kbd"
+        )
 
         state = await handler.add_address(update, context)
 
@@ -605,7 +609,9 @@ class TestProfileAddressHandlerFlows:
 
         monkeypatch.setattr(profile_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
-        monkeypatch.setattr(profile_module.ProfileKeyboards, "location_request_with_skip", lambda _lang: "loc-kbd")
+        monkeypatch.setattr(
+            profile_module.ProfileKeyboards, "location_request", lambda _lang, **_kw: "loc-kbd"
+        )
 
         state = await handler.add_address(update, context)
 
@@ -627,7 +633,9 @@ class TestProfileAddressHandlerFlows:
 
         monkeypatch.setattr(profile_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
-        monkeypatch.setattr(profile_module.ProfileKeyboards, "location_request_with_skip", lambda _lang: "loc-kbd")
+        monkeypatch.setattr(
+            profile_module.ProfileKeyboards, "location_request", lambda _lang, **_kw: "loc-kbd"
+        )
 
         state = await handler.add_address(update, context)
 

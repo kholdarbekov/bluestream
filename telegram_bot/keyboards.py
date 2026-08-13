@@ -1,7 +1,7 @@
 """
 Telegram keyboard layouts and UI components
 """
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Sequence
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 
 from i18n import i18n
@@ -984,18 +984,23 @@ class ProfileKeyboards:
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod
-    def location_request(language: str = 'en') -> ReplyKeyboardMarkup:
-        """Location request keyboard"""
-        button = KeyboardButton(
-            text=i18n.get('telegram.address.share_location_button', language),
-            request_location=True
-        )
+    def location_request(language: str = 'en', *, extra_rows: Sequence[str] = ()) -> ReplyKeyboardMarkup:
+        """Location-request keyboard: the share button, plus any plain rows.
 
-        return ReplyKeyboardMarkup(
-            [[button]],
-            one_time_keyboard=True,
-            resize_keyboard=True
-        )
+        One builder, because the three that preceded it constructed the SAME
+        KeyboardButton(request_location=True) from the same translation key and
+        differed only in which plain buttons sat underneath.
+
+        `one_time_keyboard=True` hides the keyboard after a press but does NOT
+        restore whatever keyboard preceded it — every caller must therefore send
+        an explicit keyboard (or ReplyKeyboardRemove) when the flow moves on.
+        """
+        rows = [[KeyboardButton(
+            text=i18n.get('telegram.address.share_location_button', language),
+            request_location=True,
+        )]]
+        rows.extend([[KeyboardButton(text=label)] for label in extra_rows])
+        return ReplyKeyboardMarkup(rows, one_time_keyboard=True, resize_keyboard=True)
 
     @staticmethod
     def addresses_management(addresses: List[Dict], language: str = 'en') -> InlineKeyboardMarkup:
@@ -1032,43 +1037,6 @@ class ProfileKeyboards:
         ]
 
         return KeyboardBuilder.build_inline_keyboard(buttons)
-
-    @staticmethod
-    def location_request_with_skip(language: str = 'en') -> ReplyKeyboardMarkup:
-        """Location request keyboard with manual entry option"""
-        location_button = KeyboardButton(
-            text=i18n.get('telegram.address.share_location_button', language),
-            request_location=True
-        )
-        skip_button = KeyboardButton(
-            text=i18n.get('telegram.address.enter_manually_button', language)
-        )
-
-        return ReplyKeyboardMarkup(
-            [[location_button], [skip_button]],
-            one_time_keyboard=True,
-            resize_keyboard=True
-        )
-
-    @staticmethod
-    def location_request_with_retry(language: str = 'en') -> ReplyKeyboardMarkup:
-        """Location request keyboard for retry after wrong geocode"""
-        location_button = KeyboardButton(
-            text=i18n.get('telegram.address.share_location_button', language),
-            request_location=True
-        )
-        retry_button = KeyboardButton(
-            text=i18n.get('telegram.address.reenter_manually_button', language)
-        )
-        cancel_button = KeyboardButton(
-            text=i18n.get('telegram.cancel', language)
-        )
-
-        return ReplyKeyboardMarkup(
-            [[location_button], [retry_button], [cancel_button]],
-            one_time_keyboard=True,
-            resize_keyboard=True
-        )
 
     @staticmethod
     def region_selection(language: str = 'en') -> InlineKeyboardMarkup:

@@ -75,12 +75,22 @@ def overview_payload(rows, *, is_linked=False):
 
 
 class DummyMessage:
-    def __init__(self):
+    def __init__(self, location=None):
         self.reply_text = AsyncMock()
         self.delete = AsyncMock()
         self.photo = []
         self.contact = None
+        self.location = location
         self.date = datetime.now(timezone.utc)
+
+
+class DummyLocation:
+    """Telegram's Location, minus everything the bot does not read."""
+
+    def __init__(self, latitude: float, longitude: float, horizontal_accuracy=None):
+        self.latitude = latitude
+        self.longitude = longitude
+        self.horizontal_accuracy = horizontal_accuracy
 
 
 class DummyCallbackQuery:
@@ -103,6 +113,7 @@ class DummyUpdate:
         )
         self.message = DummyMessage()
         self.callback_query = None
+        self.edited_message = None
 
 
 def make_context(args=None):

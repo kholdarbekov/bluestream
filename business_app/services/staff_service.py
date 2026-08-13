@@ -1442,14 +1442,16 @@ class StaffService:
                 notify_exc,
             )
 
-        # Re-optimize the driver's remaining stops from the new origin.
-        # ARRIVED and DELIVERED both happen at the delivery destination, so
-        # the optimizer should pick up where the driver actually is now.
-        if new_status in ("arrived", "delivered") and delivery.delivery_person_id:
+        # Re-optimize on the transitions that MOVE the anchor:
+        #  - picked_up / in_transit: the driver just committed to a stop —
+        #    the tail re-anchors on it (silent: driver-initiated, spec §5.2).
+        #  - delivered: the next leg starts from the drop point (silent).
+        #  - arrived stays deliberately trigger-free (Task 2, spec §5.3).
+        if new_status in ("picked_up", "in_transit", "delivered") and delivery.delivery_person_id:
             try:
                 from business_app.tasks.delivery_tasks import optimize_driver_route_task
 
-                trigger = "arrival" if new_status == "arrived" else "delivery"
+                trigger = "delivery" if new_status == "delivered" else new_status
                 optimize_driver_route_task.delay(delivery.delivery_person_id, trigger)
             except Exception as exc:  # noqa: BLE001 — non-critical
                 current_app.logger.warning(
@@ -1548,28 +1550,22 @@ class StaffService:
         return dp
 
     @staticmethod
-    def update_delivery_location(delivery_id: int, lat: float, lng: float) -> Delivery:
+    def update_delivery_location(delivery_id: int, lat: float, lng: float, *, acting_driver_id: int) -> Delivery:
         """
         Update delivery and delivery person's current location.
 
-        Args:
-            delivery_id: ID of the delivery
-            lat: Latitude
-            lng: Longitude
-
-        Returns:
-            Updated Delivery object
-
-        Raises:
-            NotFoundError: If delivery not found
-            ValidationError: If coordinates are invalid
+        Only the ASSIGNED driver may write: the coordinates are mirrored onto
+        the assigned driver's DeliveryPerson row, so accepting any caller let
+        one driver poison another driver's start point and location freshness
+        (route-UX plan 2026-08-11, Task 1). 404 — not 403 — so the endpoint
+        is not an existence oracle for other drivers' delivery ids.
         """
         if not (-90 <= lat <= 90) or not (-180 <= lng <= 180):
             raise ValidationError("Invalid coordinates", error_code="STAFF_INVALID_COORDINATES")
 
         delivery = Delivery.query.get(delivery_id)
-        if not delivery:
-            raise NotFoundError("Delivery not found", error_code="STAFF_DELIVERY_NOT_FOUND")
+        if not delivery or delivery.delivery_person_id != acting_driver_id:
+            raise NotFoundError("Delivery not found or not assigned", error_code="STAFF_DELIVERY_NOT_FOUND")
 
         now = datetime.now(timezone.utc)
         delivery.current_location_lat = lat

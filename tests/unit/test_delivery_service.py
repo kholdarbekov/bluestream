@@ -9,6 +9,7 @@ import pytest
 from business_app.services.delivery_service import DeliveryService
 from business_app.utils.constants import DeliveryType
 from business_app.utils.exceptions import NotFoundError
+from shared.constants import TASHKENT_COORDINATES
 
 
 @pytest.fixture
@@ -35,3 +36,21 @@ class TestDeliveryService:
     def test_create_delivery_raises_when_order_missing(self, delivery_service, db):
         with pytest.raises(NotFoundError, match="Order not found"):
             delivery_service.create_delivery(order_id=999999)
+
+    def test_store_coordinates_do_not_track_warehouse_config(self, app, monkeypatch):
+        """The warehouse (route optimization's last-resort start anchor,
+        WAREHOUSE_LATITUDE/LONGITUDE) sits at the southern edge of
+        TASHKENT_POLYGON coverage — ~48.8km from the farthest coverage
+        vertex, against DELIVERY_RADIUS_KM=50 (~1.2km of margin). Centring
+        the delivery-fee/range circle there would put northern-Tashkent
+        addresses on the edge of rejection. The store/delivery-range origin
+        must stay independent of the warehouse config, even though the two
+        happen to share a default value today."""
+        with app.app_context():
+            monkeypatch.setitem(app.config, "WAREHOUSE_LATITUDE", 41.0111)
+            monkeypatch.setitem(app.config, "WAREHOUSE_LONGITUDE", 69.5222)
+
+            service = DeliveryService()
+
+            assert service.store_latitude == TASHKENT_COORDINATES["latitude"]
+            assert service.store_longitude == TASHKENT_COORDINATES["longitude"]

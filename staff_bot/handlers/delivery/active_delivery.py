@@ -2,14 +2,14 @@
 Active Delivery Handler for Staff Bot
 Shows and manages deliveries currently assigned to the delivery person.
 """
-import asyncio
-import hashlib
-import json
 import logging
-from telegram import InlineKeyboardMarkup, Update
+from typing import Optional
+
+from telegram import Update
 from telegram.ext import ContextTypes
 
 from staff_bot.handlers.base import BaseHandler
+from staff_bot.handlers.delivery import route_card
 from staff_bot.api_client import api_client
 from staff_bot.keyboards.delivery import DeliveryKeyboards
 from staff_bot.keyboards.common import CommonKeyboards
@@ -22,192 +22,56 @@ from staff_bot.i18n import i18n
 
 logger = logging.getLogger(__name__)
 
-# user_data keys for tracking the last render of the "My active deliveries"
-# view so we can clean it up before the next render and avoid (a) duplicate
-# card stacking on every Optimize/refresh tap, and (b) Telegram "Message is
-# not modified" errors from no-op header edits.
-_CARDS_KEY = 'active_list_card_ids'           # list[(chat_id, message_id)]
-_HEADER_KEY = 'active_list_header_id'         # tuple[int, int]: (chat_id, message_id)
-_HEADER_SIG_KEY = 'active_list_header_sig'    # str: sha256(header + buttons)
-# Per-user asyncio.Lock that serializes the read-delete-render-store cycle
-# below. PTB normally serializes updates per-user through its update queue,
-# but webhook-pushed messages and any future `concurrent_updates=True` config
-# would bypass that — without this lock, two concurrent `show_active_deliveries`
-# calls would each read the same `_CARDS_KEY` snapshot, both delete the same
-# message IDs (the second deletion races into "message not found"), and both
-# write their own card list back, leaking the loser's cards as duplicates.
-_RENDER_LOCK_KEY = 'active_list_render_lock'  # asyncio.Lock
-
 
 class ActiveDeliveryHandler(BaseHandler):
     """Handle active delivery listing and management"""
 
     @staticmethod
     def _compute_render_signature(text: str, keyboard) -> str:
-        """Stable hash of message text + button labels/callbacks. We compare
-        signatures across renders so we never call edit_message_text with
-        identical content (which Telegram rejects as "Message is not
-        modified")."""
-        kb_repr = []
-        if isinstance(keyboard, InlineKeyboardMarkup):
-            for row in keyboard.inline_keyboard:
-                for btn in row:
-                    kb_repr.append(
-                        f"{getattr(btn, 'text', '')}|"
-                        f"{getattr(btn, 'callback_data', '') or ''}|"
-                        f"{getattr(btn, 'url', '') or ''}"
-                    )
-        payload = text + '||' + json.dumps(kb_repr)
-        return hashlib.sha256(payload.encode()).hexdigest()
+        """Delegates to the SSOT in staff_bot.utils.render_signature."""
+        from staff_bot.utils.render_signature import compute_render_signature
 
-    @staticmethod
-    async def _delete_previous_card_messages(context: ContextTypes.DEFAULT_TYPE):
-        """Best-effort cleanup of card messages tracked from the prior render.
-
-        Failure modes (already deleted, too old, chat changed, bot lost
-        permission) are expected and only surface as DEBUG logs — there's no
-        useful recovery and they don't affect correctness of the new render.
-        """
-        bot = context.bot
-        for chat_id, msg_id in context.user_data.get(_CARDS_KEY, []) or []:
-            try:
-                await bot.delete_message(chat_id=chat_id, message_id=msg_id)
-            except Exception as exc:  # noqa: BLE001
-                logger.debug(f"Cleanup delete_message {chat_id}/{msg_id} skipped: {exc}")
-        context.user_data[_CARDS_KEY] = []
-
-    async def _render_header(
-        self,
-        update: Update,
-        context: ContextTypes.DEFAULT_TYPE,
-        text: str,
-        keyboard,
-    ):
-        """Render or update the header message.
-
-        The header's (chat_id, message_id) is tracked in
-        ``user_data[_HEADER_KEY]`` independently from the per-delivery
-        cards in ``_CARDS_KEY``. That separation matters because
-        `view_active_delivery` edits a card *in place* into the
-        delivery-detail view without retracking — so when the driver
-        taps the detail view's ⬅️ Back button (callback
-        `staff_active_deliveries`), `update.callback_query.message` is a
-        soon-to-be-deleted card, NOT the header. The previous design
-        treated the callback's source message AS the header and broke
-        with `BadRequest: Message to edit not found` because
-        `_delete_previous_card_messages` had already removed it by the
-        time we tried to edit.
-
-        Behaviour:
-
-        - Callback updates with a tracked header in this chat: edit the
-          tracked header in place. Skip the API call entirely when the
-          new signature matches the last rendered one (Telegram rejects
-          true no-op edits with `Message is not modified`). If the edit
-          fails — header was deleted, too old, chat changed, bot lost
-          permission — fall back to sending a fresh header and re-track
-          its id; the failure is an expected recovery path, logged at
-          debug only.
-
-        - Callback updates with no tracked header in this chat (first
-          callback after a context reset, or a cross-chat dispatcher
-          mistake): send a fresh header and track its id.
-
-        - Fresh entries (typed command, reply-keyboard menu tap): always
-          send a new message and overwrite the tracked header id.
-        """
-        new_sig = self._compute_render_signature(text, keyboard)
-        old_sig = context.user_data.get(_HEADER_SIG_KEY)
-        header_loc = context.user_data.get(_HEADER_KEY)
-
-        if update.callback_query:
-            src_msg = update.callback_query.message
-            chat_id = src_msg.chat.id if src_msg and src_msg.chat else None
-
-            same_chat_header = (
-                header_loc is not None
-                and chat_id is not None
-                and header_loc[0] == chat_id
-            )
-
-            if same_chat_header:
-                if old_sig == new_sig:
-                    # Tracked header already shows this exact content.
-                    return
-                try:
-                    await context.bot.edit_message_text(
-                        chat_id=header_loc[0],
-                        message_id=header_loc[1],
-                        text=text,
-                        reply_markup=keyboard,
-                        parse_mode='HTML',
-                    )
-                    context.user_data[_HEADER_SIG_KEY] = new_sig
-                    return
-                except Exception as exc:  # noqa: BLE001
-                    logger.debug(
-                        f"Header edit failed ({exc}); sending fresh header"
-                    )
-
-            sent = await update.callback_query.message.reply_text(
-                text, reply_markup=keyboard, parse_mode='HTML'
-            )
-        else:
-            sent = await update.message.reply_text(
-                text, reply_markup=keyboard, parse_mode='HTML'
-            )
-
-        context.user_data[_HEADER_KEY] = (sent.chat_id, sent.message_id)
-        context.user_data[_HEADER_SIG_KEY] = new_sig
-
-    @staticmethod
-    def _get_render_lock(context: ContextTypes.DEFAULT_TYPE) -> asyncio.Lock:
-        """Return the per-user lock that serializes card list renders.
-
-        `setdefault` is the right primitive here: under CPython the GIL makes
-        the dict slot lookup-or-set atomic enough that we won't end up with
-        two distinct Lock instances for the same user, and even if we did
-        the worst case is one extra render which the signature compare in
-        `_render_header` would still no-op.
-        """
-        lock = context.user_data.get(_RENDER_LOCK_KEY)
-        if lock is None:
-            lock = asyncio.Lock()
-            context.user_data[_RENDER_LOCK_KEY] = lock
-        return lock
+        return compute_render_signature(text, keyboard)
 
     @require_auth
     @require_delivery_driver
     async def show_active_deliveries(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Show list of active deliveries.
+        """Render the driver's ROUTE CARD (route-UX Phase 3, spec §6).
 
-        Renders as a header message + N per-delivery card messages. To keep
-        the chat tidy and avoid duplicate card stacking on re-renders (e.g.
-        when the user taps "Optimize routes"), we track the message IDs
-        from the previous render in `context.user_data` and delete them
-        before sending fresh cards.
-
-        The render is wrapped in a per-user `asyncio.Lock` so concurrent
-        invocations (e.g. user tap + webhook-driven re-render) cannot both
-        read the same `_CARDS_KEY` snapshot and stack duplicate cards.
-        """
+        ONE long-lived message per driver per shift, edited in place —
+        editMessageText produces no notification, which is what makes a chat
+        surface usable as a driver app. The old header+N-cards render
+        (delete all, resend all) is gone; every historical entry point
+        (callback, menu tap, back-buttons, webhook alert button) lands here
+        unchanged and funnels into route_card.render_route_card."""
         language = await self._get_language(update, context)
         token = await self._get_auth_token(update, context)
         if not token:
             await self._handle_auth_error(update, language)
             return
+        if update.callback_query:
+            # Guarded, not bare: `optimize_routes` calls this method AFTER
+            # already answering the same callback_query itself (review
+            # round 1, I1) -- a bare second `.answer()` can raise (and take
+            # down the re-render with it) or silently swallow the caller's
+            # own alert. `_safe_callback_answer` is the repo's one guard
+            # for exactly this, so route through it instead of a new guard.
+            await self._safe_callback_answer(update.callback_query, "", show_alert=False)
+        await self._render_card_from_update(update, context, language, token)
 
-        async with self._get_render_lock(context):
-            await self._render_active_deliveries(update, context, language, token)
-
-    async def _render_active_deliveries(
+    async def _render_card_from_update(
         self,
         update: Update,
         context: ContextTypes.DEFAULT_TYPE,
         language: str,
         token: str,
+        view: Optional[str] = None,
     ):
-        """Inner render body — must run under the per-user render lock."""
+        """Fetch the active payload and hand it to the card renderer.
+
+        The tap's source message id is the repost-heuristic reference: a tap
+        far below the card means the card is buried and gets reposted
+        (spec §6.3). Error handling mirrors the retired list renderer."""
         try:
             async with api_client as client:
                 response = await client.get_active_deliveries(token)
@@ -219,114 +83,47 @@ class ActiveDeliveryHandler(BaseHandler):
                     await self._handle_api_response_error(update, response, language)
                 return
 
-            payload = response.data if isinstance(response.data, dict) else {}
-            deliveries = (
-                payload.get('items')
-                if isinstance(payload, dict) and 'items' in payload
-                else (response.data if isinstance(response.data, list) else [])
+            payload = (
+                response.data if isinstance(response.data, dict)
+                else {"items": response.data or []}
             )
-            location_status = payload.get('location_status', 'fresh') if isinstance(payload, dict) else 'fresh'
+            src = update.callback_query.message if update.callback_query else update.message
+            chat_id = src.chat.id if src is not None and src.chat else update.effective_user.id
+            reference_message_id = src.message_id if src is not None else None
 
-            # Reclaim previous-render card messages BEFORE sending the new
-            # ones so the chat doesn't accumulate duplicates with each refresh.
-            await self._delete_previous_card_messages(context)
+            # Last-resort, in-session-only stand-in for Redis state (review
+            # round 1, I2): bounds a Redis outage to "one send per bot
+            # restart" instead of "one new pinned card per tap". See
+            # route_card.render_route_card's session_hint paragraph.
+            session_hint = context.user_data.setdefault('route_card_session', {})
 
-            if not deliveries:
-                text = f"🚚 {i18n.get('staff.delivery.no_active', language)}"
-                # Show share-location prompt even when empty if location is missing.
-                keyboard = DeliveryKeyboards.active_list_top_actions(
-                    language, show_share_location=(location_status != 'fresh')
-                ) if location_status != 'fresh' else CommonKeyboards.back_button(language)
-
-                await self._render_header(update, context, text, keyboard)
-                return
-
-            # Header
-            header_lines = [
-                f"🚚 <b>{i18n.get('staff.delivery.active_title', language)}</b>",
-                i18n.get('staff.delivery.active_count', language, count=len(deliveries)),
-            ]
-            if location_status == 'missing':
-                # Hard precondition not met — optimization is OFF until the
-                # driver shares location. The list below is unsorted (just
-                # in claim order) and there's no ETA. Be explicit so the
-                # driver knows what to do.
-                header_lines.append("")
-                header_lines.append(
-                    f"⚠️ <b>{i18n.get('staff.delivery.location_required_notice', language)}</b>"
-                )
-            elif location_status == 'stale':
-                # We have a location but it's older than the freshness
-                # threshold — the sequence is computed from the last
-                # known position. Suggest a re-share for accuracy.
-                header_lines.append("")
-                header_lines.append(
-                    f"ℹ️ {i18n.get('staff.delivery.location_stale_notice', language)}"
-                )
-            header = '\n'.join(header_lines) + '\n'
-
-            top_actions = DeliveryKeyboards.active_list_top_actions(
-                language, show_share_location=(location_status != 'fresh')
+            await route_card.render_route_card(
+                context.bot,
+                telegram_id=update.effective_user.id,
+                chat_id=chat_id,
+                language=language,
+                payload=payload,
+                view=view,
+                reference_message_id=reference_message_id,
+                session_hint=session_hint,
             )
-
-            await self._render_header(update, context, header, top_actions)
-
-            # Send each delivery as a separate message and track the IDs so
-            # we can reclaim them on the next render.
-            new_card_ids = []
-            for delivery in deliveries:
-                lines = []
-                # Only show the "Next stop · ETA · km" badge when we have a
-                # real driver location to compute it from. When location is
-                # missing/stale, the ETA would be measured from the depot /
-                # city centre — confusing rather than useful, so we suppress it.
-                if delivery.get('is_next') and location_status == 'fresh':
-                    eta = delivery.get('eta_minutes_from_current_location')
-                    km = delivery.get('distance_km_to_next')
-                    next_parts = [
-                        f"📍 <b>{i18n.get('staff.delivery.next_stop', language)}</b>"
-                    ]
-                    if eta is not None:
-                        next_parts.append(
-                            f"⏱ {i18n.get('staff.delivery.eta_minutes', language, minutes=int(eta))}"
-                        )
-                    if km is not None:
-                        next_parts.append(
-                            f"📏 {i18n.get('staff.delivery.distance_km', language, km=km)}"
-                        )
-                    lines.append(' · '.join(next_parts))
-
-                lines.append(
-                    format_active_delivery_summary(
-                        delivery,
-                        language,
-                        include_money=True,
-                        position=delivery.get('route_position'),
-                    )
-                )
-
-                text = '\n'.join(lines)
-                delivery_id = delivery.get('delivery_id') or delivery.get('id')
-
-                from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-                keyboard = InlineKeyboardMarkup([[
-                    InlineKeyboardButton(
-                        f"📋 {i18n.get('staff.delivery.manage', language)}",
-                        callback_data=f"staff_view_active_{delivery_id}"
-                    )
-                ]])
-
-                target = update.callback_query.message if update.callback_query else update.message
-                sent = await target.reply_text(text, reply_markup=keyboard, parse_mode='HTML')
-                new_card_ids.append((sent.chat_id, sent.message_id))
-
-            # Persist the freshly-sent card IDs so the next render can clean
-            # them up (and avoid stacking duplicates across Optimize taps).
-            context.user_data[_CARDS_KEY] = new_card_ids
-
         except Exception as e:
-            logger.error(f"Error showing active deliveries: {e}", exc_info=True)
+            logger.error(f"Error rendering route card: {e}", exc_info=True)
             await self._handle_error(update, context)
+
+    @require_auth
+    @require_delivery_driver
+    async def switch_route_view(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Flip the card between next-stop and all-stops (same message)."""
+        query = update.callback_query
+        await query.answer()
+        view = query.data.rsplit('_', 1)[-1]  # 'next' | 'all' (pattern-guarded)
+        language = await self._get_language(update, context)
+        token = await self._get_auth_token(update, context)
+        if not token:
+            await self._handle_auth_error(update, language)
+            return
+        await self._render_card_from_update(update, context, language, token, view=view)
 
     @require_auth
     @require_delivery_driver
@@ -343,6 +140,31 @@ class ActiveDeliveryHandler(BaseHandler):
         try:
             # Extract delivery_id: staff_view_active_{delivery_id}
             delivery_id = int(query.data.split('_')[-1])
+
+            # The card message is about to morph into the stop detail (and
+            # possibly the at-door flows). Freeze webhook-driven silent card
+            # edits until the next full card render un-borrows it -- an edit
+            # here would yank the driver's screen mid-collection (Phase 3
+            # Task 7). The current_delivery snapshot below is UNCHANGED.
+            from staff_bot.utils import route_card_state
+            await route_card_state.mark_borrowed(update.effective_user.id)
+            # Redis-outage backstop (Task 7 fix round 1): mark_borrowed above
+            # is a no-op when Redis is down (it starts with a `load` that
+            # returns None), so the borrow would never land and the SAME
+            # stranding bug survives an outage via Task 6's session_hint
+            # fallback (route_card.render_route_card, `state is None and
+            # session_hint` branch) -- that fallback replays whatever view
+            # is still sitting in the hint, which without this line stays
+            # "next" forever. Mirror the borrow into the hint too, same
+            # field Task 6 already reads. This can never let the hint WIN
+            # over a healthy Redis: render_route_card only ever consults
+            # session_hint when `state is None`, so this write is inert
+            # whenever Redis is up (a real Redis `state` is loaded first and
+            # used instead). No-op when no card was ever rendered into this
+            # session yet -- nothing to borrow.
+            session_hint = context.user_data.get('route_card_session')
+            if session_hint:
+                session_hint['view'] = route_card_state.VIEW_BORROWED
 
             # Fetch active deliveries to find this one
             async with api_client as client:
@@ -396,9 +218,6 @@ class ActiveDeliveryHandler(BaseHandler):
                 'outstanding_amount': delivery.get('outstanding_amount', 0),
                 'cod_reserved_prepayment_amount': delivery.get('cod_reserved_prepayment_amount', 0),
                 'expected_cash_to_collect': delivery.get('expected_cash_to_collect', 0),
-                # Origin: driver's last known point
-                'origin_lat': delivery.get('current_location_lat'),
-                'origin_lng': delivery.get('current_location_lng'),
                 # Destination: order address coordinates
                 'destination_lat': delivery.get('destination_latitude'),
                 'destination_lng': delivery.get('destination_longitude'),
@@ -540,8 +359,6 @@ class ActiveDeliveryHandler(BaseHandler):
             address = escape_html(delivery_info.get('address', ''))
             destination_lat = delivery_info.get('destination_lat')
             destination_lng = delivery_info.get('destination_lng')
-            origin_lat = delivery_info.get('origin_lat')
-            origin_lng = delivery_info.get('origin_lng')
 
             if destination_lat is None or destination_lng is None:
                 await query.answer(
@@ -550,16 +367,9 @@ class ActiveDeliveryHandler(BaseHandler):
                 )
                 return
 
-            # Build Yandex route URL: origin~destination (or destination-only)
-            if origin_lat is not None and origin_lng is not None:
-                maps_url = (
-                    f"https://yandex.com/maps/?rtext="
-                    f"{origin_lat},{origin_lng}~{destination_lat},{destination_lng}&rtt=auto"
-                )
-            else:
-                maps_url = (
-                    f"https://yandex.com/maps/?rtext=~{destination_lat},{destination_lng}&rtt=auto"
-                )
+            maps_url = (
+                f"https://yandex.com/maps/?rtext=~{destination_lat},{destination_lng}&rtt=auto"
+            )
 
             from telegram import InlineKeyboardButton, InlineKeyboardMarkup
             keyboard = InlineKeyboardMarkup([[

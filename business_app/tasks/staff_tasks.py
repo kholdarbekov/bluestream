@@ -71,13 +71,16 @@ def _send_staff_webhook(endpoint: str, data: dict, timeout: int = 10) -> bool:
 
 
 @shared_task(name="staff.notify_new_order", bind=True, max_retries=2, default_retry_delay=30)
-def notify_staff_new_order(self, order_id: int, order_info: dict = None):
+def notify_staff_new_order(self, order_id: int, order_info: dict = None, exclude_driver_user_id: int = None):
     """
     Notify delivery persons about a new order available for pickup.
 
     Args:
         order_id: ID of the new order
         order_info: Pre-built order info dict (order_number, district, etc.)
+        exclude_driver_user_id: driver who already received the targeted
+            diversion offer for this order (route-UX plan 2026-08-11 §7,
+            Task 13) — must not get a second Accept button.
     """
     try:
         # Celery's ContextTask already runs this task inside app.app_context()
@@ -88,12 +91,14 @@ def notify_staff_new_order(self, order_id: int, order_info: dict = None):
         from business_app.models.user import User
 
         # Get all active delivery persons who haven't muted notifications
-        delivery_persons = (
+        query = (
             db.session.query(User.telegram_id)
             .join(DeliveryPerson, DeliveryPerson.user_id == User.id)
             .filter(DeliveryPerson.notifications_muted == False, User.telegram_id.isnot(None), User.status == "active")
-            .all()
         )
+        if exclude_driver_user_id is not None:
+            query = query.filter(User.id != exclude_driver_user_id)
+        delivery_persons = query.all()
 
         telegram_ids = [dp.telegram_id for dp in delivery_persons if dp.telegram_id]
 

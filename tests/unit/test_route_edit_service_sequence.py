@@ -102,7 +102,8 @@ class TestSetStopOrder:
             )
 
         assert result.total_distance_km == pytest.approx(6.0)      # 3 legs x 2 km
-        assert result.estimated_duration_minutes == 15             # 3 legs x 5 min
+        # 3 legs x 5 min travel + 3 stops x 4 min service (ROUTE_SERVICE_TIME_MINUTES)
+        assert result.estimated_duration_minutes == 27
         assert result.extra_data["metrics_stale"] is False
 
     def test_a_matrix_failure_still_saves_and_flags_the_metrics(
@@ -191,6 +192,34 @@ class TestSetStopOrder:
             )
         notify.assert_not_called()
 
+    def test_omits_materiality_keys_when_there_is_no_verdict(
+        self, db, route_with_three_stops, admin_user, delivery_driver
+    ):
+        """Task 8 review fix 2 (companion): a hand-authored sequence save
+        never calls `optimize_for_driver`, so it has no materiality verdict
+        to report. Prove the REAL webhook payload omits
+        head_changed/set_changed/sequence_changed/driver_initiated entirely
+        (carried item 1) -- through the real call chain (`notify_route_updated`
+        unmocked), not a mocked function argument."""
+        route, ids = route_with_three_stops
+        reordered = [ids[2], ids[0], ids[1]]
+
+        with patch(
+            "business_app.utils.bot_webhook._resolve_driver_telegram_id", return_value=777000099
+        ), patch("business_app.utils.bot_webhook._send_staff_bot_webhook", return_value=True) as hook:
+            RouteEditService.set_stop_order(
+                driver_id=delivery_driver.id,
+                ordered_delivery_ids=reordered,
+                pinned={},
+                actor_id=admin_user.id,
+                expected_delivery_ids=ids,
+            )
+
+        payload = hook.call_args.args[1]
+        for key in ("head_changed", "set_changed", "sequence_changed", "driver_initiated"):
+            assert key not in payload
+        assert payload["sound"] is True
+
 
 class TestReoptimize:
     def test_clears_the_override_and_delegates(self, db, route_with_three_stops, admin_user, delivery_driver):
@@ -208,3 +237,42 @@ class TestReoptimize:
         assert optimize.call_args.kwargs["respect_override"] is False
         assert optimize.call_args.kwargs["trigger"] == "admin_dispatch_reset"
         notify.assert_called_once_with(delivery_driver.id)
+
+    def test_passes_through_the_real_materiality_verdict_to_the_webhook_payload(
+        self, db, route_with_three_stops, admin_user, delivery_driver
+    ):
+        """Task 8 review fix 2: `test_clears_the_override_and_delegates` mocks
+        `optimize_for_driver` to return `route_with_three_stops`, whose
+        `extra_data` is never set (see the fixture, :48-55) -- so
+        `(route.extra_data or {}).get("materiality")` is always None there,
+        and that test would still pass even if the pass-through in
+        `RouteEditService.reoptimize` were deleted. Prove the real path: a
+        route that DOES carry a persisted materiality verdict must have it
+        reach the actual webhook payload intact, not merely that
+        `notify_route_updated` was called with SOME materiality kwarg."""
+        route, ids = route_with_three_stops
+        route.manual_override = True
+        route.extra_data = {
+            "materiality": {
+                "head_changed": True,
+                "set_changed": False,
+                "sequence_changed": True,
+                "driver_initiated": False,
+                "trigger": "admin_dispatch_reset",
+            }
+        }
+        db.session.commit()
+
+        with patch(
+            "business_app.services.route_edit_service.RouteOptimizationService.optimize_for_driver",
+            return_value=route,
+        ), patch(
+            "business_app.utils.bot_webhook._resolve_driver_telegram_id", return_value=777000099
+        ), patch("business_app.utils.bot_webhook._send_staff_bot_webhook", return_value=True) as hook:
+            RouteEditService.reoptimize(driver_id=delivery_driver.id, actor_id=admin_user.id)
+
+        payload = hook.call_args.args[1]
+        assert payload["head_changed"] is True
+        assert payload["set_changed"] is False
+        assert payload["sequence_changed"] is True
+        assert payload["driver_initiated"] is False

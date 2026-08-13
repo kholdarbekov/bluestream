@@ -154,6 +154,7 @@ services:
       - AWS_REGION=${AWS_REGION}
       - STORAGE_TYPE=${STORAGE_TYPE:-local}
       - MAPS_PROVIDER=${MAPS_PROVIDER:-google}
+      - OSRM_BASE_URL=${OSRM_BASE_URL:-http://osrm:5000}
       - SENDGRID_API_KEY=${SENDGRID_API_KEY}
       - ESKIZ_EMAIL=${ESKIZ_EMAIL}
       - ESKIZ_PASSWORD=${ESKIZ_PASSWORD}
@@ -335,6 +336,7 @@ services:
       - TWILIO_PHONE_NUMBER=${TWILIO_PHONE_NUMBER}
       - CELERY_WORKER_CONCURRENCY=${CELERY_WORKER_CONCURRENCY:-4}
       - CELERY_WORKER_MAX_MEMORY_PER_CHILD=${CELERY_WORKER_MAX_MEMORY_PER_CHILD:-200000}
+      - OSRM_BASE_URL=${OSRM_BASE_URL:-http://osrm:5000}
       # INF-008: backup destinations. Override BACKUP_RCLONE_REMOTE in
       # production env to enable offsite copies.
       - BACKUP_LOCAL_DIR=${BACKUP_LOCAL_DIR:-/var/backups/bluestream}
@@ -645,6 +647,85 @@ services:
         reservations:
           memory: 64M
           cpus: '0.1'
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Self-hosted OSRM — primary distance-matrix provider (route UX phase 2).
+  # Profile-gated: does nothing on a plain `docker compose up`. Enable with
+  # COMPOSE_PROFILES=routing in .env (prod) or `--profile routing` (dev).
+  # Data is prepared OFF this host by scripts/prepare_osrm_data.sh and
+  # mounted read-only; --mmap keeps resident memory low on the Pi.
+  #
+  # --max-table-size MUST be explicit: default is 100. The rule below was
+  # EMPIRICALLY VERIFIED against v5.27.1 with real prepared data on
+  # 2026-08-12 (see task-1-report.md for the probe log), and re-confirmed at
+  # SOURCE level for v26.8.0 on 2026-08-13: src/engine/plugins/table.cpp is
+  # byte-identical between the two tags, so the rule is version-independent
+  # across this upgrade rather than a property of one binary. The rule is:
+  # reject iff (sources × destinations) > (max-table-size)². Boundary
+  # confirmed to sit at exactly M² across three flag values: at M=10,
+  # 2 sources x 50 destinations = 100 cells -> Ok, 2x51 = 102 cells ->
+  # TooBig; at M=100 (default), N=100 (symmetric) -> Ok, N=101 -> TooBig;
+  # at M=1000, N=1000 -> Ok, N=1001 -> TooBig, and 1 source x 2000
+  # destinations (2000 cells, well under 1000²) -> Ok. It is NOT a
+  # per-axis cap and NOT a raw-coordinate-count cap in general — those
+  # were both tried and falsified by the M=10 pair above (a per-axis cap
+  # of 10 predicts TooBig for both 2x50 and 2x51; only the product boundary
+  # explains the split). For our real usage — one coordinate list, no
+  # explicit sources=/destinations=, so sources=destinations=N — this
+  # degenerates to N² > M², i.e. plain N > M. 1000 comfortably covers our
+  # worst case of 16 coordinates (15 stops + origin) with vast headroom,
+  # but also permits a much larger 1000x1000 = 1,000,000-cell table if a
+  # future caller ever passes asymmetric sources/destinations.
+  # The image tag MUST match OSRM_IMAGE in scripts/prepare_osrm_data.sh —
+  # the data fingerprint embeds the OSRM version.
+  #
+  # NOTE THE `-debian` SUFFIX: upstream no longer publishes bare `vX.Y.Z`
+  # image tags (`:v26.8.0` -> MANIFEST_UNKNOWN). `-debian` is the multi-arch
+  # tag (linux/amd64 + linux/arm64, so the Pi 5 is covered); Alpine variants
+  # were dropped in v26.7.0.
+  #
+  # UPGRADE POLICY: from the v26 CalVer series upstream declares datasets
+  # incompatible across EVERY monthly release — only same-month patch bumps
+  # keep prepared data loadable. So bumping this tag is never just an edit:
+  # it requires re-running scripts/prepare_osrm_data.sh off-Pi and re-shipping
+  # ~1 GB. Pin deliberately; do not chase `latest`.
+  #
+  # We keep ALL feature datasets loaded (no --disable-feature-dataset).
+  # ROUTE_GEOMETRY/ROUTE_STEPS are not dead weight here: they are what lets
+  # this instance also answer /route with real road geometry for the admin
+  # dispatch map (business_app/api/admin_dispatch.py::dispatch_route_geometry),
+  # which today goes to a paid provider or the public demo server. Disabling
+  # ROUTE_GEOMETRY additionally breaks /table unless every caller passes
+  # skip_waypoints=true — verified 2026-08-13: the server starts clean and
+  # then fails at QUERY time with code "DisabledDataset" (StringData).
+  osrm:
+    image: ghcr.io/project-osrm/osrm-backend:v26.8.0-debian
+    profiles: ["routing"]
+    command: osrm-routed --algorithm mld --mmap --max-table-size 1000 /data/uzbekistan-latest.osrm
+    volumes:
+      - ./osrm_data:/data:ro
+    ports:
+      - "127.0.0.1:5001:5000"
+    healthcheck:
+      # The image ships no curl/wget; probe the TCP port with bash.
+      test: [ "CMD-SHELL", "timeout 2 bash -c '</dev/tcp/127.0.0.1/5000' || exit 1" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
     restart: unless-stopped
     logging:
       driver: "json-file"

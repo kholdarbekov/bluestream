@@ -1,8 +1,9 @@
 """Unit tests for RouteOptimizationService.
 
-Covers the TSP solver, insertion-cost calculator, persistence to
-DeliveryRoute, start-point fallback hierarchy, and the Haversine fallback
-when external matrix calls fail.
+Covers the TSP solver, persistence to DeliveryRoute, start-point fallback
+hierarchy, and the Haversine fallback when external matrix calls fail.
+`compute_diversion_gain` (the §7 diversion offer) is covered separately in
+tests/unit/test_diversion_offer.py.
 
 The autouse `block_external_side_effects` fixture from conftest.py prevents
 real outbound HTTP, so all tests substitute the matrix via monkeypatch on
@@ -361,11 +362,15 @@ class TestStartPointResolution:
             assert source == "last_completed"
             assert point == (41.4001, 69.5001)
 
-    def test_falls_back_to_tashkent_default_when_nothing_else(
-        self, app, db, driver_user, customer_user
+    def test_falls_back_to_configured_warehouse_when_nothing_else(
+        self, app, db, driver_user, customer_user, monkeypatch
     ):
+        """Spec 8.5: the warehouse replaces the Tashkent-city-centre constant
+        as the last-resort start point. It is a START ANCHOR only — never a
+        route stop."""
         with app.app_context():
-            from shared.constants import TASHKENT_COORDINATES
+            monkeypatch.setitem(app.config, "WAREHOUSE_LATITUDE", 41.2111)
+            monkeypatch.setitem(app.config, "WAREHOUSE_LONGITUDE", 69.1222)
 
             addr = _make_address(db, customer_user.id, 41.32, 69.28)
             delivery = _make_delivery(db, customer_user.id, driver_user.id, addr)
@@ -373,8 +378,8 @@ class TestStartPointResolution:
             svc = RouteOptimizationService()
             point, source = svc._resolve_start_point(driver_user.id, [delivery])
 
-            assert source == "tashkent_default"
-            assert point == (TASHKENT_COORDINATES["latitude"], TASHKENT_COORDINATES["longitude"])
+            assert source == "warehouse"
+            assert point == (41.2111, 69.1222)
 
 
 # ---------------------------------------------------------------------------
@@ -581,121 +586,40 @@ class TestOptimizeForDriver:
             assert route.optimized_order == [d_good.id]
             assert d_bad.id not in route.optimized_order
 
-
-# ---------------------------------------------------------------------------
-# compute_insertion_cost
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-@pytest.mark.delivery
-class TestInsertionCost:
-    def test_returns_none_when_driver_has_no_shared_location(
-        self, app, db, driver_user, customer_user
-    ):
-        """Without a real driver location we can't measure detour from
-        anywhere meaningful — the candidate driver must be skipped rather
-        than evaluated against a city-centre fallback."""
-        with app.app_context():
-            addr = _make_address(db, customer_user.id, 41.31, 69.27)
-            _make_delivery(db, customer_user.id, driver_user.id, addr)
-            # No DeliveryPerson row -> location is "missing".
-
-            pool_addr = _make_address(db, customer_user.id, 41.32, 69.28)
-            pool_order = Order(
-                user_id=customer_user.id,
-                order_number="POOL-NO-LOC",
-                status=OrderStatus.CONFIRMED,
-                subtotal=Decimal("0"),
-                total_amount=Decimal("0"),
-                delivery_address_id=pool_addr.id,
-            )
-            db.session.add(pool_order)
-            db.session.flush()
-            pool_delivery = Delivery(
-                order_id=pool_order.id,
-                status=DeliveryStatus.SCHEDULED,
-                scheduled_date=datetime.now(UTC),
-                scheduled_time_slot="09:00-12:00",
-            )
-            db.session.add(pool_delivery)
-            db.session.commit()
-
-            svc = RouteOptimizationService()
-            assert svc.compute_insertion_cost(driver_user.id, pool_delivery.id) is None
-
-    def test_returns_none_when_driver_has_no_active_deliveries(self, app, db, driver_user, customer_user):
-        with app.app_context():
-            addr = _make_address(db, customer_user.id, 41.30, 69.27)
-            order = Order(
-                user_id=customer_user.id,
-                order_number="POOL-001",
-                status=OrderStatus.CONFIRMED,
-                subtotal=Decimal("0"),
-                total_amount=Decimal("0"),
-                delivery_address_id=addr.id,
-            )
-            db.session.add(order)
-            db.session.flush()
-            pool_delivery = Delivery(
-                order_id=order.id,
-                status=DeliveryStatus.SCHEDULED,
-                scheduled_date=datetime.now(UTC),
-                scheduled_time_slot="09:00-12:00",
-            )
-            db.session.add(pool_delivery)
-            db.session.commit()
-
-            svc = RouteOptimizationService()
-            assert svc.compute_insertion_cost(driver_user.id, pool_delivery.id) is None
-
-    def test_picks_cheapest_insertion_position(
+    def test_route_totals_include_flat_service_time_per_stop(
         self, app, db, driver_user, driver_with_live_location, customer_user, monkeypatch
     ):
-        """Driver's existing route runs east. A pool stop close to the driver's
-        current location should slot in at position 1 (visit it first)."""
+        """Spec 8.4: ETAs must not be pure travel time. Fold
+        ROUTE_SERVICE_TIME_MINUTES per stop into the persisted route total.
+        A constant per stop can never change which sequence wins, so it is
+        folded into TOTALS only, never into the matrix the solver ranks."""
         with app.app_context():
-            far_addr = _make_address(db, customer_user.id, 41.300, 69.330, "far")  # existing stop
-            close_addr = _make_address(db, customer_user.id, 41.301, 69.255, "close-to-driver")
-            existing = _make_delivery(db, customer_user.id, driver_user.id, far_addr)
+            monkeypatch.setitem(app.config, "ROUTE_SERVICE_TIME_MINUTES", 4.0)
+            addr1 = _make_address(db, customer_user.id, 41.310, 69.270, "S1")
+            addr2 = _make_address(db, customer_user.id, 41.320, 69.280, "S2")
+            _make_delivery(db, customer_user.id, driver_user.id, addr1, order_no="ORD-ST1")
+            _make_delivery(db, customer_user.id, driver_user.id, addr2, order_no="ORD-ST2")
 
-            # New pool delivery, NOT yet assigned.
-            pool_order = Order(
-                user_id=customer_user.id,
-                order_number="POOL-INSERT",
-                status=OrderStatus.CONFIRMED,
-                subtotal=Decimal("0"),
-                total_amount=Decimal("0"),
-                delivery_address_id=close_addr.id,
-            )
-            db.session.add(pool_order)
-            db.session.flush()
-            pool_delivery = Delivery(
-                order_id=pool_order.id,
-                status=DeliveryStatus.SCHEDULED,
-                scheduled_date=datetime.now(UTC),
-                scheduled_time_slot="09:00-12:00",
-            )
-            db.session.add(pool_delivery)
-            db.session.commit()
+            def const_matrix(self, points, traffic=True, use_cache=True):
+                m = {}
+                for i in range(len(points)):
+                    for j in range(len(points)):
+                        if i == j:
+                            m[(i, j)] = {"distance_km": 0.0, "duration_minutes": 0.0}
+                        else:
+                            m[(i, j)] = {"distance_km": 5.0, "duration_minutes": 10.0}
+                return m, "osrm_selfhosted"
 
             monkeypatch.setattr(
-                "business_app.services.maps_service.MapsService.get_distance_matrix",
-                lambda self, points, traffic=True, use_cache=True: (
-                    _matrix_from_points(points),
-                    "haversine",
-                ),
+                "business_app.services.maps_service.MapsService.get_distance_matrix", const_matrix
             )
 
             svc = RouteOptimizationService()
-            cost = svc.compute_insertion_cost(driver_user.id, pool_delivery.id)
+            route = svc.optimize_for_driver(driver_user.id)
 
-            assert cost is not None
-            # The new stop is closer to the driver than the existing far stop, so
-            # the optimal insert is position 1 (visit it first).
-            assert cost["position"] == 1
-            assert cost["delta_km"] >= 0
-            assert cost["delta_minutes"] >= 0
+            # Travel: start->A->B = 2 legs x 10 min = 20. Service: 2 stops x 4 = 8.
+            assert route.estimated_duration_minutes == 28
+            assert route.total_distance_km == pytest.approx(10.0)  # km totals unchanged
 
 
 # ---------------------------------------------------------------------------
@@ -733,7 +657,7 @@ class TestAnnotateActiveItems:
             with patch.object(
                 svc.maps,
                 "get_distance_matrix",
-                return_value=({(0, 1): {"distance_km": 1.5, "duration_minutes": 4}}, "haversine"),
+                return_value=({(0, 1): {"distance_km": 1.5, "duration_minutes": 4}}, "osrm_selfhosted"),
             ):
                 out = svc.annotate_active_items(driver_user.id, items)
 

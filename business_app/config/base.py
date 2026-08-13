@@ -256,18 +256,68 @@ class BaseConfig:
     MAPS_PROVIDER = os.environ.get("MAPS_PROVIDER", "google")  # 'google', 'yandex', 'osm'
     GOOGLE_MAPS_API_KEY = get_secret("google_maps_api_key", "GOOGLE_MAPS_API_KEY", required=False)
     YANDEX_MAPS_API_KEY = get_secret("yandex_maps_api_key", "YANDEX_MAPS_API_KEY", required=False)
-    # HERE Matrix Routing v8 — primary provider for traffic-aware route
-    # optimization (250k requests/month free tier). Sign up at
-    # https://platform.here.com to obtain a key. Leave unset to fall through
-    # to Yandex / OSRM / Haversine.
+    # HERE Matrix Routing v8 — legacy fallback provider for traffic-aware
+    # route optimization (250k requests/month free tier). Sign up at
+    # https://platform.here.com to obtain a key. Since route UX phase 2 this
+    # tier only runs when LEGACY_MATRIX_PROVIDERS_ENABLED=true — the primary
+    # matrix source is the self-hosted OSRM service.
     HERE_MAPS_API_KEY = get_secret("here_maps_api_key", "HERE_MAPS_API_KEY", required=False)
+    # Google Routes computeRoutes — the ONE traffic-aware number in the
+    # product (next-leg ETA, spec 8.2). Bills per REQUEST; the matrix
+    # endpoint bills per ELEMENT and is never used. Unset = tier skipped.
+    # Deliberately a NEW, separate key — NOT GOOGLE_MAPS_API_KEY — after
+    # Plan 1 found the HERE/Yandex keys silently un-entitled for months.
+    GOOGLE_ROUTES_API_KEY = get_secret("google_routes_api_key", "GOOGLE_ROUTES_API_KEY", required=False)
 
     # Route Optimization Configuration
-    ROUTE_INSERTION_MAX_DETOUR_KM = float(os.environ.get("ROUTE_INSERTION_MAX_DETOUR_KM", 5.0))
-    ROUTE_INSERTION_MAX_DETOUR_MIN = float(os.environ.get("ROUTE_INSERTION_MAX_DETOUR_MIN", 15.0))
     MATRIX_CACHE_TTL_TRAFFIC_SECONDS = int(os.environ.get("MATRIX_CACHE_TTL_TRAFFIC_SECONDS", 1800))
     MATRIX_CACHE_TTL_STATIC_SECONDS = int(os.environ.get("MATRIX_CACHE_TTL_STATIC_SECONDS", 86400))
     DRIVER_LOCATION_FRESH_SECONDS = int(os.environ.get("DRIVER_LOCATION_FRESH_SECONDS", 1800))
+    # Max age of the transition into IN_TRANSIT/ARRIVED for a delivery to still
+    # count as the driver's committed stop (spec §4.1). Older than this and the
+    # delivery is still active/routed, it just stops anchoring the route.
+    COMMITTED_STOP_MAX_AGE_HOURS = int(os.environ.get("COMMITTED_STOP_MAX_AGE_HOURS", 48))
+
+    # Hysteresis for re-sequencing an UNCHANGED delivery set (route-UX plan
+    # 2026-08-11 §4.4). Starting values to calibrate, not derived constants.
+    ROUTE_RESEQUENCE_MIN_GAIN_MINUTES = float(os.environ.get("ROUTE_RESEQUENCE_MIN_GAIN_MINUTES", 4.0))
+    ROUTE_RESEQUENCE_MIN_GAIN_RATIO = float(os.environ.get("ROUTE_RESEQUENCE_MIN_GAIN_RATIO", 0.08))
+
+    # Debounce for location-share-triggered re-optimization (plan §4.5).
+    ROUTE_OPTIMIZE_DEBOUNCE_SECONDS = int(os.environ.get("ROUTE_OPTIMIZE_DEBOUNCE_SECONDS", 60))
+    ROUTE_OPTIMIZE_MIN_MOVE_METERS = float(os.environ.get("ROUTE_OPTIMIZE_MIN_MOVE_METERS", 150))
+
+    # Diversion offer threshold (plan §7): offer "go here first" only when
+    # new-first beats committed-first by at least this many minutes.
+    ROUTE_DIVERSION_MIN_GAIN_MINUTES = float(os.environ.get("ROUTE_DIVERSION_MIN_GAIN_MINUTES", 8.0))
+
+    # Flat per-stop service time folded into route DURATION TOTALS (spec 8.4)
+    # in exactly one place: RouteOptimizationService._sum_route_metrics.
+    ROUTE_SERVICE_TIME_MINUTES = float(os.environ.get("ROUTE_SERVICE_TIME_MINUTES", 4.0))
+
+    # Warehouse (single depot). NEVER a route stop — only the last-resort
+    # route start anchor (spec 8.5). Affects route optimization only; it is
+    # NOT the delivery-fee distance origin. Defaults are the historical
+    # Tashkent-centre constant so an unset env keeps today's coordinates.
+    WAREHOUSE_LATITUDE = float(os.environ.get("WAREHOUSE_LATITUDE", 41.2995))
+    WAREHOUSE_LONGITUDE = float(os.environ.get("WAREHOUSE_LONGITUDE", 69.2401))
+
+    # Self-hosted OSRM (primary matrix provider, spec 8.1). Empty string
+    # disables the tier entirely — the documented rollback lever.
+    OSRM_BASE_URL = os.environ.get("OSRM_BASE_URL", "http://osrm:5000")
+    # Public OSRM demo server: EMERGENCY fallback only (usage policy forbids
+    # production use). Off by default.
+    OSRM_PUBLIC_FALLBACK_ENABLED = os.environ.get("OSRM_PUBLIC_FALLBACK_ENABLED", "false").lower() == "true"
+    # HERE/Yandex matrix tiers: 403/401 on every production call (keys not
+    # entitled to their matrix products) = ~1.5 s of guaranteed failure per
+    # optimization. Removed from the hot path but NOT deleted; re-enable
+    # only after fixing entitlements.
+    LEGACY_MATRIX_PROVIDERS_ENABLED = os.environ.get("LEGACY_MATRIX_PROVIDERS_ENABLED", "false").lower() == "true"
+
+    # Live origin-row cache tier (spec 8.3): serves the burst of repeat
+    # matrix calls within one optimization cycle. The 24 h static tier is
+    # MATRIX_CACHE_TTL_STATIC_SECONDS above.
+    MATRIX_LIVE_ORIGIN_TTL_SECONDS = int(os.environ.get("MATRIX_LIVE_ORIGIN_TTL_SECONDS", 120))
 
     # Email Configuration (Legacy - SendGrid)
     SENDGRID_API_KEY = get_secret("sendgrid_api_key", "SENDGRID_API_KEY", required=False)

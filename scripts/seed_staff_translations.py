@@ -365,15 +365,130 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Yaxshiroq taklif uchun jonli joylashuvni yoqing",
         "ru": "Включите трансляцию геопозиции для точных подсказок",
     },
+    # Review fix (route-UX plan 2026-08-11, Task 13): this key is now used
+    # ONLY for the §7 diversion offer (compute_insertion_cost's old "fits
+    # your route, +detour" suggestion was removed). The old "+{km} km,
+    # +{minutes} min" wording read as ADDED detour, but for a diversion
+    # offer `minutes` is time SAVED by going here first (and `km` is always
+    # 0) -- so it told the driver the opposite of the truth. Interim fix:
+    # correct the sign, drop the meaningless km figure. Plan 3 restyles this
+    # further using the payload's gain_minutes/committed_order_number.
     "staff.delivery.pool_insertion_offer": {
-        "en": "Order #{order_no} fits your route (+{km} km, +{minutes} min). Accept?",
-        "uz": "#{order_no} buyurtma sizning yo'nalishingizga mos keladi (+{km} km, +{minutes} daq). Qabul qilasizmi?",
-        "ru": "Заказ #{order_no} вписывается в ваш маршрут (+{km} км, +{minutes} мин). Принять?",
+        "en": "Order #{order_no} is right on your way — going there first saves about {minutes} min. Accept?",
+        "uz": "#{order_no} buyurtma yo'lingizda — avval o'sha yerga borsangiz, taxminan {minutes} daqiqa yutasiz. Qabul qilasizmi?",
+        "ru": "Заказ #{order_no} совсем рядом — если поехать туда сначала, вы сэкономите около {minutes} мин. Принять?",
     },
     "staff.delivery.suggestion_declined": {
         "en": "Suggestion dismissed",
         "uz": "Taklif rad etildi",
         "ru": "Предложение отклонено",
+    },
+    # Route-UX Plan 3, Task 10: offer-builder SSOT buttons
+    # (staff_bot/utils/offers.py). `staff.delivery.accept` was already
+    # referenced by several call sites (webhook_server.py, keyboards/delivery.py,
+    # flow_state.py) but never actually seeded here — it silently fell back to
+    # the humanised key tail ("Accept"), which happened to read fine but was
+    # one accidental key-rename away from breaking. Seeding it for real now
+    # that offers.py is the single place that reads it.
+    "staff.delivery.accept": {
+        "en": "Accept",
+        "uz": "Qabul qilish",
+        "ru": "Принять",
+    },
+    "staff.delivery.suggestion_declined_button": {
+        "en": "Not now",
+        "uz": "Hozir emas",
+        "ru": "Не сейчас",
+    },
+    # ---- Phase 3 route card (plan 2026-08-11-route-ux-phase3-route-card) ----
+    "staff.route.suggested_next": {
+        "en": "SUGGESTED NEXT",
+        "uz": "TAVSIYA ETILGAN KEYINGISI",
+        "ru": "РЕКОМЕНДУЕМАЯ СЛЕДУЮЩАЯ",
+    },
+    "staff.route.current_stop": {
+        "en": "CURRENT STOP",
+        "uz": "JORIY MANZIL",
+        "ru": "ТЕКУЩАЯ ОСТАНОВКА",
+    },
+    "staff.route.card_header": {
+        "en": "Stop {current} of {total}",
+        "uz": "{total} tadan {current}-manzil",
+        "ru": "Остановка {current} из {total}",
+    },
+    "staff.route.finish_by": {
+        "en": "finish ~{time}",
+        "uz": "tugash ~{time}",
+        "ru": "финиш ~{time}",
+    },
+    "staff.route.updated_at": {
+        "en": "updated {time}",
+        "uz": "yangilandi {time}",
+        "ru": "обновлено {time}",
+    },
+    "staff.route.all_stops_header": {
+        "en": "All stops · {count} remaining",
+        "uz": "Barcha manzillar · {count} ta qoldi",
+        "ru": "Все остановки · осталось {count}",
+    },
+    "staff.route.all_stops_button": {
+        "en": "All stops ({count})",
+        "uz": "Barcha manzillar ({count})",
+        "ru": "Все остановки ({count})",
+    },
+    "staff.route.start_this_stop": {
+        "en": "Start this stop",
+        "uz": "Shu manzilni boshlash",
+        "ru": "Начать эту остановку",
+    },
+    "staff.route.open_stop": {
+        "en": "Open stop",
+        "uz": "Manzilni ochish",
+        "ru": "Открыть остановку",
+    },
+    "staff.route.navigate_all": {
+        "en": "Navigate",
+        "uz": "Navigatsiya",
+        "ru": "Навигация",
+    },
+    # FINAL review, I1: the old copy asserted "your suggested next stop
+    # changed" unconditionally, but `RouteEditService`'s dispatch paths
+    # (business_app/services/route_edit_service.py:170-182) all default
+    # `sound=True` regardless of `head_changed` -- so a tail-only reorder
+    # (e.g. swapping stops 4 and 5) pinged the driver with a claim that was
+    # simply false. The gate itself is Plan 1's and out of scope here; only
+    # the copy changes, to a wording that is honest whether the head moved
+    # or the route was reordered further down (and for the deferred 07:00
+    # batch trigger, where the route is merely new for the day).
+    "staff.route.head_changed_alert": {
+        "en": "Your route was updated — your next stop may have changed.",
+        "uz": "Yo'nalishingiz yangilandi — keyingi manzilingiz o'zgargan bo'lishi mumkin.",
+        "ru": "Ваш маршрут обновлён — ваша следующая остановка могла измениться.",
+    },
+    "staff.route.open_route_card": {
+        "en": "Open route card",
+        "uz": "Marshrut kartasini ochish",
+        "ru": "Открыть карту маршрута",
+    },
+    "staff.route.all_done": {
+        "en": "All stops done for now — no active deliveries.",
+        "uz": "Hozircha barcha manzillar yakunlandi — faol yetkazishlar yo'q.",
+        "ru": "Все остановки выполнены — активных доставок нет.",
+    },
+    "staff.route.diversion_offer": {
+        "en": "📦 Order #{order_no} is close to you.\nGo here first instead of #{committed_no}? (saves ~{minutes} min)",
+        "uz": "📦 #{order_no} buyurtma sizga yaqin.\n#{committed_no} o'rniga avval shu yerga borasizmi? (~{minutes} daqiqa tejaladi)",
+        "ru": "📦 Заказ #{order_no} рядом с вами.\nПоехать сюда сначала вместо #{committed_no}? (сэкономит ~{minutes} мин)",
+    },
+    "staff.route.go_here_first": {
+        "en": "Go here first",
+        "uz": "Avval shu yerga",
+        "ru": "Сначала сюда",
+    },
+    "staff.route.keep_current": {
+        "en": "Keep current order",
+        "uz": "Joriy tartibda davom etish",
+        "ru": "Оставить текущий порядок",
     },
     "staff.delivery.location_required_notice": {
         "en": "Share your location to get the optimal delivery order",

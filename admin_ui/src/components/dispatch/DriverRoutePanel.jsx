@@ -74,13 +74,27 @@ const DriverRoutePanel = ({
               a route that no longer matches the stops below. Qualify with
               "≈" + a tooltip rather than showing a confidently wrong number —
               the whole point of the flag existing is that an admin must not
-              trust it at face value. */}
+              trust it at face value.
+
+              Separately (final review round, I5): `estimated_duration_minutes`
+              is TRAVEL + a flat per-stop service-time allowance
+              (`route_optimization_service.py::_sum_route_metrics`, spec 8.4)
+              — not travel alone. The number itself is never altered here
+              (that would be re-deriving a backend decision in JS, the exact
+              thing CLAUDE.md forbids); when it isn't already flagged stale,
+              the tooltip instead explains what's included so "62 min" isn't
+              read as a pure drive-time estimate. */}
           <Tooltip title={route.metrics_stale
             ? t(
               'ui.dispatch.metrics_stale_hint',
               'This route changed since these figures were last measured — they may not match the current stops',
             )
-            : undefined}
+            : (route.estimated_duration_minutes
+              ? t(
+                'ui.dispatch.duration_includes_service_time_hint',
+                'Includes stop time (loading/handoff) at each delivery, not travel alone',
+              )
+              : undefined)}
           >
             <Text type="secondary" data-testid={route.metrics_stale ? 'route-metrics-stale' : undefined}>
               {stops.length} {t('ui.dispatch.stops', 'stops')}

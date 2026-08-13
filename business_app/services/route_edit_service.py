@@ -117,7 +117,14 @@ class RouteEditService:
             actor_id,
             route.id if route else None,
         )
-        cls._notify_route_updated(driver_id)
+        # `optimize_for_driver` computed and persisted the real materiality
+        # verdict on `route.extra_data['materiality']` — pass it through
+        # instead of letting `_notify_route_updated` fabricate one. `route`
+        # is None only when the re-solve found nothing to optimize (no
+        # active deliveries / no driver location); there is genuinely no
+        # verdict to report in that case.
+        materiality = (route.extra_data or {}).get("materiality") if route is not None else None
+        cls._notify_route_updated(driver_id, materiality=materiality)
         return route
 
     # ----- internals --------------------------------------------------------
@@ -160,10 +167,19 @@ class RouteEditService:
             route.extra_data = {**(route.extra_data or {}), "metrics_stale": True}
 
     @staticmethod
-    def _notify_route_updated(driver_id: int) -> None:
-        """Best-effort: a webhook failure must not roll back a persisted edit."""
+    def _notify_route_updated(driver_id: int, materiality: Optional[Dict[str, Any]] = None) -> None:
+        """Best-effort: a webhook failure must not roll back a persisted edit.
+
+        `materiality` defaults to None (no verdict): callers that never
+        re-solved the route (a hand-authored sequence save, a stop move, a
+        pool return) have no materiality to report, and `notify_route_updated`
+        omits those keys entirely rather than fabricating False for them.
+        """
         try:
-            notify_route_updated(driver_id)
+            if materiality is not None:
+                notify_route_updated(driver_id, materiality=materiality)
+            else:
+                notify_route_updated(driver_id)
         except Exception as exc:  # noqa: BLE001
             logger.warning("route-updated push failed driver=%s: %s", driver_id, exc)
 

@@ -19,6 +19,11 @@ KEYS = {
         "Маршрут изменился с момента последнего расчёта расстояния/времени — они могут не соответствовать текущим остановкам",
         "This route changed since these figures were last measured — they may not match the current stops",
     ),
+    "ui.dispatch.duration_includes_service_time_hint": (
+        "Har bir yetkazishdagi to'xtash vaqtini (yuklash/topshirish) ham o'z ichiga oladi, faqat yo'l vaqti emas",
+        "Включает время на остановке (погрузка/передача) на каждой доставке, а не только время в пути",
+        "Includes stop time (loading/handoff) at each delivery, not travel alone",
+    ),
     "ui.dispatch.save_route": ("Marshrutni saqlash", "Сохранить маршрут", "Save route"),
     "ui.dispatch.discard": ("Bekor qilish", "Отменить", "Discard"),
     "ui.dispatch.reoptimize": ("Optimalga qaytarish", "Сбросить к оптимальному", "Reset to optimal"),

@@ -300,6 +300,36 @@ class TestMoveStop:
         assert source_route.extra_data.get("metrics_stale") is True
         assert updated_target.extra_data.get("metrics_stale") is True
 
+    def test_omits_materiality_keys_when_there_is_no_verdict(
+        self, db, assigned_delivery, admin_user, second_delivery_driver
+    ):
+        """Task 8 review fix 2 (companion): moving a stop between drivers
+        never calls `optimize_for_driver`, so it has no materiality verdict.
+        Prove the REAL webhook payload (for both the source and target
+        driver pushes) omits head_changed/set_changed/sequence_changed/
+        driver_initiated entirely (carried item 1) -- through the real call
+        chain, not a mocked `notify_route_updated`."""
+        from business_app.services.delivery_assignment_service import AssignmentResult
+
+        with patch(
+            "business_app.services.route_edit_service.DeliveryAssignmentService.assign_driver",
+            return_value=AssignmentResult(delivery=assigned_delivery, history_id=1, changed=True),
+        ), patch("business_app.services.route_edit_service.notify_staff_order_reassigned"), patch(
+            "business_app.utils.bot_webhook._resolve_driver_telegram_id", return_value=777000099
+        ), patch("business_app.utils.bot_webhook._send_staff_bot_webhook", return_value=True) as hook:
+            RouteEditService.move_stop(
+                delivery_id=assigned_delivery.id,
+                to_driver_id=second_delivery_driver.id,
+                actor_id=admin_user.id,
+            )
+
+        assert len(hook.call_args_list) == 2  # source + target driver
+        for call in hook.call_args_list:
+            payload = call.args[1]
+            for key in ("head_changed", "set_changed", "sequence_changed", "driver_initiated"):
+                assert key not in payload
+            assert payload["sound"] is True
+
 
 class TestReturnStopToPool:
     def test_delegates_to_return_delivery_to_pool(self, db, assigned_delivery, admin_user):
@@ -357,3 +387,23 @@ class TestReturnStopToPool:
 
         route = DeliveryRoute.query.filter_by(delivery_person_id=driver_id).first()
         assert route.extra_data.get("metrics_stale") is True
+
+    def test_omits_materiality_keys_when_there_is_no_verdict(self, db, assigned_delivery, admin_user):
+        """Task 8 review fix 2 (companion): returning a stop to the pool
+        never calls `optimize_for_driver`, so it has no materiality verdict.
+        Prove the REAL webhook payload omits head_changed/set_changed/
+        sequence_changed/driver_initiated entirely (carried item 1) --
+        through the real call chain, not a mocked `notify_route_updated`."""
+        with patch(
+            "business_app.services.route_edit_service.StaffService.return_delivery_to_pool",
+            return_value=assigned_delivery,
+        ), patch("business_app.services.route_edit_service.notify_staff_order_unassigned"), patch(
+            "business_app.utils.bot_webhook._resolve_driver_telegram_id", return_value=777000099
+        ), patch("business_app.utils.bot_webhook._send_staff_bot_webhook", return_value=True) as hook:
+            RouteEditService.return_stop_to_pool(delivery_id=assigned_delivery.id, actor_id=admin_user.id)
+
+        hook.assert_called_once()
+        payload = hook.call_args.args[1]
+        for key in ("head_changed", "set_changed", "sequence_changed", "driver_initiated"):
+            assert key not in payload
+        assert payload["sound"] is True

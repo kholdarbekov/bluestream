@@ -333,9 +333,11 @@ def get_driver_assignments():
     try:
         current_user_id = get_jwt_identity()
         user = User.query.get(current_user_id)
+        if not user:
+            return jsonify({"error": get_translation("api.delivery.error.driver_role_required")}), 403
 
         role_value = user.role.value if hasattr(user.role, "value") else user.role
-        if not user or role_value != UserRole.DELIVERY_DRIVER.value:
+        if role_value != UserRole.DELIVERY_DRIVER.value:
             return jsonify({"error": get_translation("api.delivery.error.driver_role_required")}), 403
 
         # Get query parameters
@@ -414,9 +416,11 @@ def update_driver_location():
     try:
         current_user_id = get_jwt_identity()
         user = User.query.get(current_user_id)
+        if not user:
+            return jsonify({"error": get_translation("api.delivery.error.driver_role_required")}), 403
 
         role_value = user.role.value if hasattr(user.role, "value") else user.role
-        if not user or role_value != UserRole.DELIVERY_DRIVER.value:
+        if role_value != UserRole.DELIVERY_DRIVER.value:
             return jsonify({"error": get_translation("api.delivery.error.driver_role_required")}), 403
 
         data = request.get_json()
@@ -455,9 +459,11 @@ def start_delivery(delivery_id):
     try:
         current_user_id = get_jwt_identity()
         user = User.query.get(current_user_id)
+        if not user:
+            return jsonify({"error": get_translation("api.delivery.error.driver_role_required")}), 403
 
         role_value = user.role.value if hasattr(user.role, "value") else user.role
-        if not user or role_value != UserRole.DELIVERY_DRIVER.value:
+        if role_value != UserRole.DELIVERY_DRIVER.value:
             return jsonify({"error": get_translation("api.delivery.error.driver_role_required")}), 403
 
         delivery = Delivery.query.filter_by(id=delivery_id, delivery_person_id=current_user_id).first()
@@ -495,9 +501,11 @@ def mark_arrived(delivery_id):
     try:
         current_user_id = get_jwt_identity()
         user = User.query.get(current_user_id)
+        if not user:
+            return jsonify({"error": get_translation("api.delivery.error.driver_role_required")}), 403
 
         role_value = user.role.value if hasattr(user.role, "value") else user.role
-        if not user or role_value != UserRole.DELIVERY_DRIVER.value:
+        if role_value != UserRole.DELIVERY_DRIVER.value:
             return jsonify({"error": get_translation("api.delivery.error.driver_role_required")}), 403
 
         delivery = Delivery.query.filter_by(id=delivery_id, delivery_person_id=current_user_id).first()
@@ -536,9 +544,11 @@ def complete_delivery(delivery_id):
     try:
         current_user_id = get_jwt_identity()
         user = User.query.get(current_user_id)
+        if not user:
+            return jsonify({"error": get_translation("api.delivery.error.driver_role_required")}), 403
 
         role_value = user.role.value if hasattr(user.role, "value") else user.role
-        if not user or role_value != UserRole.DELIVERY_DRIVER.value:
+        if role_value != UserRole.DELIVERY_DRIVER.value:
             return jsonify({"error": get_translation("api.delivery.error.driver_role_required")}), 403
 
         delivery = Delivery.query.filter_by(id=delivery_id, delivery_person_id=current_user_id).first()
@@ -591,9 +601,11 @@ def report_delivery_issue(delivery_id):
     try:
         current_user_id = get_jwt_identity()
         user = User.query.get(current_user_id)
+        if not user:
+            return jsonify({"error": get_translation("api.delivery.error.driver_role_required")}), 403
 
         role_value = user.role.value if hasattr(user.role, "value") else user.role
-        if not user or role_value != UserRole.DELIVERY_DRIVER.value:
+        if role_value != UserRole.DELIVERY_DRIVER.value:
             return jsonify({"error": get_translation("api.delivery.error.driver_role_required")}), 403
 
         delivery = Delivery.query.filter_by(id=delivery_id, delivery_person_id=current_user_id).first()
@@ -633,15 +645,20 @@ def request_route_optimization():
     try:
         current_user_id = get_jwt_identity()
         user = User.query.get(current_user_id)
-
-        role_value = user.role.value if hasattr(user.role, "value") else user.role
-        if not user or role_value != UserRole.DELIVERY_DRIVER.value:
+        if not user:
             return jsonify({"error": get_translation("api.delivery.error.driver_role_required")}), 403
 
-        # Trigger route optimization
+        role_value = user.role.value if hasattr(user.role, "value") else user.role
+        if role_value != UserRole.DELIVERY_DRIVER.value:
+            return jsonify({"error": get_translation("api.delivery.error.driver_role_required")}), 403
+
+        # Trigger route optimization. trigger="manual" marks this as an
+        # explicit driver request (route-UX plan 2026-08-11 §5.2 push gate):
+        # the default "auto" would be driver_initiated=False and the gate
+        # would sound a push for an optimization the driver just asked for.
         from business_app.tasks.delivery_tasks import optimize_driver_route_task
 
-        optimize_driver_route_task.delay(current_user_id)
+        optimize_driver_route_task.delay(current_user_id, trigger="manual")
 
         return jsonify({"message": get_translation("api.delivery.route_optimization_requested")})
 
@@ -657,9 +674,11 @@ def upload_delivery_photo():
     try:
         current_user_id = get_jwt_identity()
         user = User.query.get(current_user_id)
+        if not user:
+            return jsonify({"error": get_translation("api.delivery.error.driver_role_required")}), 403
 
         role_value = user.role.value if hasattr(user.role, "value") else user.role
-        if not user or role_value != UserRole.DELIVERY_DRIVER.value:
+        if role_value != UserRole.DELIVERY_DRIVER.value:
             return jsonify({"error": get_translation("api.delivery.error.driver_role_required")}), 403
 
         if "photo" not in request.files:

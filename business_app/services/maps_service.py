@@ -8,6 +8,8 @@ import requests
 from typing import Dict, Any, List, Optional, Tuple
 from flask import current_app
 
+from business_app.utils.distance_matrix import _OSRM_DEMO_BASE_URL
+from business_app.utils.distance_matrix import get_cached_matrix_source as _get_cached_matrix_source
 from business_app.utils.distance_matrix import get_distance_matrix as _get_distance_matrix
 from business_app.utils.distance_matrix import yandex_route_totals
 from business_app.utils.exceptions import (
@@ -45,7 +47,57 @@ class MapsService:
         self.yandex_routing_url = "https://api.routing.yandex.net/v2/route"
 
         self.osm_nominatim_url = "https://nominatim.openstreetmap.org"
-        self.osm_routing_url = "https://router.project-osrm.org/route/v1/driving"
+
+        # OSRM routing base. The tiering policy is NOT redecided here — it is
+        # the same one `distance_matrix.py` already owns: our self-hosted
+        # engine at OSRM_BASE_URL is the primary tier, and the public demo
+        # server is an emergency-only fallback behind
+        # OSRM_PUBLIC_FALLBACK_ENABLED (its usage policy forbids production
+        # use). This module used to hardcode the demo URL and honour neither
+        # setting, which sent the admin dispatch map's road geometry to a
+        # third-party box while our own OSRM sat there with the geometry
+        # dataset loaded. `None` means "no OSRM route tier is available" and
+        # `_osm_get_route` refuses rather than quietly reaching for the demo.
+        self.osm_routing_url = self._resolve_osrm_route_base()
+
+    @staticmethod
+    def _osrm_step_instruction(step: Dict[str, Any]) -> str:
+        """Compose readable step text from an OSRM maneuver.
+
+        OSRM deliberately ships NO `instruction` field — verified against the
+        live engine, `maneuver` holds exactly
+        `{bearing_after, bearing_before, location, modifier, type}`. Prose is
+        the client's job (upstream's own answer is the separate
+        osrm-text-instructions package). Reading `maneuver["instruction"]`
+        was therefore an unconditional KeyError that made this whole provider
+        branch raise on every call; it went unnoticed because production runs
+        MAPS_PROVIDER=google|yandex and nothing consumes `get_route()["steps"]`.
+
+        Deliberately plain English and not translated: `steps` currently has
+        no consumer, and inventing DB-backed translation keys for text nobody
+        renders would be worse than leaving it obvious. Route it through i18n
+        the day something actually shows it to a driver.
+        """
+        maneuver = step.get("maneuver") or {}
+        kind = (maneuver.get("type") or "").strip()
+        modifier = (maneuver.get("modifier") or "").strip()
+        name = (step.get("name") or "").strip()
+
+        head = " ".join(part for part in (kind, modifier) if part).strip()
+        if not head:
+            head = "continue"
+        text = f"{head} onto {name}" if name else head
+        return text[:1].upper() + text[1:]
+
+    @staticmethod
+    def _resolve_osrm_route_base() -> Optional[str]:
+        """Self-hosted first, public demo only if explicitly opted in."""
+        base = (current_app.config.get("OSRM_BASE_URL") or "").rstrip("/")
+        if base:
+            return f"{base}/route/v1/driving"
+        if current_app.config.get("OSRM_PUBLIC_FALLBACK_ENABLED"):
+            return f"{_OSRM_DEMO_BASE_URL}/route/v1/driving"
+        return None
 
     def geocode_address(self, address: str, city: str = "Tashkent") -> Dict[str, Any]:
         """
@@ -517,6 +569,15 @@ class MapsService:
         """
         return _get_distance_matrix(points, traffic=traffic, provider=self.provider, use_cache=use_cache)
 
+    def get_cached_matrix_source(self, points: List[Tuple[float, float]], traffic: bool = True) -> Optional[str]:
+        """Recover the provider that produced a full cache HIT for `points`.
+
+        Delegates to `business_app.utils.distance_matrix.get_cached_matrix_source`
+        (final review round, I3). Returns None when not recoverable (miss, or
+        a cache entry written before this fix) — callers must not guess.
+        """
+        return _get_cached_matrix_source(points, traffic=traffic)
+
     def _yandex_find_nearby(
         self, latitude: float, longitude: float, place_type: str, radius: int
     ) -> List[Dict[str, Any]]:
@@ -576,7 +637,18 @@ class MapsService:
         end_lon: float,
         waypoints: List[Tuple[float, float]] = None,
     ) -> Dict[str, Any]:
-        """Get route using OSRM"""
+        """Get route using OSRM (self-hosted; public demo only if opted in)."""
+        if not self.osm_routing_url:
+            # Refuse loudly rather than silently reaching for the public demo
+            # server. The one caller that renders this (the admin dispatch
+            # map) already degrades to straight dashed legs when geometry is
+            # unavailable, so a hard failure here is visible but harmless.
+            raise ExternalServiceError(
+                "No OSRM route endpoint available: set OSRM_BASE_URL to the "
+                "self-hosted engine, or set OSRM_PUBLIC_FALLBACK_ENABLED=true "
+                "to permit the public demo server."
+            )
+
         coords = f"{start_lon},{start_lat};{end_lon},{end_lat}"
 
         if waypoints:
@@ -609,7 +681,7 @@ class MapsService:
             "geometry": decode_polyline(route["geometry"]),
             "steps": [
                 {
-                    "instruction": step["maneuver"]["instruction"],
+                    "instruction": self._osrm_step_instruction(step),
                     "distance": f"{step['distance']} m",
                     "duration": f"{step['duration']} s",
                 }

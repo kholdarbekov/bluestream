@@ -6,7 +6,9 @@ These exercise the behavior wired into `mark_delivery_arrived`:
     so the route-optimizer's `last_completed` fallback finds them.
   - DeliveryPerson.current_location_* is refreshed when the live GPS is
     stale or missing, but preserved when it's still fresh.
-  - optimize_driver_route_task.delay is enqueued with trigger="arrival".
+  - optimize_driver_route_task.delay is NOT enqueued on ARRIVED (route-UX
+    plan 2026-08-11, spec §5.3): the driver is at the door and a re-solve
+    from that doorstep only churns the plan. DELIVERED keeps its trigger.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -238,10 +240,16 @@ class TestArrivalPositionCapture:
             assert history.location_lat == pytest.approx(dest_lat)
             assert history.location_lng == pytest.approx(dest_lng)
 
-    def test_mark_arrived_enqueues_route_optimization(
+    def test_mark_arrived_does_not_enqueue_route_optimization(
         self, app, db, driver_user, customer_user, driver_with_stale_location
     ):
-        """After commit, optimize_driver_route_task is enqueued with trigger='arrival'."""
+        """ARRIVED no longer enqueues optimize_driver_route_task (spec §5.3).
+
+        The driver is standing at the door; a re-solve from that doorstep
+        can't change anything useful and previously pushed a needless
+        'Route updated' message. DELIVERED (not covered here) keeps its
+        trigger — see tests/unit/test_route_trigger_arrived_removed.py.
+        """
         with app.app_context():
             addr = _make_address(db, customer_user.id, 41.3, 69.25)
             delivery = _make_in_transit_delivery(db, customer_user.id, driver_user.id, addr)
@@ -253,4 +261,4 @@ class TestArrivalPositionCapture:
                     delivery.id, actor_user_id=driver_user.id
                 )
 
-            mock_delay.assert_called_once_with(driver_user.id, "arrival")
+            mock_delay.assert_not_called()

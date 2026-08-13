@@ -149,6 +149,14 @@ class RedisKeyspace:
     def staff_bot_pool_suggestion_queue(telegram_id: int) -> str:
         return f"staff_bot:pool_suggestion_queue:{telegram_id}"
 
+    # Tier: CACHE. The staff bot's per-driver route-card state (card message
+    # id, shift date, view, alert throttle). Shared between the PTB handlers
+    # and the webhook server; survives bot restarts so the same card message
+    # keeps being edited. 48h TTL == Telegram's deleteMessage window.
+    @staticmethod
+    def staff_bot_route_card(telegram_id: int) -> str:
+        return f"staff_bot:route_card:{telegram_id}"
+
     # ---- Backend (business_app) ------------------------------------------
 
     # Tier: SECURITY. Per-provider webhook replay guard.
@@ -210,6 +218,7 @@ KEYSPACE_TIERS: dict[str, RedisUsageTier] = {
     'staff_bot_invite':                  RedisUsageTier.TIER_SECURITY,
     'staff_bot_active_flow':             RedisUsageTier.TIER_CACHE,
     'staff_bot_pool_suggestion_queue':   RedisUsageTier.TIER_CACHE,
+    'staff_bot_route_card':              RedisUsageTier.TIER_CACHE,
     'webhook_provider_rate':             RedisUsageTier.TIER_SECURITY,
     'webhook_replay_nonce':              RedisUsageTier.TIER_SECURITY,
     'inventory_reservation':             RedisUsageTier.TIER_RESERVATION,

@@ -302,11 +302,13 @@ class TestYandexPairwiseDistanceDuration:
         dm.logger.addHandler(caplog.handler)
         try:
             with app.app_context():
+                monkeypatch.setitem(app.config, "OSRM_BASE_URL", "")
+                monkeypatch.setitem(app.config, "LEGACY_MATRIX_PROVIDERS_ENABLED", True)
                 monkeypatch.setitem(app.config, "YANDEX_MAPS_API_KEY", "fake-key")
                 monkeypatch.setitem(app.config, "HERE_MAPS_API_KEY", None)
                 monkeypatch.setattr(dm, "request_with_retry", fake_request)
-                monkeypatch.setattr(dm, "_matrix_from_cache", lambda key: None)
-                monkeypatch.setattr(dm, "_matrix_to_cache", lambda key, mx, ttl: None)
+                monkeypatch.setattr(dm, "_cache_get_json", lambda key: None)
+                monkeypatch.setattr(dm, "_cache_set_json", lambda key, payload, ttl: None)
 
                 with caplog.at_level(logging.INFO, logger="business_app.utils.distance_matrix"):
                     matrix, source = dm.get_distance_matrix(

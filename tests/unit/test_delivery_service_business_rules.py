@@ -74,6 +74,51 @@ class TestDeliveryServiceBusinessRules:
         assert delivery.status == DeliveryStatus.SCHEDULED
         assert delivery.distance_km == pytest.approx(5.25, rel=1e-3)
 
+    def test_create_delivery_enqueues_only_the_evaluator_not_the_broadcast(
+        self, delivery_service, order_with_address, monkeypatch, db
+    ):
+        """route-UX plan 2026-08-11 Task 13 (spec §10 fix): create_delivery
+        must enqueue ONLY the diversion evaluator for a freshly-pooled
+        (unassigned) delivery -- the evaluator is itself responsible for the
+        broadcast fan-out (business_app/tasks/delivery_tasks.py). Re-adding
+        a second, direct `notify_staff_new_order.delay(order_id)` call here
+        reproduces the §10 bug where the best-fit driver gets two messages
+        with two Accept buttons for the same order. Prior to this test the
+        whole suite stayed green with that duplicate enqueue re-added."""
+        monkeypatch.setattr("business_app.services.delivery_service.calculate_distance", lambda *_a, **_k: 5.25)
+        monkeypatch.setattr(delivery_service, "_schedule_delivery_assignment", lambda *_a, **_k: None)
+
+        with patch(
+            "business_app.tasks.delivery_tasks.evaluate_pool_insertion_suggestions_task.delay"
+        ) as evaluator_delay, patch(
+            "business_app.tasks.staff_tasks.notify_staff_new_order.delay"
+        ) as broadcast_delay:
+            delivery = delivery_service.create_delivery(order_with_address.id, delivery_type=DeliveryType.STANDARD)
+
+        assert delivery.delivery_person_id is None
+        evaluator_delay.assert_called_once_with(delivery.id)
+        broadcast_delay.assert_not_called()
+
+    def test_create_delivery_falls_back_to_broadcast_when_evaluator_enqueue_fails(
+        self, delivery_service, order_with_address, monkeypatch, db
+    ):
+        """If enqueuing the evaluator itself fails (e.g. a broker hiccup),
+        create_delivery must fall back to broadcasting directly so the pool
+        order is never invisible."""
+        monkeypatch.setattr("business_app.services.delivery_service.calculate_distance", lambda *_a, **_k: 5.25)
+        monkeypatch.setattr(delivery_service, "_schedule_delivery_assignment", lambda *_a, **_k: None)
+
+        with patch(
+            "business_app.tasks.delivery_tasks.evaluate_pool_insertion_suggestions_task.delay",
+            side_effect=RuntimeError("broker down"),
+        ) as evaluator_delay, patch(
+            "business_app.tasks.staff_tasks.notify_staff_new_order.delay"
+        ) as broadcast_delay:
+            delivery = delivery_service.create_delivery(order_with_address.id, delivery_type=DeliveryType.STANDARD)
+
+        evaluator_delay.assert_called_once_with(delivery.id)
+        broadcast_delay.assert_called_once_with(order_with_address.id)
+
     def test_get_available_time_slots_filters_by_capacity(self, delivery_service, monkeypatch):
         monkeypatch.setattr(
             "business_app.services.delivery_service.get_time_slots",

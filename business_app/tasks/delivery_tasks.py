@@ -235,10 +235,35 @@ def optimize_driver_route_task(self, driver_id: int, trigger: str = "auto"):
         route = service.optimize_for_driver(driver_id, trigger=trigger)
 
         if route is None:
-            return {"optimized": False, "reason": "no_active_deliveries"}
+            # `last_skip_reason` is set only for the debounced-location_update
+            # path (route-UX plan §4.5); every other None cause (no active
+            # deliveries, no shared location) keeps the pre-existing generic
+            # label. Distinguishing the debounce case lets debounce rate be
+            # counted from task results instead of only from service logs.
+            # getattr, not a direct attribute access: some tests substitute a
+            # minimal service stub that only implements optimize_for_driver.
+            skip_reason = getattr(service, "last_skip_reason", None)
+            return {"optimized": False, "reason": skip_reason or "no_active_deliveries"}
 
+        # THE single push gate (route-UX plan 2026-08-11 §5.2):
+        #   sounded ⟺ head_changed AND NOT driver_initiated.
+        # Missing materiality fails SILENT — this is a noise-reduction
+        # project; never default to loud.
+        materiality = (route.extra_data or {}).get("materiality") or {}
+        sound = bool(materiality.get("head_changed")) and not bool(materiality.get("driver_initiated"))
         try:
-            notify_route_updated(driver_id)
+            # Stable across a `self.retry()` re-run (Celery keeps the same
+            # task id across retries of one dispatch), so a retried push
+            # dedups against the original on the bot side instead of
+            # minting a fresh event_id and double-sending (Task 8 review
+            # fix 1). Mirrors `staff_tasks.py`'s `f"...:{self.request.id}"`.
+            notify_route_updated(
+                driver_id,
+                sound=sound,
+                materiality=materiality,
+                trigger=trigger,
+                event_id=f"route_updated:{self.request.id}",
+            )
         except Exception as exc:  # noqa: BLE001
             logger.warning("route_updated webhook push failed driver=%s: %s", driver_id, exc)
 
@@ -246,8 +271,17 @@ def optimize_driver_route_task(self, driver_id: int, trigger: str = "auto"):
             "optimized": True,
             "driver_id": driver_id,
             "trigger": trigger,
+            "sounded": sound,
             "delivery_count": len(route.optimized_order or []),
             "total_distance_km": route.total_distance_km,
+            # TRAVEL + a flat per-stop service-time allowance, not travel
+            # alone (route_optimization_service.py::_sum_route_metrics, spec
+            # 8.4 — final review round, I5). No consumer of this task result
+            # renders it to a user today (every caller uses `.delay()` and
+            # discards the return value; only tests and Flower's task-result
+            # view read it), so the number itself is left as-is — this note
+            # exists so it isn't mistaken for pure drive time by whoever
+            # looks at it next.
             "estimated_duration_minutes": route.estimated_duration_minutes,
             "matrix_source": (route.extra_data or {}).get("matrix_source"),
         }
@@ -266,19 +300,21 @@ def optimize_driver_route_task(self, driver_id: int, trigger: str = "auto"):
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=30, time_limit=60, soft_time_limit=50)
 def evaluate_pool_insertion_suggestions_task(self, delivery_id: int):
-    """For a freshly-pooled delivery, find an active driver it can be slipped
-    into and push a suggestion to the staff bot.
+    """Diversion evaluator + single broadcast fan-out for a new pool delivery.
 
-    Skips silently if:
-      - Delivery is already assigned to a driver.
-      - No active driver's route can absorb it within the configured detour
-        thresholds.
+    For each active driver WITH a committed stop, computes the §7 diversion
+    gain; if the best gain clears ROUTE_DIVERSION_MIN_GAIN_MINUTES, that ONE
+    driver gets the targeted offer. It then ALWAYS enqueues the new-order
+    broadcast, excluding the diverted driver — so nobody ever receives two
+    Accept buttons for the same order (§10 duplicate-message bug). Diversion
+    failures degrade to a full broadcast, never to silence.
     """
     try:
         from flask import current_app
         from business_app.models.delivery import DeliveryPerson
         from business_app.services.route_optimization_service import RouteOptimizationService
         from business_app.utils.bot_webhook import notify_pool_insertion_suggestion
+        from business_app.tasks.staff_tasks import notify_staff_new_order
 
         delivery = Delivery.query.get(delivery_id)
         if not delivery:
@@ -286,58 +322,90 @@ def evaluate_pool_insertion_suggestions_task(self, delivery_id: int):
         if delivery.delivery_person_id is not None:
             return {"suggested": False, "reason": "already_assigned"}
 
-        max_km = float(current_app.config.get("ROUTE_INSERTION_MAX_DETOUR_KM", 5.0))
-        max_min = float(current_app.config.get("ROUTE_INSERTION_MAX_DETOUR_MIN", 15.0))
-
-        # Candidate drivers: active + available + currently working hours.
-        candidates = DeliveryPerson.query.filter(
-            DeliveryPerson.is_active.is_(True),
-            DeliveryPerson.is_available.is_(True),
-        ).all()
-        candidates = [c for c in candidates if c.is_working_now]
-        if not candidates:
-            return {"suggested": False, "reason": "no_active_drivers"}
-
-        service = RouteOptimizationService()
         best: Dict[str, Any] = {}
-        for cand in candidates:
-            cost = service.compute_insertion_cost(cand.user_id, delivery_id)
-            if cost is None:
-                continue
-            if cost["delta_km"] > max_km or cost["delta_minutes"] > max_min:
-                continue
-            if not best or cost["delta_km"] < best["delta_km"]:
-                best = {
-                    "driver_id": cand.user_id,
-                    "delta_km": cost["delta_km"],
-                    "delta_minutes": cost["delta_minutes"],
-                    "position": cost["position"],
-                }
-
-        if not best:
-            return {"suggested": False, "reason": "no_fit_within_thresholds"}
-
-        order_no = delivery.order.order_number if delivery.order else str(delivery.order_id)
         try:
-            notify_pool_insertion_suggestion(
-                driver_id=best["driver_id"],
-                delivery_id=delivery_id,
-                order_no=order_no,
-                detour_km=round(best["delta_km"], 1),
-                detour_minutes=round(best["delta_minutes"]),
+            min_gain = float(current_app.config.get("ROUTE_DIVERSION_MIN_GAIN_MINUTES", 8.0))
+            # Candidate drivers: active + available + currently working hours
+            # + not muted + account active -- the SAME filter set the
+            # broadcast applies (staff_tasks.py's notify_staff_new_order),
+            # so a muted/deactivated driver can't receive the targeted push
+            # either (review fix 6: this is now the only targeted push).
+            candidates = (
+                DeliveryPerson.query.join(User, User.id == DeliveryPerson.user_id)
+                .filter(
+                    DeliveryPerson.is_active.is_(True),
+                    DeliveryPerson.is_available.is_(True),
+                    DeliveryPerson.notifications_muted.is_(False),
+                    User.status == "active",
+                )
+                .all()
             )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("pool_insertion_suggestion webhook push failed: %s", exc)
+            candidates = [c for c in candidates if c.is_working_now]
+            service = RouteOptimizationService()
+            for cand in candidates:
+                gain_info = service.compute_diversion_gain(cand.user_id, delivery_id)
+                if gain_info is None or gain_info["gain_minutes"] < min_gain:
+                    continue
+                if not best or gain_info["gain_minutes"] > best["gain_minutes"]:
+                    best = {"driver_id": cand.user_id, **gain_info}
+        except Exception as exc:  # noqa: BLE001 — degrade to full broadcast
+            logger.error("diversion eval failed for delivery %s: %s", delivery_id, exc)
+            best = {}
 
-        logger.info(
-            "insertion_suggested delivery=%s driver=%s delta_km=%.2f delta_min=%.1f position=%d",
-            delivery_id,
-            best["driver_id"],
-            best["delta_km"],
-            best["delta_minutes"],
-            best["position"],
-        )
-        return {"suggested": True, **best}
+        # Only exclude the driver from the broadcast once the targeted push
+        # actually reached them (review fix 1): `_send_staff_bot_webhook`
+        # never raises, it returns False on a non-2xx/rate-limit/connection
+        # failure, so blindly excluding on `best` alone could leave the
+        # single best-fit driver with NEITHER message.
+        diverted_driver_id = None
+        try:
+            if best:
+                order_no = delivery.order.order_number if delivery.order else str(delivery.order_id)
+                sent = False
+                try:
+                    sent = notify_pool_insertion_suggestion(
+                        driver_id=best["driver_id"],
+                        delivery_id=delivery_id,
+                        order_no=order_no,
+                        detour_km=0.0,
+                        detour_minutes=round(best["gain_minutes"]),
+                        gain_minutes=round(best["gain_minutes"], 1),
+                        committed_order_number=best["committed_order_number"],
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("diversion offer webhook push failed: %s", exc)
+                if sent:
+                    diverted_driver_id = best["driver_id"]
+                    logger.info(
+                        "diversion_offered delivery=%s driver=%s gain_min=%.1f vs=%s",
+                        delivery_id,
+                        best["driver_id"],
+                        best["gain_minutes"],
+                        best["committed_order_number"],
+                    )
+                else:
+                    logger.warning(
+                        "diversion offer not delivered delivery=%s driver=%s -- " "falling back to full broadcast",
+                        delivery_id,
+                        best["driver_id"],
+                    )
+        finally:
+            # ALWAYS hand off to the broadcast (review fix 4): the eval loop
+            # above makes one real matrix call per candidate driver inside a
+            # 50s soft time limit, so a worker kill or any unexpected
+            # exception in the offer-push block must never strand this
+            # enqueue -- a pool order must never go undiscoverable. The
+            # diverted driver is excluded only when they actually received
+            # the targeted offer, so exactly one message per driver carries
+            # an Accept button.
+            try:
+                notify_staff_new_order.delay(delivery.order_id, exclude_driver_user_id=diverted_driver_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("new-order broadcast enqueue failed for order %s: %s", delivery.order_id, exc)
+
+        if best:
+            return {"suggested": True, **best}
+        return {"suggested": False, "reason": "no_diversion_gain"}
 
     except Exception as exc:
         logger.error(f"Pool insertion eval failed for delivery {delivery_id}: {exc}")

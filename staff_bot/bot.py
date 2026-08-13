@@ -163,6 +163,15 @@ class StaffBot:
             from staff_bot.utils import flow_state
             flow_state.configure(self.token_manager.redis if self.token_manager._connected else None)
 
+            # Route-card state (Plan 3): same Redis, same connected/None
+            # fallback as flow_state above -- the card must keep editing
+            # the SAME message across a bot restart, which requires Redis.
+            # Redis is the ONLY store: without it the module degrades to
+            # "no card state", exactly like flow_state, rather than keeping
+            # a second in-process copy that could disagree with Redis.
+            from staff_bot.utils import route_card_state
+            route_card_state.configure(self.token_manager.redis if self.token_manager._connected else None)
+
             # Build Telegram application
             request = ResilientHTTPXRequest(
                 connection_pool_size=config.telegram.request_connection_pool_size,
@@ -423,6 +432,7 @@ class StaffBot:
 
             # Active deliveries
             CallbackQueryHandler(active_delivery_handler.show_active_deliveries, pattern="^staff_active_deliveries$"),
+            CallbackQueryHandler(active_delivery_handler.switch_route_view, pattern="^staff_route_view_(next|all)$"),
             CallbackQueryHandler(active_delivery_handler.view_active_delivery, pattern=r"^staff_view_active_\d+$"),
             CallbackQueryHandler(active_delivery_handler.navigate_to_address, pattern=r"^staff_navigate_\d+$"),
             CallbackQueryHandler(active_delivery_handler.optimize_routes, pattern="^staff_optimize_routes$"),

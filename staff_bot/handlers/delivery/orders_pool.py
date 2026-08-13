@@ -382,13 +382,23 @@ class OrdersPoolHandler(BaseHandler):
                 parse_mode='HTML'
             )
 
-            # Driver location is the single trigger for re-optimization. We
-            # always prompt for a fresh share after an accept — even when
-            # the previous share was "fresh" — because the driver has likely
-            # moved since then and we want the new route based on their
-            # current position, not their position N minutes ago. Once the
-            # location update arrives, the backend's POST /me/location
-            # endpoint re-runs optimization on the new start point.
+            # Driver location is the single trigger for re-optimization from
+            # THIS flow (pool self-accept does not itself enqueue an
+            # optimize). We always prompt for a fresh share after an accept
+            # — even when the previous share was "fresh" — because the
+            # driver has likely moved since then and we want the new route
+            # based on their current position, not their position N minutes
+            # ago. Once the location update arrives, the backend's
+            # POST /me/location endpoint ENQUEUES a (debounced) route
+            # re-optimization off its request thread — it does not run it
+            # inline. The set-changed guard in
+            # RouteOptimizationService._should_debounce_location_trigger's
+            # caller (business_app/services/route_optimization_service.py)
+            # is what stops this share from being debounced away just
+            # because a `delivery` solve happened moments earlier at the
+            # same spot: the just-accepted stop makes the active set differ
+            # from what's already published, so the debounce is bypassed and
+            # this share always re-solves.
             try:
                 prompt = i18n.get('staff.delivery.share_location_after_accept', language)
                 button_text = i18n.get('staff.delivery.share_location_button', language)

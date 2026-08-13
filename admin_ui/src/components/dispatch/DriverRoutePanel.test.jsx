@@ -109,6 +109,20 @@ describe('DriverRoutePanel', () => {
     expect(screen.getByText(/18\.2 km/)).toBeInTheDocument();
   });
 
+  // Final review round, I5: `estimated_duration_minutes` is travel + a flat
+  // per-stop service-time allowance, not travel alone (route_optimization_
+  // service.py::_sum_route_metrics). The displayed number must stay
+  // untouched (re-deriving it in JS would violate the backend-decides-once
+  // rule), but a fresh (non-stale) route must explain what's included via
+  // the tooltip rather than let "62 min" read as pure drive time.
+  it('explains that the duration includes per-stop service time when metrics are fresh', async () => {
+    render(<DriverRoutePanel {...baseProps} route={{ ...baseProps.route, metrics_stale: false }} />);
+    // The visible number is unchanged.
+    expect(screen.getByText(/62 min/)).toBeInTheDocument();
+    fireEvent.mouseEnter(screen.getByText(/62 min/));
+    expect(await screen.findByText(/stop time/i)).toBeInTheDocument();
+  });
+
   // Not part of the brief's required suite, but the move control sits in the
   // same antd-portal risk category the pool Popconfirm turned out to be in
   // (Step 3's note calls out both `Popconfirm`/`Dropdown` together) — worth

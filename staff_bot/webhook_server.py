@@ -228,6 +228,79 @@ async def health_handler(_request):
     }, status=status_code)
 
 
+async def handle_route_updated_payload(server, data: dict) -> bool:
+    """Apply one parsed `/internal/route-updated` payload.
+
+    Returns True iff this call caused a new observable action -- a card
+    was actually refreshed (create or edit), or a sounded push was
+    attempted (Telegram-side failure there is swallowed below, matching
+    existing best-effort semantics -- "attempted" still counts). Returns
+    False when the call was a genuine no-op: the event was already
+    deduped, or `update_card_for_driver` itself determined nothing should
+    change (no cached token, borrowed card, API failure). The caller
+    (`route_updated_handler`) does not currently branch on this, but a
+    meaningful value beats an unconditional True that can never be wrong
+    (fix round 1, M4) -- callers and tests can tell "something happened"
+    from "this call was inert".
+
+    Callers must have already validated `data['telegram_id']` is present
+    and int-coercible -- see `route_updated_handler`. This function assumes
+    it.
+
+    THE GATE IS PLAN 1'S: `data["sound"]` is the backend's already-computed
+    verdict on whether this update is worth interrupting the driver for.
+    This function reads that field and MUST NOT re-derive it from
+    `head_changed` / `set_changed` / `sequence_changed` / `driver_initiated`
+    -- re-deciding materiality here would put the same rule in two places
+    (CLAUDE.md SSOT). See `docs/*route-ux*` Plan 1 for the gate itself.
+
+    sound=False (the common case, and the whole point of the user's original
+    complaint -- "your address is updated" on every arrival is noise): NO
+    chat message, ever. The driver's route card quietly becomes correct via
+    `route_card.update_card_for_driver` (Task 5), which edits the existing
+    card in place -- `editMessageText` produces no notification -- or, on
+    first contact for that driver, sends + pins exactly one silent card
+    (`disable_notification=True` on both calls; see `route_card._create_card`).
+    Checked BEFORE dedup so a silent event never consumes the dedup slot of
+    a later sounded one -- the bug shape `test_silent_then_sounded_is_not_deduped_away`
+    guards: a constant-key dedup fallback swallowing a genuine sounded push.
+    Trade-off accepted for that ordering (fix round 1, M3): a silent event
+    is never deduped at all, so a backend retry of the SAME silent event
+    costs one extra `GET /delivery/active` round trip (idempotent -- the
+    card content-signature check skips the actual Telegram edit when
+    nothing changed). Cheaper than the alternative: `_is_duplicate_event`'s
+    fallback key is a *constant* per driver, so checking it before the
+    sound gate would let one silent push swallow every later push --
+    including genuine sounded ones -- for the full 24h dedup TTL during a
+    Redis outage.
+
+    sound=True or missing (an older backend that predates the `sound` field
+    keeps today's behaviour, fail-open toward sounding): Task 9's restyled,
+    capped `route_card.send_head_change_alert` -- the ONLY sounded message
+    this plan sends. It refreshes the card alongside the alert (the alert is
+    a pointer, not a data carrier -- Plan 3's Behaviour note), throttled by
+    `ROUTE_ALERT_MIN_INTERVAL_SECONDS`: outside the window it pings, inside
+    it a newest-supersedes silent alert replaces the previous one. Dedup is
+    still checked first here (unlike the silent branch above) -- a sounded
+    push is exactly the kind of driver-visible event a backend retry must
+    not double-send.
+    """
+    from staff_bot.handlers.delivery import route_card
+
+    telegram_id = int(data['telegram_id'])
+    driver_id = data.get('driver_id')
+    event_id = data.get('event_id')
+
+    if not data.get('sound', True):
+        return await route_card.update_card_for_driver(server.bot_app, telegram_id)
+
+    if await server._is_duplicate_event(event_id, f"route_updated:{telegram_id}:{driver_id}"):
+        return False
+
+    await route_card.send_head_change_alert(server.bot_app, telegram_id=telegram_id)
+    return True
+
+
 class StaffWebhookServer:
     """Internal webhook server for staff bot notifications"""
 
@@ -664,10 +737,22 @@ class StaffWebhookServer:
         """Notify driver that their optimized route changed.
         POST /internal/route-updated
 
-        Best-effort ping; the driver receives a small toast directing them to
-        reopen "My active deliveries" to see the new sequence. We deliberately
-        avoid pushing the full sorted list here — the bot's existing list view
-        is the source of truth and re-fetches on open.
+        Best-effort. Signature/rate-limit/existence guards live here; the
+        parsed payload is delegated to `handle_route_updated_payload` (a
+        free function) so the sound-gate / dedup / card-refresh branching is
+        unit-testable without an aiohttp request. See that function's
+        docstring for the sounded vs. silent split.
+
+        Every failure from THIS POINT ON (payload handling, or an
+        unrecognized exception) still returns 200 (fix round 1, M5,
+        confirmed deliberate): this is a fire-and-forget backend->bot ping
+        with no caller that acts on failure, so a 5xx here would only
+        trigger the backend's webhook retry policy -- re-attempting an
+        already-lost cause and, worse, risking a second driver-visible send
+        on retry for the sounded branch. The malformed-input checks below
+        are the one exception: those ARE surfaced as 4xx, because a
+        malformed payload is a backend bug worth making loud, not a
+        recipient-side condition retries would fix.
         """
         try:
             if not await verify_webhook_signature(request):
@@ -681,34 +766,38 @@ class StaffWebhookServer:
             data, parse_error = await _parse_json_body(request)
             if parse_error:
                 return parse_error
-            telegram_id = data.get('telegram_id')
-            driver_id = data.get('driver_id')
-            event_id = data.get('event_id')
 
-            if not telegram_id:
+            raw_telegram_id = data.get('telegram_id')
+            if not raw_telegram_id:
                 return web.json_response({'success': False, 'message': 'Missing telegram_id'}, status=400)
-
-            if await self._is_duplicate_event(event_id, f"route_updated:{telegram_id}:{driver_id}"):
-                return web.json_response({'success': True, 'message': 'Already processed'})
-
-            language = await i18n.get_user_language(int(telegram_id))
-            from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-            keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton(
-                    f"🚚 {i18n.get('staff.menu.active_deliveries', language)}",
-                    callback_data='staff_active_deliveries',
-                )
-            ]])
             try:
-                await self.bot_app.bot.send_message(
-                    chat_id=int(telegram_id),
-                    text=f"🔄 {i18n.get('staff.delivery.route_updated_toast', language)}",
-                    reply_markup=keyboard,
+                int(raw_telegram_id)
+            except (TypeError, ValueError):
+                # fix round 1, M1: this used to reach `int(data['telegram_id'])`
+                # deep inside `handle_route_updated_payload`, where the
+                # best-effort try/except below silently turned a malformed
+                # payload into a 200 -- hiding a genuine backend bug. Caught
+                # here, before that swallow, as an explicit 4xx instead.
+                return web.json_response(
+                    {'success': False, 'message': 'Malformed telegram_id'}, status=400
                 )
-            except Exception as e:
-                logger.warning(f"route_updated send failed for {telegram_id}: {e}")
 
-            return web.json_response({'success': True, 'message': 'Route-updated ping sent'})
+            try:
+                await handle_route_updated_payload(self, data)
+            except Exception as e:  # noqa: BLE001 -- best-effort ping; a
+                # failure applying the update must not turn into a 500 the
+                # backend would retry (and potentially double-notify on retry).
+                # exc_info=True (fix round 2, item 5): this branch now covers
+                # the sounded alert too, a much larger blast radius than the
+                # silent card-only refresh it used to guard alone -- a bare
+                # message with no traceback made a real regression here
+                # invisible in the logs while still returning 200.
+                logger.warning(
+                    f"route_updated handling failed for {data.get('telegram_id')}: {e}",
+                    exc_info=True,
+                )
+
+            return web.json_response({'success': True, 'message': 'Route-updated handled'})
         except Exception as e:
             logger.error(f"Error in route_updated_handler: {e}", exc_info=True)
             return web.json_response({'success': False, 'message': 'Internal server error'}, status=500)
@@ -735,6 +824,12 @@ class StaffWebhookServer:
             order_no = data.get('order_no', '')
             detour_km = data.get('detour_km', 0)
             detour_min = data.get('detour_minutes', 0)
+            # Plan 1's diversion-offer fields (§7). Read defensively — an
+            # older backend that hasn't shipped them yet simply omits them,
+            # and `offers.build_offer` already treats that as the plain
+            # shape (deploy-skew tolerance).
+            gain_minutes = data.get('gain_minutes')
+            committed_order_number = data.get('committed_order_number')
             event_id = data.get('event_id')
 
             if not telegram_id or not delivery_id:
@@ -756,6 +851,8 @@ class StaffWebhookServer:
                 'order_no': order_no,
                 'detour_km': detour_km,
                 'detour_minutes': detour_min,
+                'gain_minutes': gain_minutes,
+                'committed_order_number': committed_order_number,
             }
             if active_flow:
                 queued = await flow_state.queue_pool_suggestion(int(telegram_id), payload)
@@ -772,34 +869,22 @@ class StaffWebhookServer:
                 })
 
             language = await i18n.get_user_language(int(telegram_id))
-            text = i18n.get(
-                'staff.delivery.pool_insertion_offer',
-                language,
-                order_no=order_no,
-                km=f"{float(detour_km):.1f}",
-                minutes=int(round(float(detour_min))),
-            )
 
-            from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-            # Accept reuses the existing confirm-accept callback to share the
-            # same downstream flow and authorization checks.
-            keyboard = InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton(
-                        f"✅ {i18n.get('staff.delivery.accept', language)}",
-                        callback_data=f"staff_confirm_accept_{int(delivery_id)}",
-                    ),
-                    InlineKeyboardButton(
-                        f"❌ {i18n.get('staff.cancel', language)}",
-                        callback_data=f"staff_decline_suggestion_{int(delivery_id)}",
-                    ),
-                ]
-            ])
+            # SSOT: staff_bot/utils/offers.py is the ONE place that decides
+            # the offer's text + keyboard (plain pool-insertion vs. diversion),
+            # shared with the deferred-drain path in flow_state.clear_and_drain.
+            from staff_bot.utils import offers
+
+            text, keyboard = offers.build_offer(payload, language)
+            # Rules that must hold (Task 10 brief): disable_notification=True
+            # on every non-urgent send — only an uncapped (sent live, not
+            # deferred) diversion offer is time-critical enough to ping.
             try:
                 await self.bot_app.bot.send_message(
                     chat_id=int(telegram_id),
                     text=text,
                     reply_markup=keyboard,
+                    disable_notification=not offers.is_diversion_offer(payload),
                 )
             except Exception as e:
                 logger.warning(f"pool_insertion send failed for {telegram_id}: {e}")

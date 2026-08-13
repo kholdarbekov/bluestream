@@ -33,6 +33,16 @@ class DeliveryService:
     def __init__(self):
         self.default_delivery_fee = current_app.config["DEFAULT_DELIVERY_FEE"]
         self.max_delivery_distance = current_app.config.get("DELIVERY_RADIUS_KM", 50)
+        # NOT the same thing as WAREHOUSE_LATITUDE/LONGITUDE (route
+        # optimization's last-resort start anchor, spec 8.5), even though
+        # they happened to share a value before the warehouse config
+        # existed. The warehouse sits at the southern edge of
+        # TASHKENT_POLYGON coverage (~48.8km to the farthest coverage
+        # vertex, against DELIVERY_RADIUS_KM=50 — ~1.2km of margin), so a
+        # delivery-range circle centred there would put northern-Tashkent
+        # addresses on the edge of rejection and wouldn't approximate the
+        # coverage polygon at all. This distance-fee origin must stay the
+        # geographic centre, not the depot.
         self.store_latitude = TASHKENT_COORDINATES["latitude"]
         self.store_longitude = TASHKENT_COORDINATES["longitude"]
 
@@ -109,30 +119,27 @@ class DeliveryService:
         except Exception as exc:  # noqa: BLE001
             current_app.logger.warning("Failed to schedule auto-assign for delivery %s: %s", delivery.id, exc)
 
-        # Broadcast the new pool order to every eligible driver with an
-        # inline Accept/Decline UX. First driver to Accept wins (server-side
-        # row lock in StaffService.accept_order returns 409 to the rest).
+        # New pool order fan-out (route-UX plan 2026-08-11, Task 13).
+        # ONE enqueue: the evaluator decides whether one driver gets the
+        # targeted §7 diversion offer, then itself enqueues the broadcast to
+        # everyone else. Enqueuing both here produced two Accept buttons for
+        # the diverted driver (§10 duplicate-message bug).
         if delivery.delivery_person_id is None:
-            try:
-                from ..tasks.staff_tasks import notify_staff_new_order
-
-                notify_staff_new_order.delay(order_id)
-            except Exception as exc:  # noqa: BLE001
-                current_app.logger.warning("Failed to enqueue new-order broadcast for order %s: %s", order_id, exc)
-
-            # Also evaluate whether this delivery is a particularly cheap
-            # detour for one specific active driver — if so, that driver
-            # gets an additional targeted suggestion message with detour
-            # info (+km, +min). The broadcast above gives everyone visibility;
-            # this targeted message just adds context for the best fit.
             try:
                 from ..tasks.delivery_tasks import evaluate_pool_insertion_suggestions_task
 
                 evaluate_pool_insertion_suggestions_task.delay(delivery.id)
             except Exception as exc:  # noqa: BLE001
-                current_app.logger.warning(
-                    "Failed to enqueue pool insertion eval for delivery %s: %s", delivery.id, exc
-                )
+                # The evaluator is also the broadcast's producer — if we cannot
+                # enqueue it, fall back to broadcasting directly so the pool
+                # order is never invisible.
+                current_app.logger.warning("Failed to enqueue pool eval for delivery %s: %s", delivery.id, exc)
+                try:
+                    from ..tasks.staff_tasks import notify_staff_new_order
+
+                    notify_staff_new_order.delay(order_id)
+                except Exception as exc2:  # noqa: BLE001
+                    current_app.logger.warning("Failed to enqueue new-order broadcast for order %s: %s", order_id, exc2)
 
         return delivery
 
@@ -382,18 +389,6 @@ class DeliveryService:
 
         self._enqueue_delivery_status_notification(history.id)
 
-        # Re-optimize remaining stops from the new origin (best-effort).
-        if delivery.delivery_person_id is not None:
-            try:
-                from business_app.tasks.delivery_tasks import optimize_driver_route_task
-
-                optimize_driver_route_task.delay(delivery.delivery_person_id, "arrival")
-            except Exception as exc:  # noqa: BLE001 — non-critical
-                current_app.logger.warning(
-                    "post-arrival route optimization enqueue failed for driver=%s: %s",
-                    delivery.delivery_person_id,
-                    exc,
-                )
         return delivery
 
     def calculate_delivery_fee(self, latitude: float, longitude: float, order_total: int) -> int:

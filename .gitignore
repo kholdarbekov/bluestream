@@ -35,6 +35,7 @@ admin_credentials.txt
 
 # Environment files
 .env*
+!.env.example
 
 telegram_bot/.env
 logs/
@@ -42,3 +43,8 @@ uploads/
 docs/audit/
 docs/operations/
 backups/
+
+# Self-hosted OSRM routing data (prepared by scripts/prepare_osrm_data.sh,
+# shipped to prod via rsync — never committed, ~1.5 GB)
+osrm_data/
+osrm_data_v5_backup/

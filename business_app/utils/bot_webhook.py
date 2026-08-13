@@ -256,20 +256,60 @@ def _resolve_driver_telegram_id(driver_id: int) -> Optional[int]:
         return None
 
 
-def notify_route_updated(driver_id: int) -> bool:
-    """Tell the staff bot to refresh the driver's open active-deliveries view."""
+def notify_route_updated(
+    driver_id: int,
+    *,
+    sound: bool = True,
+    materiality: Optional[Dict[str, Any]] = None,
+    trigger: Optional[str] = None,
+    event_id: Optional[str] = None,
+) -> bool:
+    """Tell the staff bot the driver's optimized route changed.
+
+    `sound` is the SINGLE materiality gate verdict (route-UX plan 2026-08-11
+    §5.2), decided by the caller from the persisted materiality — the bot only
+    reads it. Direct dispatch callers (RouteEditService) keep the default
+    True: a dispatch reorder is exactly the sounded case.
+
+    `materiality` is the real verdict dict (`RouteOptimizationService.
+    compute_materiality`), or None when the caller genuinely has none to
+    report (e.g. a hand-authored sequence save that never re-solved). Passing
+    None OMITS the head_changed/set_changed/sequence_changed/driver_initiated
+    keys from the payload entirely — never fabricate them as False, which
+    would read as "verdict says nothing changed" rather than "no verdict was
+    computed" (Plan 3's route card reads head_changed directly).
+
+    `event_id`: pass an explicit id when the caller has something stable to
+    key retries on (mirrors `staff_tasks.py`'s `f"...:{self.request.id}"`
+    pattern — see `optimize_driver_route_task`, whose Celery task id survives
+    a `self.retry()` re-run so the retried push dedups against the original
+    instead of double-sending). Defaults to a fresh random id per call for
+    callers with no such handle — the four `RouteEditService` paths are
+    synchronous Flask request handlers with no retry wrapper, so a random id
+    is correct for them: every call really is a distinct event.
+    """
     telegram_id = _resolve_driver_telegram_id(driver_id)
     if telegram_id is None:
         logger.info("Skipping route-updated push: driver %s has no telegram_id", driver_id)
         return False
-    return _send_staff_bot_webhook(
-        "/internal/route-updated",
-        {
-            "driver_id": driver_id,
-            "telegram_id": telegram_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        },
-    )
+    payload: Dict[str, Any] = {
+        "driver_id": driver_id,
+        "telegram_id": telegram_id,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "event_id": event_id or f"route_updated:{uuid.uuid4().hex}",
+        "sound": bool(sound),
+        "trigger": trigger,
+    }
+    if materiality is not None:
+        payload.update(
+            {
+                "head_changed": bool(materiality.get("head_changed", False)),
+                "set_changed": bool(materiality.get("set_changed", False)),
+                "sequence_changed": bool(materiality.get("sequence_changed", False)),
+                "driver_initiated": bool(materiality.get("driver_initiated", False)),
+            }
+        )
+    return _send_staff_bot_webhook("/internal/route-updated", payload)
 
 
 def notify_pool_insertion_suggestion(
@@ -279,8 +319,18 @@ def notify_pool_insertion_suggestion(
     order_no: str,
     detour_km: float,
     detour_minutes: float,
+    gain_minutes: Optional[float] = None,
+    committed_order_number: Optional[str] = None,
 ) -> bool:
-    """Push a pool-order insertion suggestion to a specific driver's chat."""
+    """Push a pool-order insertion suggestion to a specific driver's chat.
+
+    `gain_minutes`/`committed_order_number` are the §7 diversion-offer fields
+    (route-UX plan 2026-08-11, Task 13): how many minutes are saved by going
+    here first, and which already-committed order it would be diverting from.
+    `detour_minutes` still carries the rounded gain so the current bot copy
+    renders a number unchanged; Plan 3 restyles the copy to read these two
+    fields directly.
+    """
     telegram_id = _resolve_driver_telegram_id(driver_id)
     if telegram_id is None:
         logger.info("Skipping pool-insertion push: driver %s has no telegram_id", driver_id)
@@ -294,6 +344,8 @@ def notify_pool_insertion_suggestion(
             "order_no": order_no,
             "detour_km": detour_km,
             "detour_minutes": detour_minutes,
+            "gain_minutes": gain_minutes,
+            "committed_order_number": committed_order_number,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         },
     )

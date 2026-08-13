@@ -5,7 +5,14 @@ Handles every Telegram location update from a delivery driver — both
 one-shot location shares and live-location streams. Forwards the
 coordinates to the backend's driver-level endpoint
 (`POST /api/v1/staff/delivery/me/location`), which updates the driver's
-profile location and re-runs route optimization in one round-trip.
+profile location and enqueues a (debounced) route re-optimization off the
+request thread. The response returned to us reflects the LAST persisted
+sequence, not one computed from this share — the optimizer runs
+asynchronously and, if it produces a new sequence, pushes a silent
+`route-updated` webhook that refreshes any open "active deliveries" view.
+We never poll or wait for that; the driver's next tap of "My active
+deliveries" (a fresh `GET /delivery/active`) is what shows the update if
+the webhook hasn't landed yet.
 
 Important design notes:
   - Driver location is a **driver-level** state, not a per-delivery one.
@@ -19,11 +26,12 @@ Important design notes:
     accepting a location is what created the bug we're fixing here.
 """
 import logging
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from staff_bot.handlers.base import BaseHandler
 from staff_bot.api_client import api_client
+from staff_bot.keyboards.menu import MenuKeyboards
 from staff_bot.permissions import require_auth, require_delivery_driver
 from staff_bot.i18n import i18n
 
@@ -39,7 +47,11 @@ class LocationHandler(BaseHandler):
         """Handle every incoming location: one-shot share *or* live-location
         stream. We unconditionally forward to the backend's driver-level
         endpoint and then send a brief confirmation message with a button
-        to view the freshly optimized active deliveries list.
+        to view the active deliveries list. The re-optimization the share
+        triggers runs off-thread and debounced on the backend, so the list
+        behind that button may still show the pre-share order for a moment;
+        tapping it issues a fresh `GET /delivery/active` rather than reusing
+        anything cached from this request.
 
         Live-location updates arrive as `update.edited_message.location` (the
         same message gets edited each time). For those we only ACK the very
@@ -102,12 +114,21 @@ class LocationHandler(BaseHandler):
                         callback_data="staff_active_deliveries",
                     )
                 ]])
-                # Drop the "Share location" reply keyboard now that we have it.
+                # Re-attach the driver's persistent main-menu reply keyboard
+                # here instead of removing it. The location-request keyboard
+                # (CommonKeyboards.location_request) is `one_time_keyboard`,
+                # which only auto-hides *itself* on use — it does not bring
+                # back whatever keyboard was showing before it, so without
+                # this the driver's recallable keyboard stays the stale
+                # "Share Location / Cancel" one rather than the main menu
+                # (route-UX plan 2026-08-11 Task 15; recovery used to require
+                # discovering /menu).
+                staff_roles = context.user_data.get('staff_roles', [])
                 msg = update.message or update.edited_message
                 if msg is not None:
                     await msg.reply_text(
                         ack_text,
-                        reply_markup=ReplyKeyboardRemove(),
+                        reply_markup=MenuKeyboards.main_menu(language, staff_roles),
                         parse_mode='HTML',
                     )
                     await msg.reply_text(

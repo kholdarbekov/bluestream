@@ -40,7 +40,8 @@ def _haversine_matrix(self, points, traffic=True, use_cache=True):
             else:
                 km = calculate_distance(pi[0], pi[1], pj[0], pj[1])
                 matrix[(i, j)] = {"distance_km": km, "duration_minutes": km * 2.4}
-    return matrix, "haversine"
+    # label: a real-road source — Task 7 suppresses ETA fields under "haversine"
+    return matrix, "osrm_selfhosted"
 
 
 @pytest.fixture
@@ -305,18 +306,16 @@ class TestUpdateMyLocation:
         )
         assert response.status_code == 400
 
-    def test_updates_driver_location_runs_opt_and_returns_sorted_payload(
+    def test_updates_location_enqueues_optimize_and_returns_payload(
         self, app, client, db, driver, customer, monkeypatch
     ):
-        """End-to-end happy path. Driver has no DeliveryPerson row at all
-        when the request hits — the endpoint must still update the
-        driver's location, run optimization on the new start point, and
-        return the freshly-sorted active-deliveries payload."""
+        """The endpoint persists the location, ENQUEUES the debounced
+        re-optimization (plan §4.5 — never optimizes on the request thread),
+        and returns the active-deliveries payload sorted by the last
+        persisted route."""
+        from unittest.mock import patch
         from business_app.models.delivery import DeliveryPerson
 
-        # The endpoint requires an existing DeliveryPerson profile (admins
-        # provision drivers before they go online), but at this moment the
-        # driver hasn't shared any location yet.
         person = DeliveryPerson(
             user_id=driver.id,
             full_name="x",
@@ -338,25 +337,69 @@ class TestUpdateMyLocation:
             _haversine_matrix,
         )
 
-        response = client.post(
-            "/api/v1/staff/delivery/me/location",
-            headers=_auth_headers(app, driver.id),
-            json={"latitude": 41.300, "longitude": 69.250},
-        )
+        with patch(
+            "business_app.tasks.delivery_tasks.optimize_driver_route_task.delay"
+        ) as delay:
+            response = client.post(
+                "/api/v1/staff/delivery/me/location",
+                headers=_auth_headers(app, driver.id),
+                json={"latitude": 41.300, "longitude": 69.250},
+            )
 
         assert response.status_code == 200
+        delay.assert_called_once_with(driver.id, "location_update")
         body = response.get_json()
-        items = body["data"]["items"]
-        # Now that we have a real start point at (41.300, 69.250), close
-        # comes before far.
-        assert [it["delivery_id"] for it in items] == [d_close.id, d_far.id]
-        # And location_status is now "fresh" because we just updated it.
+        # No route persisted yet -> annotate_active_items' fallback sort is
+        # deterministic (ascending delivery_id) and is now the endpoint's
+        # contract for this response, since the fresh geographic order is no
+        # longer computed on the request thread. d_far was created before
+        # d_close, so it has the lower id and sorts first.
+        assert [it["delivery_id"] for it in body["data"]["items"]] == [d_far.id, d_close.id]
         assert body["data"]["location_status"] == "fresh"
 
-        # Persisted: DeliveryPerson location reflects the request.
         db.session.refresh(person)
         assert person.current_location_lat == 41.300
         assert person.current_location_lng == 69.250
+        assert person.last_location_update is not None
+
+    def test_enqueue_failure_still_persists_location_and_returns_200(
+        self, app, client, db, driver, monkeypatch
+    ):
+        """The location WRITE must never be undone or blocked by a broker/
+        enqueue outage (route-UX plan §4.5 — 'never let a debounce-store
+        outage block the driver's location write'). `optimize_driver_route_
+        task.delay` failing must degrade to a logged warning, not a 5xx and
+        not a rolled-back write."""
+        from unittest.mock import patch
+        from business_app.models.delivery import DeliveryPerson
+
+        person = DeliveryPerson(
+            user_id=driver.id,
+            full_name="x",
+            phone="x",
+            current_location_lat=None,
+            current_location_lng=None,
+            last_location_update=None,
+            is_active=True,
+            is_available=True,
+        )
+        db.session.add(person)
+        db.session.commit()
+
+        with patch(
+            "business_app.tasks.delivery_tasks.optimize_driver_route_task.delay",
+            side_effect=Exception("broker down"),
+        ):
+            response = client.post(
+                "/api/v1/staff/delivery/me/location",
+                headers=_auth_headers(app, driver.id),
+                json={"latitude": 41.301, "longitude": 69.251},
+            )
+
+        assert response.status_code == 200
+        db.session.refresh(person)
+        assert person.current_location_lat == 41.301
+        assert person.current_location_lng == 69.251
         assert person.last_location_update is not None
 
 

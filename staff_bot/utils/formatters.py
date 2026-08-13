@@ -394,6 +394,22 @@ def format_delivery_stats(stats: Dict[str, Any], language: str) -> str:
     return '\n'.join(lines)
 
 
+def format_local_time(dt: Optional[datetime] = None) -> str:
+    """HH:MM in the business display timezone (Asia/Tashkent by default).
+
+    The route card stamps this so freshness is visible without being
+    announced (route-UX spec §6.3)."""
+    from zoneinfo import ZoneInfo
+
+    from shared.constants import DISPLAY_TIMEZONE
+
+    from datetime import timezone as _tz
+    moment = dt or datetime.now(_tz.utc)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=_tz.utc)
+    return moment.astimezone(ZoneInfo(DISPLAY_TIMEZONE)).strftime("%H:%M")
+
+
 def format_user_card(user: Dict[str, Any], language: str) -> str:
     """Format user details card (for operator)"""
     name = _escape(f"{user.get('first_name', '')} {user.get('last_name', '')}".strip())

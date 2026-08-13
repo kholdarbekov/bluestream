@@ -209,8 +209,11 @@ async def clear_and_drain(telegram_id: int, bot, language: Optional[str] = None)
     `telegram.Bot` instance from `context.bot` or `Application.bot` —
     passing it here keeps this module dependency-free of PTB types.
 
-    Renders the same Accept/Cancel keyboard the live webhook would send.
-    Lazy-imports telegram to keep test suites that mock the bot light.
+    Renders through `staff_bot.utils.offers.build_offer` -- the SAME builder
+    the live webhook path uses -- so the copy and callback data for a
+    drained suggestion can never drift from the live one (CLAUDE.md SSOT).
+    Lazy-imports telegram (via `offers`) to keep test suites that mock the
+    bot light.
     """
     await clear_active(telegram_id)
     payloads = await drain_pool_suggestions(telegram_id)
@@ -219,8 +222,8 @@ async def clear_and_drain(telegram_id: int, bot, language: Optional[str] = None)
 
     # Lazy import: keeps `flow_state` importable in test environments that
     # don't have python-telegram-bot installed.
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     from staff_bot.i18n import i18n
+    from staff_bot.utils import offers
 
     if language is None:
         try:
@@ -233,25 +236,13 @@ async def clear_and_drain(telegram_id: int, bot, language: Optional[str] = None)
         if not delivery_id:
             continue
         try:
-            text = i18n.get(
-                'staff.delivery.pool_insertion_offer',
-                language,
-                order_no=payload.get('order_no', ''),
-                km=f"{float(payload.get('detour_km', 0) or 0):.1f}",
-                minutes=int(round(float(payload.get('detour_minutes', 0) or 0))),
-            )
-            keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton(
-                    f"✅ {i18n.get('staff.delivery.accept', language)}",
-                    callback_data=f"staff_confirm_accept_{int(delivery_id)}",
-                ),
-                InlineKeyboardButton(
-                    f"❌ {i18n.get('staff.cancel', language)}",
-                    callback_data=f"staff_decline_suggestion_{int(delivery_id)}",
-                ),
-            ]])
+            text, keyboard = offers.build_offer(payload, language)
+            # Deferred, therefore non-urgent by definition: a drained offer
+            # never pings, even a diversion shape that would have pinged if
+            # sent live (Task 10 brief, "Rules that must hold").
             await bot.send_message(
                 chat_id=int(telegram_id), text=text, reply_markup=keyboard,
+                disable_notification=True,
             )
         except Exception as exc:
             logger.warning(

@@ -244,15 +244,10 @@ def update_delivery_status(delivery_id):
 @require_staff_roles("delivery_driver")
 def update_my_location():
     """Update the driver's own current location (no delivery_id required).
-
-    Used for route-optimization purposes — accepts any one-shot or live
-    location share. After updating, immediately re-runs route optimization
-    so the next active-deliveries view shows the new optimal sequence.
-    Returns the active-deliveries payload (same shape as GET /delivery/active)
-    so the bot can render the freshly sorted list in one round-trip.
+    Enqueues a debounced route re-optimization and returns the active-
+    deliveries payload (same shape as GET /delivery/active) sorted by the
+    last persisted route.
     """
-    from business_app.services.route_optimization_service import RouteOptimizationService
-
     current_user_id = int(get_jwt_identity())
     data = request.get_json() or {}
     try:
@@ -266,8 +261,20 @@ def update_my_location():
 
     StaffService.update_driver_location(current_user_id, lat, lng)
 
-    # Re-optimize synchronously now that we have a fresh start point.
-    RouteOptimizationService().optimize_for_driver(current_user_id, trigger="location_update")
+    # Re-optimize OFF the request thread (plan §4.5). The task debounces
+    # per-driver inside the service; the response below simply reflects the
+    # last persisted sequence and the bot re-renders when the silent
+    # route-updated webhook lands.
+    try:
+        from business_app.tasks.delivery_tasks import optimize_driver_route_task
+
+        optimize_driver_route_task.delay(current_user_id, "location_update")
+    except Exception as exc:  # noqa: BLE001 — non-critical
+        current_app.logger.warning(
+            "location-update optimize enqueue failed for driver=%s: %s",
+            current_user_id,
+            exc,
+        )
 
     # Reuse the active-deliveries response shape so the bot can edit-in-place.
     return get_active_deliveries()
@@ -289,7 +296,8 @@ def update_location(delivery_id):
     if lat is None or lng is None:
         raise ValidationError("latitude and longitude are required", error_code="STAFF_COORDINATES_REQUIRED")
 
-    StaffService.update_delivery_location(delivery_id, lat, lng)
+    current_user_id = int(get_jwt_identity())
+    StaffService.update_delivery_location(delivery_id, lat, lng, acting_driver_id=current_user_id)
 
     return success_response({"message": "Location updated"})
 
@@ -438,6 +446,7 @@ def get_active_deliveries():
             "items": items,
             "total": len(items),
             "location_status": route_svc.location_status(int(current_user_id)),
+            "route_summary": route_svc.build_route_summary(int(current_user_id), len(items)),
         }
     )
 

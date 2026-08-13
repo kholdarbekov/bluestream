@@ -713,6 +713,28 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Joriy sessiyangizda bu buyurtma uchun yetarli idish yoq. Avval idish yuklang, keyin qayta urinib koring.",
         "ru": "В вашей текущей сессии недостаточно тары для этого заказа. Загрузите больше тары и повторите.",
     },
+    # Referenced at staff_bot/handlers/tryouts.py:138 since the delivery-zone
+    # SSOT check landed, but never seeded under the `staff_bot` CATEGORY. It
+    # does exist in scripts/seed_tryout_translations.py — under category
+    # `api`, which staff_bot's i18n never loads, so the bot could not see it.
+    #
+    # That single string held `/health` at 503: webhook_server.py:194 fails
+    # the WHOLE service on any missing required key, so the container reported
+    # docker-unhealthy indefinitely AND the database check living in that same
+    # endpoint became unreadable — nobody could tell "missing a label" from
+    # "database is gone".
+    #
+    # Verified 2026-08-13 to be the ONLY uncovered key of 434, counting the
+    # union of all three staff_bot seed scripts (this one plus
+    # seed_place_group_staff_translations.py and
+    # seed_staff_over_returned_translations.py). Do NOT add place/cluster/
+    # over-returned keys here: those are owned by the satellite scripts and
+    # tests/integration/test_place_i18n_render_e2e.py enforces that boundary.
+    "staff.tryout.outside_delivery_area": {
+        "en": "That address is outside our delivery area. Please send a different location.",
+        "uz": "Bu manzil yetkazib berish hududimizdan tashqarida. Iltimos, boshqa manzil yuboring.",
+        "ru": "Этот адрес вне зоны доставки. Пожалуйста, отправьте другое местоположение.",
+    },
     "staff.tryout.tasks_title": {
         "en": "Try-out Task Pool",
         "uz": "Sinov vazifalari",

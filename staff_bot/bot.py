@@ -8,6 +8,7 @@ import signal
 import sys
 import os
 import re
+import time
 from typing import Optional
 
 # Initialize Sentry before any other imports
@@ -34,6 +35,7 @@ from telegram.ext import (
 )
 from telegram.error import NetworkError, TimedOut
 from shared.telegram_request import ResilientHTTPXRequest
+from shared.telegram_update_processor import PerChatSerialUpdateProcessor
 
 # Setup logging
 from logging_config import setup_logging, log_bot_startup_info
@@ -201,11 +203,39 @@ class StaffBot:
                 http_version='1.1',
             )
 
+            # concurrent_updates: PTB's default is False, which processes every
+            # update STRICTLY SEQUENTIALLY across all staff. One slow handler
+            # then stalls every other driver and operator — the amplifier
+            # behind the 2026-08-13 "staff bot is slow" report, where several
+            # drivers were active in overlapping windows and two of them gave
+            # up and re-sent /start. It is also the mechanism this repo already
+            # documents in telegram_bot/handlers/callback_dedup.py, where
+            # serial queuing turns an impatient double-tap into a duplicate
+            # message.
+            #
+            # We deliberately do NOT pass a bare True/int here. PTB's own docs
+            # warn that blanket concurrency is unsafe with stateful handlers,
+            # and this bot is full of ConversationHandlers (bottle collection,
+            # cash collection, try-outs, operator order entry) — that would
+            # swap a bot-wide stall for a single driver racing their own
+            # conversation state in flows that move money and bottles.
+            #
+            # PerChatSerialUpdateProcessor keeps each chat strictly ordered
+            # (so ConversationHandler sees the sequential world it expects)
+            # while letting DIFFERENT staff run in parallel, which is the
+            # actual fix. Concurrency stays bounded by max_concurrent_updates.
             self.application = (
                 Application.builder()
                 .token(config.telegram.bot_token)
                 .request(request)
                 .get_updates_request(get_updates_request)
+                .concurrent_updates(
+                    PerChatSerialUpdateProcessor(
+                        max_concurrent_updates=int(
+                            os.environ.get("STAFF_BOT_CONCURRENT_UPDATES", "16")
+                        )
+                    )
+                )
                 .build()
             )
 
@@ -239,11 +269,65 @@ class StaffBot:
 
             self.application.add_handler(TypeHandler(Update, log_updates), group=-10)
 
+            self._install_update_timing()
+
             logger.info("Staff Bot initialization completed successfully")
 
         except Exception as e:
             logger.error(f"Failed to initialize staff bot: {e}", exc_info=True)
             raise
+
+    def _install_update_timing(self):
+        """Measure how long each update takes end to end.
+
+        Why this exists: on 2026-08-13 staff_bot was reported slow and it was
+        IMPOSSIBLE to confirm from telemetry — the bot logged `Update: ...` on
+        arrival and then nothing. No elapsed time, no completion marker, so
+        "slow" could not be distinguished from "idle". This closes that gap.
+
+        It wraps `process_update` rather than adding another handler because
+        that is the only point that sees the WHOLE update: a `TypeHandler` in
+        group -10 returns before the real handlers run, and a last-group
+        handler is skipped entirely when something raises
+        `ApplicationHandlerStop` or when an earlier group errors. The wrapper
+        reports from a `finally:`, so a failed update is still measured.
+
+        Emits WARNING above `STAFF_BOT_SLOW_UPDATE_SECONDS` so slow updates
+        are greppable in Loki (`slow_update elapsed=`) without turning normal
+        traffic into noise at INFO.
+        """
+        application = self.application
+        original_process_update = application.process_update
+        slow_threshold = float(os.environ.get("STAFF_BOT_SLOW_UPDATE_SECONDS", "3.0"))
+
+        async def timed_process_update(update):
+            started = time.perf_counter()
+            try:
+                return await original_process_update(update)
+            finally:
+                elapsed = time.perf_counter() - started
+                try:
+                    user_id = update.effective_user.id if getattr(update, "effective_user", None) else "N/A"
+                    if getattr(update, "callback_query", None):
+                        kind = f"callback_query={update.callback_query.data}"
+                    elif getattr(update, "message", None):
+                        kind = "message"
+                    else:
+                        kind = "other"
+                    if elapsed >= slow_threshold:
+                        logger.warning(
+                            "slow_update elapsed=%.2fs user=%s %s "
+                            "(threshold %.1fs; with concurrent_updates disabled this "
+                            "also delays every other staff member's update)",
+                            elapsed, user_id, kind, slow_threshold,
+                        )
+                    else:
+                        logger.info("update_processed elapsed=%.3fs user=%s %s", elapsed, user_id, kind)
+                except Exception:  # noqa: BLE001
+                    # Instrumentation must never break update processing.
+                    logger.debug("update timing log failed", exc_info=True)
+
+        application.process_update = timed_process_update
 
     async def _validate_database_schema(self):
         """Validate required DB schema for staff bot startup."""

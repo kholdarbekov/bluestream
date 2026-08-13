@@ -41,6 +41,7 @@ from telegram.ext import (
 )
 from telegram.error import TelegramError
 from shared.telegram_request import ResilientHTTPXRequest
+from shared.telegram_update_processor import PerChatSerialUpdateProcessor
 
 # Setup logging first
 from logging_config import setup_logging, log_bot_startup_info
@@ -98,8 +99,17 @@ class WaterBusinessBot:
             # Load translations
             await i18n.load_translations()
 
-            # Initialize API client
-            # Note: api_client will be used as async context manager in handlers
+            # Initialize the persistent backend HTTP client. Owned by the bot
+            # lifecycle so all handlers reuse ONE httpx.AsyncClient with a
+            # shared connection pool — the same fix staff_bot already had.
+            # This is a prerequisite for concurrent update processing, not
+            # just an optimisation: `api_client` is a module-level singleton,
+            # so the previous build-per-context/close-on-exit pattern would
+            # let one handler close the client another was still using.
+            await api_client.start()
+
+            # Note: api_client is still used as an async context manager in
+            # handlers; __aenter__ now just ensures the shared client exists.
 
             # Initialize TokenManager for JWT token caching
             logger.info("Initializing TokenManager...")
@@ -140,11 +150,31 @@ class WaterBusinessBot:
                 http_version='1.1',
             )
 
+            # Per-chat serial, cross-chat concurrent. PTB's default is to
+            # process every update one by one, so a single slow handler
+            # blocks every other customer — most visibly the ~45s wait in
+            # `handlers/orders.py::confirm_order` while Click marking-code
+            # fiscalization settles, which froze the WHOLE bot for everyone.
+            #
+            # A bare `.concurrent_updates(True)` is not safe here: PTB warns
+            # against it with stateful handlers and this bot's checkout is a
+            # ConversationHandler. PerChatSerialUpdateProcessor keeps each
+            # customer's updates ordered while unblocking everyone else — and
+            # it also removes the head-of-line queuing that
+            # `handlers/callback_dedup.py` documents as the cause of
+            # duplicate messages on an impatient double-tap.
             self.application = (
                 Application.builder()
                 .token(config.telegram.bot_token)
                 .request(request)
                 .get_updates_request(get_updates_request)
+                .concurrent_updates(
+                    PerChatSerialUpdateProcessor(
+                        max_concurrent_updates=int(
+                            os.environ.get("TELEGRAM_BOT_CONCURRENT_UPDATES", "16")
+                        )
+                    )
+                )
                 .build()
             )
             logger.info("Telegram Application created successfully!")
@@ -1052,6 +1082,12 @@ class WaterBusinessBot:
             if self.token_manager:
                 logger.info("Closing TokenManager...")
                 await self.token_manager.close()
+
+            # Close the shared backend HTTP client. This is the ONLY place it
+            # is closed — handlers' `async with api_client` no longer closes
+            # it, because the client is process-wide (see api_client.start()).
+            logger.info("Closing API client...")
+            await api_client.aclose()
 
             # Close database connection
             if db_manager.is_connected:

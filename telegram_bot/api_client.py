@@ -1,6 +1,7 @@
 """
 API client for communicating with the business application
 """
+import asyncio
 import httpx
 import hashlib
 import hmac
@@ -87,10 +88,50 @@ class BusinessAPIClient:
         self.max_retries = config.business_api.max_retries
         self.retry_delay = config.business_api.retry_delay
         self._client = None
+        # Guards start()/aclose() so concurrent handlers cannot build or close
+        # the shared client twice. Created lazily-safe: asyncio.Lock binds to
+        # the running loop on first await, and this object is constructed at
+        # import time, before any loop exists.
+        self._lifecycle_lock = asyncio.Lock()
         self._circuit_breaker = CircuitBreaker(failure_threshold=5, recovery_timeout=30.0)
 
+    async def start(self) -> None:
+        """Build the persistent HTTP client. Idempotent; owned by the bot.
+
+        Mirrors `staff_bot/api_client.py::start`. Before this existed, every
+        `async with api_client` built a fresh `httpx.AsyncClient` and
+        `__aexit__` closed it, which cost a connection setup per flow and —
+        far worse once updates are processed concurrently — raced: this class
+        is a module-level SINGLETON, so a second handler entering the context
+        overwrote `self._client` and the first handler's `__aexit__` then
+        closed the client the second one was still using
+        (`RuntimeError: client has been closed`).
+
+        The client now lives for the process, so the context manager is just
+        a scope marker and `__aexit__` must NOT close anything.
+        """
+        async with self._lifecycle_lock:
+            if self._client is None:
+                await self._build_http_client()
+
+    async def aclose(self) -> None:
+        """Close the persistent client. Called once on bot shutdown."""
+        async with self._lifecycle_lock:
+            if self._client is not None:
+                try:
+                    await self._client.aclose()
+                except Exception:
+                    logger.debug("Failed to close persistent API client", exc_info=True)
+                finally:
+                    self._client = None
+
     async def __aenter__(self):
-        """Async context manager entry"""
+        """Async context manager entry — ensures the shared client exists."""
+        await self.start()
+        return self
+
+    async def _build_http_client(self):
+        """Construct the shared httpx client (SSL config included)."""
         # SSL verification configuration
         ssl_verify = config.business_api.ssl_verify
         ssl_cert_path = config.business_api.ssl_cert_path
@@ -158,7 +199,6 @@ class BusinessAPIClient:
         except Exception as e:
             logger.error(f"Failed to initialize HTTP client with SSL configuration: {e}")
             raise
-        return self
 
     async def _test_ssl_connection(self):
         """
@@ -186,9 +226,15 @@ class BusinessAPIClient:
             # Don't raise for other errors during testing
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit"""
-        if self._client:
-            await self._client.aclose()
+        """Async context manager exit — deliberately does NOT close.
+
+        The client is owned by the bot lifecycle (`start()` / `aclose()`), not
+        by any one handler. Closing here was safe only while PTB processed
+        updates strictly one at a time; with concurrent processing it closed
+        the shared client out from under other in-flight handlers, because
+        `api_client` is a module-level singleton. See `start()`.
+        """
+        return None
 
     def _get_url(self, endpoint: str) -> str:
         """Build full URL for endpoint"""

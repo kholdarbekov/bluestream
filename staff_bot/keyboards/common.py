@@ -100,13 +100,47 @@ class CommonKeyboards:
         return buttons
 
     @staticmethod
-    def location_request(language: str, button_text: str) -> ReplyKeyboardMarkup:
-        """Reply keyboard with Telegram location request button."""
+    def location_request(
+        language: str, button_text: str, include_cancel: bool = True
+    ) -> ReplyKeyboardMarkup:
+        """Reply keyboard with Telegram location request button.
+
+        WHY THIS KEYBOARD EXISTS AT ALL: `request_location` is a field of
+        `KeyboardButton` and of nothing else -- MTProto is explicit,
+        "Available only in private chats, in reply keyboards"
+        (core.telegram.org/constructor/keyboardButtonRequestGeoLocation), and
+        `InlineKeyboardButton` has had no location field since Bot API 2.0 in
+        2016. Telegram's own "Share your location?" dialog is triggered BY this
+        button. So an inline button -- like Optimize on the route card -- can
+        never ask for a location itself; the bot has to draw this prompt to
+        reach that dialog. The extra tap is structural, not a design choice.
+
+        `include_cancel` (2026-08-14, driver feedback): the delivery paths pass
+        False. The driver's complaint was the "unwanted layer of step (two
+        buttons: one to share location and other is cancel)", and the second
+        button was pure cost there -- on the delivery paths Cancel has NO
+        handler: the tap falls through to `_handle_text_message`, matches no
+        menu label and no flow flag, and is dropped. It looked like an escape
+        and was not one. The driver's real exit is the route card's own inline
+        buttons, which the reply keyboard does not cover.
+
+        The default stays True because `staff_bot/handlers/tryouts.py` is the
+        one caller whose Cancel is real: `receive_create_address` compares the
+        text against `staff.cancel` and aborts the conversation, and it is the
+        only way out of address entry. Defaulting to False would silently strip
+        that exit.
+
+        `one_time_keyboard=True` is deliberate and must NOT be dropped to match
+        `MenuKeyboards.main_menu`'s `is_persistent=True`. These are two
+        different kinds of keyboard: the main menu is the driver's permanent
+        control surface and has to stay up, while this is a TRANSIENT PROMPT
+        that answers one question and should get out of the way once answered.
+        """
+        rows = [[KeyboardButton(button_text, request_location=True)]]
+        if include_cancel:
+            rows.append([KeyboardButton(i18n.get('staff.cancel', language))])
         return ReplyKeyboardMarkup(
-            [
-                [KeyboardButton(button_text, request_location=True)],
-                [KeyboardButton(i18n.get('staff.cancel', language))],
-            ],
+            rows,
             resize_keyboard=True,
             one_time_keyboard=True,
         )

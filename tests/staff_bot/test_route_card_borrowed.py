@@ -240,9 +240,9 @@ class TestBackPathDuringRedisOutage:
     reliably reproducing the bug."""
 
     def test_open_stop_then_back_restores_the_card_during_outage(self, monkeypatch):
-        monkeypatch.setattr(route_card, "format_local_time", lambda dt=None: "11:42")
+        monkeypatch.setattr(route_card, "format_local_time", lambda dt=None, with_seconds=False: "11:42")
         import staff_bot.utils.formatters as fmt
-        monkeypatch.setattr(fmt, "format_local_time", lambda dt=None: "11:42")
+        monkeypatch.setattr(fmt, "format_local_time", lambda dt=None, with_seconds=False: "11:42")
 
         route_card_state.configure(None)  # Redis outage for the whole test
 

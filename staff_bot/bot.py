@@ -95,6 +95,7 @@ from staff_bot.handlers.operator.orders_pool_view import OperatorOrdersPoolViewH
 from staff_bot.handlers.operator.redispatch import RedispatchHandler
 from staff_bot.handlers.common.profile import ProfileHandler
 from staff_bot.handlers.common.help import HelpHandler
+from staff_bot.permissions import require_auth
 
 logger = logging.getLogger('staff_bot')
 
@@ -370,16 +371,32 @@ class StaffBot:
                 "Apply database migrations before starting staff bot."
             )
 
+    @require_auth
     async def _route_new_orders(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """
         Route the unified `New Orders` entry to the correct pool view based on staff role.
         Dual-role users default to the delivery driver (actionable) view.
+
+        The `else` is not defensive padding: `_normalize_staff_roles` returns
+        `[]` whenever a re-auth response omits `staff_roles`
+        (handlers/base.py:197), and without a fallback the second
+        reply-keyboard button was silently inert for exactly those users
+        (spec §4.6).
         """
         roles = context.user_data.get('staff_roles', []) or []
         if 'delivery_driver' in roles:
             await self._delivery_handlers['orders_pool'].show_pool(update, context)
         elif 'operator' in roles:
             await self._operator_handlers['orders_pool_view'].show_pool(update, context)
+        else:
+            language = await self._language_handler._get_language(update, context)
+            message = i18n.get('staff.session_expired', language)
+            if update.callback_query:
+                await update.callback_query.answer(message, show_alert=True)
+            elif update.message:
+                # Silent like every other staff_bot send: only the head-change
+                # alert is allowed to make a sound (drivers are driving).
+                await update.message.reply_text(message, disable_notification=True)
 
     @staticmethod
     def _menu_text_pattern(translation_key: str) -> str:
@@ -519,6 +536,7 @@ class StaffBot:
 
             # Active deliveries
             CallbackQueryHandler(active_delivery_handler.show_active_deliveries, pattern="^staff_active_deliveries$"),
+            CallbackQueryHandler(active_delivery_handler.refresh_route_card, pattern="^staff_route_refresh$"),
             CallbackQueryHandler(active_delivery_handler.switch_route_view, pattern="^staff_route_view_(next|all)$"),
             CallbackQueryHandler(active_delivery_handler.view_active_delivery, pattern=r"^staff_view_active_\d+$"),
             CallbackQueryHandler(active_delivery_handler.navigate_to_address, pattern=r"^staff_navigate_\d+$"),
@@ -1096,14 +1114,37 @@ class StaffBot:
         text state. Abandon the conversation: clear its half-entered working data
         and any flow flags, navigate to the tapped menu action, and END so the
         stale state can't capture the driver's next text. Prepended to each
-        text-input state so non-menu text still reaches the real receive_* handler."""
+        text-input state so non-menu text still reaches the real receive_* handler.
+
+        Reads via `effective_message`, exactly like `_handle_text_message` and
+        `_delete_menu_echo`: the `filters.TEXT` states this is prepended to
+        also match EDITED messages, where `update.message` is None. Without
+        this an edited menu-label tap raised AttributeError here -- and now
+        that this method deletes the echo too, it would blow up before ever
+        reaching that cleanup."""
+        message = update.effective_message
+        if message is None:
+            # No message payload at all: nothing to match against and nothing
+            # to delete. Still END -- the tap that routed here matched the
+            # menu regex, so the driver has left this conversation whether or
+            # not we can read the text; leaving the state armed would let it
+            # capture their next message. (Unreachable in practice: the
+            # registered filter matches on effective_message, so it is
+            # non-None whenever this handler actually runs.)
+            return ConversationHandler.END
         language = await self._language_handler._get_language(update, context)
-        action = self._match_menu_action(update.message.text, language)
+        action = self._match_menu_action(message.text, language)
         for key in self._CONVERSATION_WORK_KEYS:
             context.user_data.pop(key, None)
         await self._clear_all_pending_flows(context, update)
         if action is not None:
             await self._dispatch_menu_action(action, update, context)
+            # AFTER the dispatch, never before -- same ordering and same
+            # reason as the catch-all router (see _delete_menu_echo). A menu
+            # tap made INSIDE a conversation leaves exactly the same echo as
+            # one made outside it; without this it piles up and buries the
+            # pinned card, which is the bug this branch exists to fix.
+            await self._delete_menu_echo(update)
         return ConversationHandler.END
 
     def _match_menu_action(self, text: str, language: str):
@@ -1113,11 +1154,23 @@ class StaffBot:
         actually emits (e.g. '💰 Cash'). All menu labels are non-numeric, so a
         typed cash amount / bottle count / fine quantity can NEVER collide; the
         only residual collision is a free-text note that literally equals a menu
-        label, which we accept as an intentional escape hatch.
+        label IN ANY SUPPORTED LANGUAGE -- the map below is merged across every
+        language, so the collision surface is the union of all of them, not just
+        the driver's current one. We accept it as an intentional escape hatch.
         """
         if not text:
             return None
-        menu_actions = self._menu_action_map(language)
+        menu_actions = dict(self._menu_action_map(language))
+        # `_main_menu_text_pattern` (bot.py:1084) builds its escape regex from
+        # EVERY supported language, so a driver holding a keyboard rendered
+        # before a language switch matched the regex but not this map -- and
+        # `_conv_menu_escape` then ended their conversation with no output at
+        # all. One decider, all languages (spec §4.6).
+        for lang_code in i18n.supported_languages:
+            if lang_code == language:
+                continue
+            for label, action in self._menu_action_map(lang_code).items():
+                menu_actions.setdefault(label, action)
         text = text.strip()
         candidates = [text]
         for prefix_len in (2, 3, 4):
@@ -1145,6 +1198,150 @@ class StaffBot:
         elif action == 'staff_settings':
             await self._language_handler.language_menu(update, context)
 
+    async def _delete_menu_echo(self, update: Update) -> None:
+        """Remove the driver's own reply-keyboard tap from the chat.
+
+        The reply keyboard sends TEXT, so every tap leaves a message. Left
+        alone they pile up, bury the pinned route card, and turn a chat that
+        is meant to work like an app into a transcript of the driver talking
+        to themselves (tap-feedback spec §4.1).
+
+        Called AFTER the dispatched handler has produced its output, never
+        before: if the render fails, the driver must still see the message
+        they sent rather than a tap that vanished into nothing.
+
+        Telegram documents "Bots can delete incoming messages in private
+        chats", limited to messages sent less than 48 hours ago. Entirely
+        best-effort -- a failed delete must never surface to the driver or
+        undo navigation that already succeeded.
+
+        The echo's id is captured BEFORE the delete: `note_echo_deleted` only
+        counts echoes that sat BELOW the card, so it needs the id, and the
+        Message object is not guaranteed to be useful afterwards.
+
+        Both awaits are individually guarded. The bookkeeping call is
+        best-effort in exactly the same sense as the delete, and letting it
+        escape would hand `_handle_text_message` an exception AFTER the
+        driver's navigation already succeeded -- PTB's global error_handler
+        would then apologise for a tap that worked.
+
+        Reads `effective_message` so all four text-router sites agree (the two
+        in `_handle_text_message`, one in `_conv_menu_escape`, this one), and
+        so an EDITED menu-label tap has its echo cleaned up too rather than
+        silently accumulating.
+
+        CALLBACK GUARD, load-bearing: for a callback-query update
+        `effective_message` resolves to `callback_query.message` -- the BOT's
+        own message, which for a driver is the PINNED ROUTE CARD. Both
+        callers are `filters.TEXT` MessageHandlers so this cannot happen
+        today, but the cost of it ever happening is deleting the very card
+        this whole branch exists to keep alive, so it is checked rather than
+        assumed.
+        """
+        if update.callback_query is not None:
+            return
+        message = update.effective_message
+        if message is None:
+            return
+        echo_message_id = getattr(message, 'message_id', None)
+        try:
+            await message.delete()
+        except Exception as exc:  # noqa: BLE001 -- past 48h, already gone, no rights
+            logger.debug("menu echo delete skipped: %s", exc)
+            return
+        user = update.effective_user
+        if user is None or echo_message_id is None:
+            return
+        from staff_bot.utils import route_card_state
+        try:
+            await route_card_state.note_echo_deleted(user.id, echo_message_id)
+        except Exception as exc:  # noqa: BLE001 -- bookkeeping only, never the driver's problem
+            logger.debug("menu echo counter update skipped: %s", exc)
+
+    RECOVERY_RETRY_COOLDOWN_SECONDS = 60
+
+    def _recovery_cooldowns(self) -> dict:
+        """The per-user 'do not retry recovery yet' map, pruned of expired
+        entries on every access.
+
+        Without the prune this is an unbounded instance dict keyed by
+        telegram user id: anyone sending a menu label from a fresh account
+        adds a permanent entry, and staff_bot installs no rate limiter. It
+        runs on a memory-constrained Raspberry Pi 5, so bound it to the only
+        thing it needs to remember -- users whose recovery failed inside the
+        last RECOVERY_RETRY_COOLDOWN_SECONDS. An expired entry is
+        indistinguishable from an absent one (both allow a retry), so
+        dropping it changes no behaviour.
+        """
+        cooldown = getattr(self, '_recovery_cooldown_until', None)
+        if cooldown is None:
+            cooldown = self._recovery_cooldown_until = {}
+            return cooldown
+        now = time.monotonic()
+        for user_id in [uid for uid, until in cooldown.items() if until <= now]:
+            cooldown.pop(user_id, None)
+        return cooldown
+
+    def _recovery_on_cooldown(self, user_id: int) -> bool:
+        """True while a recently-FAILED session recovery should not be retried.
+
+        Bounds the cost of the recovery path below: without this, one menu
+        label replayed in a loop is an unthrottled signed POST to the backend
+        auth endpoint per message. Process-local and lost on restart, which is
+        fine -- it only ever suppresses a retry, never a first attempt.
+        """
+        return self._recovery_cooldowns().get(int(user_id), 0.0) > time.monotonic()
+
+    def _note_recovery_failed(self, user_id: int) -> None:
+        cooldown = self._recovery_cooldowns()
+        cooldown[int(user_id)] = time.monotonic() + self.RECOVERY_RETRY_COOLDOWN_SECONDS
+
+    async def _recover_session(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Try to re-establish a staff session for a tap that arrived with
+        empty `user_data`.
+
+        The Application is built with no PTB persistence, so `user_data`
+        dies with the process while the reply keyboard survives on the
+        driver's phone.
+
+        Delegates to `BaseHandler._authenticate_staff_session`, which is the
+        ONLY path that actually establishes a session: it sets
+        `authenticated`, `staff_roles`, `user_id`, the profile fields and the
+        cached tokens (handlers/base.py). Deliberately NOT
+        `_get_auth_token`: its first branch returns a token straight out of
+        the TokenManager's Redis cache without touching `authenticated` or
+        `staff_roles`, and Redis outlives a bot restart -- so on the very
+        deploy this fix ships for, recovery would hand back a live token
+        while `@require_auth` still saw a logged-out user and answered
+        'session expired' on every tap, forever. Setting `authenticated`
+        here by hand would not do either: `staff_roles` would stay `[]`, so
+        `@require_delivery_driver` rejects and `_route_new_orders` falls to
+        its no-role branch.
+
+        Rate-bounded: a FAILED recovery is not retried for
+        RECOVERY_RETRY_COOLDOWN_SECONDS, so replaying one menu label in a
+        loop cannot sustain continuous DB + signed-HTTP load (recovery costs
+        an unrate-limited signed POST to /api/staff/auth/login plus the DB
+        work behind it).
+        """
+        from staff_bot.handlers.base import BaseHandler
+
+        user_id = update.effective_user.id
+        if self._recovery_on_cooldown(user_id):
+            return None
+
+        token_manager = context.bot_data.get('token_manager') if context.bot_data else None
+        try:
+            token = await BaseHandler()._authenticate_staff_session(update, context, token_manager)
+        except Exception as exc:  # noqa: BLE001 -- a dead session is routine
+            logger.debug("session recovery failed: %s", exc)
+            self._note_recovery_failed(user_id)
+            return None
+
+        if not token:
+            self._note_recovery_failed(user_id)
+        return token
+
     async def _clear_all_pending_flows(self, context: ContextTypes.DEFAULT_TYPE, update: Update = None):
         """Drop every in-memory flow flag plus the Redis flow mirror, draining any
         deferred pool-insertion suggestions. Delegates to the SSOT helper so the
@@ -1154,8 +1351,44 @@ class StaffBot:
 
     async def _handle_text_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle text messages (reply keyboard button presses)"""
+        # effective_message, not update.message, EVERYWHERE this handler reads
+        # the incoming text: PTB's filters.TEXT matches on effective_message,
+        # which resolves to edited_message when message is None, so an EDITED
+        # text update would raise AttributeError on update.message.text.
+        message = update.effective_message
+        text = message.text if message is not None else None
         if not context.user_data.get('authenticated'):
-            return
+            # A reply keyboard outlives the bot process, so a tap can arrive
+            # with empty user_data after any restart or deploy. Swallowing it
+            # here made every menu button silently dead until the driver
+            # guessed /start -- `require_auth`'s own 'session expired' reply
+            # (permissions.py:72) never fires, because this router bails first.
+            #
+            # Scoped to text that IS a menu label, in ANY supported language.
+            # Recovery costs a Redis read plus an unrate-limited signed POST to
+            # /api/staff/auth/login plus two DB queries; running that for
+            # arbitrary text would let anyone who never ran /start drive
+            # backend load just by typing at the bot.
+            if not re.match(self._main_menu_text_pattern(), text or ""):
+                return
+            # Captured BEFORE the attempt: a failed recovery ARMS the cooldown,
+            # so reading it afterwards would suppress the very first
+            # explanation. The reply is gated on the same window as the auth
+            # attempt because a driver in a failed-session window taps the
+            # dead keyboard repeatedly -- N taps must produce ONE explanation,
+            # not N pings and N undeleted messages burying the pinned card.
+            # They already got the message; repeating it only adds noise.
+            was_on_cooldown = self._recovery_on_cooldown(update.effective_user.id)
+            if not await self._recover_session(update, context):
+                if message is not None and not was_on_cooldown:
+                    language = await self._language_handler._get_language(update, context)
+                    await message.reply_text(
+                        i18n.get('staff.session_expired', language),
+                        # Drivers are driving: only the head-change alert is
+                        # allowed to make a sound.
+                        disable_notification=True,
+                    )
+                return
 
         language = await self._language_handler._get_language(update, context)
 
@@ -1166,10 +1399,12 @@ class StaffBot:
         # as a cash amount ("Invalid cash amount", the reported bug) or, worse,
         # consumed as a NOTE that finalizes a real transaction. Detect the tap
         # FIRST, drop every in-progress flow, then route to the menu action.
-        menu_action = self._match_menu_action(update.message.text, language)
+        menu_action = self._match_menu_action(text, language)
         if menu_action is not None:
             await self._clear_all_pending_flows(context, update)
             await self._dispatch_menu_action(menu_action, update, context)
+            # AFTER the dispatch, never before -- see _delete_menu_echo.
+            await self._delete_menu_echo(update)
             return
 
         # Delivery COD collection and reconciliation inputs take precedence over menu text.

@@ -68,7 +68,10 @@ class MenuKeyboards:
             f"❓ {i18n.get('staff.menu.help', language)}",
         ])
 
-        return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        # is_persistent (Bot API 6.4): the driver's control surface must
+        # always be on screen. Without it the client is free to collapse the
+        # keyboard behind the "⌨" affordance, which drivers do not find.
+        return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, is_persistent=True)
 
     @staticmethod
     def main_menu_inline(language: str, staff_roles: List[str] = None) -> InlineKeyboardMarkup:

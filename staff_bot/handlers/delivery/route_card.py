@@ -9,6 +9,7 @@ re-derives a routing decision (CLAUDE.md SSOT).
 import logging
 import os
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
@@ -28,6 +29,21 @@ from staff_bot.utils.render_signature import compute_render_signature
 
 logger = logging.getLogger(__name__)
 
+
+class RenderOutcome(str, Enum):
+    """What actually happened to the card on this render.
+
+    Replaces a bare bool that collapsed nine distinct outcomes into one
+    indistinguishable silence (tap-feedback spec §4.4). `str` mixin so
+    existing log lines and any JSON serialization keep working.
+    """
+
+    RENDERED = "rendered"   # edited, created or reposted
+    NOOP = "noop"           # already showing exactly this
+    BLOCKED = "blocked"     # borrowed by a detail view -- intentional, not a failure
+    FAILED = "failed"       # a Telegram-side failure this function swallowed
+
+
 _KEYCAPS = {1: "1️⃣", 2: "2️⃣", 3: "3️⃣", 4: "4️⃣", 5: "5️⃣",
             6: "6️⃣", 7: "7️⃣", 8: "8️⃣", 9: "9️⃣", 10: "🔟"}
 NAV_URL_MAX_STOPS = 5
@@ -41,7 +57,7 @@ def _delivery_id(item: Dict[str, Any]) -> Optional[int]:
     return item.get("delivery_id") or item.get("id")
 
 
-def _header_line(payload: Dict[str, Any], language: str) -> str:
+def _header_line(payload: Dict[str, Any], language: str, with_seconds: bool = False) -> str:
     """`🚚 Stop N of M · finish ~HH:MM · updated HH:MM` — every number comes
     from the backend's route_summary; a missing summary (older backend)
     degrades to the plain active-count line instead of crashing."""
@@ -65,7 +81,8 @@ def _header_line(payload: Dict[str, Any], language: str) -> str:
             parts.append(i18n.get('staff.route.finish_by', language, time=finish_local))
         except (TypeError, ValueError):
             pass
-    parts.append(i18n.get('staff.route.updated_at', language, time=format_local_time()))
+    parts.append(i18n.get('staff.route.updated_at', language,
+                          time=format_local_time(with_seconds=with_seconds)))
     return "🚚 " + " · ".join(parts)
 
 
@@ -88,7 +105,7 @@ def build_multi_stop_nav_url(items: List[Dict[str, Any]], limit: int = NAV_URL_M
     return "https://yandex.ru/maps/?rtext=~" + "~".join(coords) + "&rtt=auto"
 
 
-def build_next_view(payload: Dict[str, Any], language: str) -> Tuple[str, InlineKeyboardMarkup]:
+def build_next_view(payload: Dict[str, Any], language: str, with_seconds: bool = False) -> Tuple[str, InlineKeyboardMarkup]:
     items = payload.get("items") or []
     summary = payload.get("route_summary") or {}
     head = items[0]
@@ -98,7 +115,7 @@ def build_next_view(payload: Dict[str, Any], language: str) -> Tuple[str, Inline
         and summary.get("committed_delivery_id") == head_id
     )
 
-    lines = [_header_line(payload, language), ""]
+    lines = [_header_line(payload, language, with_seconds), ""]
     if is_committed:
         lines.append(f"▶️ <b>{i18n.get('staff.route.current_stop', language)}</b>")
     else:
@@ -152,22 +169,30 @@ def build_next_view(payload: Dict[str, Any], language: str) -> Tuple[str, Inline
         # only asks for a fresh location when that position is stale or absent.
         # `request_location` cannot live on an inline button, which is why the
         # location step is a fallback rather than this button's job.
+        #
+        # 🧭, not 🔄: this RE-RUNS the backend route optimizer, a different
+        # action from the plain 🔄 Refresh below (which only re-renders). Two
+        # distinct actions must not share an icon (task-5 review correction).
         InlineKeyboardButton(
-            f"🔄 {i18n.get('staff.delivery.optimize_routes_button', language)}",
+            f"🧭 {i18n.get('staff.delivery.optimize_routes_button', language)}",
             callback_data="staff_optimize_routes",
         ),
     ]
-    return text, InlineKeyboardMarkup([row1, row2])
+    row3 = [InlineKeyboardButton(
+        f"🔄 {i18n.get('staff.route.refresh', language)}",
+        callback_data="staff_route_refresh",
+    )]
+    return text, InlineKeyboardMarkup([row1, row2, row3])
 
 
-def build_all_view(payload: Dict[str, Any], language: str) -> Tuple[str, InlineKeyboardMarkup]:
+def build_all_view(payload: Dict[str, Any], language: str, with_seconds: bool = False) -> Tuple[str, InlineKeyboardMarkup]:
     items = payload.get("items") or []
     summary = payload.get("route_summary") or {}
     committed_id = summary.get("committed_delivery_id")
 
     lines = [
         f"🚚 <b>{i18n.get('staff.route.all_stops_header', language, count=len(items))}</b>"
-        f" · {i18n.get('staff.route.updated_at', language, time=format_local_time())}",
+        f" · {i18n.get('staff.route.updated_at', language, time=format_local_time(with_seconds=with_seconds))}",
         "",
     ]
     for pos, item in enumerate(items, start=1):
@@ -188,18 +213,38 @@ def build_all_view(payload: Dict[str, Any], language: str) -> Tuple[str, InlineK
             row = []
     if row:
         keyboard.append(row)
-    keyboard.append([InlineKeyboardButton(
-        f"⬅️ {i18n.get('staff.back', language)}", callback_data="staff_route_view_next"
-    )])
+    keyboard.append([
+        InlineKeyboardButton(
+            f"🔄 {i18n.get('staff.route.refresh', language)}",
+            callback_data="staff_route_refresh",
+        ),
+        InlineKeyboardButton(
+            f"⬅️ {i18n.get('staff.back', language)}", callback_data="staff_route_view_next"
+        ),
+    ])
     return text, InlineKeyboardMarkup(keyboard)
 
 
-def build_empty_view(payload: Dict[str, Any], language: str) -> Tuple[str, InlineKeyboardMarkup]:
+def build_empty_view(payload: Dict[str, Any], language: str, with_seconds: bool = False) -> Tuple[str, InlineKeyboardMarkup]:
     text = (
         f"🚚 {i18n.get('staff.route.all_done', language)}\n"
-        f"{i18n.get('staff.route.updated_at', language, time=format_local_time())}"
+        f"{i18n.get('staff.route.updated_at', language, time=format_local_time(with_seconds=with_seconds))}"
     )
     keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                f"🔄 {i18n.get('staff.route.refresh', language)}",
+                callback_data="staff_route_refresh",
+            ),
+            # The action a driver with no work is actually reaching for.
+            # `staff_new_orders_unified` is already registered at
+            # bot.py:508 -> StaffBot._route_new_orders, so this needs no
+            # new wiring and respects the operator/driver role split.
+            InlineKeyboardButton(
+                f"📦 {i18n.get('staff.menu.new_orders', language)}",
+                callback_data="staff_new_orders_unified",
+            ),
+        ],
         [InlineKeyboardButton(
             f"⬅️ {i18n.get('staff.back', language)}", callback_data="staff_back_to_main"
         )],
@@ -209,10 +254,13 @@ def build_empty_view(payload: Dict[str, Any], language: str) -> Tuple[str, Inlin
 
 # --- card mechanics (Task 5) -------------------------------------------------
 
-# "More than ~5 messages since posting" (spec §6.3). Private-chat message_ids
-# are per-chat monotonic, so (tap_message_id - card_message_id) approximates
-# how many messages landed since the card was posted. This heuristic is a
-# guess, not derived from anything Telegram publishes.
+# SUPERSEDED (tap-feedback spec §4.2): the repost decision is now
+# `gap > state["echoes_deleted"] + 1`, computed in `render_route_card`.
+# NOTHING READS THIS CONSTANT ANY MORE. It is kept only because
+# ROUTE_CARD_REPOST_GAP_MESSAGES is a live environment variable on the
+# production host, and retiring a prod-facing knob belongs in its own
+# change. Setting it has no effect; do not reach for it when debugging a
+# buried card -- look at `echoes_deleted` in the card state instead.
 def _repost_gap_messages() -> int:
     """Parse ROUTE_CARD_REPOST_GAP_MESSAGES defensively -- a malformed env
     value must degrade to the default, not take the whole bot down at
@@ -259,12 +307,18 @@ async def _get_user_language(telegram_id: int) -> str:
     return await i18n.get_user_language(int(telegram_id))
 
 
-def _build(payload: Dict[str, Any], language: str, view: str) -> Tuple[str, InlineKeyboardMarkup]:
+def build_view(payload: Dict[str, Any], language: str, view: str,
+               with_seconds: bool = False) -> Tuple[str, InlineKeyboardMarkup]:
+    """Public because the tap path's failure fallback (spec §4.4) needs the
+    same text without going through the card's state machine."""
     if not (payload.get("items") or []):
-        return build_empty_view(payload, language)
+        return build_empty_view(payload, language, with_seconds)
     if view == route_card_state.VIEW_ALL:
-        return build_all_view(payload, language)
-    return build_next_view(payload, language)
+        return build_all_view(payload, language, with_seconds)
+    return build_next_view(payload, language, with_seconds)
+
+
+_build = build_view
 
 
 async def _create_card(bot, chat_id, text, keyboard, old_state, pin=True):
@@ -322,7 +376,8 @@ async def render_route_card(
     reference_message_id: Optional[int] = None,
     respect_borrowed: bool = False,
     session_hint: Optional[Dict[str, Any]] = None,
-) -> bool:
+    force: bool = False,
+) -> "RenderOutcome":
     """THE single read-modify-write path for the route card. Both the PTB
     handlers (driver taps a button) and the aiohttp webhook server (backend
     pushes an update) funnel through here in the same process, so the whole
@@ -371,13 +426,34 @@ async def render_route_card(
     date guard a reliable borrow would strand the card indefinitely instead
     of just racily.
 
-    Returns True iff the card now shows the requested render (including a
-    true no-op -- it already did). Returns False when the render did not
-    happen: found borrowed, or a Telegram-side failure this function
-    swallows rather than raising (fix round 1, I2/I4) -- the driver blocked
-    the bot, a transient network error, an unrecognized edit failure, etc.
-    Never raises for a Telegram-side failure; a bug in our own code (e.g. a
-    TypeError building the text) still propagates.
+    force (tap-feedback spec §4.2): this render was asked for by the DRIVER,
+    not pushed by the backend. Two effects, both deliberate: the header is
+    stamped with seconds so the content genuinely differs from the previous
+    render, and the content-signature short-circuit below is skipped
+    entirely. Without this a repeat tap inside the same wall-clock minute
+    made no Telegram call at all and the bot read as frozen. Webhook pushes
+    always pass force=False and keep their idempotence: two identical
+    pushes still collapse to one edit.
+
+    Returns a `RenderOutcome`. RENDERED = the card now shows this render.
+    NOOP = it already did. Two ways there: the common one is the
+    content-signature short-circuit skipping the Telegram call entirely
+    (unforced renders only -- force always skips this short-circuit, see
+    above); the other is Telegram itself replying "message is not
+    modified" to an edit we did attempt (e.g. a stale `content_sig` left
+    behind by a state-save race). A NOOP of that second kind on a FORCED
+    render is a red flag, not routine: force's whole point is a seconds
+    stamp that guarantees the content differs, so Telegram confirming no
+    change means something upstream broke -- most likely
+    `staff.route.updated_at` losing its `{time}` placeholder, which makes
+    str.format silently drop the kwarg and turns every render
+    byte-identical. BLOCKED = the card is borrowed by a detail view and was
+    deliberately left alone. FAILED = a Telegram-side failure this function
+    swallowed rather than raising -- the driver blocked the bot, flood
+    control, a transient network error, an unrecognized edit failure. Only
+    the caller knows whether a FAILED render is worth telling the driver
+    about, which is the whole reason this is no longer a bool. A bug in our
+    own code (e.g. a TypeError building the text) still propagates.
 
     At most ONE send or ONE edit per call, except the one documented
     recovery: an edit that fails because the message is genuinely gone
@@ -422,14 +498,14 @@ async def render_route_card(
         # actually survive a concurrent render instead of being clobbered
         # -- fixing C1 without this turns the race into a stuck card.
         if respect_borrowed and is_current_borrow(state, today):
-            return False
+            return RenderOutcome.BLOCKED
 
         if view is None:
             stored = (state or {}).get("view")
             view = stored if stored in (route_card_state.VIEW_NEXT, route_card_state.VIEW_ALL) \
                 else route_card_state.VIEW_NEXT
 
-        text, keyboard = _build(payload, language, view)
+        text, keyboard = build_view(payload, language, view, with_seconds=force)
         sig = compute_render_signature(text, keyboard)
 
         # 1. No card for today: no state, no message_id, or a stale shift.
@@ -442,18 +518,32 @@ async def render_route_card(
         # carries a reference_message_id -- webhook edits pass None and can
         # never repost (an edit adds no message, so it cannot bury anything,
         # and this keeps the webhook path inside the per-chat send budget).
+        #
+        # The threshold is `echoes_deleted + 1`, not a fixed constant
+        # (tap-feedback spec §4.2). Private-chat message ids are per-chat
+        # monotonic and a DELETED message still consumed its id, so a raw
+        # gap cannot distinguish "four messages buried the card" from "the
+        # driver tapped four times and we deleted all four echoes". The
+        # counter is exactly that correction: the card is provably still
+        # the last visible message when every id between it and the tap was
+        # one we removed ourselves. `+ 1` accounts for the current tap,
+        # which is itself about to be deleted.
+        echoes_deleted = int((state or {}).get("echoes_deleted") or 0)
         need_repost = (
             not need_create
             and reference_message_id is not None
-            and (reference_message_id - int(state["message_id"])) > ROUTE_CARD_REPOST_GAP_MESSAGES
+            and (reference_message_id - int(state["message_id"])) > echoes_deleted + 1
         )
 
         if not need_create and not need_repost:
             # 3. Otherwise: edit in place. Skip entirely on a true no-op --
             # Telegram rejects an identical edit_message_text outright.
-            if state.get("content_sig") == sig and state.get("view") == view:
+            # A forced (driver-tap) render never takes this branch: the
+            # driver is owed a visible change, and the seconds stamp above
+            # means the edit is never actually identical anyway.
+            if not force and state.get("content_sig") == sig and state.get("view") == view:
                 _keep_hint_warm(state)
-                return True
+                return RenderOutcome.NOOP
             try:
                 await bot.edit_message_text(
                     chat_id=state.get("chat_id", chat_id),
@@ -463,7 +553,7 @@ async def render_route_card(
                 state.update({"view": view, "content_sig": sig})
                 await route_card_state.save(telegram_id, state)
                 _keep_hint_warm(state)
-                return True
+                return RenderOutcome.RENDERED
             except BadRequest as exc:
                 reason = str(exc).lower()
                 if "not modified" in reason:
@@ -471,10 +561,30 @@ async def render_route_card(
                     # failure (e.g. a prior `save` failed and left a stale
                     # content_sig, so this edit was a genuine no-op).
                     # Persist the signature so we stop retrying and return.
+                    #
+                    # NOOP, not RENDERED: nothing on the driver's screen
+                    # changed. A *forced* render reaching here is a red flag
+                    # -- the seconds stamp is supposed to make every driver
+                    # tap genuinely different content, so "not modified"
+                    # means something upstream broke (most likely
+                    # `staff.route.updated_at` losing its `{time}`
+                    # placeholder, which makes str.format drop the kwarg and
+                    # every render byte-identical). Reporting RENDERED here
+                    # would hide precisely the regression this plan exists
+                    # to prevent.
+                    if force:
+                        logger.warning(
+                            "route card: forced render for %s drew 'not modified' -- "
+                            "the seconds stamp should make every driver tap differ. "
+                            "Check that the `staff.route.updated_at` translation still "
+                            "contains its {time} placeholder; without it str.format "
+                            "drops the kwarg and every render is byte-identical.",
+                            telegram_id,
+                        )
                     state.update({"view": view, "content_sig": sig})
                     await route_card_state.save(telegram_id, state)
                     _keep_hint_warm(state)
-                    return True
+                    return RenderOutcome.NOOP
                 message_gone = (
                     "message to edit not found" in reason
                     or "message can't be edited" in reason
@@ -489,30 +599,30 @@ async def render_route_card(
                         "route card edit failed with unrecognized BadRequest for %s: %s",
                         telegram_id, exc,
                     )
-                    return False
+                    return RenderOutcome.FAILED
                 logger.debug("route card message gone (%s); sending fresh", exc)
                 # fall through to _create_card below -- this IS the case
                 # the delete+resend fallback exists for.
             except RetryAfter as exc:
                 # Flood control -- reposting now would make it worse.
                 logger.debug("route card edit rate-limited for %s: %s", telegram_id, exc)
-                return False
+                return RenderOutcome.FAILED
             except (NetworkError, TimedOut) as exc:
                 # Transient -- leave the card alone this round rather than
                 # deleting a perfectly good pinned message over a blip.
                 logger.debug("route card edit hit a transient error for %s: %s", telegram_id, exc)
-                return False
+                return RenderOutcome.FAILED
             except Forbidden as exc:
                 # Driver blocked the bot / kicked it -- a repost can't
                 # succeed either. Nothing to do but wait for them to come
                 # back; the next render attempt will hit the same wall.
                 logger.info("route card edit forbidden for %s (blocked?): %s", telegram_id, exc)
-                return False
+                return RenderOutcome.FAILED
             except TelegramError as exc:  # noqa: BLE001 -- catch-all for any
                 # other Telegram-side failure not enumerated above; never
                 # let it turn into a delete+resend storm.
                 logger.warning("route card edit failed unexpectedly for %s: %s", telegram_id, exc)
-                return False
+                return RenderOutcome.FAILED
 
         try:
             sent = await _create_card(
@@ -524,7 +634,7 @@ async def render_route_card(
             # save state -- the next event retries a fresh create instead
             # of editing against a message that was never sent.
             logger.warning("route card create failed for %s: %s", telegram_id, exc)
-            return False
+            return RenderOutcome.FAILED
 
         new_state = {
             "chat_id": sent.chat_id,
@@ -532,13 +642,16 @@ async def render_route_card(
             "card_date": today,
             "view": view,
             "content_sig": sig,
+            # A fresh card is by definition the last message in the chat,
+            # so nothing below it has been deleted yet.
+            "echoes_deleted": 0,
             # Alert throttle survives reposts/rollover (Task 9).
             "last_alert_at": (state or {}).get("last_alert_at"),
             "last_alert_message_id": (state or {}).get("last_alert_message_id"),
         }
         await route_card_state.save(telegram_id, new_state)
         _keep_hint_warm(new_state)
-        return True
+        return RenderOutcome.RENDERED
 
 
 async def update_card_for_driver(
@@ -618,12 +731,18 @@ async def update_card_for_driver(
     payload = response.data if isinstance(response.data, dict) else {"items": response.data or []}
     if language is None:
         language = await _get_user_language(telegram_id)
-    return await render_route_card(
+    outcome = await render_route_card(
         bot_app.bot, telegram_id=int(telegram_id), chat_id=int(telegram_id),  # private chat: chat_id == user id
         language=language, payload=payload,
         view=None, reference_message_id=reference_message_id,
         respect_borrowed=True,
     )
+    # Deliberately narrowed back to a bool: staff_bot/webhook_server.py:295
+    # returns this straight out of an HTTP handler, and
+    # tests/staff_bot/test_route_updated_sound_gate.py asserts on True/False.
+    # The enum's extra resolution is only useful to the DRIVER-TAP caller,
+    # which reaches render_route_card directly.
+    return outcome in (RenderOutcome.RENDERED, RenderOutcome.NOOP)
 
 
 # --- head-change alert (Task 9) ----------------------------------------------

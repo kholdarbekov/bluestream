@@ -518,6 +518,20 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Hozircha barcha manzillar yakunlandi — faol yetkazishlar yo'q.",
         "ru": "Все остановки выполнены — активных доставок нет.",
     },
+    "staff.route.refresh": {
+        "en": "Refresh",
+        "uz": "Yangilash",
+        "ru": "Обновить",
+    },
+    # Toast on the 🔄 button. Time-only on purpose: the toast is answered
+    # BEFORE the backend fetch (callback ids expire in ~10-15s), so a stop
+    # count is not known yet. A moving digit is also language-independent,
+    # which matters for a trilingual fleet.
+    "staff.route.refreshed_toast": {
+        "en": "🔄 Updated {time}",
+        "uz": "🔄 Yangilandi {time}",
+        "ru": "🔄 Обновлено {time}",
+    },
     "staff.route.diversion_offer": {
         "en": "📦 Order #{order_no} is close to you.\nGo here first instead of #{committed_no}? (saves ~{minutes} min)",
         "uz": "📦 #{order_no} buyurtma sizga yaqin.\n#{committed_no} o'rniga avval shu yerga borasizmi? (~{minutes} daqiqa tejaladi)",

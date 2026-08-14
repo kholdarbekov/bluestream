@@ -77,6 +77,11 @@ def _update(text):
     update.message = MagicMock()
     update.message.text = text
     update.message.reply_text = AsyncMock()
+    # A normal (non-edited) message: effective_message resolves to message,
+    # exactly like a real python-telegram-bot Update would. _handle_text_message
+    # reads via effective_message so an edited-message tap doesn't AttributeError
+    # on a None `.message` (see test_text_router_reauth.py for the regression).
+    update.effective_message = update.message
     update.effective_user = MagicMock()
     update.effective_user.id = 555
     update.callback_query = None

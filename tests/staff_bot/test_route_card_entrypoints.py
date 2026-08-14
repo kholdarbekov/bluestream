@@ -68,6 +68,17 @@ def _ctx():
     return ctx
 
 
+def _update_with_effective_message(chat_id=777, msg_id=555, user_id=777):
+    """`_callback_update` plus a real awaitable `effective_message`: the
+    failure fallback replies there, and a bare MagicMock's `reply_text`
+    is not awaitable (the fallback's own except would swallow the
+    TypeError and the assertion would fail for the wrong reason)."""
+    update = _callback_update(chat_id=chat_id, msg_id=msg_id, user_id=user_id)
+    update.effective_message = MagicMock()
+    update.effective_message.reply_text = AsyncMock()
+    return update
+
+
 def _driver_ctx(bot=None, **extra_user_data):
     """A context that satisfies `require_auth`/`require_delivery_driver`
     for real, so the decorated handler methods can be invoked directly
@@ -155,6 +166,67 @@ class TestRenderFromUpdate:
         ))
 
         assert render.await_args.kwargs["view"] == "all"
+
+
+@pytest.mark.unit
+class TestFailureIsVisible:
+    """A Telegram-side failure used to be byte-identical to 'nothing
+    changed' from the driver's seat: both produced no output at all."""
+
+    def test_failed_render_sends_one_silent_fallback(self, monkeypatch):
+        monkeypatch.setattr(
+            route_card, "render_route_card",
+            AsyncMock(return_value=route_card.RenderOutcome.FAILED),
+        )
+        monkeypatch.setattr(
+            mod, "api_client", _Api(MagicMock(success=True, data=_payload()))
+        )
+        handler = ActiveDeliveryHandler()
+        update = _update_with_effective_message()
+
+        asyncio.run(handler._render_card_from_update(update, _ctx(), "en", "tok"))
+
+        update.effective_message.reply_text.assert_awaited_once()
+        kwargs = update.effective_message.reply_text.await_args.kwargs
+        assert kwargs["disable_notification"] is True
+        assert kwargs["parse_mode"] == "HTML"
+        assert update.effective_message.reply_text.await_args.args[0]  # non-empty text
+        assert "reply_markup" not in kwargs  # inert: no second card surface
+
+    def test_successful_render_sends_no_fallback(self, monkeypatch):
+        monkeypatch.setattr(
+            route_card, "render_route_card",
+            AsyncMock(return_value=route_card.RenderOutcome.RENDERED),
+        )
+        monkeypatch.setattr(
+            mod, "api_client", _Api(MagicMock(success=True, data=_payload()))
+        )
+        handler = ActiveDeliveryHandler()
+        update = _update_with_effective_message()
+
+        asyncio.run(handler._render_card_from_update(update, _ctx(), "en", "tok"))
+
+        update.effective_message.reply_text.assert_not_called()
+
+    def test_noop_and_blocked_send_no_fallback(self, monkeypatch):
+        """Only FAILED is worth interrupting the driver for. NOOP means the
+        card already shows this; BLOCKED means a detail view deliberately
+        owns the card right now."""
+        for outcome in (route_card.RenderOutcome.NOOP,
+                        route_card.RenderOutcome.BLOCKED):
+            monkeypatch.setattr(
+                route_card, "render_route_card",
+                AsyncMock(return_value=outcome),
+            )
+            monkeypatch.setattr(
+                mod, "api_client", _Api(MagicMock(success=True, data=_payload()))
+            )
+            handler = ActiveDeliveryHandler()
+            update = _update_with_effective_message()
+
+            asyncio.run(handler._render_card_from_update(update, _ctx(), "en", "tok"))
+
+            update.effective_message.reply_text.assert_not_called()
 
 
 def _route_items():
@@ -378,6 +450,44 @@ class TestDoubleAnswerGuard:
         first_call_kwargs = update.callback_query.answer.await_args_list[0].kwargs
         assert first_call_kwargs.get("show_alert") is True  # the real alert, unharmed
         render.assert_awaited_once()  # show_active_deliveries's render still ran
+
+
+@pytest.mark.unit
+class TestRefreshToast:
+    def test_refresh_answers_the_callback_before_rendering(self, monkeypatch):
+        """Callback ids expire in ~10-15s and commit 15a0501 already fixed
+        one case of a slow handler eating them. The toast must not be
+        hostage to the API round trip behind it."""
+        handler = ActiveDeliveryHandler()
+        order = []
+        update = _callback_update()          # existing helper in this file
+        context = _driver_ctx()
+        update.callback_query.answer = AsyncMock(side_effect=lambda *a, **k: order.append("answer"))
+        monkeypatch.setattr(
+            handler, "_render_card_from_update",
+            AsyncMock(side_effect=lambda *a, **k: order.append("render")),
+        )
+        monkeypatch.setattr(handler, "_get_auth_token", AsyncMock(return_value="tok"))
+        monkeypatch.setattr(handler, "_get_language", AsyncMock(return_value="en"))
+        asyncio.run(handler.refresh_route_card(update, context))
+        assert order == ["answer", "render"]
+        toast = update.callback_query.answer.await_args.args[0]
+        assert toast  # never the empty string that only stops the spinner
+
+    def test_refresh_is_registered_as_a_real_callback_handler(self):
+        """AST-based, not substring-in-text: a commented-out registration
+        line contains the same substrings (mirrors TestWiring in this
+        file)."""
+        tree = ast.parse(BOT_PY.read_text())
+        patterns = {
+            kw.value.value
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and getattr(node.func, "id", "") == "CallbackQueryHandler"
+            for kw in node.keywords
+            if kw.arg == "pattern" and isinstance(kw.value, ast.Constant)
+        }
+        assert "^staff_route_refresh$" in patterns
 
 
 @pytest.mark.unit

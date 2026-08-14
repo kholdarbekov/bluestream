@@ -394,11 +394,21 @@ def format_delivery_stats(stats: Dict[str, Any], language: str) -> str:
     return '\n'.join(lines)
 
 
-def format_local_time(dt: Optional[datetime] = None) -> str:
-    """HH:MM in the business display timezone (Asia/Tashkent by default).
+def format_local_time(dt: Optional[datetime] = None, with_seconds: bool = False) -> str:
+    """HH:MM (or HH:MM:SS) in the business display timezone (Asia/Tashkent).
 
     The route card stamps this so freshness is visible without being
-    announced (route-UX spec §6.3)."""
+    announced (route-UX spec §6.3).
+
+    `with_seconds` exists for DRIVER-TAP renders only (tap-feedback spec
+    §4.2). A minute-granular stamp is byte-identical for a full minute, so
+    every repeat tap hashed to the same render signature and
+    `render_route_card` returned early having made no Telegram call at all
+    -- the bot looked frozen. Seconds make a tap's edit genuinely different
+    content. The default stays False so every existing caller is
+    byte-identical, and in particular so the WEBHOOK path keeps its
+    signature idempotence: duplicate silent pushes must remain free.
+    """
     from zoneinfo import ZoneInfo
 
     from shared.constants import DISPLAY_TIMEZONE
@@ -407,7 +417,8 @@ def format_local_time(dt: Optional[datetime] = None) -> str:
     moment = dt or datetime.now(_tz.utc)
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=_tz.utc)
-    return moment.astimezone(ZoneInfo(DISPLAY_TIMEZONE)).strftime("%H:%M")
+    fmt = "%H:%M:%S" if with_seconds else "%H:%M"
+    return moment.astimezone(ZoneInfo(DISPLAY_TIMEZONE)).strftime(fmt)
 
 
 def format_user_card(user: Dict[str, Any], language: str) -> str:

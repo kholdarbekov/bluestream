@@ -63,6 +63,8 @@ _ROUTE_CARD_KEYS = [
     "staff.delivery.eta_minutes",
     "staff.delivery.distance_km",
     "staff.delivery.active_count",
+    "staff.route.refresh",
+    "staff.route.refreshed_toast",
 ]
 
 
@@ -216,7 +218,12 @@ class TestEtaBadgeGating:
         items[0]["eta_minutes_from_current_location"] = 12
         items[0]["distance_km_to_next"] = 4.2
         text, _ = route_card.build_next_view(_payload(items), "en")
-        assert "12" not in text and "4.2" not in text
+        # Assert against the BODY, not the whole card: the header carries an
+        # `updated HH:MM` stamp, so a bare "12" substring check against the
+        # full text fails for a solid hour every day (and any other 2-digit
+        # value just moves which hour breaks).
+        body = text.split("\n", 1)[1]
+        assert "12" not in body and "4.2" not in body
         assert "⏱" not in text and "📏" not in text
 
     def test_error_state_shows_no_badge(self):
@@ -300,3 +307,25 @@ class TestEmptyAndNav:
 @pytest.mark.unit
 def test_format_local_time_shape():
     assert re.fullmatch(r"\d{2}:\d{2}", format_local_time())
+
+
+@pytest.mark.unit
+class TestRefreshAffordance:
+    def test_all_three_views_offer_refresh(self):
+        empty = {"items": [], "location_status": "missing", "route_summary": {}}
+        for text, kb in (
+            route_card.build_next_view(_payload([_item(1, "1")]), "en"),
+            route_card.build_all_view(_payload([_item(1, "1")]), "en"),
+            route_card.build_empty_view(empty, "en"),
+        ):
+            callbacks = [c for _, c, _ in _buttons(kb) if c]
+            assert "staff_route_refresh" in callbacks
+
+    def test_empty_view_offers_the_pool_and_keeps_back(self):
+        empty = {"items": [], "location_status": "missing", "route_summary": {}}
+        _, kb = route_card.build_empty_view(empty, "en")
+        callbacks = [c for _, c, _ in _buttons(kb) if c]
+        assert "staff_new_orders_unified" in callbacks
+        assert "staff_back_to_main" in callbacks
+        # Still no optimize button: there is no route left to optimize.
+        assert "staff_optimize_routes" not in callbacks

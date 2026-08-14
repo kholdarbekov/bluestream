@@ -13,9 +13,11 @@ from staff_bot.handlers.delivery import route_card
 from staff_bot.api_client import api_client
 from staff_bot.keyboards.delivery import DeliveryKeyboards
 from staff_bot.keyboards.common import CommonKeyboards
+from staff_bot.utils import route_card_state
 from staff_bot.utils.formatters import (
     escape_html,
     format_active_delivery_summary,
+    format_local_time,
 )
 from staff_bot.permissions import require_auth, require_delivery_driver
 from staff_bot.i18n import i18n
@@ -56,7 +58,22 @@ class ActiveDeliveryHandler(BaseHandler):
             # down the re-render with it) or silently swallow the caller's
             # own alert. `_safe_callback_answer` is the repo's one guard
             # for exactly this, so route through it instead of a new guard.
-            await self._safe_callback_answer(update.callback_query, "", show_alert=False)
+            #
+            # This toast is a real one now, not the empty string that only
+            # stopped the spinner (task-5). When this call is the SECOND
+            # answer of the same callback_query (the `optimize_routes` ->
+            # `show_active_deliveries` path), Telegram itself rejects a
+            # second `answerCallbackQuery` regardless of its content --
+            # `_safe_callback_answer` swallows that rejection exactly as it
+            # always has, so the caller's own alert (already delivered) is
+            # never clobbered. See TestDoubleAnswerGuard in
+            # tests/staff_bot/test_route_card_entrypoints.py.
+            await self._safe_callback_answer(
+                update.callback_query,
+                i18n.get('staff.route.refreshed_toast', language,
+                         time=format_local_time(with_seconds=True)),
+                show_alert=False,
+            )
         await self._render_card_from_update(update, context, language, token)
 
     async def _render_card_from_update(
@@ -97,7 +114,7 @@ class ActiveDeliveryHandler(BaseHandler):
             # route_card.render_route_card's session_hint paragraph.
             session_hint = context.user_data.setdefault('route_card_session', {})
 
-            await route_card.render_route_card(
+            outcome = await route_card.render_route_card(
                 context.bot,
                 telegram_id=update.effective_user.id,
                 chat_id=chat_id,
@@ -106,10 +123,82 @@ class ActiveDeliveryHandler(BaseHandler):
                 view=view,
                 reference_message_id=reference_message_id,
                 session_hint=session_hint,
+                # Every caller of this method is a DRIVER ACTION (menu tap,
+                # inline button, view switch, post-optimize re-render). The
+                # webhook path never comes through here -- it calls
+                # route_card.update_card_for_driver directly.
+                force=True,
             )
+            if outcome == route_card.RenderOutcome.FAILED:
+                await self._send_card_fallback(update, language, payload, view)
         except Exception as e:
             logger.error(f"Error rendering route card: {e}", exc_info=True)
             await self._handle_error(update, context)
+
+    async def _send_card_fallback(self, update, language, payload, view):
+        """The card could not be rendered and the driver asked for it.
+
+        One plain silent message carrying the same content -- no pin, no
+        state write, so it can never become a second tracked card. This
+        deliberately spends a send that the card's own budget forbids,
+        because the alternative is what the driver reported: flood control,
+        a network blip and 'nothing changed' all looking identical, i.e.
+        a bot that appears dead (tap-feedback spec §4.4).
+
+        Deliberately INERT: text only, no inline keyboard. An earlier
+        revision passed the card's real keyboard, which made this untracked
+        message a fully functional second card -- tapping "Start this stop"
+        on it calls `mark_borrowed` on the REAL pinned card (freezing every
+        webhook refresh of it) and then edits THIS message into the at-door
+        surface, orphaning it as a stale detail view with live buttons.
+        Actions belong on the one tracked card; this is a read-only "here is
+        what the card would have said".
+
+        Honest limitation: the first cause listed above is flood control,
+        and a sendMessage issued right after a rate-limited edit in the same
+        chat will often be rate-limited too (staff_bot installs no
+        AIORateLimiter, so there is no backoff). This is a best-effort last
+        resort, not a guarantee.
+        """
+        message = update.effective_message
+        if message is None:
+            return
+        text, _ = route_card.build_view(
+            payload, language, view or route_card_state.VIEW_NEXT, with_seconds=True
+        )
+        try:
+            await message.reply_text(
+                text, parse_mode="HTML",
+                disable_notification=True,
+            )
+        except Exception as exc:  # noqa: BLE001 -- last resort; nothing left to try
+            logger.warning("route card fallback send failed: %s", exc)
+
+    @require_auth
+    @require_delivery_driver
+    async def refresh_route_card(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """🔄 on the card.
+
+        Answers the callback FIRST, then renders. Callback ids expire in
+        ~10-15 seconds and commit 15a0501 already fixed one case of a slow
+        handler eating them -- the acknowledgement must not be hostage to
+        the backend round trip behind it. That ordering is also why the
+        toast carries only a timestamp and not a stop count: the count is
+        not known until after the fetch.
+        """
+        query = update.callback_query
+        language = await self._get_language(update, context)
+        await self._safe_callback_answer(
+            query,
+            i18n.get('staff.route.refreshed_toast', language,
+                     time=format_local_time(with_seconds=True)),
+            show_alert=False,
+        )
+        token = await self._get_auth_token(update, context)
+        if not token:
+            await self._handle_auth_error(update, language)
+            return
+        await self._render_card_from_update(update, context, language, token)
 
     @require_auth
     @require_delivery_driver
@@ -146,7 +235,6 @@ class ActiveDeliveryHandler(BaseHandler):
             # edits until the next full card render un-borrows it -- an edit
             # here would yank the driver's screen mid-collection (Phase 3
             # Task 7). The current_delivery snapshot below is UNCHANGED.
-            from staff_bot.utils import route_card_state
             await route_card_state.mark_borrowed(update.effective_user.id)
             # Redis-outage backstop (Task 7 fix round 1): mark_borrowed above
             # is a no-op when Redis is down (it starts with a `load` that
@@ -334,7 +422,13 @@ class ActiveDeliveryHandler(BaseHandler):
                 target = query.message if query is not None else update.message
                 await target.reply_text(
                     prompt,
-                    reply_markup=CommonKeyboards.location_request(language, button_text),
+                    # include_cancel=False: Cancel has no handler on this path,
+                    # so it was an escape that escaped nothing. The driver's
+                    # real exit is the route card's own inline buttons, which
+                    # this reply keyboard does not cover.
+                    reply_markup=CommonKeyboards.location_request(
+                        language, button_text, include_cancel=False
+                    ),
                 )
                 return False
 

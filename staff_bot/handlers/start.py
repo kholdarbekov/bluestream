@@ -82,7 +82,7 @@ class StartHandler(BaseHandler):
         # English for everyone, in a fleet whose DEFAULT_LANGUAGE is 'uz'.
         await update.message.reply_text(
             i18n.get('staff.welcome_intro', self._preferred_language(update, context)),
-            reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         )
         return SELECT_LANGUAGE
 

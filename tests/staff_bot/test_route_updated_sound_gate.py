@@ -563,7 +563,12 @@ class TestUpdateCardForDriverReferenceMessageIdPassthrough:
         async def fake_render(bot, *, telegram_id, chat_id, language, payload,
                                view=None, reference_message_id=None, **kwargs):
             captured["reference_message_id"] = reference_message_id
-            return True
+            # Must return a RenderOutcome, not a bare bool: update_card_for_driver
+            # narrows via `outcome in (RenderOutcome.RENDERED, RenderOutcome.NOOP)`,
+            # and `True in (...)` is False (str-Enum equality against a plain
+            # bool falls back to identity) -- a bare `True` here would silently
+            # invert the assertions below.
+            return route_card.RenderOutcome.RENDERED
 
         monkeypatch.setattr(route_card, "render_route_card", fake_render)
         monkeypatch.setattr(route_card, "api_client", _api_client_stub(_delivery_payload(1)))

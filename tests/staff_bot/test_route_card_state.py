@@ -246,6 +246,55 @@ class TestRedisBacked:
 
 
 @pytest.mark.unit
+class TestEchoCounter:
+    """`note_echo_deleted` feeds the route card's repost heuristic: it is how
+    the renderer tells "messages buried the card" apart from "the driver
+    tapped N times and we deleted every echo".
+
+    The counter is POSITION-AWARE: only an echo BELOW the card (a higher
+    message id) ever contributed to the gap the heuristic subtracts from."""
+
+    def test_no_op_without_state(self):
+        route_card_state.configure(_FakeRedis())
+        asyncio.run(route_card_state.note_echo_deleted(777, 101))
+        assert asyncio.run(route_card_state.load(777)) is None
+
+    def test_increments_across_calls(self):
+        route_card_state.configure(_FakeRedis())
+        asyncio.run(route_card_state.save(777, {"chat_id": 777, "message_id": 100}))
+        asyncio.run(route_card_state.note_echo_deleted(777, 101))
+        asyncio.run(route_card_state.note_echo_deleted(777, 102))
+        assert asyncio.run(route_card_state.load(777))["echoes_deleted"] == 2
+
+    def test_echo_above_the_card_is_not_counted(self):
+        """The create case: the tap that TRIGGERED the card gets a lower id
+        than the card the render then sent, so deleting it removed nothing
+        from below the card. Counting it would inflate the repost threshold
+        for the whole life of that card."""
+        route_card_state.configure(_FakeRedis())
+        asyncio.run(route_card_state.save(777, {"chat_id": 777, "message_id": 100}))
+        asyncio.run(route_card_state.note_echo_deleted(777, 99))
+        assert asyncio.run(route_card_state.load(777)).get("echoes_deleted") in (None, 0)
+
+    def test_echo_with_the_cards_own_id_is_not_counted(self):
+        """Boundary: the check is a strict `>`."""
+        route_card_state.configure(_FakeRedis())
+        asyncio.run(route_card_state.save(777, {"chat_id": 777, "message_id": 100}))
+        asyncio.run(route_card_state.note_echo_deleted(777, 100))
+        assert asyncio.run(route_card_state.load(777)).get("echoes_deleted") in (None, 0)
+
+    def test_non_integer_message_id_is_ignored_rather_than_miscounted(self):
+        route_card_state.configure(_FakeRedis())
+        asyncio.run(route_card_state.save(777, {"chat_id": 777, "message_id": 100}))
+        asyncio.run(route_card_state.note_echo_deleted(777, None))  # must not raise
+        assert asyncio.run(route_card_state.load(777)).get("echoes_deleted") in (None, 0)
+
+    def test_survives_redis_unconfigured(self):
+        route_card_state.configure(None)
+        asyncio.run(route_card_state.note_echo_deleted(777, 101))  # must not raise
+
+
+@pytest.mark.unit
 class TestRestartSurvival:
     def test_load_reads_from_redis_with_no_process_local_state(self):
         """Simulates a bot restart mid-shift: a previous process wrote the

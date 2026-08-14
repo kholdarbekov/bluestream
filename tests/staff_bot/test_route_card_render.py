@@ -18,6 +18,7 @@ import pytest
 from telegram.error import BadRequest, Forbidden, TimedOut
 
 from staff_bot.handlers.delivery import route_card
+from staff_bot.i18n import i18n
 from staff_bot.utils import route_card_state
 
 
@@ -88,11 +89,11 @@ def _reset_state():
     route_card_state._locks.clear()
 
 
-def _render(bot, *, view=None, ref=None, payload=None, session_hint=None):
-    asyncio.run(route_card.render_route_card(
+def _render(bot, *, view=None, ref=None, payload=None, session_hint=None, force=False):
+    return asyncio.run(route_card.render_route_card(
         bot, telegram_id=777, chat_id=777, language="en",
         payload=payload or _payload(), view=view, reference_message_id=ref,
-        session_hint=session_hint,
+        session_hint=session_hint, force=force,
     ))
 
 
@@ -255,10 +256,15 @@ class TestEdit:
         assert bot2.edit_message_text.await_args.kwargs["message_id"] == 100
 
     def test_identical_content_same_view_skips_edit(self, monkeypatch):
-        # Freeze the updated-stamp so consecutive renders hash identically.
-        monkeypatch.setattr(route_card, "format_local_time", lambda dt=None: "11:42")
+        """Unforced (webhook) renders keep their signature idempotence --
+        two identical pushes must still collapse to one edit. The DRIVER
+        tap path deliberately does NOT take this branch; see
+        TestForcedRender."""
+        monkeypatch.setattr(route_card, "format_local_time",
+                            lambda dt=None, with_seconds=False: "11:42")
         import staff_bot.utils.formatters as fmt
-        monkeypatch.setattr(fmt, "format_local_time", lambda dt=None: "11:42")
+        monkeypatch.setattr(fmt, "format_local_time",
+                            lambda dt=None, with_seconds=False: "11:42")
         bot = _bot()
         _render(bot)
         bot2 = _bot()
@@ -285,9 +291,9 @@ class TestEdit:
         after a prior successful edit leaves a stale content_sig, so the
         next render computes a genuinely-identical signature check gap and
         attempts an edit Telegram already reflects. Telegram's own
-        'Message is not modified' must be treated as success -- NOT as
-        "message gone" -- so the pinned card is never deleted+resent over
-        it."""
+        'Message is not modified' reports NOOP -- the card is correct, but
+        nothing changed -- NOT "message gone", so the pinned card is never
+        deleted+resent over it."""
         bot = _bot()
         _render(bot)
         bot2 = _bot()
@@ -349,12 +355,142 @@ class TestEdit:
 
 
 @pytest.mark.unit
+class TestForcedRender:
+    """The 2026-08-14 reported bug: a driver taps 'Active deliveries' four
+    times inside one minute and the bot makes ZERO Telegram calls, because
+    the only time-varying token in the card was a minute-granular stamp."""
+
+    @pytest.fixture(autouse=True)
+    def _seed_updated_at_translation(self, monkeypatch):
+        """This file's i18n singleton has no translations loaded, so an
+        unseeded `staff.route.updated_at` falls back to the humanized key
+        tail ("Updated at"), which has no `{time}` placeholder -- str.format
+        silently drops the `time` kwarg on a string with no slot for it.
+        Without this seed, `test_forced_render_stamps_seconds_unforced_does_not`
+        below would never see a seconds-stamp in EITHER render and pass
+        vacuously regardless of whether `with_seconds` actually worked. Seed
+        the real production copy (scripts/seed_staff_translations.py) so the
+        assertion exercises genuine product text. `monkeypatch.setitem`
+        reverts the "en" entry after this class's tests, so nothing here
+        leaks into other test files."""
+        merged = {**i18n.translations.get("en", {}), "staff.route.updated_at": "updated {time}"}
+        monkeypatch.setitem(i18n.translations, "en", merged)
+
+    def test_repeat_tap_same_minute_still_edits(self, monkeypatch):
+        # Freeze the MINUTE stamp exactly as the old no-op test does, so the
+        # only thing that can break the tie is the seconds resolution.
+        monkeypatch.setattr(
+            route_card, "format_local_time",
+            lambda dt=None, with_seconds=False: "11:42:07" if with_seconds else "11:42",
+        )
+        bot = _bot()
+        _render(bot, force=True)
+        bot.send_message.assert_awaited_once()
+
+        # Second tap, same frozen minute: must still reach Telegram.
+        bot2 = _bot()
+        _render(bot2, force=True)
+        bot2.edit_message_text.assert_awaited_once()
+        assert bot2.edit_message_text.await_args.kwargs["message_id"] == 100
+        bot2.send_message.assert_not_called()
+
+    def test_forced_render_stamps_seconds_unforced_does_not(self):
+        bot = _bot()
+        _render(bot, force=True)
+        forced_text = bot.send_message.await_args.kwargs["text"]
+
+        route_card_state.configure(_FakeRedis())  # fresh store, force a create
+        bot2 = _bot()
+        _render(bot2, force=False)
+        plain_text = bot2.send_message.await_args.kwargs["text"]
+
+        import re
+        assert re.search(r"\d{2}:\d{2}:\d{2}", forced_text)
+        assert not re.search(r"\d{2}:\d{2}:\d{2}", plain_text)
+
+    def test_forced_render_actually_changes_the_text(self, monkeypatch):
+        """force=True only guarantees an edit is ATTEMPTED. If the text were
+        byte-identical Telegram answers 'message is not modified', which
+        render_route_card reports as NOOP (route_card.py, the 'not
+        modified' branch) -- the card is correct, but the driver still sees
+        no visible change. The seconds stamp is what makes the edit real, so
+        assert the text, not the call."""
+        times = iter(["11:42:07", "11:42:09"])
+        monkeypatch.setattr(
+            route_card, "format_local_time",
+            lambda dt=None, with_seconds=False: next(times) if with_seconds else "11:42",
+        )
+        bot = _bot()
+        _render(bot, force=True)
+        first = bot.send_message.await_args.kwargs["text"]
+        bot2 = _bot()
+        _render(bot2, force=True)
+        second = bot2.edit_message_text.await_args.kwargs["text"]
+        assert first != second
+
+
+@pytest.mark.unit
+class TestDeletionAwareRepost:
+    """Repost when the card is not provably the last visible message.
+
+    Reposting on every tap costs 1 send + 1 delete + 1 pin against a ~1
+    msg/sec per-chat budget, and PTB's AIORateLimiter halts ALL requests on
+    RetryAfter -- so an unconditional repost would trip flood control on a
+    frustrated driver and reproduce the very bug this fixes."""
+
+    def _set_echoes(self, n):
+        state = asyncio.run(route_card_state.load(777))
+        state["echoes_deleted"] = n
+        asyncio.run(route_card_state.save(777, state))
+
+    def test_repeat_taps_whose_echoes_we_deleted_never_repost(self):
+        bot = _bot()
+        _render(bot, force=True)  # card at 100
+
+        # Three taps at ids 101, 102, 103; we deleted each echo.
+        for tap_id, deleted in ((101, 0), (102, 1), (103, 2)):
+            self._set_echoes(deleted)
+            bot_n = _bot(next_message_id=999)
+            _render(bot_n, ref=tap_id, force=True)
+            bot_n.send_message.assert_not_called()
+            bot_n.edit_message_text.assert_awaited_once()
+
+    def test_undeleted_traffic_below_the_card_triggers_a_repost(self):
+        bot = _bot()
+        _render(bot, force=True)  # card at 100
+        # 3 echoes deleted, then a head-change alert (id 104) we did NOT
+        # delete, then a tap at 105. Gap 5 > 3 + 1 -> repost.
+        self._set_echoes(3)
+        bot2 = _bot(next_message_id=300)
+        _render(bot2, ref=105, force=True)
+        bot2.send_message.assert_awaited_once()
+        assert bot2.send_message.await_args.kwargs["disable_notification"] is True
+        bot2.delete_message.assert_awaited_once()
+        assert bot2.delete_message.await_args.kwargs["message_id"] == 100
+        bot2.edit_message_text.assert_not_called()
+
+    def test_repost_resets_the_echo_counter(self):
+        bot = _bot()
+        _render(bot, force=True)
+        self._set_echoes(3)
+        _render(_bot(next_message_id=300), ref=105, force=True)
+        assert asyncio.run(route_card_state.load(777))["echoes_deleted"] == 0
+
+    def test_edit_in_place_preserves_the_echo_counter(self):
+        bot = _bot()
+        _render(bot, force=True)
+        self._set_echoes(2)
+        _render(_bot(), ref=103, force=True)
+        assert asyncio.run(route_card_state.load(777))["echoes_deleted"] == 2
+
+
+@pytest.mark.unit
 class TestRepostAndRollover:
     def test_buried_card_is_reposted_below(self):
         bot = _bot()
-        _render(bot)  # card at message_id 100
+        _render(bot)  # card at message_id 100, echoes_deleted 0
         bot2 = _bot(next_message_id=300)
-        _render(bot2, ref=100 + route_card.ROUTE_CARD_REPOST_GAP_MESSAGES + 1)
+        _render(bot2, ref=103)  # gap 3 > 0 + 1
         bot2.delete_message.assert_awaited_once()
         assert bot2.delete_message.await_args.kwargs["message_id"] == 100
         bot2.send_message.assert_awaited_once()
@@ -363,24 +499,27 @@ class TestRepostAndRollover:
         bot2.edit_message_text.assert_not_called()
         assert asyncio.run(route_card_state.load(777))["message_id"] == 300
 
-    def test_small_gap_edits_instead_of_reposting(self):
+    def test_adjacent_tap_edits_instead_of_reposting(self):
+        """Gap of exactly 1 = the tap is the very next id after the card, so
+        the card is still the last visible message. Nothing to move."""
         bot = _bot()
         _render(bot)
         bot2 = _bot()
-        _render(bot2, ref=100 + route_card.ROUTE_CARD_REPOST_GAP_MESSAGES - 1,
-                payload=_payload(2))
+        _render(bot2, ref=101, payload=_payload(2))
         bot2.send_message.assert_not_called()
         bot2.edit_message_text.assert_awaited_once()
 
     def test_gap_exactly_at_threshold_edits_not_reposts(self):
         """The condition is a strict `>`, so a gap exactly equal to
-        ROUTE_CARD_REPOST_GAP_MESSAGES must NOT repost (review M3: the
-        boundary itself was uncovered)."""
+        `echoes_deleted + 1` must NOT repost (review M3: the boundary
+        itself was uncovered)."""
         bot = _bot()
         _render(bot)
+        state = asyncio.run(route_card_state.load(777))
+        state["echoes_deleted"] = 2
+        asyncio.run(route_card_state.save(777, state))
         bot2 = _bot()
-        _render(bot2, ref=100 + route_card.ROUTE_CARD_REPOST_GAP_MESSAGES,
-                payload=_payload(2))
+        _render(bot2, ref=103, payload=_payload(2))  # gap 3, threshold 3
         bot2.send_message.assert_not_called()
         bot2.delete_message.assert_not_called()
         bot2.edit_message_text.assert_awaited_once()
@@ -461,6 +600,45 @@ class TestConcurrency:
         # Exactly one CREATE; the loser of the race sees state and edits.
         assert bot.send_message.await_count == 1
         assert bot.edit_message_text.await_count == 1
+
+
+@pytest.mark.unit
+class TestRenderOutcome:
+    def test_outcomes_are_distinguishable(self):
+        bot = _bot()
+        assert _render(bot) == route_card.RenderOutcome.RENDERED
+
+        bot2 = _bot()
+        assert _render(bot2) == route_card.RenderOutcome.NOOP  # identical, unforced
+
+        bot3 = _bot()
+        bot3.edit_message_text.side_effect = TimedOut()
+        assert _render(bot3, payload=_payload(2)) == route_card.RenderOutcome.FAILED
+
+    def test_borrowed_card_reports_blocked_not_failed(self):
+        bot = _bot()
+        _render(bot)
+        asyncio.run(route_card_state.mark_borrowed(777))
+        outcome = asyncio.run(route_card.render_route_card(
+            bot, telegram_id=777, chat_id=777, language="en",
+            payload=_payload(), respect_borrowed=True,
+        ))
+        assert outcome == route_card.RenderOutcome.BLOCKED
+
+    def test_not_modified_reports_noop_not_rendered(self):
+        """Telegram says the content is identical, so nothing on the
+        driver's screen changed -- reporting RENDERED would hide exactly
+        the regression this branch exists to surface."""
+        bot = _bot()
+        _render(bot)
+        bot2 = _bot()
+        bot2.edit_message_text.side_effect = BadRequest(
+            "Message is not modified: specified new message content and "
+            "reply markup are exactly the same as a current content and "
+            "reply markup of the message"
+        )
+        outcome = _render(bot2, payload=_payload(2))
+        assert outcome == route_card.RenderOutcome.NOOP
 
 
 @pytest.mark.unit
@@ -686,7 +864,7 @@ class TestMarkBorrowedRace:
             bot2, telegram_id=777, chat_id=777, language="en",
             payload=_payload(2), respect_borrowed=True,
         ))
-        assert result is False
+        assert result == route_card.RenderOutcome.BLOCKED
         bot2.edit_message_text.assert_not_called()
 
 
@@ -713,7 +891,8 @@ class TestBorrowedRolloverPrecedence:
             payload=_payload(), respect_borrowed=True,
         ))
 
-        assert result is True, "the rollover-create must win over a stale-shift borrow"
+        assert result == route_card.RenderOutcome.RENDERED, \
+            "the rollover-create must win over a stale-shift borrow"
         bot.delete_message.assert_awaited_once()  # best-effort cleanup of yesterday's message
         bot.send_message.assert_awaited_once()
         bot.edit_message_text.assert_not_called()
@@ -735,7 +914,7 @@ class TestBorrowedRolloverPrecedence:
             payload=_payload(), respect_borrowed=True,
         ))
 
-        assert result is False
+        assert result == route_card.RenderOutcome.BLOCKED
         bot.edit_message_text.assert_not_called()
         bot.send_message.assert_not_called()
         bot.delete_message.assert_not_called()

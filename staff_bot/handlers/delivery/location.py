@@ -118,7 +118,12 @@ class LocationHandler(BaseHandler):
                         button_text = i18n.get('staff.delivery.share_location_button', language)
                         await msg.reply_text(
                             f"📡 {i18n.get('staff.delivery.location_too_coarse', language)}",
-                            reply_markup=CommonKeyboards.location_request(language, button_text),
+                            # include_cancel=False -- same reasoning as the 412
+                            # branch in active_delivery.py: this is the same
+                            # optimize flow, one step later.
+                            reply_markup=CommonKeyboards.location_request(
+                                language, button_text, include_cancel=False
+                            ),
                         )
                     else:
                         # Non-coarse failure: spec §4.2 says the armed flag

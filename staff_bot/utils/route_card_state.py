@@ -25,7 +25,10 @@ silently reappearing after a Redis blip is not.
 
 State dict keys: chat_id, message_id (None => no card message yet),
 card_date ('YYYY-MM-DD' in DISPLAY_TIMEZONE — the card is SHIFT-scoped),
-view ('next'|'all'|'borrowed'), content_sig, last_alert_at (ISO),
+view ('next'|'all'|'borrowed'), content_sig, echoes_deleted (count of the
+driver's own menu-tap messages we deleted from BELOW this card since it was
+posted — input to the repost heuristic; see `note_echo_deleted` for why the
+position matters), last_alert_at (ISO),
 last_alert_message_id. TTL 48h — deleteMessage only works within 48h, so
 older state is useless anyway (spec §6.3).
 """
@@ -138,4 +141,60 @@ async def mark_borrowed(telegram_id: int) -> None:
         if not state:
             return
         state["view"] = VIEW_BORROWED
+        await save(telegram_id, state)
+
+
+async def note_echo_deleted(telegram_id: int, message_id: int) -> None:
+    """The bot just deleted ONE of the driver's own reply-keyboard echo
+    messages (tap-feedback spec §4.1). `message_id` is the id of the message
+    that was deleted.
+
+    Recorded so `render_route_card`'s repost heuristic can tell "N messages
+    landed below the card" apart from "N messages landed below the card and
+    we deleted every one of them". Without this counter a repeat tap is
+    indistinguishable from real chat traffic burying the card, so the card
+    reposts -- 1 send + 1 delete + 1 pin -- on roughly every other tap, and
+    a fast-tapping driver trips flood control.
+
+    POSITION CHECK (final review, fix 3): the counter only ever means
+    "messages we removed from BELOW the card", because that is the only
+    thing the heuristic's arithmetic can subtract -- it compares the card's
+    message id against a LATER tap's id. An echo whose id is <= the card's
+    id sits ABOVE the card and never contributed to the gap, so counting it
+    inflates the threshold and silently suppresses a repost that should
+    fire.
+
+    That is not hypothetical: on a create/repost `render_route_card` resets
+    `echoes_deleted` to 0 (route_card.py, `new_state`), and the very next
+    thing the router does is delete the tap echo that TRIGGERED the create
+    -- an id strictly BELOW the freshly sent card. Without this check every
+    card starts life with a permanently inflated counter, and because each
+    later tap raises the gap and the counter together the slack never
+    closes: the spec §4.2 row-5 repost (an undeleted head-change alert
+    buries the card) never fires.
+
+    DEADLOCK CHECK: this self-locks, the same shape as `mark_borrowed`. Its
+    only caller is `StaffBot._delete_menu_echo`, which holds no lock and
+    does not enter `render_route_card` -- the dispatch that DID render has
+    already returned by the time this runs. Re-verify before adding any
+    caller that sits inside `render_route_card`'s critical section:
+    `asyncio.Lock` is not reentrant.
+
+    No state (Redis down, or no card yet) is a silent no-op, matching every
+    other writer in this module. A non-integer id is treated the same way:
+    a miscount is worse than no count.
+    """
+    async with get_lock(telegram_id):
+        state = await load(telegram_id)
+        if not state:
+            return
+        try:
+            deleted_id = int(message_id)
+            card_message_id = int(state.get("message_id") or 0)
+        except (TypeError, ValueError):
+            return
+        if deleted_id <= card_message_id:
+            # Above (or is) the card -- it never buried anything.
+            return
+        state["echoes_deleted"] = int(state.get("echoes_deleted") or 0) + 1
         await save(telegram_id, state)

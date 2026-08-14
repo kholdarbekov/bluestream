@@ -258,7 +258,10 @@ const Orders = () => {
   const { data: usersData, isFetching: isUsersFetching } = useQuery({
     queryKey: ['users-for-order', userSearchTerm],
     queryFn: () => fetchAllPages(
-      (page) => adminService.getUsers({ search: userSearchTerm, page, per_page: BULK_LOAD_PAGE_SIZE }),
+      // role=customer keeps staff accounts (admins, operators, drivers) out of
+      // the customer picker — the backend search itself is role-agnostic because
+      // the staff bot's COD flow deliberately searches every role.
+      (page) => adminService.getUsers({ search: userSearchTerm, role: 'customer', page, per_page: BULK_LOAD_PAGE_SIZE }),
       (resp) => resp?.data?.items || [],
       BULK_LOAD_PAGE_SIZE,
     ),

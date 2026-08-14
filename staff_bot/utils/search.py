@@ -1,10 +1,17 @@
-"""Search-related helper functions for staff bot handlers."""
+"""Search-related helper functions for staff bot handlers.
 
+Thin delegators over :mod:`shared.user_search`, which is the single place the
+customer-search matching rules live so the staff bot and the admin API resolve
+a typed query the same way. The wrappers are kept (rather than re-exporting)
+so the bot's import surface stays explicit and stable for its handlers.
+"""
 
-# Minimum digits required before a fully-numeric query is treated as a phone
-# substring search. Anything shorter (1–3 digits) is routed to name search to
-# avoid noisy partial matches and to dovetail with the backend's name path.
-MIN_PHONE_DIGITS = 4
+from shared.user_search import MIN_PHONE_DIGITS as _MIN_PHONE_DIGITS
+from shared.user_search import detect_search_type as _detect_search_type
+from shared.user_search import normalize_phone_query as _normalize_phone_query
+
+# Re-exported so existing handler imports and tests keep their meaning.
+MIN_PHONE_DIGITS = _MIN_PHONE_DIGITS
 
 
 def detect_search_type(query_text: str) -> str:
@@ -14,20 +21,10 @@ def detect_search_type(query_text: str) -> str:
     and classifies the result as ``phone`` only when it's all-digits with at
     least :data:`MIN_PHONE_DIGITS` characters; otherwise ``name``.
     """
-    compact = (
-        query_text
-        .replace('+', '')
-        .replace(' ', '')
-        .replace('-', '')
-        .replace('(', '')
-        .replace(')', '')
-    )
-    if compact.isdigit() and len(compact) >= MIN_PHONE_DIGITS:
-        return 'phone'
-    return 'name'
+    return _detect_search_type(query_text)
 
 
 def normalize_phone_query(query_text: str) -> str:
     """Strip everything except digits so a typed phone with spaces/dashes
     matches against canonical ``+998901234567``-style values via ILIKE."""
-    return ''.join(ch for ch in query_text if ch.isdigit())
+    return _normalize_phone_query(query_text)

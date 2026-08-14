@@ -97,6 +97,7 @@ from shared.enums import (
 from business_app import db
 from business_app.utils.helpers import get_current_language
 from business_app.utils.user_types import normalize_user_type
+from business_app.utils.user_search import build_user_search_filter
 from business_app.utils.translations import get_translation
 from business_app.utils.exceptions import ValidationError, ConflictError, NotFoundError, ForbiddenError
 from business_app.utils.api_responses import (
@@ -1025,18 +1026,15 @@ def get_users():
         # Build query
         query = User.query
 
-        # Apply search filter
+        # Apply search filter. The matching rule (Latin<->Cyrillic names,
+        # formatted phones, multi-word queries) is owned by
+        # business_app/utils/user_search.py so this endpoint and the staff bot's
+        # COD search resolve a typed query identically -- see
+        # shared/user_search.py for why there is only one expression of it.
         if search:
-            search_term = f"%{search}%"
-            query = query.filter(
-                or_(
-                    User.first_name.ilike(search_term),
-                    User.last_name.ilike(search_term),
-                    User.email.ilike(search_term),
-                    User.phone.ilike(search_term),
-                    User.company_name.ilike(search_term),
-                )
-            )
+            search_filter = build_user_search_filter(search)
+            if search_filter is not None:
+                query = query.filter(search_filter)
 
         # Apply role filter
         if role:

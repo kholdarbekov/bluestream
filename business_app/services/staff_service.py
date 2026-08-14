@@ -10,7 +10,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, List, Tuple
 from flask import current_app
 import redis
-from sqlalchemy import and_, or_, func
+from sqlalchemy import or_, func
 from sqlalchemy.orm import joinedload
 from decimal import Decimal
 
@@ -25,6 +25,7 @@ from business_app.services.cod_collect_ceiling import (
 )
 from business_app.utils.exceptions import ValidationError, NotFoundError, ForbiddenError, ConflictError
 from business_app.utils.geo_validation import ensure_within_delivery_zone
+from business_app.utils.user_search import build_name_match_clause
 from business_app.utils.payment_projection import (
     is_ledger_receivable,
     open_receivable_amount,
@@ -2434,62 +2435,17 @@ class StaffService:
                 .all()
             )
         elif search_type == "name":
-            # Multi-word search: tokenize on whitespace and require each token to
-            # appear in *either* first_name or last_name. Lets "Donald Trump" and
-            # "Trump Donald" both find a customer named Donald Trump (and shorter
-            # prefixes like "Don Tr" still hit via ILIKE substring match). We do
-            # this for every Latin↔Cyrillic transliteration variant so a Cyrillic
-            # name in DB cross-matches a Latin query and vice versa.
-            variants = StaffService._expand_name_variants(normalized_query)
-            variant_clauses = []
-            for variant in variants:
-                tokens = [t for t in variant.split() if t]
-                if not tokens:
-                    continue
-                token_clauses = [
-                    or_(
-                        User.first_name.ilike(f"%{tok}%"),
-                        User.last_name.ilike(f"%{tok}%"),
-                    )
-                    for tok in tokens
-                ]
-                variant_clauses.append(and_(*token_clauses))
-            if not variant_clauses:
+            # Multi-word + Latin↔Cyrillic matching is owned by
+            # business_app/utils/user_search.py so the admin UI's user search
+            # resolves a typed name exactly the way this does.
+            name_clause = build_name_match_clause(normalized_query)
+            if name_clause is None:
                 return []
-            users = User.query.filter(or_(*variant_clauses)).limit(20).all()
+            users = User.query.filter(name_clause).limit(20).all()
         else:
             raise ValidationError("search_type must be 'phone' or 'name'", error_code="STAFF_SEARCH_TYPE_INVALID")
 
         return users
-
-    @staticmethod
-    def _expand_name_variants(query: str) -> List[str]:
-        """Return the original query plus its Latin↔Cyrillic transliterations.
-
-        Best-effort: when ``transliterate`` cannot detect/convert a string the
-        helper silently falls back to the inputs collected so far. The GOST
-        7.79-2000 scheme used by the ``transliterate`` package emits
-        apostrophes for the Russian soft/hard signs (e.g. ``Дональд`` →
-        ``Donal'd``) — those punctuation marks are absent from real-world
-        Latin spellings of names, so each variant is also folded into an
-        apostrophe-stripped form to keep matching symmetric in practice.
-        """
-        from transliterate import translit  # local import — keep top-level lean
-        from transliterate.exceptions import LanguageDetectionError
-
-        variants = {query}
-        try:
-            variants.add(translit(query, "ru"))  # Latin → Cyrillic
-        except (LanguageDetectionError, Exception):  # noqa: BLE001 — best-effort
-            pass
-        try:
-            variants.add(translit(query, "ru", reversed=True))  # Cyrillic → Latin
-        except (LanguageDetectionError, Exception):  # noqa: BLE001 — best-effort
-            pass
-        # Strip GOST-injected punctuation (apostrophe / prime / double-prime).
-        cleaned = {v.replace("'", "").replace("ʹ", "").replace("ʺ", "") for v in variants}
-        variants |= cleaned
-        return list(variants)
 
     @staticmethod
     def search_customers_for_cod_collection(

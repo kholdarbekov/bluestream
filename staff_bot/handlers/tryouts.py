@@ -235,7 +235,10 @@ class TryoutHandler(BaseHandler):
         return {
             'task_id': int(task.get('id')),
             'tryout_id': int(task.get('tryout_id')),
-            'tryout_number': task.get('tryout_number') or 'Try-out',
+            # Store the RAW value; the placeholder is localized at render time
+            # in `_build_pickup_overview`, which knows the driver's language.
+            # (This dict is persisted in user_data and outlives a language switch.)
+            'tryout_number': task.get('tryout_number') or '',
             'products': [
                 {
                     'product_id': int(row.get('product_id')),
@@ -249,8 +252,11 @@ class TryoutHandler(BaseHandler):
 
     def _build_pickup_overview(self, language: str, state: dict) -> str:
         selected = self._pickup_selected_map(state)
+        tryout_number = state.get('tryout_number') or i18n.get(
+            'staff.tryout.default_label', language
+        )
         lines = [
-            f"♻️ <b>{escape_html(state.get('tryout_number'))}</b>",
+            f"♻️ <b>{escape_html(tryout_number)}</b>",
             i18n.get('staff.tryout.pickup_select_product', language),
             "",
         ]
@@ -561,7 +567,7 @@ class TryoutHandler(BaseHandler):
         contact = task.get('trial_contact') or {}
         address = task.get('address_snapshot') or {}
         lines = [
-            f"🧪 <b>{escape_html(task.get('tryout_number') or 'Try-out')}</b>",
+            f"🧪 <b>{escape_html(task.get('tryout_number') or i18n.get('staff.tryout.default_label', language))}</b>",
             f"{i18n.get('staff.tryout.task_type', language)}: {escape_html(task.get('task_type'))}",
             f"{i18n.get('staff.tryout.task_status', language)}: {escape_html(task.get('status'))}",
         ]

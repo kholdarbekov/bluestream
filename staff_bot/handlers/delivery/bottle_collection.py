@@ -1103,8 +1103,12 @@ class BottleCollectionHandler(BaseHandler):
         returned_wh_label = i18n.get('staff.delivery.bottles_returned_wh_label', language)
         discrepancy_label = i18n.get('staff.delivery.discrepancy_label', language)
 
+        # `status.upper()` printed the raw enum value ("[OPEN]", "[FORCE_CLOSED]")
+        # in every language; route it through the translated status family.
+        status_label = i18n.get(f'staff.delivery.bottle_session_status.{status}', language)
+
         lines = [
-            f"🚚 <b>{session_label} #{escape_html(ref)}</b>  [{escape_html(status.upper())}]",
+            f"🚚 <b>{session_label} #{escape_html(ref)}</b>  [{escape_html(status_label)}]",
             f"⏱ {started_label}: {escape_html(started_at)}",
             "",
             f"📦 {loaded_label}:               <b>{loaded}</b>",
@@ -1187,7 +1191,11 @@ class BottleCollectionHandler(BaseHandler):
             if response.success and response.data:
                 session = response.data
                 raw_started = session.get('started_at')
-                started = raw_started[:16].replace('T', ' ') if raw_started else 'unknown time'
+                started = (
+                    raw_started[:16].replace('T', ' ')
+                    if raw_started
+                    else i18n.get('staff.common.unknown_time', language)
+                )
                 loaded = session.get('bottles_loaded', 0)
                 text = i18n.get(
                     'staff.delivery.bottle_session_already_open', language,
@@ -1545,8 +1553,11 @@ class BottleCollectionHandler(BaseHandler):
             for t in transfers:
                 ref = (t.get('transfer_ref') or '')[:8]
                 qty = t.get('declared_quantity', 0)
-                sender = t.get('sender_name', 'Unknown driver')
-                lines.append(f"• From <b>{escape_html(sender)}</b>: <b>{qty}</b> bottles  [ref: {escape_html(ref)}]")
+                sender = t.get('sender_name') or i18n.get('staff.common.unknown_driver', language)
+                lines.append(i18n.get(
+                    'staff.delivery.pending_transfer_line', language,
+                    sender=escape_html(sender), qty=qty, ref=escape_html(ref),
+                ))
 
             await query.edit_message_text(
                 "\n".join(lines),

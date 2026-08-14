@@ -1037,11 +1037,14 @@ class StaffBot:
                 await self.application.bot.set_my_commands(commands, language_code=lang)
 
             # Global fallback commands when Telegram cannot resolve localized scope.
+            # This is what most drivers actually see in the `/` menu, so it must
+            # be the deployment default language (uz), not English.
+            default_language = i18n.normalize_language(None)
             fallback_commands = [
-                BotCommand("start", i18n.get('staff.command.start', 'en')),
-                BotCommand("menu", i18n.get('staff.command.menu', 'en')),
-                BotCommand("help", i18n.get('staff.command.help', 'en')),
-                BotCommand("language", i18n.get('staff.command.language', 'en')),
+                BotCommand("start", i18n.get('staff.command.start', default_language)),
+                BotCommand("menu", i18n.get('staff.command.menu', default_language)),
+                BotCommand("help", i18n.get('staff.command.help', default_language)),
+                BotCommand("language", i18n.get('staff.command.language', default_language)),
             ]
             await self.application.bot.set_my_commands(fallback_commands)
             logger.info("Staff bot commands set successfully")

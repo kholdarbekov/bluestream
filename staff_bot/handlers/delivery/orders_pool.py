@@ -348,7 +348,7 @@ class OrdersPoolHandler(BaseHandler):
                             callback_data='bottles_join_session',
                         )],
                         [InlineKeyboardButton(
-                            i18n.get('common.back', language),
+                            i18n.get('staff.back', language),
                             callback_data='staff_new_orders',
                         )],
                     ])

@@ -334,7 +334,10 @@ class BaseHandler:
             language = await i18n.get_user_language(update.effective_user.id)
             error_msg = i18n.get('staff.error_occurred', language)
         except Exception:
-            error_msg = i18n.get('staff.error_occurred', 'en')
+            # The DB lookup failed, not the user's preference — fall back to the
+            # deployment default (uz), not English. `normalize_language(None)`
+            # is the SSOT for "no language known".
+            error_msg = i18n.get('staff.error_occurred', i18n.normalize_language(None))
 
         await self._notify_user(update, error_msg, show_alert=True)
 

@@ -76,11 +76,31 @@ class StartHandler(BaseHandler):
             name = i18n.get_language_name(lang_code, lang_code)
             keyboard.append([f"{flag} {name}"])
 
+        # The staff member has not picked a language yet, so lean on Telegram's
+        # own client locale before falling back to the deployment default.
+        # Hardcoding 'en' here made the very first screen a new driver sees
+        # English for everyone, in a fleet whose DEFAULT_LANGUAGE is 'uz'.
         await update.message.reply_text(
-            i18n.get('staff.welcome_intro', 'en'),
+            i18n.get('staff.welcome_intro', self._preferred_language(update, context)),
             reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
         )
         return SELECT_LANGUAGE
+
+    @staticmethod
+    def _preferred_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+        """Best guess at a language for a staff member who has not chosen one.
+
+        Order: a language already captured this session -> the Telegram client
+        locale -> `config.localization.default_language`. `normalize_language`
+        maps locale variants ('ru-RU', 'uz-Latn') onto supported codes and
+        returns the configured default for anything it cannot place.
+        """
+        captured = (context.user_data or {}).get('language')
+        if captured:
+            return i18n.normalize_language(captured)
+
+        telegram_locale = getattr(update.effective_user, 'language_code', None)
+        return i18n.normalize_language(telegram_locale)
 
     async def language_selected(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle language selection then authenticate by Telegram binding."""
@@ -207,7 +227,7 @@ class StartHandler(BaseHandler):
 
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Cancel authentication flow"""
-        language = context.user_data.get('language', 'en')
+        language = self._preferred_language(update, context)
         context.user_data.pop('invite_token', None)
         await update.message.reply_text(
             i18n.get('staff.auth_cancelled', language),

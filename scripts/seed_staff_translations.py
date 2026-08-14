@@ -18,8 +18,18 @@ sys.path.insert(0, '/app')
 
 from business_app import create_app, db  # noqa: E402
 from business_app.models.translation import Translation  # noqa: E402
-from shared.staff_constants import FAILED_DELIVERY_REASONS, STAFF_BOT_ROLES  # noqa: E402
-from shared.enums import OrderStatus, PaymentMethod  # noqa: E402
+from shared.staff_constants import (  # noqa: E402
+    FAILED_DELIVERY_REASONS,
+    RECONCILIATION_RISK_FLAGS,
+    STAFF_BOT_ROLES,
+)
+from shared.enums import (  # noqa: E402
+    DeliveryStatus,
+    DriverBottleSessionStatus,
+    DriverCashSessionStatus,
+    OrderStatus,
+    PaymentMethod,
+)
 
 
 LANGUAGES = ("en", "uz", "ru")
@@ -79,9 +89,9 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "ru": "Новые заказы (просмотр)",
     },
     "staff.menu.active_deliveries": {
-        "en": "My Active Deliveries",
-        "uz": "Mening faol yetkazishlarim",
-        "ru": "Мои активные доставки",
+        "en": "Orders assigned to me",
+        "uz": "Menga biriktirilgan buyurtmalar",
+        "ru": "Заказы, назначенные мне",
     },
     "staff.menu.delivery_history": {
         "en": "Delivery History",
@@ -110,7 +120,7 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
     },
     "staff.menu.cash_reconciliation": {
         "en": "Cash Reconciliation",
-        "uz": "Naqd pul yarashtiruvi",
+        "uz": "Naqd pul hisobini solishtirish",
         "ru": "Сверка наличных",
     },
     "staff.menu.create_client": {
@@ -160,8 +170,8 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
     },
     "staff.menu.collect_cod_debt": {
         "en": "Collect COD Debt",
-        "uz": "COD qarzni yigish",
-        "ru": "Сбор долга COD",
+        "uz": "Qarzni yigish",
+        "ru": "Сбор долга",
     },
     "staff.tryouts.hub_title": {
         "en": "Try-outs",
@@ -230,8 +240,8 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
     },
     "staff.operator.cod_restricted": {
         "en": "Cash on delivery is unavailable for this customer until earlier COD debts are settled.",
-        "uz": "Avvalgi COD qarzlari yopilmaguncha bu mijoz uchun yetkazib berishda naqd tolov mavjud emas.",
-        "ru": "Оплата наличными при доставке недоступна для этого клиента, пока не будут погашены прежние долги COD.",
+        "uz": "Avvalgi qarzlari yopilmaguncha bu mijoz uchun yetkazib berishda naqd tolov mavjud emas.",
+        "ru": "Оплата наличными при доставке недоступна для этого клиента, пока не будут погашены прежние долги.",
     },
     "staff.operator.payment_unavailable": {
         "en": "This payment method is not available for the selected customer.",
@@ -249,6 +259,34 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "N/A",
         "uz": "Mavjud emas",
         "ru": "Недоступно",
+    },
+    # Placeholders for records the API returned without a display name/time.
+    # These used to be bare English literals (`or 'Driver'`, `or 'unknown time'`)
+    # inside button labels and message bodies.
+    "staff.common.unknown_driver": {
+        "en": "Driver",
+        "uz": "Haydovchi",
+        "ru": "Водитель",
+    },
+    "staff.common.driver_number": {
+        "en": "Driver #{driver_id}",
+        "uz": "Haydovchi #{driver_id}",
+        "ru": "Водитель №{driver_id}",
+    },
+    "staff.common.unknown_time": {
+        "en": "unknown time",
+        "uz": "vaqti nomalum",
+        "ru": "время неизвестно",
+    },
+    "staff.delivery.pending_transfer_line": {
+        "en": "• From <b>{sender}</b>: <b>{qty}</b> bottles  [ref: {ref}]",
+        "uz": "• <b>{sender}</b>dan: <b>{qty}</b> ta idish  [ref: {ref}]",
+        "ru": "• От <b>{sender}</b>: <b>{qty}</b> ед. тары  [ref: {ref}]",
+    },
+    "staff.tryout.default_label": {
+        "en": "Try-out",
+        "uz": "Sinov",
+        "ru": "Пробная",
     },
     "staff.currency.uzs": {
         "en": "UZS",
@@ -442,9 +480,9 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "ru": "Все остановки ({count})",
     },
     "staff.route.start_this_stop": {
-        "en": "Start this stop",
-        "uz": "Shu manzilni boshlash",
-        "ru": "Начать эту остановку",
+        "en": "Start this order",
+        "uz": "Shu buyurtmani boshlash",
+        "ru": "Начать этот заказ",
     },
     "staff.route.open_stop": {
         "en": "Open stop",
@@ -1725,13 +1763,79 @@ ROLE_TRANSLATIONS = {
     "operator": {"en": "Operator", "uz": "Operator", "ru": "Оператор"},
 }
 
+# MUST cover every `shared.enums.DeliveryStatus` value, not just the ones a
+# driver can move a delivery INTO. `keyboards/delivery.py:95` labels a button
+# for every successor in `DELIVERY_STATUS_TRANSITIONS` — and CANCELLED is a
+# successor of all four active statuses — while `formatters.py:358` falls
+# through to `staff.delivery.status.{status}` for anything outside its own map.
+# Both are fed straight from the enum, so a narrower catalog here prints the
+# humanised English key tail on a driver's screen. `_add_dynamic_keys` derives
+# from the enum for exactly this reason; keep the two in step.
 DELIVERY_STATUS_TRANSLATIONS = {
+    "scheduled": {"en": "Scheduled", "uz": "Rejalashtirilgan", "ru": "Запланирован"},
+    "pending": {"en": "Pending", "uz": "Kutilmoqda", "ru": "В ожидании"},
     "assigned": {"en": "Assigned", "uz": "Biriktirilgan", "ru": "Назначен"},
     "picked_up": {"en": "Picked Up", "uz": "Olib ketildi", "ru": "Забран"},
     "in_transit": {"en": "In Transit", "uz": "Yolda", "ru": "В пути"},
     "arrived": {"en": "Arrived", "uz": "Yetib keldi", "ru": "Прибыл"},
     "delivered": {"en": "Delivered", "uz": "Yetkazildi", "ru": "Доставлен"},
     "failed": {"en": "Failed", "uz": "Muvaffaqiyatsiz", "ru": "Неудачно"},
+    "cancelled": {"en": "Cancelled", "uz": "Bekor qilingan", "ru": "Отменен"},
+    "returned": {"en": "Returned", "uz": "Qaytarilgan", "ru": "Возвращен"},
+}
+
+# Driver cash-reconciliation session status — `shared.enums.DriverCashSessionStatus`.
+# `status_update.py::_format_session_summary` used to print the raw enum value
+# ("open", "force_closed") onto the money screen in every language.
+CASH_SESSION_STATUS_TRANSLATIONS = {
+    "open": {"en": "Open", "uz": "Ochiq", "ru": "Открыта"},
+    "partial": {"en": "Partially submitted", "uz": "Qisman topshirilgan", "ru": "Частично сдано"},
+    "submitted": {"en": "Submitted", "uz": "Topshirilgan", "ru": "Сдано"},
+    "verified": {"en": "Verified", "uz": "Tasdiqlangan", "ru": "Проверено"},
+    "mismatch": {"en": "Mismatch", "uz": "Nomuvofiqlik", "ru": "Расхождение"},
+    "overdue": {"en": "Overdue", "uz": "Muddati o'tgan", "ru": "Просрочено"},
+    "resolved": {"en": "Resolved", "uz": "Hal qilingan", "ru": "Урегулировано"},
+    "force_closed": {"en": "Force closed", "uz": "Majburan yopilgan", "ru": "Закрыта принудительно"},
+}
+
+# Bottle-accountability session status — `shared.enums.DriverBottleSessionStatus`.
+# `bottle_collection.py::_format_session` used to render `[{status.upper()}]`.
+BOTTLE_SESSION_STATUS_TRANSLATIONS = {
+    "open": {"en": "Open", "uz": "Ochiq", "ru": "Открыта"},
+    "closed": {"en": "Closed", "uz": "Yopiq", "ru": "Закрыта"},
+    "force_closed": {"en": "Force closed", "uz": "Majburan yopilgan", "ru": "Закрыта принудительно"},
+    "cancelled": {"en": "Cancelled", "uz": "Bekor qilingan", "ru": "Отменена"},
+}
+
+# Reconciliation risk flags — emitted as snake_case identifiers by
+# `DriverReconciliationService._build_risk_flags` and previously joined straight
+# into the driver's cash screen ("Признаки риска: cash_on_hand_warning").
+RISK_FLAG_TRANSLATIONS = {
+    "cash_on_hand_escalation": {
+        "en": "Cash on hand above escalation limit",
+        "uz": "Qo'ldagi naqd pul eskalatsiya chegarasidan yuqori",
+        "ru": "Наличные на руках выше порога эскалации",
+    },
+    "cash_on_hand_warning": {
+        "en": "Cash on hand above warning limit",
+        "uz": "Qo'ldagi naqd pul ogohlantirish chegarasidan yuqori",
+        "ru": "Наличные на руках выше порога предупреждения",
+    },
+    "repeated_mismatch_pattern": {
+        "en": "Repeated mismatches recently",
+        "uz": "So'nggi paytda takroriy nomuvofiqliklar",
+        "ru": "Повторяющиеся расхождения за последнее время",
+    },
+    "submission_overdue": {
+        "en": "Cash submission overdue",
+        "uz": "Naqd pulni topshirish muddati o'tgan",
+        "ru": "Сдача наличных просрочена",
+    },
+    "reconciliation_warning_due": {
+        "en": "Reconciliation due soon",
+        "uz": "Hisob-kitob muddati yaqinlashdi",
+        "ru": "Скоро срок сверки",
+    },
 }
 
 FAILED_REASON_TRANSLATIONS = {
@@ -2114,9 +2218,23 @@ def _add_dynamic_keys(keys: Set[str]) -> None:
     for role in STAFF_BOT_ROLES:
         keys.add(f"staff.role.{role}")
 
-    # Delivery statuses
-    for status in ("assigned", "picked_up", "in_transit", "arrived", "delivered", "failed"):
-        keys.add(f"staff.delivery.status.{status}")
+    # Delivery statuses — derived from the ENUM, never a hand-written tuple.
+    # A hardcoded six-status list here (and the twin in
+    # staff_bot/i18n.py::_add_dynamic_family_keys) is what hid
+    # `staff.delivery.status.cancelled` from both the seeder and /health while
+    # every active-delivery card rendered it as the English word "Cancelled".
+    for status in DeliveryStatus:
+        keys.add(f"staff.delivery.status.{status.value}")
+
+    # Backend-supplied statuses the bot displays verbatim.
+    for status in DriverCashSessionStatus:
+        keys.add(f"staff.delivery.cash_session_status.{status.value}")
+
+    for status in DriverBottleSessionStatus:
+        keys.add(f"staff.delivery.bottle_session_status.{status.value}")
+
+    for flag in RECONCILIATION_RISK_FLAGS:
+        keys.add(f"staff.delivery.risk_flag.{flag}")
 
     # Failure reasons
     for reason in FAILED_DELIVERY_REASONS:
@@ -2182,6 +2300,18 @@ def _auto_family_translation(key: str, language: str) -> Optional[str]:
     if key.startswith("staff.delivery.status."):
         status = key.rsplit(".", 1)[-1]
         return DELIVERY_STATUS_TRANSLATIONS.get(status, {}).get(language)
+
+    if key.startswith("staff.delivery.cash_session_status."):
+        status = key.rsplit(".", 1)[-1]
+        return CASH_SESSION_STATUS_TRANSLATIONS.get(status, {}).get(language)
+
+    if key.startswith("staff.delivery.bottle_session_status."):
+        status = key.rsplit(".", 1)[-1]
+        return BOTTLE_SESSION_STATUS_TRANSLATIONS.get(status, {}).get(language)
+
+    if key.startswith("staff.delivery.risk_flag."):
+        flag = key.rsplit(".", 1)[-1]
+        return RISK_FLAG_TRANSLATIONS.get(flag, {}).get(language)
 
     if key.startswith("staff.delivery.reason."):
         reason = key.rsplit(".", 1)[-1]

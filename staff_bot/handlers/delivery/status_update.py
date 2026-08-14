@@ -235,7 +235,14 @@ class StatusUpdateHandler(BaseHandler):
 
     @staticmethod
     def _format_session_summary(session: dict, language: str) -> str:
-        status = session.get('status') or i18n.get('staff.common.not_available', language)
+        # `status` is a raw `DriverCashSessionStatus` value from the API. It used
+        # to be printed verbatim, so a Russian driver read "Статус: force_closed".
+        raw_status = session.get('status') or ''
+        status = (
+            i18n.get(f'staff.delivery.cash_session_status.{raw_status}', language)
+            if raw_status
+            else i18n.get('staff.common.not_available', language)
+        )
         expected_cash = format_currency(session.get('expected_cash'), language=language)
         expected_on_hand = format_currency(session.get('expected_cash_on_hand'), language=language)
         declared_cash = session.get('declared_cash')
@@ -265,7 +272,8 @@ class StatusUpdateHandler(BaseHandler):
             lines.append(
                 f"⚠️ {i18n.get('staff.delivery.cash_variance_label', language)}: {declared_variance}"
             )
-        if status == 'partial':
+        # Branch on the RAW value: `status` is now a localized label.
+        if raw_status == 'partial':
             remaining = session.get('remaining_cash_to_submit') or 0
             lines.append(
                 f"📌 {i18n.get('staff.delivery.remaining_to_submit', language)}: "
@@ -276,9 +284,14 @@ class StatusUpdateHandler(BaseHandler):
             lines.append(f"💬 {notes}")
         risk_flags = session.get('risk_flags') or []
         if risk_flags:
+            # Flags arrive as snake_case identifiers from
+            # `DriverReconciliationService._build_risk_flags` and were joined
+            # raw, so drivers read "Признаки риска: cash_on_hand_warning".
+            flag_labels = ', '.join(
+                i18n.get(f'staff.delivery.risk_flag.{flag}', language) for flag in risk_flags
+            )
             lines.append(
-                f"⚠️ {i18n.get('staff.delivery.risk_flags', language)}: "
-                f"{', '.join(str(flag) for flag in risk_flags)}"
+                f"⚠️ {i18n.get('staff.delivery.risk_flags', language)}: {flag_labels}"
             )
         return '\n'.join(lines)
 

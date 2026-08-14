@@ -29,6 +29,7 @@ from shared.enums import (
     DriverCashSessionStatus,
     UserRole,
 )
+from shared.staff_constants import RECONCILIATION_RISK_FLAGS
 from business_app.utils.exceptions import ConflictError, NotFoundError, ValidationError
 
 
@@ -154,6 +155,14 @@ class DriverReconciliationService:
         return reference >= due_at and not session.submitted_at
 
     def _build_risk_flags(self, session: DriverCashSession) -> List[str]:
+        """Flags shown to the DRIVER, so every value must be translatable.
+
+        The staff bot renders each one through `staff.delivery.risk_flag.<flag>`;
+        a flag added here without a matching seed prints the bare snake_case
+        identifier onto the cash screen in all three languages. The assertion
+        below keeps the producer honest against the shared list the translation
+        catalog and the bot's required-key set are both built from.
+        """
         flags: List[str] = []
         warning_threshold = self._to_decimal(current_app.config["COD_CASH_WARNING_THRESHOLD_UZS"])
         escalation_threshold = self._to_decimal(current_app.config["COD_CASH_ESCALATION_THRESHOLD_UZS"])
@@ -183,6 +192,15 @@ class DriverReconciliationService:
 
         if self._is_warning_due(session):
             flags.append("reconciliation_warning_due")
+
+        unknown = sorted(set(flags) - set(RECONCILIATION_RISK_FLAGS))
+        if unknown:
+            raise ValueError(
+                f"Risk flags {unknown} are not in shared.staff_constants."
+                "RECONCILIATION_RISK_FLAGS, so the staff bot would print them "
+                "untranslated. Add them there and to RISK_FLAG_TRANSLATIONS in "
+                "scripts/seed_staff_translations.py."
+            )
 
         return sorted(set(flags))
 

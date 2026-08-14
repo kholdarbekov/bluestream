@@ -75,7 +75,7 @@ class BottleSessionMembershipHandler(BaseHandler):
             # Build session list buttons
             buttons = []
             for s in sessions:
-                owner_name = s.get('owner_name') or 'Driver'
+                owner_name = s.get('owner_name') or i18n.get('staff.common.unknown_driver', language)
                 inventory = s.get('current_inventory', 0)
                 loaded = s.get('bottles_loaded', 0)
                 label = f"📦 {owner_name} — {inventory}/{loaded}"
@@ -84,7 +84,7 @@ class BottleSessionMembershipHandler(BaseHandler):
                 ])
             buttons.append([
                 InlineKeyboardButton(
-                    i18n.get('common.back', language),
+                    i18n.get('staff.back', language),
                     callback_data='staff_back_to_main',
                 )
             ])
@@ -134,7 +134,7 @@ class BottleSessionMembershipHandler(BaseHandler):
                 )
                 return
 
-            owner_name = session_info.get('owner_name') or 'Driver'
+            owner_name = session_info.get('owner_name') or i18n.get('staff.common.unknown_driver', language)
             inventory = session_info.get('current_inventory', 0)
             loaded = session_info.get('bottles_loaded', 0)
 
@@ -150,7 +150,7 @@ class BottleSessionMembershipHandler(BaseHandler):
                     callback_data=f"bottles_join_execute_{session_id}",
                 )],
                 [InlineKeyboardButton(
-                    i18n.get('common.cancel', language),
+                    i18n.get('staff.cancel', language),
                     callback_data='bottles_join_session',
                 )],
             ])
@@ -194,7 +194,7 @@ class BottleSessionMembershipHandler(BaseHandler):
                 return
 
             membership = response.data or {}
-            owner_name = membership.get('owner_name') or 'Driver'
+            owner_name = membership.get('owner_name') or i18n.get('staff.common.unknown_driver', language)
 
             text = (
                 f"✅ <b>"
@@ -286,7 +286,7 @@ class BottleSessionMembershipHandler(BaseHandler):
                 return
 
             m = response.data or {}
-            owner_name = m.get('owner_name') or 'Driver'
+            owner_name = m.get('owner_name') or i18n.get('staff.common.unknown_driver', language)
             inventory = m.get('current_inventory', 0)
 
             text = (
@@ -301,7 +301,7 @@ class BottleSessionMembershipHandler(BaseHandler):
                     callback_data='bottles_leave_session',
                 )],
                 [InlineKeyboardButton(
-                    i18n.get('common.back', language),
+                    i18n.get('staff.back', language),
                     callback_data='staff_back_to_main',
                 )],
             ])
@@ -363,7 +363,9 @@ class BottleSessionMembershipHandler(BaseHandler):
 
             buttons = []
             for d in drivers:
-                name = d.get('name') or f"Driver #{d['user_id']}"
+                name = d.get('name') or i18n.get(
+                    'staff.common.driver_number', language, driver_id=d['user_id']
+                )
                 buttons.append([
                     InlineKeyboardButton(
                         f"👤 {name}",
@@ -371,7 +373,7 @@ class BottleSessionMembershipHandler(BaseHandler):
                     )
                 ])
             buttons.append([
-                InlineKeyboardButton(i18n.get('common.back', language), callback_data='staff_back_to_main')
+                InlineKeyboardButton(i18n.get('staff.back', language), callback_data='staff_back_to_main')
             ])
 
             text = f"<b>{i18n.get('staff.bottles.invite_codriver', language)}</b>"
@@ -409,7 +411,9 @@ class BottleSessionMembershipHandler(BaseHandler):
             if response.success and response.data:
                 driver_info = next((d for d in response.data if d['user_id'] == driver_id), None)
 
-            name = driver_info.get('name') if driver_info else f"Driver #{driver_id}"
+            name = driver_info.get('name') if driver_info else i18n.get(
+                'staff.common.driver_number', language, driver_id=driver_id
+            )
 
             text = (
                 f"🤝 <b>{i18n.get('staff.bottles.invite_codriver_confirm', language)}</b>\n\n"
@@ -422,7 +426,7 @@ class BottleSessionMembershipHandler(BaseHandler):
                     callback_data=f"bottles_invite_execute_{driver_id}",
                 )],
                 [InlineKeyboardButton(
-                    i18n.get('common.cancel', language),
+                    i18n.get('staff.cancel', language),
                     callback_data='bottles_invite_driver',
                 )],
             ])
@@ -465,7 +469,9 @@ class BottleSessionMembershipHandler(BaseHandler):
                 return
 
             membership = response.data or {}
-            member_name = membership.get('member_name') or f"Driver #{driver_id}"
+            member_name = membership.get('member_name') or i18n.get(
+                'staff.common.driver_number', language, driver_id=driver_id
+            )
 
             text = (
                 f"✅ <b>"

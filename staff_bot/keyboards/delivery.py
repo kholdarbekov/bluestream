@@ -575,7 +575,7 @@ class DeliveryKeyboards:
         keyboard = []
         for driver in drivers[:10]:  # cap at 10 to avoid overflow
             driver_id = driver.get('id') or driver.get('user_id')
-            name = driver.get('name') or driver.get('full_name', 'Driver')
+            name = driver.get('name') or i18n.get('staff.common.unknown_driver', language)
             keyboard.append([InlineKeyboardButton(
                 f"👤 {name}",
                 callback_data=f"staff_transfer_driver_{driver_id}"
@@ -593,7 +593,7 @@ class DeliveryKeyboards:
         for t in transfers[:5]:
             transfer_id = t.get('id')
             qty = t.get('declared_quantity', 0)
-            sender = (t.get('sender_name') or 'Driver')[:15]
+            sender = (t.get('sender_name') or i18n.get('staff.common.unknown_driver', language))[:15]
             keyboard.append([
                 InlineKeyboardButton(
                     f"✅ {i18n.get('staff.delivery.transfer_confirm_button', language, qty=qty, sender=sender)}",

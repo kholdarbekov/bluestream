@@ -9,8 +9,18 @@ from typing import Dict, Any, Optional, List, Set
 
 from staff_bot.config import config
 from staff_bot.database import db_manager
-from shared.staff_constants import FAILED_DELIVERY_REASONS, STAFF_BOT_ROLES
-from shared.enums import OrderStatus, PaymentMethod
+from shared.staff_constants import (
+    FAILED_DELIVERY_REASONS,
+    RECONCILIATION_RISK_FLAGS,
+    STAFF_BOT_ROLES,
+)
+from shared.enums import (
+    DeliveryStatus,
+    DriverBottleSessionStatus,
+    DriverCashSessionStatus,
+    OrderStatus,
+    PaymentMethod,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -158,12 +168,31 @@ class Translation:
 
     @staticmethod
     def _add_dynamic_family_keys(keys: Set[str]):
-        """Add dynamic key families that are built via f-strings in handlers."""
+        """Add dynamic key families that are built via f-strings in handlers.
+
+        Every family here MUST be derived from the enum that feeds the renderer.
+        This function is the required-key set `/health` checks against, so a
+        hand-written subset does not merely miss a translation — it makes the
+        gap *undetectable*. That is exactly how `staff.delivery.status.cancelled`
+        shipped: this list named six statuses, `DELIVERY_STATUS_TRANSITIONS`
+        offers CANCELLED as a successor of all four active statuses, and so
+        every active-delivery card rendered an English "Cancelled" button while
+        /health stayed green.
+        """
         for role in STAFF_BOT_ROLES:
             keys.add(f"staff.role.{role}")
 
-        for status in ("assigned", "picked_up", "in_transit", "arrived", "delivered", "failed"):
-            keys.add(f"staff.delivery.status.{status}")
+        for status in DeliveryStatus:
+            keys.add(f"staff.delivery.status.{status.value}")
+
+        for status in DriverCashSessionStatus:
+            keys.add(f"staff.delivery.cash_session_status.{status.value}")
+
+        for status in DriverBottleSessionStatus:
+            keys.add(f"staff.delivery.bottle_session_status.{status.value}")
+
+        for flag in RECONCILIATION_RISK_FLAGS:
+            keys.add(f"staff.delivery.risk_flag.{flag}")
 
         for reason in FAILED_DELIVERY_REASONS:
             keys.add(f"staff.delivery.reason.{reason}")

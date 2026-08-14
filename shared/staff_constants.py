@@ -45,3 +45,19 @@ FAILED_DELIVERY_REASONS = [
 
 # Staff roles that can access the staff bot
 STAFF_BOT_ROLES = ['delivery_driver', 'operator']
+
+# Risk flags a driver cash-reconciliation session can carry.
+#
+# SSOT for a value with TWO expressions: `DriverReconciliationService.
+# _build_risk_flags` PRODUCES them and the staff bot RENDERS them (via
+# `staff.delivery.risk_flag.<flag>`). Adding a flag in the service without a
+# translation used to print the bare snake_case identifier onto a driver's
+# money screen in every language, so the producer, the translation catalog and
+# the bot's required-key set all read this list.
+RECONCILIATION_RISK_FLAGS = [
+    'cash_on_hand_escalation',
+    'cash_on_hand_warning',
+    'repeated_mismatch_pattern',
+    'submission_overdue',
+    'reconciliation_warning_due',
+]

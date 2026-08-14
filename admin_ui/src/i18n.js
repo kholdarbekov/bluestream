@@ -2,6 +2,7 @@ import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import HttpBackend from 'i18next-http-backend';
 import LanguageDetector from 'i18next-browser-languagedetector';
+import { createParseMissingKeyHandler } from './utils/missingTranslation';
 
 // Get API base URL from environment or use proxy
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://aqua-element.uz/api/v1';
@@ -68,13 +69,12 @@ i18n
         console.warn(`Missing translation: [${ns}] ${key} for languages: ${lngs.join(', ')}`);
       }
     },
-    // Format missing keys with visual indicator
-    parseMissingKeyHandler: (key) => {
-      if (process.env.NODE_ENV === 'development') {
-        return `⚠️ ${key}`;
-      }
-      return key;
-    },
+    // Falls back to the English default the call site passed, and only marks
+    // the key when there is nothing to fall back to. See missingTranslation.js
+    // for why accepting i18next's second argument is load-bearing.
+    parseMissingKeyHandler: createParseMissingKeyHandler(
+      process.env.NODE_ENV === 'development'
+    ),
   });
 
 // Export reload function for manual sync

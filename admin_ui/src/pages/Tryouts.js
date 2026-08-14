@@ -683,7 +683,7 @@ const Tryouts = () => {
         forceRender
         onCancel={closeTryoutModal}
         footer={null}
-        width={820}
+        width={900}
       >
         <Form
           form={tryoutForm}
@@ -701,7 +701,7 @@ const Tryouts = () => {
               value={tryoutCoordinates}
               onChange={handleTryoutMapCoordinateChange}
               onAddressFound={handleTryoutMapAddressFound}
-              height={250}
+              height={400}
               isVisible={isTryoutModalOpen}
             />
           </div>

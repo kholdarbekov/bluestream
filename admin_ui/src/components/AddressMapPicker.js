@@ -5,6 +5,7 @@ import { AimOutlined, SearchOutlined, EnvironmentOutlined } from '@ant-design/ic
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import api from '../services/api';
+import { parseCoordinates } from '../utils/parseCoordinates';
 
 // Fix Leaflet default icon issue
 delete L.Icon.Default.prototype._getIconUrl;
@@ -39,14 +40,20 @@ const isPointInPolygon = (lat, lng, polygon) => {
   return inside;
 };
 
+// The delivery coverage polygon (SSOT) is the single gate on where a pin may
+// land. Every path that can move the marker — map click, marker drag, browser
+// geolocation, address search, pasted coordinates — asks this one question.
+const isOutsideDeliveryArea = (lat, lng, polygon) => (
+  Boolean(polygon && polygon.length > 0) && !isPointInPolygon(lat, lng, polygon)
+);
+
 // Component to handle map click events
 const MapClickHandler = ({ onLocationSelect, polygon }) => {
   useMapEvents({
     click: (e) => {
       const { lat, lng } = e.latlng;
 
-      // Validate against the delivery coverage polygon (SSOT)
-      if (polygon && polygon.length > 0 && !isPointInPolygon(lat, lng, polygon)) {
+      if (isOutsideDeliveryArea(lat, lng, polygon)) {
         message.warning('Selected location is outside the delivery area');
         return;
       }
@@ -96,7 +103,7 @@ const AddressMapPicker = ({
   onChange,
   onAddressFound,
   style,
-  height = 300,
+  height = 420,
   isVisible = true,
 }) => {
   const [geoConfig, setGeoConfig] = useState(null);
@@ -189,9 +196,7 @@ const AddressMapPicker = ({
       (pos) => {
         const { latitude, longitude } = pos.coords;
 
-        // Validate against the delivery coverage polygon (SSOT)
-        if (geoConfig?.polygon?.length > 0 &&
-          !isPointInPolygon(latitude, longitude, geoConfig.polygon)) {
+        if (isOutsideDeliveryArea(latitude, longitude, geoConfig?.polygon)) {
           message.warning('Your location is outside the delivery area');
           setLocationLoading(false);
           return;
@@ -220,6 +225,28 @@ const AddressMapPicker = ({
       return;
     }
 
+    // Admins receive a customer's geolocation over Telegram and paste the raw
+    // pair; pin it directly rather than handing coordinates to a geocoder that
+    // only understands street addresses.
+    const pastedCoordinates = parseCoordinates(searchAddress);
+
+    if (pastedCoordinates) {
+      const { latitude, longitude } = pastedCoordinates;
+
+      if (isOutsideDeliveryArea(latitude, longitude, geoConfig?.polygon)) {
+        message.warning('Coordinates are outside the delivery area');
+        return;
+      }
+
+      setSearchLoading(true);
+      try {
+        await handleLocationSelect(latitude, longitude);
+      } finally {
+        setSearchLoading(false);
+      }
+      return;
+    }
+
     setSearchLoading(true);
 
     try {
@@ -232,9 +259,7 @@ const AddressMapPicker = ({
       if (result?.success && result?.data?.latitude && result?.data?.longitude) {
         const { latitude, longitude } = result.data;
 
-        // Validate against the delivery coverage polygon (SSOT)
-        if (geoConfig?.polygon?.length > 0 &&
-          !isPointInPolygon(latitude, longitude, geoConfig.polygon)) {
+        if (isOutsideDeliveryArea(latitude, longitude, geoConfig?.polygon)) {
           message.warning('Address is outside the delivery area');
           setSearchLoading(false);
           return;
@@ -298,7 +323,7 @@ const AddressMapPicker = ({
       {/* Search controls */}
       <Space.Compact style={{ width: '100%', marginBottom: 8 }}>
         <Input
-          placeholder="Search address..."
+          placeholder="Search address or paste 41.323396, 69.193840"
           value={searchAddress}
           onChange={(e) => setSearchAddress(e.target.value)}
           onPressEnter={handleSearchAddress}
@@ -363,9 +388,7 @@ const AddressMapPicker = ({
                   const marker = e.target;
                   const pos = marker.getLatLng();
 
-                  // Validate against the delivery coverage polygon (SSOT)
-                  if (geoConfig?.polygon?.length > 0 &&
-                    !isPointInPolygon(pos.lat, pos.lng, geoConfig.polygon)) {
+                  if (isOutsideDeliveryArea(pos.lat, pos.lng, geoConfig?.polygon)) {
                     // Reset to previous position
                     marker.setLatLng(position);
                     message.warning('Cannot move marker outside the delivery area');
@@ -410,7 +433,8 @@ const AddressMapPicker = ({
       {!position && (
         <div style={{ marginTop: 8, textAlign: 'center' }}>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            Click on the map to select delivery location, or search/use your location
+            Click on the map to select delivery location, search an address, paste
+            {' '}coordinates like 41.323396, 69.193840, or use your location
           </Text>
         </div>
       )}

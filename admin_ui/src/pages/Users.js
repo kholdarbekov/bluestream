@@ -1841,7 +1841,7 @@ const Users = () => {
         confirmLoading={createAddressMutation.isPending || updateAddressMutation.isPending}
         okText={editingAddress ? t('ui.common.save', 'Save') : t('ui.users.add', 'Add')}
         cancelText={t('ui.common.cancel', 'Cancel')}
-        width={responsive.isMobileDevice ? '95%' : 750}
+        width={responsive.isMobileDevice ? '95%' : 900}
       >
         <Form
           form={addressForm}
@@ -1894,7 +1894,8 @@ const Users = () => {
               value={addressCoordinates}
               onChange={handleMapCoordinateChange}
               onAddressFound={handleMapAddressFound}
-              height={250}
+              height={responsive.isMobileDevice ? 260 : 450}
+              isVisible={isAddressModalVisible}
             />
           </div>
 

@@ -4,6 +4,7 @@ import {
 } from 'antd';
 import { CarOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import { formatStopItems } from './dispatchLogic';
 
 const { Text } = Typography;
 
@@ -23,6 +24,7 @@ const PoolPanel = ({
   drivers = [],
   assigning = false,
   onAssign,
+  onFocusStop,
   selectedDeliveryId = null,
 }) => {
   const { t } = useTranslation('delivery');
@@ -64,6 +66,7 @@ const PoolPanel = ({
           data-testid={`pool-row-${stop.delivery_id}`}
           data-delivery-id={String(stop.delivery_id)}
           data-selected={selectedDeliveryId === stop.delivery_id ? 'true' : 'false'}
+          onClick={() => onFocusStop && onFocusStop(stop)}
           style={{
             display: 'flex', alignItems: 'center', gap: 8, padding: '6px 4px',
             borderBottom: '1px solid rgba(0,0,0,.06)',
@@ -89,6 +92,21 @@ const PoolPanel = ({
             >
               {stop.address_label}
             </Text>
+            {/* Same line, same formatter as a route stop card — see
+                `formatStopItems`. A dispatcher's view of what they are
+                loading must not change the moment the stop is assigned. */}
+            {formatStopItems(stop) && (
+              <Text
+                data-testid={`pool-items-${stop.delivery_id}`}
+                ellipsis
+                style={{
+                  display: 'block', fontSize: 11, color: '#1677ff',
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                }}
+              >
+                {formatStopItems(stop)}
+              </Text>
+            )}
             <Space size={4}>
               {stop.is_cod && <Tag color="gold">COD</Tag>}
               {stop.is_overdue && <Tag color="red">{t('ui.dispatch.overdue', 'Overdue')}</Tag>}
@@ -101,7 +119,7 @@ const PoolPanel = ({
             {/* antd disabled Buttons don't fire hover events on their own —
                 the Tooltip needs a wrapping element to attach its listeners
                 to. */}
-            <span style={{ flexShrink: 0 }}>
+            <span style={{ flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
               <Dropdown menu={assignTargets(stop.delivery_id)} trigger={['click']} disabled={noDrivers}>
                 <Button
                   data-testid={`pool-assign-${stop.delivery_id}`}

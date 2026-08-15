@@ -106,3 +106,43 @@ export const driverColor = (driverId) => {
   // eslint-disable-next-line security/detect-object-injection
   return `hsl(${DRIVER_HUES[index]}, 68%, 45%)`;
 };
+
+/**
+ * The one-line "what's in this order" text a stop or pool card shows.
+ *
+ * Shared by both panels on purpose: the same delivery appears in the pool
+ * before assignment and on a route after it, and the two must not describe
+ * its contents differently.
+ *
+ * The backend already decided WHICH items are shown and how many it withheld
+ * (`summarize_order_items`); this only renders that decision, and returns
+ * null — not an empty string — when there is nothing to say, so the caller
+ * can omit the line rather than render an empty one.
+ *
+ * Tolerates a stop with no `items` key at all: cached geometry/snapshot
+ * payloads written before the field existed are still in flight for a while
+ * after a deploy, and losing a detail line beats crashing the board.
+ */
+export const formatStopItems = (stop) => {
+  const items = Array.isArray(stop?.items) ? stop.items : [];
+  if (items.length === 0) return null;
+  const rendered = items
+    .map((item) => `${item.product_name} ×${item.quantity}`)
+    .join(', ');
+  const hidden = Number(stop?.items_hidden_count) || 0;
+  return hidden > 0 ? `${rendered}  +${hidden}` : rendered;
+};
+
+/**
+ * "4.2 km · 11 min" for one measured leg, or null when it wasn't measured.
+ *
+ * Never estimates. The routing spec forbids presenting a straight-line guess
+ * where a measured figure goes, so an absent leg renders as absent.
+ */
+export const formatLeg = (leg) => {
+  if (!leg) return null;
+  const km = Number(leg.distance_km);
+  const min = Number(leg.duration_minutes);
+  if (!Number.isFinite(km) || !Number.isFinite(min)) return null;
+  return `${km.toFixed(1)} km · ${Math.round(min)} min`;
+};

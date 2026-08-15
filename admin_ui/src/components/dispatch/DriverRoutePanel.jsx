@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useMemo, useRef } from 'react';
 import {
   Button, Card, Dropdown, Popconfirm, Space, Tag, Tooltip, Typography,
 } from 'antd';
@@ -7,7 +7,9 @@ import {
   RollbackOutlined, SwapOutlined, ThunderboltOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import { moveBy, reorder, driverColor } from './dispatchLogic';
+import {
+  moveBy, reorder, driverColor, formatStopItems, formatLeg,
+} from './dispatchLogic';
 
 const { Text } = Typography;
 
@@ -26,6 +28,9 @@ const DriverRoutePanel = ({
   pinned = {},
   dirty = false,
   saving = false,
+  legs = null,
+  legDeliveryIds = null,
+  onFocusStop,
   onReorder,
   onTogglePin,
   onMove,
@@ -37,6 +42,26 @@ const DriverRoutePanel = ({
   const { t } = useTranslation('delivery');
   const dragFrom = useRef(null);
   const ids = stops.map((s) => s.delivery_id);
+
+  // Per-stop travel figures, keyed by the delivery the API says each leg
+  // ARRIVES at. Deliberately not `legs[index]` against this component's own
+  // stop list: the backend drops stops with no coordinates before measuring,
+  // so on a route with one ungeocoded stop the two sequences diverge and
+  // every subsequent leg would be captioned with the wrong stop — silently,
+  // and looking entirely plausible.
+  //
+  // A length mismatch means the pairing is unknowable, so nothing is shown at
+  // all. Showing some stops a number that might belong to a neighbour is the
+  // failure this guard exists to prevent.
+  const legByDeliveryId = useMemo(() => {
+    if (!Array.isArray(legs) || !Array.isArray(legDeliveryIds)) return {};
+    if (legs.length !== legDeliveryIds.length) return {};
+    return Object.fromEntries(
+      legDeliveryIds
+        .map((deliveryId, index) => [String(deliveryId), legs.at(index)])
+        .filter(([, leg]) => leg != null),
+    );
+  }, [legs, legDeliveryIds]);
 
   const handleDrop = (index) => {
     if (dragFrom.current === null || dragFrom.current === index) return;
@@ -141,6 +166,8 @@ const DriverRoutePanel = ({
     >
       {stops.map((stop, index) => {
         const isPinned = String(stop.delivery_id) in (pinned || {});
+        const itemsLine = formatStopItems(stop);
+        const legLine = formatLeg(legByDeliveryId[String(stop.delivery_id)]);
         return (
           <div
             key={stop.delivery_id}
@@ -150,18 +177,42 @@ const DriverRoutePanel = ({
             onDragStart={() => { dragFrom.current = index; }}
             onDragOver={(e) => e.preventDefault()}
             onDrop={() => handleDrop(index)}
+            // Clicking the row body moves the map to this stop, which is how
+            // the stacked layout keeps the list and the map connected. The
+            // action buttons stop propagation themselves (see the group
+            // below), so nudging a stop never also yanks the map.
+            onClick={() => onFocusStop && onFocusStop(stop)}
             style={{
-              display: 'flex', alignItems: 'center', gap: 8, padding: '6px 4px',
+              display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 4px',
               borderBottom: '1px solid rgba(0,0,0,.06)', cursor: 'grab',
             }}
           >
-            <HolderOutlined style={{ opacity: 0.4 }} />
+            <HolderOutlined style={{ opacity: 0.4, marginTop: 4 }} />
             <Text strong style={{ minWidth: 18 }}>{index + 1}</Text>
             {/* `overflow: hidden` gives the ellipsis span something bounded to
                 clip against; `flex: 1, minWidth: 0` alone lets the flex
                 algorithm shrink this column, but without a hard bound the
-                text itself still dictates the row's min content size. */}
+                text itself still dictates the row's min content size.
+                (Until 2026-08 a global `.ant-space { width: 100% }` in
+                index.css overrode all of this from the sibling action group
+                and squeezed this column to exactly 0px — the order number and
+                customer name were present in the DOM and invisible on screen.
+                See the note in index.css before reintroducing anything of
+                that shape.) */}
             <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+              {/* Travel to THIS stop, above its name — the number describes the
+                  hop the driver makes to arrive here, so reading it before the
+                  destination matches the order things happen in. Absent
+                  whenever the provider did not measure it. */}
+              {legLine && (
+                <Text
+                  type="secondary"
+                  data-testid={`stop-leg-${stop.delivery_id}`}
+                  style={{ display: 'block', fontSize: 11, opacity: 0.75 }}
+                >
+                  ↳ {legLine}
+                </Text>
+              )}
               {/* antd's `ellipsis` boolean only switches on CSS ellipsis
                   after a layout effect measures `text-overflow` support; it
                   does nothing without `white-space: nowrap` actually applied,
@@ -183,12 +234,32 @@ const DriverRoutePanel = ({
               >
                 {stop.address_label}
               </Text>
+              {itemsLine && (
+                <Text
+                  data-testid={`stop-items-${stop.delivery_id}`}
+                  ellipsis
+                  style={{
+                    display: 'block', fontSize: 11, color: '#1677ff',
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  }}
+                >
+                  {itemsLine}
+                </Text>
+              )}
             </div>
             {/* `flexShrink: 0`: without it the flex algorithm satisfies this
                 row's width by collapsing the text column above to near-zero
                 instead of shrinking this fixed-content button group — the
                 actual cause of the one-character-per-line rendering. */}
-            <Space size={2} data-testid={`stop-actions-${stop.delivery_id}`} style={{ flexShrink: 0 }}>
+            {/* `stopPropagation`: these controls sit inside the row's
+                focus-the-map click target, and reordering a stop must not
+                also scroll the map out from under the admin. */}
+            <Space
+              size={2}
+              data-testid={`stop-actions-${stop.delivery_id}`}
+              style={{ flexShrink: 0 }}
+              onClick={(e) => e.stopPropagation()}
+            >
               <Button
                 data-testid={`stop-up-${stop.delivery_id}`}
                 size="small" type="text" icon={<ArrowUpOutlined />}

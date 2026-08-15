@@ -62,6 +62,23 @@ def dispatch_snapshot():
     return success_response(data=DispatchService.get_snapshot(target))
 
 
+def _no_geometry(driver_id: int, *, approximate: bool) -> dict:
+    """The payload for "there is no measured route to show".
+
+    One shape for every such exit, so `legs` can never be present on one
+    no-geometry branch and missing on another — a caller reading
+    `data.legs.length` would crash on whichever branch was forgotten.
+    """
+    return {
+        "driver_id": driver_id,
+        "geometry": None,
+        "legs": None,
+        "leg_delivery_ids": [],
+        "approximate": approximate,
+        "cached": False,
+    }
+
+
 @admin_dispatch_bp.route("/dispatch/routes/<int:driver_id>/geometry", methods=["GET"])
 @handle_api_exception
 @jwt_required()
@@ -70,19 +87,32 @@ def dispatch_route_geometry(driver_id):
     """Real road geometry for a driver's planned route."""
     route = RouteOptimizationService().current_route(driver_id)
     if route is None or not route.optimized_order:
-        return success_response(data={"driver_id": driver_id, "geometry": None, "approximate": False, "cached": False})
+        return success_response(data=_no_geometry(driver_id, approximate=False))
 
     # Resolved via DispatchService (service-layer-first), not a raw model
     # query here: geometry is polled per selected driver, and rebuilding
     # every order/driver/route for one polyline is a lot of query for
     # nothing, so this resolves exactly the stops on ONE route.
-    points = DispatchService.route_stop_coordinates(route)
+    #
+    # `route_stop_points`, not `route_stop_coordinates`: both drop stops with
+    # no coordinates, but only this one says WHICH stops survived. The per-leg
+    # figures below are positional against the points actually sent to the
+    # provider, so on a route with an ungeocoded stop the two sequences
+    # diverge — and a UI zipping legs against `optimized_order` would then
+    # label every following leg with the wrong stop.
+    stop_points = DispatchService.route_stop_points(route)
+    points = [point for _delivery_id, point in stop_points]
+    leg_delivery_ids = [delivery_id for delivery_id, _point in stop_points]
     if not points:
-        return success_response(data={"driver_id": driver_id, "geometry": None, "approximate": False, "cached": False})
+        return success_response(data=_no_geometry(driver_id, approximate=False))
 
     start = (route.start_location_lat, route.start_location_lng)
     digest = hashlib.sha1(json.dumps([start] + points).encode("utf-8")).hexdigest()  # noqa: S324
-    cache_key = f"dispatch:route_geom:{driver_id}:{digest}"
+    # `v2` because the cached payload SHAPE changed (it gained `legs` /
+    # `leg_delivery_ids`). The digest only covers the route's points, so
+    # without a prefix bump every driver whose route was already cached would
+    # keep being served a legless payload until the 15-minute TTL expired.
+    cache_key = f"dispatch:route_geom:v2:{driver_id}:{digest}"
 
     try:
         cached = redis_client.get(cache_key)
@@ -110,6 +140,20 @@ def dispatch_route_geometry(driver_id):
             "geometry": geometry,
             "distance_km": result.get("distance_km"),
             "duration_minutes": result.get("duration_minutes"),
+            # Per-hop distance/time, already measured inside the same provider
+            # call that produced the polyline. `None` (never [] and never a
+            # straight-line estimate) when the provider did not measure them —
+            # MapsService owns that decision; this handler must not know what
+            # any provider's leg looks like.
+            #
+            # These do NOT sum to `distance_km`/`duration_minutes` on the route
+            # header: those come from the optimiser's matrix plus a per-stop
+            # service-time allowance plus a separately priced driver leg. Two
+            # different questions, deliberately not reconciled here.
+            "legs": result.get("legs"),
+            # leg[k] is the hop that ARRIVES at leg_delivery_ids[k]; leg 0 is
+            # the depot -> first-stop hop, so this is the stop sequence itself.
+            "leg_delivery_ids": leg_delivery_ids,
             # A provider call can succeed (no exception) yet still carry no
             # usable path — MapsService already reports that as `geometry:
             # None`, so mirror it here instead of hard-coding False. Getting
@@ -128,7 +172,7 @@ def dispatch_route_geometry(driver_id):
         # Degrade, never blank: the UI draws straight dashed legs and badges them
         # as approximate rather than showing an empty map or a fake road path.
         logger.warning("route geometry unavailable driver=%s: %s", driver_id, exc)
-        return success_response(data={"driver_id": driver_id, "geometry": None, "approximate": True, "cached": False})
+        return success_response(data=_no_geometry(driver_id, approximate=True))
 
 
 @admin_dispatch_bp.route("/dispatch/routes/<int:driver_id>/stops", methods=["PUT"])

@@ -102,6 +102,8 @@ KEYS = {
         "Нет других курьеров",
         "No other drivers available",
     ),
+    "ui.dispatch.collapse_map": ("Xaritani yig'ish", "Свернуть карту", "Collapse map"),
+    "ui.dispatch.expand_map": ("Xaritani yoyish", "Развернуть карту", "Expand map"),
     "ui.users.map.layer_orders": ("Faol buyurtmalar", "Активные заказы", "Active orders"),
     "ui.users.map.layer_drivers": ("Kuryerlar va marshrutlar", "Курьеры и маршруты", "Drivers & routes"),
     "ui.users.map.open_dispatch": ("Dispecherda ochish ↗", "Открыть в Диспетчере ↗", "Open in Dispatch ↗"),

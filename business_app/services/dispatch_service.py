@@ -24,11 +24,12 @@ from zoneinfo import ZoneInfo
 
 from flask import current_app
 from sqlalchemy import func, or_
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 
 from business_app.models.delivery import Delivery, DeliveryPerson, DeliveryRoute
-from business_app.models.order import Order
+from business_app.models.order import Order, OrderItem
 from business_app.models.user import User, UserAddress
+from business_app.serializers.order_serializers import summarize_order_items
 from business_app.services.route_optimization_service import (
     RouteOptimizationService,
     _driver_day_start_utc,
@@ -79,6 +80,13 @@ class DispatchService:
                 joinedload(Order.user),
                 joinedload(Order.delivery_address),
                 joinedload(Order.delivery),
+                # `selectinload`, not `joinedload`: this query already carries
+                # three outer joins and calls `.all()` without `.unique()`, and
+                # fanning a collection into that row set multiplies the parent
+                # rows. Two extra round-trips total (items, then products) —
+                # versus two PER ORDER if these load lazily, on an endpoint the
+                # dispatch board polls every 30 seconds.
+                selectinload(Order.order_items).joinedload(OrderItem.product),
             )
             # `orders` carries more than one FK to `users`; an unpinned
             # join(User) either raises or silently resolves the wrong one.
@@ -145,6 +153,22 @@ class DispatchService:
         would be a lot of query for nothing. Keeps the API layer free of any
         direct `Delivery`/`Order` model access (service-layer-first).
         """
+        return [point for _delivery_id, point in cls.route_stop_points(route)]
+
+    @classmethod
+    def route_stop_points(cls, route: DeliveryRoute) -> List[Tuple[int, Tuple[float, float]]]:
+        """The same resolved stops as `route_stop_coordinates`, but each one
+        still carrying the delivery it belongs to.
+
+        This exists because the filter above is lossy: a stop with no
+        coordinates is silently absent from the returned sequence, so the
+        Nth point is NOT necessarily the Nth entry of `optimized_order`. Any
+        caller that wants to attribute a per-point result — the geometry
+        endpoint's per-leg distances, for instance — back to a stop has to be
+        told which stops actually made it in. Re-deriving that by zipping
+        against `optimized_order` gets it silently wrong on exactly the routes
+        that have an ungeocoded stop.
+        """
         if not route.optimized_order:
             return []
 
@@ -154,13 +178,13 @@ class DispatchService:
             .all()
         )
         by_id = {d.id: d for d in deliveries}
-        points: List[Tuple[float, float]] = []
+        stops: List[Tuple[int, Tuple[float, float]]] = []
         for delivery_id in route.optimized_order:
             delivery = by_id.get(delivery_id)
             address = delivery.order.delivery_address if delivery and delivery.order else None
             if address and address.latitude is not None and address.longitude is not None:
-                points.append((float(address.latitude), float(address.longitude)))
-        return points
+                stops.append((delivery_id, (float(address.latitude), float(address.longitude))))
+        return stops
 
     # ----- internals --------------------------------------------------------
 
@@ -245,6 +269,30 @@ class DispatchService:
             "time_slot": order.delivery_time_slot,
             "delivery_date": schedule.isoformat(),
             "is_overdue": bool(schedule < today_start),
+            **cls._items_fields(order),
+        }
+
+    @staticmethod
+    def _items_fields(order: Optional[Order]) -> Dict[str, Any]:
+        """What's in the order, for the stop and pool cards.
+
+        Shared by both builders on purpose. `pool[]` is a filtered view over
+        the dicts `_order_entry` produces while route stops are assembled
+        separately, so a dispatcher can see the same order on either panel —
+        if only one of them carried items, the same delivery would list its
+        contents in the pool and lose them the moment it was assigned.
+
+        Truncation is not decided here: `summarize_order_items` owns the limit
+        and the hidden count (see order_serializers.py). Flattened into the
+        parent dict rather than nested under `items_summary`, because that name
+        already means a STRING on the delivery rows and an ARRAY on the Orders
+        page — a third meaning on a third screen is how those two drifted.
+        """
+        summary = summarize_order_items(order)
+        return {
+            "items": summary["items"],
+            "items_total_count": summary["total_count"],
+            "items_hidden_count": summary["hidden_count"],
         }
 
     @classmethod
@@ -329,6 +377,16 @@ class DispatchService:
             Delivery.query.options(
                 joinedload(Delivery.order).joinedload(Order.user),
                 joinedload(Delivery.order).joinedload(Order.delivery_address),
+                # Route stops render the same item lines as the pool rows, so
+                # they need the same eager load — see the sibling options in
+                # `get_snapshot`.
+                #
+                # Chained off `joinedload(Delivery.order)` deliberately: the
+                # two options above already declare that path as a joinedload,
+                # and declaring it a second time with a different strategy
+                # raises "Loader strategies ... conflict" at query-compile
+                # time. Only the collection hop switches to `selectinload`.
+                joinedload(Delivery.order).selectinload(Order.order_items).joinedload(OrderItem.product),
             )
             .filter(Delivery.id.in_(all_ids))
             .all()
@@ -359,6 +417,7 @@ class DispatchService:
                         "address_label": cls._address_label(address),
                         "customer_name": order.user.full_name if order and order.user else "",
                         "delivery_status": cls._value(delivery.status),
+                        **cls._items_fields(order),
                     }
                 )
             routes.append(

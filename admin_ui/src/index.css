@@ -355,10 +355,39 @@ code {
   padding-right: 8px !important;
 }
 
-/* Space Component Adjustments */
-.ant-space {
-  flex-wrap: wrap;
+/* Space Component Adjustments
+ *
+ * This used to be `.ant-space { flex-wrap: wrap; width: 100% }` and it broke
+ * layout in two ways that looked unrelated but shared one cause:
+ *
+ * 1. `flex-wrap: wrap` on a COLUMN-direction Space makes it a multi-line flex
+ *    container, so its line cross-size (the width) resolves from max-content
+ *    and ignores the `width: 100%` beside it. Cards inside a grid column laid
+ *    out wider than the column and bled over the neighbouring one — measured
+ *    at +53.7px on the dispatch board, which is why the map appeared to cover
+ *    the route panels. Nothing clipped it, because the map is painted later
+ *    and Leaflet's panes carry z-index 200-1000.
+ *
+ * 2. `width: 100%` on a HORIZONTAL Space used as a fixed-size control group
+ *    makes that group claim the entire row. Where such a group also sets
+ *    `flex-shrink: 0` (the dispatch stop-row action buttons), the sibling
+ *    text column was squeezed to exactly 0px: the order number and customer
+ *    name were in the DOM, and invisible.
+ *
+ * Both causes are direction-specific, and so is the fix: a vertical stack
+ * wants to fill its container and must never wrap; a horizontal toolbar wants
+ * to wrap on a narrow screen (the mobile behaviour this block was added for)
+ * and must never claim a full row. Splitting it by direction keeps the
+ * original intent for each and removes both defects.
+ *
+ * Do not merge these back into a bare `.ant-space` selector.
+ */
+.ant-space-vertical {
   width: 100%;
+}
+
+.ant-space-horizontal {
+  flex-wrap: wrap;
 }
 
 .ant-space-item {

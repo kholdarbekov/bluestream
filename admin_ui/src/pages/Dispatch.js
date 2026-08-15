@@ -29,6 +29,21 @@ const Dispatch = () => {
   const [selectedPoolStopId, setSelectedPoolStopId] = useState(null);
   // driverId -> { ids: number[], pinned: {} } while unsaved.
   const [drafts, setDrafts] = useState({});
+  // The map and the stop lists no longer share a row, so a stop picked in a
+  // panel has to be able to move the map — otherwise stacking them would have
+  // traded a layout bug for a workflow one. Holds `[lat, lng]` of the last
+  // stop clicked in a panel; OperationsMap pans there without changing zoom.
+  const [focusPoint, setFocusPoint] = useState(null);
+  // Collapsing the map turns the page into a pure worklist for bulk
+  // resequencing, where the map is just scroll distance between panels.
+  const [mapCollapsed, setMapCollapsed] = useState(false);
+  const mapHeight = mapCollapsed ? 220 : 600;
+
+  const focusStop = (stop) => {
+    setSelectedPoolStopId(stop.delivery_id);
+    if (stop.lat != null && stop.lng != null) setFocusPoint([stop.lat, stop.lng]);
+  };
+
   // driverId -> { currentIds } while that driver's route has an unresolved
   // 409. Keyed the same way as `drafts`: a save on driver B's route must not
   // clear driver A's still-unresolved conflict banner, or the admin loses
@@ -202,10 +217,43 @@ const Dispatch = () => {
           <Text data-testid="unmapped-count">{(snapshot.unmapped || []).length}</Text>
         </Badge>
         <Text type="secondary">{t('ui.dispatch.unmapped', 'orders not on the map')}</Text>
+        <Button size="small" data-testid="map-collapse" onClick={() => setMapCollapsed((v) => !v)}>
+          {mapCollapsed
+            ? t('ui.dispatch.expand_map', 'Expand map')
+            : t('ui.dispatch.collapse_map', 'Collapse map')}
+        </Button>
       </Space>
 
+      {/* The map is a full-width band ABOVE the panels, not a grid neighbour
+          competing with them for one row. Two reasons, in order of weight:
+          the map is the thing an admin reads the city from and it was
+          previously boxed into ~62% of the page; and a panel that shares a
+          row with a Leaflet map has no way to win a paint-order argument with
+          it (Leaflet's panes sit at z-index 200-1000 and nothing here creates
+          a stacking context), so any overflow lands underneath the map. Side
+          by side, that was a permanent hazard; stacked, it cannot happen.
+
+          The cost is that the map and a stop list are no longer both on
+          screen at once. `onSelectStop` keeps them connected: picking a stop
+          on the map highlights its row, and picking a row focuses the map. */}
+      <div style={{ marginBottom: 12 }}>
+        <OperationsMap
+          height={mapHeight}
+          customers={[]}
+          orders={snapshot.orders || []}
+          drivers={drivers}
+          routes={routes}
+          geometry={geometry}
+          visibleLayers={layers}
+          selectedDriverId={selectedDriverId}
+          onSelectDriver={setSelectedDriverId}
+          onSelectStop={(stop) => setSelectedPoolStopId(stop.delivery_id)}
+          focusPoint={focusPoint}
+        />
+      </div>
+
       <Row gutter={12}>
-        <Col xs={24} lg={9}>
+        <Col xs={24} lg={8}>
           <Space direction="vertical" size={8} style={{ width: '100%' }}>
             <PoolPanel
               stops={snapshot.pool || []}
@@ -215,8 +263,13 @@ const Dispatch = () => {
                 deliveryId, body: { driver_id: driverId },
               })}
               selectedDeliveryId={selectedPoolStopId}
+              onFocusStop={focusStop}
             />
+          </Space>
+        </Col>
 
+        <Col xs={24} lg={16}>
+          <Space direction="vertical" size={8} style={{ width: '100%' }}>
             {routes.length === 0 && <Empty description={t('ui.dispatch.no_routes', 'No planned routes today')} />}
             {routes.map((route) => {
               const state = stateFor(route);
@@ -264,6 +317,14 @@ const Dispatch = () => {
                     pinned={state.pinned}
                     dirty={Boolean(drafts[route.driver_id])}
                     saving={saveMutation.isPending}
+                    // Straight off the geometry payload, including the id list
+                    // that says which stop each leg arrives at. Not zipped
+                    // against `orderedStops` here: the backend drops stops it
+                    // could not geocode before measuring, so position is not a
+                    // valid join key (see DriverRoutePanel's legByDeliveryId).
+                    legs={geometry[route.driver_id]?.legs ?? null}
+                    legDeliveryIds={geometry[route.driver_id]?.leg_delivery_ids ?? null}
+                    onFocusStop={focusStop}
                     onReorder={(ids) => updateDraft(route, { ids, pinned: clampPins(state.pinned, ids) })}
                     onTogglePin={(deliveryId) => updateDraft(route, {
                       ids: state.ids,
@@ -324,21 +385,6 @@ const Dispatch = () => {
               </Card>
             )}
           </Space>
-        </Col>
-
-        <Col xs={24} lg={15}>
-          <OperationsMap
-            height={720}
-            customers={[]}
-            orders={snapshot.orders || []}
-            drivers={drivers}
-            routes={routes}
-            geometry={geometry}
-            visibleLayers={layers}
-            selectedDriverId={selectedDriverId}
-            onSelectDriver={setSelectedDriverId}
-            onSelectStop={(stop) => setSelectedPoolStopId(stop.delivery_id)}
-          />
         </Col>
       </Row>
     </div>

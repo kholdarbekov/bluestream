@@ -1,6 +1,6 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import {
-  MapContainer, TileLayer, CircleMarker, Marker, Polyline, Popup,
+  MapContainer, TileLayer, CircleMarker, Marker, Polyline, Popup, useMap,
 } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -55,6 +55,29 @@ const driverIcon = (color) => L.divIcon({
 });
 
 /**
+ * Pans the map to `point` when it changes.
+ *
+ * A child component rather than a prop on MapContainer, because Leaflet's map
+ * instance only exists inside the container's context — `MapContainer`'s
+ * `center` is an INITIAL value and re-rendering with a new one does not move
+ * an already-mounted map.
+ *
+ * Keeps the current zoom deliberately: the admin picks a working scale (one
+ * district, or the whole city) and a focus gesture that also rezoomed would
+ * keep undoing that choice.
+ */
+const FocusController = ({ point }) => {
+  const map = useMap();
+  const lat = Array.isArray(point) ? point[0] : null;
+  const lng = Array.isArray(point) ? point[1] : null;
+  useEffect(() => {
+    if (typeof lat !== 'number' || typeof lng !== 'number') return;
+    map.setView([lat, lng], map.getZoom());
+  }, [map, lat, lng]);
+  return null;
+};
+
+/**
  * Shared operations map. Every layer is data-in / callbacks-out.
  *
  * `geometry` maps driverId -> { geometry: [[lat,lng],...] | null, approximate }.
@@ -75,6 +98,7 @@ const OperationsMap = ({
   thresholds = { t1: 7, t2: 30 },
   heatPoints = null,
   renderCustomerPopup,
+  focusPoint = null,
 }) => {
   const { t } = useTranslation(['delivery', 'users']);
   const now = useMemo(() => new Date(), []);
@@ -83,6 +107,7 @@ const OperationsMap = ({
 
   return (
     <MapContainer center={CENTER} zoom={ZOOM} style={{ height, width: '100%' }} preferCanvas scrollWheelZoom>
+      <FocusController point={focusPoint} />
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"

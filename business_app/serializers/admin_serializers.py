@@ -688,22 +688,20 @@ def serialize_order_admin(order: Order) -> Dict[str, Any]:
             data["customer_email"] = order.user.email
             data["customer_phone"] = order.user.phone
 
-        # Add order items summary
+        # Add order items summary.
+        #
+        # Truncation is NOT decided here: `summarize_order_items` owns how many
+        # lines a compact summary shows, so this screen and the dispatch/
+        # delivery rows can't disagree about the same order (they used to —
+        # 5 here, 3 there). `with_prices` widens each row for the money columns
+        # the Orders page renders; it does not change which rows appear.
+        # `item_count` stays the TRUE line count so "+N more" is honest.
         if hasattr(order, "order_items") and order.order_items:
-            from business_app.serializers.order_serializers import is_free_reward_item
+            from business_app.serializers.order_serializers import is_free_reward_item, summarize_order_items
 
-            data["item_count"] = len(order.order_items)
-            data["items_summary"] = [
-                {
-                    "product_name": item.product.name if item.product else "Unknown",
-                    "product_id": item.product_id,
-                    "quantity": item.quantity,
-                    "unit_price": float(item.unit_price),
-                    "total_price": float(item.total_price),
-                    "is_reward": is_free_reward_item(item),
-                }
-                for item in order.order_items[:5]  # Show first 5 items
-            ]
+            summary = summarize_order_items(order, with_prices=True)
+            data["item_count"] = summary["total_count"]
+            data["items_summary"] = summary["items"]
             data["has_loyalty_reward"] = float(getattr(order, "loyalty_discount", 0) or 0) > 0 or any(
                 is_free_reward_item(it) for it in order.order_items
             )

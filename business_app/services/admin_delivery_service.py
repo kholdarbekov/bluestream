@@ -10,6 +10,7 @@ from business_app import db
 from business_app.models.delivery import Delivery, DeliveryPerson, DeliveryStatusHistory
 from business_app.models.order import Order, OrderItem
 from business_app.models.user import User, UserAddress
+from business_app.serializers.order_serializers import format_order_items_summary
 from business_app.services.staff_service import StaffService
 from shared.enums import DeliveryStatus, OrderStatus, PaymentMethod
 from business_app.utils.exceptions import NotFoundError, ValidationError
@@ -491,18 +492,14 @@ class AdminDeliveryService:
 
     @staticmethod
     def _build_items_summary(order: Optional[Order]) -> str:
-        if not order or not order.order_items:
-            return ""
+        """Compact one-line item summary for a delivery row.
 
-        parts = []
-        for item in order.order_items[:3]:
-            product_name = item.product.name if item.product else f"Product #{item.product_id}"
-            parts.append(f"{product_name} x{item.quantity}")
-
-        suffix = ""
-        if len(order.order_items) > 3:
-            suffix = f" +{len(order.order_items) - 3} more"
-        return ", ".join(parts) + suffix
+        Delegates rather than re-deriving: the truncation and the "+N more"
+        wording are the same rule the admin order serializer and the dispatch
+        board render, and this used to be an independent copy of it that
+        happened to agree on the format but not on the limit.
+        """
+        return format_order_items_summary(order)
 
     @staticmethod
     def _format_delivery_code(delivery_id: int) -> str:

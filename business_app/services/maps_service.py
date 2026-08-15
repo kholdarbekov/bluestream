@@ -11,7 +11,7 @@ from flask import current_app
 from business_app.utils.distance_matrix import _OSRM_DEMO_BASE_URL
 from business_app.utils.distance_matrix import get_cached_matrix_source as _get_cached_matrix_source
 from business_app.utils.distance_matrix import get_distance_matrix as _get_distance_matrix
-from business_app.utils.distance_matrix import yandex_route_totals
+from business_app.utils.distance_matrix import yandex_leg_totals, yandex_route_totals
 from business_app.utils.exceptions import (
     ConfigurationError,
     ExternalServiceError,
@@ -59,6 +59,35 @@ class MapsService:
         # dataset loaded. `None` means "no OSRM route tier is available" and
         # `_osm_get_route` refuses rather than quietly reaching for the demo.
         self.osm_routing_url = self._resolve_osrm_route_base()
+
+    @staticmethod
+    def _normalized_legs(measurements) -> Optional[List[Dict[str, float]]]:
+        """Per-hop `(metres, seconds)` pairs -> the one leg shape callers see.
+
+        Every provider's route response describes the hops between the points
+        it was given, in its own units and nesting. Callers must not learn any
+        of that: `admin_dispatch.py` relays these straight through and has a
+        boundary-coupling budget of zero.
+
+        Returns `None` — never a partial or empty list — when the provider did
+        not actually measure every hop. A leg list is consumed positionally
+        against a stop sequence, so a gap in the middle cannot be rendered
+        without guessing which hop it belongs to, and an empty list would read
+        as the measured claim "zero legs". `None` says "not measured", which is
+        what the UI suppresses on, and keeps this the honest side of the
+        routing spec's rule against presenting a guess as a measurement.
+        """
+        legs: List[Dict[str, float]] = []
+        for distance_m, duration_s in measurements:
+            if distance_m is None or duration_s is None:
+                return None
+            legs.append(
+                {
+                    "distance_km": round(distance_m / 1000, 3),
+                    "duration_minutes": round(duration_s / 60, 2),
+                }
+            )
+        return legs or None
 
     @staticmethod
     def _osrm_step_instruction(step: Dict[str, Any]) -> str:
@@ -353,6 +382,15 @@ class MapsService:
             # admin_dispatch.py, which happily accepted a string where it
             # expected an array of coordinate pairs.
             "geometry": decode_polyline(route["overview_polyline"]["points"]),
+            # Every leg, not just `legs[0]`. The totals above deliberately keep
+            # reading the first leg (changing what `distance_km` means for
+            # existing callers is not this change's business), but a route with
+            # waypoints has one leg per hop and the dispatch board needs all of
+            # them.
+            "legs": self._normalized_legs(
+                ((leg.get("distance") or {}).get("value"), (leg.get("duration") or {}).get("value"))
+                for leg in route.get("legs") or []
+            ),
             "steps": [
                 {
                     "instruction": step["html_instructions"],
@@ -518,6 +556,9 @@ class MapsService:
             "duration_minutes": duration_s / 60.0,
             "duration_in_traffic_minutes": (duration_traffic_s / 60.0) if duration_traffic_s else None,
             "estimated_arrival": None,
+            # Summed from each leg's own steps — Yandex has no leg aggregate,
+            # exactly as the note above describes for the route totals.
+            "legs": self._normalized_legs(yandex_leg_totals(route)),
             "geometry": self._yandex_route_geometry(route),
         }
 
@@ -679,6 +720,14 @@ class MapsService:
             # normalised `[[lat, lng], ...] | None` shape every provider now
             # returns under "geometry".
             "geometry": decode_polyline(route["geometry"]),
+            # OSRM already measured every hop between the points we asked for;
+            # this loop used to walk `legs` purely to flatten `steps` and drop
+            # each leg's own numbers on the floor. Keeping them costs no extra
+            # request, no extra parameter and no extra cache entry — the
+            # dispatch board's stop-to-stop figures come from right here.
+            "legs": self._normalized_legs(
+                (leg.get("distance"), leg.get("duration")) for leg in route.get("legs") or []
+            ),
             "steps": [
                 {
                     "instruction": self._osrm_step_instruction(step),

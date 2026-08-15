@@ -613,6 +613,33 @@ def _yandex_step_metric(raw: object) -> Optional[float]:
     return None
 
 
+def yandex_leg_totals(route: Dict) -> List[Tuple[Optional[float], Optional[float]]]:
+    """Per-leg (metres, seconds) for a Yandex Router API `route` object.
+
+    Yandex publishes no leg-level aggregate — same gap `yandex_route_totals`
+    documents for the route level — so a leg's distance/duration only exists
+    as the sum of its own `steps[]`.
+
+    A leg with no usable step metrics yields `(None, None)` rather than
+    `(0.0, 0.0)`: zero is a measurement ("these two stops are in the same
+    place"), absence is not, and the caller has to be able to tell them apart
+    to decide whether it may show a number at all.
+    """
+    legs: List[Tuple[Optional[float], Optional[float]]] = []
+    for leg in route.get("legs") or []:
+        distance_m: Optional[float] = None
+        duration_s: Optional[float] = None
+        for step in leg.get("steps") or []:
+            step_distance = _yandex_step_metric(step.get("length"))
+            step_duration = _yandex_step_metric(step.get("duration"))
+            if step_distance is not None:
+                distance_m = (distance_m or 0.0) + step_distance
+            if step_duration is not None:
+                duration_s = (duration_s or 0.0) + step_duration
+        legs.append((distance_m, duration_s))
+    return legs
+
+
 def yandex_route_totals(route: Dict) -> Tuple[float, float]:
     """Sum per-step distance (metres) and duration (seconds) from a Yandex
     Router API `route` object, across every leg and every step.

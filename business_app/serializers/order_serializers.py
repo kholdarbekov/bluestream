@@ -375,6 +375,75 @@ def is_free_reward_item(order_item) -> bool:
     return float(order_item.unit_price or 0) == 0 and float(order_item.total_price or 0) == 0
 
 
+# How many lines a COMPACT items summary shows before collapsing the rest
+# into "+N more". This used to be decided independently by each caller (3 in
+# the delivery rows, 5 in the admin order serializer, unlimited elsewhere), so
+# the same order truncated differently depending on which screen you opened.
+# One number, one place: change it here or not at all.
+ORDER_ITEMS_SUMMARY_LIMIT = 3
+
+
+def summarize_order_items(
+    order: Optional[Order],
+    limit: int = ORDER_ITEMS_SUMMARY_LIMIT,
+    *,
+    with_prices: bool = False,
+) -> Dict[str, Any]:
+    """The compact "what's in this order" summary, for cards and list rows.
+
+    Returns the first `limit` lines plus the counts needed to say "+N more"
+    honestly — `total_count` is always the true number of lines, so a caller
+    can never mistake a truncated list for a complete one.
+
+    `with_prices` exists for the admin order serializer, which shows money on
+    the same rows. It widens each item; it must not change WHICH items appear
+    or how many, because that is the rule this function exists to own.
+
+    Degrades rather than raises: this feeds read models (the dispatch board,
+    delivery rows) where a missing order or a dangling product must not blank
+    the surrounding card. A product whose row is gone is still identified by
+    id, so whoever has to fix the data can find it.
+    """
+    items = list(getattr(order, "order_items", None) or []) if order is not None else []
+
+    shown: List[Dict[str, Any]] = []
+    for item in items[:limit]:
+        entry: Dict[str, Any] = {
+            "product_id": item.product_id,
+            "product_name": item.product.name if item.product else f"Product #{item.product_id}",
+            "quantity": item.quantity,
+            "is_reward": is_free_reward_item(item),
+        }
+        if with_prices:
+            entry["unit_price"] = float(item.unit_price or 0)
+            entry["total_price"] = float(item.total_price or 0)
+        shown.append(entry)
+
+    return {
+        "items": shown,
+        "total_count": len(items),
+        "hidden_count": max(0, len(items) - limit),
+    }
+
+
+def format_order_items_summary(order: Optional[Order], limit: int = ORDER_ITEMS_SUMMARY_LIMIT) -> str:
+    """The same summary as a single line, for surfaces that have no room for a list.
+
+    Deliberately a thin render over `summarize_order_items` rather than its own
+    traversal — the truncation and the "+N more" wording have to agree with the
+    structured form, because the two are shown for the same orders on adjacent
+    screens.
+    """
+    summary = summarize_order_items(order, limit)
+    if not summary["items"]:
+        return ""
+
+    rendered = ", ".join(f"{item['product_name']} x{item['quantity']}" for item in summary["items"])
+    if summary["hidden_count"]:
+        rendered += f" +{summary['hidden_count']} more"
+    return rendered
+
+
 def serialize_order_item(order_item: OrderItem) -> Dict[str, Any]:
     """Serialize order item object"""
     try:

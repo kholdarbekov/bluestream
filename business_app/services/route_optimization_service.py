@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 from flask import current_app
 from sqlalchemy import func
@@ -27,7 +28,7 @@ from business_app.models.delivery import Delivery, DeliveryPerson, DeliveryRoute
 from business_app.services.maps_service import MapsService
 from business_app.utils import google_routes
 from business_app.utils.exceptions import ExternalServiceError
-from shared.constants import TASHKENT_COORDINATES
+from shared.constants import DISPLAY_TIMEZONE, TASHKENT_COORDINATES
 from shared.enums import DeliveryStatus
 
 logger = logging.getLogger(__name__)
@@ -79,6 +80,26 @@ LOCATION_MAX_ACCURACY_DEFAULT_METERS = 500
 # 12 deliveries -> n=13, 2^12*12 ~= 49K states, sub-second on commodity hardware.
 # Above this we fall back to the nearest-neighbor + 2-opt heuristic.
 HELDKARP_MAX_DELIVERIES = 12
+
+
+def _driver_day_start_utc() -> datetime:
+    """Start of the driver's working day, normalized to UTC.
+
+    SSOT for "today" across this module. The business day is LOCAL
+    (DISPLAY_TIMEZONE), not UTC: in Tashkent (UTC+5) a UTC-midnight boundary is
+    05:00 local, so "today" ran 05:00 yesterday -> 05:00 today. That was wrong
+    in both directions every morning between 00:00 and 05:00 — a delivery
+    finished at 04:45 local counted as yesterday (so the start point fell
+    through to the warehouse instead of the driver's real last position), while
+    one finished at 08:00 the PREVIOUS local day still counted as today
+    (anchoring the route on a ~20h-old GPS fix).
+
+    Timestamps are stored in UTC, so the local midnight is converted back
+    before being compared against a column.
+    """
+    local_tz = ZoneInfo(current_app.config.get("DISPLAY_TIMEZONE", DISPLAY_TIMEZONE))
+    local_midnight = datetime.now(local_tz).replace(hour=0, minute=0, second=0, microsecond=0)
+    return local_midnight.astimezone(timezone.utc)
 
 
 def _ensure_aware(dt: Optional[datetime]) -> Optional[datetime]:
@@ -561,7 +582,7 @@ class RouteOptimizationService:
     def current_route(self, driver_id: int) -> Optional[DeliveryRoute]:
         """Today's route row for this driver, newest first. Public: the dispatch
         read/write services need the same row this service upserts into."""
-        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start = _driver_day_start_utc()
         return (
             DeliveryRoute.query.filter(
                 DeliveryRoute.delivery_person_id == driver_id,
@@ -840,7 +861,7 @@ class RouteOptimizationService:
             return (person.current_location_lat, person.current_location_lng), "driver_live"
 
         # Last completed delivery from earlier today (location snapshot in history)
-        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start = _driver_day_start_utc()
         last_completed = (
             DeliveryStatusHistory.query.join(Delivery, Delivery.id == DeliveryStatusHistory.delivery_id)
             .filter(
@@ -1179,7 +1200,7 @@ class RouteOptimizationService:
         extra: Dict[str, Any],
         keep_override: bool = False,
     ) -> DeliveryRoute:
-        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start = _driver_day_start_utc()
         route = (
             DeliveryRoute.query.filter(
                 DeliveryRoute.delivery_person_id == driver_id,
@@ -1372,13 +1393,7 @@ class RouteOptimizationService:
         wire `updated_at` arrives at +05:00 and `finish_eta` arrives as UTC —
         parse both as tz-aware and never assume a `Z` suffix.
         """
-        from zoneinfo import ZoneInfo
-
-        from shared.constants import DISPLAY_TIMEZONE
-
-        local_tz = ZoneInfo(DISPLAY_TIMEZONE)
-        local_midnight = datetime.now(local_tz).replace(hour=0, minute=0, second=0, microsecond=0)
-        day_start_utc = local_midnight.astimezone(timezone.utc)
+        day_start_utc = _driver_day_start_utc()
 
         completed_today = Delivery.query.filter(
             Delivery.delivery_person_id == driver_id,

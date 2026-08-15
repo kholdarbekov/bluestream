@@ -624,7 +624,11 @@ class AuthService:
         # Set cooldown to prevent immediate resend
         self.redis_client.setex(cooldown_key, self.PHONE_OTP_RESEND_COOLDOWN, "1")
 
-        # Send SMS via Celery task
+        # Send SMS via Celery task. This used to carry its own
+        # `sms.registration.otp` text, which never passed Eskiz moderation —
+        # all 9 sends in the 30 days before 2026-08-14 were rejected with HTTP
+        # 400, so no web signup ever received a code. It now shares the single
+        # moderated OTP text (see notification_tasks._dispatch_otp_sms).
         try:
             from business_app.tasks.notification_tasks import send_registration_otp_task
 
@@ -633,7 +637,6 @@ class AuthService:
         except Exception:
             logger.exception("Failed to send registration OTP")
             # Still return success - OTP is stored, SMS might be delayed
-            # In production, you might want to handle this differently
 
         return {
             "phone_masked": mask_phone_number(phone),
@@ -796,13 +799,7 @@ class AuthService:
         # Create user session
         self._create_user_session(user.id, tokens["access_token"])
 
-        # Send welcome SMS
-        try:
-            from business_app.tasks.notification_tasks import send_welcome_sms_task
-
-            send_welcome_sms_task.delay(user.id)
-        except Exception as e:
-            logger.warning(f"Failed to send welcome SMS: {e}")
+        # No welcome SMS: SMS is OTP-only (see OTP_SMS_TEMPLATES).
 
         # Clean up Redis keys
         self.redis_client.delete(

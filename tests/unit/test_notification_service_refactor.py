@@ -23,6 +23,11 @@ from shared.enums import (
 )
 from business_app.utils.exceptions import ForbiddenError, ValidationError
 
+# conftest's autouse `block_external_side_effects` stubs send_notification with
+# an always-succeeds mock. Tests that assert the real fan-out refuses SMS must
+# put the production implementation back; captured before any monkeypatching.
+_REAL_SEND_NOTIFICATION = NotificationService.send_notification
+
 
 def _create_notification(db, user_id: int, status: NotificationStatus) -> Notification:
     notification = Notification(
@@ -144,9 +149,7 @@ def test_queue_bulk_notification_requires_admin(db, sample_user):
         )
 
 
-def test_create_notification_campaign_persists_audit_log_and_normalizes_phone_channel(
-    db, admin_user, sample_user
-):
+def test_create_notification_campaign_persists_audit_log(db, admin_user, sample_user):
     service = NotificationService()
 
     campaign = service.create_notification_campaign(
@@ -154,7 +157,7 @@ def test_create_notification_campaign_persists_audit_log_and_normalizes_phone_ch
         payload={
             'name': 'Weekend retention push',
             'notification_type': NotificationType.PROMOTIONAL.value,
-            'channel': 'phone',
+            'channel': 'email',
             'subject': 'Weekend special',
             'content': 'Save 10% this weekend',
             'target_audience': 'all_customers',
@@ -164,10 +167,31 @@ def test_create_notification_campaign_persists_audit_log_and_normalizes_phone_ch
 
     assert campaign['name'] == 'Weekend retention push'
     assert campaign['notification_type'] == NotificationType.PROMOTIONAL.value
-    assert campaign['channel'] == 'sms'
+    assert campaign['channel'] == 'email'
     assert campaign['recipient_count'] == 0
     assert campaign['status'] == 'draft'
     assert campaign['summary']['total'] == 0
+
+
+@pytest.mark.parametrize('channel', ['sms', 'phone'])
+def test_create_notification_campaign_rejects_sms_channels(db, admin_user, channel):
+    """'phone' used to be silently normalized to 'sms'. Both are now refused:
+    SMS is OTP-only, so it can never carry a campaign blast."""
+    service = NotificationService()
+
+    with pytest.raises(ValidationError):
+        service.create_notification_campaign(
+            sender_id=admin_user.id,
+            payload={
+                'name': 'Weekend retention push',
+                'notification_type': NotificationType.PROMOTIONAL.value,
+                'channel': channel,
+                'subject': 'Weekend special',
+                'content': 'Save 10% this weekend',
+                'target_audience': 'all_customers',
+                'priority': 'high',
+            },
+        )
 
 
 def test_get_notification_campaigns_paginated_filters_by_search_status_and_channel(
@@ -961,71 +985,42 @@ def test_resolve_delivery_status_channels_honors_explicit_delivery_telegram_disa
     assert channels == [NotificationChannel.EMAIL]
 
 
-def test_send_sms_notification_is_disabled_for_delivery_updates(db, sample_user):
-    service = NotificationService()
-    service.eskiz_client = Mock()
-
-    result = service._send_sms_notification(
-        sample_user,
+@pytest.mark.parametrize(
+    'notification_type',
+    [
         NotificationType.DELIVERY_UPDATE,
-        {'order_number': 'AD_000342_26', 'delivery_status': 'Delivered'},
-        'uz',
-    )
-
-    assert result['success'] is True
-    assert result['skipped'] is True
-    assert result['reason'] == 'sms_disabled_for_type'
-    service.eskiz_client.send_sms.assert_not_called()
-
-
-def test_send_sms_notification_is_disabled_for_delivery_reminders(db, sample_user):
-    service = NotificationService()
-    service.eskiz_client = Mock()
-
-    result = service._send_sms_notification(
-        sample_user,
         NotificationType.DELIVERY_REMINDER,
-        {'order_number': 'AD_000342_26'},
-        'uz',
-    )
-
-    assert result['skipped'] is True
-    service.eskiz_client.send_sms.assert_not_called()
-
-
-def test_send_sms_notification_is_disabled_for_order_status_update(db, sample_user):
-    """Order status updates are Telegram-first — SMS is short-circuited by the
-    no-SMS backstop before the (nonexistent) SMS-template lookup, so no per-order
-    'SMS template not found' WARNING is emitted."""
-    service = NotificationService()
-    service.eskiz_client = Mock()
-
-    result = service._send_sms_notification(
-        sample_user,
         NotificationType.ORDER_STATUS_UPDATE,
-        {'order_number': 'AD_000342_26', 'status': 'Confirmed'},
-        'uz',
+        NotificationType.ORDER_UPDATE,
+    ],
+)
+def test_customer_updates_never_go_out_over_sms(db, sample_user, monkeypatch, notification_type):
+    """These types were the original reason for the no-SMS backstop.
+
+    SMS is now OTP-only outright, so the guarantee is stronger than it was: it
+    holds for every notification type, and even a caller that explicitly asks
+    for the SMS channel cannot reach the provider. Asserted through the public
+    fan-out rather than a private helper, because that is what callers use.
+    """
+    monkeypatch.setattr(
+        NotificationService, 'send_notification', _REAL_SEND_NOTIFICATION
     )
-
-    assert result['success'] is True
-    assert result['skipped'] is True
-    assert result['reason'] == 'sms_disabled_for_type'
-    service.eskiz_client.send_sms.assert_not_called()
-
-
-def test_send_sms_notification_is_disabled_for_order_update(db, sample_user):
     service = NotificationService()
     service.eskiz_client = Mock()
 
-    result = service._send_sms_notification(
-        sample_user,
-        NotificationType.ORDER_UPDATE,
-        {'order_number': 'AD_000342_26'},
-        'uz',
+    assert NotificationChannel.SMS not in service._default_channels_for_type(
+        notification_type.value
     )
 
-    assert result['skipped'] is True
-    assert result['reason'] == 'sms_disabled_for_type'
+    results = service.send_notification(
+        sample_user.id,
+        notification_type,
+        [NotificationChannel.SMS],
+        {'order_number': 'AD_000342_26', 'delivery_status': 'Delivered'},
+    )
+
+    assert results['sms']['success'] is False
+    assert results['sms']['reason'] == 'sms_is_otp_only'
     service.eskiz_client.send_sms.assert_not_called()
 
 

@@ -64,47 +64,73 @@ class TestJsonSafe:
         assert safe["nested"]["objs"][0]["street"] == "Chilanzar 5"
 
 
+# conftest's autouse `block_external_side_effects` stubs send_sms_to_phone.
+# These tests drive the production implementation, contained by a fake Eskiz
+# client. Captured before any per-test monkeypatching runs.
+_REAL_SEND_SMS_TO_PHONE = NotificationService.send_sms_to_phone
+
+
+@pytest.fixture(autouse=True)
+def restore_real_send_sms_to_phone(monkeypatch):
+    monkeypatch.setattr(NotificationService, "send_sms_to_phone", _REAL_SEND_SMS_TO_PHONE)
+
+
 @pytest.mark.unit
-class TestSmsTemplateMissing:
-    def test_missing_template_is_skipped_with_warning_not_error(self, monkeypatch, caplog):
-        svc = _bare_service(eskiz_client=MagicMock(), eskiz_from="4546")
-        svc._get_notification_template = lambda *a, **k: None
+class TestNonOtpTemplateBlocked:
+    """Fix #2 originally covered a missing SMS template logging at ERROR on
+    every send. SMS is now OTP-only, so the same class of event — a caller
+    asking for a text that cannot be sent — must still be a WARNING, not an
+    ERROR, and must not reach the provider."""
+
+    def test_blocked_template_is_skipped_with_warning_not_error(self, monkeypatch, caplog):
+        eskiz = MagicMock()
+        svc = _bare_service(eskiz_client=eskiz, eskiz_from="4546")
         monkeypatch.setattr(ns_module, "get_translation", lambda key, **kw: key)
-        user = SimpleNamespace(id=1, phone="+998901112233")
 
         # The celery task logger does not propagate to root in the test env;
         # attach caplog's handler directly.
         ns_module.logger.addHandler(caplog.handler)
         try:
             with caplog.at_level(logging.INFO, logger="business_app.services.notification_service"):
-                result = svc._send_sms_notification(user, "order_confirmation", {}, "uz")
+                result = svc.send_sms_to_phone(
+                    phone="+998901112233",
+                    notification_type="order_confirmation",
+                    template_key="sms.order_confirmation",
+                    template_data={},
+                    language="uz",
+                )
         finally:
             ns_module.logger.removeHandler(caplog.handler)
 
         assert result["success"] is False
         assert result.get("skipped") is True
+        eskiz.send_sms.assert_not_called()
         assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
         warning_text = " ".join(r.getMessage() for r in caplog.records if r.levelno == logging.WARNING)
-        assert "order_confirmation" in warning_text
+        assert "sms.order_confirmation" in warning_text
 
 
 @pytest.mark.unit
 class TestEskizWaitingStatus:
+    def _send(self, svc):
+        return svc.send_sms_to_phone(
+            phone="+998901112233",
+            notification_type="system",
+            template_key="sms.verification.otp",
+            template_data={"otp_code": "123456"},
+            language="uz",
+        )
+
     def test_waiting_status_counts_as_accepted(self, monkeypatch, caplog):
         eskiz = MagicMock()
         eskiz.send_sms.return_value = SimpleNamespace(status="waiting", id="msg-1")
         svc = _bare_service(eskiz_client=eskiz, eskiz_from="4546")
-        svc._render_template = lambda content, data, lang: "hello"
         monkeypatch.setattr(ns_module, "get_translation", lambda key, **kw: key)
-        template_override = SimpleNamespace(content="hello")
-        user = SimpleNamespace(id=1, phone="+998901112233")
 
         ns_module.logger.addHandler(caplog.handler)
         try:
             with caplog.at_level(logging.INFO, logger="business_app.services.notification_service"):
-                result = svc._send_sms_notification(
-                    user, "auth_otp", {}, "uz", template_override=template_override
-                )
+                result = self._send(svc)
         finally:
             ns_module.logger.removeHandler(caplog.handler)
 
@@ -116,13 +142,8 @@ class TestEskizWaitingStatus:
         eskiz = MagicMock()
         eskiz.send_sms.return_value = SimpleNamespace(status="error", message="rejected")
         svc = _bare_service(eskiz_client=eskiz, eskiz_from="4546")
-        svc._render_template = lambda content, data, lang: "hello"
         monkeypatch.setattr(ns_module, "get_translation", lambda key, **kw: key)
-        template_override = SimpleNamespace(content="hello")
-        user = SimpleNamespace(id=1, phone="+998901112233")
 
-        result = svc._send_sms_notification(
-            user, "auth_otp", {}, "uz", template_override=template_override
-        )
+        result = self._send(svc)
 
         assert result["success"] is False

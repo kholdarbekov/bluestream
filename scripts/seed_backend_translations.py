@@ -251,20 +251,17 @@ BACKEND_TRANSLATIONS = {
     # ============================================================================
     # SMS Templates (sms.*)
     # ============================================================================
-    'sms.registration.otp': {
-        'en': 'Aqua Element: Your registration code: {otp_code}. Valid for 3 minutes.',
-        'uz': 'Aqua Element: Ro\'yxatdan o\'tish kodi: {otp_code}. Kod 3 daqiqa amal qiladi.',
-        'ru': 'Aqua Element: Код регистрации: {otp_code}. Код действителен 3 минуты.'
-    },
-    'sms.welcome': {
-        'en': 'Welcome to Aqua Element, {first_name}! Use our app to place orders.',
-        'uz': 'Aqua Elementga xush kelibsiz, {first_name}! Buyurtma berish uchun ilovamizdan foydalaning.',
-        'ru': 'Добро пожаловать в Aqua Element, {first_name}! Используйте наше приложение для заказов.'
-    },
+    # SMS is OTP-only, and the sendable texts live in
+    # business_app/services/notification_service.py::OTP_SMS_TEMPLATES — NOT
+    # here. That is deliberate: these rows are admin-editable, and Eskiz
+    # rejects any text it has not moderated, so a well-meaning edit here would
+    # break OTP delivery entirely. These rows are kept only so the strings are
+    # visible/translatable in the admin console; they must stay byte-identical
+    # to the moderated originals.
     'sms.verification.otp': {
-        'en': 'Aqua Element: Your verification code: {otp_code}. Valid for 5 minutes.',
-        'uz': 'Aqua Element: Tasdiqlash kodi: {otp_code}. Kod 5 daqiqa amal qiladi.',
-        'ru': 'Aqua Element: Код подтверждения: {otp_code}. Код действителен 5 минут.'
+        'en': 'Code to verify your phone number on the Aqua Element platform: {otp_code}',
+        'uz': 'Aqua Element platformasida telefon raqamingizni tasdiqlash uchun kod: {otp_code}',
+        'ru': 'Kod dlya podtverjdeniya vashego nomera telefona na platforme Aqua Element: {otp_code}'
     },
 
     # ============================================================================

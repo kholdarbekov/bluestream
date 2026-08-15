@@ -8573,13 +8573,18 @@ def get_system_settings():
             # loyalty programs/rewards/tiers endpoints. The former System-Settings
             # loyalty category was a phantom surface reading undefined config keys
             # (always 1/100/50/365) with no UI consumer — removed (loyalty SSOT, Phase 2).
+            # SMS is OTP-only and not configurable: the provider rejects any
+            # text it has not moderated, so the sendable set is the fixed
+            # allowlist in notification_service.OTP_SMS_TEMPLATES. The former
+            # sms_enabled / order_confirmation_sms / delivery_reminder_sms keys
+            # were phantom surfaces — they read config keys that do not exist,
+            # always reported True, had no UI consumer, and now actively
+            # misrepresent the system. Reported as a fixed fact instead.
             "notifications": {
-                "sms_enabled": current_app.config.get("SMS_ENABLED", True),
+                "sms_scope": "otp_only",
                 "email_enabled": current_app.config.get("EMAIL_ENABLED", True),
                 "telegram_enabled": current_app.config.get("TELEGRAM_ENABLED", True),
                 "push_enabled": current_app.config.get("PUSH_ENABLED", False),
-                "order_confirmation_sms": current_app.config.get("ORDER_CONFIRMATION_SMS", True),
-                "delivery_reminder_sms": current_app.config.get("DELIVERY_REMINDER_SMS", True),
             },
             "payments": {
                 "payment_methods_enabled": current_app.config.get(

@@ -74,6 +74,42 @@ logger = get_task_logger(__name__)
 #     logger.propagate = True
 
 
+# ---------------------------------------------------------------------------
+# SMS is OTP-only.
+#
+# Two hard constraints, both learned from production:
+#
+# 1. Eskiz refuses any text that has not passed moderation, with HTTP 400
+#    ("Этот смс текст еще не прошёл модерацию"). So the sendable set is a
+#    CLOSED ALLOWLIST, not a default-open template lookup. Adding a key here
+#    without first getting its exact text moderated at my.eskiz.uz means every
+#    send fails — silently, from the caller's point of view.
+# 2. Cyrillic forces UCS-2, which segments every 70 characters instead of
+#    GSM-7's 160, and is billed per segment. The Russian verification text was
+#    78 chars = 2 billed parts; transliterated to Latin it is 81 chars = 1.
+#    Every text below is therefore GSM-7-safe Latin. Beware: the GSM-7
+#    alphabet is narrower than "Latin". U+2018/U+2019 (typographic quotes) are
+#    outside it, so writing Uzbek o' / g' with a curly quote rather than an
+#    ASCII apostrophe (U+0027) silently doubles the bill again.
+#    tests/unit/test_sms_otp_only.py asserts every text here stays in-alphabet.
+#
+# Anything that is not a one-time passcode must use Telegram or email.
+# ---------------------------------------------------------------------------
+OTP_SMS_TEMPLATES = {
+    "sms.verification.otp": {
+        "uz": "Aqua Element platformasida telefon raqamingizni tasdiqlash uchun kod: {otp_code}",
+        "ru": "Kod dlya podtverjdeniya vashego nomera telefona na platforme Aqua Element: {otp_code}",
+        "en": "Code to verify your phone number on the Aqua Element platform: {otp_code}",
+    },
+    # Allowed, but no moderated text exists yet, so every send returns
+    # "template not found" rather than burning a provider call. Fill this in
+    # once a password-reset text has been moderated at my.eskiz.uz.
+    "sms.password_reset.otp": {},
+}
+
+OTP_SMS_TEMPLATE_KEYS = frozenset(OTP_SMS_TEMPLATES)
+
+
 class BottleSummaryNotReady(Exception):
     """Raised when a delivered order's bottle ledger has not committed yet.
 
@@ -290,9 +326,11 @@ class NotificationService:
                         user, notification_type, template_data, user_language, template_override=template_override
                     )
                 elif channel == NotificationChannel.SMS:
-                    result = self._send_sms_notification(
-                        user, notification_type, template_data, user_language, template_override=template_override
-                    )
+                    # SMS is OTP-only (see OTP_SMS_TEMPLATES). OTPs are
+                    # delivered by send_sms_to_phone(); this generic fan-out
+                    # must never reach the provider, whatever channel a caller
+                    # or a stored preference asks for.
+                    result = {"success": False, "skipped": True, "reason": "sms_is_otp_only"}
                 elif channel == NotificationChannel.TELEGRAM:
                     result = self._send_telegram_notification(
                         user, notification_type, template_data, user_language, template_override=template_override
@@ -1607,13 +1645,6 @@ class NotificationService:
                 "available": True,
             },
             {
-                "value": NotificationChannel.SMS.value,
-                "label": "SMS",
-                "requires_subject": False,
-                "icon": "message",
-                "available": True,
-            },
-            {
                 "value": NotificationChannel.TELEGRAM.value,
                 "label": "Telegram",
                 "requires_subject": False,
@@ -2086,11 +2117,10 @@ class NotificationService:
             raise ValidationError("Channel is required")
 
         normalized = str(channel).strip().lower()
-        if normalized == "phone":
-            normalized = NotificationChannel.SMS.value
+        # "sms" and its legacy alias "phone" are deliberately absent: SMS is
+        # OTP-only, so a campaign can never be blasted over it.
         supported_channels = {
             NotificationChannel.EMAIL.value,
-            NotificationChannel.SMS.value,
             NotificationChannel.TELEGRAM.value,
             NotificationChannel.IN_APP.value,
         }
@@ -2648,9 +2678,9 @@ class NotificationService:
     def _default_channels_for_type(self, notification_type: str) -> List[NotificationChannel]:
         """Default channels for a notification type."""
         defaults = {
-            NotificationType.ORDER_CONFIRMATION.value: [NotificationChannel.EMAIL, NotificationChannel.SMS],
-            NotificationType.ORDER_STATUS_UPDATE.value: [NotificationChannel.SMS, NotificationChannel.TELEGRAM],
-            NotificationType.ORDER_UPDATE.value: [NotificationChannel.SMS, NotificationChannel.TELEGRAM],
+            NotificationType.ORDER_CONFIRMATION.value: [NotificationChannel.EMAIL],
+            NotificationType.ORDER_STATUS_UPDATE.value: [NotificationChannel.TELEGRAM],
+            NotificationType.ORDER_UPDATE.value: [NotificationChannel.TELEGRAM],
             NotificationType.ORDER_EDITED.value: [NotificationChannel.TELEGRAM],
             NotificationType.DELIVERY_UPDATE.value: [NotificationChannel.TELEGRAM],
             NotificationType.DELIVERY_REMINDER.value: [NotificationChannel.TELEGRAM],
@@ -2661,11 +2691,11 @@ class NotificationService:
             NotificationType.SUBSCRIPTION_CANCELLED.value: [NotificationChannel.EMAIL],
             NotificationType.SUBSCRIPTION_CANCELLATION_SCHEDULED.value: [NotificationChannel.EMAIL],
             NotificationType.PROMOTIONAL.value: [NotificationChannel.EMAIL],
-            NotificationType.SYSTEM.value: [NotificationChannel.EMAIL, NotificationChannel.SMS],
-            NotificationType.SYSTEM_ALERT.value: [NotificationChannel.EMAIL, NotificationChannel.SMS],
-            NotificationType.SECURITY.value: [NotificationChannel.EMAIL, NotificationChannel.SMS],
+            NotificationType.SYSTEM.value: [NotificationChannel.EMAIL],
+            NotificationType.SYSTEM_ALERT.value: [NotificationChannel.EMAIL],
+            NotificationType.SECURITY.value: [NotificationChannel.EMAIL],
             NotificationType.EMAIL_VERIFICATION.value: [NotificationChannel.EMAIL],
-            NotificationType.PASSWORD_RESET.value: [NotificationChannel.EMAIL, NotificationChannel.SMS],
+            NotificationType.PASSWORD_RESET.value: [NotificationChannel.EMAIL],
             NotificationType.LOYALTY_REWARD.value: [NotificationChannel.EMAIL, NotificationChannel.TELEGRAM],
             NotificationType.REWARD_REDEEMED.value: [NotificationChannel.EMAIL],
         }
@@ -3013,122 +3043,6 @@ class NotificationService:
             logger.exception("Email sending failed")
             return {"success": False, "error": str(e)}
 
-    def _send_sms_notification(
-        self,
-        user: User,
-        notification_type: NotificationType,
-        template_data: Dict[str, Any],
-        language: str,
-        template_override=None,
-    ) -> Dict[str, Any]:
-        """Send SMS notification using Eskiz"""
-        logger.info(
-            "_send_sms_notification started user=%s, notification_type=%s, template_data=%s, language=%s",
-            user,
-            notification_type,
-            template_data,
-            language,
-        )
-
-        # Business rule: delivery AND order-status/update notifications never go
-        # out over SMS — they are Telegram-first (else email). This backstop is the
-        # single SSOT chokepoint that guarantees no SMS leaves the system for these
-        # types regardless of caller or stored channel preferences, and short-circuits
-        # before the (nonexistent) SMS-template lookup so no per-order WARNING fires.
-        notification_type_value = self._status_value(notification_type)
-        if notification_type_value in (
-            NotificationType.DELIVERY_UPDATE.value,
-            NotificationType.DELIVERY_REMINDER.value,
-            NotificationType.ORDER_STATUS_UPDATE.value,
-            NotificationType.ORDER_UPDATE.value,
-        ):
-            logger.info(
-                "SMS suppressed (Telegram-first notification type): user_id=%s notification_type=%s",
-                getattr(user, "id", None),
-                notification_type_value,
-            )
-            return {"success": True, "skipped": True, "reason": "sms_disabled_for_type"}
-
-        if not self.eskiz_client:
-            logger.error(f"_send_sms_notification error Eskiz SMS not configured")  # noqa: F541
-            raise ConfigurationError(get_translation("error.configuration.sms_not_configured"))
-
-        if not user.phone:
-            logger.error(f"_send_sms_notification error User has no phone number, user.phone={user.phone}")
-            return {"success": False, "error": get_translation("error.validation.no_phone_number")}
-
-        # Get template
-        template = template_override or self._get_notification_template(
-            notification_type, NotificationChannel.SMS, language
-        )
-
-        if not template:
-            # Missing SMS template for a notification type is an expected
-            # configuration gap (DEFAULT_TEMPLATES covers few types), not a
-            # code error — skip the channel instead of recording a failure.
-            logger.warning(
-                "SMS template not found for notification_type=%s language=%s — skipping SMS channel",
-                notification_type,
-                language,
-            )
-            return {
-                "success": False,
-                "skipped": True,
-                "reason": "sms_template_not_found",
-                "error": get_translation("error.template_not_found"),
-            }
-
-        # Get translated content (or fallback to default)
-        template_content = (
-            template.get_translated("content", language) if hasattr(template, "get_translated") else template.content
-        )
-        logger.info(f"_send_sms_notification template_content: {template_content}")
-        # Render template
-        content = self._render_template(template_content, template_data, language)
-        logger.info(f"_send_sms_notification rendered content: {content}")
-
-        try:
-            # Clean phone number (Eskiz expects format like 998901234567)
-            phone = user.phone.replace("+", "").replace(" ", "").replace("-", "")
-
-            # Send SMS via Eskiz
-            response = self.eskiz_client.send_sms(mobile_phone=phone, message=content, from_whom=self.eskiz_from)
-
-            # Check if SMS was sent successfully
-            # Eskiz returns Response object with status field
-            if response and hasattr(response, "status"):
-                # Eskiz "waiting"/"pending" mean the SMS was accepted and queued
-                # by the provider — only genuine error statuses are failures.
-                if response.status in ("success", "waiting", "pending"):
-                    logger.info(
-                        f"SMS accepted by provider (status={response.status}) for {phone}. "
-                        f"Message ID: {getattr(response, 'id', 'N/A')}"
-                    )
-                    return {
-                        "success": True,
-                        "message_id": getattr(response, "id", None),
-                        "phone": phone,
-                        "provider_status": response.status,
-                        "response": response,
-                    }
-                else:
-                    # SMS service returned an error status
-                    error_msg = getattr(response, "message", "Unknown error from SMS provider")
-                    logger.error(f"Eskiz SMS failed for {phone}: status={response.status}, message={error_msg}")
-                    return {
-                        "success": False,
-                        "error": f"SMS provider returned status: {response.status}",
-                        "details": error_msg,
-                    }
-            else:
-                # Unexpected response format
-                logger.warning(f"Eskiz SMS returned unexpected response format: {response}")
-                return {"success": False, "error": "Unexpected response from SMS provider", "response": response}
-
-        except Exception as e:
-            logger.exception("Eskiz SMS error")
-            return {"success": False, "error": str(e)}
-
     def send_sms_to_phone(
         self,
         phone: str,
@@ -3138,14 +3052,17 @@ class NotificationService:
         language: str = "uz",
     ) -> Dict[str, Any]:
         """
-        Send SMS to a phone number without requiring a User object.
+        Send an OTP SMS to a phone number, without requiring a User object.
 
-        Used for sending OTPs during registration when user doesn't exist yet.
+        This is the ONLY function in the codebase that reaches the SMS
+        provider, and it only sends one-time passcodes — see OTP_SMS_TEMPLATES
+        for why the sendable set is a closed allowlist.
 
         Args:
             phone: Phone number in normalized format (+998XXXXXXXXX)
-            notification_type: Type of notification for template lookup
-            template_key: Specific template key (e.g., 'sms.registration.otp')
+            notification_type: Type of notification, for logging/audit only
+            template_key: A key in OTP_SMS_TEMPLATES (e.g. 'sms.verification.otp');
+                anything else is refused without contacting the provider
             template_data: Data to render in template
             language: Language code for template
 
@@ -3153,6 +3070,16 @@ class NotificationService:
             Dict with success status and message_id or error
         """
         logger.info(f"send_sms_to_phone started: phone={phone[:4]}***{phone[-4:]}, template_key={template_key}")
+
+        # SSOT gate: SMS carries one-time passcodes and nothing else. This is
+        # the only function that reaches the provider, so this check is the
+        # single chokepoint that guarantees it — no caller can bypass it.
+        if template_key not in OTP_SMS_TEMPLATE_KEYS:
+            logger.warning(
+                "SMS blocked: %s is not an OTP template and SMS is OTP-only. Use Telegram or email.",
+                template_key,
+            )
+            return {"success": False, "skipped": True, "reason": "sms_is_otp_only"}
 
         if not self.eskiz_client:
             logger.error("send_sms_to_phone error: Eskiz SMS not configured")
@@ -3162,37 +3089,15 @@ class NotificationService:
             logger.error("send_sms_to_phone error: No phone number provided")
             return {"success": False, "error": "No phone number provided"}
 
-        # Get template by key from translation system
-
-        # Try to get SMS content from translation system with the specific key
-        # content = get_translation(template_key, language=language, default=None)
-        content = None
+        # Texts come from the moderated allowlist above, never from the DB.
+        # A DB-backed text would let an admin edit their way into an
+        # unmoderated string, which the provider rejects at send time.
+        texts = OTP_SMS_TEMPLATES[template_key]
+        content = texts.get(language) or texts.get("en")
 
         if not content:
-            # Fallback templates for phone registration
-            fallback_templates = {
-                "sms.registration.otp": {
-                    "uz": "Bluestream: Ro'yxatdan o'tish kodi: {otp_code}. Kod 3 daqiqa amal qiladi.",
-                    "ru": "Bluestream: Код регистрации: {otp_code}. Код действителен 3 минуты.",
-                    "en": "Bluestream: Your registration code: {otp_code}. Valid for 3 minutes.",
-                },
-                "sms.verification.otp": {
-                    "uz": "Aqua Element platformasida telefon raqamingizni tasdiqlash uchun kod: {otp_code}",
-                    "ru": "Код для подтверждения вашего номера телефона на платформе Aqua Element: {otp_code}",
-                    "en": "Code to verify your phone number on the Aqua Element platform: {otp_code}",
-                },
-                "sms.welcome": {
-                    "uz": "Bluestream'ga xush kelibsiz, {first_name}! Buyurtma berish uchun ilovamizdan foydalaning.",
-                    "ru": "Добро пожаловать в Bluestream, {first_name}! Используйте наше приложение для заказов.",
-                    "en": "Welcome to Bluestream, {first_name}! Use our app to place orders.",
-                },
-            }
-
-            if template_key in fallback_templates:
-                content = fallback_templates[template_key].get(language, fallback_templates[template_key].get("en"))
-            else:
-                logger.error(f"send_sms_to_phone error: No template found for key {template_key}")
-                return {"success": False, "error": f"SMS template not found: {template_key}"}
+            logger.error(f"send_sms_to_phone error: no moderated text for key {template_key}")
+            return {"success": False, "error": f"SMS template not found: {template_key}"}
 
         # Render template with data
         try:
@@ -3481,14 +3386,14 @@ class NotificationService:
 
         # Default preferences if none set
         default_channels = {
-            NotificationType.ORDER_CONFIRMATION: [NotificationChannel.EMAIL, NotificationChannel.SMS],
-            NotificationType.ORDER_STATUS_UPDATE: [NotificationChannel.SMS, NotificationChannel.TELEGRAM],
+            NotificationType.ORDER_CONFIRMATION: [NotificationChannel.EMAIL],
+            NotificationType.ORDER_STATUS_UPDATE: [NotificationChannel.TELEGRAM],
             NotificationType.ORDER_EDITED: [NotificationChannel.TELEGRAM],
             NotificationType.DELIVERY_UPDATE: [NotificationChannel.TELEGRAM],
             NotificationType.PAYMENT_CONFIRMATION: [NotificationChannel.EMAIL],
             NotificationType.SUBSCRIPTION_REMINDER: [NotificationChannel.EMAIL],
             NotificationType.PROMOTIONAL: [NotificationChannel.EMAIL],
-            NotificationType.SYSTEM: [NotificationChannel.EMAIL, NotificationChannel.SMS],
+            NotificationType.SYSTEM: [NotificationChannel.EMAIL],
             NotificationType.LOYALTY_REWARD: [NotificationChannel.EMAIL, NotificationChannel.TELEGRAM],
             NotificationType.REWARD_REDEEMED: [NotificationChannel.EMAIL],
         }
@@ -3743,36 +3648,6 @@ DEFAULT_TEMPLATES = {
 <p><strong>Итого: {order_total} сум</strong></p>
 <p><strong>Адрес доставки:</strong> {delivery_address}</p>
 <p>Мы уведомим вас, когда ваш заказ будет готовиться и доставляться.</p>""",
-            },
-        },
-    },
-    # Order confirmation - SMS
-    ("order_confirmation", "sms"): {
-        "name": "order_confirmation_sms",
-        "translations": {
-            "uz": {
-                "content": "Buyurtma #{order_number} tasdiqlandi! Jami: {order_total} so'm. Yetkazib berish haqida xabar beramiz. {{company_name}}ni tanlaganingiz uchun rahmat!"  # noqa: E501
-            },
-            "en": {
-                "content": "Order #{order_number} confirmed! Total: {order_total} UZS. We'll update you on delivery progress. Thank you for choosing {{company_name}}!"  # noqa: E501
-            },
-            "ru": {
-                "content": "Заказ #{order_number} подтвержден! Сумма: {order_total} сум. Уведомим о доставке. Спасибо за выбор {{company_name}}!"  # noqa: E501
-            },
-        },
-    },
-    # Delivery update - SMS
-    ("delivery_update", "sms"): {
-        "name": "delivery_update_sms",
-        "translations": {
-            "uz": {
-                "content": "Yetkazib berish: #{order_number} buyurtmangiz {delivery_status}. Kuzatish: {tracking_code}. Savollar? {company_phone} ga qo'ng'iroq qiling"  # noqa: E501
-            },
-            "en": {
-                "content": "Delivery Update: Your order #{order_number} is {delivery_status}. Track: {tracking_code}. Questions? Call {company_phone}"  # noqa: E501
-            },
-            "ru": {
-                "content": "Обновление доставки: Ваш заказ #{order_number} {delivery_status}. Отслеживание: {tracking_code}. Вопросы? {company_phone}"  # noqa: E501
             },
         },
     },

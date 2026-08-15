@@ -435,19 +435,21 @@ class TestRouteWindowMatchesWriteSide:
     def test_route_in_utc_tashkent_divergence_window_is_visible_to_reader_and_writer(
         self, db, sample_user, sample_order, delivery_driver, monkeypatch
     ):
-        """`_routes()` must key "today's route" off the same UTC-midnight boundary
-        RouteOptimizationService.current_route()/_upsert_route() (the write side a
-        later task edits routes through) use for `route_date` — NOT the
-        Tashkent-local boundary the order layer correctly uses for
-        `delivery_date`. A route stamped inside the Tashkent-local 00:00-05:00
-        window is on the UTC side of that UTC day's midnight but already on the
-        *next* Tashkent day; if reader and writer used different boundaries, the
-        map could hide a route the route editor still finds, or show one it can
-        no longer find.
+        """`_routes()` must key "today's route" off the SAME boundary
+        RouteOptimizationService.current_route()/_upsert_route() (the write side
+        an admin edits routes through) use for `route_date`. If reader and
+        writer disagree, the map can hide a route the route editor still finds,
+        or show one it can no longer find.
 
-        Real wall-clock time only sits in that 5-hour window for 5 of 24 hours a
-        day, so this freezes `datetime.now()` in both service modules rather than
-        relying on when the suite happens to run.
+        Both sides used to hard-code UTC midnight, which is 05:00 in Tashkent —
+        so they agreed with each other but were wrong together, treating the
+        previous local evening as "today" until 05:00 each morning. Both now
+        resolve to local midnight, which also aligns the route layer with the
+        Tashkent-local calendar day the order layer already uses.
+
+        Real wall-clock time only sits in the divergence window for 5 of 24
+        hours a day, so this freezes `datetime.now()` in both service modules
+        rather than relying on when the suite happens to run.
         """
         from business_app.models.delivery import DeliveryRoute
         from business_app.services import dispatch_service as dispatch_module
@@ -482,30 +484,36 @@ class TestRouteWindowMatchesWriteSide:
         # 2026-01-05 10:00 UTC is >= UTC midnight for Jan 5 (00:00 UTC) — the
         # bound the write side uses — but < Tashkent midnight for Jan 6
         # (2026-01-05 19:00 UTC) — the bound a Tashkent-local `_routes()` would
-        # wrongly use. Only visible to both reader and writer once they share
-        # the UTC bound.
-        route_date = datetime(2026, 1, 5, 10, 0, tzinfo=timezone.utc)
-        db.session.add(
-            DeliveryRoute(
-                name="r",
-                delivery_person_id=delivery_driver.id,
-                start_location_lat=41.30,
-                start_location_lng=69.24,
-                route_date=route_date,
-                optimized_order=[delivery.id],
+        # Local midnight is 2026-01-06 00:00 Tashkent = 2026-01-05 19:00 UTC.
+        # One route on each side of it, so the test pins WHERE the boundary is,
+        # not merely that the two sides agree on some boundary.
+        yesterday_route = datetime(2026, 1, 5, 10, 0, tzinfo=timezone.utc)  # Jan 5 15:00 local
+        todays_route = datetime(2026, 1, 5, 19, 30, tzinfo=timezone.utc)  # Jan 6 00:30 local
+        for name, stamp in (("yesterday", yesterday_route), ("today", todays_route)):
+            db.session.add(
+                DeliveryRoute(
+                    name=name,
+                    delivery_person_id=delivery_driver.id,
+                    start_location_lat=41.30,
+                    start_location_lng=69.24,
+                    route_date=stamp,
+                    optimized_order=[delivery.id],
+                )
             )
-        )
         db.session.commit()
 
-        # Writer side: RouteOptimizationService.current_route() must find it.
+        # Writer side: current_route() finds today's row, not the stale one.
         found = RouteOptimizationService().current_route(delivery_driver.id)
         assert found is not None
-        assert found.route_date.replace(tzinfo=None) == route_date.replace(tzinfo=None)
+        assert found.route_date.replace(tzinfo=None) == todays_route.replace(tzinfo=None)
 
-        # Reader side: DispatchService._routes() must find the SAME row.
+        # Reader side: DispatchService._routes() must resolve to the SAME row.
         routes = DispatchService.get_snapshot(date(2026, 1, 6))["routes"]
         assert [r["driver_id"] for r in routes] == [delivery_driver.id]
         assert [s["delivery_id"] for s in routes[0]["stops"]] == [delivery.id]
+        assert DispatchService._route_window_start_utc() == datetime(
+            2026, 1, 5, 19, 0, tzinfo=timezone.utc
+        )
 
 
 class TestQueryBudget:

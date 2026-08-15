@@ -29,7 +29,10 @@ from sqlalchemy.orm import joinedload
 from business_app.models.delivery import Delivery, DeliveryPerson, DeliveryRoute
 from business_app.models.order import Order
 from business_app.models.user import User, UserAddress
-from business_app.services.route_optimization_service import RouteOptimizationService
+from business_app.services.route_optimization_service import (
+    RouteOptimizationService,
+    _driver_day_start_utc,
+)
 from business_app.utils.state_validators import DELIVERY_POOL_UNASSIGNED_STATES
 from shared.enums import OrderStatus, PaymentMethod
 
@@ -282,26 +285,29 @@ class DispatchService:
 
     @staticmethod
     def _route_window_start_utc() -> datetime:
-        """UTC-midnight boundary for "today's route" — deliberately NOT
-        `_day_bounds(today())`.
+        """Boundary for "today's route" — delegated, never re-derived.
 
-        `delivery_date`/`get_snapshot`'s order layer is a calendar day the admin
-        picks in a date picker, so it stays Tashkent-local (see `_day_bounds`):
-        slicing it in UTC would cut the day five hours short.
+        The load-bearing invariant is that READER and WRITER agree on which row
+        is "today's": this method is the dispatch map's read side, and
+        RouteOptimizationService.current_route()/_upsert_route() are the write
+        side an admin edits routes through. If the two disagree, an admin can
+        edit a route the map isn't displaying, or see one the editor can no
+        longer find.
 
-        `DeliveryRoute.route_date`, by contrast, is not a calendar day at all —
-        it's a bookkeeping timestamp the optimiser stamps, and
-        RouteOptimizationService.current_route()/_upsert_route() (the WRITE side
-        a later task edits routes through) both key "today's route" off UTC
-        midnight. The only thing that matters here is that reader and writer
-        agree on which row is "today's". Using the Tashkent boundary instead
-        would make the two disagree for ~5 hours a day (Tashkent 00:00-05:00),
-        during which an admin could edit a route the map isn't displaying, or
-        see one the editor can no longer find. Keep this identical to
-        RouteOptimizationService's own computation — do not "fix" it back to
-        `_day_bounds`.
+        Both used to hard-code UTC midnight, and this docstring used to warn
+        against "fixing" it to the Tashkent boundary — because at the time that
+        would have introduced the very disagreement described above. That
+        reasoning was right about the invariant and wrong about the value: UTC
+        midnight is 05:00 in Tashkent, so BOTH sides were wrong together for
+        five hours every morning (see _driver_day_start_utc for what that broke
+        for drivers). The boundary now resolves to local midnight on both
+        sides, which also lines the route layer up with `_day_bounds` — the
+        order layer's Tashkent-local calendar day — instead of splitting from it.
+
+        Delegating rather than copying is the point: the two can no longer
+        drift apart. Do not re-derive the boundary here.
         """
-        return datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        return _driver_day_start_utc()
 
     @classmethod
     def _routes(cls) -> List[Dict[str, Any]]:

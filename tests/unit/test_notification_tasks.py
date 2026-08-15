@@ -109,47 +109,46 @@ class TestNotificationTasks:
         assert kwargs["template_key"] == "sms.password_reset.otp"
         assert kwargs["notification_type"] == NotificationType.PASSWORD_RESET
 
-    def test_send_registration_otp_task_calls_sms_for_phone_without_user(self, app):
+    def test_welcome_sms_task_no_longer_exists(self):
+        """SMS is OTP-only and a welcome message is not a passcode, so the
+        task is gone rather than left dormant."""
+        assert not hasattr(notification_tasks, "send_welcome_sms_task")
+
+    def test_send_registration_otp_task_uses_the_moderated_verification_template(self, app):
+        """Web signup used to send its own `sms.registration.otp` text, which
+        never passed Eskiz moderation — every send in the 30 days to
+        2026-08-14 was rejected with HTTP 400. It now shares the one moderated
+        OTP text."""
         with (
             app.app_context(),
             patch("business_app.tasks.notification_tasks.NotificationService") as mock_service_cls,
         ):
-            app.config["COMPANY_NAME"] = "Bluestream"
             mock_service = mock_service_cls.return_value
             mock_service.send_sms_to_phone.return_value = {"success": True, "message_id": "otp-1"}
 
             result = notification_tasks.send_registration_otp_task.run(
-                "+998901231212",
-                "123123",
-                "uz",
+                "+998901231212", "123123", "ru"
             )
 
         assert result["success"] is True
         kwargs = mock_service.send_sms_to_phone.call_args.kwargs
-        assert kwargs["template_key"] == "sms.registration.otp"
-        assert kwargs["notification_type"] == NotificationType.SYSTEM
+        assert kwargs["template_key"] == "sms.verification.otp"
+        assert kwargs["template_data"]["otp_code"] == "123123"
+        assert kwargs["language"] == "ru"
 
-    def test_send_welcome_sms_task_user_not_found(self, app, db):
-        with app.app_context():
-            result = notification_tasks.send_welcome_sms_task.run(777777)
-
-        assert result["success"] is False
-        assert result["error"] == "User not found"
-
-    def test_send_welcome_sms_task_uses_welcome_template(self, app, sample_user):
+    def test_account_locked_notification_sends_no_sms(self, app, sample_user):
         with (
             app.app_context(),
             patch("business_app.tasks.notification_tasks.NotificationService") as mock_service_cls,
         ):
-            app.config["COMPANY_NAME"] = "Bluestream"
             mock_service = mock_service_cls.return_value
-            mock_service.send_sms_to_phone.return_value = {"success": True}
+            mock_service.send_notification.return_value = {"telegram": {"success": True}}
 
-            result = notification_tasks.send_welcome_sms_task.run(sample_user.id)
+            notification_tasks.send_account_locked_notification_task.run(
+                sample_user.id, "2026-08-14T12:00:00+00:00", 15
+            )
 
-        assert result["success"] is True
-        kwargs = mock_service.send_sms_to_phone.call_args.kwargs
-        assert kwargs["template_key"] == "sms.welcome"
+        mock_service.send_sms_to_phone.assert_not_called()
 
     def test_send_delivery_update_task_uses_history_based_contract(self, app):
         with (

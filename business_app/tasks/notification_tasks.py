@@ -93,7 +93,7 @@ def send_account_locked_notification_task(self, user_id: int, lockout_until: str
     """
     Send notification when user account is locked due to failed login attempts.
 
-    Sends alerts via SMS and Telegram to warn user of potential unauthorized access.
+    Sends a Telegram alert to warn the user of potential unauthorized access.
 
     Args:
         user_id: User ID
@@ -120,20 +120,8 @@ def send_account_locked_notification_task(self, user_id: int, lockout_until: str
 
         results = {}
 
-        # Send SMS if user has phone
-        if user.phone:
-            try:
-                sms_result = notification_service.send_sms_to_phone(
-                    phone=user.phone,
-                    notification_type=NotificationType.SECURITY,
-                    template_key="sms.account_locked",
-                    template_data=template_data,
-                    language=user.preferred_language or "uz",
-                )
-                results["sms"] = sms_result
-            except Exception as e:
-                logger.warning(f"Failed to send account locked SMS: {e}")
-                results["sms"] = {"success": False, "error": str(e)}
+        # No SMS leg: SMS is OTP-only (see OTP_SMS_TEMPLATES). A lockout
+        # notice is not a passcode, so it goes over Telegram or email.
 
         # Send Telegram if user has telegram_id
         if user.telegram_id:
@@ -435,6 +423,55 @@ def send_verification_email_task(self, user_id: int, verification_token: str):
         raise self.retry(exc=exc)
 
 
+def _dispatch_otp_sms(phone: str, otp_code: str, language: str):
+    """Deliver a one-time passcode over SMS.
+
+    SSOT for OTP delivery: every OTP flow — phone verification, account
+    linking, and web phone signup — sends the same `sms.verification.otp`
+    text, because that is the only text moderated at Eskiz and the provider
+    rejects anything else with HTTP 400. Keeping the template choice in one
+    place is what stops a second flow from quietly inventing its own text
+    again (see the registration-OTP outage that motivated this).
+    """
+    return NotificationService().send_sms_to_phone(
+        phone=phone,
+        notification_type=NotificationType.SYSTEM,
+        template_key="sms.verification.otp",
+        template_data={"otp_code": otp_code, "phone_number": phone},
+        language=language,
+    )
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=30, time_limit=120, soft_time_limit=100)
+def send_registration_otp_task(self, phone: str, otp_code: str, language: str = "uz"):
+    """
+    Send the web phone-signup OTP.
+
+    No User row exists yet at this point, so this cannot go through the
+    user-centric verification task.
+
+    Args:
+        phone: Phone number in normalized format (+998XXXXXXXXX)
+        otp_code: 6-digit OTP code
+        language: Language code chosen during signup (uz, ru, en)
+    """
+    try:
+        logger.info(f"Sending registration OTP to {phone[:4]}***{phone[-4:]}")
+
+        result = _dispatch_otp_sms(phone, otp_code, language)
+
+        if result.get("success"):
+            logger.info(f"Registration OTP sent successfully to {phone[:4]}***{phone[-4:]}")
+        else:
+            logger.warning(f"Registration OTP send returned: {result}")
+
+        return result
+
+    except Exception as exc:
+        logger.error(f"Failed to send registration OTP to {phone[:4]}***{phone[-4:]}: {exc}")
+        raise self.retry(exc=exc)
+
+
 @shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=120, soft_time_limit=100)
 def send_verification_sms_task(self, user_id: int, otp_code: str, phone_number: str = None):
     """
@@ -459,30 +496,12 @@ def send_verification_sms_task(self, user_id: int, otp_code: str, phone_number: 
             logger.error(f"No phone number available for user {user_id}")
             return {"success": False, "error": "No phone number available"}
 
-        notification_service = NotificationService()
-
-        template_data = {
-            "user_name": user.first_name,
-            "otp_code": otp_code,
-            "phone_number": target_phone,
-            "company_name": current_app.config["COMPANY_NAME"],
-        }
-
-        # If explicit phone provided (like for account linking), use send_sms_to_phone
-        # since user.phone may be None or different
-        if phone_number:
-            result = notification_service.send_sms_to_phone(
-                phone=target_phone,
-                notification_type=NotificationType.SYSTEM,
-                template_key="sms.verification.otp",
-                template_data=template_data,
-                language=getattr(user, "preferred_language", "en"),
-            )
-        else:
-            # Use standard send_notification when using user's own phone
-            result = notification_service.send_notification(
-                user_id, NotificationType.SYSTEM, [NotificationChannel.SMS], template_data
-            )
+        # Always the same dispatch, whether the number came from the caller
+        # (account linking, where user.phone may differ or be None) or from the
+        # user record. The generic send_notification fan-out used to serve the
+        # latter case, but it can no longer emit SMS at all — routing an OTP
+        # through it would silently deliver nothing.
+        result = _dispatch_otp_sms(target_phone, otp_code, getattr(user, "preferred_language", None) or "en")
 
         logger.info(f"SMS verification sent successfully for user {user_id} to {target_phone}")
         return result
@@ -698,102 +717,6 @@ def send_bulk_notification_task(
 # =============================================================================
 # Phone Registration OTP Tasks
 # =============================================================================
-
-
-@shared_task(bind=True, max_retries=3, default_retry_delay=30, time_limit=120, soft_time_limit=100)
-def send_registration_otp_task(self, phone: str, otp_code: str, language: str = "uz"):
-    """
-    Send registration OTP via SMS to a phone number.
-
-    This task is used during phone-based registration before the user account exists.
-
-    Args:
-        phone: Phone number in normalized format (+998XXXXXXXXX)
-        otp_code: 6-digit OTP code
-        language: Language code for SMS template (uz, ru, en)
-    """
-    try:
-        logger.info(f"Sending registration OTP to {phone[:4]}***{phone[-4:]}")
-
-        notification_service = NotificationService()
-
-        # Template data for registration OTP
-        template_data = {
-            "otp_code": otp_code,
-            "phone_number": phone,
-            "company_name": current_app.config.get("COMPANY_NAME", "Bluestream"),
-            "expiry_minutes": 3,
-        }
-
-        # Send SMS directly without user_id (user doesn't exist yet)
-        result = notification_service.send_sms_to_phone(
-            phone=phone,
-            notification_type=NotificationType.SYSTEM,
-            template_key="sms.registration.otp",
-            template_data=template_data,
-            language=language,
-        )
-
-        if result.get("success"):
-            logger.info(f"Registration OTP sent successfully to {phone[:4]}***{phone[-4:]}")
-        else:
-            logger.warning(f"Registration OTP send returned: {result}")
-
-        return result
-
-    except Exception as exc:
-        logger.error(f"Failed to send registration OTP to {phone[:4]}***{phone[-4:]}: {exc}")
-        raise self.retry(exc=exc)
-
-
-@shared_task(bind=True, max_retries=3, default_retry_delay=30, time_limit=120, soft_time_limit=100)
-def send_welcome_sms_task(self, user_id: int):
-    """
-    Send welcome SMS after successful phone registration.
-
-    Args:
-        user_id: User ID of the newly registered user
-    """
-    try:
-        logger.info(f"Sending welcome SMS for user {user_id}")
-
-        user = User.query.get(user_id)
-        if not user:
-            logger.error(f"User {user_id} not found for welcome SMS")
-            return {"success": False, "error": "User not found"}
-
-        if not user.phone:
-            logger.error(f"User {user_id} has no phone number for welcome SMS")
-            return {"success": False, "error": "No phone number"}
-
-        notification_service = NotificationService()
-
-        template_data = {
-            "first_name": user.first_name or "Customer",
-            "user_name": user.first_name or "Customer",
-            "phone_number": user.phone,
-            "company_name": current_app.config.get("COMPANY_NAME", "Bluestream"),
-        }
-
-        # Send welcome SMS
-        result = notification_service.send_sms_to_phone(
-            phone=user.phone,
-            notification_type=NotificationType.SYSTEM,
-            template_key="sms.welcome",
-            template_data=template_data,
-            language=user.preferred_language or "uz",
-        )
-
-        if result.get("success"):
-            logger.info(f"Welcome SMS sent successfully to user {user_id}")
-        else:
-            logger.warning(f"Welcome SMS send returned: {result}")
-
-        return result
-
-    except Exception as exc:
-        logger.error(f"Failed to send welcome SMS for user {user_id}: {exc}")
-        raise self.retry(exc=exc)
 
 
 @shared_task(time_limit=120, soft_time_limit=100)

@@ -12,6 +12,7 @@ from flask_jwt_extended import create_access_token
 from business_app.models.delivery import Delivery, DeliveryPerson, DeliveryRoute
 from business_app.models.order import Order
 from business_app.models.user import User, UserAddress
+from business_app.services.route_optimization_service import _driver_day_start_utc
 from business_app.utils.timezone_utils import utc_to_local
 from shared.constants import DISPLAY_TIMEZONE
 from shared.enums import DeliveryStatus, OrderStatus, UserRole, UserType
@@ -110,9 +111,13 @@ class TestRouteSummaryField:
     def test_summary_counts_committed_and_finish_eta(self, app, client, db, driver, customer):
         active_a = _make_delivery(db, customer.id, driver.id, "ORD-RS-1", DeliveryStatus.IN_TRANSIT)
         _make_delivery(db, customer.id, driver.id, "ORD-RS-2", DeliveryStatus.ASSIGNED)
+        # Clamped to the start of the driver's day: a bare `now - 1h` lands in
+        # YESTERDAY for the first hour after midnight, which would zero out
+        # stops_completed_today. Uses the production boundary so the two can
+        # never disagree.
         _make_delivery(
             db, customer.id, driver.id, "ORD-RS-3", DeliveryStatus.DELIVERED,
-            delivered_at=datetime.now(UTC) - timedelta(hours=1),
+            delivered_at=max(_driver_day_start_utc(), datetime.now(UTC) - timedelta(hours=1)),
         )
         solved_at = datetime.now(UTC) - timedelta(minutes=10)
         route = DeliveryRoute(

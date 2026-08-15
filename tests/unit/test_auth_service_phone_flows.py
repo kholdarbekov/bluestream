@@ -103,7 +103,9 @@ class TestAuthServicePhoneFlows:
         assert stateful_redis.get(otp_key) is not None
         assert stateful_redis.get(mapping_key) == phone.encode()
         assert stateful_redis.ttl(cooldown_key) == auth_service_with_stateful_redis.PHONE_OTP_RESEND_COOLDOWN
-        mock_delay.assert_called_once()
+        # The stored OTP is the one dispatched — a mismatch here would mean
+        # customers typing a code the backend will reject.
+        mock_delay.assert_called_once_with(phone, stateful_redis.get(otp_key).decode(), "uz")
 
     def test_initiate_phone_registration_rejects_existing_phone(
         self, app, db, auth_service_with_stateful_redis
@@ -197,7 +199,6 @@ class TestAuthServicePhoneFlows:
                 return_value={"access_token": "access", "refresh_token": "refresh"},
             ),
             patch.object(auth_service_with_stateful_redis, "_create_user_session"),
-            patch("business_app.tasks.notification_tasks.send_welcome_sms_task.delay") as mock_welcome_delay,
         ):
             user, tokens = auth_service_with_stateful_redis.complete_phone_registration(
                 phone=phone,
@@ -217,7 +218,6 @@ class TestAuthServicePhoneFlows:
         assert stateful_redis.get(f"phone_reg_mapping:{phone_hash}") is None
         assert stateful_redis.get(f"phone_reg_lang:{phone_hash}") is None
         assert stateful_redis.get(f"phone_otp_cooldown:{phone_hash}") is None
-        mock_welcome_delay.assert_called_once_with(user.id)
 
     def test_request_password_reset_for_telegram_user_with_verified_phone_uses_sms(
         self, app, db, auth_service_with_stateful_redis

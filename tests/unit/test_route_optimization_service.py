@@ -24,7 +24,10 @@ from business_app.models.delivery import (
 )
 from business_app.models.order import Order
 from business_app.models.user import User, UserAddress
-from business_app.services.route_optimization_service import RouteOptimizationService
+from business_app.services.route_optimization_service import (
+    RouteOptimizationService,
+    _driver_day_start_utc,
+)
 from shared.enums import DeliveryStatus, OrderStatus, UserRole, UserType
 
 
@@ -308,6 +311,78 @@ class TestTSPSolver:
 
 @pytest.mark.unit
 @pytest.mark.delivery
+class TestRouteDayRollover:
+    """The driver-facing symptom of the UTC/local day-boundary bug.
+
+    "Today's route row" was scoped to UTC midnight = 05:00 in Tashkent, so
+    between 00:00 and 05:00 local the driver's first open of the day rendered
+    YESTERDAY's sequence — the exact bug the Phase 1 plan's Task 14 set out to
+    eliminate by giving the route row one definition.
+
+    Real wall-clock time only sits in that 5-hour window for 5 of 24 hours a
+    day, so `datetime.now()` is frozen inside the service module (the same
+    technique tests/unit/test_dispatch_service.py uses) rather than depending
+    on when the suite happens to run. Both tests fail on a UTC-midnight
+    boundary at every hour of the day.
+    """
+
+    # 2026-01-05 20:00 UTC = 2026-01-06 01:00 Tashkent: past local midnight,
+    # but UTC still calls it Jan 5. Local midnight = 2026-01-05 19:00 UTC.
+    FROZEN_UTC = datetime(2026, 1, 5, 20, 0, tzinfo=UTC)
+    LOCAL_MIDNIGHT_UTC = datetime(2026, 1, 5, 19, 0, tzinfo=UTC)
+
+    @pytest.fixture
+    def frozen_early_morning(self, monkeypatch):
+        from business_app.services import route_optimization_service as route_opt_module
+
+        frozen = self.FROZEN_UTC
+
+        class _FrozenDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return frozen.astimezone(tz) if tz else frozen.replace(tzinfo=None)
+
+        monkeypatch.setattr(route_opt_module, "datetime", _FrozenDatetime)
+
+    def _add_route(self, db, driver_user, name, route_date, order):
+        db.session.add(
+            DeliveryRoute(
+                name=name,
+                delivery_person_id=driver_user.id,
+                start_location_lat=41.3,
+                start_location_lng=69.25,
+                route_date=route_date,
+                optimized_order=order,
+                status="planned",
+            )
+        )
+        db.session.commit()
+
+    def test_yesterday_evenings_route_is_not_returned_as_todays(
+        self, app, db, driver_user, frozen_early_morning
+    ):
+        """20:00 the previous local evening. UTC midnight would call this
+        'today' (it is after 2026-01-05 00:00 UTC) — local midnight does not."""
+        with app.app_context():
+            self._add_route(
+                db, driver_user, "yesterday", self.LOCAL_MIDNIGHT_UTC - timedelta(hours=4), [99]
+            )
+
+            assert RouteOptimizationService().current_route(driver_user.id) is None
+
+    def test_a_route_stamped_after_local_midnight_is_todays(
+        self, app, db, driver_user, frozen_early_morning
+    ):
+        with app.app_context():
+            self._add_route(
+                db, driver_user, "today", self.LOCAL_MIDNIGHT_UTC + timedelta(minutes=30), [42]
+            )
+
+            route = RouteOptimizationService().current_route(driver_user.id)
+            assert route is not None
+            assert route.optimized_order == [42]
+
+
 class TestStartPointResolution:
     def test_uses_driver_live_location_when_fresh(
         self, app, db, driver_user, driver_with_live_location, customer_user
@@ -344,12 +419,19 @@ class TestStartPointResolution:
             delivery = _make_delivery(db, customer_user.id, driver_user.id, addr)
 
             # A completed delivery earlier today with a recorded GPS fix.
+            # Clamped to the start of the driver's day: a bare `now - 45min`
+            # lands in YESTERDAY for the first 45 minutes after midnight, so
+            # this test failed every night for 45 minutes. Uses the production
+            # boundary so the two can never disagree.
+            completed_at = max(
+                _driver_day_start_utc(), datetime.now(UTC) - timedelta(minutes=45)
+            )
             history = DeliveryStatusHistory(
                 delivery_id=delivery.id,
                 old_status=DeliveryStatus.IN_TRANSIT,
                 new_status=DeliveryStatus.DELIVERED,
                 changed_by=driver_user.id,
-                changed_at=datetime.now(UTC) - timedelta(minutes=45),
+                changed_at=completed_at,
                 location_lat=41.4001,
                 location_lng=69.5001,
             )

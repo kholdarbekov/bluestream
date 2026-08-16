@@ -28,7 +28,8 @@ from business_app.utils.geo_validation import ensure_within_delivery_zone
 from business_app.utils.user_search import build_name_match_clause
 from business_app.utils.payment_projection import (
     is_ledger_receivable,
-    open_receivable_amount,
+    net_open_receivable_amount,
+    reserved_prepayment_amount,
 )
 from business_app.utils.state_validators import (
     assert_order_address_for_status,
@@ -162,8 +163,8 @@ class StaffService:
         `payment_method == 'cash'`. Now that the bot shows it, returning the
         total would make a driver collect the whole order from a customer who
         had already paid most of it by card — strictly worse than the invisible
-        receivable it replaces. `open_receivable_amount` is the single decision
-        and there is no per-rail branch left.
+        receivable it replaces. `net_open_receivable_amount` is the single
+        decision and there is no per-rail branch left.
         """
         total_amount = Decimal(str(getattr(order, "total_amount", 0) or 0))
         if not order:
@@ -176,21 +177,17 @@ class StaffService:
         if payment is None:
             # No payment row yet — the whole order is due. Same fallback the
             # CASH arm has always used.
-            outstanding_amount = total_amount
-        else:
-            outstanding_amount = open_receivable_amount(payment)
-        provider_data = dict(getattr(payment, "provider_data", {}) or {})
-        reserved_amount = Decimal(str(provider_data.get("cod_prepayment_reserved_amount") or 0))
+            return {
+                "cod_reserved_prepayment_amount": 0.0,
+                "expected_cash_to_collect": float(total_amount),
+            }
 
-        if reserved_amount < Decimal("0.00"):
-            reserved_amount = Decimal("0.00")
-        if reserved_amount > outstanding_amount:
-            reserved_amount = outstanding_amount
-
-        expected_cash_to_collect = max(Decimal("0.00"), outstanding_amount - reserved_amount)
+        # The clamp and the subtraction live in payment_projection so this
+        # screen, the admin order modal, the COD statement and every allocator
+        # quote one number. This used to hand-roll both.
         return {
-            "cod_reserved_prepayment_amount": float(reserved_amount),
-            "expected_cash_to_collect": float(expected_cash_to_collect),
+            "cod_reserved_prepayment_amount": float(reserved_prepayment_amount(payment)),
+            "expected_cash_to_collect": float(net_open_receivable_amount(payment)),
         }
 
     @staticmethod

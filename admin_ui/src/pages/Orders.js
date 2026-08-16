@@ -144,6 +144,15 @@ const getMarkingActionColor = (action) => {
 const humanizeAuditAction = (value) =>
   value ? String(value).replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : '—';
 
+// What is actually left to COLLECT: gross outstanding minus prepayment the
+// customer already handed over and that is reserved against this order. The
+// backend computes it in payment_projection.net_open_receivable_amount and
+// every settle path allocates against it, so anything the admin is quoted or
+// pre-filled with must be this number, never `outstanding_amount`.
+// Falls back to the gross for payloads predating the field.
+export const collectableOutstanding = (order) =>
+  Number(order?.net_outstanding_amount ?? order?.outstanding_amount ?? 0);
+
 const Orders = () => {
   const { t } = useTranslation('orders');
   const queryClient = useQueryClient();
@@ -1336,6 +1345,32 @@ const Orders = () => {
               <Descriptions.Item label={t('ui.orders.outstanding_amount', 'Outstanding')}>
                 {formatMoney(selectedOrder.outstanding_amount)} UZS
               </Descriptions.Item>
+              {/* Reserved prepayment is cash the customer already handed over.
+                  Showing only the gross made this modal disagree with the
+                  driver's screen and the customer's COD statement, and the
+                  Record Personal Card Payment button below pre-fills from
+                  here — so the gross invited collecting it twice. */}
+              {Number(selectedOrder.reserved_prepayment_amount) > 0 ? (
+                <>
+                  <Descriptions.Item
+                    label={t('ui.orders.reserved_prepayment_amount', 'Covered by prepayment')}
+                  >
+                    {formatMoney(selectedOrder.reserved_prepayment_amount)} UZS
+                  </Descriptions.Item>
+                  <Descriptions.Item
+                    label={t('ui.orders.net_outstanding_amount', 'Left to collect')}
+                    span={2}
+                  >
+                    <strong>{formatMoney(selectedOrder.net_outstanding_amount)} UZS</strong>
+                    <div style={{ color: '#8c8c8c' }}>
+                      {t(
+                        'ui.orders.net_outstanding_hint',
+                        'The customer has already prepaid part of this order.',
+                      )}
+                    </div>
+                  </Descriptions.Item>
+                </>
+              ) : null}
             </Descriptions>
             {isAdmin() && selectedOrder.is_collected_cash_editable ? (
               <Button
@@ -1856,8 +1891,9 @@ const Orders = () => {
                     icon={<DollarOutlined />}
                     disabled={['cancelled', 'returned'].includes(selectedOrder.status)}
                     onClick={() => {
+                      const due = collectableOutstanding(selectedOrder);
                       personalCardForm.setFieldsValue({
-                        amount: selectedOrder.outstanding_amount || 0,
+                        amount: due,
                         notes: '',
                       });
                       setPersonalCardPreview(null);
@@ -1865,7 +1901,7 @@ const Orders = () => {
                       // setFieldsValue doesn't fire onChange, so project the
                       // pre-filled amount explicitly — otherwise the preview stays
                       // blank until the admin edits the field.
-                      requestPersonalCardPreview(selectedOrder.outstanding_amount || 0);
+                      requestPersonalCardPreview(due);
                     }}
                   >
                     {t('ui.orders.record_personal_card_payment', 'Record Personal Card Payment')}
@@ -2200,7 +2236,7 @@ const Orders = () => {
             <Input value={selectedOrder?.order_number} disabled />
           </Form.Item>
           <Form.Item label={t('ui.orders.outstanding_amount', 'Outstanding')}>
-            <Input value={`${formatMoney(selectedOrder?.outstanding_amount)} UZS`} disabled />
+            <Input value={`${formatMoney(collectableOutstanding(selectedOrder))} UZS`} disabled />
           </Form.Item>
           <Form.Item name="amount" label={t('ui.orders.amount', 'Amount')} rules={[{ required: true, message: t('ui.orders.amount_required', 'Amount is required') }]}>
             <Input type="number" min={0} onChange={(e) => requestPersonalCardPreview(e.target.value)} />

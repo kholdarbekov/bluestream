@@ -2487,6 +2487,16 @@ def get_order_details(order_id):
             ),
             "amount_collected": float(payment_projection["amount_collected"]) if payment_projection else 0,
             "outstanding_amount": float(payment_projection["outstanding_amount"]) if payment_projection else 0,
+            # Prepayment the customer has already handed over and that is
+            # reserved against this order, plus what is genuinely left to
+            # collect. Without these the modal quoted the gross while the
+            # driver screen and the COD statement quoted the net.
+            "reserved_prepayment_amount": (
+                float(payment_projection["reserved_prepayment_amount"]) if payment_projection else 0
+            ),
+            "net_outstanding_amount": (
+                float(payment_projection["net_outstanding_amount"]) if payment_projection else 0
+            ),
             "collection_events_count": (
                 len(getattr(order.payment, "cash_collection_allocations", []) or []) if order.payment else 0
             ),

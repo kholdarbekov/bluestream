@@ -14,6 +14,7 @@ from business_app.serializers.order_serializers import format_order_items_summar
 from business_app.services.staff_service import StaffService
 from shared.enums import DeliveryStatus, OrderStatus, PaymentMethod
 from business_app.utils.exceptions import NotFoundError, ValidationError
+from business_app.utils.payment_projection import net_open_receivable_amount
 
 
 ACTIVE_DELIVERY_STATUSES = {
@@ -272,6 +273,11 @@ class AdminDeliveryService:
             ),
             "outstanding_amount": (
                 float(order.payment.outstanding_amount or 0) if order and getattr(order, "payment", None) else 0.0
+            ),
+            # What the driver is actually asked to collect — gross minus the
+            # customer's own reserved prepayment. Same helper as the staff bot.
+            "net_outstanding_amount": (
+                float(net_open_receivable_amount(order.payment)) if order and getattr(order, "payment", None) else 0.0
             ),
             "items_summary": AdminDeliveryService._build_items_summary(order),
             "current_location": (

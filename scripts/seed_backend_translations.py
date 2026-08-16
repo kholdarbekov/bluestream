@@ -6240,6 +6240,15 @@ ADMIN_UI_ORDER_TRANSLATIONS = {
     'ui.orders.order_number': _ui_tr('Order Number', 'Buyurtma raqami', 'Номер заказа'),
     'ui.orders.order_total': _ui_tr('Order Total', 'Buyurtma jami', 'Итого по заказу'),
     'ui.orders.outstanding_amount': _ui_tr('Outstanding', 'Qoldiq qarz', 'Остаток долга'),
+    'ui.orders.reserved_prepayment_amount': _ui_tr(
+        'Covered by prepayment', 'Oldindan to‘lov bilan qoplangan', 'Покрыто предоплатой'
+    ),
+    'ui.orders.net_outstanding_amount': _ui_tr('Left to collect', 'Yig‘ish kerak', 'Осталось собрать'),
+    'ui.orders.net_outstanding_hint': _ui_tr(
+        'The customer has already prepaid part of this order.',
+        'Mijoz bu buyurtmaning bir qismini oldindan to‘lagan.',
+        'Клиент уже внёс предоплату за часть этого заказа.',
+    ),
     'ui.orders.pagination_text': _ui_tr('orders'),
     'ui.orders.payment_link': _ui_tr('Payment Link', "To'lov havolasi", 'Ссылка оплаты'),
     'ui.orders.payment_link_ready': _ui_tr('Payment link created'),

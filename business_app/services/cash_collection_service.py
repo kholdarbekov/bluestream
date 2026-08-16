@@ -32,8 +32,10 @@ from business_app.utils.payment_projection import (
     get_payment_projection,
     has_open_receivable,
     is_ledger_receivable,
+    net_open_receivable_amount,
     open_receivable_amount,
     open_receivable_clause,
+    reserved_prepayment_amount,
 )
 from business_app.utils.state_validators import assert_cash_payment_collector
 
@@ -855,13 +857,16 @@ class CashCollectionService:
             return payment
         if payment.payment_method != PaymentMethod.CASH:
             return payment
-        if self._to_decimal(payment.outstanding_amount) <= Decimal("0.00"):
+        # Net: credit already reserved against this payment is settled by
+        # `consume_reserved_prepayment_for_payment`, so applying MORE credit to
+        # cover that same slice would double-spend the customer's balance.
+        if net_open_receivable_amount(payment) <= Decimal("0.00"):
             return payment
 
         unapplied_events = self._locked_cluster_credit_events(payment.user_id)
 
         for event in unapplied_events:
-            outstanding = self._to_decimal(payment.outstanding_amount)
+            outstanding = net_open_receivable_amount(payment)
             if outstanding <= Decimal("0.00"):
                 break
 
@@ -1123,20 +1128,63 @@ class CashCollectionService:
             .all()
         )
 
+        # CAPPED BY THE LIVE RECEIVABLE, and the overflow goes back to the
+        # customer. A reservation can outlive the balance it was parked against:
+        # the payment may have been settled from another source first (a card
+        # transfer recorded before delivery — prod order AD_000630_26) or the
+        # order edited down below the reserved amount. Adding it to
+        # `amount_collected` regardless used to look harmless because
+        # `sync_payment_projection` clamps to `payment.amount` — but the clamp
+        # DESTROYS money: the allocation is stamped applied while the payment
+        # cannot hold it and the funding event never gets it back, so the
+        # customer's credit silently disappears and live allocations no longer
+        # sum to `amount_collected`. Refunding the overflow is what keeps the
+        # ledger's conservation law (live allocations + unapplied == event
+        # amount) true through every ordering of settlement and delivery.
+        remaining_capacity = open_receivable_amount(payment)
         consumed_total = Decimal("0.00")
+        released_total = Decimal("0.00")
         collector_from_event: Optional[int] = None
         for allocation in reservations:
             amount = self._to_decimal(allocation.allocated_amount)
             if amount <= Decimal("0.00"):
                 continue
-            payment.amount_collected = self._to_decimal(payment.amount_collected) + amount
-            consumed_total += amount
+            event = allocation.cash_collection_event
+            consumable = min(amount, remaining_capacity)
+
+            if consumable <= Decimal("0.00"):
+                # Nothing left to settle — hand the whole reservation back.
+                # `allocated_amount` is left intact so the reversed row still
+                # records what had been held.
+                if event is not None:
+                    event.unapplied_amount = self._to_decimal(event.unapplied_amount) + amount
+                allocation.reversed_at = now
+                allocation.reversed_by_user_id = collected_by
+                allocation.reversal_reason = "Released: payment no longer owes the reserved amount"
+                metadata = dict(allocation.allocation_metadata or {})
+                metadata["reservation_state"] = "released"
+                metadata["reservation_released_at"] = now.isoformat()
+                metadata["affects_payment_projection"] = False
+                allocation.allocation_metadata = metadata
+                released_total += amount
+                continue
+
+            overflow = amount - consumable
+            if overflow > Decimal("0.00"):
+                # Partially fits: shrink the row to what settles and refund the
+                # rest, so the row keeps matching the money it moved.
+                if event is not None:
+                    event.unapplied_amount = self._to_decimal(event.unapplied_amount) + overflow
+                allocation.allocated_amount = consumable
+                released_total += overflow
+
+            payment.amount_collected = self._to_decimal(payment.amount_collected) + consumable
+            remaining_capacity -= consumable
+            consumed_total += consumable
             # The cash was physically collected by the reservation's source
             # event collector (fall back to whoever recorded it).
-            if collector_from_event is None:
-                event = allocation.cash_collection_event
-                if event is not None:
-                    collector_from_event = event.collector_user_id or event.recorded_by_user_id
+            if collector_from_event is None and event is not None:
+                collector_from_event = event.collector_user_id or event.recorded_by_user_id
             allocation.allocation_mode = "prepaid_credit"
             metadata = dict(allocation.allocation_metadata or {})
             metadata["reservation_state"] = "consumed"
@@ -1152,6 +1200,11 @@ class CashCollectionService:
                 collected_at=effective_collected_at,
                 collected_by=collector_from_event or collected_by,
             )
+
+        if released_total > Decimal("0.00"):
+            # The reservation projection is a SQL SUM over live rows, so the
+            # reversals/shrinks must be in the database before it is recomputed.
+            db.session.flush()
 
         self._sync_reserved_prepayment_projection(payment)
         return self._to_decimal(consumed_total)
@@ -1898,10 +1951,11 @@ class CashCollectionService:
         total_net_outstanding = Decimal("0.00")
         for payment in payments:
             outstanding_amount = self._to_decimal(payment.outstanding_amount)
-            reserved_amount = self._to_decimal(
-                (payment.provider_data or {}).get("cod_prepayment_reserved_amount", 0) or 0
-            )
-            net_outstanding = max(Decimal("0.00"), outstanding_amount - reserved_amount)
+            # Same helper the driver screen, the order modal and every allocator
+            # use — this statement used to hand-roll the subtraction, which is
+            # how the surfaces drifted apart in the first place.
+            reserved_amount = reserved_prepayment_amount(payment)
+            net_outstanding = net_open_receivable_amount(payment)
             # Cancelled/returned orders aren't collectible debt; keep them in
             # `items` for display but out of the totals.
             if payment.order is not None and payment.order.status not in self._TERMINAL_ORDER_STATUSES:
@@ -2702,9 +2756,14 @@ class CashCollectionService:
 
         allocations = list(manual_allocations or [])
         if source_enum == CashCollectionSource.PERSONAL_CARD_TRANSFER:
+            # NET, not gross: the reserved slice is money this customer has
+            # already handed over. Filling it from the transfer would orphan the
+            # reservation, and the transfer's own surplus would stop short of
+            # becoming credit. Whatever the transfer leaves unpaid is exactly
+            # what the reservation closes at delivery.
             allocatable = min(
                 self._to_decimal(event.unapplied_amount),
-                self._to_decimal(target_payment.outstanding_amount if target_payment else 0),
+                net_open_receivable_amount(target_payment) if target_payment else Decimal("0.00"),
             )
             if allocatable > Decimal("0.00") and target_payment:
                 self._allocate_to_payment(
@@ -3723,7 +3782,14 @@ class CashCollectionService:
         by_id = self._lock_payments_by_ids(all_ids)
 
         def live_outstanding(payment: Payment) -> Decimal:
-            return self._to_decimal(payment.outstanding_amount)
+            # NET of reserved prepayment — the same figure the driver's screen
+            # quotes. A door collection of the GROSS amount (customer hands over
+            # the full total even though only the net was due) must leave the
+            # surplus as credit, not overwrite the reservation's slice and
+            # strand it. Ring 1/2 candidates are DELIVERED orders, which
+            # normally carry no reservation, so in practice this bites on the
+            # current order appended pre-delivery.
+            return net_open_receivable_amount(payment)
 
         # Phase 3 — ring ordering in memory over the already-locked rows, using
         # the SQL-derived rank (never a Python datetime sort — see
@@ -3845,7 +3911,11 @@ class CashCollectionService:
         warnings: List[str] = []
         payment = order.payment
         if payment and payment.payment_method == PaymentMethod.CASH:
-            target_outstanding = self._to_decimal(payment.outstanding_amount)
+            # Net of reserved prepayment, matching the apply path above. Quoting
+            # the gross told the admin the customer owed money their own credit
+            # had already covered, and — because the modal pre-fills this figure
+            # — invited a transfer that consumed the reservation's slice.
+            target_outstanding = net_open_receivable_amount(payment)
             target_payment_id = payment.id
         elif payment and payment.status not in self._OFFLINE_SETTLEABLE_STATUSES and has_open_receivable(payment):
             # SETTLE IN PLACE: the rail is preserved and only the unpaid delta is
@@ -3889,13 +3959,17 @@ class CashCollectionService:
             for candidate in self.get_active_cod_payments_for_scope(scope)
             if candidate.id != target_payment_id
         ]
-        plan, remaining_as_credit = self._plan_allocation(
-            candidates, residual, lambda candidate: self._to_decimal(candidate.outstanding_amount)
-        )
+        # Byte-identical to `_allocate_scoped`'s `live_outstanding`, which is what
+        # the confirm actually walks. Spill candidates are DELIVERED orders and so
+        # normally carry no reservation, making this the same number as the gross
+        # today — but a preview that computes the balance a DIFFERENT way from the
+        # apply is the drift this method exists to prevent, whatever the current
+        # data happens to look like.
+        plan, remaining_as_credit = self._plan_allocation(candidates, residual, net_open_receivable_amount)
 
         spill_allocations = []
         for candidate, allocatable in plan:
-            outstanding_before = self._to_decimal(candidate.outstanding_amount)
+            outstanding_before = net_open_receivable_amount(candidate)
             spill_allocations.append(
                 {
                     "order_id": candidate.order_id,
@@ -3964,7 +4038,12 @@ class CashCollectionService:
             amount = self._to_decimal(payment.amount)
             collected = self._to_decimal(payment.amount_collected) - restored.get(payment.id, Decimal("0.00"))
             collected = min(amount, max(Decimal("0.00"), collected))
-            return max(Decimal("0.00"), amount - collected)
+            # Net of reserved prepayment, exactly as `_allocate_scoped`'s
+            # `live_outstanding` is — the replay this projects runs through that
+            # allocator, so quoting gross here would re-introduce the
+            # preview/apply drift this method exists to prevent.
+            gross = max(Decimal("0.00"), amount - collected)
+            return max(Decimal("0.00"), gross - reserved_prepayment_amount(payment, ceiling=gross))
 
         from business_app.services.allocation_scope import AllocationScope
 

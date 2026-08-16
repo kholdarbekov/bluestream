@@ -65,10 +65,13 @@ def get_payment_projection(payment: Any) -> Dict[str, Any]:
         else:
             outstanding_amount = min(amount, outstanding_amount)
 
+    reserved = reserved_prepayment_amount(payment)
     return {
         "amount": amount,
         "amount_collected": amount_collected,
         "outstanding_amount": outstanding_amount,
+        "reserved_prepayment_amount": reserved,
+        "net_outstanding_amount": max(Decimal("0.00"), outstanding_amount - reserved),
         "payment_method": _enum_value(getattr(payment, "payment_method", None)),
         "payment_status": _enum_value(getattr(payment, "status", None)),
         "is_settled_prepayment": is_settled_prepayment(payment),
@@ -109,6 +112,55 @@ def open_receivable_amount(payment: Any) -> Decimal:
 def has_open_receivable(payment: Any) -> bool:
     """True when this payment still owes money, on any rail."""
     return open_receivable_amount(payment) > Decimal("0.00")
+
+
+def reserved_prepayment_amount(payment: Any, *, ceiling: Optional[Decimal] = None) -> Decimal:
+    """Customer prepayment currently parked on this payment, clamped to what is
+    still owed.
+
+    Mirror of the ``prepaid_reservation`` allocation total that
+    ``CashCollectionService._sync_reserved_prepayment_projection`` stamps into
+    ``provider_data``. Reading the stamp rather than re-summing the allocations
+    keeps this usable from read surfaces that hold no session.
+
+    The clamp is what makes the figure safe to subtract anywhere: a reservation
+    can outlive the balance it was parked against (the payment gets settled from
+    another source, or the order is edited down), and an unclamped stamp would
+    then drive the net receivable negative.
+
+    ``ceiling`` overrides what it is clamped against, for the one caller that
+    models a balance other than the live one (``simulate_event_amount_change``
+    projects the receivable a reversal would restore). Same rule, different
+    baseline — do not re-implement the clamp at the call site.
+    """
+    if payment is None:
+        return Decimal("0.00")
+    provider_data = getattr(payment, "provider_data", None) or {}
+    if not isinstance(provider_data, dict):
+        return Decimal("0.00")
+    reserved = max(Decimal("0.00"), _to_decimal(provider_data.get("cod_prepayment_reserved_amount") or 0))
+    limit = open_receivable_amount(payment) if ceiling is None else max(Decimal("0.00"), _to_decimal(ceiling))
+    return min(reserved, limit)
+
+
+def net_open_receivable_amount(payment: Any) -> Decimal:
+    """Money that still has to be COLLECTED on this payment — the SSOT figure.
+
+    ``open_receivable_amount`` minus prepayment the customer has already handed
+    over and that is reserved against this payment. Every surface that quotes
+    "how much is left to pay" or that decides how much incoming cash a payment
+    may absorb must use THIS, not the gross receivable:
+
+    * quoting gross tells an admin/driver to collect money the customer already
+      paid, and
+    * allocating against gross lets an unrelated settlement fill the space the
+      reservation was holding, orphaning it (prod order AD_000630_26).
+
+    The reservation itself is turned into collected money by
+    ``CashCollectionService.consume_reserved_prepayment_for_payment`` at
+    delivery, which is what closes the remaining gap.
+    """
+    return max(Decimal("0.00"), open_receivable_amount(payment) - reserved_prepayment_amount(payment))
 
 
 def open_receivable_clause():

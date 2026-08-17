@@ -15,6 +15,8 @@ from phonenumbers import NumberParseException
 from transliterate import translit
 import logging
 
+from shared.constants import TASHKENT_COORDINATES
+
 logger = logging.getLogger(__name__)
 
 
@@ -80,6 +82,25 @@ def format_phone_number(phone: str, region: str = "UZ") -> Optional[str]:
 def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Calculate distance between two coordinates in kilometers"""
     return geodesic((lat1, lon1), (lat2, lon2)).kilometers
+
+
+def get_warehouse_coordinates() -> tuple:
+    """The single depot's (latitude, longitude).
+
+    The ONE reader of WAREHOUSE_LATITUDE/LONGITUDE. Two things now key off the
+    depot — route optimization's last-resort start anchor and the position
+    stamped on a driver who loads or returns bottles — and a second inline
+    `current_app.config.get(...)` pair would let them disagree about where the
+    warehouse is the moment someone overrides only one of them.
+
+    NOT the delivery-fee distance origin: that stays the geographic centre of
+    the coverage polygon (see DeliveryService.__init__), which the defaults here
+    happen to share only for historical reasons.
+    """
+    return (
+        float(current_app.config.get("WAREHOUSE_LATITUDE", TASHKENT_COORDINATES["latitude"])),
+        float(current_app.config.get("WAREHOUSE_LONGITUDE", TASHKENT_COORDINATES["longitude"])),
+    )
 
 
 def is_within_delivery_radius(

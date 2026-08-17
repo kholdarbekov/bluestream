@@ -1598,6 +1598,51 @@ class StaffService:
         return dp
 
     @staticmethod
+    def anchor_driver_at_warehouse(driver_user_id: int) -> Optional[DeliveryPerson]:
+        """Stamp the depot as the driver's current position.
+
+        Called by the driver actions that can only physically happen AT the
+        single warehouse — loading bottles onto the van and returning them.
+        Those are as real a position fix as a shared pin, and a far better
+        routing origin than the reading the driver left behind yesterday.
+
+        Three deliberate choices:
+
+        * `location_accuracy_m` is cleared (via the model's `update_location`,
+          whose `accuracy_m` default is `None` and is written unconditionally).
+          This position is DERIVED from a config constant, not measured, so
+          leaving the previous fix's radius attached would advertise GPS
+          precision for a point no GPS produced.
+        * `last_location_update` moves to now, which makes the anchor "fresh"
+          for DRIVER_LOCATION_FRESH_SECONDS. That is the point: a driver who
+          just loaded up no longer gets 412 LOCATION_REQUIRED on their first
+          Optimize tap, and auto-optimization stops skipping a driver who has
+          never shared a pin today.
+        * It does NOT commit. Callers run inside `@transactional` service
+          methods, so the anchor must live or die with the session write that
+          justified it — a rejected load must not teleport the driver.
+
+        Returns the row it wrote, or None when the user has no delivery-person
+        profile. A missing profile is not an error here: this is a side effect
+        of the action the driver actually asked for, and it must never be the
+        reason that action fails.
+        """
+        from business_app.utils.helpers import get_warehouse_coordinates
+
+        dp = DeliveryPerson.query.filter_by(user_id=driver_user_id).first()
+        if dp is None:
+            current_app.logger.debug(
+                "[LOCATION] warehouse anchor skipped: no delivery-person profile for user=%s",
+                driver_user_id,
+            )
+            return None
+
+        lat, lng = get_warehouse_coordinates()
+        dp.update_location(lat, lng)
+        current_app.logger.info("[LOCATION] driver=%s anchored at warehouse (%s, %s)", driver_user_id, lat, lng)
+        return dp
+
+    @staticmethod
     def update_delivery_location(delivery_id: int, lat: float, lng: float, *, acting_driver_id: int) -> Delivery:
         """
         Update delivery and delivery person's current location.

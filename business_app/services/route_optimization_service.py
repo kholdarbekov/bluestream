@@ -28,7 +28,7 @@ from business_app.models.delivery import Delivery, DeliveryPerson, DeliveryRoute
 from business_app.services.maps_service import MapsService
 from business_app.utils import google_routes
 from business_app.utils.exceptions import ExternalServiceError
-from shared.constants import DISPLAY_TIMEZONE, TASHKENT_COORDINATES
+from shared.constants import DISPLAY_TIMEZONE
 from shared.enums import DeliveryStatus
 
 logger = logging.getLogger(__name__)
@@ -888,11 +888,12 @@ class RouteOptimizationService:
 
         # Fall back to the configured warehouse (spec 8.5). NEVER a route
         # stop — only the start anchor for a driver who has never shared
-        # location today.
-        return (
-            float(current_app.config.get("WAREHOUSE_LATITUDE", TASHKENT_COORDINATES["latitude"])),
-            float(current_app.config.get("WAREHOUSE_LONGITUDE", TASHKENT_COORDINATES["longitude"])),
-        ), "warehouse"
+        # location today. Reached far less often since loading/returning
+        # bottles stamps the depot onto the driver's own position, which the
+        # "driver_live" branch above picks up first.
+        from business_app.utils.helpers import get_warehouse_coordinates
+
+        return get_warehouse_coordinates(), "warehouse"
 
     # ----- TSP --------------------------------------------------------------
 

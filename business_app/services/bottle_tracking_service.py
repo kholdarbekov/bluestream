@@ -3127,6 +3127,29 @@ class BottleTrackingService:
     # Driver bottle sessions
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _anchor_actor_at_warehouse(driver_user_id: int, actor_user_id: Optional[int]) -> None:
+        """Move the driver's stored position to the depot, if they were there.
+
+        Opening and closing a session are physical acts at the single
+        warehouse — but only when the DRIVER performs them. `actor_user_id`
+        exists so a non-driver can act on a driver's session, and such a caller
+        knows nothing about where the driver is standing; anchoring on their
+        behalf would plant a confident, wrong pin on the dispatch map and hand
+        route optimization a false origin. So: driver-acting only.
+
+        The write itself belongs to StaffService, the one owner of
+        DeliveryPerson location columns — this method decides *whether*, never
+        *what*. Imported inside the function because StaffService reaches back
+        into BottleTrackingService the same way.
+        """
+        if actor_user_id is not None and int(actor_user_id) != int(driver_user_id):
+            return
+
+        from business_app.services.staff_service import StaffService
+
+        StaffService.anchor_driver_at_warehouse(driver_user_id)
+
     @transactional
     def open_bottle_session(
         self,
@@ -3141,6 +3164,9 @@ class BottleTrackingService:
         Raises ConflictError if the driver already has an OPEN session.
         The DB partial unique index on (driver_user_id) WHERE status='open'
         acts as a second safety net against concurrent opens.
+
+        Loading happens AT the depot, so the driver's stored position is
+        anchored there — see `_anchor_actor_at_warehouse`.
         """
         existing = DriverBottleSession.query.filter_by(
             driver_user_id=driver_user_id,
@@ -3164,6 +3190,7 @@ class BottleTrackingService:
             notes=notes,
         )
         db.session.add(session)
+        self._anchor_actor_at_warehouse(driver_user_id, actor_user_id)
         db.session.flush()
         return session
 
@@ -3185,6 +3212,11 @@ class BottleTrackingService:
         session is released here (its binding deleted) rather than blocking the
         close; it re-binds to the driver's next open session on the next forward
         transition (late-bind guard), or an admin delivers it unbound.
+
+        The return happens AT the depot, so the driver's stored position is
+        anchored there — see `_anchor_actor_at_warehouse`. Deliberately NOT
+        mirrored in `admin_force_close_session`: an admin closing an abandoned
+        session is at a desk, and the driver is wherever they actually are.
         """
         session = self._get_open_session_or_raise(driver_user_id)
 
@@ -3216,6 +3248,7 @@ class BottleTrackingService:
             logger.info(
                 "[BOTTLE] close_bottle_session revoked %s co-driver membership(s) for session=%s", revoked, session.id
             )
+        self._anchor_actor_at_warehouse(driver_user_id, actor_user_id)
         db.session.flush()
         return session
 

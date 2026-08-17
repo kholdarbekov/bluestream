@@ -7,12 +7,17 @@ always 0/0.
 
 Provider fallback chain (best to last-resort):
   1. Self-hosted OSRM (OSRM_BASE_URL)         — real road, free-flow, primary
-  2. HERE Matrix v8 / Yandex Distance Matrix  — LEGACY_MATRIX_PROVIDERS_ENABLED
-     only; both keys are un-entitled in production (403/401) so this tier is
-     off the hot path by default. Code kept for the day entitlements exist.
+  2. Yandex Distance Matrix                   — LEGACY_MATRIX_PROVIDERS_ENABLED
+     only; the key is un-entitled in production (401) so this tier is off the
+     hot path by default. Code kept for the day an entitlement exists.
   3. OSRM public demo server                  — OSRM_PUBLIC_FALLBACK_ENABLED
      only (emergency; demo usage policy forbids production use)
   4. Haversine                                — straight-line, last resort
+
+Only the providers listed above may ever be contacted. A paid third-party
+matrix vendor was removed from tier 2 on 2026-08-16 after it billed us;
+`TestNoUnapprovedMatrixProviders` pins the host allowlist so another one
+cannot be added silently.
 
 Each level is tried only if the previous one is misconfigured or returns
 an error. All external calls go through the shared `request_with_retry`
@@ -49,12 +54,6 @@ logger = logging.getLogger(__name__)
 Point = Tuple[float, float]
 Matrix = Dict[Tuple[int, int], Dict[str, float]]
 
-# HERE Matrix Routing API v8 — traffic-aware, free tier 250k req/month.
-# Per HERE docs: POST JSON, auth via ?apiKey=... query param. The sync mode
-# (?async=false) returns the matrix in the response body; async mode is for
-# matrices >100x100 which we never approach (typical N is 3-15).
-_HERE_MATRIX_URL = "https://matrix.router.hereapi.com/v8/matrix"
-
 _YANDEX_MATRIX_URL = "https://api.routing.yandex.net/v2/distancematrix"
 _YANDEX_ROUTE_URL = "https://api.routing.yandex.net/v2/route"
 # OSRM public demo endpoint. EMERGENCY fallback only, behind
@@ -64,7 +63,7 @@ _OSRM_DEMO_BASE_URL = "https://router.project-osrm.org"
 
 # Self-hosted OSRM is a same-network / LAN service, not an internet API. Its
 # retry policy is tuned tighter than the other tiers (15s timeout / 2
-# retries, sized for HERE/Yandex/the public demo) but NOT on the timeout —
+# retries, sized for Yandex/the public demo) but NOT on the timeout —
 # on a dev box where OSRM_BASE_URL points nowhere (default
 # "http://osrm:5000"; the `osrm` compose service sits behind `--profile
 # routing` and is simply not running — see .env.example), Docker's embedded
@@ -129,10 +128,10 @@ _AVG_CITY_SPEED_KMH = 25.0  # Tashkent baseline for Haversine fallback
 
 # Sources whose durations actually vary with live/predicted traffic. Self-hosted
 # and public-demo OSRM are free-flow ALWAYS (no traffic model at all, regardless
-# of the `traffic` flag a caller passes) — only these legacy providers, and only
+# of the `traffic` flag a caller passes) — only the legacy Yandex tiers, and only
 # when LEGACY_MATRIX_PROVIDERS_ENABLED, produce data that can go stale within
 # hours rather than a day (task-4 review fix 4).
-_TRAFFIC_AWARE_SOURCES = frozenset({"here_matrix", "yandex_matrix", "yandex_pairwise"})
+_TRAFFIC_AWARE_SOURCES = frozenset({"yandex_matrix", "yandex_pairwise"})
 
 _ZERO_CELL = {"distance_km": 0.0, "duration_minutes": 0.0}
 
@@ -218,7 +217,7 @@ def _store_split_cache(points: List[Point], traffic: bool, matrix: Matrix, sourc
     The static tier's 24h TTL assumes free-flow data — true for self-hosted
     OSRM (the primary tier, source="osrm_selfhosted"/"osrm_table") which has
     no traffic model regardless of the `traffic` flag a caller passes. It is
-    NOT true for `source` in `_TRAFFIC_AWARE_SOURCES` (HERE/Yandex, only
+    NOT true for `source` in `_TRAFFIC_AWARE_SOURCES` (Yandex, only
     reachable when `LEGACY_MATRIX_PROVIDERS_ENABLED`): a stop↔stop cell from
     those providers can go stale within hours, not a day — a route solved at
     20:00 must not still be priced on 08:00 rush-hour durations 20 hours
@@ -407,112 +406,6 @@ def _fetch_origin_row_col(points: List[Point], base_url: str) -> Optional[dict]:
     except Exception as exc:  # noqa: BLE001
         _log_osrm_selfhosted_unavailable(f"origin-row fetch error: {exc}")
         return None
-
-
-def _here_matrix(points: List[Point], api_key: str, traffic: bool) -> Matrix:
-    """Single POST to HERE Matrix Routing API v8 (sync mode).
-
-    Per HERE docs: coordinates are `{"lat": ..., "lng": ...}` objects;
-    response carries `matrix.travelTimes` (seconds) and `matrix.distances`
-    (metres) as flat row-major arrays of length numOrigins×numDestinations.
-    Auth is `?apiKey=...` (camelCase). Traffic is taken into account when
-    `departureTime` is set to a real timestamp; we send "any" when caller
-    explicitly disables traffic.
-
-    Region: HERE requires a `regionDefinition` for traffic-aware queries.
-    We fit a circle to the input points (centroid + max radius + padding)
-    so the request stays under their region size limits.
-    """
-    n = len(points)
-    if n == 0:
-        return {}
-
-    coord_objs = [{"lat": lat, "lng": lng} for lat, lng in points]
-
-    # Centroid + radius for the region. HERE caps traffic-aware regions at
-    # ~400 km diameter; clamp our radius so we never violate that, with a
-    # 5 km padding around the bounding sphere of the points.
-    centroid_lat = sum(p[0] for p in points) / n
-    centroid_lng = sum(p[1] for p in points) / n
-    max_km_from_centroid = max(
-        (calculate_distance(centroid_lat, centroid_lng, p[0], p[1]) for p in points),
-        default=0.0,
-    )
-    radius_m = int(min(max(max_km_from_centroid + 5.0, 5.0), 200.0) * 1000)
-
-    body = {
-        "origins": coord_objs,
-        "destinations": coord_objs,
-        "regionDefinition": {
-            "type": "circle",
-            "center": {"lat": centroid_lat, "lng": centroid_lng},
-            "radius": radius_m,
-        },
-        "matrixAttributes": ["travelTimes", "distances"],
-        "transportMode": "car",
-        "routingMode": "fast",
-    }
-    if traffic:
-        # ISO 8601 with offset; HERE uses this to pick live or predicted
-        # traffic. We use UTC.
-        from datetime import datetime, timezone
-
-        body["departureTime"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
-    else:
-        # Time-independent calculation, no traffic.
-        body["departureTime"] = "any"
-
-    response = request_with_retry(
-        method="POST",
-        url=_HERE_MATRIX_URL,
-        timeout_seconds=15,
-        retry_config=RetryConfig(max_retries=2, backoff_base_seconds=0.5),
-        circuit_key="here_matrix",
-        params={"async": "false", "apiKey": api_key},
-        json=body,
-        headers={"Content-Type": "application/json"},
-    )
-    if response.status_code >= 400:
-        raise ProviderUnavailableError(
-            f"HERE matrix returned {response.status_code}: {response.text[:200]}",
-            provider="here_matrix",
-        )
-
-    data = response.json()
-    matrix_data = data.get("matrix") or {}
-    travel_times = matrix_data.get("travelTimes") or []
-    distances = matrix_data.get("distances") or []
-    error_codes = matrix_data.get("errorCodes") or []
-
-    if not travel_times or not distances or len(travel_times) != n * n or len(distances) != n * n:
-        raise ProviderUnavailableError(
-            f"HERE matrix response shape unexpected: travelTimes={len(travel_times)} "
-            f"distances={len(distances)} expected={n * n}",
-            provider="here_matrix",
-        )
-
-    # Reshape flat row-major (per HERE docs: k = numDest * i + j) into our
-    # dict[(i, j)] form. Per HERE's error-code table, 0 = OK, others mean
-    # the cell wasn't computable — backfill with Haversine for those.
-    matrix: Matrix = {}
-    for i in range(n):
-        for j in range(n):
-            k = n * i + j
-            err = error_codes[k] if k < len(error_codes) else 0
-            t = travel_times[k]
-            d = distances[k]
-            if err != 0 or t < 0 or d < 0:
-                km = calculate_distance(points[i][0], points[i][1], points[j][0], points[j][1])
-                matrix[(i, j)] = {
-                    "distance_km": km,
-                    "duration_minutes": (km / _AVG_CITY_SPEED_KMH) * 60.0,
-                }
-            else:
-                matrix[(i, j)] = {
-                    "distance_km": d / 1000.0,
-                    "duration_minutes": t / 60.0,
-                }
-    return matrix
 
 
 def _osrm_matrix(
@@ -829,8 +722,8 @@ def get_distance_matrix(
 
     Returns:
         (matrix, source) where source ∈ {"cache", "osrm_selfhosted",
-        "here_matrix", "yandex_matrix", "yandex_pairwise", "osrm_table",
-        "haversine", "empty", "trivial"}.
+        "yandex_matrix", "yandex_pairwise", "osrm_table", "haversine",
+        "empty", "trivial"}.
     """
     if not points:
         return {}, "empty"
@@ -887,7 +780,6 @@ def get_distance_matrix(
                         return assembled, "osrm_selfhosted"
 
     provider = (provider or current_app.config.get("MAPS_PROVIDER", "google")).lower()
-    here_key = current_app.config.get("HERE_MAPS_API_KEY")
     yandex_key = current_app.config.get("YANDEX_MAPS_API_KEY")
     legacy_enabled = bool(current_app.config.get("LEGACY_MATRIX_PROVIDERS_ENABLED", False))
     demo_enabled = bool(current_app.config.get("OSRM_PUBLIC_FALLBACK_ENABLED", False))
@@ -902,10 +794,11 @@ def get_distance_matrix(
 
     # Chain (spec 8.1/8.2), best to last-resort:
     #   1. Self-hosted OSRM        — real road, free-flow, always on when configured
-    #   2. HERE / Yandex           — LEGACY_MATRIX_PROVIDERS_ENABLED only (403/401
-    #                                 in production today; kept, not deleted)
+    #   2. Yandex                  — LEGACY_MATRIX_PROVIDERS_ENABLED only (401 in
+    #                                 production today; kept, not deleted)
     #   3. OSRM public demo        — OSRM_PUBLIC_FALLBACK_ENABLED only (emergency)
     #   4. Haversine               — straight-line, never cached
+    # A paid vendor was removed from tier 2 on 2026-08-16 (module docstring).
     if osrm_base_url:
         breaker = get_circuit_breaker("osrm_selfhosted")
         if not breaker.allow_request():
@@ -947,20 +840,6 @@ def get_distance_matrix(
             except Exception as exc:  # noqa: BLE001
                 _log_osrm_selfhosted_unavailable(str(exc))
                 matrix = None
-
-    if matrix is None and legacy_enabled and here_key:
-        try:
-            matrix = _here_matrix(points, here_key, traffic)
-            source = "here_matrix"
-        except ProviderUnavailableError as exc:
-            logger.warning("HERE matrix unavailable, trying Yandex: %s", exc)
-            matrix = None
-        except Exception as exc:  # noqa: BLE001
-            # Defensive catch — network errors that bypass the retry layer,
-            # parse errors on malformed responses, etc. Always fall through
-            # to the next provider rather than crashing the optimizer.
-            logger.warning("HERE matrix unexpected error, trying Yandex: %s", exc)
-            matrix = None
 
     if matrix is None and legacy_enabled and provider == "yandex" and yandex_key:
         try:

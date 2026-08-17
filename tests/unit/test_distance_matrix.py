@@ -6,6 +6,7 @@ conftest's `block_external_side_effects` fixture; we substitute the HTTP
 layer via monkeypatch.
 """
 
+import re
 from unittest.mock import MagicMock
 
 import pytest
@@ -220,7 +221,7 @@ class TestStaticTierTrafficAwareTTL:
     by nobody — the static tier always got the 24h TTL regardless of the
     `traffic` flag or the actual provider. Self-hosted/public OSRM are
     free-flow always (correct to keep 24h); a genuinely traffic-aware
-    source (HERE/Yandex, only reachable behind LEGACY_MATRIX_PROVIDERS_ENABLED)
+    source (Yandex, only reachable behind LEGACY_MATRIX_PROVIDERS_ENABLED)
     must get the shorter traffic TTL so a route solved at rush hour doesn't
     silently price an off-peak solve a day later."""
 
@@ -279,7 +280,6 @@ class TestStaticTierTrafficAwareTTL:
             monkeypatch.setitem(app.config, "OSRM_BASE_URL", "")
             monkeypatch.setitem(app.config, "LEGACY_MATRIX_PROVIDERS_ENABLED", True)
             monkeypatch.setitem(app.config, "YANDEX_MAPS_API_KEY", "fake-key")
-            monkeypatch.setitem(app.config, "HERE_MAPS_API_KEY", None)
             monkeypatch.setitem(app.config, "MATRIX_CACHE_TTL_STATIC_SECONDS", 86400)
             monkeypatch.setitem(app.config, "MATRIX_CACHE_TTL_TRAFFIC_SECONDS", 1800)
             monkeypatch.setattr(dm, "request_with_retry", fake_request)
@@ -372,7 +372,6 @@ class TestYandexMatrixParsing:
             monkeypatch.setitem(app.config, "LEGACY_MATRIX_PROVIDERS_ENABLED", True)
             # Force Yandex creds + override the HTTP layer.
             monkeypatch.setitem(app.config, "YANDEX_MAPS_API_KEY", "fake-key-for-tests")
-            monkeypatch.setitem(app.config, "HERE_MAPS_API_KEY", None)
             yandex_body = {
                 "rows": [
                     {
@@ -440,7 +439,6 @@ class TestYandexMatrixParsing:
             monkeypatch.setitem(app.config, "LEGACY_MATRIX_PROVIDERS_ENABLED", True)
             monkeypatch.setitem(app.config, "OSRM_PUBLIC_FALLBACK_ENABLED", True)
             monkeypatch.setitem(app.config, "YANDEX_MAPS_API_KEY", "fake-key")
-            monkeypatch.setitem(app.config, "HERE_MAPS_API_KEY", None)
             monkeypatch.setattr(dm, "request_with_retry", fake_request)
             monkeypatch.setattr(dm, "_cache_get_json", lambda key: None)
             monkeypatch.setattr(dm, "_cache_set_json", lambda key, payload, ttl: None)
@@ -458,227 +456,6 @@ class TestYandexMatrixParsing:
             # And we attempted Yandex first.
             assert any("yandex.net" in u for u in call_log)
             assert any("project-osrm.org" in u for u in call_log)
-
-    def test_here_is_tried_first_when_HERE_MAPS_API_KEY_is_set(self, app, monkeypatch):
-        """When the HERE key is configured, the wrapper must hit HERE first
-        — not Yandex, not OSRM. HERE is our primary because it's traffic-aware
-        and has the most generous free tier (250k req/month)."""
-        call_log = []
-
-        def fake_request(**kw):
-            url = kw.get("url", "")
-            call_log.append(url)
-            if "matrix.router.hereapi.com" in url:
-                return self._fake_response(
-                    200,
-                    {
-                        "matrix": {
-                            "numOrigins": 2,
-                            "numDestinations": 2,
-                            # Row-major: [d(0,0), d(0,1), d(1,0), d(1,1)]
-                            "travelTimes": [0, 1020, 1020, 0],   # 17 min
-                            "distances": [0, 8000, 8000, 0],     # 8 km
-                            "errorCodes": [0, 0, 0, 0],
-                        }
-                    },
-                )
-            return self._fake_response(500, {})
-
-        with app.app_context():
-            monkeypatch.setitem(app.config, "OSRM_BASE_URL", "")
-            monkeypatch.setitem(app.config, "LEGACY_MATRIX_PROVIDERS_ENABLED", True)
-            monkeypatch.setitem(app.config, "HERE_MAPS_API_KEY", "fake-here-key")
-            monkeypatch.setitem(app.config, "YANDEX_MAPS_API_KEY", "fake-yandex-key")
-            monkeypatch.setattr(dm, "request_with_retry", fake_request)
-            monkeypatch.setattr(dm, "_cache_get_json", lambda key: None)
-            monkeypatch.setattr(dm, "_cache_set_json", lambda key, payload, ttl: None)
-
-            matrix, source = dm.get_distance_matrix(
-                [(41.30, 69.25), (41.275, 69.220)],
-                traffic=True,
-                provider="yandex",
-                use_cache=False,
-            )
-
-            assert source == "here_matrix"
-            # Real-world numbers from HERE response: 8.0 km, 17.0 min.
-            assert matrix[(0, 1)]["distance_km"] == 8.0
-            assert matrix[(0, 1)]["duration_minutes"] == 17.0
-            # Yandex was NOT touched — HERE answered first.
-            assert all("yandex" not in u for u in call_log), \
-                f"Yandex should not be called when HERE is configured and works; got: {call_log}"
-
-    def test_here_request_is_post_with_correct_body_shape(self, app, monkeypatch):
-        """Lock in the request contract per HERE Matrix Routing v8 docs:
-        POST, JSON body with origins/destinations as {lat, lng} objects,
-        matrixAttributes including both travelTimes and distances, departureTime
-        as ISO timestamp for traffic, apiKey as query param."""
-        captured = {}
-
-        def fake_request(**kw):
-            captured["method"] = kw.get("method")
-            captured["url"] = kw.get("url")
-            captured["params"] = kw.get("params")
-            captured["json"] = kw.get("json")
-            return self._fake_response(
-                200,
-                {
-                    "matrix": {
-                        "travelTimes": [0, 60, 60, 0],
-                        "distances": [0, 1000, 1000, 0],
-                        "errorCodes": [0, 0, 0, 0],
-                    }
-                },
-            )
-
-        with app.app_context():
-            monkeypatch.setitem(app.config, "OSRM_BASE_URL", "")
-            monkeypatch.setitem(app.config, "LEGACY_MATRIX_PROVIDERS_ENABLED", True)
-            monkeypatch.setitem(app.config, "HERE_MAPS_API_KEY", "the-key")
-            monkeypatch.setattr(dm, "request_with_retry", fake_request)
-            monkeypatch.setattr(dm, "_cache_get_json", lambda key: None)
-            monkeypatch.setattr(dm, "_cache_set_json", lambda key, payload, ttl: None)
-
-            dm.get_distance_matrix(
-                [(41.30, 69.25), (41.275, 69.220)],
-                traffic=True,
-                provider="yandex",
-                use_cache=False,
-            )
-
-            assert captured["method"] == "POST"
-            assert captured["url"] == "https://matrix.router.hereapi.com/v8/matrix"
-            assert captured["params"]["apiKey"] == "the-key"
-            assert captured["params"]["async"] == "false"
-            body = captured["json"]
-            assert body["origins"] == [{"lat": 41.30, "lng": 69.25}, {"lat": 41.275, "lng": 69.220}]
-            assert body["destinations"] == body["origins"]
-            assert body["transportMode"] == "car"
-            assert "travelTimes" in body["matrixAttributes"]
-            assert "distances" in body["matrixAttributes"]
-            assert body["regionDefinition"]["type"] == "circle"
-            # Traffic enabled → departureTime should be a timestamp, not "any".
-            assert body["departureTime"] != "any"
-            assert "T" in body["departureTime"]  # ISO 8601 marker
-
-    def test_here_traffic_disabled_sends_departureTime_any(self, app, monkeypatch):
-        captured = {}
-
-        def fake_request(**kw):
-            captured["json"] = kw.get("json")
-            return self._fake_response(
-                200,
-                {
-                    "matrix": {
-                        "travelTimes": [0, 60, 60, 0],
-                        "distances": [0, 1000, 1000, 0],
-                        "errorCodes": [0, 0, 0, 0],
-                    }
-                },
-            )
-
-        with app.app_context():
-            monkeypatch.setitem(app.config, "OSRM_BASE_URL", "")
-            monkeypatch.setitem(app.config, "LEGACY_MATRIX_PROVIDERS_ENABLED", True)
-            monkeypatch.setitem(app.config, "HERE_MAPS_API_KEY", "x")
-            monkeypatch.setattr(dm, "request_with_retry", fake_request)
-            monkeypatch.setattr(dm, "_cache_get_json", lambda key: None)
-            monkeypatch.setattr(dm, "_cache_set_json", lambda key, payload, ttl: None)
-
-            dm.get_distance_matrix(
-                [(41.30, 69.25), (41.275, 69.220)],
-                traffic=False,
-                use_cache=False,
-            )
-            assert captured["json"]["departureTime"] == "any"
-
-    def test_here_failure_falls_back_to_yandex(self, app, monkeypatch):
-        """If HERE returns a 4xx/5xx, the wrapper must continue down the chain
-        — Yandex first, OSRM next, Haversine last. The user must never get
-        stuck if their primary provider has a hiccup."""
-        call_log = []
-
-        def fake_request(**kw):
-            url = kw.get("url", "")
-            call_log.append(url)
-            if "hereapi.com" in url:
-                return self._fake_response(503, {"error": "Service Unavailable"})
-            if "yandex.net" in url:
-                return self._fake_response(
-                    200,
-                    {
-                        "rows": [
-                            {"elements": [
-                                {"distance": {"value": 0}, "duration": {"value": 0}},
-                                {"distance": {"value": 8000}, "duration": {"value": 1020}},
-                            ]},
-                            {"elements": [
-                                {"distance": {"value": 8000}, "duration": {"value": 1020}},
-                                {"distance": {"value": 0}, "duration": {"value": 0}},
-                            ]},
-                        ]
-                    },
-                )
-            return self._fake_response(500, {})
-
-        with app.app_context():
-            monkeypatch.setitem(app.config, "OSRM_BASE_URL", "")
-            monkeypatch.setitem(app.config, "LEGACY_MATRIX_PROVIDERS_ENABLED", True)
-            monkeypatch.setitem(app.config, "HERE_MAPS_API_KEY", "k")
-            monkeypatch.setitem(app.config, "YANDEX_MAPS_API_KEY", "y")
-            monkeypatch.setattr(dm, "request_with_retry", fake_request)
-            monkeypatch.setattr(dm, "_cache_get_json", lambda key: None)
-            monkeypatch.setattr(dm, "_cache_set_json", lambda key, payload, ttl: None)
-
-            matrix, source = dm.get_distance_matrix(
-                [(41.30, 69.25), (41.275, 69.220)],
-                traffic=True,
-                provider="yandex",
-                use_cache=False,
-            )
-            assert source == "yandex_matrix"
-            assert matrix[(0, 1)]["distance_km"] == 8.0
-            # Both providers attempted, in order.
-            assert any("hereapi.com" in u for u in call_log)
-            assert any("yandex.net" in u for u in call_log)
-
-    def test_here_unreachable_cells_get_haversine_backfill(self, app, monkeypatch):
-        """HERE returns errorCodes[k] != 0 for unreachable pairs (e.g. island,
-        island bridge out, etc). Those cells must fall back to Haversine so
-        the matrix is always well-formed and the TSP solver doesn't choke
-        on negative or null values."""
-        def fake_request(**kw):
-            return self._fake_response(
-                200,
-                {
-                    "matrix": {
-                        "travelTimes": [0, -1, 60, 0],
-                        "distances": [0, -1, 1000, 0],
-                        "errorCodes": [0, 3, 0, 0],   # cell (0,1) is unreachable
-                    }
-                },
-            )
-
-        with app.app_context():
-            monkeypatch.setitem(app.config, "OSRM_BASE_URL", "")
-            monkeypatch.setitem(app.config, "LEGACY_MATRIX_PROVIDERS_ENABLED", True)
-            monkeypatch.setitem(app.config, "HERE_MAPS_API_KEY", "x")
-            monkeypatch.setattr(dm, "request_with_retry", fake_request)
-            monkeypatch.setattr(dm, "_cache_get_json", lambda key: None)
-            monkeypatch.setattr(dm, "_cache_set_json", lambda key, payload, ttl: None)
-
-            matrix, source = dm.get_distance_matrix(
-                [(41.30, 69.25), (41.32, 69.27)],
-                traffic=True,
-                use_cache=False,
-            )
-            assert source == "here_matrix"
-            # Unreachable cell (0,1): backfilled with positive Haversine.
-            assert matrix[(0, 1)]["distance_km"] > 0
-            assert matrix[(0, 1)]["duration_minutes"] > 0
-            # Reachable cell (1,0): real HERE data.
-            assert matrix[(1, 0)]["distance_km"] == 1.0
-            assert matrix[(1, 0)]["duration_minutes"] == 1.0
 
     def test_osrm_eta_is_returned_as_is_with_no_synthetic_adjustment(self, app, monkeypatch):
         """When OSRM is the source, the wrapper must return its free-flow
@@ -707,7 +484,6 @@ class TestYandexMatrixParsing:
             monkeypatch.setitem(app.config, "LEGACY_MATRIX_PROVIDERS_ENABLED", True)
             monkeypatch.setitem(app.config, "OSRM_PUBLIC_FALLBACK_ENABLED", True)
             monkeypatch.setitem(app.config, "YANDEX_MAPS_API_KEY", "fake-key")
-            monkeypatch.setitem(app.config, "HERE_MAPS_API_KEY", None)
             monkeypatch.setattr(dm, "request_with_retry", fake_request)
             monkeypatch.setattr(dm, "_cache_get_json", lambda key: None)
             monkeypatch.setattr(dm, "_cache_set_json", lambda key, payload, ttl: None)
@@ -753,7 +529,6 @@ class TestYandexMatrixParsing:
             monkeypatch.setitem(app.config, "OSRM_BASE_URL", "")
             monkeypatch.setitem(app.config, "LEGACY_MATRIX_PROVIDERS_ENABLED", True)
             monkeypatch.setitem(app.config, "YANDEX_MAPS_API_KEY", "fake-key")
-            monkeypatch.setitem(app.config, "HERE_MAPS_API_KEY", None)
             monkeypatch.setattr(dm, "request_with_retry", fake_request)
             monkeypatch.setattr(dm, "_cache_get_json", lambda key: None)
             monkeypatch.setattr(dm, "_cache_set_json", lambda key, payload, ttl: None)
@@ -776,7 +551,6 @@ class TestYandexMatrixParsing:
             monkeypatch.setitem(app.config, "OSRM_BASE_URL", "")
             monkeypatch.setitem(app.config, "LEGACY_MATRIX_PROVIDERS_ENABLED", True)
             monkeypatch.setitem(app.config, "YANDEX_MAPS_API_KEY", "fake-key")
-            monkeypatch.setitem(app.config, "HERE_MAPS_API_KEY", None)
             yandex_body = {
                 "rows": [
                     {
@@ -815,9 +589,12 @@ class TestYandexMatrixParsing:
 
 @pytest.mark.unit
 class TestSelfHostedOsrmPrimary:
-    """Spec 8.1/8.2: self-hosted OSRM is tier 1; HERE/Yandex are OFF the hot
-    path (403/401 on every production call today, ~1.5 s of guaranteed
-    failure); the public demo server only runs behind an explicit flag."""
+    """Spec 8.1/8.2: self-hosted OSRM is tier 1; the legacy Yandex tier is OFF
+    the hot path (401 on every production call today, ~1.5 s of guaranteed
+    failure); the public demo server only runs behind an explicit flag.
+
+    The full outbound-host allowlist is pinned separately by
+    `TestNoUnapprovedMatrixProviders`."""
 
     def _fake_response(self, status, body):
         resp = MagicMock()
@@ -847,8 +624,7 @@ class TestSelfHostedOsrmPrimary:
 
         with app.app_context():
             monkeypatch.setitem(app.config, "OSRM_BASE_URL", "http://osrm:5000")
-            # Keys PRESENT but the flag is off — they must not be touched.
-            monkeypatch.setitem(app.config, "HERE_MAPS_API_KEY", "here-key")
+            # Key PRESENT but the flag is off — it must not be touched.
             monkeypatch.setitem(app.config, "YANDEX_MAPS_API_KEY", "yandex-key")
             monkeypatch.setattr(dm, "request_with_retry", fake_request)
             monkeypatch.setattr(dm, "_cache_get_json", lambda key: None)
@@ -865,7 +641,7 @@ class TestSelfHostedOsrmPrimary:
 
     def test_dead_legacy_providers_never_reached_by_default(self, app, monkeypatch):
         """Self-hosted down, legacy flag off, demo flag off -> haversine.
-        No hereapi.com, no yandex.net, no project-osrm.org calls."""
+        No outbound call to any external provider."""
         call_log = []
 
         def fake_request(**kw):
@@ -874,7 +650,6 @@ class TestSelfHostedOsrmPrimary:
 
         with app.app_context():
             monkeypatch.setitem(app.config, "OSRM_BASE_URL", "http://osrm:5000")
-            monkeypatch.setitem(app.config, "HERE_MAPS_API_KEY", "here-key")
             monkeypatch.setitem(app.config, "YANDEX_MAPS_API_KEY", "yandex-key")
             monkeypatch.setattr(dm, "request_with_retry", fake_request)
             monkeypatch.setattr(dm, "_cache_get_json", lambda key: None)
@@ -885,7 +660,6 @@ class TestSelfHostedOsrmPrimary:
             )
 
         assert source == "haversine"
-        assert all("hereapi.com" not in u for u in call_log)
         assert all("yandex.net" not in u for u in call_log)
         assert all("project-osrm.org" not in u for u in call_log)
 
@@ -912,38 +686,6 @@ class TestSelfHostedOsrmPrimary:
 
         assert source == "osrm_table"
         assert any(u.startswith("http://osrm:5000/") for u in call_log), "self-hosted tried first"
-
-    def test_legacy_flag_restores_here_after_selfhosted_failure(self, app, monkeypatch):
-        def fake_request(**kw):
-            url = kw.get("url", "")
-            if "matrix.router.hereapi.com" in url:
-                return self._fake_response(
-                    200,
-                    {
-                        "matrix": {
-                            "travelTimes": [0, 1020, 1020, 0],
-                            "distances": [0, 8000, 8000, 0],
-                            "errorCodes": [0, 0, 0, 0],
-                        }
-                    },
-                )
-            return self._fake_response(500, {})
-
-        with app.app_context():
-            monkeypatch.setitem(app.config, "OSRM_BASE_URL", "http://osrm:5000")
-            monkeypatch.setitem(app.config, "LEGACY_MATRIX_PROVIDERS_ENABLED", True)
-            monkeypatch.setitem(app.config, "HERE_MAPS_API_KEY", "here-key")
-            monkeypatch.setattr(dm, "request_with_retry", fake_request)
-            monkeypatch.setattr(dm, "_cache_get_json", lambda key: None)
-            monkeypatch.setattr(dm, "_cache_set_json", lambda key, payload, ttl: None)
-
-            matrix, source = dm.get_distance_matrix(
-                [(41.30, 69.25), (41.275, 69.220)], traffic=True, use_cache=False
-            )
-
-        assert source == "here_matrix"
-        assert matrix[(0, 1)]["distance_km"] == 8.0
-
 
 @pytest.mark.unit
 class TestOsrmMajorityRealCellGuard:
@@ -1323,3 +1065,117 @@ class TestSourceLabelObservability:
         joined = "\n".join(r.getMessage() for r in caplog.records)
         assert "distance_matrix_built source=osrm_selfhosted" in joined
         assert "static_tier=hit live_tier=fetched" in joined
+
+@pytest.mark.unit
+class TestNoUnapprovedMatrixProviders:
+    """The matrix wrapper may contact ONLY the approved hosts below.
+
+    An allowlist, deliberately, not a blocklist. A paid third-party vendor once
+    sat in tier 2 ungated for ~100 days and billed us before anyone noticed;
+    naming that one vendor in a blocklist would guard against exactly the
+    mistake we already made and nothing else. These tests instead assert the
+    complete set of reachable hosts and map credentials, so ANY new outbound
+    provider — paid or free — fails the suite until it is added here on purpose.
+    """
+
+    #: Every host the module is permitted to build a URL for. Hosts are compared
+    #: without their port, so the self-hosted engine is `osrm`, not `osrm:5000`.
+    APPROVED_HOSTS = frozenset({
+        "osrm",                       # our own self-hosted engine (OSRM_BASE_URL default)
+        "api.routing.yandex.net",     # legacy tier, LEGACY_MATRIX_PROVIDERS_ENABLED only
+        "router.project-osrm.org",    # emergency demo tier, OSRM_PUBLIC_FALLBACK_ENABLED only
+    })
+
+    #: The complete set of map credentials the config may define.
+    APPROVED_MAP_CREDENTIALS = frozenset({"GOOGLE_MAPS_API_KEY", "YANDEX_MAPS_API_KEY"})
+
+    def _fake_response(self, status, body):
+        resp = MagicMock()
+        resp.status_code = status
+        resp.json.return_value = body
+        resp.text = "err"
+        return resp
+
+    @staticmethod
+    def _hosts_in(text):
+        return {m.group(1) for m in re.finditer(r"https?://([A-Za-z0-9.\-]+)", text)}
+
+    def test_module_source_contains_no_unapproved_host(self):
+        """A deleted provider must leave no endpoint literal behind, and a new
+        one cannot be introduced without updating APPROVED_HOSTS."""
+        import inspect
+
+        found = self._hosts_in(inspect.getsource(dm))
+        unapproved = found - self.APPROVED_HOSTS
+        assert not unapproved, f"unapproved provider host(s) in distance_matrix: {sorted(unapproved)}"
+
+    def test_no_unapproved_host_is_contacted_with_every_tier_enabled(self, app, monkeypatch):
+        """The most permissive configuration possible: legacy tier on, demo tier
+        on, every credential present, self-hosted OSRM failing. Even here the
+        wrapper may only reach approved hosts."""
+        call_log = []
+
+        def fake_request(**kw):
+            url = kw.get("url", "")
+            call_log.append(url)
+            if "yandex.net" in url:
+                return self._fake_response(
+                    200,
+                    {
+                        "rows": [
+                            {"elements": [
+                                {"distance": {"value": 0}, "duration": {"value": 0}},
+                                {"distance": {"value": 8000}, "duration": {"value": 1020}},
+                            ]},
+                            {"elements": [
+                                {"distance": {"value": 8000}, "duration": {"value": 1020}},
+                                {"distance": {"value": 0}, "duration": {"value": 0}},
+                            ]},
+                        ]
+                    },
+                )
+            return self._fake_response(500, {})
+
+        with app.app_context():
+            monkeypatch.setitem(app.config, "OSRM_BASE_URL", "http://osrm:5000")
+            monkeypatch.setitem(app.config, "LEGACY_MATRIX_PROVIDERS_ENABLED", True)
+            monkeypatch.setitem(app.config, "OSRM_PUBLIC_FALLBACK_ENABLED", True)
+            monkeypatch.setitem(app.config, "YANDEX_MAPS_API_KEY", "yandex-key")
+            monkeypatch.setattr(dm, "request_with_retry", fake_request)
+            monkeypatch.setattr(dm, "_cache_get_json", lambda key: None)
+            monkeypatch.setattr(dm, "_cache_set_json", lambda key, payload, ttl: None)
+
+            matrix, source = dm.get_distance_matrix(
+                [(41.30, 69.25), (41.275, 69.220)],
+                traffic=True,
+                provider="yandex",
+                use_cache=False,
+            )
+
+        assert source == "yandex_matrix"
+        assert matrix[(0, 1)]["distance_km"] == 8.0
+        contacted = set()
+        for url in call_log:
+            contacted |= self._hosts_in(url)
+        unapproved = contacted - self.APPROVED_HOSTS
+        assert not unapproved, f"contacted unapproved host(s): {sorted(unapproved)}; full log: {call_log}"
+
+    def test_config_defines_only_approved_map_credentials(self, app):
+        """A removed provider must leave no credential behind, and a new one
+        cannot be added without updating APPROVED_MAP_CREDENTIALS."""
+        defined = {k for k in app.config if k.endswith("_MAPS_API_KEY") or k.endswith("_MAPS_APP_ID")}
+        assert defined == self.APPROVED_MAP_CREDENTIALS, (
+            f"map credentials drifted from the approved set: "
+            f"unexpected={sorted(defined - self.APPROVED_MAP_CREDENTIALS)} "
+            f"missing={sorted(self.APPROVED_MAP_CREDENTIALS - defined)}"
+        )
+
+    def test_traffic_aware_sources_are_all_producible(self):
+        """`_TRAFFIC_AWARE_SOURCES` drives the short cache TTL. Every label in it
+        must still be reachable in `get_distance_matrix`, or the set is carrying
+        a ghost from a deleted provider."""
+        import inspect
+
+        body = inspect.getsource(dm.get_distance_matrix)
+        for label in dm._TRAFFIC_AWARE_SOURCES:
+            assert f'"{label}"' in body, f"{label} can never be produced — stale entry"

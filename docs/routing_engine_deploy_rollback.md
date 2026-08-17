@@ -288,9 +288,11 @@ real provider failed for that call (self-hosted OSRM down AND the public
 demo flag is off) — straight-line distance is used, sequencing/ETA degrade.
 Investigate immediately if this appears more than a handful of times.
 
-The old `source=osrm_table` (public demo), `source=here_matrix` /
-`source=yandex_matrix`, and the HERE 403 / Yandex 401 warning lines must
-be GONE — their absence is itself part of the proof.
+The old `source=osrm_table` (public demo), `source=yandex_matrix`, and the
+Yandex 401 warning lines must be GONE — their absence is itself part of the
+proof. The third matrix source that used to appear here can no longer occur
+at all — that provider was deleted from the codebase on 2026-08-16 (see §7
+lever 2).
 
 ## 7. Rollback levers (fastest first — no code revert, no migration)
 
@@ -314,7 +316,7 @@ applies to every lever below that recreates `business_app` (all of them).
 1. **OSRM misbehaving (bad ETAs, crashes, OOM):** set `OSRM_BASE_URL=`
    (empty disables the tier) and `OSRM_PUBLIC_FALLBACK_ENABLED=true`. This
    restores the pre-change EFFECTIVE behaviour (public demo server), since
-   HERE and Yandex were already dead (403/401). Optionally
+   the legacy tier was already dead (Yandex 401). Optionally
    `docker compose stop osrm` and remove `COMPOSE_PROFILES=routing` from
    `.env`.
 
@@ -332,9 +334,19 @@ applies to every lever below that recreates `business_app` (all of them).
      `OSRM_PUBLIC_FALLBACK_ENABLED=true` as step 1 already instructs, or
      switch `MAPS_PROVIDER` to `google`.
    - `MAPS_PROVIDER=google|yandex` never reaches this code path at all.
-2. **Want the full legacy chain back verbatim:** additionally set
+2. **Want the legacy chain back:** additionally set
    `LEGACY_MATRIX_PROVIDERS_ENABLED=true` — NOT recommended: it re-adds
-   ~1.5 s of guaranteed 403/401 failure per optimization for zero data.
+   ~1.5 s of guaranteed 401 failure per optimization for zero data.
+
+   ⚠️ **This lever gates Yandex ALONE.** The third-party paid provider that
+   used to sit in this tier was DELETED from the codebase on 2026-08-16 —
+   its request builder, endpoint constant, credential, and chain position are
+   all gone, and
+   `tests/unit/test_distance_matrix.py::TestNoUnapprovedMatrixProviders`
+   fails if any unapproved provider is added back. Reason: it was tier-1 and
+   ungated from 2026-05-05 to 2026-08-13 and billed us. Below self-hosted
+   OSRM the real ladder is now: Yandex (flag) → public demo (flag) →
+   Haversine.
 3. **Google ETA misbehaving:** unset `GOOGLE_ROUTES_API_KEY` — the tier
    skips silently; matrix durations take over.
 4. **Do NOT touch the `osrm` service's `command:` in `docker-compose.yml`

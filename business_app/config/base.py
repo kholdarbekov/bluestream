@@ -256,17 +256,14 @@ class BaseConfig:
     MAPS_PROVIDER = os.environ.get("MAPS_PROVIDER", "google")  # 'google', 'yandex', 'osm'
     GOOGLE_MAPS_API_KEY = get_secret("google_maps_api_key", "GOOGLE_MAPS_API_KEY", required=False)
     YANDEX_MAPS_API_KEY = get_secret("yandex_maps_api_key", "YANDEX_MAPS_API_KEY", required=False)
-    # HERE Matrix Routing v8 — legacy fallback provider for traffic-aware
-    # route optimization (250k requests/month free tier). Sign up at
-    # https://platform.here.com to obtain a key. Since route UX phase 2 this
-    # tier only runs when LEGACY_MATRIX_PROVIDERS_ENABLED=true — the primary
-    # matrix source is the self-hosted OSRM service.
-    HERE_MAPS_API_KEY = get_secret("here_maps_api_key", "HERE_MAPS_API_KEY", required=False)
+    # A third paid matrix-provider credential was removed on 2026-08-16 after
+    # it billed us; self-hosted OSRM replaced it. Only the two map credentials
+    # above may exist — `TestNoUnapprovedMatrixProviders` asserts the set.
     # Google Routes computeRoutes — the ONE traffic-aware number in the
     # product (next-leg ETA, spec 8.2). Bills per REQUEST; the matrix
     # endpoint bills per ELEMENT and is never used. Unset = tier skipped.
     # Deliberately a NEW, separate key — NOT GOOGLE_MAPS_API_KEY — after
-    # Plan 1 found the HERE/Yandex keys silently un-entitled for months.
+    # Plan 1 found the legacy matrix keys silently un-entitled for months.
     GOOGLE_ROUTES_API_KEY = get_secret("google_routes_api_key", "GOOGLE_ROUTES_API_KEY", required=False)
 
     # Route Optimization Configuration

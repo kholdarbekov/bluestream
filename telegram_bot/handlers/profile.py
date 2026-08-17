@@ -751,17 +751,53 @@ class ProfileHandlers(BaseHandler):
         except Exception as e:
             await self._handle_error(update, exc=e, operation="verify_phone_number")
 
-    @staticmethod
-    def _capture_referral_arg(context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Store a ``ref_<code>`` /start deep-link param for use at registration."""
+    # Recognized /start deep-link acquisition markers (AEO roadmap, task AG-M3).
+    #   ``ai_<engine>``   — arrived from an AI assistant surface, e.g.
+    #                       t.me/<bot>?start=ai_chatgpt (links seeded in llms.txt
+    #                       and other AI-facing surfaces).
+    #   ``src_<channel>`` — arrived from a claimed business profile / directory,
+    #                       e.g. t.me/<bot>?start=src_2gis.
+    # Both are whitelist-validated so arbitrary deep-link strings can never
+    # reach logs or the registration payload.
+    _AI_ENGINES = frozenset(
+        {"chatgpt", "gemini", "perplexity", "claude", "copilot", "alisa", "deepseek", "other"}
+    )
+    _SRC_CHANNELS = frozenset(
+        {"gbp", "yandex", "2gis", "fsq", "bing", "apple", "olx", "site", "press"}
+    )
+
+    @classmethod
+    def _capture_referral_arg(cls, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Store /start deep-link params for use at registration.
+
+        Handles ``ref_<code>`` (referral, unchanged behaviour) plus the
+        ``ai_<engine>`` / ``src_<channel>`` acquisition markers above. An
+        acquisition marker is logged immediately — a visit-level signal that
+        fires for existing users too — and, for new users, attached to the
+        registration payload (consumed by the backend once
+        ``users.acquisition_source`` lands with task AG-M1).
+        """
         args = getattr(context, "args", None) or []
         if not args:
             return
-        param = str(args[0])
-        if param.startswith("ref_") and context.user_data is not None:
+        if context.user_data is None:
+            return
+        param = str(args[0]).strip()
+        if param.startswith("ref_"):
             code = param[len("ref_"):].strip()
             if code:
                 context.user_data["referral_code"] = code
+            return
+        lowered = param.lower()
+        source = None
+        if lowered.startswith("ai_") and lowered[len("ai_"):] in cls._AI_ENGINES:
+            source = lowered
+        elif lowered.startswith("src_") and lowered[len("src_"):] in cls._SRC_CHANNELS:
+            source = lowered
+        if source:
+            context.user_data["acquisition_source"] = source
+            # Stable, greppable marker for log-based telemetry (task AG-M4).
+            logger.info("acquisition_deeplink source=%s", source)
 
     async def start_registration_new(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start registration process"""
@@ -854,6 +890,14 @@ class ProfileHandlers(BaseHandler):
                         referral_code = (context.user_data or {}).get('referral_code')
                         if referral_code:
                             registration_data['referral_code'] = referral_code
+                        # Attach an AI/profile acquisition marker captured from a
+                        # /start deep link (e.g. ?start=ai_chatgpt). The backend
+                        # ignores unknown keys today (and INFO-logs the payload);
+                        # it will persist this once users.acquisition_source
+                        # ships with task AG-M1 (AEO roadmap WS1).
+                        acquisition_source = (context.user_data or {}).get('acquisition_source')
+                        if acquisition_source:
+                            registration_data['acquisition_source'] = acquisition_source
                         response = await client.register_telegram_user(user_id, registration_data)
                         if not response.success:
                             logger.error(f"Failed to register telegram user {user_id}: {response.error}")
@@ -879,9 +923,11 @@ class ProfileHandlers(BaseHandler):
                                 )
                                 logger.info(f"Cached fresh registration tokens for user {user_id}")
 
-                        # Referral code (if any) has now been consumed by the backend.
+                        # Referral / acquisition params (if any) have now been
+                        # consumed by the backend.
                         if context.user_data is not None:
                             context.user_data.pop('referral_code', None)
+                            context.user_data.pop('acquisition_source', None)
                 except Exception as e:
                     logger.error(f"Exception during telegram user registration: {e}")
                     import traceback

@@ -31,6 +31,7 @@ from business_app.serializers.payment_serializers import (
 from business_app.utils.decorators import validate_json, rate_limit
 from business_app.utils.constants import PaymeErrors, PaymentMethodType
 from shared.enums import PaymentStatus, PaymentMethod
+from shared.payment_methods import normalize_payment_method
 from business_app.utils.validation_helpers import (
     validate_list_request_params,
     FilterValidator,
@@ -84,6 +85,13 @@ def _get_webhook_idempotency_guard(payment_service):
     # would ignore it and always use the module default).
     return build_default_guard(client)
 
+
+# Rails a customer may point their own order at from this route.
+_SELF_SERVICE_PAYMENT_METHODS = {
+    PaymentMethod.CASH,
+    PaymentMethod.CLICK,
+    PaymentMethod.PAYME,
+}
 
 # PAY-006: per-provider global cap. 600/min lets Click/Payme retry aggressively
 # during a reconnect storm without swamping the app; crosses into 503 only on
@@ -270,7 +278,13 @@ def create_payment():
 
         # Check for existing pending payment for this order with same payment method
         # This prevents duplicate payments when user retries payment
-        requested_payment_method = PaymentMethod(payment_method)
+        # This route re-points the order's rail as well as the payment's, so it
+        # may only offer the self-service rails; business_account is eligibility-
+        # gated and belongs to OrderPaymentMethodEditService. Normalizing first
+        # folds the legacy `card` alias into click rather than writing it back.
+        requested_payment_method = normalize_payment_method(payment_method)
+        if requested_payment_method not in _SELF_SERVICE_PAYMENT_METHODS:
+            return validation_error_response("Payment method is not available for this order")
         existing_payment = Payment.query.filter(
             Payment.order_id == order_id,
             Payment.user_id == current_user_id,

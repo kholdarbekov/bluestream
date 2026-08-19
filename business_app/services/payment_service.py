@@ -25,7 +25,7 @@ from shared.enums import (
     PaymentMethod,
     FiscalizationStatus,
 )
-from shared.payment_methods import CUSTOMER_SELECTABLE_METHODS, PAYMENT_METHOD_CATALOG
+from shared.payment_methods import CUSTOMER_SELECTABLE_METHODS, ORDER_PAYMENT_METHODS, PAYMENT_METHOD_CATALOG
 from business_app.utils.helpers import generate_random_string
 from business_app.utils.timezone_utils import ensure_utc
 from business_app.utils.payment_projection import (
@@ -38,6 +38,12 @@ from business_app.services.card_token_service import CardTokenService
 from business_app.services.providers.payme_provider import PaymeProvider
 from business_app.services.providers.webhook_signature import WebhookSignatureVerifier
 from business_app import db
+
+
+# Statuses past which a self-service rail switch has no settlement path left.
+_RAIL_LOCKED_ORDER_STATUSES = frozenset(
+    {OrderStatus.DELIVERED, OrderStatus.CANCELLED, OrderStatus.RETURNED}
+)
 
 
 class PaymentContext(str, Enum):
@@ -251,6 +257,20 @@ class PaymentService:
             )
         )
 
+        # RAIL SSOT. `orders.payment_method` is what every settlement gate reads;
+        # `payments.payment_method` is what the allocator reads. Re-purposing the
+        # row without moving the order strands the order in a shape no settlement
+        # path handles, so move both or neither — and never move a rail that
+        # already absorbed money (a later completion would zero amount_collected).
+        rail_moves = payment is not None and payment.payment_method != payment_method
+        if rail_moves and Decimal(str(payment.amount_collected or 0)) > Decimal("0.00"):
+            raise ValidationError("Payment method cannot be changed after cash has been collected")
+        if rail_moves and order.status in _RAIL_LOCKED_ORDER_STATUSES:
+            # Past the door there is no settlement path left to re-route to, and
+            # moving a delivered COD debt onto a gateway rail hides it from the
+            # receivable ledger. Re-classifying those is an admin operation.
+            raise ValidationError("Payment method cannot be changed once the order has left delivery")
+
         if payment:
             payment.user_id = order.user_id
             payment.payment_method = payment_method
@@ -281,6 +301,9 @@ class PaymentService:
                 idempotency_key=idempotency_key,
             )
             db.session.add(payment)
+
+        if order.payment_method != payment_method and payment_method in ORDER_PAYMENT_METHODS:
+            order.payment_method = payment_method
 
         if payment_method == PaymentMethod.CASH:
             from business_app.services.cash_collection_service import CashCollectionService

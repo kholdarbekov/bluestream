@@ -1143,10 +1143,13 @@ class StaffService:
         _electronic_methods = {PaymentMethod.CLICK, PaymentMethod.PAYME, PaymentMethod.CARD}
         order = delivery.order
         order_payment = order.payment if order else None
+        # EITHER rail, not just the order's. The gates below read the order's
+        # method while the allocator reads the payment's; when they disagree the
+        # driver's cash would post as customer credit and leave the order unpaid.
         is_unsettled_electronic = bool(
             order
-            and order.payment_method in _electronic_methods
             and order_payment is not None
+            and {order.payment_method, order_payment.payment_method} & _electronic_methods
             and order_payment.status in _CCS._OFFLINE_SETTLEABLE_STATUSES
         )
         _raw_cash = metadata.get("cash_collected") if metadata else None

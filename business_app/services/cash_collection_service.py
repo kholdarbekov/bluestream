@@ -3090,14 +3090,17 @@ class CashCollectionService:
         if not payment:
             raise NotFoundError("Order has no payment to settle")
 
-        if order.payment_method == PaymentMethod.CASH:
+        # BOTH rails, not just the order's: the allocator reads the payment's, so
+        # an order already reading CASH over an electronic payment row is exactly
+        # the shape this conversion has to repair rather than skip.
+        if order.payment_method == PaymentMethod.CASH and payment.payment_method == PaymentMethod.CASH:
             locked = Payment.query.with_for_update(of=Payment).get(payment.id)
             if not locked:
                 raise NotFoundError("Payment not found")
             return locked
 
         _electronic_methods = {PaymentMethod.CLICK, PaymentMethod.PAYME, PaymentMethod.CARD}
-        if order.payment_method not in _electronic_methods:
+        if not {order.payment_method, payment.payment_method} & _electronic_methods:
             raise ValidationError("Only electronic-method orders can be converted to cash")
         if payment.status not in self._OFFLINE_SETTLEABLE_STATUSES:
             raise ValidationError(

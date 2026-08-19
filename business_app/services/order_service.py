@@ -1851,9 +1851,16 @@ class OrderService:
         )
 
         if driver_id:
+            from business_app.services.route_optimization_service import RouteOptimizationService
             from business_app.services.staff_service import StaffService
 
             StaffService.sync_active_delivery_counters([driver_id])
+            # A cancelled stop is out of the driver's active set, so it must
+            # also leave their planned sequence — otherwise it keeps a numbered
+            # slot on the dispatch panel and a vertex on the drawn polyline
+            # until some unrelated re-solve happens to rebuild the list. Same
+            # membership rule the assignment SSOTs apply, at the other exit.
+            RouteOptimizationService.drop_from_route(driver_id, delivery.id)
 
         logger.info(f"Delivery {delivery.id} cancelled in cascade from order {order.id} cancellation")
         return True

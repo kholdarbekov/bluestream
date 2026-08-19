@@ -118,3 +118,62 @@ class TestRedisFlushContainment:
                 f"xdist worker gw{worker_num} maps to {mapped!r} — flushing "
                 f"redis DB 0 wipes the live broker"
             )
+
+
+class TestRedisIsolationReachesTheClientTheAppActuallyUses:
+    """The per-worker DB mapping is worthless unless application code lands in
+    the database ``reset_redis_state`` flushes.
+
+    ``business_app/__init__.py`` builds its module-level ``redis_client`` at
+    IMPORT time, straight from ``os.environ['REDIS_URL']`` — and that client,
+    not ``app.config['REDIS_URL']``, is what the dispatch geometry cache, the
+    rate limiters and the counters read and write. Mapping only the config left
+    the two on different databases: every worker's app wrote to one shared DB
+    while the autouse flush cleared a per-worker DB nothing used. Cached values
+    then outlived their test and leaked between concurrently running workers.
+
+    It surfaced as order-dependent failures in the dispatch geometry tests —
+    one test's cached provider response served to another, so a test that had
+    mocked the provider to FAIL was answered from cache and saw success.
+
+    NOTE for anyone re-verifying these: ``gw0`` maps to DB ``15 - 0 = 15``,
+    which is also the unmapped default, so on that worker the two URLs agree
+    even with the bug present and these assertions pass vacuously. Reproduce on
+    any other worker:
+
+        docker run ... -e PYTEST_XDIST_WORKER=gw1 <image> pytest <this file>
+
+    which fails both assertions below (config DB 14 vs client DB 15) until the
+    mapping is applied to the environment in conftest.
+    """
+
+    def test_app_config_and_module_level_client_share_one_database(self, app):
+        from business_app import redis_client
+
+        assert _redis_db(app.config["REDIS_URL"]) == str(redis_client.connection_pool.connection_kwargs["db"])
+
+    def test_the_flushed_database_is_the_one_the_client_writes_to(self, app):
+        """The invariant stated as the fixture's own contract: whatever
+        `reset_redis_state` flushes must be where a write from application code
+        lands. Asserted through a real round trip rather than by comparing URLs.
+        """
+        import redis as redis_lib
+
+        from business_app import redis_client
+
+        redis_client.set("isolation-probe", "written-by-app-code")
+        redis_lib.from_url(app.config["REDIS_URL"]).flushdb()
+
+        assert redis_client.get("isolation-probe") is None
+
+    def test_each_xdist_worker_maps_to_its_own_database(self, monkeypatch):
+        """Two workers must never share a DB, or one worker's flush wipes
+        another's in-flight state and its cached values answer another's reads.
+        """
+        from tests.conftest import _per_worker_redis_url
+
+        seen = set()
+        for worker in ("gw0", "gw1", "gw2", "gw3"):
+            monkeypatch.setenv("PYTEST_XDIST_WORKER", worker)
+            seen.add(_per_worker_redis_url("redis://redis:6379/15"))
+        assert len(seen) == 4

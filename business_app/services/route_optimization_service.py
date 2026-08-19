@@ -157,15 +157,29 @@ class RouteOptimizationService:
         deliveries = self._load_active_deliveries(driver_id)
         if not deliveries:
             logger.info("route_optimize: driver=%s has no active deliveries", driver_id)
-            # A spent override — every stop it locked has completed — must not
-            # outlive its delivery set and silently bind a future, unrelated one.
+            # No active deliveries means the stored sequence names nothing this
+            # driver still has, so it is cleared — NOT only when the route
+            # carried a manual override.
+            #
+            # That override condition is why the reassignment bug outlived
+            # every attempt to fix itself. `manual_override` is false on
+            # essentially every route in production (it is set only by a hand
+            # edit in the dispatch map), so the branch that would have emptied
+            # a stripped driver's route was, in practice, unreachable: the
+            # driver kept the full original list, the panel kept listing it and
+            # the map kept drawing it, for the rest of the day.
+            #
+            # The override bookkeeping still only applies to an override: a
+            # spent one must not outlive its delivery set and silently bind a
+            # future, unrelated one.
             existing_route = self.current_route(driver_id)
-            if existing_route is not None and existing_route.manual_override:
+            if existing_route is not None and (existing_route.optimized_order or existing_route.manual_override):
                 existing_route.optimized_order = []
-                existing_route.manual_override = False
                 existing_route.pinned_stops = {}
-                existing_route.overridden_by = None
-                existing_route.overridden_at = None
+                if existing_route.manual_override:
+                    existing_route.manual_override = False
+                    existing_route.overridden_by = None
+                    existing_route.overridden_at = None
                 db.session.commit()
             return None
 
@@ -809,6 +823,77 @@ class RouteOptimizationService:
         alive = {str(did) for did in ordered_ids}
         index_of = {str(did): idx for idx, did in enumerate(ordered_ids)}
         return {k: index_of[str(k)] for k in pinned if str(k) in alive}
+
+    # ----- route membership bookkeeping -------------------------------------
+    #
+    # `optimized_order` is a plain JSON id list: no foreign key, no trigger,
+    # nothing that notices when the delivery it names changes hands. Keeping it
+    # truthful is therefore a deliberate act, and it used to be performed by
+    # exactly one of the ten-odd code paths that can change ownership — the
+    # dispatch map's own move button. Everything else (the admin reassign
+    # modal, a bulk action, a driver claiming in the staff bot, an auto-assign
+    # retry) moved the delivery and left the id behind.
+    #
+    # These two methods are that act, expressed once. `DeliveryAssignmentService`
+    # and `StaffService` — the SSOTs for gaining and losing a delivery — call
+    # them, so the bookkeeping now happens wherever ownership changes rather
+    # than wherever someone remembered. Neither commits: the caller owns the
+    # transaction, and an assignment plus its route edit must land together or
+    # not at all.
+
+    @classmethod
+    def drop_from_route(cls, driver_id: Optional[int], delivery_id: int) -> bool:
+        """Take a delivery off `driver_id`'s current route. True if it moved.
+
+        A driver with no route row today has nothing to correct — their next
+        optimisation builds the sequence from their active set.
+        """
+        if driver_id is None:
+            return False
+        route = cls().current_route(driver_id)
+        if route is None:
+            return False
+        surviving = [did for did in (route.optimized_order or []) if did != delivery_id]
+        if len(surviving) == len(route.optimized_order or []):
+            return False
+        route.optimized_order = surviving
+        # A pin is an instruction about a stop this driver no longer has;
+        # leaving it re-anchors it onto whatever later occupies that slot.
+        route.pinned_stops = cls.clamp_pins(route.pinned_stops, surviving)
+        cls.mark_metrics_stale(route)
+        return True
+
+    @classmethod
+    def splice_into_route(cls, driver_id: int, delivery_id: int, position: Optional[int] = None) -> bool:
+        """Put a delivery onto `driver_id`'s current route. True if it moved.
+
+        Appended when `position` is None, which is the honest default: nothing
+        has measured where this stop belongs yet, and `metrics_stale` says so.
+        """
+        route = cls().current_route(driver_id)
+        if route is None:
+            return False
+        sequence = [did for did in (route.optimized_order or []) if did != delivery_id]
+        index = len(sequence) if position is None else max(0, min(int(position), len(sequence)))
+        sequence.insert(index, delivery_id)
+        if sequence == list(route.optimized_order or []):
+            return False
+        route.optimized_order = sequence
+        route.pinned_stops = cls.clamp_pins(route.pinned_stops, sequence)
+        cls.mark_metrics_stale(route)
+        return True
+
+    @staticmethod
+    def mark_metrics_stale(route: DeliveryRoute) -> None:
+        """A stop moving on or off a route invalidates its distance/duration
+        figures without a full re-solve.
+
+        Deliberately no external matrix call: an assignment must not depend on
+        the routing provider being up. The dispatch panel reads
+        `extra_data.metrics_stale` and qualifies the number instead of showing
+        it as confidently current.
+        """
+        route.extra_data = {**(route.extra_data or {}), "metrics_stale": True}
 
     def _delivery_point(self, delivery: Delivery) -> Optional[Point]:
         order = delivery.order

@@ -11,7 +11,9 @@ import toast from 'react-hot-toast';
 import OperationsMap from '../components/OperationsMap';
 import DriverRoutePanel from '../components/dispatch/DriverRoutePanel';
 import PoolPanel from '../components/dispatch/PoolPanel';
-import { buildSavePayload, clampPins, isDirty, togglePin } from '../components/dispatch/dispatchLogic';
+import {
+  buildSavePayload, clampPins, isDirty, routeStopSignature, togglePin,
+} from '../components/dispatch/dispatchLogic';
 import adminService from '../services/adminService';
 
 const { Text, Title } = Typography;
@@ -74,16 +76,27 @@ const Dispatch = () => {
   // route, not just a selected one — the product decision is always real
   // road geometry, and the backend caches on a sequence hash with a 15-minute
   // TTL, so panning and the 30s snapshot poll are free; only a real sequence
-  // change re-fetches. No `refetchInterval` here for the same reason — it
-  // would just be noise on an endpoint that rarely changes. The query key
-  // stays the exact per-driver shape (`['dispatchRouteGeometry', driverId]`)
-  // `invalidate()` below already targets by prefix, so save/reoptimize/
-  // assign/unassign keeps invalidating every route's geometry, not only the
-  // one that changed.
+  // change re-fetches.
+  //
+  // The key carries the route's STOP SIGNATURE, not just the driver id, which
+  // is what makes "only a real sequence change re-fetches" true rather than
+  // merely intended. `invalidate()` below covers changes THIS page makes; the
+  // signature covers every change it does not — a reassignment from the
+  // Delivery page, a bulk action, a driver claiming in the staff bot, another
+  // admin's browser. Those arrive through the 30s snapshot poll, and a
+  // driver-only key meant the panels updated underneath a polyline that kept
+  // its original shape for as long as the tab stayed open. New stops => new
+  // key => fetch; identical stops => cache hit, so the poll stays free.
+  // Still no `refetchInterval`: with the signature in the key there is nothing
+  // for a timer to discover that the snapshot has not already reported.
   const geometryQueries = useQueries({
     queries: routes.map((route) => ({
-      queryKey: ['dispatchRouteGeometry', route.driver_id],
-      queryFn: () => adminService.getDispatchRouteGeometry(route.driver_id),
+      queryKey: [
+        'dispatchRouteGeometry', day.format('YYYY-MM-DD'), route.driver_id, routeStopSignature(route.stops),
+      ],
+      queryFn: () => adminService.getDispatchRouteGeometry(
+        route.driver_id, { date: day.format('YYYY-MM-DD') },
+      ),
     })),
   });
   const geometry = useMemo(
@@ -102,12 +115,14 @@ const Dispatch = () => {
   // same driver sequence, so any mutation that can change that sequence
   // (save, reoptimize, assign, unassign) must invalidate both — otherwise
   // the map keeps drawing a real, solid polyline for a route nobody is
-  // driving anymore. Invalidated on the shared 'dispatchRouteGeometry'
-  // prefix (matches every driverId-keyed variant) rather than the one
-  // currently selected, since a move/pool can affect a route other than the
-  // selected one. No polling here: the backend caches geometry on the
-  // sequence hash, so a post-mutation refetch is cheap and a timer would
-  // just be noise on an endpoint that rarely changes.
+  // driving anymore.
+  //
+  // Invalidated on the bare 'dispatchRouteGeometry' prefix, which matches every
+  // (date, driverId, signature) variant, rather than the route that changed:
+  // react-query prefix matching is element-wise, so this stays correct as the
+  // key grows, and a move affects at least two routes anyway. It is the
+  // belt to the signature's braces — the signature catches changes made
+  // elsewhere, this catches our own without waiting for the next poll.
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['dispatchSnapshot'] });
     queryClient.invalidateQueries({ queryKey: ['dispatchRouteGeometry'] });

@@ -187,7 +187,14 @@ const OperationsMap = ({
         // separate truthiness checks previously let that empty-array case fall
         // through to the straight-leg fallback while still being drawn SOLID —
         // presenting hops between stops as if they were a driveable road.
-        const hasRealGeometry = Boolean(geo && geo.geometry && geo.geometry.length);
+        // `stopPoints.length` is part of the condition, not just `geo`: the
+        // cached geometry payload was measured over the stops the route had
+        // when it was fetched, and it can outlive them (a reassignment made
+        // outside this page arrives via the snapshot poll). Without this, an
+        // emptied route kept drawing a full solid road path — the fallback
+        // branch cannot produce that, since `legPoints` collapses to the lone
+        // depot point and the `< 2` guard below bails.
+        const hasRealGeometry = Boolean(stopPoints.length && geo && geo.geometry && geo.geometry.length);
         const line = hasRealGeometry ? geo.geometry : legPoints;
         if (line.length < 2) return null;
         return (

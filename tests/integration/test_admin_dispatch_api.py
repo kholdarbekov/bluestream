@@ -181,12 +181,19 @@ class TestAssignAndUnassign:
         assert resp.status_code == 400
 
 
-def _make_geocoded_delivery(db, user, *, order_number, lat, lng):
+def _make_geocoded_delivery(db, user, *, order_number, lat, lng, driver_id):
     """A real, geocoded `Delivery` — Order + UserAddress + Delivery — so a
     `DeliveryRoute.optimized_order` referencing it actually resolves stop
     coordinates. See the module docstring: the geometry endpoint deliberately
     short-circuits (no Maps call, no cache) when the route has no resolvable
     stops, so exercising the cache/degrade paths needs a real one.
+
+    `driver_id` is mandatory and must match the route's `delivery_person_id`.
+    The stop set is derived from OWNERSHIP (`DispatchService.route_stop_points`
+    → `_sequence_active_stops`), not from `optimized_order`, so an ownerless
+    delivery listed on a driver's route is not a shortcut — it is the very
+    inconsistency the read model now refuses to render, and the endpoint
+    correctly short-circuits to `_no_geometry` for it.
     """
     from business_app.models.delivery import Delivery
     from business_app.models.order import Order
@@ -212,6 +219,7 @@ def _make_geocoded_delivery(db, user, *, order_number, lat, lng):
 
     delivery = Delivery(
         order_id=order.id,
+        delivery_person_id=driver_id,
         status=DeliveryStatus.ASSIGNED,
         scheduled_date=datetime.now(timezone.utc),
         scheduled_time_slot="09:00-12:00",
@@ -226,7 +234,7 @@ class TestGeometry:
         from business_app.models.delivery import DeliveryRoute
 
         delivery = _make_geocoded_delivery(
-            db, sample_user, order_number="ORD-GEOM-CACHE-1", lat=41.31, lng=69.25
+            db, sample_user, order_number="ORD-GEOM-CACHE-1", lat=41.31, lng=69.25, driver_id=delivery_driver.id
         )
         db.session.add(
             DeliveryRoute(
@@ -284,7 +292,7 @@ class TestGeometry:
         from business_app.models.delivery import DeliveryRoute
 
         delivery = _make_geocoded_delivery(
-            db, sample_user, order_number="ORD-GEOM-NOPATH-1", lat=41.32, lng=69.26
+            db, sample_user, order_number="ORD-GEOM-NOPATH-1", lat=41.32, lng=69.26, driver_id=delivery_driver.id
         )
         db.session.add(
             DeliveryRoute(
@@ -313,7 +321,7 @@ class TestGeometry:
         from business_app.utils.exceptions import ExternalServiceError
 
         delivery = _make_geocoded_delivery(
-            db, sample_user, order_number="ORD-GEOM-FAIL-1", lat=41.41, lng=69.31
+            db, sample_user, order_number="ORD-GEOM-FAIL-1", lat=41.41, lng=69.31, driver_id=delivery_driver.id
         )
         db.session.add(
             DeliveryRoute(

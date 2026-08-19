@@ -2,6 +2,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import dayjs from 'dayjs';
 
 // Exposes the props the wiring tests need to observe: the `geometry` map the
 // page built, a way to simulate picking a driver (which is normally done by
@@ -68,6 +69,11 @@ vi.mock('../services/adminService', () => {
 import adminService from '../services/adminService';
 import toast from 'react-hot-toast';
 import Dispatch from './Dispatch';
+
+// The board's date picker defaults to today, and the geometry endpoint now
+// takes the same `date` the snapshot does — the polyline layer and the panels
+// above it have to describe the same day.
+const today = () => dayjs().format('YYYY-MM-DD');
 
 const renderPage = () => {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -234,7 +240,7 @@ describe('Dispatch page route geometry (fetched for every visible route)', () =>
     renderPage();
     await screen.findByTestId('stop-row-11');
 
-    await waitFor(() => expect(adminService.getDispatchRouteGeometry).toHaveBeenCalledWith(5));
+    await waitFor(() => expect(adminService.getDispatchRouteGeometry).toHaveBeenCalledWith(5, { date: today() }));
   });
 
   it('fetches geometry for every route when more than one is visible, not just one', async () => {
@@ -262,8 +268,8 @@ describe('Dispatch page route geometry (fetched for every visible route)', () =>
     renderPage();
     await screen.findByTestId('stop-row-77');
 
-    await waitFor(() => expect(adminService.getDispatchRouteGeometry).toHaveBeenCalledWith(5));
-    await waitFor(() => expect(adminService.getDispatchRouteGeometry).toHaveBeenCalledWith(6));
+    await waitFor(() => expect(adminService.getDispatchRouteGeometry).toHaveBeenCalledWith(5, { date: today() }));
+    await waitFor(() => expect(adminService.getDispatchRouteGeometry).toHaveBeenCalledWith(6, { date: today() }));
   });
 
   it('feeds the fetched geometry to OperationsMap keyed by driver id', async () => {
@@ -284,5 +290,76 @@ describe('Dispatch page route geometry (fetched for every visible route)', () =>
 
     await waitFor(() => expect(adminService.setDispatchStops).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(adminService.getDispatchRouteGeometry).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe('Dispatch page route geometry stays in step with the stop set', () => {
+  // The polyline is the first thing an admin reads the city from, and it was
+  // the last thing to notice a reassignment. `['dispatchRouteGeometry',
+  // driverId]` never polls and is only invalidated by this page's OWN five
+  // mutations, so a driver change made anywhere else — the Delivery page's
+  // reassign modal, a bulk action, a driver claiming from the staff bot, a
+  // second admin's browser — left a real, solid road path drawn through stops
+  // the driver no longer had, for as long as the tab stayed open. The snapshot
+  // poll corrected the panels underneath it, which made the map the only
+  // surface still lying.
+  //
+  // Keying geometry on the stop set rather than the driver alone makes the
+  // 30-second snapshot poll the refresh trigger: new stops => new key => fetch.
+  // `setQueryData` here IS that poll landing — the same cache write react-query
+  // performs when the interval refetch returns changed data, without depending
+  // on timer faking inside jsdom.
+  const renderPageWithClient = () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter><Dispatch /></MemoryRouter>
+      </QueryClientProvider>,
+    );
+    return qc;
+  };
+
+  const withStops = (stops) => ({
+    data: { ...SNAPSHOT.data, routes: [{ ...SNAPSHOT.data.routes[0], stops }] },
+  });
+
+  it('re-fetches geometry when a poll drops a stop from the route, with no local mutation', async () => {
+    const qc = renderPageWithClient();
+    await screen.findByTestId('stop-row-22');
+    await waitFor(() => expect(adminService.getDispatchRouteGeometry).toHaveBeenCalledTimes(1));
+
+    const [snapshotQuery] = qc.getQueryCache().findAll({ queryKey: ['dispatchSnapshot'] });
+    qc.setQueryData(snapshotQuery.queryKey, withStops([SNAPSHOT.data.routes[0].stops[0]]));
+
+    await waitFor(() => expect(screen.queryByTestId('stop-row-22')).toBeNull());
+    await waitFor(() => expect(adminService.getDispatchRouteGeometry).toHaveBeenCalledTimes(2));
+  });
+
+  it('re-fetches geometry when a poll only re-sequences the same stops', async () => {
+    // A pure reorder — same two deliveries, swapped. The drawn path genuinely
+    // differs, so a key that ignored sequence would keep the old polyline.
+    const qc = renderPageWithClient();
+    await screen.findByTestId('stop-row-22');
+    await waitFor(() => expect(adminService.getDispatchRouteGeometry).toHaveBeenCalledTimes(1));
+
+    const [snapshotQuery] = qc.getQueryCache().findAll({ queryKey: ['dispatchSnapshot'] });
+    const [first, second] = SNAPSHOT.data.routes[0].stops;
+    qc.setQueryData(snapshotQuery.queryKey, withStops([second, first]));
+
+    await waitFor(() => expect(adminService.getDispatchRouteGeometry).toHaveBeenCalledTimes(2));
+  });
+
+  it('does not re-fetch geometry when a poll changes nothing about the stops', async () => {
+    // The counterweight: the endpoint calls a paid routing provider, and the
+    // board polls every 30 seconds. An identical stop set must reuse the cache.
+    const qc = renderPageWithClient();
+    await screen.findByTestId('stop-row-22');
+    await waitFor(() => expect(adminService.getDispatchRouteGeometry).toHaveBeenCalledTimes(1));
+
+    const [snapshotQuery] = qc.getQueryCache().findAll({ queryKey: ['dispatchSnapshot'] });
+    qc.setQueryData(snapshotQuery.queryKey, withStops([...SNAPSHOT.data.routes[0].stops]));
+
+    await waitFor(() => expect(screen.getByTestId('stop-row-22')).toBeInTheDocument());
+    expect(adminService.getDispatchRouteGeometry).toHaveBeenCalledTimes(1);
   });
 });

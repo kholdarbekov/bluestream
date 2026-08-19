@@ -418,20 +418,49 @@ def optimize_daily_delivery_routes():
     try:
         logger.info("Optimizing daily delivery routes")
 
-        # Get all active drivers with pending deliveries
-        active_drivers = (
+        # Every driver with work to sequence, PLUS every driver holding a route
+        # row for today.
+        #
+        # The second half is not redundant. Starting from the deliveries alone
+        # meant the sweep could only ever find drivers who still had some — so
+        # the one driver guaranteed to need repair, the one whose stops were
+        # all reassigned away and whose stored sequence therefore describes
+        # nobody's work, was precisely the one it could never reach. Their
+        # phantom route survived every nightly run.
+        #
+        # `ACTIVE_DELIVERY_STATUSES` rather than a hand-listed trio: ARRIVED is
+        # an active status everywhere else in the routing code and was missing
+        # here, so a driver whose last remaining stop was ARRIVED got skipped too.
+        from business_app.models.delivery import DeliveryRoute
+        from business_app.services.route_optimization_service import (
+            ACTIVE_DELIVERY_STATUSES,
+            _driver_day_start_utc,
+        )
+
+        with_active_work = (
             db.session.query(Delivery.delivery_person_id)
             .filter(
-                Delivery.status.in_([DeliveryStatus.ASSIGNED, DeliveryStatus.IN_TRANSIT, DeliveryStatus.PICKED_UP]),
+                Delivery.status.in_(ACTIVE_DELIVERY_STATUSES),
                 Delivery.delivery_person_id.isnot(None),
             )
             .distinct()
-            .all()
+        )
+        with_todays_route = (
+            db.session.query(DeliveryRoute.delivery_person_id)
+            .filter(DeliveryRoute.route_date >= _driver_day_start_utc())
+            .distinct()
+        )
+        # Deduplicated in Python, not by SQL UNION: the two queries are already
+        # cheap and indexed, and a stable, sorted order keeps the task log
+        # readable and the enqueue order deterministic.
+        active_drivers = sorted(
+            {driver_id for (driver_id,) in with_active_work.all()}
+            | {driver_id for (driver_id,) in with_todays_route.all() if driver_id is not None}
         )
 
         optimized_count = 0
 
-        for (driver_id,) in active_drivers:
+        for driver_id in active_drivers:
             try:
                 optimize_driver_route_task.delay(driver_id)
                 optimized_count += 1
@@ -744,9 +773,19 @@ def reschedule_failed_delivery_task(self, delivery_id: int):
             hour=delivery.estimated_delivery_time.hour, minute=delivery.estimated_delivery_time.minute
         )
 
-        # Clear driver assignment for reassignment
+        # Clear driver assignment for reassignment — and with it the stop's
+        # place in that driver's planned sequence. This path writes the
+        # ownership column directly rather than through an assignment SSOT, so
+        # without the second line the delivery stays listed on the old route
+        # while auto-assign hands it to somebody else, and it is drawn on two
+        # drivers' routes at once.
+        previous_driver_id = delivery.delivery_person_id
         delivery.delivery_person_id = None
         delivery.updated_at = datetime.now(timezone.utc)
+        if previous_driver_id:
+            from business_app.services.route_optimization_service import RouteOptimizationService
+
+            RouteOptimizationService.drop_from_route(previous_driver_id, delivery.id)
 
         db.session.commit()
 

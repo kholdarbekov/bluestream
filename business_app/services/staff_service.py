@@ -1044,9 +1044,18 @@ class StaffService:
 
             BottleTrackingService().unbind_order(delivery.order.id)
 
-        # The previous driver lost a delivery — refresh their cached workload.
+        # The previous driver lost a delivery — refresh their cached workload,
+        # and take the stop off their planned sequence. Without the second half
+        # the delivery was simultaneously offered in the unassigned pool (which
+        # reads live ownership) and numbered as a stop on that driver's route
+        # (which read `optimized_order`), so assigning it from the pool looked
+        # like a duplicate rather than a move. Same transaction as the rest of
+        # the return, and the same SSOT `DeliveryAssignmentService` uses.
         if old_driver_id:
+            from business_app.services.route_optimization_service import RouteOptimizationService
+
             StaffService.sync_active_delivery_counters([old_driver_id])
+            RouteOptimizationService.drop_from_route(old_driver_id, delivery.id)
 
         db.session.commit()
 
@@ -1422,6 +1431,19 @@ class StaffService:
                     cod_debt_limit_breached = (
                         pre_cod_debt_count is not None and pre_cod_debt_count < limit and post_cod_debt_count >= limit
                     )
+
+            # A stop that has reached a terminal status is no longer part of
+            # the driver's active set, so it must leave their planned sequence
+            # too — inside this transaction, and regardless of whether the
+            # re-optimize enqueued below ever runs. That enqueue is the wrong
+            # place to rely on: it is best-effort, it skips FAILED entirely,
+            # and `optimize_for_driver` bails without writing anything when the
+            # driver has no shared location. Membership is not something to
+            # leave to an optimiser that is allowed to decline.
+            if delivery.delivery_person_id and delivery.status not in StaffService.ACTIVE_DELIVERY_STATUSES:
+                from business_app.services.route_optimization_service import RouteOptimizationService
+
+                RouteOptimizationService.drop_from_route(delivery.delivery_person_id, delivery.id)
 
             db.session.commit()
         except Exception:

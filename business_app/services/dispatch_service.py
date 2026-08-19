@@ -31,6 +31,7 @@ from business_app.models.order import Order, OrderItem
 from business_app.models.user import User, UserAddress
 from business_app.serializers.order_serializers import summarize_order_items
 from business_app.services.route_optimization_service import (
+    ACTIVE_DELIVERY_STATUSES,
     RouteOptimizationService,
     _driver_day_start_utc,
 )
@@ -137,7 +138,7 @@ class DispatchService:
             "unmapped": unmapped,
             "pool": pool,
             "drivers": cls._drivers(),
-            "routes": cls._routes(),
+            "routes": cls._routes(target_date),
         }
 
     @classmethod
@@ -156,6 +157,31 @@ class DispatchService:
         return [point for _delivery_id, point in cls.route_stop_points(route)]
 
     @classmethod
+    def route_for_driver(cls, driver_id: int, target_date: Optional[date] = None) -> Optional[DeliveryRoute]:
+        """The route row the board is showing for this driver on `target_date`.
+
+        Exists so the geometry endpoint resolves the SAME row `_routes()` put in
+        the snapshot. It used to call `current_route()` directly — today's route,
+        unconditionally — while the snapshot beside it honoured the date picker,
+        so another day's orders were drawn under today's road path.
+
+        For today this delegates to `current_route`, deliberately: that is the
+        row the write side edits, and the reader must not develop its own
+        opinion about which one that is.
+        """
+        target_date = target_date or cls.today()
+        if target_date == cls.today():
+            return RouteOptimizationService().current_route(driver_id)
+        window_start, window_end = cls._route_window(target_date)
+        query = DeliveryRoute.query.filter(
+            DeliveryRoute.delivery_person_id == driver_id,
+            DeliveryRoute.route_date >= window_start,
+        )
+        if window_end is not None:
+            query = query.filter(DeliveryRoute.route_date < window_end)
+        return query.order_by(DeliveryRoute.created_at.desc()).first()
+
+    @classmethod
     def route_stop_points(cls, route: DeliveryRoute) -> List[Tuple[int, Tuple[float, float]]]:
         """The same resolved stops as `route_stop_coordinates`, but each one
         still carrying the delivery it belongs to.
@@ -168,23 +194,73 @@ class DispatchService:
         told which stops actually made it in. Re-deriving that by zipping
         against `optimized_order` gets it silently wrong on exactly the routes
         that have an ungeocoded stop.
-        """
-        if not route.optimized_order:
-            return []
 
+        Membership comes from ownership, not from `optimized_order` — see
+        `_sequence_active_stops`. Without that, the polyline, `distance_km`,
+        `duration_minutes` and every per-leg figure were measured over stops
+        the driver no longer had.
+        """
         deliveries = (
             Delivery.query.options(joinedload(Delivery.order).joinedload(Order.delivery_address))
-            .filter(Delivery.id.in_(route.optimized_order))
+            .filter(
+                Delivery.delivery_person_id == route.delivery_person_id,
+                Delivery.status.in_(ACTIVE_DELIVERY_STATUSES),
+            )
             .all()
         )
-        by_id = {d.id: d for d in deliveries}
         stops: List[Tuple[int, Tuple[float, float]]] = []
-        for delivery_id in route.optimized_order:
-            delivery = by_id.get(delivery_id)
-            address = delivery.order.delivery_address if delivery and delivery.order else None
+        for delivery in cls._sequence_active_stops(deliveries, route.optimized_order):
+            address = delivery.order.delivery_address if delivery.order else None
             if address and address.latitude is not None and address.longitude is not None:
-                stops.append((delivery_id, (float(address.latitude), float(address.longitude))))
+                stops.append((delivery.id, (float(address.latitude), float(address.longitude))))
         return stops
+
+    @staticmethod
+    def _sequence_active_stops(
+        deliveries: List[Delivery], optimized_order, *, include_unsequenced: bool = True
+    ) -> List[Delivery]:
+        """Order a driver's ACTIVE deliveries by their slot in `optimized_order`.
+
+        The one place the dispatch read model reconciles its two inputs, and
+        the reason they can no longer contradict each other:
+
+        * MEMBERSHIP is `deliveries` — rows already filtered on
+          `delivery_person_id` + `ACTIVE_DELIVERY_STATUSES`, the same
+          definition `RouteOptimizationService.active_deliveries` uses and
+          therefore the same one `RouteEditService.set_stop_order` validates a
+          save against. A read model that offered a stop the write guard
+          rejects made every Save on that route 409 forever.
+        * SEQUENCE is `optimized_order` — a plain JSON id list with no foreign
+          key and no write trigger, maintained by only one of the ~10 paths
+          that can change ownership. Trusted for ordering, never for
+          membership.
+
+        Consequences of that split, both load-bearing: an id left behind in
+        the list after the delivery moved to another driver, was returned to
+        the pool, or finished, is simply not in `deliveries` and disappears;
+        and a delivery the driver owns but that nothing has sequenced yet
+        (three of the four assign paths never splice into the target route) is
+        appended rather than hidden.
+
+        Unsequenced stops sort by `id` so the tail is stable across polls —
+        the board refreshes every 30 seconds and rows must not shuffle.
+        `include_unsequenced=False` drops that tail instead, for a route row
+        that is not describing the plan currently being executed.
+        """
+        position_of = {}
+        for index, raw_id in enumerate(optimized_order or []):
+            # The legacy `PUT /admin/delivery-routes/<id>` writes this column
+            # unvalidated, so it can hold anything JSON can encode.
+            try:
+                position_of.setdefault(int(raw_id), index)
+            except (TypeError, ValueError):
+                continue
+        if not include_unsequenced:
+            deliveries = [d for d in deliveries if d.id in position_of]
+        return sorted(
+            deliveries,
+            key=lambda d: (0, position_of[d.id]) if d.id in position_of else (1, d.id),
+        )
 
     # ----- internals --------------------------------------------------------
 
@@ -358,21 +434,50 @@ class DispatchService:
         return _driver_day_start_utc()
 
     @classmethod
-    def _routes(cls) -> List[Dict[str, Any]]:
-        route_window_start = cls._route_window_start_utc()
-        route_rows = (
-            DeliveryRoute.query.options(joinedload(DeliveryRoute.overridden_by_user))
-            .filter(DeliveryRoute.route_date >= route_window_start)
-            .order_by(DeliveryRoute.delivery_person_id, DeliveryRoute.created_at.desc())
-            .all()
+    def _route_window(cls, target_date: date):
+        """The `route_date` range that belongs to the selected day.
+
+        TODAY is deliberately the open-ended `>= start` window and NOT a bounded
+        one, because for today this method has to select the exact row
+        `RouteOptimizationService.current_route()` selects — that is the
+        reader/writer invariant `_route_window_start_utc` exists to protect, and
+        `current_route` has no upper bound. Bounding today's window would be a
+        second, subtly different definition of "today's route", which is the
+        class of divergence this whole change is undoing.
+
+        Any OTHER day is a closed interval: nothing writes routes for it, so
+        there is no writer to agree with, and an open-ended window there would
+        simply re-admit today's rows — which is exactly what made the date
+        picker draw today's polylines over another day's orders.
+        """
+        start, end = cls._day_bounds(target_date)
+        if target_date == cls.today():
+            return cls._route_window_start_utc(), None
+        return start, end
+
+    @classmethod
+    def _routes(cls, target_date: Optional[date] = None) -> List[Dict[str, Any]]:
+        target_date = target_date or cls.today()
+        is_today = target_date == cls.today()
+        window_start, window_end = cls._route_window(target_date)
+        query = DeliveryRoute.query.options(joinedload(DeliveryRoute.overridden_by_user)).filter(
+            DeliveryRoute.route_date >= window_start
         )
+        if window_end is not None:
+            query = query.filter(DeliveryRoute.route_date < window_end)
+        route_rows = query.order_by(DeliveryRoute.delivery_person_id, DeliveryRoute.created_at.desc()).all()
         # One route per driver: the newest row for the day wins, matching
         # RouteOptimizationService.current_route.
         newest: Dict[int, DeliveryRoute] = {}
         for row in route_rows:
             newest.setdefault(row.delivery_person_id, row)
 
-        all_ids = [did for row in newest.values() for did in (row.optimized_order or [])]
+        # Keyed on the DRIVERS, not on the union of their `optimized_order`
+        # lists: the id list answers "in what sequence", never "whose". One
+        # query either way, but this one cannot return a delivery that has
+        # since moved to somebody else, and it DOES return one the driver owns
+        # that nothing has sequenced yet.
+        driver_ids = list(newest.keys())
         deliveries = (
             Delivery.query.options(
                 joinedload(Delivery.order).joinedload(Order.user),
@@ -388,21 +493,35 @@ class DispatchService:
                 # time. Only the collection hop switches to `selectinload`.
                 joinedload(Delivery.order).selectinload(Order.order_items).joinedload(OrderItem.product),
             )
-            .filter(Delivery.id.in_(all_ids))
+            .filter(
+                Delivery.delivery_person_id.in_(driver_ids),
+                Delivery.status.in_(ACTIVE_DELIVERY_STATUSES),
+            )
             .all()
-            if all_ids
+            if driver_ids
             else []
         )
-        by_id = {d.id: d for d in deliveries}
+        by_driver: Dict[int, List[Delivery]] = {}
+        for delivery in deliveries:
+            by_driver.setdefault(delivery.delivery_person_id, []).append(delivery)
 
         routes = []
         for driver_id, row in newest.items():
             pinned = {str(k): int(v) for k, v in (row.pinned_stops or {}).items()}
             stops = []
-            for position, delivery_id in enumerate(row.optimized_order or []):
-                delivery = by_id.get(delivery_id)
-                if delivery is None:
-                    continue
+            for position, delivery in enumerate(
+                cls._sequence_active_stops(
+                    by_driver.get(driver_id, []),
+                    row.optimized_order,
+                    # Appending an owned-but-unsequenced stop is a statement
+                    # about the plan being executed right now — three of the
+                    # four assign paths lag the sequence, and today's board must
+                    # not hide live work. A row from another day carries no such
+                    # promise, and growing it with today's deliveries would be a
+                    # fresh way of showing one day's work under another's date.
+                    include_unsequenced=is_today,
+                )
+            ):
                 order = delivery.order
                 address = order.delivery_address if order else None
                 stops.append(
@@ -429,14 +548,15 @@ class DispatchService:
                     "overridden_at": row.overridden_at.isoformat() if row.overridden_at else None,
                     "total_distance_km": row.total_distance_km,
                     "estimated_duration_minutes": row.estimated_duration_minutes,
-                    # `RouteEditService` sets `extra_data["metrics_stale"]`
-                    # whenever a stop moves on/off this route or the sequence
-                    # is hand-edited without a fresh matrix figure (see
-                    # route_edit_service.py `_refresh_metrics` /
-                    # `_mark_metrics_stale`) — the distance/duration above can
-                    # describe a route that no longer matches `stops`. This
-                    # must reach the admin panel so it can qualify the number
-                    # instead of showing it as confidently current.
+                    # `extra_data["metrics_stale"]` is set whenever a stop moves
+                    # on/off this route (RouteOptimizationService's
+                    # `mark_metrics_stale`, called from every ownership change)
+                    # or the sequence is hand-edited without a fresh matrix
+                    # figure (route_edit_service.py `_refresh_metrics`) — the
+                    # distance/duration above can describe a route that no
+                    # longer matches `stops`. This must reach the admin panel so
+                    # it can qualify the number instead of showing it as
+                    # confidently current.
                     "metrics_stale": bool((row.extra_data or {}).get("metrics_stale", False)),
                     "start_lat": row.start_location_lat,
                     "start_lng": row.start_location_lng,

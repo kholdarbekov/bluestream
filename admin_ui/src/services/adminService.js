@@ -283,8 +283,8 @@ class AdminService {
     return response.data;
   }
 
-  async getDispatchRouteGeometry(driverId) {
-    const response = await api.get(`/admin/dispatch/routes/${driverId}/geometry`);
+  async getDispatchRouteGeometry(driverId, params = {}) {
+    const response = await api.get(`/admin/dispatch/routes/${driverId}/geometry`, { params });
     return response.data;
   }
 

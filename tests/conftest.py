@@ -68,21 +68,6 @@ def _force_nonzero_redis_db(url: str) -> str:
     return f"{scheme}://{host_part}/15"
 
 
-os.environ['REDIS_URL'] = _force_nonzero_redis_db(os.environ.get('REDIS_URL', 'redis://redis:6379/15'))
-
-# Add project root to Python path
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-
-from business_app import create_app
-from business_app.models.user import User
-from business_app.models.product import Product, ProductCategory
-from business_app.models.order import Order
-from business_app.models.payment import Payment
-from business_app.models.delivery import DeliveryPerson
-from shared.enums import UserRole, UserType, OrderStatus, PaymentStatus, PaymentMethod
-from business_app.utils.password_security import hash_password
-
-
 def _per_worker_redis_url(base_url: str) -> str:
     """Allocate a unique Redis DB per pytest-xdist worker (TST-006).
 
@@ -109,6 +94,37 @@ def _per_worker_redis_url(base_url: str) -> str:
     scheme, rest = scheme_split
     host_part = rest.rsplit('/', 1)[0] if '/' in rest else rest
     return f"{scheme}://{host_part}/{db_index}"
+
+
+# Applied to the ENVIRONMENT, not only to `app.config`, and before business_app
+# is imported below.
+#
+# `business_app/__init__.py` builds its module-level `redis_client` at import
+# time straight from `os.environ['REDIS_URL']`, and that client — not
+# `app.config['REDIS_URL']` — is what application code actually reads and
+# writes (the dispatch geometry cache, rate limiters, counters). Mapping only
+# the config left the two pointing at different databases: every worker's app
+# wrote to the shared DB 15 while `reset_redis_state` dutifully flushed a
+# per-worker DB that nothing used. Cached values therefore survived across
+# tests AND leaked between concurrently running workers, which is exactly the
+# cross-test contamination TST-006 exists to prevent — it surfaced as
+# order-dependent failures in the dispatch geometry tests, where one test's
+# cached provider response was served to another.
+os.environ['REDIS_URL'] = _per_worker_redis_url(
+    _force_nonzero_redis_db(os.environ.get('REDIS_URL', 'redis://redis:6379/15'))
+)
+
+# Add project root to Python path
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+
+from business_app import create_app
+from business_app.models.user import User
+from business_app.models.product import Product, ProductCategory
+from business_app.models.order import Order
+from business_app.models.payment import Payment
+from business_app.models.delivery import DeliveryPerson
+from shared.enums import UserRole, UserType, OrderStatus, PaymentStatus, PaymentMethod
+from business_app.utils.password_security import hash_password
 
 
 @pytest.fixture(scope='session')

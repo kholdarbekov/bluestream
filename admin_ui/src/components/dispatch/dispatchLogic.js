@@ -146,3 +146,17 @@ export const formatLeg = (leg) => {
   if (!Number.isFinite(km) || !Number.isFinite(min)) return null;
   return `${km.toFixed(1)} km · ${Math.round(min)} min`;
 };
+
+/**
+ * The identity of the path a route draws: its stop sequence.
+ *
+ * Used as the trailing element of the `dispatchRouteGeometry` query key so the
+ * cached polyline is bound to the stops it was measured over. Keyed by driver
+ * alone, geometry only ever refreshed when THIS page mutated something — a
+ * reassignment made on the Delivery page, by a bulk action, by a driver
+ * claiming in the staff bot, or in another admin's browser left the old road
+ * path drawn while the 30s snapshot poll quietly corrected the panels beneath
+ * it. Sequence is included, not just membership: a pure reorder changes the
+ * path the driver actually drives.
+ */
+export const routeStopSignature = (stops) => (stops || []).map((s) => s.delivery_id).join('-');

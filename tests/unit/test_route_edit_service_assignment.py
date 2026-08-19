@@ -128,13 +128,11 @@ class TestMoveStop:
     def test_removes_the_stop_and_its_pin_from_the_source_route(
         self, db, assigned_delivery, admin_user, second_delivery_driver
     ):
-        from business_app.services.delivery_assignment_service import AssignmentResult
-
         source_driver_id = assigned_delivery.delivery_person_id
-        with patch(
-            "business_app.services.route_edit_service.DeliveryAssignmentService.assign_driver",
-            return_value=AssignmentResult(delivery=assigned_delivery, history_id=1, changed=True),
-        ), patch("business_app.services.route_edit_service.notify_route_updated"), patch(
+        # The assignment SSOT is NOT mocked here: `assign_driver` is what moves
+        # a stop between route rows now, so a stub would leave this asserting
+        # that the mock did nothing. Only the outbound notifications are patched.
+        with patch("business_app.services.route_edit_service.notify_route_updated"), patch(
             "business_app.services.route_edit_service.notify_staff_order_reassigned"
         ):
             RouteEditService.move_stop(
@@ -203,13 +201,11 @@ class TestMoveStop:
     def test_appends_when_no_position_is_given(
         self, db, assigned_delivery, admin_user, second_delivery_driver, target_route_with_two_stops
     ):
-        from business_app.services.delivery_assignment_service import AssignmentResult
-
         target_route, target_ids = target_route_with_two_stops
-        with patch(
-            "business_app.services.route_edit_service.DeliveryAssignmentService.assign_driver",
-            return_value=AssignmentResult(delivery=assigned_delivery, history_id=1, changed=True),
-        ), patch("business_app.services.route_edit_service.notify_route_updated"), patch(
+        # The assignment SSOT is NOT mocked here: `assign_driver` is what moves
+        # a stop between route rows now, so a stub would leave this asserting
+        # that the mock did nothing. Only the outbound notifications are patched.
+        with patch("business_app.services.route_edit_service.notify_route_updated"), patch(
             "business_app.services.route_edit_service.notify_staff_order_reassigned"
         ):
             RouteEditService.move_stop(
@@ -279,14 +275,12 @@ class TestMoveStop:
     def test_marks_metrics_stale_on_both_the_source_and_target_route(
         self, db, assigned_delivery, admin_user, second_delivery_driver, target_route_with_two_stops
     ):
-        from business_app.services.delivery_assignment_service import AssignmentResult
-
         target_route, _target_ids = target_route_with_two_stops
         source_driver_id = assigned_delivery.delivery_person_id
-        with patch(
-            "business_app.services.route_edit_service.DeliveryAssignmentService.assign_driver",
-            return_value=AssignmentResult(delivery=assigned_delivery, history_id=1, changed=True),
-        ), patch("business_app.services.route_edit_service.notify_route_updated"), patch(
+        # The assignment SSOT is NOT mocked here: `assign_driver` is what moves
+        # a stop between route rows now, so a stub would leave this asserting
+        # that the mock did nothing. Only the outbound notifications are patched.
+        with patch("business_app.services.route_edit_service.notify_route_updated"), patch(
             "business_app.services.route_edit_service.notify_staff_order_reassigned"
         ):
             RouteEditService.move_stop(
@@ -364,10 +358,9 @@ class TestReturnStopToPool:
 
     def test_drops_the_stop_from_the_route(self, db, assigned_delivery, admin_user):
         driver_id = assigned_delivery.delivery_person_id
-        with patch(
-            "business_app.services.route_edit_service.StaffService.return_delivery_to_pool",
-            return_value=assigned_delivery,
-        ), patch("business_app.services.route_edit_service.notify_route_updated"), patch(
+        # `return_delivery_to_pool` is the SSOT that now clears the route as
+        # part of clearing the owner, so it runs for real here.
+        with patch("business_app.services.route_edit_service.notify_route_updated"), patch(
             "business_app.services.route_edit_service.notify_staff_order_unassigned"
         ):
             RouteEditService.return_stop_to_pool(delivery_id=assigned_delivery.id, actor_id=admin_user.id)
@@ -377,10 +370,9 @@ class TestReturnStopToPool:
 
     def test_marks_the_source_routes_metrics_stale(self, db, assigned_delivery, admin_user):
         driver_id = assigned_delivery.delivery_person_id
-        with patch(
-            "business_app.services.route_edit_service.StaffService.return_delivery_to_pool",
-            return_value=assigned_delivery,
-        ), patch("business_app.services.route_edit_service.notify_route_updated"), patch(
+        # `return_delivery_to_pool` is the SSOT that now clears the route as
+        # part of clearing the owner, so it runs for real here.
+        with patch("business_app.services.route_edit_service.notify_route_updated"), patch(
             "business_app.services.route_edit_service.notify_staff_order_unassigned"
         ):
             RouteEditService.return_stop_to_pool(delivery_id=assigned_delivery.id, actor_id=admin_user.id)

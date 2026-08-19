@@ -55,18 +55,22 @@ def _delivery(db, user, *, order_number, lat, lng, driver_id):
     return delivery
 
 
-def _route(db, driver_id, delivery_ids):
-    db.session.add(
-        DeliveryRoute(
-            name="r",
-            delivery_person_id=driver_id,
-            start_location_lat=41.30,
-            start_location_lng=69.24,
-            route_date=datetime.now(timezone.utc),
-            optimized_order=delivery_ids,
-        )
+def _route_row(db, driver_id, delivery_ids):
+    route = DeliveryRoute(
+        name="r",
+        delivery_person_id=driver_id,
+        start_location_lat=41.30,
+        start_location_lng=69.24,
+        route_date=datetime.now(timezone.utc),
+        optimized_order=delivery_ids,
     )
+    db.session.add(route)
     db.session.commit()
+    return route
+
+
+def _route(db, driver_id, delivery_ids):
+    _route_row(db, driver_id, delivery_ids)
 
 
 def _get(client, headers, driver_id):
@@ -211,3 +215,125 @@ class TestLegsAreNeverInvented:
 
         assert data["legs"] is None
         assert data["leg_delivery_ids"] == []
+
+
+@pytest.mark.integration
+class TestGeometryCacheIsKeyedByStops:
+    """The cached payload names its stops, so the key must name them too.
+
+    `leg_delivery_ids` is stored INSIDE the cached payload and returned verbatim
+    on a hit, but the cache key hashed only the coordinate sequence — the ids
+    were stripped before the digest. Any route change that leaves the coordinate
+    list identical therefore reused the previous id mapping for the full
+    15-minute TTL, and `leg[k]` is what the panel prints beside stop `k`.
+
+    Two deliveries to the same address is not a corner case in a water
+    business: one building, two flats, one round.
+    """
+
+    def _measured(self):
+        return patch(
+            "business_app.api.admin_dispatch.MapsService.get_route",
+            return_value={
+                "geometry": [[41.30, 69.24], [41.31, 69.25]],
+                "legs": [
+                    {"distance_km": 4.2, "duration_minutes": 11.0},
+                    {"distance_km": 1.8, "duration_minutes": 5.0},
+                ],
+            },
+        )
+
+    def test_reordering_two_stops_at_one_address_does_not_serve_the_old_mapping(
+        self, client, db, admin_auth_headers, delivery_driver, sample_user
+    ):
+        first = _delivery(db, sample_user, order_number="ORD-SAMEADDR-1", lat=41.31, lng=69.25,
+                          driver_id=delivery_driver.id)
+        second = _delivery(db, sample_user, order_number="ORD-SAMEADDR-2", lat=41.31, lng=69.25,
+                           driver_id=delivery_driver.id)
+        route = _route_row(db, delivery_driver.id, [first.id, second.id])
+
+        with self._measured():
+            assert _get(client, admin_auth_headers, delivery_driver.id)["leg_delivery_ids"] == [
+                first.id, second.id
+            ]
+
+        route.optimized_order = [second.id, first.id]
+        db.session.commit()
+
+        with self._measured():
+            data = _get(client, admin_auth_headers, delivery_driver.id)
+
+        assert data["leg_delivery_ids"] == [second.id, first.id]
+
+    def test_an_unchanged_route_is_still_served_from_cache(
+        self, client, db, admin_auth_headers, delivery_driver, sample_user
+    ):
+        """The counterweight: the key must not become so specific that every
+        poll pays a routing provider. Nothing changed, so nothing is re-measured.
+        """
+        delivery = _delivery(db, sample_user, order_number="ORD-SAMEADDR-3", lat=41.31, lng=69.25,
+                             driver_id=delivery_driver.id)
+        _route(db, delivery_driver.id, [delivery.id])
+
+        with self._measured():
+            assert _get(client, admin_auth_headers, delivery_driver.id)["cached"] is False
+            assert _get(client, admin_auth_headers, delivery_driver.id)["cached"] is True
+
+
+@pytest.mark.integration
+class TestGeometryFollowsTheSelectedDay:
+    """The polyline endpoint resolved the driver's route with
+    `current_route(driver_id)` — today's, always — while the snapshot beside it
+    took a `date`. Picking another day therefore redrew that day's orders under
+    today's road path.
+    """
+
+    def _measured(self):
+        return patch(
+            "business_app.api.admin_dispatch.MapsService.get_route",
+            return_value={
+                "geometry": [[41.30, 69.24], [41.31, 69.25]],
+                "legs": [{"distance_km": 4.2, "duration_minutes": 11.0}],
+            },
+        )
+
+    def test_asking_for_another_day_does_not_return_todays_route(
+        self, client, db, admin_auth_headers, delivery_driver, sample_user
+    ):
+        from datetime import date, timedelta
+
+        today_stop = _delivery(db, sample_user, order_number="ORD-DAY-1", lat=41.31, lng=69.25,
+                               driver_id=delivery_driver.id)
+        _route(db, delivery_driver.id, [today_stop.id])
+
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        with self._measured():
+            response = client.get(
+                f"/api/v1/admin/dispatch/routes/{delivery_driver.id}/geometry?date={yesterday}",
+                headers=admin_auth_headers,
+            )
+
+        assert response.status_code == 200
+        assert response.get_json()["data"]["geometry"] is None
+        assert response.get_json()["data"]["leg_delivery_ids"] == []
+
+    def test_omitting_the_day_still_means_today(
+        self, client, db, admin_auth_headers, delivery_driver, sample_user
+    ):
+        stop = _delivery(db, sample_user, order_number="ORD-DAY-2", lat=41.31, lng=69.25,
+                         driver_id=delivery_driver.id)
+        _route(db, delivery_driver.id, [stop.id])
+
+        with self._measured():
+            data = _get(client, admin_auth_headers, delivery_driver.id)
+
+        assert data["leg_delivery_ids"] == [stop.id]
+
+    def test_a_malformed_day_is_a_400_rather_than_silently_meaning_today(
+        self, client, db, admin_auth_headers, delivery_driver
+    ):
+        response = client.get(
+            f"/api/v1/admin/dispatch/routes/{delivery_driver.id}/geometry?date=not-a-date",
+            headers=admin_auth_headers,
+        )
+        assert response.status_code == 400

@@ -99,6 +99,20 @@ describe('OperationsMap layers', () => {
     expect(JSON.parse(polyline.dataset.positions)).toEqual(geometry[5].geometry);
   });
 
+  it('draws no route line at all once a route has lost every stop', () => {
+    // The stale-polyline half of the reassignment bug. `geometry` is a cached
+    // payload measured over stops the driver had at fetch time; `route.stops`
+    // is what they have now. Deciding "this is a real road path" from the
+    // cached payload ALONE meant an emptied route kept a full, solid,
+    // multi-kilometre path drawn across the city — the fallback branch
+    // correctly collapses to a single depot point and bails, so only the
+    // geometry branch could produce this, and only by outliving its stops.
+    const geometry = { 5: { geometry: [[41.29, 69.24], [41.295, 69.23], [41.3, 69.2]], approximate: false } };
+    const emptied = [{ ...ROUTES[0], stops: [] }];
+    render(<OperationsMap {...baseProps} routes={emptied} geometry={geometry} />);
+    expect(screen.queryAllByTestId('polyline')).toHaveLength(0);
+  });
+
   it('hides drivers and routes when the drivers layer is off', () => {
     render(<OperationsMap {...baseProps} visibleLayers={{ customers: false, orders: true, drivers: false }} />);
     expect(screen.queryAllByTestId('polyline')).toHaveLength(0);

@@ -153,6 +153,25 @@ class DeliveryAssignmentService:
             affected.append(old_person_id)
         StaffService.sync_active_delivery_counters(affected)
 
+        # 11b. Route bookkeeping for the same two drivers.
+        #
+        # `DeliveryRoute.optimized_order` is the other place a delivery's owner
+        # is written down. It has no foreign key and no trigger, so a delivery
+        # that changes hands here used to stay listed on the losing driver's
+        # planned sequence indefinitely — the same order rendered under two
+        # drivers on the dispatch board, both polylines drawn through it, and
+        # the losing driver's route became unsaveable (the save guard checks
+        # real ownership, so its `expected_delivery_ids` could never match).
+        #
+        # Done HERE, beside the counter sync and inside the same transaction,
+        # for the same reason the counter sync is: this is the one function
+        # every assign path goes through. Doing it in the callers is what
+        # produced the divergence — only one of them ever did.
+        from business_app.services.route_optimization_service import RouteOptimizationService
+
+        RouteOptimizationService.drop_from_route(old_person_id, delivery.id)
+        RouteOptimizationService.splice_into_route(driver_user_id, delivery.id)
+
         # 12. Commit.
         db.session.commit()
 

@@ -366,6 +366,21 @@ class AdminDeliveryService:
         if new_status in {DeliveryStatus.RETURNED, DeliveryStatus.SCHEDULED, DeliveryStatus.PENDING}:
             delivery.delivery_person_id = None
 
+        # Releasing the driver is only half of releasing the stop: the other
+        # half is the planned sequence, which names the delivery by id and
+        # notices nothing. Left behind, the delivery keeps a numbered slot on
+        # the ex-driver's dispatch route and a vertex on their polyline —
+        # doubly invisible for RETURNED, where the parent order also leaves
+        # `ACTIVE_ORDER_STATUSES` and disappears from the order layer.
+        #
+        # The same call the assignment SSOTs make. This path writes
+        # `delivery_person_id` directly rather than through them, so it needs
+        # to be said here too.
+        if previous_driver_id and delivery.delivery_person_id != previous_driver_id:
+            from business_app.services.route_optimization_service import RouteOptimizationService
+
+            RouteOptimizationService.drop_from_route(previous_driver_id, delivery.id)
+
         if new_status == DeliveryStatus.RETURNED:
             AdminDeliveryService._release_driver_workload(delivery, driver_id=previous_driver_id)
             if delivery.order:
@@ -519,7 +534,17 @@ class AdminDeliveryService:
             return "medium"
         if delivery.scheduled_date:
             now = datetime.now(UTC)
-            if delivery.scheduled_date <= now + timedelta(hours=2):
+            # `scheduled_date` is `DateTime(timezone=True)`, but a value still
+            # sitting in the identity map from an in-session write — or read
+            # back from a backend that drops tzinfo — arrives naive, and
+            # comparing it raises `TypeError: can't compare offset-naive and
+            # offset-aware datetimes` from inside a serializer, turning an
+            # ordinary admin status change into a 500. Assume UTC, which is
+            # what every writer in this codebase stores.
+            scheduled = delivery.scheduled_date
+            if scheduled.tzinfo is None:
+                scheduled = scheduled.replace(tzinfo=UTC)
+            if scheduled <= now + timedelta(hours=2):
                 return "medium"
         return "low"
 

@@ -22,7 +22,6 @@ from business_app.serializers.dispatch_serializers import (
 from business_app.services.dispatch_service import DispatchService
 from business_app.services.maps_service import MapsService
 from business_app.services.route_edit_service import RouteEditService, RouteStaleError
-from business_app.services.route_optimization_service import RouteOptimizationService
 from business_app.utils.api_responses import success_response, validation_error_response
 from business_app.utils.decorators import validate_admin_action
 from business_app.utils.error_handlers import handle_api_exception
@@ -85,7 +84,18 @@ def _no_geometry(driver_id: int, *, approximate: bool) -> dict:
 @validate_admin_action(["view_delivery", "manage_delivery"])
 def dispatch_route_geometry(driver_id):
     """Real road geometry for a driver's planned route."""
-    route = RouteOptimizationService().current_route(driver_id)
+    # Same `date` contract as the snapshot: the polyline layer and the panels it
+    # sits above must describe the same day, or the map draws today's road path
+    # over another day's orders.
+    raw_date = request.args.get("date")
+    target = None
+    if raw_date:
+        try:
+            target = date.fromisoformat(raw_date)
+        except ValueError:
+            return validation_error_response("date must be YYYY-MM-DD")
+
+    route = DispatchService.route_for_driver(driver_id, target)
     if route is None or not route.optimized_order:
         return success_response(data=_no_geometry(driver_id, approximate=False))
 
@@ -107,11 +117,20 @@ def dispatch_route_geometry(driver_id):
         return success_response(data=_no_geometry(driver_id, approximate=False))
 
     start = (route.start_location_lat, route.start_location_lng)
-    digest = hashlib.sha1(json.dumps([start] + points).encode("utf-8")).hexdigest()  # noqa: S324
+    # The digest covers the DELIVERY IDS as well as the coordinates, because
+    # `leg_delivery_ids` is stored inside the cached payload and returned
+    # verbatim on a hit — a key that could not tell two stop sets apart served
+    # one set's id mapping for the other's legs, and `leg[k]` is what the panel
+    # prints beside stop `k`. Coordinates alone are not an identity: two flats
+    # in one building geocode to the same point, so swapping them, or moving
+    # one to another driver and taking on a different order at the same
+    # address, produced an identical hash and a 15-minute-stale mapping.
+    digest = hashlib.sha1(  # noqa: S324
+        json.dumps([start, list(zip(leg_delivery_ids, points))]).encode("utf-8")
+    ).hexdigest()
     # `v2` because the cached payload SHAPE changed (it gained `legs` /
-    # `leg_delivery_ids`). The digest only covers the route's points, so
-    # without a prefix bump every driver whose route was already cached would
-    # keep being served a legless payload until the 15-minute TTL expired.
+    # `leg_delivery_ids`); a change to what the digest COVERS needs no bump,
+    # since it necessarily produces different keys for the same route.
     cache_key = f"dispatch:route_geom:v2:{driver_id}:{digest}"
 
     try:

@@ -220,9 +220,13 @@ class RouteEditService:
             allow_in_progress=True,
         )
 
-        if from_driver_id is not None:
-            cls._remove_from_route(from_driver_id, delivery_id)
-        cls._insert_into_route(to_driver_id, delivery_id, position)
+        # `assign_driver` now performs the route bookkeeping itself — it takes
+        # the stop off the losing driver's sequence and appends it to the
+        # target's — so there is nothing to repeat here. A dispatcher who
+        # dropped the stop at a specific slot is asking for one thing more than
+        # "it is on this route now", and only that difference is applied.
+        if position is not None:
+            cls._insert_into_route(to_driver_id, delivery_id, position)
 
         logger.info(
             "dispatch_stop_moved delivery=%s from=%s to=%s actor=%s position=%s",
@@ -270,8 +274,11 @@ class RouteEditService:
             notes="Returned to pool from the dispatch map",
         )
 
+        # `return_delivery_to_pool` takes the stop off the driver's sequence as
+        # part of the same transaction that clears the owner, so this path is
+        # left with only the two things it uniquely owns: telling the driver's
+        # bot its route changed, and telling them which order left them.
         if from_driver_id is not None:
-            cls._remove_from_route(from_driver_id, delivery_id)
             cls._notify_route_updated(from_driver_id)
             cls._enqueue(notify_staff_order_unassigned, old_telegram_id, order_info)
 
@@ -286,45 +293,24 @@ class RouteEditService:
 
     # ----- route bookkeeping ------------------------------------------------
 
-    @classmethod
-    def _remove_from_route(cls, driver_id: int, delivery_id: int) -> None:
-        route = RouteOptimizationService().current_route(driver_id)
-        if route is None:
-            return
-        surviving = [did for did in (route.optimized_order or []) if did != delivery_id]
-        route.optimized_order = surviving
-        route.pinned_stops = RouteOptimizationService.clamp_pins(route.pinned_stops, surviving)
-        cls._mark_metrics_stale(route)
-        db.session.commit()
+    # Route membership itself is `RouteOptimizationService.drop_from_route` /
+    # `splice_into_route` — the same methods `DeliveryAssignmentService` and
+    # `StaffService` call, so a stop moved from the dispatch map and one moved
+    # from the Delivery page take the identical path through the route rows.
+    # This service keeps only the one thing those SSOTs cannot do for it:
+    # honour an explicit drop position, and commit it (every other caller is
+    # already inside somebody else's transaction).
 
     @classmethod
     def _insert_into_route(cls, driver_id: int, delivery_id: int, position: Optional[int]) -> None:
-        """Splice a stop into the target route.
+        """Splice a stop into the target route at an admin-chosen slot.
 
         No route row yet means the driver has never been optimised today; the
         next optimisation run will build one from their active set, so there is
         nothing to splice into and nothing to fix.
         """
-        route = RouteOptimizationService().current_route(driver_id)
-        if route is None:
-            return
-        sequence = [did for did in (route.optimized_order or []) if did != delivery_id]
-        idx = len(sequence) if position is None else max(0, min(int(position), len(sequence)))
-        sequence.insert(idx, delivery_id)
-        route.optimized_order = sequence
-        route.pinned_stops = RouteOptimizationService.clamp_pins(route.pinned_stops, sequence)
-        cls._mark_metrics_stale(route)
+        RouteOptimizationService.splice_into_route(driver_id, delivery_id, position)
         db.session.commit()
-
-    @staticmethod
-    def _mark_metrics_stale(route: DeliveryRoute) -> None:
-        """A stop moving on or off a route invalidates its distance/duration
-        figures without a full re-solve. Flag them the same way
-        `_refresh_metrics` does for a hand-authored sequence — but without an
-        external matrix call: a move/return-to-pool must not depend on the
-        matrix provider being up. The UI reads `extra_data.metrics_stale`.
-        """
-        route.extra_data = {**(route.extra_data or {}), "metrics_stale": True}
 
     @staticmethod
     def _telegram_id_for(driver_id: Optional[int]) -> Optional[str]:

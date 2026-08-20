@@ -23,6 +23,7 @@ from business_app.services.cod_collect_ceiling import (
     place_widening_applies,
     resolve_collect_scope,
 )
+from business_app.utils.delivery_window import window_slot_label
 from business_app.utils.exceptions import ValidationError, NotFoundError, ForbiddenError, ConflictError
 from business_app.utils.geo_validation import ensure_within_delivery_zone
 from business_app.utils.user_search import build_name_match_clause
@@ -904,7 +905,14 @@ class StaffService:
                 Delivery.status.in_([DeliveryStatus.SCHEDULED, DeliveryStatus.PENDING]),
             )
 
-        query = query.order_by(Order.created_at.asc())
+        # Deadline first: an order with an explicit "until HH:MM" is a promise
+        # with a clock on it, so it outranks the open-ended ones regardless of
+        # age. NULLS LAST keeps anytime/after orders (no end time) behind the
+        # deadlines; created_at then preserves the old FIFO among equals.
+        query = query.order_by(
+            Order.delivery_window_end.asc().nullslast(),
+            Order.created_at.asc(),
+        )
 
         pagination = query.paginate(page=page, per_page=per_page, error_out=False)
 
@@ -2240,7 +2248,7 @@ class StaffService:
             delivery_person_id=None,
             status=DeliveryStatus.SCHEDULED,
             scheduled_date=order.delivery_date or datetime.now(timezone.utc),
-            scheduled_time_slot=order.delivery_time_slot or "09:00-12:00",
+            scheduled_time_slot=window_slot_label(order.delivery_window_start, order.delivery_window_end),
         )
         db.session.add(delivery)
 

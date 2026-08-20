@@ -116,7 +116,6 @@ def get_cart_estimate():
     cart_items = data.get("cart_items", [])
     delivery_address_id = data.get("delivery_address_id")
     delivery_date = data.get("delivery_date")
-    delivery_time_slot = data.get("delivery_time_slot")
     loyalty_points_used = data.get("loyalty_points_used", 0)
     promo_code = data.get("promo_code")
 
@@ -126,7 +125,6 @@ def get_cart_estimate():
         items=cart_items,
         delivery_address_id=delivery_address_id,
         delivery_date=delivery_date,
-        delivery_time_slot=delivery_time_slot,
         loyalty_points_used=loyalty_points_used,
         promo_code=promo_code,
     )

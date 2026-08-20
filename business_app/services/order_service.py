@@ -206,7 +206,8 @@ class OrderService:
             subscription_id=subscription.id if subscription is not None else None,
             is_subscription_order=subscription is not None,
             delivery_date=order_data.get("delivery_date"),
-            delivery_time_slot=order_data.get("delivery_time_slot"),
+            delivery_window_start=order_data.get("delivery_window_start"),
+            delivery_window_end=order_data.get("delivery_window_end"),
             delivery_notes=order_data.get("delivery_notes"),
             is_urgent=bool(order_data.get("is_urgent", False)),
             # Points redeem only via rewards; orders never consume points directly.
@@ -810,10 +811,9 @@ class OrderService:
                     order.updated_at = datetime.now(timezone.utc)
                     db.session.commit()
                 elif action == "assign_delivery":
-                    if not order.delivery:
-                        from business_app.services.delivery_service import DeliveryService
+                    from business_app.services.order_schedule_service import OrderScheduleService
 
-                        DeliveryService().create_delivery(order.id)
+                    OrderScheduleService.ensure_delivery_if_due(order)
 
                 results.append({"order_id": order_id, "success": True})
             except Exception as exc:
@@ -928,38 +928,6 @@ class OrderService:
         }
 
         return get_subscription_service().create_subscription(payload, items_data)
-
-    def create_scheduled_order(self, order_data: Dict[str, Any], items_data: List[Dict[str, Any]]) -> Order:
-        """Create an order scheduled for future processing."""
-        user_id = order_data["user_id"]
-        _, address = self.get_user_and_address_for_order(user_id, order_data.get("delivery_address_id"))
-        if not address:
-            raise ValidationError("Delivery address is required")
-
-        scheduled_date = order_data.get("scheduled_date")
-        if isinstance(scheduled_date, str):
-            scheduled_date = datetime.fromisoformat(scheduled_date)
-        if scheduled_date and scheduled_date.tzinfo is None:
-            scheduled_date = scheduled_date.replace(tzinfo=timezone.utc)
-        if scheduled_date and scheduled_date <= datetime.now(timezone.utc):
-            raise ValidationError("Scheduled date must be in the future")
-
-        create_payload = {
-            "items": items_data,
-            "delivery_address": {
-                "delivery_address_id": address.id,
-                "street": address.street_address,
-                "latitude": address.latitude,
-                "longitude": address.longitude,
-            },
-            "delivery_date": order_data.get("delivery_date") or (scheduled_date.date() if scheduled_date else None),
-            "delivery_time_slot": order_data.get("delivery_time_slot"),
-            "delivery_notes": order_data.get("delivery_notes"),
-            "payment_method": order_data.get("payment_method"),
-            "order_source": order_data.get("order_source", "web"),
-            "is_urgent": bool(order_data.get("is_urgent", False)),
-        }
-        return self.create_order(user_id, create_payload)
 
     def update_order_status(
         self,
@@ -1216,7 +1184,8 @@ class OrderService:
                 "latitude": address.latitude,
             },
             "delivery_date": cancelled.delivery_date,
-            "delivery_time_slot": cancelled.delivery_time_slot,
+            "delivery_window_start": cancelled.delivery_window_start,
+            "delivery_window_end": cancelled.delivery_window_end,
             "delivery_notes": cancelled.delivery_notes,
             "payment_method": "cash",
             "order_source": cancelled.order_source or "telegram",
@@ -1633,11 +1602,11 @@ class OrderService:
             else:
                 logger.info(f"Skipping inventory confirmation for cash order {order.id} - will deduct on delivery")
 
-            # Create delivery record (idempotent — API/scheduled-task paths may have created it already)
-            if not order.delivery:
-                from .delivery_service import DeliveryService
+            # Create delivery record, unless the order is scheduled for a future
+            # day — then the release sweep creates it on the morning.
+            from business_app.services.order_schedule_service import OrderScheduleService
 
-                DeliveryService().create_delivery(order.id)
+            OrderScheduleService.ensure_delivery_if_due(order)
 
             # NOTE: purchase AquaCoins are NOT awarded at CONFIRMED. They are
             # earned only once the order is delivered AND fully paid (see the

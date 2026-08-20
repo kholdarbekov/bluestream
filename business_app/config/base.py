@@ -518,6 +518,9 @@ class BaseConfig:
     # there is no amount-based free-delivery threshold.
     DEFAULT_DELIVERY_FEE = business_config.DEFAULT_DELIVERY_FEE  # UZS (0 = free)
     EMERGENCY_DELIVERY_FEE = business_config.EMERGENCY_DELIVERY_FEE  # UZS
+    MAX_SCHEDULE_HORIZON_DAYS = business_config.MAX_SCHEDULE_HORIZON_DAYS
+    DEFAULT_DISPATCH_OPEN_TIME = business_config.DEFAULT_DISPATCH_OPEN_TIME
+    SCHEDULED_RELEASE_SWEEP_MINUTES = business_config.SCHEDULED_RELEASE_SWEEP_MINUTES
     DELIVERY_RADIUS_KM = int(os.environ.get("DELIVERY_RADIUS_KM", 50))
     MAX_DELIVERY_TIME_HOURS = int(os.environ.get("MAX_DELIVERY_TIME_HOURS", 24))
     MIN_ORDER_AMOUNT = business_config.MIN_ORDER_AMOUNT  # UZS

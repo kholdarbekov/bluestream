@@ -54,29 +54,6 @@ def auto_confirm_order_task(self, order_id: int):
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=300, time_limit=600, soft_time_limit=540)
-def process_scheduled_order_task(self, order_id: int):
-    """Prepare a scheduled order shortly before the requested delivery time."""
-    try:
-        logger.info(f"Processing scheduled order {order_id}")
-
-        order = Order.query.get(order_id)
-        if not order:
-            logger.error(f"Scheduled order {order_id} not found")
-            return {"success": False, "error": "Order not found"}
-
-        # Ensure delivery exists before the slot opens.
-        if not order.delivery:
-            from business_app.services.delivery_service import DeliveryService
-
-            DeliveryService().create_delivery(order.id)
-
-        return {"success": True, "order_id": order_id}
-    except Exception as exc:
-        logger.error(f"Failed to process scheduled order {order_id}: {exc}")
-        raise self.retry(exc=exc)
-
-
 @shared_task(time_limit=600, soft_time_limit=540)
 def auto_confirm_pending_orders():
     """Auto-confirm orders that have been pending for too long"""
@@ -105,8 +82,19 @@ def auto_confirm_pending_orders():
                     # Defence in depth: surface the silent failure mode where
                     # the order is committed as CONFIRMED but delivery creation
                     # fails inside _handle_status_change_actions.
+                    #
+                    # "No delivery after confirmation" used to mean something
+                    # broke. For a future-dated order it is now the CORRECT
+                    # expected state -- the release sweep creates the delivery
+                    # on its morning -- so the release gate is consulted before
+                    # crying wolf. This feature's stated risk is that "nothing
+                    # was due" and "the sweep is broken" look identical from
+                    # outside; an ERROR per scheduled order would poison the one
+                    # channel that has to stay meaningful.
+                    from business_app.services.order_schedule_service import OrderScheduleService
+
                     db.session.refresh(order)
-                    if not order.delivery:
+                    if not order.delivery and not OrderScheduleService.is_awaiting_release(order):
                         logger.error(
                             "Order %s auto-confirmed but delivery was NOT created — address_id=%s, delivery_date=%s",
                             order.id,
@@ -592,3 +580,82 @@ def monitor_order_anomalies():
     except Exception as e:
         logger.error(f"Failed to monitor order anomalies: {e}")
         return {"error": str(e)}
+
+
+@shared_task(time_limit=300, soft_time_limit=240)
+def release_due_scheduled_orders():
+    """Hand every due future-dated order to the drivers.
+
+    A future-dated order has NO delivery row, which is exactly what makes it
+    invisible to every driver-facing surface. This sweep is what ends that.
+
+    Query-driven rather than a per-order `apply_async(eta=...)`: an ETA is lost
+    if the broker or worker restarts, whereas a sweep that matches
+    `delivery_date <= today` self-heals — a day of downtime releases on the next
+    tick instead of stranding orders forever.
+    """
+    from business_app.models.delivery import Delivery
+    from business_app.services.order_schedule_service import (
+        RELEASABLE_ORDER_STATUSES,
+        OrderScheduleService,
+        get_utc_now,
+    )
+    from business_app.utils.timezone_utils import utc_to_local
+    from shared.constants import DISPLAY_TIMEZONE
+
+    # Imported from order_schedule_service (not timezone_utils directly) so
+    # that patching `business_app.services.order_schedule_service.get_utc_now`
+    # in tests governs this sweep's clock too — the same symbol the gate
+    # itself reads, not a second independent binding of it.
+    local_today = utc_to_local(get_utc_now(), DISPLAY_TIMEZONE).date()
+
+    candidates = (
+        Order.query.outerjoin(Delivery, Delivery.order_id == Order.id)
+        .filter(
+            Delivery.id.is_(None),
+            Order.delivery_date.isnot(None),
+            Order.delivery_date <= local_today,
+            Order.status.in_(RELEASABLE_ORDER_STATUSES),
+        )
+        .all()
+    )
+
+    released = failed = awaiting = 0
+    now = get_utc_now()
+    for order in candidates:
+        try:
+            # The gate owns the decision; this loop must not re-test
+            # `release_at <= now` itself. A second copy of that comparison is
+            # exactly the two-places-deciding-one-thing failure mode.
+            if OrderScheduleService.ensure_delivery_if_due(order) is None:
+                awaiting += 1
+                continue
+            # `released` is incremented last, after the late-warning check, so
+            # the two counters stay disjoint by construction: an order only
+            # ever lands in `released` once the entire try body — including
+            # this lookup — has completed without raising. If this block ever
+            # did raise, the order must land in `failed` alone, not both.
+            release_at = OrderScheduleService.release_at(order)
+            if release_at and (now - release_at).total_seconds() > 900:
+                logger.warning(
+                    "Order %s released %.0f min late — check celery beat health",
+                    order.id,
+                    (now - release_at).total_seconds() / 60,
+                )
+            released += 1
+        except Exception:
+            db.session.rollback()
+            failed += 1
+            logger.exception("Failed to release scheduled order %s", order.id)
+
+    # Logged on EVERY tick, including quiet ones. A future-dated order is
+    # invisible by design, so "nothing happened" and "the sweep is broken" look
+    # identical from the outside — this line is the only routine signal that
+    # separates them, and it is what prod forensics query in Loki.
+    logger.info(
+        "scheduled_order_release released=%d failed=%d awaiting=%d",
+        released,
+        failed,
+        awaiting,
+    )
+    return {"released": released, "failed": failed, "awaiting": awaiting}

@@ -4,7 +4,8 @@
 
     var cartItems = [];
     var selectedAddress = null;
-    var selectedTimeSlot = null;
+    var deliveryWindowStart = null;   // "HH:MM" or null (open)
+    var deliveryWindowEnd = null;     // "HH:MM" or null (open)
     var selectedPaymentMethod = 'cash';
     var deliveryDate = null;
     var currentOrderId = null;
@@ -232,93 +233,44 @@
         }
     }
 
-    function renderTimeSlots(slots) {
-        var container = document.getElementById('time-slots-container');
-
-        if (slots.length === 0) {
-            renderDefaultTimeSlots();
-            return;
-        }
-
-        var html = '';
-        slots.forEach(function (slot, index) {
-            var isAvailable = slot.available !== false;
-            html += '<div class="time-slot ' + (!isAvailable ? 'unavailable' : '') + ' ' + (index === 0 ? 'selected' : '') + '"' +
-                (isAvailable
-                    ? ' data-action="select-time-slot" data-slot-id="' + slot.id + '" data-start-time="' + escapeHtml(slot.start_time) + '" data-end-time="' + escapeHtml(slot.end_time) + '"'
-                    : '') +
-                '>' +
-                '<div class="time-slot-time">' + escapeHtml(slot.start_time) + ' - ' + escapeHtml(slot.end_time) + '</div>' +
-                '<div class="time-slot-info">' + escapeHtml(isAvailable ? PAGE_DATA.i18n.available : PAGE_DATA.i18n.full) + '</div>' +
-                '</div>';
-        });
-
-        container.innerHTML = html;
-
-        if (slots.length > 0 && slots[0].available !== false) {
-            selectedTimeSlot = slots[0].id;
-        }
+    function localDateString(d) {
+        // `<input type="date">` wants YYYY-MM-DD in the user's own calendar
+        // day. `Date.prototype.toISOString()` renders the UTC day instead, so
+        // any date derived from it is off by one for the first five hours of
+        // every Tashkent day. Read the local fields directly.
+        var month = String(d.getMonth() + 1).padStart(2, '0');
+        var day = String(d.getDate()).padStart(2, '0');
+        return d.getFullYear() + '-' + month + '-' + day;
     }
 
-    function renderDefaultTimeSlots() {
-        var defaultSlots = [
-            { time: '09:00 - 12:00', label: PAGE_DATA.i18n.morning },
-            { time: '12:00 - 15:00', label: PAGE_DATA.i18n.afternoon },
-            { time: '15:00 - 18:00', label: PAGE_DATA.i18n.evening },
-            { time: '18:00 - 21:00', label: PAGE_DATA.i18n.night }
-        ];
+    // Same four shapes the backend stores. The page never decides what a window
+    // MEANS — it only fills the two fields.
+    var WINDOW_PRESETS = [
+        { key: 'anytime',   start: null,    end: null,    label: PAGE_DATA.i18n.window_anytime },
+        { key: 'morning',   start: '09:00', end: '12:00', label: PAGE_DATA.i18n.window_morning },
+        { key: 'afternoon', start: '12:00', end: '18:00', label: PAGE_DATA.i18n.window_afternoon },
+        { key: 'evening',   start: '18:00', end: '21:00', label: PAGE_DATA.i18n.window_evening }
+    ];
 
-        var container = document.getElementById('time-slots-container');
-        var html = '';
-
-        defaultSlots.forEach(function (slot, index) {
-            html += '<div class="time-slot ' + (index === 0 ? 'selected' : '') + '" ' +
-                'data-action="select-time-slot-manual" data-slot-time="' + escapeHtml(slot.time) + '">' +
-                '<div class="time-slot-time">' + escapeHtml(slot.time) + '</div>' +
-                '<div class="time-slot-info">' + escapeHtml(slot.label) + '</div>' +
-                '</div>';
-        });
-
-        container.innerHTML = html;
-        selectedTimeSlot = defaultSlots[0].time;
-    }
-
-    async function loadTimeSlots() {
+    function renderDeliveryWindows() {
         deliveryDate = document.getElementById('delivery-date').value;
-        if (!deliveryDate) return;
 
         var container = document.getElementById('time-slots-container');
-        container.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; padding: 20px;"><div class="loading-spinner" style="width: 30px; height: 30px;"></div></div>';
-
-        try {
-            var response = await apiRequest('/delivery/time-slots?date=' + deliveryDate, { method: 'GET' });
-
-            if (response.ok) {
-                var data = await response.json();
-                renderTimeSlots((data.data && data.data.time_slots) || []);
-            } else {
-                renderDefaultTimeSlots();
-            }
-        } catch (error) {
-            console.error('Error loading time slots:', error);
-            renderDefaultTimeSlots();
-        }
+        container.innerHTML = WINDOW_PRESETS.map(function (preset, index) {
+            return '<div class="time-slot ' + (index === 0 ? 'selected' : '') + '"' +
+                ' data-action="select-window" data-window-key="' + escapeHtml(preset.key) + '">' +
+                '<div class="time-slot-time">' + escapeHtml(preset.label) + '</div>' +
+                '</div>';
+        }).join('');
+        selectWindow('anytime', container.firstChild);
     }
 
-    function selectTimeSlot(slotId, startTime, endTime, targetEl) {
-        document.querySelectorAll('.time-slot').forEach(function (slot) {
-            slot.classList.remove('selected');
-        });
-        targetEl.classList.add('selected');
-        selectedTimeSlot = slotId;
-    }
-
-    function selectTimeSlotManual(time, targetEl) {
-        document.querySelectorAll('.time-slot').forEach(function (slot) {
-            slot.classList.remove('selected');
-        });
-        targetEl.classList.add('selected');
-        selectedTimeSlot = time;
+    function selectWindow(key, targetEl) {
+        document.querySelectorAll('.time-slot').forEach(function (el) { el.classList.remove('selected'); });
+        if (targetEl) targetEl.classList.add('selected');
+        var preset = WINDOW_PRESETS.filter(function (p) { return p.key === key; })[0] || WINDOW_PRESETS[0];
+        deliveryWindowStart = preset.start;
+        deliveryWindowEnd = preset.end;
     }
 
     function selectPaymentMethod(method, targetEl) {
@@ -588,7 +540,8 @@
                 items: cartItems,
                 delivery_address_id: selectedAddress,
                 delivery_date: deliveryDate,
-                delivery_time_slot: selectedTimeSlot,
+                delivery_window_start: deliveryWindowStart,
+                delivery_window_end: deliveryWindowEnd,
                 payment_method: method,
                 delivery_notes: document.getElementById('order-notes').value || null,
                 source: 'web'
@@ -623,7 +576,8 @@
                 items: cartItems,
                 delivery_address_id: selectedAddress,
                 delivery_date: deliveryDate,
-                delivery_time_slot: selectedTimeSlot,
+                delivery_window_start: deliveryWindowStart,
+                delivery_window_end: deliveryWindowEnd,
                 payment_method: 'click',
                 delivery_notes: document.getElementById('order-notes').value || null,
                 source: 'web'
@@ -657,11 +611,6 @@
 
         if (!deliveryDate) {
             showNotification(PAGE_DATA.i18n.select_delivery_date, 'warning');
-            return;
-        }
-
-        if (!selectedTimeSlot) {
-            showNotification(PAGE_DATA.i18n.select_delivery_time, 'warning');
             return;
         }
 
@@ -716,15 +665,25 @@
 
         if (window.cartSyncPromise) await window.cartSyncPromise;
 
-        var today = new Date().toISOString().split('T')[0];
-        document.getElementById('delivery-date').min = today;
-
-        var tomorrow = new Date();
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        document.getElementById('delivery-date').value = tomorrow.toISOString().split('T')[0];
+        // TODAY, in LOCAL time, for both the floor and the default.
+        //
+        // Default: `delivery_date` used to decide nothing, so defaulting to
+        // tomorrow was inert. It is now load-bearing — an order dated tomorrow
+        // has no Delivery row and is invisible to every driver until tomorrow
+        // morning — and this page has no "deliver now" escape (`deliveryDate`
+        // is mandatory in placeOrder()), so a tomorrow default would silently
+        // delay every single web order by a day.
+        //
+        // Local, not `toISOString()`: that renders UTC, and Tashkent is UTC+5,
+        // so between 00:00 and 05:00 local it yields YESTERDAY's date — a past
+        // date the backend rejects with a 400 on the page's own default.
+        var today = localDateString(new Date());
+        var dateInput = document.getElementById('delivery-date');
+        dateInput.min = today;
+        dateInput.value = today;
 
         await loadCartSummary();
-        loadTimeSlots();
+        renderDeliveryWindows();
         await loadPaymentMethods();
 
         var firstAddress = document.querySelector('.address-card[data-address-id]');
@@ -733,8 +692,7 @@
             await calculateDeliveryFee(selectedAddress);
         }
 
-        var dateInput = document.getElementById('delivery-date');
-        if (dateInput) dateInput.addEventListener('change', loadTimeSlots);
+        if (dateInput) dateInput.addEventListener('change', renderDeliveryWindows);
 
         var cardNumInput = document.getElementById('card-number');
         if (cardNumInput) cardNumInput.addEventListener('input', function () { formatCardNumber(this); });
@@ -767,16 +725,8 @@
                 case 'select-payment-method':
                     selectPaymentMethod(target.dataset.method, target);
                     break;
-                case 'select-time-slot':
-                    selectTimeSlot(
-                        parseInt(target.dataset.slotId, 10),
-                        target.dataset.startTime,
-                        target.dataset.endTime,
-                        target
-                    );
-                    break;
-                case 'select-time-slot-manual':
-                    selectTimeSlotManual(target.dataset.slotTime, target);
+                case 'select-window':
+                    selectWindow(target.dataset.windowKey, target);
                     break;
                 case 'place-order':
                     placeOrder();

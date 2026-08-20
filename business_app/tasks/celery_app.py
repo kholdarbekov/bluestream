@@ -9,6 +9,7 @@ from celery.schedules import crontab
 from celery.signals import before_task_publish, setup_logging, task_prerun, worker_process_init
 from flask import g, has_request_context
 import os
+from shared import business_config
 from shared.constants import DISPLAY_TIMEZONE
 
 logger = logging.getLogger(__name__)
@@ -184,6 +185,14 @@ def make_celery(app=None):
             "task": "business_app.tasks.order_tasks.monitor_order_anomalies",
             "schedule": crontab(minute=5),
             "options": {"time_limit": 600},
+        },
+        # Release future-dated orders to the driver pool once their delivery
+        # day's working hours open. Cheap query; the cadence only bounds how
+        # long an order waits past the release moment.
+        "release-scheduled-orders": {
+            "task": "business_app.tasks.order_tasks.release_due_scheduled_orders",
+            "schedule": crontab(minute=f"*/{business_config.SCHEDULED_RELEASE_SWEEP_MINUTES}"),
+            "options": {"time_limit": 300},
         },
         # Send subscription renewal reminders
         "subscription-renewal-reminders": {

@@ -492,6 +492,14 @@ class AdminService {
     return response.data;
   }
 
+  // Re-date or re-window a scheduled order. `delivery_date` must always be a
+  // key in `payload` (even `null` to clear the schedule) — the endpoint 400s
+  // if the key is absent, since absent and null mean different things.
+  async rescheduleOrder(orderId, payload) {
+    const response = await api.patch(`/admin/orders/${orderId}/schedule`, payload);
+    return response.data;
+  }
+
   // Order management
   async getOrders(params = {}) {
     const response = await api.get('/admin/orders', { params });

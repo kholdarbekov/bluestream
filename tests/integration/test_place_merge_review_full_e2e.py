@@ -2966,6 +2966,22 @@ def test_the_api_contract_snapshot_still_lists_the_merge_preview_route(db):
     # .../stops/<int:delivery_id>/assign, POST
     # .../stops/<int:delivery_id>/unassign. Unrelated to place-merge; only the
     # estate-wide count moved.
+    #
+    # 566 -> 565: a route was REMOVED, announced here rather than the count
+    # merely bumped -- POST /api/v1/orders/schedule (orders.schedule_order).
+    # It enqueued process_scheduled_order_task with an eta, which called
+    # DeliveryService.create_delivery directly and so handed a future-dated
+    # order to drivers immediately, defeating the release gate. Scheduling now
+    # lives on the ordinary create paths (delivery_date + the window pair) and
+    # release is owned by the release_due_scheduled_orders beat sweep, so the
+    # endpoint and its task were deleted rather than ported.
+    #
+    # 565 -> 566: a route was ADDED, announced here rather than the count
+    # merely bumped -- PATCH /api/v1/admin/orders/<int:order_id>/schedule
+    # (admin.reschedule_order). It lets an operator move an already-placed
+    # order to a different delivery day/window post-creation, delegating to
+    # OrderScheduleService.reschedule. Unrelated to place-merge; only the
+    # estate-wide count moved.
     assert len(routes) == 566
     entry = next(r for r in routes if r["rule"] == "/api/v1/admin/place-groups/merge-preview")
     assert entry["methods"] == ["GET"]

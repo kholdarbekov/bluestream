@@ -113,6 +113,7 @@ def notify_staff_new_order(self, order_id: int, order_info: dict = None, exclude
             from business_app.models.order import Order
             from business_app.models.delivery import Delivery
             from business_app.utils.address_helpers import get_address_line
+            from business_app.utils.delivery_window import format_delivery_window
 
             order = Order.query.get(order_id)
             if not order:
@@ -142,7 +143,12 @@ def notify_staff_new_order(self, order_id: int, order_info: dict = None, exclude
                 "items": items,
                 "district": addr.district if addr else "",
                 "address": get_address_line(addr),
-                "time_slot": order.delivery_time_slot or "",
+                # `delivery_window` is the structured {start,end,kind,label}
+                # payload staff_bot renders locally (see
+                # staff_bot/utils/formatters.py:format_delivery_window_line).
+                # The legacy `time_slot` shim it replaced is gone — Task 13
+                # converted the last staff_bot reader.
+                "delivery_window": format_delivery_window(order.delivery_window_start, order.delivery_window_end),
             }
 
         data = {

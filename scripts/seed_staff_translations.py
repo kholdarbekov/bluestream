@@ -607,6 +607,32 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Qoldiq qarz",
         "ru": "Остаток долга",
     },
+    # Delivery-window rendering (scheduled-delivery-orders task 13). The call
+    # site builds this key with an f-string
+    # (f'staff.delivery.window.{kind}') — a hand-written dynamic key family
+    # blinds the /health required-key check (see
+    # Translation._add_dynamic_family_keys's docstring for the same failure
+    # mode), so all four `kind` values MUST also be listed literally here.
+    "staff.delivery.window.anytime": {
+        "en": "Anytime today",
+        "uz": "Bugun istalgan vaqtda",
+        "ru": "Сегодня в любое время",
+    },
+    "staff.delivery.window.between": {
+        "en": "Between {time}",
+        "uz": "{time} oralig'ida",
+        "ru": "В интервале {time}",
+    },
+    "staff.delivery.window.until": {
+        "en": "Deliver before {time}",
+        "uz": "{time} gacha yetkazing",
+        "ru": "Доставить до {time}",
+    },
+    "staff.delivery.window.after": {
+        "en": "Deliver after {time}",
+        "uz": "{time} dan keyin yetkazing",
+        "ru": "Доставить после {time}",
+    },
     "staff.delivery.no_cash_collected": {
         "en": "No cash collected",
         "uz": "Naqd pul olinmadi",

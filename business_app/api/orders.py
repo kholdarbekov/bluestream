@@ -187,8 +187,12 @@ def create_emergency_order():
 
         # Set delivery for within 2 hours
         emergency_delivery_time = datetime.now(UTC) + timedelta(hours=2)
-        order_data["delivery_date"] = emergency_delivery_time.date()
-        order_data["delivery_time_slot"] = "emergency"
+        # Deliberately NO delivery_date: an emergency order must reach drivers
+        # immediately. Dating it today would put it through the release gate, and
+        # an emergency placed at 06:00 would be HELD until the 08:00 shift opens —
+        # the exact opposite of what "emergency" means. A dateless order releases
+        # at once, which is precisely today's behaviour.
+        order_data["delivery_date"] = None
 
         order = get_order_service().create_order(current_user_id, order_data)
 
@@ -335,6 +339,19 @@ def create_order():
         if not address:
             return error_response(message=get_translation("api.addresses.not_found"), status_code=400)
 
+        # The web checkout posts a date and an open-ended window here. Same
+        # helper as the admin create path — the customer-facing surface must not
+        # get a second, laxer expression of the same rule.
+        from business_app.utils.delivery_window import parse_and_validate_schedule
+
+        delivery_date, window_start, window_end, schedule_errors = parse_and_validate_schedule(
+            order_request.delivery_date,
+            order_request.delivery_window_start,
+            order_request.delivery_window_end,
+        )
+        if schedule_errors:
+            return validation_error_response(schedule_errors)
+
         # Create order using service
         order_data = {
             "items": order_request.items,
@@ -345,8 +362,9 @@ def create_order():
                 "latitude": address.latitude,
             },
             "user_id": current_user_id,
-            "delivery_date": order_request.delivery_date,
-            "delivery_time_slot": order_request.delivery_time_slot,
+            "delivery_date": delivery_date,
+            "delivery_window_start": window_start,
+            "delivery_window_end": window_end,
             "delivery_notes": order_request.delivery_notes,
             "is_urgent": order_request.is_urgent,
             "payment_method": order_request.payment_method,
@@ -365,12 +383,13 @@ def create_order():
         # empty cart, with no way to retry. See clear_cart call below the
         # pre-utilisation block.
 
-        # Create delivery record if delivery details provided
-        if order.delivery_date and order.delivery_time_slot and not getattr(order, "delivery", None):
-            delivery = get_delivery_service().create_delivery(order.id)
-
-            # Auto-assign delivery driver
-            auto_assign_delivery_task.delay(delivery.id)
+        # No delivery row here: a freshly created order is PENDING (unpaid for
+        # card/click), and neither the driver broadcast nor the pool-insertion
+        # evaluator look at the order's own status — only the delivery's.
+        # Delivery creation happens at the CONFIRMED transition, via
+        # OrderService._handle_status_change_actions, which already routes
+        # through OrderScheduleService.ensure_delivery_if_due. Do not re-add
+        # a create-delivery call here.
 
         current_app.logger.info(
             "CREATE ORDER API: order_number=%s, type=%s, total_amount=%s, type=%s",
@@ -581,7 +600,6 @@ def estimate_cart():
             items=[item.dict() for item in cart_request.items],
             delivery_address_id=cart_request.delivery_address_id,
             delivery_date=cart_request.delivery_date,
-            delivery_time_slot=cart_request.delivery_time_slot,
             loyalty_points_used=cart_request.loyalty_points_used,
             promo_code=cart_request.promo_code,
         )
@@ -677,24 +695,18 @@ def retry_order_with_cash(order_id):
 
     Implementation: clones the cancelled order's items into a fresh PENDING
     cash order via the canonical create_order pipeline, then mirrors the
-    main create_order endpoint's downstream side-effects (delivery row +
-    auto-assign + cart clear) so the new order behaves identically to any
-    other cash order from this point on.
+    main create_order endpoint's downstream side-effects (cart clear) so the
+    new order behaves identically to any other cash order from this point on.
+    No delivery row is created here, for the same reason it isn't at the main
+    create_order endpoint: the rescued order is PENDING, and delivery
+    creation happens at the CONFIRMED transition via
+    OrderService._handle_status_change_actions, which already routes through
+    OrderScheduleService.ensure_delivery_if_due. Do not re-add a
+    create-delivery call here.
     """
     try:
         current_user_id = get_jwt_identity()
         order = get_order_service().rescue_order_after_psp_failure(order_id, current_user_id)
-
-        # Mirror the downstream side-effects of the main create_order endpoint
-        # for cash orders: create delivery row + dispatch auto-assign task.
-        if order.delivery_date and order.delivery_time_slot and not getattr(order, "delivery", None):
-            try:
-                delivery = get_delivery_service().create_delivery(order.id)
-                auto_assign_delivery_task.delay(delivery.id)
-            except Exception:
-                current_app.logger.exception(
-                    f"retry_order_with_cash: delivery setup failed for rescued order {order.id}"
-                )
 
         # Clear cart — cart was preserved by the original 503 path so the user
         # could retry. With a successful rescue, drop it so they don't see
@@ -951,68 +963,6 @@ def create_subscription_order():
     except Exception as e:
         _rollback_session()
         current_app.logger.error(f"Create subscription order error: {e}")
-        return internal_error_response(message=get_translation("error.server_error"))
-
-
-@orders_bp.route("/schedule", methods=["POST"])
-@jwt_required()
-def schedule_order():
-    """Schedule an order for future delivery"""
-    try:
-        current_user_id = get_jwt_identity()
-        data = request.get_json()
-
-        get_order_service().get_user_or_raise(current_user_id)
-
-        scheduled_date = data.get("scheduled_date")
-        try:
-            scheduled_dt = datetime.fromisoformat(scheduled_date)
-            if scheduled_dt.tzinfo is None:
-                scheduled_dt = scheduled_dt.replace(tzinfo=UTC)
-
-            if scheduled_dt <= datetime.now(UTC):
-                return error_response(message=get_translation("error.validation.invalid_date"), status_code=400)
-        except ValueError:
-            return error_response(message=get_translation("error.validation.invalid_date"), status_code=400)
-
-        # Create scheduled order
-        order_data = {
-            "user_id": current_user_id,
-            "delivery_address_id": data.get("delivery_address_id"),
-            "delivery_date": scheduled_dt.date(),
-            "delivery_time_slot": data.get("delivery_time_slot"),
-            "delivery_notes": data.get("delivery_notes"),
-            "payment_method": data.get("payment_method"),
-            "order_source": data.get("source", "web"),
-            "is_scheduled": True,
-            "scheduled_date": scheduled_dt,
-        }
-
-        items_data = data.get("items", [])
-        order = get_order_service().create_scheduled_order(order_data, items_data)
-
-        # Schedule order processing task
-        from business_app.tasks.order_tasks import process_scheduled_order_task
-
-        process_scheduled_order_task.apply_async(
-            args=[order.id], eta=scheduled_dt - timedelta(hours=1)  # Process 1 hour before scheduled time
-        )
-
-        return created_response(
-            data={"order": serialize_order(order), "scheduled_for": scheduled_dt.isoformat()},
-            message=get_translation("api.orders.created"),
-        )
-
-    except NotFoundError:
-        return not_found_response(message=get_translation("error.not_found"))
-    except ValidationError as e:
-        return error_response(message=e.message, status_code=400)
-    except ValueError as e:
-        current_app.logger.warning(f"Schedule order validation error: {e}")
-        return error_response(message=get_translation("api.orders.error.invalid_request_data"), status_code=400)
-    except Exception as e:
-        _rollback_session()
-        current_app.logger.error(f"Schedule order error: {e}")
         return internal_error_response(message=get_translation("error.server_error"))
 
 

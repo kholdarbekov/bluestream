@@ -1,6 +1,6 @@
 """Integration tests for current API endpoint contracts."""
 
-from datetime import date, timedelta
+from datetime import date, time, timedelta
 
 import pytest
 
@@ -181,17 +181,79 @@ class TestOrdersAndDeliveryAPI:
         assert body['date'] == target_date
         assert 'time_slots' in body
 
-    def test_delivery_time_slots_uses_aggregated_booking_query(self, client, delivery_slot, monkeypatch):
+    def test_delivery_time_slots_uses_aggregated_booking_query(self, client, delivery_slot):
+        """The per-slot booking counter is GONE, not merely unused.
+
+        It used to be monkeypatched to fail-if-called; it counted one query per
+        slot by matching the free-text `orders.delivery_time_slot` against
+        "start-end". That column no longer exists (migration c9e4a1f7b3d2) and
+        an open-ended window cannot be matched that way at all, so the helper
+        was deleted rather than ported — the endpoint aggregates bookings in a
+        single grouped query. Asserting its absence is what keeps a per-slot
+        counter from growing back.
+        """
         target_date = (date.today() + timedelta(days=1)).isoformat()
 
-        def _fail_if_called(*args, **kwargs):
-            raise AssertionError("Per-slot booking count helper should not be called")
-
-        monkeypatch.setattr(DeliveryTimeSlot, "get_current_orders_count", _fail_if_called)
+        assert not hasattr(DeliveryTimeSlot, "get_current_orders_count")
 
         response = client.get(f'/api/v1/delivery/time-slots?date={target_date}')
 
         assert response.status_code == 200
+
+    def test_slot_capacity_counts_only_orders_that_actually_book_that_slot(
+        self, client, db, delivery_slot, sample_user
+    ):
+        """`available_capacity` gates a customer-facing choice, so it must not
+        count orders that booked something else — or nothing at all.
+
+        The window replacing `delivery_time_slot` is open-ended, which breaks
+        two assumptions the old free-text key relied on:
+
+        * an "after 19:00" order books no fixed slot, so it must not consume
+          the 19:00-21:00 slot's capacity;
+        * two active slots may share a start minute (09:00-12:00 / 09:00-18:00)
+          and must not consume each other's.
+
+        Both would hide a slot the customer may legitimately pick, since
+        `is_available` is `available_capacity > 0` and the checkout renders
+        only available slots.
+        """
+        from business_app.models.order import Order
+        from shared.enums import OrderStatus
+
+        target = date.today() + timedelta(days=1)
+        db.session.add_all([
+            DeliveryTimeSlot(
+                name='Long', start_time='09:00', end_time='18:00', is_active=True,
+                max_orders=50, available_days=[0, 1, 2, 3, 4, 5, 6],
+            ),
+            DeliveryTimeSlot(
+                name='Evening', start_time='19:00', end_time='21:00', is_active=True,
+                max_orders=50, available_days=[0, 1, 2, 3, 4, 5, 6],
+            ),
+        ])
+        for number, start, end in [
+            ('ORD-CAP-CLOSED', time(9, 0), time(12, 0)),   # books Morning only
+            ('ORD-CAP-AFTER', time(19, 0), None),          # "after 19:00" — books nothing
+            ('ORD-CAP-ANYTIME', None, None),               # "anytime" — books nothing
+        ]:
+            db.session.add(Order(
+                user_id=sample_user.id, order_number=number, status=OrderStatus.CONFIRMED,
+                total_amount=50000, delivery_date=target,
+                delivery_window_start=start, delivery_window_end=end,
+            ))
+        db.session.commit()
+
+        response = client.get(f'/api/v1/delivery/time-slots?date={target.isoformat()}')
+
+        assert response.status_code == 200
+        capacity = {
+            (s['start_time'], s['end_time']): s['available_capacity']
+            for s in response.get_json()['time_slots']
+        }
+        assert capacity[('09:00', '12:00')] == 49, 'the closed 09:00-12:00 window books this slot'
+        assert capacity[('09:00', '18:00')] == 50, 'a shared start minute is not a shared booking'
+        assert capacity[('19:00', '21:00')] == 50, '"after 19:00" books no slot'
 
     def test_calculate_delivery_fee_requires_auth(self, client):
         response = client.post('/api/v1/delivery/calculate-fee', json={'address_id': 1, 'order_total': 20000})

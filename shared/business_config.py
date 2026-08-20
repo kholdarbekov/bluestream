@@ -63,6 +63,16 @@ LARGE_ORDER_THRESHOLD_UZS = _int("LARGE_ORDER_THRESHOLD_UZS", 500000)  # fraud/a
 DEFAULT_DELIVERY_FEE = _int("DEFAULT_DELIVERY_FEE", 0)  # UZS
 EMERGENCY_DELIVERY_FEE = _int("EMERGENCY_DELIVERY_FEE", 0)  # UZS
 
+# Scheduled (future-dated) orders. An order carrying a `delivery_date` is held
+# out of the driver pool until that day's release moment; see
+# OrderScheduleService. The horizon is how far ahead an operator may book.
+MAX_SCHEDULE_HORIZON_DAYS = _int("MAX_SCHEDULE_HORIZON_DAYS", 15)
+# Fallback release time used ONLY when no active driver is rostered at all, so
+# a scheduled order can never strand on an empty roster. Matches the
+# DeliveryPerson.working_hours_start column default.
+DEFAULT_DISPATCH_OPEN_TIME = os.environ.get("DEFAULT_DISPATCH_OPEN_TIME") or "09:00"
+SCHEDULED_RELEASE_SWEEP_MINUTES = _int("SCHEDULED_RELEASE_SWEEP_MINUTES", 5)
+
 # ─── Loyalty ────────────────────────────────────────────────────────────
 # Earning rate / bonus amounts / tier thresholds / expiry are all DB-driven
 # (LoyaltyProgram + LoyaltyTierConfig). LOYALTY_POINTS_RATIO is only the

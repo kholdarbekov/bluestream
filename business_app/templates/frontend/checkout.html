@@ -696,11 +696,11 @@
                                 </div>
                             </div>
 
-                            <!-- Delivery Time Section -->
+                            <!-- Delivery Window Section -->
                             <div class="form-section" id="delivery-time-section">
                                 <h4>
                                     <i class="far fa-clock"></i>
-                                    {{ 'Delivery Time'|t }}
+                                    {{ 'Delivery Window'|t }}
                                 </h4>
 
                                 <div class="delivery-time-grid">
@@ -713,12 +713,9 @@
                                     </div>
 
                                     <div>
-                                        <label>{{ 'Select Time Slot'|t }}:</label>
+                                        <label>{{ 'Select Delivery Window'|t }}:</label>
                                         <div class="time-slots" id="time-slots-container">
-                                            <!-- Time slots will be loaded dynamically -->
-                                            <div style="grid-column: 1 / -1; text-align: center; padding: 20px; color: #999;">
-                                                {{ 'Please select a date first'|t }}
-                                            </div>
+                                            <!-- Delivery window presets are rendered dynamically -->
                                         </div>
                                     </div>
                                 </div>
@@ -1041,12 +1038,6 @@
         'min_qty_warning_line': '{name}: minimum {min}, add {remaining} more' | t,
         'min_qty_warning_short': 'Some items are below their minimum order quantity' | t,
         'calculating': 'Calculating...' | t,
-        'available': 'Available' | t,
-        'full': 'Full' | t,
-        'morning': 'Morning' | t,
-        'afternoon': 'Afternoon' | t,
-        'evening': 'Evening' | t,
-        'night': 'Night' | t,
         'address_coming_soon': 'Address management feature coming soon! For now, please add addresses through your account settings.' | t,
         'code_expires_in': 'Code expires in' | t,
         'code_expired': 'Code expired.' | t,
@@ -1064,9 +1055,12 @@
         'payment_failed': 'Payment failed. Please try again.' | t,
         'select_delivery_address': 'Please select a delivery address' | t,
         'select_delivery_date': 'Please select a delivery date' | t,
-        'select_delivery_time': 'Please select a delivery time' | t,
         'agree_terms': 'Please agree to the terms and conditions' | t,
         'place_order_failed': 'Failed to place order' | t,
+        'window_anytime': 'Anytime' | t,
+        'window_morning': 'Morning (09:00-12:00)' | t,
+        'window_afternoon': 'Afternoon (12:00-18:00)' | t,
+        'window_evening': 'Evening (18:00-21:00)' | t,
     },
 }) }}
 <script src="{{ url_for('static', filename='js/pages/checkout.js') }}"></script>

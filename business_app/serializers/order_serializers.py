@@ -9,6 +9,7 @@ from typing import Dict, Any, Optional, List
 from pydantic import BaseModel, Field, ConfigDict
 from pydantic.alias_generators import to_camel
 
+from business_app.utils.delivery_window import format_delivery_window
 from business_app.utils.payment_projection import get_payment_projection
 from business_app.models.order import Order, OrderItem
 from business_app.serializers.types import MoneyFloat
@@ -120,7 +121,7 @@ class OrderSchema(BaseModel):
 
     # Delivery information
     delivery_date: Optional[date] = None
-    delivery_time_slot: Optional[str] = None
+    delivery_window: Optional[Dict[str, Any]] = None
     delivery_notes: Optional[str] = None
 
     # Promotional info
@@ -146,7 +147,12 @@ class CreateOrderRequest(BaseModel):
     items: List[Dict[str, Any]] = Field(..., min_length=1)
     delivery_address_id: Optional[int] = None
     delivery_date: Optional[date] = None
-    delivery_time_slot: Optional[str] = None
+    # "HH:MM" or null on either side — the four window shapes live in
+    # business_app/utils/delivery_window.py. Kept as raw strings so a malformed
+    # time is reported by the one schedule validator (with its sibling date and
+    # window checks) rather than as a bare Pydantic type error.
+    delivery_window_start: Optional[str] = None
+    delivery_window_end: Optional[str] = None
     delivery_notes: Optional[str] = None
     is_urgent: bool = Field(default=False)
     payment_method: Optional[str] = None
@@ -162,7 +168,9 @@ class UpdateOrderRequest(BaseModel):
 
     delivery_notes: Optional[str] = None
     special_instructions: Optional[str] = None
-    delivery_time_slot: Optional[str] = None
+    # "HH:MM" or null on either side — see CreateOrderRequest.
+    delivery_window_start: Optional[str] = None
+    delivery_window_end: Optional[str] = None
 
 
 class OrderFeedbackRequest(BaseModel):
@@ -195,7 +203,7 @@ class CartEstimateRequest(BaseModel):
     items: List[Dict[str, Any]] = Field(..., min_length=1)
     delivery_address_id: Optional[int] = None
     delivery_date: Optional[date] = None
-    delivery_time_slot: Optional[str] = None
+    delivery_window: Optional[Dict[str, Any]] = None
     loyalty_points_used: int = Field(default=0, ge=0)
     promo_code: Optional[str] = None
 
@@ -322,7 +330,7 @@ def serialize_order(order: Order, include_items=False, include_delivery=False, i
             "order_source": getattr(order, "order_source", "web"),
             "special_instructions": getattr(order, "special_instructions", None),
             "delivery_date": order.delivery_date.isoformat() if order.delivery_date else None,
-            "delivery_time_slot": getattr(order, "delivery_time_slot", None),
+            "delivery_window": format_delivery_window(order.delivery_window_start, order.delivery_window_end),
             "delivery_notes": getattr(order, "delivery_notes", None),
             "promo_code_used": getattr(order, "promo_code_used", None),
             "loyalty_points_used": getattr(order, "loyalty_points_used", 0),

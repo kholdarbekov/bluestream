@@ -17,7 +17,7 @@ from staff_bot.config import config
 from staff_bot.database import db_manager
 from staff_bot.i18n import i18n
 from staff_bot.utils import flow_state
-from staff_bot.utils.formatters import escape_html
+from staff_bot.utils.formatters import escape_html, format_delivery_window_line
 from shared.redis_failure import report_redis_failure
 from shared.redis_keyspace import RedisKeyspace
 
@@ -904,7 +904,7 @@ class StaffWebhookServer:
         number = escape_html(order_info.get('order_number') or i18n.get('staff.common.not_available', language))
         customer_name = escape_html(order_info.get('customer_name', ''))
         address = escape_html(order_info.get('address') or order_info.get('district', ''))
-        time_slot = escape_html(order_info.get('time_slot', ''))
+        window_line = format_delivery_window_line(order_info, language)
         amount = order_info.get('total_amount', 0)
         payment = order_info.get('payment_method', '')
         payment_label = i18n.get(f'staff.delivery.payment.{payment}', language) if payment else ''
@@ -923,8 +923,8 @@ class StaffWebhookServer:
             lines.append(f"👤 {customer_name}")
         if address:
             lines.append(f"📍 {address}")
-        if time_slot:
-            lines.append(f"🕐 {time_slot}")
+        if window_line:
+            lines.append(window_line)
         lines.append(f"💰 {amount_text}")
 
         items = order_info.get('items') or []

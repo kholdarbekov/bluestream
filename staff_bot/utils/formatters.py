@@ -173,6 +173,39 @@ def format_money_block(
     return lines
 
 
+def format_delivery_window_line(order: Dict[str, Any], language: str) -> str:
+    """The `🕐 ...` delivery-window line for an order card, or `''`.
+
+    SSOT for turning the backend's `delivery_window` payload
+    (``{start, end, kind, label}`` — see
+    ``business_app/utils/delivery_window.py``) into a localized driver-facing
+    line. Shared by :func:`format_order_card`,
+    ``StaffWebhookServer._format_new_order_message``, and
+    ``OrdersPoolHandler.view_order_details`` — all three used to render the
+    legacy `time_slot` string raw and unlocalized, which is exactly the
+    English-leak class this project keeps rediscovering (see
+    `has_cash_due`'s docstring for the same failure mode in the money block).
+
+    MUST branch on `kind`, never on the backend's English `label` — `label`
+    is a log/fallback string, and shipping it here is how English leaks into
+    a driver's Uzbek or Russian card. Returns `''` for an `anytime` window
+    (no line at all) and for a payload without a `delivery_window`.
+    """
+    window = order.get('delivery_window') or {}
+    window_kind = window.get('kind')
+    if not window_kind or window_kind == 'anytime':
+        return ''
+
+    if window_kind == 'until':
+        window_time = window.get('end')
+    elif window_kind == 'between':
+        window_time = f"{window.get('start')}-{window.get('end')}"
+    else:
+        window_time = window.get('start')
+
+    return f"🕐 {i18n.get(f'staff.delivery.window.{window_kind}', language, time=window_time)}"
+
+
 def format_order_card(order: Dict[str, Any], language: str) -> str:
     """
     Format order details as a compact card for Telegram message.
@@ -183,7 +216,7 @@ def format_order_card(order: Dict[str, Any], language: str) -> str:
     customer_phone = _escape(order.get('customer_phone', ''))
     district = _escape(order.get('district', ''))
     address = _escape(order.get('address', ''))
-    time_slot = _escape(order.get('time_slot', ''))
+    window_line = format_delivery_window_line(order, language)
     total = format_currency(order.get('total_amount'), language=language)
     payment = order.get('payment_method', '')
     item_count = order.get('item_count', 0)
@@ -201,8 +234,8 @@ def format_order_card(order: Dict[str, Any], language: str) -> str:
         lines.append(f"📍 {district}")
     if address:
         lines.append(f"    {address}")
-    if time_slot:
-        lines.append(f"🕐 {time_slot}")
+    if window_line:
+        lines.append(window_line)
 
     payment_label = i18n.get(f'staff.delivery.payment.{payment}', language) if payment else ''
     if payment_label:

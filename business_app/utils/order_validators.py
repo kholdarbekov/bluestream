@@ -3,11 +3,12 @@ Comprehensive validation utilities for Order API endpoints
 """
 
 import re
-from datetime import datetime, date, UTC, timedelta
+from datetime import datetime, date, timedelta
 from typing import Any, Dict, List
 from decimal import Decimal, InvalidOperation
 import bleach
 
+from business_app.utils.delivery_window import local_now, validate_schedule
 from shared.enums import OrderStatus, PaymentMethod
 
 
@@ -35,9 +36,6 @@ class OrderInputValidator:
         # Validate delivery date and time
         if "delivery_date" in data:
             self._validate_delivery_date(data["delivery_date"])
-
-        if "delivery_time_slot" in data:
-            self._validate_delivery_time_slot(data["delivery_time_slot"])
 
         # Validate payment method
         if "payment_method" in data:
@@ -82,9 +80,6 @@ class OrderInputValidator:
 
         if "delivery_date" in data:
             self._validate_delivery_date(data["delivery_date"])
-
-        if "delivery_time_slot" in data:
-            self._validate_delivery_time_slot(data["delivery_time_slot"])
 
         if "loyalty_points_used" in data:
             self._validate_loyalty_points(data["loyalty_points_used"])
@@ -188,31 +183,6 @@ class OrderInputValidator:
         # Validate auto pay flag
         if "auto_pay" in data:
             self._validate_auto_pay_flag(data["auto_pay"])
-
-        return self.errors
-
-    def validate_scheduled_order(self, data: Dict[str, Any]) -> Dict[str, List[str]]:
-        """Validate scheduled order data"""
-        self.errors = {}
-
-        # Required fields
-        self._validate_required_fields(data, ["items", "scheduled_date", "delivery_address_id"])
-
-        # Validate items
-        if "items" in data:
-            self._validate_order_items(data["items"])
-
-        # Validate scheduled date
-        if "scheduled_date" in data:
-            self._validate_scheduled_date(data["scheduled_date"])
-
-        # Validate delivery address
-        if "delivery_address_id" in data:
-            self._validate_delivery_address_id(data["delivery_address_id"])
-
-        # Validate payment method
-        if "payment_method" in data:
-            self._validate_payment_method(data["payment_method"])
 
         return self.errors
 
@@ -394,54 +364,34 @@ class OrderInputValidator:
             self._add_error("delivery_address_id", "delivery_address_id must be positive")
 
     def _validate_delivery_date(self, delivery_date: Any):
-        """Validate delivery date"""
+        """Validate delivery date.
+
+        Parsing is local (this class owns its own "must be a string" / "must be
+        ISO" message contract), but the past-date and horizon DECISIONS are
+        delegated to `delivery_window.validate_schedule` — the one place that
+        rule lives.
+
+        This class has no production caller today, so nothing is broken either
+        way. Delegation is the point: the version this replaced re-derived the
+        horizon against `date.today()`, i.e. the container's clock rather than
+        the operator-local one the endpoints use, so anyone wiring
+        `validate_create_order` back into the admin path (its obvious purpose)
+        would have inherited a second horizon that disagreed with the shared one
+        for five hours every evening. Delegating means a future re-wiring
+        inherits the correct rule instead of resurrecting the bug.
+        """
         if not isinstance(delivery_date, str):
             self._add_error("delivery_date", "delivery_date must be a string")
             return
 
         try:
             parsed_date = datetime.fromisoformat(delivery_date).date()
-
-            # Cannot be in the past
-            if parsed_date < date.today():
-                self._add_error("delivery_date", "delivery_date cannot be in the past")
-
-            # Cannot be more than 30 days in the future
-            max_date = date.today() + timedelta(days=30)
-            if parsed_date > max_date:
-                self._add_error("delivery_date", "delivery_date cannot be more than 30 days in the future")
-
         except ValueError:
             self._add_error("delivery_date", "delivery_date must be in ISO format (YYYY-MM-DD)")
-
-    def _validate_delivery_time_slot(self, time_slot: Any):
-        """Validate delivery time slot"""
-        if not isinstance(time_slot, str):
-            self._add_error("delivery_time_slot", "delivery_time_slot must be a string")
             return
 
-        # Sanitize input
-        time_slot = bleach.clean(time_slot, tags=[], strip=True)
-
-        if len(time_slot) > 50:
-            self._add_error("delivery_time_slot", "delivery_time_slot cannot exceed 50 characters")
-
-        # Valid time slot patterns
-        valid_slots = [
-            "morning",
-            "afternoon",
-            "evening",
-            "emergency",
-            "09:00-12:00",
-            "12:00-15:00",
-            "15:00-18:00",
-            "18:00-21:00",
-        ]
-
-        if time_slot not in valid_slots:
-            # Allow custom time slot format HH:MM-HH:MM
-            if not re.match(r"^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$", time_slot):
-                self._add_error("delivery_time_slot", "delivery_time_slot has invalid format")
+        for message in validate_schedule(parsed_date, None, None, now_local=local_now()):
+            self._add_error("delivery_date", message)
 
     def _validate_payment_method(self, payment_method: Any):
         """Validate payment method"""
@@ -623,27 +573,6 @@ class OrderInputValidator:
         """Validate auto pay flag"""
         if not isinstance(auto_pay, bool):
             self._add_error("auto_pay", "auto_pay must be a boolean")
-
-    def _validate_scheduled_date(self, scheduled_date: Any):
-        """Validate scheduled date"""
-        if not isinstance(scheduled_date, str):
-            self._add_error("scheduled_date", "scheduled_date must be a string")
-            return
-
-        try:
-            parsed_datetime = datetime.fromisoformat(scheduled_date)
-
-            # Must be in the future
-            if parsed_datetime <= datetime.now(UTC):
-                self._add_error("scheduled_date", "scheduled_date must be in the future")
-
-            # Cannot be more than 7 days in the future for scheduled orders
-            max_datetime = datetime.now(UTC) + timedelta(days=7)
-            if parsed_datetime > max_datetime:
-                self._add_error("scheduled_date", "scheduled_date cannot be more than 7 days in the future")
-
-        except ValueError:
-            self._add_error("scheduled_date", "scheduled_date must be in ISO format")
 
     def _validate_export_format(self, format_type: Any):
         """Validate export format"""

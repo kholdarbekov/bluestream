@@ -6,12 +6,14 @@ const POOL = [
   {
     delivery_id: 101, order_id: 201, order_number: 'B-1', customer_name: 'Dee',
     customer_phone: '+998901112233', address_label: 'Chilonzor 5', lat: 41.3, lng: 69.2,
-    total_amount: 50000, is_cod: true, is_overdue: false, time_slot: '10-12',
+    total_amount: 50000, is_cod: true, is_overdue: false,
+    delivery_window: { start: '10:00', end: '12:00', kind: 'between', label: '10:00-12:00' },
   },
   {
     delivery_id: 102, order_id: 202, order_number: 'B-2', customer_name: 'Eli',
     customer_phone: '+998901112244', address_label: 'Yunusobod 9', lat: 41.31, lng: 69.21,
-    total_amount: 30000, is_cod: false, is_overdue: true, time_slot: '12-14',
+    total_amount: 30000, is_cod: false, is_overdue: true,
+    delivery_window: { start: null, end: '14:00', kind: 'until', label: 'until 14:00' },
   },
 ];
 

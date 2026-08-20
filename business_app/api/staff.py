@@ -10,6 +10,7 @@ from business_app.services.staff_service import StaffService
 from business_app.utils.service_factory import get_corporate_contract_service
 from business_app.utils.address_helpers import get_address_label, get_address_line
 from business_app.utils.decorators import require_staff_roles, verify_webhook_signature
+from business_app.utils.delivery_window import format_delivery_window
 from business_app.utils.error_handlers import handle_api_exception
 from business_app.utils.api_responses import success_response
 from business_app.utils.exceptions import ValidationError
@@ -164,7 +165,9 @@ def get_order_pool():
                 # phone the customer for the flat/floor.
                 "apartment_number": address.apartment_number or "" if address else "",
                 "floor_number": address.floor_number or "" if address else "",
-                "time_slot": order.delivery_time_slot if order else "",
+                "delivery_window": (
+                    format_delivery_window(order.delivery_window_start, order.delivery_window_end) if order else None
+                ),
                 "created_at": order.created_at.isoformat() if order and order.created_at else None,
                 "delivery_person_id": delivery.delivery_person_id,
                 "delivery_person_name": assignee.full_name if assignee else "",

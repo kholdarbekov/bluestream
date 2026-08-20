@@ -111,7 +111,6 @@ def _make_delivery(db, customer_id, driver_id, address, status=DeliveryStatus.AS
         total_amount=Decimal("10000"),
         delivery_address_id=address.id,
         delivery_date=datetime.now(UTC) + timedelta(hours=2),
-        delivery_time_slot="09:00-12:00",
     )
     db.session.add(order)
     db.session.flush()

@@ -1,10 +1,12 @@
 """Unit tests for order input validator utilities."""
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, timedelta
 
 import pytest
 
 from shared.enums import PaymentMethod
+from business_app.utils.delivery_window import local_now
+from shared.business_config import MAX_SCHEDULE_HORIZON_DAYS
 from business_app.utils.order_validators import (
     OrderInputValidator,
     sanitize_search_query,
@@ -18,7 +20,6 @@ def _valid_order_payload():
         "items": [{"product_id": 1, "quantity": 2}],
         "delivery_address_id": 10,
         "delivery_date": (date.today() + timedelta(days=1)).isoformat(),
-        "delivery_time_slot": "09:00-12:00",
         "payment_method": PaymentMethod.CARD.value,
         "loyalty_points_used": 0,
         "promo_code": "DISCOUNT10",
@@ -35,6 +36,47 @@ class TestOrderInputValidator:
         validator = OrderInputValidator()
         errors = validator.validate_create_order(_valid_order_payload())
         assert errors == {}
+
+    def test_delivery_date_rule_is_the_shared_one_not_a_local_copy(self):
+        """This validator used to re-derive the past/horizon rule against
+        `date.today()` — the container clock, not the operator-local one the
+        endpoints validate with — so the two disagreed for five hours every
+        evening. It now delegates to `delivery_window.validate_schedule`.
+        Reverting it to a local copy would have to reproduce these exact
+        messages, which is the point: there is one rule, and this is its wording.
+        """
+        today = local_now().date()
+
+        past = _valid_order_payload()
+        past["delivery_date"] = (today - timedelta(days=1)).isoformat()
+        assert OrderInputValidator().validate_create_order(past)["delivery_date"] == [
+            "delivery_date cannot be in the past"
+        ]
+
+        too_far = _valid_order_payload()
+        too_far["delivery_date"] = (today + timedelta(days=MAX_SCHEDULE_HORIZON_DAYS + 2)).isoformat()
+        assert OrderInputValidator().validate_create_order(too_far)["delivery_date"] == [
+            f"delivery_date cannot be more than {MAX_SCHEDULE_HORIZON_DAYS} days in the future"
+        ]
+
+        on_the_horizon = _valid_order_payload()
+        on_the_horizon["delivery_date"] = (today + timedelta(days=MAX_SCHEDULE_HORIZON_DAYS)).isoformat()
+        assert "delivery_date" not in OrderInputValidator().validate_create_order(on_the_horizon)
+
+    def test_delivery_date_still_reports_its_own_shape_errors(self):
+        """Parsing stays local: the shared rule answers "is this schedule
+        allowed", not "is this field even a date"."""
+        bad_type = _valid_order_payload()
+        bad_type["delivery_date"] = 20260820
+        assert OrderInputValidator().validate_create_order(bad_type)["delivery_date"] == [
+            "delivery_date must be a string"
+        ]
+
+        bad_format = _valid_order_payload()
+        bad_format["delivery_date"] = "20-08-2026"
+        assert OrderInputValidator().validate_create_order(bad_format)["delivery_date"] == [
+            "delivery_date must be in ISO format (YYYY-MM-DD)"
+        ]
 
     def test_validate_create_order_required_and_item_errors(self):
         validator = OrderInputValidator()
@@ -72,7 +114,7 @@ class TestOrderInputValidator:
         assert "payment_method" in errors
         assert any("not allowed" in message for message in errors["payment_method"])
 
-    def test_validate_subscription_and_scheduled_order_paths(self):
+    def test_validate_subscription_order_paths(self):
         validator = OrderInputValidator()
 
         subscription_errors = validator.validate_subscription_order(
@@ -87,16 +129,6 @@ class TestOrderInputValidator:
         assert "frequency" in subscription_errors
         assert "start_date" in subscription_errors
         assert "auto_pay" in subscription_errors
-
-        scheduled_errors = validator.validate_scheduled_order(
-            {
-                "items": [{"product_id": 1, "quantity": 1}],
-                "scheduled_date": (datetime.now(UTC) - timedelta(hours=1)).isoformat(),
-                "delivery_address_id": 1,
-                "payment_method": PaymentMethod.CARD.value,
-            }
-        )
-        assert "scheduled_date" in scheduled_errors
 
     def test_validate_bulk_feedback_export_and_filters(self):
         validator = OrderInputValidator()

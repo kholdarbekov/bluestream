@@ -1955,6 +1955,19 @@ def create_order_for_user():
         delivery_notes = data.get("delivery_notes", "")
         consume_marking_codes = bool(data.get("consume_marking_codes", False))
 
+        # A future date + an open-ended window. Parsed and validated by the one
+        # helper every write path shares, so the operator screen and the web
+        # checkout can never disagree about what a legal schedule is.
+        from business_app.utils.delivery_window import parse_and_validate_schedule
+
+        delivery_date, window_start, window_end, schedule_errors = parse_and_validate_schedule(
+            data.get("delivery_date"),
+            data.get("delivery_window_start"),
+            data.get("delivery_window_end"),
+        )
+        if schedule_errors:
+            return validation_error_response(schedule_errors)
+
         # Validate user exists
         user = User.query.get(user_id)
         if not user:
@@ -1990,6 +2003,9 @@ def create_order_for_user():
             "payment_method": payment_method,
             "consume_marking_codes": consume_marking_codes,
             "delivery_notes": delivery_notes,
+            "delivery_date": delivery_date,
+            "delivery_window_start": window_start,
+            "delivery_window_end": window_end,
             "order_source": "admin",
             "created_by_staff_id": current_user_id,
         }
@@ -2075,6 +2091,66 @@ def update_order_status(order_id):
     except Exception as e:
         current_app.logger.error(f"Update order status error: {e}")
         return internal_error_response("Failed to update order status")
+
+
+@admin_bp.route("/orders/<int:order_id>/schedule", methods=["PATCH"])
+@jwt_required()
+@validate_admin_action(["manage_orders", "edit_orders"])
+def reschedule_order(order_id):
+    """Change an order's delivery date/window.
+
+    Separate from `/orders/<id>/edit`, which is items-only and runs five
+    cascades (inventory, corporate, bottle, cash, loyalty) that have nothing to
+    do with dates.
+
+    Free while the order is awaiting release or its delivery was never
+    claimed by a driver; refused with ORDER_SCHEDULE_LOCKED_BY_DRIVER once a
+    driver has touched it (see OrderScheduleService.reschedule).
+    """
+    try:
+        from business_app.services.order_schedule_service import OrderScheduleService
+        from business_app.utils.delivery_window import parse_and_validate_schedule
+
+        data = request.get_json(silent=True) or {}
+
+        # `data.get("delivery_date")` alone cannot tell "key omitted" from
+        # "key sent as null" -- both read as None -- but they must not mean
+        # the same thing here. Omitted is very likely a caller that only
+        # meant to touch the window and forgot the date; silently treating
+        # that as "clear the schedule" would make the order immediately due.
+        # Explicit null IS a legitimate request to clear the schedule (see
+        # OrderScheduleService.reschedule's undated-order behaviour) and
+        # keeps that meaning below.
+        if "delivery_date" not in data:
+            return validation_error_response("delivery_date is required (send it as null to clear the schedule)")
+
+        # The ONE parse+validate helper every write path shares (create,
+        # checkout, reschedule) -- never call parse_window_time/validate_schedule
+        # separately here, that would be a second copy of the rule. It defaults
+        # its own clock, so `now_local` is deliberately not passed.
+        delivery_date, window_start, window_end, schedule_errors = parse_and_validate_schedule(
+            data.get("delivery_date"),
+            data.get("delivery_window_start"),
+            data.get("delivery_window_end"),
+        )
+        if schedule_errors:
+            return validation_error_response(schedule_errors)
+
+        order = OrderScheduleService.reschedule(
+            order_id,
+            delivery_date=delivery_date,
+            window_start=window_start,
+            window_end=window_end,
+            actor_user_id=int(get_jwt_identity()),
+        )
+        return success_response(data={"order": serialize_order_admin(order)}, message="Schedule updated")
+    except NotFoundError as e:
+        return not_found_response(resource_type="Order", message=str(e))
+    except ValidationError as e:
+        return validation_error_response(str(e), error_code=e.error_code)
+    except Exception as e:
+        current_app.logger.error(f"Reschedule order error: {e}", exc_info=True)
+        return internal_error_response("Failed to reschedule order")
 
 
 @admin_bp.route("/orders/<int:order_id>/edit-preview", methods=["POST"])

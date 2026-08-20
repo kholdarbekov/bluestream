@@ -262,7 +262,40 @@ For API support, contact: support@aqua-element.uz
                         "description": "Final total amount in UZS",
                     },
                     "delivery_address": {"$ref": "#/definitions/Address"},
-                    "delivery_time_slot": {"$ref": "#/definitions/TimeSlot"},
+                    "delivery_date": {
+                        "type": "string",
+                        "format": "date",
+                        "example": "2024-01-15",
+                        "description": "Scheduled delivery date, if the order was scheduled for a future day",
+                    },
+                    "delivery_window": {
+                        "type": "object",
+                        "description": "Open-ended delivery time window for a scheduled order",
+                        "properties": {
+                            "start": {
+                                "type": "string",
+                                "example": "09:00",
+                                "description": "Window start time (HH:MM); null if open-ended on this side",
+                            },
+                            "end": {
+                                "type": "string",
+                                "example": "18:00",
+                                "description": "Window end time (HH:MM); null if open-ended on this side",
+                            },
+                            "kind": {
+                                "type": "string",
+                                "enum": ["anytime", "between", "until", "after"],
+                                "example": "between",
+                                "description": "Machine-readable window shape; clients must branch on this, "
+                                "not re-derive it from start/end",
+                            },
+                            "label": {
+                                "type": "string",
+                                "example": "09:00-18:00",
+                                "description": "English fallback label for logs and non-localized surfaces",
+                            },
+                        },
+                    },
                     "notes": {
                         "type": "string",
                         "example": "Please call before delivery",

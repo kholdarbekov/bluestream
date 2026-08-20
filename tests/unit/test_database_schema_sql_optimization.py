@@ -20,7 +20,12 @@ def test_expected_indexes_and_constraints_exist(db):
 
     assert "idx_loyalty_transactions_user_created" in _index_names(inspector, "loyalty_transactions")
     assert "idx_loyalty_points_program_tier_activity" in _index_names(inspector, "loyalty_points")
-    assert "idx_orders_delivery_slot_date" in _index_names(inspector, "orders")
+    # Renamed, not dropped: `idx_orders_delivery_slot_date` was composite over
+    # (delivery_time_slot, delivery_date). The free-text slot column is gone
+    # (migration c9e4a1f7b3d2), so the index it led on went with it and
+    # `delivery_date` — the column the release sweep filters on — carries its
+    # own index instead.
+    assert "idx_orders_delivery_date" in _index_names(inspector, "orders")
     assert "idx_subscriptions_status_next_billing" in _index_names(inspector, "subscriptions")
     assert "idx_subscriptions_status_next_delivery" in _index_names(inspector, "subscriptions")
     assert "idx_campaign_usage_campaign_user" in _index_names(inspector, "campaign_usage")

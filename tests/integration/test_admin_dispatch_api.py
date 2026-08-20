@@ -48,6 +48,209 @@ class TestSnapshotEndpoint:
         assert resp.status_code == 403
 
 
+def test_dispatch_snapshot_includes_order_dated_without_a_delivery(client, app, admin_user):
+    """An order carrying only `delivery_date` and NO delivery row must still
+    reach the board for its date. This is what makes 'no delivery row == not
+    released' compatible with dispatch visibility, and it is the exact query
+    that breaks if delivery_date's type changes without the filter changing.
+    """
+    from datetime import date, timedelta
+
+    from flask_jwt_extended import create_access_token
+
+    from business_app import db
+    from business_app.models.order import Order
+    from shared.enums import OrderStatus
+
+    target = date.today() + timedelta(days=1)
+    with app.app_context():
+        order = Order(
+            user_id=admin_user.id,
+            status=OrderStatus.CONFIRMED,
+            total_amount=50000,
+            delivery_date=target,
+            order_source="admin",
+        )
+        db.session.add(order)
+        db.session.commit()
+        order_id = order.id
+        token = create_access_token(identity=str(admin_user.id), additional_claims={"role": "admin"})
+
+    resp = client.get(
+        f"/api/v1/admin/dispatch/snapshot?date={target.isoformat()}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    payload = resp.get_json()["data"]
+    seen = [o["order_id"] for o in payload["orders"]] + [u["order_id"] for u in payload["unmapped"]]
+    assert order_id in seen
+    # It has no delivery, so it is NOT in the claimable pool bucket.
+    assert order_id not in [p["order_id"] for p in payload["pool"]]
+
+
+def test_dispatch_snapshot_publishes_the_structured_delivery_window(client, app, admin_user):
+    """The board carries the structured window, not the free-text slot string.
+
+    `_order_entry` used to emit `time_slot` straight from the
+    `orders.delivery_time_slot` column. That column is gone; the four window
+    shapes (anytime / between / until / after) are published under
+    `delivery_window`, formatted by the one module that names them
+    (`business_app/utils/delivery_window.py`), so no client re-derives the
+    shape from the raw times.
+    """
+    from datetime import date, time, timedelta
+
+    from flask_jwt_extended import create_access_token
+
+    from business_app import db
+    from business_app.models.order import Order
+    from business_app.models.user import UserAddress
+    from shared.enums import OrderStatus
+
+    target = date.today() + timedelta(days=1)
+    with app.app_context():
+        address = UserAddress(
+            user_id=admin_user.id, full_address="Chilonzor 12", city="Tashkent",
+            latitude=41.31, longitude=69.25,
+        )
+        db.session.add(address)
+        db.session.flush()
+        order = Order(
+            user_id=admin_user.id,
+            status=OrderStatus.CONFIRMED,
+            total_amount=50000,
+            delivery_address_id=address.id,
+            delivery_date=target,
+            delivery_window_start=time(12, 0),
+            delivery_window_end=time(18, 0),
+            order_source="admin",
+        )
+        db.session.add(order)
+        db.session.commit()
+        order_id = order.id
+        token = create_access_token(identity=str(admin_user.id), additional_claims={"role": "admin"})
+
+    resp = client.get(
+        f"/api/v1/admin/dispatch/snapshot?date={target.isoformat()}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    entry = next(o for o in resp.get_json()["data"]["orders"] if o["order_id"] == order_id)
+    assert entry["delivery_window"] == {
+        "start": "12:00", "end": "18:00", "kind": "between", "label": "12:00-18:00",
+    }
+    assert "time_slot" not in entry
+    # A future calendar day is not overdue, however the DATE is anchored.
+    assert entry["is_overdue"] is False
+
+
+def test_dispatch_snapshot_orders_are_sorted_by_schedule_then_id(client, app, admin_user):
+    """The board comes back in resolved-schedule order, earliest first.
+
+    That sort moved out of SQL when the COALESCE went away (`delivery_date` is a
+    DATE, `scheduled_date` a TIMESTAMPTZ, so there is no single expression left
+    to ORDER BY), and nothing else pins it: the query's own `ORDER BY` is
+    `Order.id` alone. So the three orders below are created in an order that
+    makes an unsorted board visibly wrong — the EARLIEST-dated one is created
+    LAST, giving it the HIGHEST id. Drop the Python sort and this comes back as
+    [tomorrow_a, tomorrow_b, today] instead.
+
+    The two same-day orders pin the `order_id` tiebreak that keeps the sort
+    total when two stops share a schedule.
+    """
+    from datetime import date, timedelta
+
+    from flask_jwt_extended import create_access_token
+
+    from business_app import db
+    from business_app.models.order import Order
+    from business_app.models.user import UserAddress
+    from shared.enums import OrderStatus
+
+    today = date.today()
+    tomorrow = today + timedelta(days=1)
+
+    def _order(number, when):
+        order = Order(
+            user_id=admin_user.id,
+            order_number=number,
+            status=OrderStatus.CONFIRMED,
+            total_amount=50000,
+            delivery_address_id=address.id,
+            delivery_date=when,
+            order_source="admin",
+        )
+        db.session.add(order)
+        db.session.flush()
+        return order.id
+
+    with app.app_context():
+        address = UserAddress(
+            user_id=admin_user.id, full_address="Chilonzor 12", city="Tashkent",
+            latitude=41.31, longitude=69.25,
+        )
+        db.session.add(address)
+        db.session.flush()
+
+        tomorrow_a = _order("ORD-SORT-T1", tomorrow)
+        tomorrow_b = _order("ORD-SORT-T2", tomorrow)
+        today_order = _order("ORD-SORT-D0", today)
+        db.session.commit()
+        token = create_access_token(identity=str(admin_user.id), additional_claims={"role": "admin"})
+
+    assert today_order > tomorrow_b > tomorrow_a, "creation order must contradict schedule order"
+
+    resp = client.get(
+        f"/api/v1/admin/dispatch/snapshot?date={tomorrow.isoformat()}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert [o["order_id"] for o in resp.get_json()["data"]["orders"]] == [
+        today_order, tomorrow_a, tomorrow_b,
+    ]
+
+
+def test_snapshot_buckets_awaiting_release_orders_separately(client, app, admin_user):
+    """An order with a future `delivery_date` and no `Delivery` row can never
+    land in `pool` (pool requires `delivery_id is not None`), so a board that
+    only showed `pool` would understate the day's work. `scheduled` is where
+    that awaiting-release order surfaces instead — greyed, with its release
+    time — derived from the snapshot's own already-fetched rows, not a
+    second query.
+
+    `target` is two days out on purpose: `is_awaiting_release` compares
+    `release_at` (the target day's shift-start instant) against the real
+    wall clock, and the test container's UTC clock vs. the app's
+    Asia/Tashkent reasoning made a one-day-out fixture flaky in Task 9. Two
+    days out means "release_at > now" holds no matter what the current wall
+    time is, so this assertion cannot flip on a clock boundary.
+    """
+    from datetime import date, timedelta
+
+    from flask_jwt_extended import create_access_token
+
+    from business_app import db
+    from business_app.models.order import Order
+    from shared.enums import OrderStatus
+
+    target = date.today() + timedelta(days=2)
+    with app.app_context():
+        order = Order(user_id=admin_user.id, status=OrderStatus.CONFIRMED, total_amount=1000,
+                      delivery_date=target, order_source="admin")
+        db.session.add(order)
+        db.session.commit()
+        order_id = order.id
+        token = create_access_token(identity=str(admin_user.id), additional_claims={"role": "admin"})
+
+    resp = client.get(f"/api/v1/admin/dispatch/snapshot?date={target.isoformat()}",
+                      headers={"Authorization": f"Bearer {token}"})
+    payload = resp.get_json()["data"]
+    entry = next(s for s in payload["scheduled"] if s["order_id"] == order_id)
+    assert entry["release_at"] is not None
+    assert entry["delivery_window"]["kind"] == "anytime"
+    assert order_id not in [p["order_id"] for p in payload["pool"]]
+
+
 class TestStopsEndpoint:
     def test_delegates_with_exact_arguments(self, client, db, admin_auth_headers, admin_user, delivery_driver):
         from business_app.models.delivery import DeliveryRoute

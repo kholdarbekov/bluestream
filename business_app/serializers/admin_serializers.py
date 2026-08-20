@@ -15,6 +15,7 @@ from business_app.models.product import Product, ProductCategory
 from business_app.models.order import Order
 from business_app.utils.user_types import normalize_user_type
 from business_app.utils.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
+from business_app.utils.delivery_window import format_delivery_window
 from business_app.serializers.types import MoneyFloat
 
 
@@ -132,7 +133,10 @@ class OrderAdminSchema(BaseModel):
     payment_status: Optional[str] = None
     is_subscription_order: bool = Field(default=False)
     subscription_id: Optional[int] = None
-    delivery_date: Optional[datetime] = None
+    delivery_date: Optional[date] = None
+    delivery_window: Optional[Dict[str, Any]] = None
+    awaiting_release: bool = Field(default=False)
+    release_at: Optional[datetime] = None
     delivery_address: Optional[str] = None
     special_instructions: Optional[str] = None
     created_at: Optional[datetime] = None
@@ -663,6 +667,16 @@ def serialize_order_admin(order: Order) -> Dict[str, Any]:
         Serialized order data for admin
     """
     try:
+        # Local import: order_schedule_service imports business_app.models.*
+        # only, so this is not a real cycle risk, but every other
+        # cross-service import in this function (see order_serializers below)
+        # is already lazy -- matching that keeps this module importable before
+        # the service layer is fully wired up.
+        from business_app.services.order_schedule_service import OrderScheduleService
+
+        awaiting_release = OrderScheduleService.is_awaiting_release(order)
+        release_at = OrderScheduleService.release_at(order) if awaiting_release else None
+
         data = {
             "id": order.id,
             "order_number": order.order_number,
@@ -676,6 +690,9 @@ def serialize_order_admin(order: Order) -> Dict[str, Any]:
             "is_subscription_order": bool(order.is_subscription_order),
             "subscription_id": order.subscription_id,
             "delivery_date": order.delivery_date.isoformat() if order.delivery_date else None,
+            "delivery_window": format_delivery_window(order.delivery_window_start, order.delivery_window_end),
+            "awaiting_release": awaiting_release,
+            "release_at": release_at.isoformat() if release_at else None,
             "delivery_address": order.delivery_address.to_dict() if getattr(order, "delivery_address", None) else None,
             "special_instructions": getattr(order, "special_instructions", None),
             "created_at": order.created_at.isoformat() if order.created_at else None,

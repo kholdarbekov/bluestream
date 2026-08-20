@@ -13,6 +13,7 @@ from staff_bot.keyboards.common import CommonKeyboards
 from staff_bot.utils.formatters import (
     escape_html,
     format_currency,
+    format_delivery_window_line,
     format_money_block,
     format_order_card,
 )
@@ -244,9 +245,9 @@ class OrdersPoolHandler(BaseHandler):
                 lines.append(f"    📝 {delivery_instructions}")
 
             # Delivery time
-            time_slot = escape_html(order.get('time_slot', ''))
-            if time_slot:
-                lines.append(f"🕐 {time_slot}")
+            window_line = format_delivery_window_line(order, language)
+            if window_line:
+                lines.append(window_line)
 
             # Payment
             total = format_currency(order.get('total_amount'), language=language)

@@ -146,7 +146,6 @@ class CartService:
         items: List[Dict[str, Any]],
         delivery_address_id: Optional[int] = None,
         delivery_date: Optional[str] = None,
-        delivery_time_slot: Optional[str] = None,
         loyalty_points_used: int = 0,
         promo_code: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -158,7 +157,6 @@ class CartService:
             items: Cart items
             delivery_address_id: Delivery address
             delivery_date: Requested delivery date
-            delivery_time_slot: Requested time slot
             loyalty_points_used: Loyalty points to apply
             promo_code: Promotional code
 
@@ -183,9 +181,7 @@ class CartService:
         items_subtotal = sum(item["subtotal"] for item in validated_items)
 
         # Calculate delivery fee
-        delivery_fee = self._calculate_delivery_fee(
-            items_subtotal, delivery_address_id, delivery_date, delivery_time_slot, user
-        )
+        delivery_fee = self._calculate_delivery_fee(items_subtotal, delivery_address_id, delivery_date, user)
 
         # Calculate promotional discount
         promo_discount = 0.0
@@ -671,7 +667,7 @@ class CartService:
             )
 
         # Calculate delivery fee
-        delivery_fee = self._calculate_delivery_fee(subtotal, None, None, None, user)
+        delivery_fee = self._calculate_delivery_fee(subtotal, None, None, user)
         estimated_total = subtotal + delivery_fee
 
         return {
@@ -784,7 +780,6 @@ class CartService:
         items_subtotal: float,
         delivery_address_id: Optional[int],
         delivery_date: Optional[str],
-        delivery_time_slot: Optional[str],
         user: Optional[User],
     ) -> float:
         """Calculate delivery fee via DeliveryService (single source of truth)"""

@@ -1120,6 +1120,13 @@
     "rule": "/api/v1/admin/orders/<int:order_id>/personal-card-transfer/preview"
   },
   {
+    "endpoint": "admin.reschedule_order",
+    "methods": [
+      "PATCH"
+    ],
+    "rule": "/api/v1/admin/orders/<int:order_id>/schedule"
+  },
+  {
     "endpoint": "admin.update_order_status",
     "methods": [
       "PUT"
@@ -3079,13 +3086,6 @@
       "POST"
     ],
     "rule": "/api/v1/orders/repeat/<int:order_id>"
-  },
-  {
-    "endpoint": "orders.schedule_order",
-    "methods": [
-      "POST"
-    ],
-    "rule": "/api/v1/orders/schedule"
   },
   {
     "endpoint": "orders.get_order_statistics",

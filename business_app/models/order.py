@@ -6,8 +6,10 @@ from sqlalchemy import (
     Integer,
     String,
     Boolean,
+    Date,
     DateTime,
     Text,
+    Time,
     ForeignKey,
     Enum,
     JSON,
@@ -20,6 +22,7 @@ from business_app import db
 from business_app.utils.constants import (
     ORDER_SOURCE_PREFIXES,
 )
+from business_app.utils.delivery_window import format_delivery_window
 from shared.enums import (
     OrderStatus,
     PaymentMethod,
@@ -37,7 +40,7 @@ class Order(db.Model, TimestampMixin):
         Index("idx_orders_user_status", "user_id", "status"),
         Index("idx_orders_status_created", "status", "created_at"),
         Index("idx_orders_user_created", "user_id", "created_at"),
-        Index("idx_orders_delivery_slot_date", "delivery_time_slot", "delivery_date"),
+        Index("idx_orders_delivery_date", "delivery_date"),
         # Place (address-group) queries join orders on delivery_address_id and
         # filter on status: ring-1 candidates inside the FOR UPDATE window, the
         # COD cap check on every cash order creation, the place debtor list and
@@ -64,8 +67,14 @@ class Order(db.Model, TimestampMixin):
 
     # Delivery information
     delivery_address_id = Column(Integer, ForeignKey("addresses.id"), nullable=True)
-    delivery_date = Column(DateTime(timezone=True), nullable=True)
-    delivery_time_slot = Column(String(20), nullable=True)  # "09:00-12:00"
+    delivery_date = Column(Date, nullable=True)
+    # Open-ended delivery window; either side may be NULL.
+    #   (None, None) anytime · (12:00, 18:00) between
+    #   (None, 10:00) until  · (19:00, None) after
+    # See business_app/utils/delivery_window.py — the ONLY place these four
+    # shapes are named. Advisory: nothing blocks a delivery outside the window.
+    delivery_window_start = Column(Time, nullable=True)
+    delivery_window_end = Column(Time, nullable=True)
     delivery_notes = Column(Text, nullable=True)
     is_urgent = Column(Boolean, default=False)
 
@@ -184,7 +193,7 @@ class Order(db.Model, TimestampMixin):
             "loyalty_discount": self.loyalty_discount,
             "total_amount": self.total_amount,
             "delivery_date": self.delivery_date.isoformat() if self.delivery_date else None,
-            "delivery_time_slot": self.delivery_time_slot,
+            "delivery_window": format_delivery_window(self.delivery_window_start, self.delivery_window_end),
             "is_paid": self.is_paid,
             "is_urgent": self.is_urgent,
             "loyalty_points_used": self.loyalty_points_used,

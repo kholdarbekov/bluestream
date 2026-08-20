@@ -8,6 +8,12 @@ address coordinates (`no_coordinates`). A map that silently omits those
 implies it is showing all the work, and an order with neither reason surfaced
 is exactly the one that gets forgotten.
 
+Also — deliberately — `scheduled`: orders awaiting release (see
+`OrderScheduleService.is_awaiting_release`) that carry no `Delivery` row at
+all, and so can never land in `pool` (which requires `delivery_id is not
+None`). Without this bucket, a board driven only by `pool` would understate
+the day's work by exactly the orders not yet offered to a driver.
+
 An order's schedule is resolved as `order.delivery_date` if set, else its
 `delivery.scheduled_date` — `order.delivery_date` is nullable and, in
 production, NULL on every active order; `Delivery.scheduled_date` is the
@@ -23,18 +29,20 @@ from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from flask import current_app
-from sqlalchemy import func, or_
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import joinedload, selectinload
 
 from business_app.models.delivery import Delivery, DeliveryPerson, DeliveryRoute
 from business_app.models.order import Order, OrderItem
 from business_app.models.user import User, UserAddress
 from business_app.serializers.order_serializers import summarize_order_items
+from business_app.services.order_schedule_service import OrderScheduleService
 from business_app.services.route_optimization_service import (
     ACTIVE_DELIVERY_STATUSES,
     RouteOptimizationService,
     _driver_day_start_utc,
 )
+from business_app.utils.delivery_window import format_delivery_window
 from business_app.utils.state_validators import DELIVERY_POOL_UNASSIGNED_STATES
 from shared.enums import OrderStatus, PaymentMethod
 
@@ -69,12 +77,18 @@ class DispatchService:
         end_of_day = cls._day_bounds(target_date)[1]
         today_start = cls._day_bounds(cls.today())[0]
 
-        # `order.delivery_date` if set, else `delivery.scheduled_date` — see
-        # module docstring. COALESCE at the SQL level (not a Python filter
-        # after a narrower query) so a row whose `orders.delivery_date` is
-        # NULL but whose `deliveries.scheduled_date` is set is never dropped
-        # before it reaches Python.
-        resolved_schedule = func.coalesce(Order.delivery_date, Delivery.scheduled_date)
+        # `order.delivery_date` if set, else `delivery.scheduled_date` — see the
+        # module docstring. Expressed WITHOUT a COALESCE: `delivery_date` is a
+        # DATE and `scheduled_date` a TIMESTAMPTZ, and there is no common type
+        # Postgres will pick for us. The three branches below are the exact
+        # logical equivalent of the old `resolved IS NULL OR resolved <=
+        # end_of_day`, and unlike a `timezone()` cast they also run on the
+        # SQLite the test suite uses.
+        schedule_in_range = or_(
+            and_(Order.delivery_date.is_(None), Delivery.scheduled_date.is_(None)),
+            and_(Order.delivery_date.isnot(None), Order.delivery_date <= target_date),
+            and_(Order.delivery_date.is_(None), Delivery.scheduled_date <= end_of_day),
+        )
 
         rows = (
             Order.query.options(
@@ -96,15 +110,15 @@ class DispatchService:
             .outerjoin(Delivery, Delivery.order_id == Order.id)
             .filter(
                 Order.status.in_(cls.ACTIVE_ORDER_STATUSES),
-                # SQL `NULL <= x` is falsy, so a bare `resolved_schedule <=
-                # end_of_day` silently drops any active order with no
-                # resolved schedule at all — it would never reach `orders` OR
-                # `unmapped`. Fetch it regardless of the selected day; the
+                # SQL `NULL <= x` is falsy, so a bare `schedule <= end_of_day`
+                # silently drops any active order with no resolved schedule at
+                # all — it would never reach `orders` OR `unmapped`. The first
+                # branch above fetches it regardless of the selected day; the
                 # loop below routes it to `unmapped` (reason `not_scheduled`)
                 # instead of pretending it doesn't exist.
-                or_(resolved_schedule.is_(None), resolved_schedule <= end_of_day),
+                schedule_in_range,
             )
-            .order_by(resolved_schedule.asc(), Order.id.asc())
+            .order_by(Order.id.asc())
             .all()
         )
 
@@ -124,6 +138,17 @@ class DispatchService:
                 continue
             orders.append(entry)
 
+        # Sort here rather than in SQL: the resolved schedule is no longer a
+        # single SQL expression, and `_order_entry` already carries it as
+        # `delivery_date`. Parsed back into an aware datetime rather than
+        # compared as text — the two branches of `_resolved_schedule` can carry
+        # different UTC offsets, and lexicographic order across mixed offsets is
+        # not chronological. No missing-value case to defend against: every
+        # entry in `orders` came through `_order_entry`, which is only reached
+        # once `schedule is None` has been diverted to `unmapped` above.
+        orders.sort(key=lambda o: (datetime.fromisoformat(o["delivery_date"]), o["order_id"]))
+        unmapped.sort(key=lambda u: u["order_id"])
+
         pool = [
             o
             for o in orders
@@ -132,11 +157,33 @@ class DispatchService:
             and o["delivery_status"] in cls._POOL_DELIVERY_STATUS_VALUES
         ]
 
+        # Orders that are on the board for this day but not yet offered to any
+        # driver. They have no delivery row at all — that is precisely what
+        # keeps them out of `pool` above — so they can never appear there, and
+        # a board that showed only `pool` would imply the day has less work
+        # than it does. Derived from `rows`, the same fetch `orders`/`unmapped`
+        # came from — no second query.
+        scheduled = []
+        for order in rows:
+            if not OrderScheduleService.is_awaiting_release(order):
+                continue
+            release_at = OrderScheduleService.release_at(order)
+            scheduled.append(
+                {
+                    "order_id": order.id,
+                    "order_number": order.order_number,
+                    "delivery_date": order.delivery_date.isoformat() if order.delivery_date else None,
+                    "delivery_window": format_delivery_window(order.delivery_window_start, order.delivery_window_end),
+                    "release_at": release_at.isoformat() if release_at else None,
+                }
+            )
+
         return {
             "date": target_date.isoformat(),
             "orders": orders,
             "unmapped": unmapped,
             "pool": pool,
+            "scheduled": scheduled,
             "drivers": cls._drivers(),
             "routes": cls._routes(target_date),
         }
@@ -294,8 +341,8 @@ class DispatchService:
             return ""
         return address.full_address or address.street_address or address.district or ""
 
-    @staticmethod
-    def _resolved_schedule(order: Order) -> Optional[datetime]:
+    @classmethod
+    def _resolved_schedule(cls, order: Order) -> Optional[datetime]:
         """`order.delivery_date` if set, else `order.delivery.scheduled_date`.
 
         `Order.delivery` is an existing one-to-one relationship, already
@@ -303,7 +350,12 @@ class DispatchService:
         of its own.
         """
         if order.delivery_date is not None:
-            return order.delivery_date
+            # A DATE, not an instant. Everything downstream (`is_overdue`, the
+            # sort key, the JSON) compares it against UTC-aware datetimes, so
+            # anchor it at the operator-local start of that day — via
+            # `_day_bounds`, so the day boundary is not defined a second time
+            # here and cannot drift from the one the query filters on.
+            return cls._day_bounds(order.delivery_date)[0]
         delivery = order.delivery
         return delivery.scheduled_date if delivery else None
 
@@ -342,7 +394,7 @@ class DispatchService:
             "total_amount": float(order.total_amount or 0),
             "payment_method": payment_method,
             "is_cod": payment_method == PaymentMethod.CASH.value,
-            "time_slot": order.delivery_time_slot,
+            "delivery_window": format_delivery_window(order.delivery_window_start, order.delivery_window_end),
             "delivery_date": schedule.isoformat(),
             "is_overdue": bool(schedule < today_start),
             **cls._items_fields(order),

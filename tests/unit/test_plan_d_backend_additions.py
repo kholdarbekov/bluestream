@@ -113,7 +113,6 @@ def test_active_delivery_payload_emits_the_signed_place_balance_over_the_wire(
         status=OrderStatus.CONFIRMED, subtotal=Decimal("10000"),
         total_amount=Decimal("10000"), delivery_address_id=place["a1"].id,
         delivery_date=datetime.now(UTC) + timedelta(hours=2),
-        delivery_time_slot="09:00-12:00",
     )
     db.session.add(order)
     db.session.flush()

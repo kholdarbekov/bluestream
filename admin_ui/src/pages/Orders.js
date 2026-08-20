@@ -24,6 +24,8 @@ import {
   Switch,
   Checkbox,
   InputNumber,
+  TimePicker,
+  Segmented,
 } from 'antd';
 import {
   ShoppingCartOutlined,
@@ -41,6 +43,7 @@ import {
   WarningOutlined,
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
+import dayjs from 'dayjs';
 import { formatDate, formatDateTimeShort } from '../utils/dateUtils';
 import { formatMoney } from '../utils/formatMoney';
 import {
@@ -153,6 +156,57 @@ const humanizeAuditAction = (value) =>
 export const collectableOutstanding = (order) =>
   Number(order?.net_outstanding_amount ?? order?.outstanding_amount ?? 0);
 
+// Matches shared/business_config.py MAX_SCHEDULE_HORIZON_DAYS (currently 15).
+// Not published to the frontend today, so this is the one place in the JS
+// that names the horizon — bump both if it ever changes.
+export const SCHEDULE_HORIZON_DAYS = 15;
+
+// A Map, not a plain object, because the lookup key below comes from form
+// state: `WINDOW_PRESETS[preset]` is a prototype-pollution sink (a `preset` of
+// `__proto__` or `constructor` returns something that is not a preset), which
+// is what security/detect-object-injection flags. Map.get() only ever returns
+// own entries, so this is a real fix rather than a silenced rule.
+export const WINDOW_PRESETS = new Map([
+  ['anytime', { start: null, end: null }],
+  ['morning', { start: '09:00', end: '12:00' }],
+  ['afternoon', { start: '12:00', end: '18:00' }],
+  ['evening', { start: '18:00', end: '21:00' }],
+]);
+
+// The admin UI never decides what a window MEANS — it only fills the two fields
+// the backend stores. `kind` and the human label come back from the API.
+export function buildSchedulePayload({ preset, date, start = null, end = null }) {
+  if (!date) return {};
+  const window = preset === 'custom' ? { start, end } : WINDOW_PRESETS.get(preset) || WINDOW_PRESETS.get('anytime');
+  return {
+    delivery_date: date,
+    delivery_window_start: window.start,
+    delivery_window_end: window.end,
+  };
+}
+
+// business_app/utils/delivery_window.py publishes `kind` as the machine-readable
+// shape and `label` as an English-only log/fallback string. Rendering `label`
+// to an operator is how English leaks into a Russian/Uzbek UI, so this builds
+// the display string from `kind` + `start`/`end` and lets i18n own the wording.
+// Branch on `kind`, never render `label`, never re-derive the shape from
+// `start`/`end` (the backend is the one place that names the four shapes).
+export const formatDeliveryWindowLabel = (deliveryWindow, t) => {
+  if (!deliveryWindow) return null;
+  const { kind, start, end } = deliveryWindow;
+  switch (kind) {
+    case 'between':
+      return t('ui.orders.window_between', '{{start}}–{{end}}', { start, end });
+    case 'until':
+      return t('ui.orders.window_until', 'Before {{end}}', { end });
+    case 'after':
+      return t('ui.orders.window_after', 'After {{start}}', { start });
+    case 'anytime':
+    default:
+      return t('ui.orders.window_anytime', 'Anytime');
+  }
+};
+
 const Orders = () => {
   const { t } = useTranslation('orders');
   const queryClient = useQueryClient();
@@ -219,6 +273,7 @@ const Orders = () => {
   const [cashEditForm] = Form.useForm();
   const [paymentMethodForm] = Form.useForm();
   const watchedPaymentMethod = Form.useWatch('payment_method', createOrderForm);
+  const watchedWindowPreset = Form.useWatch('window_preset', createOrderForm);
   const watchedStatusValue = Form.useWatch('status', statusForm);
   const watchedBypassCodCheck = Form.useWatch('bypass_cod_check', paymentMethodForm);
 
@@ -835,6 +890,12 @@ const Orders = () => {
         product_id: item.product_id,
         quantity: item.quantity,
       })),
+      ...buildSchedulePayload({
+        preset: values.window_preset,
+        date: values.delivery_date ? values.delivery_date.format('YYYY-MM-DD') : null,
+        start: values.window_start ? values.window_start.format('HH:mm') : null,
+        end: values.window_end ? values.window_end.format('HH:mm') : null,
+      }),
     });
   };
 
@@ -1092,6 +1153,25 @@ const Orders = () => {
       key: 'created_at',
       width: 140,
       render: (date) => formatDate(date),
+    },
+    {
+      title: t('ui.orders.delivery_schedule', 'Delivery schedule'),
+      key: 'delivery_schedule',
+      width: 180,
+      render: (_, record) => {
+        if (!record.delivery_date) return '—';
+        return (
+          <div>
+            <div>{formatDate(record.delivery_date)}</div>
+            <small style={{ color: '#666' }}>{formatDeliveryWindowLabel(record.delivery_window, t)}</small>
+            {record.awaiting_release ? (
+              <div>
+                <Tag color="blue" style={{ marginTop: 2 }}>{t('ui.orders.awaiting_release', 'Scheduled')}</Tag>
+              </div>
+            ) : null}
+          </div>
+        );
+      },
     },
     {
       title: t('ui.orders.actions', 'Actions'),
@@ -2191,6 +2271,43 @@ const Orders = () => {
               <Switch />
             </Form.Item>
           ) : null}
+
+          <Form.Item label={t('ui.orders.delivery_schedule', 'Delivery schedule')}>
+            <Space direction="vertical" style={{ width: '100%' }}>
+              <Form.Item name="delivery_date" noStyle>
+                <DatePicker
+                  style={{ width: '100%' }}
+                  placeholder={t('ui.orders.deliver_asap', 'Deliver as soon as possible')}
+                  disabledDate={(current) =>
+                    current && (current < dayjs().startOf('day') || current > dayjs().add(SCHEDULE_HORIZON_DAYS, 'day').endOf('day'))
+                  }
+                />
+              </Form.Item>
+              <Form.Item name="window_preset" noStyle initialValue="anytime">
+                <Segmented
+                  options={[
+                    { label: t('ui.orders.window_anytime', 'Anytime'), value: 'anytime' },
+                    { label: t('ui.orders.window_morning', 'Morning'), value: 'morning' },
+                    { label: t('ui.orders.window_afternoon', 'Afternoon'), value: 'afternoon' },
+                    { label: t('ui.orders.window_evening', 'Evening'), value: 'evening' },
+                    { label: t('ui.orders.window_custom', 'Custom'), value: 'custom' },
+                  ]}
+                />
+              </Form.Item>
+              {watchedWindowPreset === 'custom' ? (
+                <Space>
+                  <Form.Item name="window_start" noStyle>
+                    <TimePicker format="HH:mm" minuteStep={15} allowClear
+                      placeholder={t('ui.orders.window_from_any', 'From (any)')} />
+                  </Form.Item>
+                  <Form.Item name="window_end" noStyle>
+                    <TimePicker format="HH:mm" minuteStep={15} allowClear
+                      placeholder={t('ui.orders.window_to_any', 'To (any)')} />
+                  </Form.Item>
+                </Space>
+              ) : null}
+            </Space>
+          </Form.Item>
 
           <Form.Item name="delivery_notes" label={t('ui.orders.delivery_notes', 'Delivery Notes')}>
             <Input.TextArea rows={2} placeholder={t('ui.orders.delivery_notes_placeholder', 'Any special delivery instructions...')} />

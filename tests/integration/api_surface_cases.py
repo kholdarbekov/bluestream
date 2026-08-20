@@ -345,7 +345,6 @@ API_SURFACE_CASES = [
     ('POST', '/api/v1/orders/export', 'orders.export_orders'),
     ('POST', '/api/v1/orders/promo-code/validate', 'orders.validate_promo_code'),
     ('POST', '/api/v1/orders/repeat/1', 'orders.repeat_order'),
-    ('POST', '/api/v1/orders/schedule', 'orders.schedule_order'),
     ('POST', '/api/v1/orders/subscription', 'orders.create_subscription_order'),
     ('POST', '/api/v1/payments/1/cancel', 'payments.cancel_payment'),
     ('POST', '/api/v1/payments/1/verify', 'payments.verify_payment'),

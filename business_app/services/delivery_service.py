@@ -17,6 +17,7 @@ from business_app.models.order import Order
 from business_app.utils.exceptions import ValidationError, NotFoundError, DeliveryError
 from business_app.utils.state_validators import assert_delivery_person_for_status
 from business_app.utils.constants import DeliveryType, DELIVERY_ZONES
+from business_app.utils.delivery_window import window_slot_label
 from shared.enums import DeliveryStatus, OrderStatus
 from shared.status_transitions import is_valid_delivery_transition
 from business_app.utils.helpers import (
@@ -105,7 +106,8 @@ class DeliveryService:
             distance_km=round(distance, 2),
             estimated_delivery_time=estimated_time,
             scheduled_date=order.delivery_date or datetime.now(UTC),
-            scheduled_time_slot=scheduled_time_slot or "09:00-12:00",
+            scheduled_time_slot=scheduled_time_slot
+            or window_slot_label(order.delivery_window_start, order.delivery_window_end),
         )
 
         db.session.add(delivery)
@@ -433,28 +435,41 @@ class DeliveryService:
         """Return delivery slot capacity details for a specific booking date."""
         booking_rows = (
             db.session.query(
-                Order.delivery_time_slot,
+                Order.delivery_window_start,
+                Order.delivery_window_end,
                 db.func.count(Order.id),
             )
             .filter(
                 Order.delivery_date >= target_date,
                 Order.delivery_date < target_date + timedelta(days=1),
-                Order.delivery_time_slot.isnot(None),
+                # OPEN-ENDED WINDOWS ARE EXCLUDED ON PURPOSE — do not "restore"
+                # them. "after 19:00", "until 10:00" and "anytime" book no fixed
+                # slot, so they occupy none of one's capacity. This list is not a
+                # report: `is_available` below gates which slots the web checkout
+                # offers the customer, so counting an "after 19:00" order against
+                # a 19:00-21:00 slot would hide a slot they may legitimately pick.
+                # Only a CLOSED window has a slot identity at all.
+                Order.delivery_window_start.isnot(None),
+                Order.delivery_window_end.isnot(None),
             )
-            .group_by(Order.delivery_time_slot)
+            .group_by(Order.delivery_window_start, Order.delivery_window_end)
             .all()
         )
-        bookings_by_slot = {slot_label: count for slot_label, count in booking_rows}
+        # Keyed by the WHOLE window, not by its start alone: two active slots may
+        # share a start minute (09:00-12:00 and 09:00-18:00) and must not consume
+        # each other's capacity. `DeliveryTimeSlot.start_time`/`end_time` are
+        # "HH:MM" strings, so the key is rendered in that shape rather than
+        # compared as times.
+        bookings_by_window = {
+            (start.strftime("%H:%M"), end.strftime("%H:%M")): count for start, end, count in booking_rows
+        }
 
         slots_data = []
         for slot in DeliveryTimeSlot.query.filter_by(is_active=True).all():
             if not slot.is_available_on_date(target_date):
                 continue
 
-            current_bookings = bookings_by_slot.get(
-                f"{slot.start_time}-{slot.end_time}",
-                0,
-            )
+            current_bookings = bookings_by_window.get((slot.start_time, slot.end_time), 0)
             available_capacity = slot.max_orders - current_bookings
             delivery_fee = float(slot.delivery_fee)
             premium_fee = float(slot.premium_fee) if slot.is_premium else 0

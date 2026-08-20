@@ -217,7 +217,6 @@ def _order_with_address(db, customer, order_number, *, apartment, floor):
         total_amount=Decimal("10000"),
         delivery_address_id=address.id,
         delivery_date=datetime.now(UTC) + timedelta(hours=2),
-        delivery_time_slot="09:00-12:00",
     )
     db.session.add(order)
     db.session.flush()

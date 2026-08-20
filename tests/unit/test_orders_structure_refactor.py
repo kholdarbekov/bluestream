@@ -38,7 +38,6 @@ def test_orders_api_delegates_migrated_flows_to_order_service():
         "perform_bulk_action(",
         "export_orders(",
         "create_subscription_order(",
-        "create_scheduled_order(",
     ]
 
     for method in delegated_methods:
@@ -61,7 +60,6 @@ def test_orders_api_targeted_routes_do_not_contain_query_calls():
         "bulk_order_action",
         "export_orders",
         "create_subscription_order",
-        "schedule_order",
     ]
 
     for function_name in functions:
@@ -77,4 +75,3 @@ def test_order_service_contains_orders_api_entrypoints():
     assert "def submit_order_feedback_for_user(" in text
     assert "def repeat_order_for_user(" in text
     assert "def create_subscription_order(" in text
-    assert "def create_scheduled_order(" in text

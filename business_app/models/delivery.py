@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, UTC
 from decimal import Decimal
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, Enum, JSON, Index, Numeric
 from sqlalchemy.orm import relationship
@@ -6,7 +6,6 @@ import uuid
 from business_app import db
 from shared.enums import DeliveryStatus
 from business_app.models import TimestampMixin
-from business_app.models.order import Order
 
 
 class Delivery(db.Model, TimestampMixin):
@@ -144,22 +143,6 @@ class DeliveryTimeSlot(db.Model):
 
         day_of_week = target_date.weekday()
         return day_of_week in self.available_days
-
-    def get_current_orders_count(self, target_date):
-        """Get number of orders already scheduled for this slot on target date"""
-        return Order.query.filter(
-            Order.delivery_date >= target_date,
-            Order.delivery_date < target_date + timedelta(days=1),
-            Order.delivery_time_slot == f"{self.start_time}-{self.end_time}",
-        ).count()
-
-    def is_available(self, target_date):
-        """Check if slot has capacity on target date"""
-        if not self.is_available_on_date(target_date):
-            return False
-
-        current_orders = self.get_current_orders_count(target_date)
-        return current_orders < self.max_orders
 
     def to_dict(self):
         return {

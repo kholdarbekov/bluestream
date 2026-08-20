@@ -1,6 +1,6 @@
 """Service-level regressions for orders API boundary migration."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import Mock, patch
 
@@ -10,7 +10,7 @@ from business_app.models.order import Order, OrderItem
 from business_app.models.user import UserAddress
 from business_app.services.order_service import OrderService
 from shared.enums import OrderStatus, PaymentMethod
-from business_app.utils.exceptions import ForbiddenError, ValidationError
+from business_app.utils.exceptions import ForbiddenError
 
 
 @pytest.fixture
@@ -137,17 +137,3 @@ def test_create_subscription_order_delegates_to_subscription_service(order_servi
         )
 
     assert result['id'] == 55
-
-
-def test_create_scheduled_order_rejects_past_datetime(order_service, db, sample_user):
-    _create_address(db, sample_user.id)
-
-    with pytest.raises(ValidationError):
-        order_service.create_scheduled_order(
-            {
-                'user_id': sample_user.id,
-                'delivery_address_id': 1,
-                'scheduled_date': (datetime.now(UTC) - timedelta(hours=1)).isoformat(),
-            },
-            [{'product_id': 1, 'quantity': 1}],
-        )

@@ -37,7 +37,8 @@ const SNAPSHOT = {
     unmapped: [{ order_id: 4, order_number: 'A-9', customer_name: 'Zed', address_label: '', reason: 'no_coordinates' }],
     pool: [{
       delivery_id: 33, order_id: 44, order_number: 'A-3', customer_name: 'Cid', customer_phone: '',
-      address_label: 'z', lat: 41.32, lng: 69.22, total_amount: 20000, is_cod: true, is_overdue: false, time_slot: null,
+      address_label: 'z', lat: 41.32, lng: 69.22, total_amount: 20000, is_cod: true, is_overdue: false,
+      delivery_window: { start: null, end: null, kind: 'anytime', label: 'anytime' },
     }],
     drivers: [{ driver_id: 5, full_name: 'Ali', lat: 41.3, lng: 69.2, location_status: 'fresh', active_count: 2, phone: '' }],
     routes: [{

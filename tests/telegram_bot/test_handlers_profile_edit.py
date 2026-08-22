@@ -33,9 +33,21 @@ class TestProfileEditMenuKeyboard:
 @pytest.mark.unit
 @pytest.mark.anyio
 class TestEditProfileSubMenu:
-    async def test_edit_profile_shows_field_submenu_and_clears_state(self, monkeypatch):
+    async def test_edit_profile_shows_field_submenu_and_disarms_only_its_own_prompts(
+        self, monkeypatch
+    ):
+        """Opening the sub-menu abandons the name/birthday prompt it offers.
+
+        It used to abandon EVERYTHING: `update_user_state(user_id, {})` also
+        wiped a concern report armed by "Report an issue", silently, while that
+        report's prompt and Cancel button were still on the customer's screen.
+        So the clear is now targeted — the screen names the prompts it owns and
+        `clear_awaiting_input` leaves any other flow armed.
+        """
         handler = profile_module.ProfileHandlers()
-        handler.user_repo = SimpleNamespace(update_user_state=AsyncMock())
+        handler.user_repo = SimpleNamespace(
+            update_user_state=AsyncMock(), clear_awaiting_input=AsyncMock(return_value=False)
+        )
         update = DummyUpdate(user_id=501)
         update.callback_query = DummyCallbackQuery(data="edit_profile")
         context = make_context()
@@ -46,7 +58,10 @@ class TestEditProfileSubMenu:
 
         await handler.edit_profile(update, context)
 
-        handler.user_repo.update_user_state.assert_awaited_once_with(501, {})
+        handler.user_repo.clear_awaiting_input.assert_awaited_once_with(
+            501, "edit_profile_name", "edit_profile_birthday"
+        )
+        handler.user_repo.update_user_state.assert_not_awaited()
         update.callback_query.edit_message_text.assert_awaited_once_with(
             text="telegram.profile.edit_menu_title:en",
             reply_markup="edit-menu-kbd",
@@ -75,7 +90,9 @@ class TestProfileNameEdit:
 
     async def test_handle_profile_name_edit_splits_and_updates(self, monkeypatch):
         handler = profile_module.ProfileHandlers()
-        handler.user_repo = SimpleNamespace(update_user_state=AsyncMock())
+        handler.user_repo = SimpleNamespace(
+            update_user_state=AsyncMock(), clear_awaiting_input=AsyncMock(return_value=True)
+        )
         update = DummyUpdate(user_id=602)
         context = make_context()
         captured = {}
@@ -102,7 +119,9 @@ class TestProfileNameEdit:
 
         assert captured["token"] == "jwt-token"
         assert captured["payload"] == {"first_name": "John", "last_name": "Van Der Berg"}
-        handler.user_repo.update_user_state.assert_awaited_once_with(602, {})
+        # The completed flow disarms ITSELF; a flow armed elsewhere is not this
+        # handler's to throw away.
+        handler.user_repo.clear_awaiting_input.assert_awaited_once_with(602, "edit_profile_name")
 
     async def test_handle_profile_name_edit_rejects_too_short(self, monkeypatch):
         handler = profile_module.ProfileHandlers()
@@ -148,7 +167,9 @@ class TestBirthdayTextEntry:
 
     async def test_handle_profile_birthday_edit_valid_date_calls_backend(self, monkeypatch):
         handler = profile_module.ProfileHandlers()
-        handler.user_repo = SimpleNamespace(update_user_state=AsyncMock())
+        handler.user_repo = SimpleNamespace(
+            update_user_state=AsyncMock(), clear_awaiting_input=AsyncMock(return_value=True)
+        )
         update = DummyUpdate(user_id=702)
         context = make_context()
         captured = {}
@@ -176,7 +197,9 @@ class TestBirthdayTextEntry:
         # Must convert DD-MM-YYYY -> YYYY-MM-DD (ISO)
         assert captured["payload"] == {"date_of_birth": "1990-05-17"}
         assert captured["token"] == "jwt-token"
-        handler.user_repo.update_user_state.assert_awaited_once_with(702, {})
+        handler.user_repo.clear_awaiting_input.assert_awaited_once_with(
+            702, "edit_profile_birthday"
+        )
         update.message.reply_text.assert_awaited_once_with(
             text="telegram.profile.birthday_updated:en",
             reply_markup="edit-menu-kbd",
@@ -288,7 +311,9 @@ class TestProfileMenuBirthdayDisplay:
 
     async def test_profile_menu_shows_birthday_as_dd_mm_yyyy(self, monkeypatch):
         handler = profile_module.ProfileHandlers()
-        handler.user_repo = SimpleNamespace(update_user_state=AsyncMock())
+        handler.user_repo = SimpleNamespace(
+            update_user_state=AsyncMock(), clear_awaiting_input=AsyncMock(return_value=False)
+        )
         update = DummyUpdate(user_id=801)
         update.callback_query = None  # message path
         context = make_context()

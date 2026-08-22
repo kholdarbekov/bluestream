@@ -104,10 +104,12 @@ class TestLinkAccountResponseNesting:
         state = await handler.link_account_confirm(update, context)
 
         assert state == profile_module.LINK_ACCOUNT_OTP
-        prompt_call = update.callback_query.edit_message_text.await_args
+        # The prompt is rendered through `_edit_or_replace_callback_message`,
+        # which passes the text as a keyword.
+        prompt_text = update.callback_query.edit_message_text.await_args.kwargs["text"]
         # Masked phone must be used; the full number must never appear.
-        assert "+998***2233" in prompt_call.args[0]
-        assert "+998901112233" not in prompt_call.args[0]
+        assert "+998***2233" in prompt_text
+        assert "+998901112233" not in prompt_text
 
 
 @pytest.mark.unit

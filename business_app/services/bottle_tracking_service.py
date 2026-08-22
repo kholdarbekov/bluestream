@@ -35,6 +35,7 @@ from shared.enums import (
     OrderStatus,
     UserStatus,
 )
+from shared.staff_constants import BOTTLE_RETURN_COLUMN_CEILING, MAX_BOTTLES_PER_SESSION
 from business_app.utils.audit_logger import AuditEventType, AuditSeverity, audit_logger
 from business_app.utils.exceptions import (
     ConfigurationError,
@@ -3150,6 +3151,28 @@ class BottleTrackingService:
 
         StaffService.anchor_driver_at_warehouse(driver_user_id)
 
+    @staticmethod
+    def _assert_bottle_count_within(field: str, value: int, ceiling: int) -> None:
+        """The SERVICE-side half of the session bottle bounds.
+
+        The floor guards beside each call site have always been here; the
+        ceilings lived only in the staff bot and in the pydantic request bodies,
+        which means they only ever bounded a count that arrived over HTTP. Every
+        other caller — a Celery task, an admin path, a script, a fixture that
+        graduates into production code — reached a 4-byte PostgreSQL integer
+        with an unbounded number and took the write down as a DataError 500
+        carrying no hint about which field or which value.
+
+        The numbers themselves are NOT restated here: `MAX_BOTTLES_PER_SESSION`
+        and `BOTTLE_RETURN_COLUMN_CEILING` are the same names the bot and the
+        serializers read (shared/staff_constants.py documents what each one is
+        for and why the return bound is deliberately not the load-out one).
+        `ValidationError` is the same type the floor guards raise, so a caller
+        sees one shape whichever end of the range it missed.
+        """
+        if value > ceiling:
+            raise ValidationError(f"{field} cannot exceed {ceiling}")
+
     @transactional
     def open_bottle_session(
         self,
@@ -3180,6 +3203,7 @@ class BottleTrackingService:
             )
         if bottles_loaded <= 0:
             raise ValidationError("bottles_loaded must be greater than zero")
+        self._assert_bottle_count_within("bottles_loaded", bottles_loaded, MAX_BOTTLES_PER_SESSION)
 
         session = DriverBottleSession(
             driver_user_id=driver_user_id,
@@ -3222,6 +3246,11 @@ class BottleTrackingService:
 
         if bottles_returned_to_warehouse < 0:
             raise ValidationError("bottles_returned_to_warehouse cannot be negative")
+        self._assert_bottle_count_within(
+            "bottles_returned_to_warehouse",
+            bottles_returned_to_warehouse,
+            BOTTLE_RETURN_COLUMN_CEILING,
+        )
 
         # Release still-undelivered orders instead of blocking the close. Deleting
         # the binding (vs. leaving it on the now-closed session) matters: the delivery
@@ -3273,6 +3302,18 @@ class BottleTrackingService:
             raise ConflictError(f"Session is already {session.status.value}, cannot force close")
         if not reason or not reason.strip():
             raise ValidationError("A reason is required for force-closing a session")
+        # THE BOUND BELONGS TO THE FIELD, NOT TO THE CALLER. This is the third
+        # writer of `bottles_returned_to_warehouse`; leaving it out would keep
+        # the DataError alive on the admin path after the driver's two were
+        # fixed. (The floor here CLAMPS rather than raises — `max(0, ...)`
+        # below — which is pre-existing and deliberate for an admin cleaning up
+        # an abandoned session; a value the column cannot hold has no such
+        # sensible clamp, so it is refused.)
+        self._assert_bottle_count_within(
+            "bottles_returned_to_warehouse",
+            bottles_returned_to_warehouse,
+            BOTTLE_RETURN_COLUMN_CEILING,
+        )
 
         # Mirror the normal-close release: an abandoned session's still-undelivered
         # orders must not stay bound to this sealed session (a later delivery would

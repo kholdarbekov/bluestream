@@ -96,20 +96,53 @@ def _ctx(user_data):
 
 
 @pytest.mark.unit
-class TestMainMenuTextPattern:
+class TestMainMenuTapRecognition:
+    """`_match_menu_action` is the ONE predicate for "is this text a tap?".
+
+    Was `TestMainMenuTextPattern`, against a regex (`_main_menu_text_pattern`)
+    that answered the same question a second time and more loosely — it
+    accepted any leading token, so text the matcher could not resolve was still
+    claimed by the escape and the conversation died with no output at all. The
+    regex is gone; the cases it pinned are pinned here, on the decider itself.
+    """
+
     def test_matches_menu_labels_with_and_without_emoji(self):
-        rx = re.compile(StaffBot.__new__(StaffBot)._main_menu_text_pattern())
-        assert rx.match(f"💰 {i18n.get('staff.menu.cash', 'en')}")
-        assert rx.match(i18n.get('staff.menu.cash', 'en'))
-        assert rx.match(f"📦 {i18n.get('staff.menu.new_orders', 'en')}")
-        assert rx.match(f"👤 {i18n.get('staff.menu.profile', 'en')}")
+        bot = StaffBot.__new__(StaffBot)
+        assert bot._match_menu_action(f"💰 {i18n.get('staff.menu.cash', 'en')}", 'en')
+        assert bot._match_menu_action(i18n.get('staff.menu.cash', 'en'), 'en')
+        assert bot._match_menu_action(f"📦 {i18n.get('staff.menu.new_orders', 'en')}", 'en')
+        assert bot._match_menu_action(f"👤 {i18n.get('staff.menu.profile', 'en')}", 'en')
 
     def test_does_not_match_user_typed_input(self):
-        rx = re.compile(StaffBot.__new__(StaffBot)._main_menu_text_pattern())
-        assert not rx.match("+998901234567")
-        assert not rx.match("Aziz Karimov")
-        assert not rx.match("54000")
-        assert not rx.match("Near the big mosque, 2nd floor")
+        bot = StaffBot.__new__(StaffBot)
+        assert bot._match_menu_action("+998901234567", 'en') is None
+        assert bot._match_menu_action("Aziz Karimov", 'en') is None
+        assert bot._match_menu_action("54000", 'en') is None
+        assert bot._match_menu_action("Near the big mosque, 2nd floor", 'en') is None
+
+    def test_a_word_typed_in_front_of_a_label_is_not_a_tap(self):
+        """The decoration the router strips is an EMOJI, not "a few characters".
+
+        `"Aziz Profile"` used to resolve to the Profile button (the matcher
+        retried the text with its first 2-4 characters removed), and
+        `"Sardor Profile"` used to be claimed by the escape filter and resolved
+        by nobody. Both shapes are ordinary things a person types into a staff
+        flow.
+        """
+        bot = StaffBot.__new__(StaffBot)
+        label = i18n.get('staff.menu.profile', 'en')
+        assert bot._match_menu_action(f"Aziz {label}", 'en') is None
+        assert bot._match_menu_action(f"Sardor {label}", 'en') is None
+
+    def test_a_trailing_space_in_the_translation_row_does_not_kill_the_button(self, monkeypatch):
+        """A row seeded as "Cash " renders a button; it must still route."""
+        from staff_bot.i18n import i18n as live_i18n
+
+        merged = {**live_i18n.translations.get('en', {}), 'staff.menu.cash': 'Cash '}
+        monkeypatch.setitem(live_i18n.translations, 'en', merged)
+
+        bot = StaffBot.__new__(StaffBot)
+        assert bot._match_menu_action("💰 Cash ", 'en') == 'staff_cash_hub'
 
 
 @pytest.mark.unit
@@ -194,9 +227,8 @@ class TestStateListRoutingDecision:
 
     def _state_handlers(self):
         bot = StaffBot.__new__(StaffBot)
-        pattern = bot._main_menu_text_pattern()
         menu_escape = MessageHandler(
-            filters.Regex(pattern) & ~filters.COMMAND, AsyncMock()
+            bot._main_menu_tap_filter() & ~filters.COMMAND, AsyncMock()
         )
         receive = MessageHandler(filters.TEXT & ~filters.COMMAND, AsyncMock())
         return menu_escape, receive
@@ -276,7 +308,10 @@ class TestConversationMenuEscapeWiring:
 
     def test_bot_defines_menu_escape_handler(self):
         text = BOT_FILE.read_text(encoding="utf-8")
-        assert "_main_menu_text_pattern" in text
+        # The escape is guarded by the MATCHER, not by a second regex of its
+        # own: `_main_menu_text_pattern` was that second regex and is gone.
+        assert "_main_menu_text_pattern" not in text
+        assert "self._main_menu_tap_filter()" in text
         assert "self._conv_menu_escape" in text
         assert "menu_escape" in text
 

@@ -53,6 +53,43 @@ logger = logging.getLogger('handlers')
 # the whole address after five steps, so the bot rejects it first.
 ADDRESS_DETAIL_MAX_LENGTH = 20
 
+# The DB-backed prompts this handler group ARMS, grouped by the screen that
+# owns them. A screen the customer can reach while one of its own prompts is
+# armed names its group when it disarms (see
+# ``BotUserRepository.clear_awaiting_input``) — never a blanket wipe, which
+# would also throw away a concern report armed by handlers/support.py.
+_PROFILE_EDIT_PROMPTS = ('edit_profile_name', 'edit_profile_birthday')
+_ADDRESS_EDIT_PROMPTS = ('edit_address_title', 'edit_address_instructions')
+
+
+def _markdown_copy(key: str, language: str, **data: Any) -> str:
+    """Render seeded Markdown copy with every interpolated value escaped as DATA.
+
+    The seeded copy is MARKUP — ``*Aniqlangan joylashuv:*``, ``**{title}**`` —
+    and that is why these messages go out with ``parse_mode='Markdown'`` at all.
+    Everything interpolated INTO it is data the customer or a geocoder wrote,
+    and Uzbek addresses really do carry ``_`` (building suffixes like "15_A"),
+    ``[`` (geocoder annotations) and ``*``. Unescaped, one of those makes
+    Telegram refuse the whole message with "can't parse entities"; the handler's
+    ``except Exception`` then turns a formatting problem into a dead screen, and
+    ``_edit_or_replace_callback_message`` cannot rescue it because its fallback
+    re-sends with the SAME parse mode.
+
+    So: escape the VALUES, never the template. Escaping the rendered string
+    instead (what ``district_selected`` does for MarkdownV2) would neuter the
+    copy's own bold — the trap on the other side of this fix.
+
+    One helper rather than an ``escape_markdown`` at each call site: the rule
+    "copy is markup, parameters are data" then has exactly one expression, and a
+    new Markdown screen inherits it by using it.
+    """
+    return i18n.get(
+        key,
+        language,
+        **{name: escape_markdown(str(value)) for name, value in data.items()},
+    )
+
+
 class AddressStep(NamedTuple):
     """One step of the optional address-detail chain.
 
@@ -103,9 +140,11 @@ _SKIP_TARGETS = {
     'floor': 'delivery_instructions',
 }
 
-# Which key in temp_address_data each step writes. Skip CLEARS it, so Skip means
-# what it says: retry_geocode reruns the whole chain, so a value typed before the
-# retry would otherwise survive a later Skip and still be saved.
+# Which key in temp_address_data each step writes, IN FLOW ORDER. Skip CLEARS
+# it, so Skip means what it says: retry_geocode reruns the whole chain, so a
+# value typed before the retry would otherwise survive a later Skip and still be
+# saved. The order is load-bearing — `_cleared_by_skip` walks it to find the
+# steps a Skip jumps OVER.
 _ADDRESS_FIELD_DATA_KEYS = {
     'street': 'street_address',
     'building': 'building_number',
@@ -113,6 +152,40 @@ _ADDRESS_FIELD_DATA_KEYS = {
     'floor': 'floor_number',
     'delivery_instructions': 'delivery_instructions',
 }
+
+
+def _cleared_by_skip(field: str) -> tuple[str, ...]:
+    """The temp_address_data keys a Skip on `field` must clear.
+
+    Not just the field that was tapped: a Skip that JUMPS OVER steps clears
+    those too. Skipping the building number means there is no building to be
+    inside, so `_SKIP_TARGETS` lands on delivery instructions — and an
+    apartment and floor typed before a `retry_geocode` rerun would otherwise be
+    saved onto a house whose owner has just said it has neither.
+
+    An unknown field (a Skip button rendered by an older deploy) clears
+    nothing: it must not take somebody's real answers with it on its way out.
+    """
+    fields = list(_ADDRESS_FIELD_DATA_KEYS)
+    if field not in fields:
+        return ()
+
+    start = fields.index(field)
+    target = _SKIP_TARGETS.get(field)
+    stop = fields.index(target) if target in fields else start + 1
+    return tuple(_ADDRESS_FIELD_DATA_KEYS[name] for name in fields[start:stop])
+
+# The columns the optional-detail chain owns, i.e. everything a shared-pin
+# address can still gain AFTER it has been created. Sent in full on every
+# enrichment write rather than merged key-by-key: Skip CLEARS a value, and a
+# payload that omitted the key could not express "this is now empty".
+_ADDRESS_DETAIL_KEYS = ('apartment_number', 'floor_number', 'delivery_instructions')
+
+# Snapshot of the detail payload last pushed to the backend, so a step that
+# changed nothing (every Skip) costs no HTTP call. Lives inside
+# temp_address_data because it dies with the flow; it is never read by
+# _build_address_payload, which names the columns it sends explicitly.
+_DETAIL_SYNC_SNAPSHOT_KEY = 'detail_sync_snapshot'
 
 
 def _is_shared_pin_address(context) -> bool:
@@ -166,8 +239,12 @@ class ProfileHandlers(BaseHandler):
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            # Clear any pending input state
-            await self.user_repo.update_user_state(user_id, {})
+            # The customer navigated away from any prompt this handler group
+            # armed — but a concern report armed elsewhere is not ours to throw
+            # away, so only our own prompts are disarmed.
+            await self.user_repo.clear_awaiting_input(
+                user_id, *_PROFILE_EDIT_PROMPTS, *_ADDRESS_EDIT_PROMPTS
+            )
 
             # Get user profile from API
             async with api_client as client:
@@ -225,11 +302,10 @@ class ProfileHandlers(BaseHandler):
             keyboard = ProfileKeyboards.profile_menu(language)
 
             if update.callback_query:
-                await update.callback_query.edit_message_text(
-                    text=profile_text,
-                    reply_markup=keyboard
+                await self._edit_or_replace_callback_message(
+                    update.callback_query, profile_text, reply_markup=keyboard
                 )
-                await update.callback_query.answer()
+                await self._ack(update.callback_query)
             else:
                 await update.message.reply_text(
                     text=profile_text,
@@ -272,14 +348,10 @@ class ProfileHandlers(BaseHandler):
         )
 
         if update.callback_query:
-            await update.callback_query.edit_message_text(
-                text=text,
-                reply_markup=keyboard,
+            await self._edit_or_replace_callback_message(
+                update.callback_query, text, reply_markup=keyboard
             )
-            if callback_toast:
-                await update.callback_query.answer(callback_toast)
-            else:
-                await update.callback_query.answer()
+            await self._ack(update.callback_query, callback_toast)
             return
 
         await update.message.reply_text(text=text, reply_markup=keyboard)
@@ -344,7 +416,7 @@ class ProfileHandlers(BaseHandler):
                     {'delivery_telegram_status_updates_enabled': enabled},
                 )
                 if not response.success:
-                    await query.answer(
+                    await self._ack(query,
                         i18n.get('telegram.notifications.update_failed', language),
                         show_alert=True,
                     )
@@ -361,7 +433,7 @@ class ProfileHandlers(BaseHandler):
         except Exception as e:
             logger.error(f"Error toggling delivery telegram notifications: {e}")
             if update.callback_query:
-                await update.callback_query.answer(
+                await self._ack(update.callback_query,
                     i18n.get('telegram.notifications.update_failed', 'en'),
                     show_alert=True,
                 )
@@ -418,11 +490,10 @@ class ProfileHandlers(BaseHandler):
             keyboard = KeyboardBuilder.build_inline_keyboard(buttons)
 
             if update.callback_query:
-                await update.callback_query.edit_message_text(
-                    text=status_text,
-                    reply_markup=keyboard
+                await self._edit_or_replace_callback_message(
+                    update.callback_query, status_text, reply_markup=keyboard
                 )
-                await update.callback_query.answer()
+                await self._ack(update.callback_query)
             else:
                 await update.message.reply_text(
                     text=status_text,
@@ -451,7 +522,7 @@ class ProfileHandlers(BaseHandler):
             keyboard = ProfileKeyboards.phone_request(language)
 
             if update.callback_query:
-                await update.callback_query.answer()
+                await self._ack(update.callback_query)
                 await update.callback_query.message.reply_text(
                     phone_prompt,
                     parse_mode='Markdown',
@@ -652,7 +723,7 @@ class ProfileHandlers(BaseHandler):
             context.user_data.pop('pending_phone', None)
 
             if update.callback_query:
-                await update.callback_query.answer()
+                await self._ack(update.callback_query)
                 await update.callback_query.message.reply_text(
                     text=i18n.get('telegram.action_cancelled_short', language),
                     reply_markup=ReplyKeyboardRemove()
@@ -704,7 +775,7 @@ class ProfileHandlers(BaseHandler):
                 phone = profile.get('phone')
 
             if not phone:
-                await update.callback_query.answer(i18n.get('telegram.phone.no_phone_added', language))
+                await self._ack(update.callback_query, i18n.get('telegram.phone.no_phone_added', language))
                 await update.callback_query.message.reply_text(
                     i18n.get('telegram.phone.no_phone_added', language)
                 )
@@ -716,13 +787,16 @@ class ProfileHandlers(BaseHandler):
                 if user_token:
                     response = await client.send_phone_verification(user_token, phone)
                     if response.success:
-                        verification_msg = i18n.get(
+                        # Sent as Markdown a few lines down, so the phone goes
+                        # through the same door as every other interpolated
+                        # value in this file.
+                        verification_msg = _markdown_copy(
                             'telegram.phone.verification_sms_sent',
                             language,
                             phone=phone
                         )
 
-                        await update.callback_query.answer(
+                        await self._ack(update.callback_query,
                             i18n.get('telegram.phone.verification_code_sent_toast', language)
                         )
                         await update.callback_query.message.reply_text(
@@ -737,7 +811,7 @@ class ProfileHandlers(BaseHandler):
 
                         logger.info(f"Verification SMS sent to {phone} for user {user_id}")
                     else:
-                        await update.callback_query.answer(
+                        await self._ack(update.callback_query,
                             i18n.get('telegram.phone.verification_code_send_failed_toast', language)
                         )
                         await update.callback_query.message.reply_text(
@@ -869,7 +943,7 @@ class ProfileHandlers(BaseHandler):
 
             # Validate language code
             if language_code not in config.localization.supported_languages:
-                await query.answer(i18n.get('telegram.registration.invalid_language_selection', 'en'))
+                await self._ack(query, i18n.get('telegram.registration.invalid_language_selection', 'en'))
                 return SELECT_LANGUAGE  # Stay in language selection state
 
             user_repo = BotUserRepository(db_manager)
@@ -901,7 +975,7 @@ class ProfileHandlers(BaseHandler):
                         response = await client.register_telegram_user(user_id, registration_data)
                         if not response.success:
                             logger.error(f"Failed to register telegram user {user_id}: {response.error}")
-                            await query.answer(i18n.get('telegram.registration.failed_toast', language_code))
+                            await self._ack(query, i18n.get('telegram.registration.failed_toast', language_code))
                             await context.bot.send_message(
                                 chat_id=update.effective_chat.id,
                                 text=i18n.get('telegram.registration.failed_contact_support', language_code)
@@ -932,7 +1006,7 @@ class ProfileHandlers(BaseHandler):
                     logger.error(f"Exception during telegram user registration: {e}")
                     import traceback
                     logger.error(f"Traceback: {traceback.format_exc()}")
-                    await query.answer(i18n.get('telegram.registration.failed_toast', language_code))
+                    await self._ack(query, i18n.get('telegram.registration.failed_toast', language_code))
                     await context.bot.send_message(
                         chat_id=update.effective_chat.id,
                         text=i18n.get('telegram.registration.failed_try_start', language_code)
@@ -941,7 +1015,7 @@ class ProfileHandlers(BaseHandler):
             else:
                 # Update user's preferred language
                 await self.user_repo.update_user_language(user_id, language_code)
-                await query.answer(i18n.get('telegram.registration.language_updated_toast', language_code))
+                await self._ack(query, i18n.get('telegram.registration.language_updated_toast', language_code))
 
             # Proceed to phone number input
             phone_text = i18n.get('telegram.registration.enter_phone', language_code)
@@ -1257,7 +1331,10 @@ class ProfileHandlers(BaseHandler):
         """Handle user's choice to link or cancel account linking"""
         try:
             query = update.callback_query
-            await query.answer()
+            # Cosmetic: a refused ack ("query is too old", routine when a
+            # redeploy redelivers a backlog) must not abort the branch below
+            # and drop the customer out of signup.
+            await self._ack(query)
 
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
@@ -1268,17 +1345,17 @@ class ProfileHandlers(BaseHandler):
                 phone = context.user_data.get('pending_link_phone')
 
                 if not phone:
-                    await query.edit_message_text(
+                    await self._edit_or_replace_callback_message(
+                        query,
                         i18n.get('telegram.phone.session_expired_share_again', language),
-                        reply_markup=None
                     )
                     return PHONE
 
                 # Rate limit OTP requests
                 if not await otp_rate_limiter.allow_otp_request(user_id):
-                    await query.edit_message_text(
+                    await self._edit_or_replace_callback_message(
+                        query,
                         i18n.get('telegram.phone.too_many_verification_attempts', language),
-                        reply_markup=None
                     )
                     return PHONE
 
@@ -1291,13 +1368,13 @@ class ProfileHandlers(BaseHandler):
                             # Backend wraps payloads as {success, message, data:{...}}.
                             link_payload = response.data.get('data', {}) if isinstance(response.data, dict) else {}
                             phone_masked = link_payload.get('phone_masked', phone)
-                            await query.edit_message_text(
+                            await self._edit_or_replace_callback_message(
+                                query,
                                 i18n.get(
                                     'telegram.phone.verification_code_sent_to_phone_prompt',
                                     language,
                                     phone_masked=phone_masked
                                 ),
-                                reply_markup=None
                             )
                             return LINK_ACCOUNT_OTP
                         else:
@@ -1305,13 +1382,13 @@ class ProfileHandlers(BaseHandler):
                                 'telegram.phone.verification_code_send_failed_default',
                                 language
                             )
-                            await query.edit_message_text(
+                            await self._edit_or_replace_callback_message(
+                                query,
                                 i18n.get(
                                     'telegram.phone.verification_code_send_failed_retry_or_different',
                                     language,
                                     error=error_msg
                                 ),
-                                reply_markup=None
                             )
                             await context.bot.send_message(
                                 chat_id=update.effective_chat.id,
@@ -1322,9 +1399,9 @@ class ProfileHandlers(BaseHandler):
 
                 except Exception as api_error:
                     logger.error(f"API error sending OTP: {api_error}")
-                    await query.edit_message_text(
+                    await self._edit_or_replace_callback_message(
+                        query,
                         i18n.get('telegram.phone.verification_code_send_failed_generic', language),
-                        reply_markup=None
                     )
                     await context.bot.send_message(
                         chat_id=update.effective_chat.id,
@@ -1337,9 +1414,13 @@ class ProfileHandlers(BaseHandler):
                 # User wants to use different phone
                 context.user_data.pop('pending_link_phone', None)
 
-                await query.edit_message_text(
+                # Rewriting the link question is cosmetic; the share-phone
+                # keyboard below is the whole step. A refused edit used to take
+                # both with it and end registration, leaving the customer
+                # looking at the link question with no keyboard and no way on.
+                await self._edit_or_replace_callback_message(
+                    query,
                     i18n.get('telegram.phone.share_different_phone_prompt', language),
-                    reply_markup=None
                 )
 
                 # Send keyboard for phone sharing
@@ -1593,14 +1674,16 @@ class ProfileHandlers(BaseHandler):
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            # Clear any stale pending input state before showing the edit sub-menu.
-            await self.user_repo.update_user_state(user_id, {})
+            # Opening the sub-menu abandons the name/birthday prompt it offers;
+            # nothing else armed is ours to clear.
+            await self.user_repo.clear_awaiting_input(user_id, *_PROFILE_EDIT_PROMPTS)
 
-            await query.edit_message_text(
-                text=i18n.get('telegram.profile.edit_menu_title', language),
+            await self._edit_or_replace_callback_message(
+                query,
+                i18n.get('telegram.profile.edit_menu_title', language),
                 reply_markup=ProfileKeyboards.profile_edit_menu(language)
             )
-            await query.answer()
+            await self._ack(query)
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="edit_profile")
@@ -1612,11 +1695,12 @@ class ProfileHandlers(BaseHandler):
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            await query.edit_message_text(
-                text=i18n.get('telegram.profile.name_prompt', language),
+            await self._edit_or_replace_callback_message(
+                query,
+                i18n.get('telegram.profile.name_prompt', language),
                 reply_markup=MenuKeyboards.cancel_button(language)
             )
-            await query.answer()
+            await self._ack(query)
 
             await self.user_repo.update_user_state(user_id, {'awaiting_input': 'edit_profile_name'})
 
@@ -1658,7 +1742,7 @@ class ProfileHandlers(BaseHandler):
                     text=i18n.get('telegram.profile.name_updated', language),
                     reply_markup=ProfileKeyboards.profile_edit_menu(language)
                 )
-                await self.user_repo.update_user_state(user_id, {})
+                await self.user_repo.clear_awaiting_input(user_id, 'edit_profile_name')
                 logger.info(f"Profile name updated for user {user_id}: {first_name} {last_name}")
             else:
                 await update.message.reply_text(
@@ -1677,11 +1761,12 @@ class ProfileHandlers(BaseHandler):
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            await query.edit_message_text(
-                text=i18n.get('telegram.profile.birthday_prompt', language),
+            await self._edit_or_replace_callback_message(
+                query,
+                i18n.get('telegram.profile.birthday_prompt', language),
                 reply_markup=MenuKeyboards.cancel_button(language)
             )
-            await query.answer()
+            await self._ack(query)
 
             await self.user_repo.update_user_state(user_id, {'awaiting_input': 'edit_profile_birthday'})
 
@@ -1720,7 +1805,7 @@ class ProfileHandlers(BaseHandler):
                     text=i18n.get('telegram.profile.birthday_updated', language),
                     reply_markup=ProfileKeyboards.profile_edit_menu(language)
                 )
-                await self.user_repo.update_user_state(user_id, {})
+                await self.user_repo.clear_awaiting_input(user_id, 'edit_profile_birthday')
                 logger.info(f"Profile birthday updated for user {user_id}: {iso_date}")
             else:
                 await update.message.reply_text(
@@ -1740,8 +1825,9 @@ class ProfileHandlers(BaseHandler):
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            # Clear any pending input state
-            await self.user_repo.update_user_state(user_id, {})
+            # The address list is where an abandoned title/instructions edit
+            # ends up; disarm those and leave every other flow armed.
+            await self.user_repo.clear_awaiting_input(user_id, *_ADDRESS_EDIT_PROMPTS)
 
             # Get user addresses
             async with api_client as client:
@@ -1772,11 +1858,10 @@ class ProfileHandlers(BaseHandler):
                 keyboard = ProfileKeyboards.addresses_management(addresses, language)
                 logger.info(f"Found {len(addresses)} addresses, showing management keyboard")
 
-            await query.edit_message_text(
-                text=addresses_text,
-                reply_markup=keyboard
+            await self._edit_or_replace_callback_message(
+                query, addresses_text, reply_markup=keyboard
             )
-            await query.answer()
+            await self._ack(query)
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="manage_addresses")
@@ -1787,9 +1872,15 @@ class ProfileHandlers(BaseHandler):
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            # Clear any pending database state before starting address flow
-            await self.user_repo.update_user_state(user_id, {})
-
+            # Deliberately does NOT clear `bot_state`. That clear was a guard
+            # against an armed `awaiting_input` eating this flow's typed
+            # answers, and `WaterBusinessBot._consumes` now stops every
+            # conversation step in group -2, so the guard is obsolete — while
+            # the damage was not: a customer who tapped "Report an issue" and
+            # then came here had their armed concern report silently thrown
+            # away, with its prompt and Cancel button still on screen saying a
+            # report was open. Arming is DB-backed precisely so it survives
+            # until the customer sends it or cancels it.
             logger.info(f"=== ADD ADDRESS CONVERSATION ENTRY POINT ===")
             logger.info(f"User: {user_id}")
             if update.callback_query:
@@ -1818,15 +1909,12 @@ class ProfileHandlers(BaseHandler):
                 logger.info(f"Editing message via callback query")
                 query = update.callback_query
                 if self._is_callback_message_deletable(query):
-                    try:
-                        await query.delete_message()
-                    except BadRequest as delete_error:
-                        # Deletion is non-critical UI cleanup.
-                        logger.info(f"Skipping callback message deletion in add_address: {delete_error}")
+                    # Deletion is non-critical UI cleanup.
+                    await self._delete_callback_message(query)
                 else:
                     logger.info("Skipping callback message deletion in add_address: message not deletable by policy")
 
-                await query.answer()
+                await self._ack(query)
                 # Send keyboard in new message
                 if query.message:
                     await query.message.reply_text(
@@ -1915,22 +2003,27 @@ class ProfileHandlers(BaseHandler):
                 reply_markup=ReplyKeyboardRemove()
             )
 
-            # Ask for address title with suggestions
+            # Ask for address title with suggestions.
+            #
+            # The geocoded address is DATA, not markup, so it is escaped before
+            # it goes anywhere near `parse_mode='Markdown'`. Unescaped, a street
+            # whose name carries a `_`, `*`, `[` or backtick made Telegram
+            # refuse the whole message; the handler's `except Exception` then
+            # returned ConversationHandler.END, so the customer saw "location
+            # received" and nothing else — deterministically, forever, for
+            # everyone living on that street. The prefix copy itself carries
+            # deliberate `*bold*`, which is why the parse mode stays.
             title_prompt = i18n.get('telegram.address.title_prompt', language)
             if reverse_geocoded_address:
-                title_prompt = i18n.get(
+                title_prompt = _markdown_copy(
                     'telegram.address.detected_location_prefix',
                     language,
-                    address=reverse_geocoded_address
+                    address=reverse_geocoded_address,
                 ) + title_prompt
 
             keyboard = ProfileKeyboards.address_title_suggestions(language)
 
-            await update.message.reply_text(
-                title_prompt,
-                reply_markup=keyboard,
-                parse_mode='Markdown'
-            )
+            await self._reply_markdown_or_plain(update.message, title_prompt, keyboard)
 
             logger.info(f"Transitioning to ADDRESS_TITLE state")
             return ADDRESS_TITLE
@@ -1960,6 +2053,7 @@ class ProfileHandlers(BaseHandler):
             # of it. A manually typed address only reaches this step LAST,
             # after geocode confirmation, so titling here is the save.
             if _is_shared_pin_address(context):
+                await self._create_address_now(update, context, language)
                 return await self._prompt_address_step(update, language, 'apartment')
 
             return await self.save_address_final(update, context)
@@ -1977,14 +2071,19 @@ class ProfileHandlers(BaseHandler):
             language = await i18n.get_user_language(user_id)
 
             cancel_text = i18n.get('telegram.action_cancelled', language)
+
+            # Cancel is the one exit that means "I do not want this address",
+            # so it has to undo the row the pin flow created back at the title
+            # step. Done BEFORE the temp data is popped — the id lives there.
+            await self._discard_created_address(update, context)
+
             keyboard = await main_menu_for(update.effective_user.id, language)
 
             # Handle both message and callback query
             if update.callback_query:
-                await update.callback_query.answer()
-                await update.callback_query.edit_message_text(
-                    text=cancel_text,
-                    reply_markup=keyboard
+                await self._ack(update.callback_query)
+                await self._edit_or_replace_callback_message(
+                    update.callback_query, cancel_text, reply_markup=keyboard
                 )
             else:
                 await update.message.reply_text(
@@ -2014,6 +2113,10 @@ class ProfileHandlers(BaseHandler):
 
             # Read before the pop below consumes it.
             origin = context.user_data.get('address_flow_origin')
+
+            # Same contract as the inline Cancel: an explicit cancel undoes the
+            # row the pin flow created at the title step.
+            await self._discard_created_address(update, context)
 
             # First remove the reply keyboard
             await update.message.reply_text(
@@ -2047,6 +2150,58 @@ class ProfileHandlers(BaseHandler):
         except Exception as e:
             logger.error(f"Error canceling address from text: {e}")
             return ConversationHandler.END
+
+    async def address_flow_timeout(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """The address conversation hit `conversation_timeout` and is over.
+
+        Without this the flow expires in total silence: the customer is left
+        staring at a prompt whose buttons no longer do anything, and the flow's
+        keys survive it in `user_data` — a stale ``address_flow_origin ==
+        'checkout'`` then hijacks the NEXT, unrelated address save and bounces
+        that customer into checkout.
+
+        A timeout is not a cancel: an address already created by the pin flow
+        stays. Only the in-flight flow state is dropped.
+        """
+        try:
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+
+            addr_data = context.user_data.get('temp_address_data') or {}
+            saved_address_id = addr_data.get('address_id')
+
+            context.user_data.pop('temp_address_data', None)
+            context.user_data.pop('temp_location', None)
+            context.user_data.pop('temp_address', None)
+            context.user_data.pop('address_flow_origin', None)
+
+            logger.info(
+                f"Address flow timed out for user {user_id} "
+                f"(saved address: {saved_address_id or 'none'})"
+            )
+
+            text = i18n.get(
+                'telegram.address.flow_timed_out_saved' if saved_address_id
+                else 'telegram.address.flow_timed_out',
+                language,
+            )
+            keyboard = await main_menu_for(user_id, language)
+
+            # A timeout arrives as a synthetic update carrying whatever the last
+            # real one was, so the reply target is derived rather than assumed.
+            if update.callback_query is not None and update.callback_query.message is not None:
+                await update.callback_query.message.reply_text(text, reply_markup=keyboard)
+            elif update.message is not None:
+                await update.message.reply_text(text, reply_markup=keyboard)
+            else:
+                await context.bot.send_message(
+                    chat_id=user_id, text=text, reply_markup=keyboard
+                )
+
+        except Exception as e:
+            logger.error(f"Error in address_flow_timeout: {e}")
+
+        return ConversationHandler.END
 
     # ==================== MANUAL ADDRESS ENTRY HANDLERS ====================
 
@@ -2103,16 +2258,15 @@ class ProfileHandlers(BaseHandler):
             context.user_data['temp_address_data']['region'] = region
             context.user_data['temp_address_data']['city'] = 'Tashkent'
 
-            await query.answer()
+            await self._ack(query)
 
             # Show district selection
             district_prompt = i18n.get('telegram.address.select_district', language)
             districts = get_all_districts(language)
             keyboard = ProfileKeyboards.district_selection(districts, language)
 
-            await query.edit_message_text(
-                district_prompt,
-                reply_markup=keyboard
+            await self._edit_or_replace_callback_message(
+                query, district_prompt, reply_markup=keyboard
             )
 
             return ADDRESS_DISTRICT
@@ -2130,16 +2284,15 @@ class ProfileHandlers(BaseHandler):
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            await query.answer()
+            await self._ack(query)
             logger.info(f"User {user_id} going back to region selection")
 
             # Show region selection again
             region_prompt = i18n.get('telegram.address.select_region', language)
             keyboard = ProfileKeyboards.region_selection(language)
 
-            await query.edit_message_text(
-                region_prompt,
-                reply_markup=keyboard
+            await self._edit_or_replace_callback_message(
+                query, region_prompt, reply_markup=keyboard
             )
 
             return ADDRESS_REGION
@@ -2171,7 +2324,7 @@ class ProfileHandlers(BaseHandler):
             context.user_data['temp_address_data']['hint_lat'] = center[0]
             context.user_data['temp_address_data']['hint_lon'] = center[1]
 
-            await query.answer()
+            await self._ack(query)
 
             # Ask for street name (required, no skip option)
             street_prompt = escape_markdown(
@@ -2180,7 +2333,12 @@ class ProfileHandlers(BaseHandler):
             )
             # No skip keyboard - street is required
 
-            await query.edit_message_text(
+            # A refused edit ("message to edit not found" — the customer
+            # deleted the bubble) used to unwind into `except Exception` and
+            # end the flow in silence: the street they then typed reached a bot
+            # that was no longer listening and was filed as a support ticket.
+            await self._edit_or_replace_callback_message(
+                query,
                 street_prompt,
                 parse_mode=constants.ParseMode.MARKDOWN_V2
             )
@@ -2193,12 +2351,193 @@ class ProfileHandlers(BaseHandler):
             logger.error(f"Traceback: {traceback.format_exc()}")
             return ConversationHandler.END
 
+    @staticmethod
+    async def _reply_markdown_or_plain(message, text: str, reply_markup=None):
+        """Send `text` as Markdown, falling back to plain text if Telegram says no.
+
+        Escaping the interpolated geocoder string fixes the hazard we know
+        about; it cannot fix the one we do not. The cost of being wrong here is
+        total — a refused prompt used to end the conversation, leaving the
+        customer on a dead screen with no way to self-rescue, because
+        re-sharing the pin re-runs the same deterministic failure. Losing the
+        bold is a much smaller price than losing the flow.
+        """
+        try:
+            return await message.reply_text(
+                text, reply_markup=reply_markup, parse_mode='Markdown'
+            )
+        except BadRequest as e:
+            logger.warning(f"Markdown prompt refused ({e}); resending as plain text")
+            return await message.reply_text(text, reply_markup=reply_markup)
+
+    @staticmethod
+    def _build_address_payload(addr_data: Dict[str, Any], language: str) -> Dict[str, Any]:
+        """The CREATE payload for an address, from whatever the flow collected.
+
+        SSOT for the two moments an address can be born: a shared pin creates
+        it the instant it has a title, a manually typed one still creates it at
+        the end, after geocode confirmation. One builder so the two cannot
+        drift into writing different columns.
+        """
+        payload = {
+            'title': addr_data.get('title', i18n.get('telegram.address.default_title', language)),
+            'full_address': addr_data.get('full_address', ''),
+            'street_address': addr_data.get('street_address'),
+            'city': addr_data.get('city', i18n.get('telegram.address.default_city', language)),
+            'district': addr_data.get('district'),
+            'latitude': addr_data.get('latitude'),
+            'longitude': addr_data.get('longitude'),
+            'apartment_number': addr_data.get('apartment_number'),
+            'floor_number': addr_data.get('floor_number'),
+            'delivery_instructions': addr_data.get('delivery_instructions'),
+        }
+        return {k: v for k, v in payload.items() if v is not None}
+
+    @staticmethod
+    def _detail_payload(addr_data: Dict[str, Any]) -> Dict[str, Any]:
+        """The UPDATE payload for an address that already exists.
+
+        Deliberately NOT None-filtered, unlike the create payload: Skip clears
+        a value, and the backend's updater only touches keys the payload
+        carries, so an omitted key would silently mean "leave it alone" when
+        the customer meant "there is none".
+        """
+        return {key: addr_data.get(key) for key in _ADDRESS_DETAIL_KEYS}
+
+    async def _create_address_now(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
+                                  language: str):
+        """Write the address the moment it is deliverable, and remember its id.
+
+        A shared pin plus a title IS a deliverable address. Everything the flow
+        asks afterwards renders a Skip button — the flow itself calls those
+        fields optional — yet holding the address until the customer answers
+        them lost 20 of 33 pin flows in the 30 days to 2026-08-21 (Loki). So it
+        is created here and merely ENRICHED later.
+
+        Returns the new id, or None when the write could not happen. None is
+        not fatal: the terminal step still creates the address the old way, so
+        a transient backend failure degrades to the previous behaviour instead
+        of stranding the customer in a chain that can never commit.
+
+        CORRECTS rather than duplicates when this flow already created a row.
+        `location_received` is an ENTRY POINT and the conversation sets
+        `allow_reentry=True`, so PTB re-enters on a second pin even mid-flow: a
+        customer who spots a bad pin and drops a better one arrives back here
+        with an address already in hand. They are moving that address, not
+        adding another — and the first pin's row must not be left behind at the
+        wrong coordinates for a driver to deliver to.
+        """
+        addr_data = context.user_data.setdefault('temp_address_data', {})
+        existing_id = addr_data.get('address_id')
+        payload = self._build_address_payload(addr_data, language)
+
+        async with api_client as client:
+            user_token = await get_auth_token(update, context, client)
+            if not user_token:
+                logger.warning("No auth token; deferring address create to the end of the flow")
+                return None
+
+            if existing_id:
+                response = await client.update_user_address(user_token, existing_id, payload)
+            else:
+                response = await client.add_user_address(user_token, payload)
+
+        if not response.success:
+            logger.error(
+                f"Early address {'update' if existing_id else 'create'} failed "
+                f"({response.error}); deferring to the end of the flow"
+            )
+            return None
+
+        if existing_id:
+            addr_data[_DETAIL_SYNC_SNAPSHOT_KEY] = self._detail_payload(addr_data)
+            logger.info(f"Address {existing_id} moved to the corrected pin")
+            return existing_id
+
+        address = ((response.data or {}).get('data') or {}).get('address') or {}
+        address_id = address.get('id')
+        if address_id is None:
+            logger.error("Address created but the response carried no id; deferring enrichment")
+            return None
+
+        addr_data['address_id'] = address_id
+        addr_data[_DETAIL_SYNC_SNAPSHOT_KEY] = self._detail_payload(addr_data)
+        logger.info(f"Address {address_id} created early for user {update.effective_user.id}")
+        return address_id
+
+    async def _sync_address_details(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Push the optional details collected so far onto the created address.
+
+        Called after every optional step so an answer the customer HAS given
+        survives them abandoning the next one. No-ops when the address does not
+        exist yet (manual entry, or an early create that failed) and when the
+        detail set is unchanged, so a run of Skips costs no HTTP at all.
+        """
+        addr_data = context.user_data.get('temp_address_data') or {}
+        address_id = addr_data.get('address_id')
+        if not address_id:
+            return False
+
+        payload = self._detail_payload(addr_data)
+        if payload == addr_data.get(_DETAIL_SYNC_SNAPSHOT_KEY):
+            return True
+
+        async with api_client as client:
+            user_token = await get_auth_token(update, context, client)
+            if not user_token:
+                logger.warning(f"No auth token; address {address_id} keeps its previous details")
+                return False
+
+            response = await client.update_user_address(user_token, address_id, payload)
+
+        if not response.success:
+            logger.error(f"Failed to enrich address {address_id}: {response.error}")
+            return False
+
+        addr_data[_DETAIL_SYNC_SNAPSHOT_KEY] = payload
+        return True
+
+    async def _discard_created_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Delete the address an explicitly CANCELLED pin flow already created.
+
+        Cancel is the only exit that means "I do not want this address". Timing
+        out or walking away does not — the customer dropped a pin and named it,
+        and that address is theirs to keep.
+        """
+        addr_data = context.user_data.get('temp_address_data') or {}
+        address_id = addr_data.get('address_id')
+        if not address_id:
+            return
+
+        try:
+            async with api_client as client:
+                user_token = await get_auth_token(update, context, client)
+                if not user_token:
+                    logger.error(f"No auth token; cancelled address {address_id} was left behind")
+                    return
+
+                response = await client.delete_user_address(user_token, address_id)
+
+            if response.success:
+                logger.info(f"Deleted cancelled address {address_id}")
+            else:
+                logger.error(f"Failed to delete cancelled address {address_id}: {response.error}")
+        except Exception as e:
+            logger.error(f"Error deleting cancelled address {address_id}: {e}")
+
     async def _prompt_address_step(self, update: Update, language: str, field: str):
         """Send one optional address step's prompt and return its state.
 
         Both address flows converge on this chain, and every step is reachable
         from either a typed answer (message) or a Skip tap (callback), so the
         send path is derived from the update rather than passed by each caller.
+
+        The callback path goes through `_edit_or_replace_callback_message`
+        because a REFUSED edit is a rendering problem, not a flow problem: this
+        bare edit used to unwind into the caller's `except Exception: return
+        ConversationHandler.END`, so Telegram's most benign rejection
+        ("message is not modified") left the customer looking at a
+        correct-looking prompt whose Skip button was wired to nothing.
         """
         step = _ADDRESS_STEPS[field]
 
@@ -2206,7 +2545,9 @@ class ProfileHandlers(BaseHandler):
         keyboard = step.keyboard(language)
 
         if update.callback_query is not None:
-            await update.callback_query.edit_message_text(text, reply_markup=keyboard)
+            await self._edit_or_replace_callback_message(
+                update.callback_query, text, reply_markup=keyboard
+            )
         else:
             await update.message.reply_text(text, reply_markup=keyboard)
 
@@ -2277,6 +2618,7 @@ class ProfileHandlers(BaseHandler):
             logger.info(f"User {user_id} entered apartment: {apartment}")
             context.user_data['temp_address_data']['apartment_number'] = apartment
 
+            await self._sync_address_details(update, context)
             return await self._prompt_address_step(update, language, 'floor')
 
         except Exception as e:
@@ -2297,6 +2639,7 @@ class ProfileHandlers(BaseHandler):
             logger.info(f"User {user_id} entered floor: {floor}")
             context.user_data['temp_address_data']['floor_number'] = floor
 
+            await self._sync_address_details(update, context)
             return await self._prompt_address_step(update, language, 'delivery_instructions')
 
         except Exception as e:
@@ -2336,14 +2679,18 @@ class ProfileHandlers(BaseHandler):
             field_name = query.data.replace('skip_', '')
             logger.info(f"User {user_id} skipped field: {field_name}")
 
-            await query.answer()
+            # Cosmetic, and deliberately not allowed to abort the step: a stale
+            # tap answered after Telegram's ~60s window used to take the whole
+            # Skip with it (no state change, no prompt, no error).
+            await self._ack(query)
 
-            # Skip means "I have no value for this". retry_geocode reruns the
+            # Skip means "I have no value for this" — for the field tapped AND
+            # for every field the jump lands past. retry_geocode reruns the
             # whole chain, so an answer typed before the retry would otherwise
             # survive the Skip and still be saved.
-            data_key = _ADDRESS_FIELD_DATA_KEYS.get(field_name)
-            if data_key:
-                context.user_data.get('temp_address_data', {}).pop(data_key, None)
+            addr_data = context.user_data.get('temp_address_data', {})
+            for data_key in _cleared_by_skip(field_name):
+                addr_data.pop(data_key, None)
 
             if field_name == 'delivery_instructions':
                 # Terminal step. A shared pin is already an exact coordinate, so
@@ -2352,13 +2699,18 @@ class ProfileHandlers(BaseHandler):
                 if _is_shared_pin_address(context):
                     logger.info("Location already set from sharing, saving address directly")
                     return await self.save_address_final(update, context, is_callback=True)
-                return await self.geocode_and_confirm_callback(update, context)
+                return await self.geocode_and_confirm(update, context, is_callback=True)
 
             next_field = _SKIP_TARGETS.get(field_name)
             if next_field is None:
                 logger.warning(f"Unknown field skipped: {field_name}")
                 return ConversationHandler.END
 
+            # A Skip that CLEARS a value already written to the backend (only
+            # reachable via retry_geocode) has to clear it there too; a Skip
+            # over a field that was never answered changes nothing and costs
+            # no HTTP call.
+            await self._sync_address_details(update, context)
             return await self._prompt_address_step(update, language, next_field)
 
         except Exception as e:
@@ -2367,12 +2719,30 @@ class ProfileHandlers(BaseHandler):
             logger.error(f"Traceback: {traceback.format_exc()}")
             return ConversationHandler.END
 
-    async def geocode_and_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Geocode the manual address and show confirmation"""
+    async def geocode_and_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
+                                  is_callback: bool = False):
+        """Geocode the manually typed address and show the confirmation pin.
+
+        ONE implementation for both ways a customer reaches this step: TYPING
+        the delivery instructions (a message) or TAPPING Skip on them (a
+        callback). They used to be two near-identical functions, and the copy
+        behind the Skip button had silently lost the `is_within_tashkent`
+        guard — so which of two equivalent buttons the customer pressed decided
+        whether the delivery-zone SSOT was enforced at all. The Skip customer
+        was shown an out-of-zone pin as if it were fine, named it, and only
+        then got the generic "could not save" from the backend backstop.
+
+        The only difference left between the two entry points is where the
+        confirmation is delivered, which is derived here rather than copied.
+        """
         try:
+            query = update.callback_query if is_callback else None
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
             addr_data = context.user_data.get('temp_address_data', {})
+
+            if query is not None:
+                await self._ack(query, i18n.get('telegram.common.processing', language))
 
             # Build address string for geocoding
             address_parts = []
@@ -2418,6 +2788,14 @@ class ProfileHandlers(BaseHandler):
 
             context.user_data['temp_address_data'] = addr_data
 
+            # The bubble that carried the Skip button is spent either way: what
+            # comes next (a pin, then a confirmation, or the out-of-zone
+            # re-prompt) arrives as new messages below it.
+            if query is not None:
+                await self._delete_callback_message(query)
+
+            target = query.message if query is not None else update.message
+
             # Enforce the delivery-zone SSOT (TASHKENT_POLYGON). The district-center
             # fallback is always in-zone; this guards against a geocoder returning a
             # point outside the coverage area. The backend re-validates authoritatively.
@@ -2425,7 +2803,7 @@ class ProfileHandlers(BaseHandler):
             final_lng = addr_data.get('longitude')
             if final_lat is not None and final_lng is not None and not is_within_tashkent(final_lat, final_lng):
                 logger.info(f"User {user_id} geocoded to out-of-zone point: {final_lat}, {final_lng}")
-                await update.message.reply_text(
+                await target.reply_text(
                     i18n.get('telegram.address.outside_delivery_area', language),
                     reply_markup=ProfileKeyboards.location_request(
                         language,
@@ -2435,7 +2813,7 @@ class ProfileHandlers(BaseHandler):
                 return ADDRESS_LOCATION
 
             # Send location pin for confirmation
-            await update.message.reply_location(
+            await target.reply_location(
                 latitude=addr_data['latitude'],
                 longitude=addr_data['longitude']
             )
@@ -2451,100 +2829,15 @@ class ProfileHandlers(BaseHandler):
 
             keyboard = ProfileKeyboards.geocode_confirmation(language, show_edit=False)
 
-            await update.message.reply_text(
-                confirm_text,
-                reply_markup=keyboard,
-                parse_mode='Markdown'
-            )
+            # The geocoder's formatted address is DATA inside a Markdown
+            # message; a street name carrying `_` or `[` would otherwise be
+            # refused and end the flow on the last step before the save.
+            await self._reply_markdown_or_plain(target, confirm_text, keyboard)
 
             return ADDRESS_GEOCODE_CONFIRM
 
         except Exception as e:
             logger.error(f"Error in geocode_and_confirm: {e}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            return ConversationHandler.END
-
-    async def geocode_and_confirm_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Geocode and confirm from callback query (skip button)"""
-        try:
-            query = update.callback_query
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
-            addr_data = context.user_data.get('temp_address_data', {})
-
-            await query.answer(i18n.get('telegram.common.processing', language))
-
-            # Build address string
-            address_parts = []
-            if addr_data.get('street_address'):
-                address_parts.append(f"{addr_data['street_address']} street")
-            if addr_data.get('building_number'):
-                address_parts.append(addr_data['building_number'])
-            if addr_data.get('district_name'):
-                address_parts.append(addr_data['district_name'])
-            address_parts.append('Tashkent, Uzbekistan')
-
-            address_string = ', '.join(address_parts)
-            logger.info(f"Geocoding address: {address_string}")
-
-            # Attempt geocoding
-            geocode_success = False
-            async with api_client as client:
-                user_token = await get_auth_token(update, context, client)
-                if user_token:
-                    hint_lat = addr_data.get('hint_lat')
-                    hint_lon = addr_data.get('hint_lon')
-
-                    response = await client.geocode_address(
-                        user_token, address_string, hint_lat, hint_lon
-                    )
-
-                    if response.success and response.data.get('data'):
-                        geo_data = response.data['data']
-                        addr_data['latitude'] = geo_data.get('latitude')
-                        addr_data['longitude'] = geo_data.get('longitude')
-                        addr_data['full_address'] = geo_data.get('formatted_address', address_string)
-                        geocode_success = True
-
-            # Fallback to district center
-            if not geocode_success:
-                district_key = addr_data.get('district', 'yunusabad')
-                center = get_district_center(district_key)
-                addr_data['latitude'] = center[0]
-                addr_data['longitude'] = center[1]
-                addr_data['full_address'] = address_string
-
-            context.user_data['temp_address_data'] = addr_data
-
-            # Delete old message and send location
-            await query.delete_message()
-
-            await query.message.reply_location(
-                latitude=addr_data['latitude'],
-                longitude=addr_data['longitude']
-            )
-
-            confirm_text = i18n.get(
-                'telegram.address.geocode_found_with_address',
-                language,
-                address=addr_data.get('full_address', i18n.get('telegram.common.not_set', language))
-            )
-            if not geocode_success:
-                confirm_text += i18n.get('telegram.address.geocode_note_approximate_center', language)
-
-            keyboard = ProfileKeyboards.geocode_confirmation(language, show_edit=False)
-
-            await query.message.reply_text(
-                confirm_text,
-                reply_markup=keyboard,
-                parse_mode='Markdown'
-            )
-
-            return ADDRESS_GEOCODE_CONFIRM
-
-        except Exception as e:
-            logger.error(f"Error in geocode_and_confirm_callback: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             return ConversationHandler.END
@@ -2556,16 +2849,15 @@ class ProfileHandlers(BaseHandler):
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            await query.answer(i18n.get('telegram.address.location_confirmed_toast', language))
+            await self._ack(query, i18n.get('telegram.address.location_confirmed_toast', language))
             logger.info(f"User {user_id} confirmed geocoded location")
 
             # Ask for address title
             title_prompt = i18n.get('telegram.address.title_prompt', language)
             keyboard = ProfileKeyboards.address_title_suggestions(language)
 
-            await query.edit_message_text(
-                title_prompt,
-                reply_markup=keyboard
+            await self._edit_or_replace_callback_message(
+                query, title_prompt, reply_markup=keyboard
             )
 
             return ADDRESS_TITLE
@@ -2581,11 +2873,11 @@ class ProfileHandlers(BaseHandler):
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            await query.answer(i18n.get('telegram.address.retry_location_toast', language))
+            await self._ack(query, i18n.get('telegram.address.retry_location_toast', language))
             logger.info(f"User {user_id} says geocode is wrong, offering correction options")
 
             # Delete previous message with inline keyboard
-            await query.delete_message()
+            await self._delete_callback_message(query)
 
             # Keep temp address data but reset for potential location share
             if 'temp_address_data' in context.user_data:
@@ -2632,7 +2924,7 @@ class ProfileHandlers(BaseHandler):
             logger.info(f"User {user_id} selected title: {title}")
             context.user_data['temp_address_data']['title'] = title
 
-            await query.answer()
+            await self._ack(query)
 
             # The title step sits at a different position in each flow: a
             # shared pin asks for the title early, right after the location,
@@ -2640,6 +2932,7 @@ class ProfileHandlers(BaseHandler):
             # of it. A manually typed address only reaches this step LAST,
             # after geocode confirmation, so titling here is the save.
             if _is_shared_pin_address(context):
+                await self._create_address_now(update, context, language)
                 return await self._prompt_address_step(update, language, 'apartment')
 
             return await self.save_address_final(update, context, is_callback=True)
@@ -2672,42 +2965,81 @@ class ProfileHandlers(BaseHandler):
         await order_handlers.checkout_handler(update, context)
 
     async def save_address_final(self, update: Update, context: ContextTypes.DEFAULT_TYPE, is_callback: bool = False):
-        """Save the address to API"""
+        """Finish the address flow: create the address, or complete the one the
+        flow already created.
+
+        A shared pin creates its address back at the title step, so reaching
+        here means the row exists and only its optional details are still
+        outstanding. A manually typed address — and a pin whose early create
+        failed — is still born here.
+
+        A save that could not happen at all (no token, backend refusal) does
+        NOT end the flow: the answers stay in `temp_address_data` and the
+        conversation stays in ADDRESS_TITLE, so the customer retries with one
+        tap instead of retyping seven answers.
+        """
         try:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
             addr_data = context.user_data.get('temp_address_data', {})
+            address_id = addr_data.get('address_id')
 
-            # Prepare address data for API
-            address_payload = {
-                'title': addr_data.get('title', i18n.get('telegram.address.default_title', language)),
-                'full_address': addr_data.get('full_address', ''),
-                'street_address': addr_data.get('street_address'),
-                'city': addr_data.get('city', i18n.get('telegram.address.default_city', language)),
-                'district': addr_data.get('district'),
-                'latitude': addr_data.get('latitude'),
-                'longitude': addr_data.get('longitude'),
-                'apartment_number': addr_data.get('apartment_number'),
-                'floor_number': addr_data.get('floor_number'),
-                'delivery_instructions': addr_data.get('delivery_instructions'),
-            }
-
-            # Remove None values
-            address_payload = {k: v for k, v in address_payload.items() if v is not None}
-
-            logger.info(f"Saving address for user {user_id}: {address_payload}")
+            if address_id:
+                address_payload = self._detail_payload(addr_data)
+                logger.info(f"Completing address {address_id} for user {user_id}: {address_payload}")
+            else:
+                address_payload = self._build_address_payload(addr_data, language)
+                logger.info(f"Saving address for user {user_id}: {address_payload}")
 
             # Save via API
             success = False
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if user_token:
-                    response = await client.add_user_address(user_token, address_payload)
+                    if address_id:
+                        response = await client.update_user_address(
+                            user_token, address_id, address_payload
+                        )
+                    else:
+                        response = await client.add_user_address(user_token, address_payload)
                     if response.success:
                         success = True
                         logger.info(f"Address saved successfully for user {user_id}")
+                    elif address_id:
+                        # The row already exists — this call was only adding
+                        # OPTIONAL details. Telling the customer the save failed
+                        # would send them through the whole flow again and leave
+                        # them with a duplicate, which is worse than losing the
+                        # delivery note.
+                        success = True
+                        logger.error(
+                            f"Address {address_id} is saved but its final details "
+                            f"were not applied: {response.error}"
+                        )
                     else:
                         logger.error(f"Failed to save address: {response.error}")
+
+            if not success:
+                # Nothing was written, so nothing the customer answered may be
+                # thrown away: keeping `temp_address_data` (and the checkout
+                # origin) alive means retapping the title button retries the
+                # save with all seven answers intact, instead of restarting the
+                # whole flow. Same contract as the pin branch's failed early
+                # create, which degrades rather than discarding.
+                failure_text = i18n.get('telegram.address.save_failed', language)
+                retry_keyboard = ProfileKeyboards.address_title_suggestions(language)
+
+                if is_callback:
+                    await self._edit_or_replace_callback_message(
+                        update.callback_query, failure_text, reply_markup=retry_keyboard
+                    )
+                else:
+                    await update.message.reply_text(
+                        text=failure_text,
+                        reply_markup=retry_keyboard
+                    )
+
+                return ADDRESS_TITLE
 
             resume_checkout_after_save = context.user_data.pop('address_flow_origin', None) == 'checkout'
 
@@ -2716,22 +3048,19 @@ class ProfileHandlers(BaseHandler):
             context.user_data.pop('temp_location', None)
             context.user_data.pop('temp_address', None)
 
-            if success and resume_checkout_after_save:
+            if resume_checkout_after_save:
                 await self._resume_checkout_after_address(update, context)
                 return ConversationHandler.END
 
-            if success:
-                success_text = i18n.get('telegram.address.saved_successfully', language)
-            else:
-                success_text = i18n.get('telegram.address.save_failed', language)
-
+            success_text = i18n.get('telegram.address.saved_successfully', language)
             keyboard = await main_menu_for(update.effective_user.id, language)
 
             if is_callback:
-                query = update.callback_query
-                await query.edit_message_text(
-                    text=success_text,
-                    reply_markup=keyboard
+                # A refused edit is a rendering problem: the address IS saved,
+                # and losing this confirmation sends the customer round the
+                # flow again and leaves them with a duplicate.
+                await self._edit_or_replace_callback_message(
+                    update.callback_query, success_text, reply_markup=keyboard
                 )
             else:
                 await update.message.reply_text(
@@ -2754,8 +3083,9 @@ class ProfileHandlers(BaseHandler):
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            # Clear any pending input state (user may have cancelled an edit)
-            await self.user_repo.update_user_state(user_id, {})
+            # This screen IS the Cancel button of the title/instructions edit
+            # prompts, so reaching it disarms them — and only them.
+            await self.user_repo.clear_awaiting_input(user_id, *_ADDRESS_EDIT_PROMPTS)
 
             # Extract address ID from callback data
             address_id = query.data.split('_')[-1]
@@ -2776,24 +3106,28 @@ class ProfileHandlers(BaseHandler):
                 address = next((addr for addr in addresses if str(addr.get('id')) == address_id), None)
 
                 if not address:
-                    await query.answer(i18n.get('telegram.address.not_found', language))
+                    await self._ack(query, i18n.get('telegram.address.not_found', language))
                     return
 
-            # Format address details
-            address_text = i18n.get(
+            # Format address details. Every value below is DATA the customer or
+            # a geocoder wrote, and this screen is rendered as Markdown, so it
+            # goes through `_markdown_copy` — an address carrying `_` used to
+            # make Telegram refuse the message and the customer could not view,
+            # edit or delete their own address.
+            address_text = _markdown_copy(
                 'telegram.address.details_title',
                 language,
                 title=address.get('title', i18n.get('telegram.address.untitled', language))
             )
-            address_text += i18n.get(
+            address_text += _markdown_copy(
                 'telegram.address.details_full_address',
                 language,
                 address=address.get('full_address', i18n.get('telegram.common.not_set', language))
             )
             if address.get('street_address'):
-                address_text += i18n.get('telegram.address.details_street', language, street=address.get('street_address'))
+                address_text += _markdown_copy('telegram.address.details_street', language, street=address.get('street_address'))
             if address.get('city'):
-                address_text += i18n.get('telegram.address.details_city', language, city=address.get('city'))
+                address_text += _markdown_copy('telegram.address.details_city', language, city=address.get('city'))
             if address.get('is_default'):
                 address_text += i18n.get('telegram.address.details_default_badge', language)
 
@@ -2813,20 +3147,10 @@ class ProfileHandlers(BaseHandler):
             from keyboards import KeyboardBuilder
             keyboard = KeyboardBuilder.build_inline_keyboard(buttons)
 
-            try:
-                await query.edit_message_text(
-                    text=address_text,
-                    reply_markup=keyboard,
-                    parse_mode='Markdown'
-                )
-            except BadRequest as edit_error:
-                # Handle "message is not modified" error
-                if "message is not modified" in str(edit_error).lower():
-                    logger.info(f"Message content unchanged for address {address_id}")
-                else:
-                    raise edit_error
-
-            await query.answer()
+            await self._edit_or_replace_callback_message(
+                query, address_text, reply_markup=keyboard, parse_mode='Markdown'
+            )
+            await self._ack(query)
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="view_address")
@@ -2853,7 +3177,7 @@ class ProfileHandlers(BaseHandler):
                 addresses = response.data.get('data', {}).get('addresses', [])
 
             if not addresses:
-                await query.answer(i18n.get('telegram.address.no_addresses_to_edit', language))
+                await self._ack(query, i18n.get('telegram.address.no_addresses_to_edit', language))
                 return
 
             edit_text = i18n.get('telegram.address.select_edit_prompt', language)
@@ -2876,12 +3200,10 @@ class ProfileHandlers(BaseHandler):
             from keyboards import KeyboardBuilder
             keyboard = KeyboardBuilder.build_inline_keyboard(buttons)
 
-            await query.edit_message_text(
-                text=edit_text,
-                reply_markup=keyboard,
-                parse_mode='Markdown'
+            await self._edit_or_replace_callback_message(
+                query, edit_text, reply_markup=keyboard, parse_mode='Markdown'
             )
-            await query.answer()
+            await self._ack(query)
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="select_edit_address")
@@ -2908,7 +3230,7 @@ class ProfileHandlers(BaseHandler):
                 addresses = response.data.get('data', {}).get('addresses', [])
 
             if not addresses:
-                await query.answer(i18n.get('telegram.address.no_addresses_to_delete', language))
+                await self._ack(query, i18n.get('telegram.address.no_addresses_to_delete', language))
                 return
 
             delete_text = i18n.get('telegram.address.select_delete_prompt', language)
@@ -2921,9 +3243,15 @@ class ProfileHandlers(BaseHandler):
                     'title',
                     i18n.get('telegram.address.title_fallback', language, index=addr.get('id'))
                 )
+                # `delete_address_` — NOT `confirm_delete_address_`: the row
+                # has to land on `delete_address_handler`, which names the
+                # address and asks first. Pointing it straight at
+                # `confirm_delete_address` made the picker delete on a SINGLE
+                # tap and bypassed the confirmation dialog that exists in this
+                # very file.
                 buttons.append([{
                     'text': f"{status} {addr_title}",
-                    'callback_data': f"confirm_delete_address_{addr['id']}"
+                    'callback_data': f"delete_address_{addr['id']}"
                 }])
 
             buttons.append([{'text': i18n.get('telegram.back', language), 'callback_data': 'manage_addresses'}])
@@ -2931,12 +3259,10 @@ class ProfileHandlers(BaseHandler):
             from keyboards import KeyboardBuilder
             keyboard = KeyboardBuilder.build_inline_keyboard(buttons)
 
-            await query.edit_message_text(
-                text=delete_text,
-                reply_markup=keyboard,
-                parse_mode='Markdown'
+            await self._edit_or_replace_callback_message(
+                query, delete_text, reply_markup=keyboard, parse_mode='Markdown'
             )
-            await query.answer()
+            await self._ack(query)
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="select_delete_address")
@@ -2961,13 +3287,13 @@ class ProfileHandlers(BaseHandler):
                 # Call the API to set address as default
                 response = await client.set_default_address(user_token, int(address_id))
                 if response.success:
-                    await query.answer(i18n.get('telegram.address.set_default_success_toast', language))
+                    await self._ack(query, i18n.get('telegram.address.set_default_success_toast', language))
                     logger.info(f"Address {address_id} successfully set as default")
 
                     # Refresh the address view to show updated status
                     await self.view_address(update, context)
                 else:
-                    await query.answer(
+                    await self._ack(query,
                         i18n.get('telegram.address.set_default_failed_toast', language, error=response.error)
                     )
                     logger.error(f"Failed to set address {address_id} as default: {response.error}")
@@ -2982,8 +3308,9 @@ class ProfileHandlers(BaseHandler):
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            # Clear any old pending input state before showing edit menu
-            await self.user_repo.update_user_state(user_id, {})
+            # Back on the edit menu, so the prompt the customer left is one of
+            # ours; anything else armed stays armed.
+            await self.user_repo.clear_awaiting_input(user_id, *_ADDRESS_EDIT_PROMPTS)
 
             # Extract address ID from callback data
             address_id = query.data.split('_')[-1]
@@ -3010,17 +3337,10 @@ class ProfileHandlers(BaseHandler):
             from keyboards import KeyboardBuilder
             keyboard = KeyboardBuilder.build_inline_keyboard(buttons)
 
-            try:
-                await query.edit_message_text(
-                    text=edit_text,
-                    reply_markup=keyboard,
-                    parse_mode='Markdown'
-                )
-            except BadRequest as edit_error:
-                if "message is not modified" not in str(edit_error).lower():
-                    raise edit_error
-
-            await query.answer()
+            await self._edit_or_replace_callback_message(
+                query, edit_text, reply_markup=keyboard, parse_mode='Markdown'
+            )
+            await self._ack(query)
             logger.info(f"Address editing options shown for address {address_id}")
 
         except Exception as e:
@@ -3052,11 +3372,16 @@ class ProfileHandlers(BaseHandler):
                 address = next((addr for addr in addresses if str(addr.get('id')) == address_id), None)
 
                 if not address:
-                    await query.answer(i18n.get('telegram.address.not_found', language))
+                    await self._ack(query, i18n.get('telegram.address.not_found', language))
                     return
 
             # Show confirmation dialog
-            confirm_text = i18n.get('telegram.address.delete_confirmation', language, title=address.get('title', 'Untitled'), address=address.get('full_address', 'N/A'))
+            confirm_text = _markdown_copy(
+                'telegram.address.delete_confirmation',
+                language,
+                title=address.get('title', 'Untitled'),
+                address=address.get('full_address', 'N/A'),
+            )
 
             buttons = [
                 [
@@ -3068,12 +3393,10 @@ class ProfileHandlers(BaseHandler):
             from keyboards import KeyboardBuilder
             keyboard = KeyboardBuilder.build_inline_keyboard(buttons)
 
-            await query.edit_message_text(
-                text=confirm_text,
-                reply_markup=keyboard,
-                parse_mode='Markdown'
+            await self._edit_or_replace_callback_message(
+                query, confirm_text, reply_markup=keyboard, parse_mode='Markdown'
             )
-            await query.answer()
+            await self._ack(query)
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="delete_address_handler")
@@ -3097,34 +3420,42 @@ class ProfileHandlers(BaseHandler):
 
                 # Call the API to delete the address
                 response = await client.delete_user_address(user_token, int(address_id))
-                if response.success:
-                    await query.answer(i18n.get('telegram.address.deleted_success_toast', language))
-                    logger.info(f"Address {address_id} successfully deleted")
+
+                # A DELETE of an address that is already gone is the outcome
+                # the customer asked for. The confirm button stays tappable
+                # forever and the toast only lands after the round trip, so
+                # impatient customers do tap twice — and reporting the second
+                # 404 as a FAILURE sent them looking for an address that had
+                # in fact been deleted.
+                already_gone = response.status_code == 404
+                if response.success or already_gone:
+                    await self._ack(
+                        query, i18n.get('telegram.address.deleted_success_toast', language)
+                    )
+                    if already_gone:
+                        logger.info(f"Address {address_id} was already deleted; reporting success")
+                    else:
+                        logger.info(f"Address {address_id} successfully deleted")
 
                     # Redirect back to address management
                     await self.manage_addresses(update, context)
                 else:
-                    await query.answer(
+                    await self._ack(
+                        query,
                         i18n.get('telegram.address.delete_failed_toast', language, error=response.error)
                     )
                     logger.error(f"Failed to delete address {address_id}: {response.error}")
 
                     # Show error and go back to address view
-                    error_text = i18n.get('telegram.address.delete_failed_detail', language, error=response.error)
+                    error_text = _markdown_copy('telegram.address.delete_failed_detail', language, error=response.error)
                     back_button = [[{'text': i18n.get('telegram.back', language), 'callback_data': f'view_address_{address_id}'}]]
 
                     from keyboards import KeyboardBuilder
                     keyboard = KeyboardBuilder.build_inline_keyboard(back_button)
 
-                    try:
-                        await query.edit_message_text(
-                            text=error_text,
-                            reply_markup=keyboard,
-                            parse_mode='Markdown'
-                        )
-                    except BadRequest as edit_error:
-                        if "message is not modified" not in str(edit_error).lower():
-                            raise edit_error
+                    await self._edit_or_replace_callback_message(
+                        query, error_text, reply_markup=keyboard, parse_mode='Markdown'
+                    )
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="confirm_delete_address")
@@ -3157,20 +3488,21 @@ class ProfileHandlers(BaseHandler):
 
                     if address:
                         current_title = address.get('title', i18n.get('telegram.address.untitled', language))
-                        edit_text = i18n.get('telegram.address.edit_title_prompt', language, current_title=current_title)
+                        edit_text = _markdown_copy('telegram.address.edit_title_prompt', language, current_title=current_title)
 
                         cancel_button = [[{'text': i18n.get('telegram.cancel', language), 'callback_data': f'view_address_{address_id}'}]]
                         from keyboards import KeyboardBuilder
                         keyboard = KeyboardBuilder.build_inline_keyboard(cancel_button)
 
-                        await query.edit_message_text(
-                            text=edit_text,
-                            reply_markup=keyboard,
-                            parse_mode='Markdown'
+                        await self._edit_or_replace_callback_message(
+                            query, edit_text, reply_markup=keyboard, parse_mode='Markdown'
                         )
-                        await query.answer()
+                        await self._ack(query)
 
-                        # Set state to wait for title input
+                        # Arm by WRITING A FRESH state, never by merging into
+                        # the one already there: `clear_awaiting_input` relies
+                        # on every key in the document belonging to the single
+                        # flow that is armed.
                         await self.user_repo.update_user_state(user_id, {
                             'awaiting_input': 'edit_address_title',
                             'edit_address_id': address_id
@@ -3178,7 +3510,7 @@ class ProfileHandlers(BaseHandler):
 
                         return
 
-            await query.answer(i18n.get('telegram.address.not_found', language))
+            await self._ack(query, i18n.get('telegram.address.not_found', language))
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="edit_title_handler")
@@ -3190,7 +3522,7 @@ class ProfileHandlers(BaseHandler):
             language = await i18n.get_user_language(update.effective_user.id)
             address_id = query.data.split('_')[-1]
 
-            await query.answer(i18n.get('telegram.address.location_edit_not_supported', language))
+            await self._ack(query, i18n.get('telegram.address.location_edit_not_supported', language))
             logger.info(f"Location edit requested for address {address_id} - redirecting to delete/add flow")
 
         except Exception as e:
@@ -3203,7 +3535,7 @@ class ProfileHandlers(BaseHandler):
             language = await i18n.get_user_language(update.effective_user.id)
             address_id = query.data.split('_')[-1]
 
-            await query.answer(i18n.get('telegram.address.details_edit_coming_soon', language))
+            await self._ack(query, i18n.get('telegram.address.details_edit_coming_soon', language))
             logger.info(f"Details edit requested for address {address_id} - not yet implemented")
 
         except Exception as e:
@@ -3233,7 +3565,7 @@ class ProfileHandlers(BaseHandler):
 
                     if address:
                         current_instructions = address.get('delivery_instructions') or i18n.get('telegram.address.none_value', language)
-                        edit_text = i18n.get(
+                        edit_text = _markdown_copy(
                             'telegram.address.edit_instructions_prompt',
                             language,
                             current_instructions=current_instructions
@@ -3243,14 +3575,13 @@ class ProfileHandlers(BaseHandler):
                         from keyboards import KeyboardBuilder
                         keyboard = KeyboardBuilder.build_inline_keyboard(cancel_button)
 
-                        await query.edit_message_text(
-                            text=edit_text,
-                            reply_markup=keyboard,
-                            parse_mode='Markdown'
+                        await self._edit_or_replace_callback_message(
+                            query, edit_text, reply_markup=keyboard, parse_mode='Markdown'
                         )
-                        await query.answer()
+                        await self._ack(query)
 
-                        # Set state to wait for instructions input
+                        # A fresh state, for the reason spelled out at the
+                        # title prompt above.
                         await self.user_repo.update_user_state(user_id, {
                             'awaiting_input': 'edit_address_instructions',
                             'edit_address_id': address_id
@@ -3258,7 +3589,7 @@ class ProfileHandlers(BaseHandler):
 
                         return
 
-            await query.answer(i18n.get('telegram.address.not_found', language))
+            await self._ack(query, i18n.get('telegram.address.not_found', language))
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="edit_instructions_handler")
@@ -3273,7 +3604,7 @@ class ProfileHandlers(BaseHandler):
 
             if not address_id:
                 await update.message.reply_text(i18n.get('telegram.address.edit_session_expired', language))
-                await self.user_repo.update_user_state(user_id, {})
+                await self.user_repo.clear_awaiting_input(user_id, 'edit_address_title')
                 return
 
             # Validate title input
@@ -3297,7 +3628,7 @@ class ProfileHandlers(BaseHandler):
 
                 response = await client.update_user_address(user_token, int(address_id), update_data)
                 if response.success:
-                    success_text = i18n.get('telegram.address.title_updated_success', language, title=text.strip())
+                    success_text = _markdown_copy('telegram.address.title_updated_success', language, title=text.strip())
 
                     back_button = [[{'text': i18n.get('telegram.back', language), 'callback_data': f'view_address_{address_id}'}]]
                     from keyboards import KeyboardBuilder
@@ -3309,12 +3640,12 @@ class ProfileHandlers(BaseHandler):
                         parse_mode='Markdown'
                     )
 
-                    # Clear user state
-                    await self.user_repo.update_user_state(user_id, {})
+                    # This flow is over; nobody else's is touched.
+                    await self.user_repo.clear_awaiting_input(user_id, 'edit_address_title')
                     logger.info(f"Address {address_id} title updated to: {text.strip()}")
 
                 else:
-                    error_text = i18n.get('telegram.address.title_update_failed', language, error=response.error)
+                    error_text = _markdown_copy('telegram.address.title_update_failed', language, error=response.error)
                     await update.message.reply_text(error_text, parse_mode='Markdown')
                     logger.error(f"Failed to update address {address_id} title: {response.error}")
 
@@ -3332,7 +3663,7 @@ class ProfileHandlers(BaseHandler):
 
             if not address_id:
                 await update.message.reply_text(i18n.get('telegram.address.edit_session_expired', language))
-                await self.user_repo.update_user_state(user_id, {})
+                await self.user_repo.clear_awaiting_input(user_id, 'edit_address_instructions')
                 return
 
             # Validate instructions input
@@ -3354,7 +3685,7 @@ class ProfileHandlers(BaseHandler):
                 if response.success:
                     success_text = i18n.get('telegram.address.instructions_updated_intro', language)
                     if text.strip():
-                        success_text += i18n.get('telegram.address.instructions_new_value', language, value=text.strip())
+                        success_text += _markdown_copy('telegram.address.instructions_new_value', language, value=text.strip())
                     else:
                         success_text += i18n.get('telegram.address.instructions_cleared', language)
 
@@ -3368,12 +3699,12 @@ class ProfileHandlers(BaseHandler):
                         parse_mode='Markdown'
                     )
 
-                    # Clear user state
-                    await self.user_repo.update_user_state(user_id, {})
+                    # This flow is over; nobody else's is touched.
+                    await self.user_repo.clear_awaiting_input(user_id, 'edit_address_instructions')
                     logger.info(f"Address {address_id} delivery instructions updated")
 
                 else:
-                    error_text = i18n.get('telegram.address.instructions_update_failed', language, error=response.error)
+                    error_text = _markdown_copy('telegram.address.instructions_update_failed', language, error=response.error)
                     await update.message.reply_text(error_text, parse_mode='Markdown')
                     logger.error(f"Failed to update address {address_id} instructions: {response.error}")
 
@@ -3401,12 +3732,10 @@ class ProfileHandlers(BaseHandler):
             keyboard = KeyboardBuilder.build_inline_keyboard(buttons)
 
             if update.callback_query:
-                await update.callback_query.edit_message_text(
-                    text=logout_text,
-                    reply_markup=keyboard,
-                    parse_mode='Markdown'
+                await self._edit_or_replace_callback_message(
+                    update.callback_query, logout_text, reply_markup=keyboard, parse_mode='Markdown'
                 )
-                await update.callback_query.answer()
+                await self._ack(update.callback_query)
             else:
                 await update.message.reply_text(
                     text=logout_text,
@@ -3445,11 +3774,10 @@ class ProfileHandlers(BaseHandler):
             logout_success = i18n.get('telegram.profile.logout_success_text', language)
 
             # Remove inline keyboard
-            await query.edit_message_text(
-                text=logout_success,
-                parse_mode='Markdown'
+            await self._edit_or_replace_callback_message(
+                query, logout_success, parse_mode='Markdown'
             )
-            await query.answer(i18n.get('telegram.profile.logout_success_toast', language))
+            await self._ack(query, i18n.get('telegram.profile.logout_success_toast', language))
 
             logger.info(f"User {user_id} successfully logged out")
 

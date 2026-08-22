@@ -491,7 +491,23 @@ class ActiveDeliveryHandler(BaseHandler):
         language = await self._get_language(update, context)
 
         try:
-            delivery_info = context.user_data.get('current_delivery', {})
+            # Parse: staff_navigate_{delivery_id}
+            delivery_id = int(query.data.split('_')[-1])
+
+            # Re-anchor BEFORE a single coordinate is read. Each stop is its own
+            # chat message but the driver has ONE `current_delivery`, so a tap on
+            # an earlier stop's still-live card would otherwise build the map link
+            # out of whichever stop was opened last -- and nothing on this screen
+            # names the stop, so the driver only finds out at the wrong door.
+            # The guard is BaseHandler's, the same one the at-door money handlers
+            # apply.
+            delivery_info = await self._anchor_current_delivery(
+                update, context, delivery_id
+            )
+            if delivery_info is None:
+                await self._refuse_stale_card(update, language)
+                return
+
             address = escape_html(delivery_info.get('address', ''))
             destination_lat = delivery_info.get('destination_lat')
             destination_lng = delivery_info.get('destination_lng')

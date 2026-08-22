@@ -1,13 +1,13 @@
 """
 Telegram keyboard layouts and UI components
 """
-from typing import List, Dict, Optional, Any, Sequence
+import re
+from typing import List, Dict, Optional, Any, Sequence, Tuple
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 
 from i18n import i18n
 from config import config
 from shared.constants import ORDER_STATUS_ICONS, SUBSCRIPTION_STATUS_ICONS, DEFAULT_STATUS_ICON
-from shared.business_config import MAX_QUANTITY_PER_ITEM
 
 
 MAX_DISPLAYED_ADDRESSES = 5
@@ -34,6 +34,65 @@ def i18n_button(key: str, language: str, callback_data: str, **fmt) -> Dict[str,
         i18n_button('telegram.menu.products', lang, 'menu_products')
     """
     return {'text': i18n.get(key, language, **fmt), 'callback_data': callback_data}
+
+
+# ---------------------------------------------------------------------------
+# Product-list pagination, in ONE place.
+#
+# The regex `bot.py` registers, the string this module renders and the parser
+# `handlers/products.py` reads it back with are the same rule; they live here
+# together so a change to the shape cannot land in two of the three.
+#
+# The first version of this row emitted `page_{n}`. It named the PAGE and
+# nothing else, so no handler could re-render the list from it and both buttons
+# were dead: the tap matched no pattern, nothing answered the callback query,
+# and the customer watched a spinner until Telegram gave up.
+#
+# The category and the single-category Back target therefore ride on the
+# CALLBACK rather than in `context.user_data`, for exactly the reason the
+# cancel-confirmation card carries its order id
+# (handlers/orders.py::_cancel_confirmation_callback): the Application is built
+# with no `persistence`, so bot memory is empty after every deploy, and a
+# product list still open on a customer's screen has to keep working.
+#
+# The registered pattern also claims the LEGACY `page_{n}` shape. Nothing
+# renders it any more, but cards rendered before this release outlive the
+# deploy, and a tap no handler claims is a spinner nobody can stop — claimed
+# here, `ProductHandlers.product_page_handler` can at least say so.
+PRODUCT_PAGE_PATTERN = r"^page_\d+(_\d+)?(_single)?$"
+
+_PRODUCT_PAGE_RE = re.compile(r"^page_(\d+)_(\d+)(_single)?$")
+
+
+def product_page_callback(category_id: Any, page: int,
+                          single_category: bool = False) -> Optional[str]:
+    """`callback_data` for one Previous/Next button of a category's product list.
+
+    `None` when the button could not address itself — an unknown category, or a
+    page below the first. A button that cannot say what it pages is the defect
+    this replaced, so the caller renders nothing at all rather than a dead one.
+    """
+    category = str(category_id if category_id is not None else '')
+    try:
+        page_number = int(page)
+    except (TypeError, ValueError):
+        return None
+    if not category.isdigit() or page_number < 1:
+        return None
+    return f"page_{category}_{page_number}" + ('_single' if single_category else '')
+
+
+def parse_product_page_callback(data: Any) -> Optional[Tuple[str, int, bool]]:
+    """`(category_id, page, single_category)` carried by a pagination callback.
+
+    `None` means the data carries no category — the legacy `page_{n}` shape from
+    a card rendered before this release. It is a screen the bot can no longer
+    reconstruct, not an error to swallow.
+    """
+    match = _PRODUCT_PAGE_RE.match(str(data or ''))
+    if match is None:
+        return None
+    return match.group(1), int(match.group(2)), match.group(3) is not None
 
 
 class KeyboardBuilder:
@@ -244,7 +303,8 @@ class ProductKeyboards:
     def product_list(products: List[Dict], page: int = 1,
                     total_pages: int = 1, language: str = 'en',
                     quick_suggestions: Optional[List[Dict]] = None,
-                    single_category: bool = False) -> InlineKeyboardMarkup:
+                    single_category: bool = False,
+                    category_id: Any = None) -> InlineKeyboardMarkup:
         """Product list keyboard with pagination.
 
         When `single_category` is True the products menu skipped the category
@@ -253,6 +313,12 @@ class ProductKeyboards:
 
         `quick_suggestions` is rendered as a top section when present (used
         when the products list is shown directly without a category step).
+
+        `category_id` is what the Previous/Next buttons page WITHIN: it is
+        carried by their callback_data so the tap can be served with no bot
+        memory at all (see `product_page_callback`). Without it there is no
+        pagination row, even across several pages — a caller that cannot name
+        its category has nothing a paging button could re-render.
         """
         buttons = []
 
@@ -272,18 +338,21 @@ class ProductKeyboards:
                 'callback_data': f"product_{product['id']}"
             }])
 
-        # Add pagination if needed
+        # Add pagination if needed. Each button is rendered only when it can
+        # address itself; `product_page_callback` returns None otherwise.
         if total_pages > 1:
             nav_row = []
-            if page > 1:
+            previous_callback = product_page_callback(category_id, page - 1, single_category)
+            next_callback = product_page_callback(category_id, page + 1, single_category)
+            if page > 1 and previous_callback:
                 nav_row.append({
                     'text': i18n.get('telegram.pagination.previous', language),
-                    'callback_data': f'page_{page - 1}'
+                    'callback_data': previous_callback,
                 })
-            if page < total_pages:
+            if page < total_pages and next_callback:
                 nav_row.append({
                     'text': i18n.get('telegram.pagination.next', language),
-                    'callback_data': f'page_{page + 1}'
+                    'callback_data': next_callback,
                 })
 
             if nav_row:
@@ -340,32 +409,35 @@ class ProductKeyboards:
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     QUANTITY_PRESET_OFFSETS = (3, 6, 10, 13, 18)
-    # Mirror the backend order-item cap (SSOT: shared.business_config).
-    MAX_QUANTITY = MAX_QUANTITY_PER_ITEM
 
     @staticmethod
-    def _build_quantity_presets(min_order_qty: int,
-                                stock_quantity: Optional[int] = None) -> List[int]:
+    def _build_quantity_presets(min_order_qty: int, max_quantity: int) -> List[int]:
         """Build preset quantity values as offsets above the per-product minimum.
 
         The cart already starts at min_order_qty when an item is first added, so
-        presets are jumps from that floor. We cap at stock_quantity (when known)
-        and at MAX_QUANTITY (99). Returned list is deduplicated and sorted.
-        """
-        upper = ProductKeyboards.MAX_QUANTITY
-        if stock_quantity is not None and stock_quantity > 0:
-            upper = min(upper, stock_quantity)
+        presets are jumps from that floor.
 
+        This builder does NOT decide what is orderable. ``max_quantity`` is the
+        ceiling its CALLER already resolved (``ProductHandlers._purchase_bounds``
+        — stock, the backend per-item cap, and what "unknown stock" means all
+        live there). It used to re-derive that ceiling from ``stock_quantity``
+        with ``stock_quantity > 0``, which switches the ceiling OFF at exactly
+        the moment it matters: a sold-out product fell back to the per-item cap and
+        rendered buttons up to min+18 for water that does not exist. A ceiling
+        below the floor yields no presets at all, which is the honest screen.
+
+        Returned list is deduplicated and sorted.
+        """
         candidates = [min_order_qty + offset for offset in ProductKeyboards.QUANTITY_PRESET_OFFSETS]
         # Keep only values strictly above min (presets are shortcuts, not the floor)
         # and at-or-below the cap.
-        presets = [v for v in candidates if min_order_qty < v <= upper]
+        presets = [v for v in candidates if min_order_qty < v <= max_quantity]
         return sorted(set(presets))
 
     @staticmethod
     def quantity_selector(product_id: int, current_quantity: int = 1,
-                         language: str = 'en', min_order_qty: int = 1,
-                         stock_quantity: Optional[int] = None) -> InlineKeyboardMarkup:
+                         language: str = 'en', *, min_order_qty: int,
+                         max_quantity: int) -> InlineKeyboardMarkup:
         """Quantity selection keyboard with offset-based presets + fine-tune row.
 
         Layout:
@@ -373,10 +445,17 @@ class ProductKeyboards:
             [ −1 ]     {qty}     [ +1 ]              (fine-tune)
             [ Checkout ]
             [ Back ]
+
+        ``min_order_qty`` and ``max_quantity`` are the purchase bounds the
+        caller resolved (``ProductHandlers._purchase_bounds``) and are REQUIRED:
+        a default here would be a second, silent opinion about what the customer
+        may order, and the sold-out case is precisely where the default would be
+        wrong. The preset row disappears when nothing above the floor is
+        orderable.
         """
         buttons: List[List[Dict[str, str]]] = []
 
-        presets = ProductKeyboards._build_quantity_presets(min_order_qty, stock_quantity)
+        presets = ProductKeyboards._build_quantity_presets(min_order_qty, max_quantity)
         if presets:
             preset_row = []
             for value in presets:
@@ -567,25 +646,6 @@ class OrderKeyboards:
         buttons.append([{
             'text': i18n.get('telegram.back', language),
             'callback_data': 'back_to_delivery'
-        }])
-
-        return KeyboardBuilder.build_inline_keyboard(buttons)
-
-    @staticmethod
-    def delivery_time_slots(slots: List[Dict], language: str = 'en') -> InlineKeyboardMarkup:
-        """Delivery time slot selection"""
-        buttons = []
-
-        for slot in slots:
-            if slot['available']:
-                buttons.append([{
-                    'text': f"🕐 {slot['start_time']} - {slot['end_time']}",
-                    'callback_data': f"timeslot_{slot['id']}"
-                }])
-
-        buttons.append([{
-            'text': i18n.get('telegram.back', language),
-            'callback_data': 'back_to_address'
         }])
 
         return KeyboardBuilder.build_inline_keyboard(buttons)
@@ -834,8 +894,19 @@ class SubscriptionKeyboards:
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod
-    def quantity_selector(language: str = 'en') -> InlineKeyboardMarkup:
-        """Quantity selection keyboard"""
+    def quantity_selector(
+        language: str = 'en',
+        back_callback: str = None,
+    ) -> InlineKeyboardMarkup:
+        """Quantity selection keyboard.
+
+        Three flows render this: subscription creation, add-an-item and
+        update-an-item. The first two came from a product list, so the default
+        Back returns there; the update flow never showed one and passes the
+        item-management menu instead. One callback per destination is what
+        makes each Back landable — `back_to_product_selection` used to be the
+        only option and, in the update flow, meant nothing.
+        """
         buttons = [
             [
                 {'text': '1', 'callback_data': 'sub_qty_1'},
@@ -847,18 +918,31 @@ class SubscriptionKeyboards:
                 {'text': '5', 'callback_data': 'sub_qty_5'},
                 {'text': '10', 'callback_data': 'sub_qty_10'}
             ],
-            [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_product_selection'}]
+            [{
+                'text': i18n.get('telegram.back', language),
+                'callback_data': back_callback or 'back_to_product_selection',
+            }]
         ]
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod
-    def payment_methods(available_methods: List[Dict[str, Any]], language: str = 'en') -> InlineKeyboardMarkup:
+    def payment_methods(
+        available_methods: List[Dict[str, Any]],
+        language: str = 'en',
+        back_callback: str = 'back_to_address_selection',
+    ) -> InlineKeyboardMarkup:
         """Payment method selection for subscription.
 
         Buttons are derived from GET /payments/methods so the subscription menu
         can never diverge from checkout. Callback data is `sub_payment_<type>`;
         handlers MUST parse it with split('_', 2)[2] because `business_account`
         contains an underscore.
+
+        Two screens render this: the creation flow, whose previous step was the
+        address list (the default Back), and the "change payment method" screen
+        reached from an existing subscription's edit menu, which passes
+        `edit_sub_<id>`. One Back callback for both would have to mean two
+        different destinations, so it meant neither and the button was dead.
         """
         from payment_methods import build_payment_method_buttons
 
@@ -866,7 +950,7 @@ class SubscriptionKeyboards:
             [{'text': option['name'], 'callback_data': f"sub_payment_{option['type']}"}]
             for option in build_payment_method_buttons(available_methods, language)
         ]
-        buttons.append([{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_address_selection'}])
+        buttons.append([{'text': i18n.get('telegram.back', language), 'callback_data': back_callback}])
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod
@@ -1190,10 +1274,21 @@ class PaymentKeyboards:
 
     @staticmethod
     def payment_failed(order_id: int, language: str = 'en') -> InlineKeyboardMarkup:
-        """Shown on payment failure with retry and switch options"""
+        """Recovery options for an order that exists but is not paid.
+
+        Every button carries `order_id` (My Orders needs none — it lists them),
+        so the whole screen keeps working against THAT order after a bot
+        restart, when `context.user_data` is gone. Rendered both when a payment
+        is cancelled and when the payment link could not be created at all
+        (`confirm_order`), which is why My Orders is here: after a failed link
+        the customer's first question is "so does my order exist?", and the
+        answer has to be one tap away.
+        """
         buttons = [
             [{'text': i18n.get('telegram.payment.retry', language),
               'callback_data': f'payment_retry_{order_id}'}],
+            [{'text': i18n.get('telegram.menu.orders', language),
+              'callback_data': 'menu_orders'}],
             [{'text': i18n.get('telegram.payment.switch_method', language),
               'callback_data': f'payment_switch_{order_id}'}],
             [{'text': i18n.get('telegram.payment.cancel_order', language),

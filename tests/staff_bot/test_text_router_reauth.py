@@ -26,7 +26,7 @@ def _menu_tap_text():
     button, built from the real (DB-backed) translation the same way the
     keyboard does -- see staff_bot/keyboards/menu.py. Deliberately not
     hardcoded: the bot's guard now matches this text against the real,
-    DB-backed staff.menu.* labels via _main_menu_text_pattern(), so a
+    DB-backed staff.menu.* labels via _match_menu_action(), so a
     literal string here would silently drift out of sync with the seeded
     translation content."""
     return f"\U0001F69A {i18n.get('staff.menu.active_deliveries', 'en')}"

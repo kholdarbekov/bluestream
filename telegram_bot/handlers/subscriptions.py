@@ -10,6 +10,11 @@ from keyboards import SubscriptionKeyboards, MenuKeyboards, ProductKeyboards
 from api_client import api_client
 from utils import user_middleware, get_auth_token
 from shared.constants import SUBSCRIPTION_STATUS_ICONS
+# `BaseHandler._ack` is why every ack below goes through `self._ack`: answering
+# a callback is cosmetic and must never abort the step. Every handler here works
+# inside one `try` that returns ConversationHandler.END, so a late "query is too
+# old" used to end the customer's subscription flow AFTER the change had already
+# been sent to the backend.
 from handlers.base import BaseHandler
 
 
@@ -60,8 +65,10 @@ class SubscriptionHandlers(BaseHandler):
             keyboard = SubscriptionKeyboards.subscription_list(subscriptions, language)
 
             if update.callback_query:
-                await update.callback_query.edit_message_text(text=subs_text, reply_markup=keyboard)
-                await update.callback_query.answer()
+                await self._edit_or_replace_callback_message(
+                    update.callback_query, text=subs_text, reply_markup=keyboard
+                )
+                await self._ack(update.callback_query)
             else:
                 await update.message.reply_text(text=subs_text, reply_markup=keyboard)
 
@@ -127,8 +134,8 @@ class SubscriptionHandlers(BaseHandler):
 
             keyboard = SubscriptionKeyboards.subscription_actions(subscription_id, subscription['status'], language)
 
-            await query.edit_message_text(text=details_text, reply_markup=keyboard)
-            await query.answer()
+            await self._edit_or_replace_callback_message(query, text=details_text, reply_markup=keyboard)
+            await self._ack(query)
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="subscription_details")
@@ -163,8 +170,8 @@ class SubscriptionHandlers(BaseHandler):
                     # Show templates option
                     text = i18n.get('telegram.subscription.create_template_or_custom', language)
                     keyboard = SubscriptionKeyboards.subscription_creation_options(language)
-                    await query.edit_message_text(text=text, reply_markup=keyboard)
-                    await query.answer()
+                    await self._edit_or_replace_callback_message(query, text=text, reply_markup=keyboard)
+                    await self._ack(query)
                     return SELECT_PRODUCTS
 
             # No templates, go straight to product selection
@@ -242,8 +249,8 @@ class SubscriptionHandlers(BaseHandler):
                 )]
             ])
 
-            await query.edit_message_text(text=text, reply_markup=keyboard)
-            await query.answer()
+            await self._edit_or_replace_callback_message(query, text=text, reply_markup=keyboard)
+            await self._ack(query)
 
             return SELECT_FREQUENCY  # Reusing this state for the intermediate step
 
@@ -255,8 +262,7 @@ class SubscriptionHandlers(BaseHandler):
         """Select delivery address"""
         try:
             query = update.callback_query
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
+            language = await i18n.get_user_language(update.effective_user.id)
 
             # Save frequency - parse from callback data (format: subscription_freq_daily)
             frequency = query.data.split('_')[2]
@@ -265,6 +271,40 @@ class SubscriptionHandlers(BaseHandler):
             # For subscriptions, typically these are the same
             context.user_data['subscription_creation']['billing_cycle'] = frequency
             context.user_data['subscription_creation']['delivery_frequency'] = frequency
+
+            return await self._show_address_selection(update, context, language)
+
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="select_address")
+            return ConversationHandler.END
+
+    async def back_to_address_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Back from the payment-method screen of subscription creation.
+
+        `SubscriptionKeyboards.payment_methods` has always rendered this
+        button; nothing claimed it, so a customer part way through subscription
+        checkout tapped Back and stayed on the payment screen. The frequency
+        they already chose is still in `subscription_creation`, so only the
+        address step is re-shown.
+        """
+        try:
+            language = await i18n.get_user_language(update.effective_user.id)
+            return await self._show_address_selection(update, context, language)
+
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="back_to_address_selection")
+            return ConversationHandler.END
+
+    async def _show_address_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
+                                      language: str):
+        """Render the address step of subscription creation. Returns the next state.
+
+        Shared by the forward step (`select_address`) and the Back button
+        (`back_to_address_selection`) so the screen a customer returns to is
+        the screen they left, by construction.
+        """
+        try:
+            query = update.callback_query
 
             # Get user addresses
             async with api_client as client:
@@ -286,20 +326,20 @@ class SubscriptionHandlers(BaseHandler):
                     i18n.get('telegram.subscription.add_address', language),
                     callback_data='add_address'
                 )]]
-                await query.edit_message_text(text=text, reply_markup=InlineKeyboardMarkup(keyboard))
-                await query.answer()
+                await self._edit_or_replace_callback_message(query, text=text, reply_markup=InlineKeyboardMarkup(keyboard))
+                await self._ack(query)
                 return ConversationHandler.END
 
             text = i18n.get('telegram.subscription.select_address', language)
             keyboard = self._build_address_keyboard(addresses, language)
 
-            await query.edit_message_text(text=text, reply_markup=keyboard)
-            await query.answer()
+            await self._edit_or_replace_callback_message(query, text=text, reply_markup=keyboard)
+            await self._ack(query)
 
             return SELECT_PAYMENT
 
         except Exception as e:
-            await self._handle_error(update, exc=e, operation="select_address")
+            await self._handle_error(update, exc=e, operation="show_address_selection")
             return ConversationHandler.END
 
     async def select_payment(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -329,8 +369,8 @@ class SubscriptionHandlers(BaseHandler):
             text = i18n.get('telegram.subscription.select_payment', language)
             keyboard = SubscriptionKeyboards.payment_methods(available_methods, language)
 
-            await query.edit_message_text(text=text, reply_markup=keyboard)
-            await query.answer()
+            await self._edit_or_replace_callback_message(query, text=text, reply_markup=keyboard)
+            await self._ack(query)
 
             return CONFIRM_SUBSCRIPTION
 
@@ -394,8 +434,8 @@ class SubscriptionHandlers(BaseHandler):
                 )
             ]]
 
-            await query.edit_message_text(text=text, reply_markup=InlineKeyboardMarkup(keyboard))
-            await query.answer()
+            await self._edit_or_replace_callback_message(query, text=text, reply_markup=InlineKeyboardMarkup(keyboard))
+            await self._ack(query)
 
             return CONFIRM_SUBSCRIPTION
 
@@ -464,8 +504,8 @@ class SubscriptionHandlers(BaseHandler):
                 )
             ]]
 
-            await query.edit_message_text(text=text, reply_markup=InlineKeyboardMarkup(keyboard))
-            await query.answer(i18n.get('telegram.subscription.created_success', language))
+            await self._edit_or_replace_callback_message(query, text=text, reply_markup=InlineKeyboardMarkup(keyboard))
+            await self._ack(query, i18n.get('telegram.subscription.created_success', language))
 
             # Clear context
             if 'subscription_creation' in context.user_data:
@@ -501,15 +541,15 @@ class SubscriptionHandlers(BaseHandler):
             # Check if at least one item was added
             items = context.user_data.get('subscription_creation', {}).get('items', [])
             if not items:
-                await query.answer(i18n.get('telegram.subscription.select_at_least_one_item', language), show_alert=True)
+                await self._ack(query, i18n.get('telegram.subscription.select_at_least_one_item', language), show_alert=True)
                 return SELECT_QUANTITY
 
             # Proceed to frequency selection
             text = i18n.get('telegram.subscription.select_frequency', language)
             keyboard = SubscriptionKeyboards.subscription_frequency(language)
 
-            await query.edit_message_text(text=text, reply_markup=keyboard)
-            await query.answer()
+            await self._edit_or_replace_callback_message(query, text=text, reply_markup=keyboard)
+            await self._ack(query)
 
             return SELECT_ADDRESS
 
@@ -531,8 +571,8 @@ class SubscriptionHandlers(BaseHandler):
             text = i18n.get('telegram.subscription.creation_cancelled', language)
             keyboard = await main_menu_for(update.effective_user.id, language)
 
-            await query.edit_message_text(text=text, reply_markup=keyboard)
-            await query.answer()
+            await self._edit_or_replace_callback_message(query, text=text, reply_markup=keyboard)
+            await self._ack(query)
 
             return ConversationHandler.END
 
@@ -574,14 +614,14 @@ class SubscriptionHandlers(BaseHandler):
                     success_msg = i18n.get('telegram.subscription.cancelled_success', language)
 
                 else:
-                    await query.answer(i18n.get('telegram.unknown_action', language))
+                    await self._ack(query, i18n.get('telegram.unknown_action', language))
                     return
 
                 if not response.success:
                     await self._handle_api_error(update, response.error, language)
                     return
 
-            await query.answer(success_msg)
+            await self._ack(query, success_msg)
 
             # Return to subscriptions menu
             await self.subscriptions_menu(update, context)
@@ -611,7 +651,7 @@ class SubscriptionHandlers(BaseHandler):
                     return
 
             text = i18n.get('telegram.subscription.skip_success', language)
-            await query.answer(text)
+            await self._ack(query, text)
 
             # Show updated subscription details
             await self.subscription_details(update, context)
@@ -659,8 +699,8 @@ class SubscriptionHandlers(BaseHandler):
                 )
             ]]
 
-            await query.edit_message_text(text=text, reply_markup=InlineKeyboardMarkup(keyboard))
-            await query.answer()
+            await self._edit_or_replace_callback_message(query, text=text, reply_markup=InlineKeyboardMarkup(keyboard))
+            await self._ack(query)
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="view_billing_history")
@@ -704,8 +744,8 @@ class SubscriptionHandlers(BaseHandler):
 
             keyboard = SubscriptionKeyboards.item_management_menu(sub_id, items, language)
 
-            await query.edit_message_text(text=text, reply_markup=keyboard)
-            await query.answer()
+            await self._edit_or_replace_callback_message(query, text=text, reply_markup=keyboard)
+            await self._ack(query)
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="manage_subscription_items")
@@ -713,9 +753,26 @@ class SubscriptionHandlers(BaseHandler):
     async def add_item_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start adding item to subscription"""
         try:
+            context.user_data['editing_subscription_id'] = int(
+                update.callback_query.data.split('_')[2]
+            )
+            return await self.add_item_back_to_products(update, context)
+
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="add_item_start")
+            return ConversationHandler.END
+
+    async def add_item_back_to_products(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show the add-an-item product list — the first step, and the one the
+        quantity screen's Back button returns to.
+
+        That Back used to emit `back_to_product_selection` with nothing in this
+        conversation claiming it, so it fell through to the group-0
+        `^back_to_product_` handler and died inside `int('selection')`.
+        """
+        try:
             language = await i18n.get_user_language(update.effective_user.id)
-            sub_id = int(update.callback_query.data.split('_')[2])
-            context.user_data['editing_subscription_id'] = sub_id
+            sub_id = context.user_data.get('editing_subscription_id')
 
             products = await self._fetch_and_display_products(
                 update, context, language,
@@ -728,7 +785,7 @@ class SubscriptionHandlers(BaseHandler):
             return ITEM_SELECT_PRODUCT
 
         except Exception as e:
-            await self._handle_error(update, exc=e, operation="add_item_start")
+            await self._handle_error(update, exc=e, operation="add_item_back_to_products")
             return ConversationHandler.END
 
     async def add_item_select_quantity(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -780,8 +837,8 @@ class SubscriptionHandlers(BaseHandler):
                 )
             ]]
 
-            await query.edit_message_text(text=text, reply_markup=InlineKeyboardMarkup(keyboard))
-            await query.answer()
+            await self._edit_or_replace_callback_message(query, text=text, reply_markup=InlineKeyboardMarkup(keyboard))
+            await self._ack(query)
 
             # Clear context
             if 'editing_subscription_id' in context.user_data:
@@ -808,7 +865,14 @@ class SubscriptionHandlers(BaseHandler):
             context.user_data['editing_subscription_id'] = sub_id
             context.user_data['editing_item_id'] = item_id
 
-            await self._show_quantity_selector(update, language, 'telegram.subscription.select_new_quantity')
+            # This flow never showed a product list — the customer picked an
+            # existing item off the item-management menu, so that is where Back
+            # belongs. The shared default (`back_to_product_selection`) would
+            # offer a step that does not exist here.
+            await self._show_quantity_selector(
+                update, language, 'telegram.subscription.select_new_quantity',
+                back_callback=f'manage_items_{sub_id}',
+            )
             return ITEM_SELECT_QUANTITY
 
         except Exception as e:
@@ -847,8 +911,8 @@ class SubscriptionHandlers(BaseHandler):
                 )
             ]]
 
-            await query.edit_message_text(text=text, reply_markup=InlineKeyboardMarkup(keyboard))
-            await query.answer()
+            await self._edit_or_replace_callback_message(query, text=text, reply_markup=InlineKeyboardMarkup(keyboard))
+            await self._ack(query)
 
             # Clear context
             if 'editing_subscription_id' in context.user_data:
@@ -886,7 +950,7 @@ class SubscriptionHandlers(BaseHandler):
                     return
 
             text = f"✅ {i18n.get('telegram.subscription.item_removed_successfully', language)}"
-            await query.answer(text)
+            await self._ack(query, text)
 
             # Return to item management
             context.user_data['callback_query_data'] = f'manage_items_{sub_id}'
@@ -909,8 +973,8 @@ class SubscriptionHandlers(BaseHandler):
             text = i18n.get('telegram.subscription.edit_menu', language)
             keyboard = SubscriptionKeyboards.edit_subscription_menu(sub_id, language)
 
-            await query.edit_message_text(text=text, reply_markup=keyboard)
-            await query.answer()
+            await self._edit_or_replace_callback_message(query, text=text, reply_markup=keyboard)
+            await self._ack(query)
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="edit_subscription_menu")
@@ -928,8 +992,8 @@ class SubscriptionHandlers(BaseHandler):
             text = i18n.get('telegram.subscription.select_new_frequency', language)
             keyboard = SubscriptionKeyboards.subscription_frequency(language)
 
-            await query.edit_message_text(text=text, reply_markup=keyboard)
-            await query.answer()
+            await self._edit_or_replace_callback_message(query, text=text, reply_markup=keyboard)
+            await self._ack(query)
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="change_frequency")
@@ -965,8 +1029,8 @@ class SubscriptionHandlers(BaseHandler):
                 )
             ]]
 
-            await query.edit_message_text(text=text, reply_markup=InlineKeyboardMarkup(keyboard))
-            await query.answer()
+            await self._edit_or_replace_callback_message(query, text=text, reply_markup=InlineKeyboardMarkup(keyboard))
+            await self._ack(query)
 
             # Clear context
             if 'editing_subscription_id' in context.user_data:
@@ -999,10 +1063,14 @@ class SubscriptionHandlers(BaseHandler):
             available_methods = (methods_response.data or {}).get('data', {}).get('available_methods', [])
 
             text = i18n.get('telegram.subscription.select_new_payment_method', language)
-            keyboard = SubscriptionKeyboards.payment_methods(available_methods, language)
+            # Reached from the subscription's edit menu, not from the creation
+            # flow's address step, so Back goes back there.
+            keyboard = SubscriptionKeyboards.payment_methods(
+                available_methods, language, back_callback=f'edit_sub_{sub_id}'
+            )
 
-            await query.edit_message_text(text=text, reply_markup=keyboard)
-            await query.answer()
+            await self._edit_or_replace_callback_message(query, text=text, reply_markup=keyboard)
+            await self._ack(query)
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="change_payment_method_menu")
@@ -1038,8 +1106,8 @@ class SubscriptionHandlers(BaseHandler):
                 )
             ]]
 
-            await query.edit_message_text(text=text, reply_markup=InlineKeyboardMarkup(keyboard))
-            await query.answer()
+            await self._edit_or_replace_callback_message(query, text=text, reply_markup=InlineKeyboardMarkup(keyboard))
+            await self._ack(query)
 
             # Clear context
             if 'editing_subscription_id' in context.user_data:
@@ -1086,8 +1154,8 @@ class SubscriptionHandlers(BaseHandler):
                 )
             ]]
 
-            await query.edit_message_text(text=text, reply_markup=InlineKeyboardMarkup(keyboard))
-            await query.answer()
+            await self._edit_or_replace_callback_message(query, text=text, reply_markup=InlineKeyboardMarkup(keyboard))
+            await self._ack(query)
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="view_subscription_statistics")
@@ -1140,8 +1208,8 @@ class SubscriptionHandlers(BaseHandler):
                 )
             ]]
 
-            await query.edit_message_text(text=text, reply_markup=InlineKeyboardMarkup(keyboard))
-            await query.answer()
+            await self._edit_or_replace_callback_message(query, text=text, reply_markup=InlineKeyboardMarkup(keyboard))
+            await self._ack(query)
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="view_subscription_logs")
@@ -1167,7 +1235,7 @@ class SubscriptionHandlers(BaseHandler):
                     return
 
             text = f"✅ {i18n.get('telegram.subscription.billing_retry_initiated', language)}"
-            await query.answer(text, show_alert=True)
+            await self._ack(query, text, show_alert=True)
 
             # Refresh subscription details
             await self.subscription_details(update, context)
@@ -1225,8 +1293,8 @@ class SubscriptionHandlers(BaseHandler):
         keyboard = InlineKeyboardMarkup(buttons)
 
         if query:
-            await query.edit_message_text(text=products_text, reply_markup=keyboard)
-            await query.answer()
+            await self._edit_or_replace_callback_message(query, text=products_text, reply_markup=keyboard)
+            await self._ack(query)
         else:
             await context.bot.send_message(
                 chat_id=update.effective_user.id,
@@ -1236,13 +1304,20 @@ class SubscriptionHandlers(BaseHandler):
 
         return products
 
-    async def _show_quantity_selector(self, update, language, text_key):
-        """Shared helper: display quantity selection keyboard."""
+    async def _show_quantity_selector(self, update, language, text_key, back_callback=None):
+        """Shared helper: display quantity selection keyboard.
+
+        `back_callback` names the screen this one was reached from; the builder
+        default (`back_to_product_selection`) is correct for the two flows that
+        came from a product list.
+        """
         query = update.callback_query
         text = i18n.get(text_key, language)
-        keyboard = SubscriptionKeyboards.quantity_selector(language)
-        await query.edit_message_text(text=text, reply_markup=keyboard)
-        await query.answer()
+        keyboard = SubscriptionKeyboards.quantity_selector(
+            language, back_callback=back_callback
+        )
+        await self._edit_or_replace_callback_message(query, text=text, reply_markup=keyboard)
+        await self._ack(query)
 
     def _build_address_keyboard(self, addresses, language):
         """Build keyboard for address selection"""

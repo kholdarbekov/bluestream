@@ -758,21 +758,3 @@ class MessageBuilder:
             lines.append(f"📊 Status: {icon} {order['status'].replace('_', ' ').title()}")
 
         return '\n'.join(lines)
-
-    @staticmethod
-    def build_product_summary(product: Dict[str, Any], language: str = 'en') -> str:
-        """Build product summary message"""
-        lines = [
-            f"🏷️ {product.get('name', 'Unknown Product')}",
-            f"💰 {format_price(product['pricing'].get('base_price', 0))} UZS"
-        ]
-
-        if product['specifications'].get('volume'):
-            lines.append(f"📦 {product['specifications']['volume']}{product['specifications'].get('volume_unit', '')}")
-
-        if product['inventory'].get('stock_quantity') is not None:
-            stock = product['inventory']['stock_quantity']
-            status = "✅ In Stock" if stock > 0 else "❌ Out of Stock"
-            lines.append(f"📊 {status}")
-
-        return '\n'.join(lines)

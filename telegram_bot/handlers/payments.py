@@ -48,6 +48,20 @@ class PaymentHandlers(BaseHandler):
         message (which triggers a Telegram notification) and the original
         callback-query message is edited to a brief "ready" status. Used after
         the Asl Belgisi wait so users get a notification the link arrived.
+
+        FAILURE IS SIGNALLED, NOT DRAWN. Every failure path below logs and
+        returns False WITHOUT touching the customer's screen. This method
+        cannot know what the failure means: by the time `confirm_order` calls
+        it the order already exists, so "payment failed" would be a lie that
+        makes the customer buy the same basket twice. Only the caller knows,
+        so the caller renders — via `show_payment_link_failed` when the right
+        screen is "the order stands, here is Retry".
+
+        Drawing a screen here as well as at the call site is not merely
+        redundant: when Telegram refuses the first edit,
+        `_edit_or_replace_callback_message` DELETES the bubble and posts a
+        replacement, so the caller's edit then lands on a stale message and
+        posts a second one — two messages for one failure.
         """
         try:
             user_id = update.effective_user.id
@@ -63,10 +77,6 @@ class PaymentHandlers(BaseHandler):
                 token = await get_auth_token(update, context, client)
                 if not token:
                     logger.error("Failed to get auth token for payment-link generation")
-                    await self._send_error_message(
-                        update, context,
-                        i18n.get('telegram.auth.login_required', language)
-                    )
                     return False
 
                 # 2. Request Payment Link
@@ -84,10 +94,6 @@ class PaymentHandlers(BaseHandler):
 
                 if not result.success:
                     logger.error(f"Failed to create {payment_method} link: {result.error}")
-                    await self._send_error_message(
-                        update, context,
-                        i18n.get('telegram.payment.create_link_failed_with_error', language, error=result.error)
-                    )
                     return False
 
                 # Let's inspect result structure safely
@@ -106,13 +112,8 @@ class PaymentHandlers(BaseHandler):
                     payment_url = str(payment_link_data)
 
                 if not payment_url:
-                     logger.error(f"No payment_url in response: {result.data}")
-                     await self._send_error_message(
-                         update,
-                         context,
-                         i18n.get('telegram.payment.invalid_link_received', language)
-                     )
-                     return False
+                    logger.error(f"No payment_url in response: {result.data}")
+                    return False
 
             # 3. Send Message with Button
             msg_text = i18n.get(
@@ -184,25 +185,55 @@ class PaymentHandlers(BaseHandler):
                     logger.warning(f"Failed to store payment message_id in Redis: {redis_err}")
 
             # Ack the tap: the dedup middleware no longer pre-answers, so the
-            # happy path must dismiss the spinner itself. Guarded so an
-            # answer failure can't trigger the error path after success.
-            if update.callback_query:
-                try:
-                    await update.callback_query.answer()
-                except Exception as ack_err:
-                    logger.debug(f"send_payment_link: query.answer() failed: {ack_err}")
+            # happy path must dismiss the spinner itself. Through `_ack`, so a
+            # refused answer can't trigger the error path after success.
+            await self._ack(update.callback_query)
 
             logger.info(f"{payment_method} link sent for order {order_id}")
             return True
 
         except Exception as e:
             logger.error(f"Error sending payment link: {e}", exc_info=True)
-            language = await i18n.get_user_language(update.effective_user.id)
-            await self._send_error_message(
-                update, context,
-                i18n.get('telegram.payment.failed_message', language)
-            )
             return False
+
+    async def show_payment_link_failed(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        order: Dict[str, Any],
+        language: str,
+    ) -> None:
+        """The ONE screen for "the order exists, the payment link does not".
+
+        Both callers of `send_payment_link` need exactly this screen, so it is
+        written once here rather than copied into each of them: the copy in
+        `confirm_order` and the copy in `retry_payment` would be two places
+        deciding what a link failure looks like, which is how they drift.
+
+        The copy leads with the order being PLACED and names it, because a
+        screen that only says "payment failed" reads as "nothing happened" and
+        the customer's next move is to order the same basket again. The
+        keyboard is the shared recovery one: its Retry button carries the order
+        id in its `callback_data`, so it re-pays THIS order (and survives a bot
+        restart, which `user_data` would not).
+
+        Draws only — the caller answers the callback query, because the caller
+        owns when the interaction ends.
+        """
+        order_id = order.get('id')
+        text = i18n.get(
+            'telegram.orders.payment_link_failed_message', language,
+            order_number=order.get('order_number') or str(order_id),
+        )
+        keyboard = PaymentKeyboards.payment_failed(order_id, language)
+
+        query = update.callback_query
+        if query is not None:
+            await self._edit_or_replace_callback_message(
+                query, text, reply_markup=keyboard,
+            )
+        else:
+            await update.effective_message.reply_text(text, reply_markup=keyboard)
 
     async def send_payme_invoice(
         self,
@@ -240,7 +271,7 @@ class PaymentHandlers(BaseHandler):
             # Extract order ID from callback data
             order_id = int(query.data.split('_')[-1])
 
-            await query.answer()
+            await self._ack(query)
 
             # Fetch order details
             async with api_client as client:
@@ -260,6 +291,11 @@ class PaymentHandlers(BaseHandler):
 
                 order = response.data.get('data', {}).get('order', {})
 
+            # The id on the callback data is the one of record for this retry —
+            # it is what survives a restart. Keep it on the payload so a thin
+            # response body can still be rendered as a named order.
+            order.setdefault('id', order_id)
+
             # Check if order can still be paid
             if order.get('is_paid'):
                 await query.edit_message_text(
@@ -273,7 +309,22 @@ class PaymentHandlers(BaseHandler):
                 provider_method = 'click'
 
             # Send new payment link
-            await self.send_payment_link(update, context, order, payment_method=provider_method)
+            link_sent = await self.send_payment_link(
+                update, context, order, payment_method=provider_method
+            )
+            if not link_sent:
+                # `send_payment_link` signals, it does not render. This call
+                # site owns the screen: the order is still there and still
+                # unpaid, so the customer needs the same "it stands, here is
+                # Retry" screen rather than a silent no-op that reads as a tap
+                # that never registered.
+                await self.show_payment_link_failed(update, context, order, language)
+                logger.warning(
+                    "Payment retry for order %s by user %s produced no %s link; "
+                    "left the retry screen up",
+                    order_id, user_id, provider_method,
+                )
+                return
 
             logger.info(f"Payment retry initiated for order {order_id} by user {user_id}")
 
@@ -297,14 +348,9 @@ class PaymentHandlers(BaseHandler):
             # Extract order ID from callback data
             order_id = int(query.data.split('_')[-1])
 
-            await query.answer()
-
-            # Store order ID in context for payment method selection
-            context.user_data['pending_order_id'] = order_id
+            await self._ack(query)
 
             # Show payment method selection
-            from handlers.orders import order_handlers
-
             payment_methods = [
                 {'type': 'cash', 'name': i18n.get('telegram.payment_cash', language)},
                 {'type': 'card', 'name': i18n.get('telegram.payment_card', language)},
@@ -342,7 +388,7 @@ class PaymentHandlers(BaseHandler):
             # Extract order ID from callback data
             order_id = int(query.data.split('_')[-1])
 
-            await query.answer()
+            await self._ack(query)
 
             # Show cancellation options
             cancelled_text = i18n.get('telegram.payment.cancelled_message', language)

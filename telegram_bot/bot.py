@@ -3,6 +3,7 @@ Main Telegram Bot Application
 Comprehensive water business bot with full feature integration
 """
 import asyncio
+import functools
 import logging
 import re
 import signal
@@ -37,8 +38,8 @@ if _sentry_dsn:
 
 from telegram import Update, BotCommand, ReplyKeyboardRemove
 from telegram.ext import (
-    Application, CommandHandler, MessageHandler, CallbackQueryHandler,
-    ConversationHandler, filters, ContextTypes, TypeHandler
+    Application, ApplicationHandlerStop, CommandHandler, MessageHandler,
+    CallbackQueryHandler, ConversationHandler, filters, ContextTypes, TypeHandler
 )
 from telegram.error import TelegramError
 from shared.telegram_request import ResilientHTTPXRequest
@@ -74,9 +75,131 @@ from handlers.profile import (
 )
 from eligibility import main_menu_for
 from utils import error_handler, rate_limiter, user_middleware, get_auth_token
-from keyboards import MenuKeyboards
+from keyboards import MenuKeyboards, PRODUCT_PAGE_PATTERN
 
 logger = logging.getLogger('bot')
+
+
+# ---------------------------------------------------------------------------
+# "Is this text a reply-keyboard tap?" -- ONE rule, one place
+# ---------------------------------------------------------------------------
+# The address flow arms REPLY keyboards (`ProfileKeyboards.location_request`
+# with `extra_rows=`), so Enter-manually / Re-enter / Cancel arrive as ordinary
+# text. Unlike the staff bot, the KEYBOARD adds no decoration of its own here:
+# the row is rendered verbatim from `i18n.get`, and any emoji is part of the
+# seeded copy ("❌ Bekor qilish"). The decoration therefore sits on EITHER side
+# of the comparison -- a keyboard still on the customer's phone was rendered
+# from the row as it read then, which may carry an emoji the row has since lost
+# (or vice versa) -- so the strip is symmetric.
+#
+# It is an EMOJI strip, and this regex is the only place that says so. What it
+# replaces was `(?:\S+\s+)?`, "any single leading token", which is the shape
+# wave 3 deleted from the staff bot: there it let a five-character first word
+# ("Sardor Profil") satisfy the FILTER while the matcher resolved nothing, and
+# the conversation was torn down with no output at all. Here the same shape
+# meant "word Bekor qilish" cancelled the address flow. Ranges rather than a
+# library: `re` has no \p{Emoji}, and "strip any leading non-alphanumeric run"
+# would quietly re-admit "+998...".
+_EMOJI_PREFIX_RE = re.compile(
+    r"^(?:"
+    r"[\U0001F000-\U0001FAFF]"       # pictographs, transport, flags, extended-A
+    r"|[\u2190-\u21FF]"              # arrows
+    r"|[\u2300-\u23FF]"              # misc technical (watch, hourglass)
+    r"|[\u2460-\u27BF]"              # enclosed alphanumerics .. dingbats (gear, check)
+    r"|[\u2B00-\u2BFF]"              # misc symbols and arrows (left arrow, star)
+    r"|[\u3030\u303D\u3297\u3299]"   # wavy dash, part alternation mark, congrat/secret
+    r"|[\uFE00-\uFE0F\u200D\u20E3]"  # variation selectors, ZWJ, combining keycap
+    r")+"
+)
+
+
+def _bare_label(text: Optional[str]) -> str:
+    """`text` stripped of surrounding space and of a leading emoji decoration."""
+    return _EMOJI_PREFIX_RE.sub("", (text or "").strip()).strip()
+
+
+def _is_tap_on_label(text: Optional[str], label: Optional[str]) -> bool:
+    """Is `text` a tap on a reply-keyboard button reading `label`?
+
+    Whole-string, never a substring: the pattern this replaces once matched any
+    message CONTAINING the copy, so "I don't want to cancel" cancelled the
+    address flow -- the bot agreeing with the customer by ending their work.
+    Text that merely contains a label is not a tap and is left to the state's
+    own handler, which is what a customer typing a sentence is owed.
+
+    Equal after the emoji strip, so the decoration may differ between the
+    keyboard on the phone and the row as it reads now -- but only the
+    decoration. A pure-emoji label strips to nothing and is compared raw, so
+    two different emoji buttons can never collapse into each other.
+    """
+    text = (text or "").strip()
+    label = (label or "").strip()
+    if not text or not label:
+        return False
+    if text == label:
+        return True
+    bare_text, bare_label = _bare_label(text), _bare_label(label)
+    return bool(bare_text) and bare_text == bare_label
+
+
+def _resolve_tapped_label(text: Optional[str], translation_keys) -> Optional[str]:
+    """Which of `translation_keys` is this text a tap on? The key, or None.
+
+    THE decider, and the only copy of the rule. `MenuTapFilter` -- the only
+    thing that asks -- calls this and nothing else, so "the filter claimed it"
+    and "the matcher resolved it" cannot become different answers.
+
+    Resolved WHEN THE TAP ARRIVES: `i18n.get` is called here, exactly as the
+    keyboard builder calls it when it renders. Nothing is memoised across
+    updates, and that is the feature -- an admin retitling a label in the admin
+    UI (or any `i18n.reload_translations()`) changes what the button says AND
+    what answers it in the same instant, with no restart, and the retired copy
+    stops matching at the same instant so it cannot linger as a hotword that
+    hijacks typed text. A matcher frozen at handler-build time left the button
+    the customer could SEE dead, and an unmatched tap in ADDRESS_LOCATION
+    escapes to the group-0 catch-all, where Cancel becomes a support ticket
+    with no reply.
+
+    Swept across EVERY supported language, not just the customer's: a reply
+    keyboard is client-side and survives a language switch until Telegram
+    redraws it, so a tap can arrive in the language the customer just left.
+    Key order breaks a tie if two keys ever render the same copy.
+
+    Cost per text update: one `i18n.get` -- an in-memory dict lookup plus
+    `render_translation` on a placeholder-free label -- per key per language,
+    abandoned on the first hit. The wiring registers at most three keys against
+    one update (Enter-manually + Re-enter, then Cancel) over three languages,
+    so under 10 lookups, a few microseconds. The one cost that is not free is
+    an UNSEEDED label key: `i18n.get` logs a missing-key warning per language
+    per update instead of once at startup. It still resolves -- both sides
+    derive the same `humanised_missing_key` -- it is just loud, which is the
+    correct volume for a reply-keyboard row that was never seeded.
+    """
+    for translation_key in translation_keys:
+        for lang_code in i18n.supported_languages:
+            if _is_tap_on_label(text, i18n.get(translation_key, lang_code)):
+                return translation_key
+    return None
+
+
+class MenuTapFilter(filters.MessageFilter):
+    """``True`` for text that IS a tap on one of `translation_keys`.
+
+    A `filters.MessageFilter` rather than a `filters.Regex` because a regex can
+    only be built from copy that is already known, i.e. at handler-build time;
+    this asks `_resolve_tapped_label` per update instead. Registered in place
+    of the build-time label regexes that guarded the customer's way OUT of the
+    address flow.
+    """
+
+    __slots__ = ("_translation_keys",)
+
+    def __init__(self, *translation_keys: str):
+        super().__init__(name="telegram_menu_tap:%s" % ",".join(translation_keys))
+        self._translation_keys = translation_keys
+
+    def filter(self, message) -> bool:
+        return _resolve_tapped_label(message.text, self._translation_keys) is not None
 
 
 class WaterBusinessBot:
@@ -89,29 +212,105 @@ class WaterBusinessBot:
         self.token_manager: Optional[TokenManager] = None
 
     @staticmethod
-    def _label_pattern(translation_key: str) -> str:
-        """Regex matching a reply-keyboard label in ANY supported language.
+    def _consumes(callback):
+        """Wrap a conversation callback so the update STOPS at the conversation.
 
-        Modelled on staff_bot/bot.py:_menu_text_pattern. Anchored on purpose:
-        the substring patterns this replaces matched an English word that only
-        appears in the English copy, so Cancel was dead in uz/ru — and an
-        unmatched tap in ADDRESS_LOCATION escapes to the group-0 catch-all and
-        is filed as a support ticket with no reply.
+        PTB dispatches at most one handler per GROUP and then walks on to the
+        NEXT group. Every ConversationHandler here lives in group -2 while the
+        free-text catch-all `_handle_text_message` sits in group 0, so an answer
+        typed INSIDE a flow was processed twice: once by the step that asked for
+        it, and once by the catch-all, which silently filed it in the admin
+        Support Inbox as an unsolicited customer message. Production,
+        2026-08-20 23:07:12 (+05), telegram user 251067721: one sentence of
+        delivery instructions both saved the address AND opened a support
+        ticket. Registration leaked the same way — the typed phone number and
+        the LIVE SMS one-time code were filed as two tickets per signup.
 
-        Compiled at handler-build time, so a translation reload alone does not
-        pick up new copy — the bot must be restarted.
+        `ConversationHandler.handle_update` catches ApplicationHandlerStop,
+        takes `exception.state` as the new conversation state and re-raises it,
+        so this changes only WHO ELSE sees the update: the value the callback
+        returns still drives the state machine exactly as before.
+
+        Wrap ONLY callbacks whose update no later group may act on. In
+        particular NOT the `ConversationHandler.TIMEOUT` handlers — PTB
+        dispatches those itself and warns that ApplicationHandlerStop there has
+        no effect — and not steps whose update kind no group-0 handler claims
+        (CONTACT, LOCATION, and the callback patterns that appear only inside a
+        conversation), because stopping dispatch there would buy nothing and
+        would silence the group -1 callback logger for no reason.
         """
-        labels = []
-        for lang_code in i18n.supported_languages:
-            label = i18n.get(translation_key, lang_code).strip()
-            if label:
-                labels.append(re.escape(label))
+        @functools.wraps(callback)
+        async def _stop_after_this_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            raise ApplicationHandlerStop(await callback(update, context))
 
-        unique_labels = sorted(set(labels), key=len, reverse=True)
-        if not unique_labels:
-            return r"$a"  # never match
+        return _stop_after_this_conversation
 
-        return r"^\s*(?:\S+\s+)?(?:%s)\s*$" % "|".join(unique_labels)
+    @staticmethod
+    def _flow_timeout(message_key: str, *state_keys: str, offer_menu: bool = True):
+        """Build the ``ConversationHandler.TIMEOUT`` callback for one flow.
+
+        ``conversation_timeout`` is not self-announcing: when the timer fires
+        PTB looks for handlers under the TIMEOUT key and, finding none, ends
+        the conversation in TOTAL SILENCE. The customer is left on a prompt
+        whose buttons are dead, and the flow's keys survive in ``user_data``
+        for the next flow to trip over. Registration was the worst of the five
+        that did this — 300s is well inside normal Uzbek SMS latency, so a
+        customer waiting for their code was dropped mid-signup and never told,
+        and the code they eventually pasted was filed as a support ticket by
+        the group-0 catch-all because ``awaiting_otp`` was still set.
+
+        One factory rather than five copies: "say so, drop the flow's keys,
+        end" is one rule, and the per-flow parts are its arguments. It lives
+        here, beside the registrations, because these five flows have no
+        state to unwind beyond those keys. ``address_conversation`` keeps its
+        own handler in ``handlers/profile.py`` — its copy depends on whether
+        the pin step already saved an address, which only that module knows.
+
+        Deliberately NOT wrapped in :meth:`_consumes`: PTB dispatches TIMEOUT
+        handlers itself and warns that ApplicationHandlerStop has no effect
+        there.
+        """
+        async def _announce_timeout(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            try:
+                user_id = update.effective_user.id
+                language = await i18n.get_user_language(user_id)
+
+                for key in state_keys:
+                    context.user_data.pop(key, None)
+
+                logger.info(
+                    "Conversation timed out for user %s; cleared %s",
+                    user_id, list(state_keys),
+                )
+
+                text = i18n.get(message_key, language)
+                # A half-registered customer has no menu to go back to, and the
+                # step they abandoned left a request_contact REPLY keyboard on
+                # their screen; clearing it is the only honest thing to show.
+                keyboard = (
+                    await main_menu_for(user_id, language) if offer_menu
+                    else ReplyKeyboardRemove()
+                )
+
+                # The timeout update is synthetic — it carries whatever the
+                # customer's last real one was — so the reply target is
+                # derived rather than assumed.
+                query = update.callback_query
+                if query is not None and query.message is not None:
+                    await query.message.reply_text(text, reply_markup=keyboard)
+                elif update.message is not None:
+                    await update.message.reply_text(text, reply_markup=keyboard)
+                else:
+                    await context.bot.send_message(
+                        chat_id=user_id, text=text, reply_markup=keyboard
+                    )
+
+            except Exception as e:
+                logger.error("Error announcing conversation timeout (%s): %s", message_key, e)
+
+            return ConversationHandler.END
+
+        return _announce_timeout
 
     async def initialize(self):
         """Initialize bot and all dependencies"""
@@ -237,65 +436,6 @@ class WaterBusinessBot:
             self.application.add_error_handler(error_handler)
             logger.info("Error handler setup completed!")
 
-            # Add middleware to log updates (minimal in production, detailed in DEBUG)
-            async def log_all_updates(update: Update, context: ContextTypes.DEFAULT_TYPE):
-                import logging as _logging
-                user_id = update.effective_user.id if update.effective_user else 'N/A'
-
-                if not logger.isEnabledFor(_logging.DEBUG):
-                    # Production: log minimal info only, no sensitive data
-                    update_type = 'message'
-                    if update.message and update.message.successful_payment:
-                        update_type = 'successful_payment'
-                    elif update.callback_query:
-                        update_type = 'callback_query'
-                    elif update.pre_checkout_query:
-                        update_type = 'pre_checkout_query'
-                    elif update.edited_message:
-                        update_type = 'edited_message'
-                    logger.info(f"Update received: type={update_type}, user={user_id}")
-                    return
-
-                # DEBUG level: log full details with sensitive data redacted
-                logger.debug(f"UPDATE RECEIVED: type={type(update).__name__}")
-                if update.message:
-                    if update.message.successful_payment:
-                        sp = update.message.successful_payment
-                        logger.debug(
-                            f"SUCCESSFUL_PAYMENT - User: {user_id}, "
-                            f"Currency: {sp.currency}, "
-                            f"Telegram charge ID: {sp.telegram_payment_charge_id[:8]}..."
-                        )
-                    else:
-                        logger.debug(f"Message from user {user_id}, text: {update.message.text[:50] if update.message.text else 'NO TEXT'}")
-                if update.callback_query:
-                    logger.debug(f"CALLBACK QUERY: {update.callback_query.data} from user {user_id}")
-                if update.pre_checkout_query:
-                    logger.debug(
-                        f"PRE_CHECKOUT_QUERY - User: {user_id}, "
-                        f"Currency: {update.pre_checkout_query.currency}"
-                    )
-
-
-            self.application.add_handler(TypeHandler(Update, log_all_updates), group=-10)
-            logger.info("Update logging middleware installed!")
-
-            # Callback-dedup middleware: raises ApplicationHandlerStop on
-            # duplicates within a short TTL, answering ONLY the dropped
-            # duplicate (handlers own the ack for taps they process — a
-            # middleware pre-answer would consume Telegram's single
-            # answerCallbackQuery slot and hide handler error toasts). Sits
-            # between the debug logger (group=-10, sees everything including
-            # duplicates) and the conversation/main handlers (group ≥ -2,
-            # never see duplicates). Root-cause fix for the production
-            # "Message to edit/delete not found" warning pair caused by
-            # double-taps on inline buttons. See handlers.callback_dedup.
-            from handlers.callback_dedup import callback_dedup_middleware
-            self.application.add_handler(
-                TypeHandler(Update, callback_dedup_middleware), group=-5
-            )
-            logger.info("Callback dedup middleware installed!")
-
             logger.info("Bot initialization completed successfully")
 
         except Exception as e:
@@ -305,7 +445,76 @@ class WaterBusinessBot:
             raise
 
     async def _setup_handlers(self):
-        """Set up all bot handlers"""
+        """Set up all bot handlers.
+
+        Includes the two dispatcher middlewares. They used to be registered
+        in `initialize()` instead, which split the wiring across two methods:
+        anything that builds this bot from `_setup_handlers()` alone — the
+        test harness in tests/telegram_bot/ptb_harness.py included — got an
+        Application with NO callback-dedup guard, so a double-tap regression
+        was invisible to every dispatcher test. Registered here so there is
+        one expression of the wiring rather than two that can drift.
+        """
+
+        # Add middleware to log updates (minimal in production, detailed in DEBUG)
+        async def log_all_updates(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            import logging as _logging
+            user_id = update.effective_user.id if update.effective_user else 'N/A'
+
+            if not logger.isEnabledFor(_logging.DEBUG):
+                # Production: log minimal info only, no sensitive data
+                update_type = 'message'
+                if update.message and update.message.successful_payment:
+                    update_type = 'successful_payment'
+                elif update.callback_query:
+                    update_type = 'callback_query'
+                elif update.pre_checkout_query:
+                    update_type = 'pre_checkout_query'
+                elif update.edited_message:
+                    update_type = 'edited_message'
+                logger.info(f"Update received: type={update_type}, user={user_id}")
+                return
+
+            # DEBUG level: log full details with sensitive data redacted
+            logger.debug(f"UPDATE RECEIVED: type={type(update).__name__}")
+            if update.message:
+                if update.message.successful_payment:
+                    sp = update.message.successful_payment
+                    logger.debug(
+                        f"SUCCESSFUL_PAYMENT - User: {user_id}, "
+                        f"Currency: {sp.currency}, "
+                        f"Telegram charge ID: {sp.telegram_payment_charge_id[:8]}..."
+                    )
+                else:
+                    logger.debug(f"Message from user {user_id}, text: {update.message.text[:50] if update.message.text else 'NO TEXT'}")
+            if update.callback_query:
+                logger.debug(f"CALLBACK QUERY: {update.callback_query.data} from user {user_id}")
+            if update.pre_checkout_query:
+                logger.debug(
+                    f"PRE_CHECKOUT_QUERY - User: {user_id}, "
+                    f"Currency: {update.pre_checkout_query.currency}"
+                )
+
+
+        self.application.add_handler(TypeHandler(Update, log_all_updates), group=-10)
+        logger.info("Update logging middleware installed!")
+
+        # Callback-dedup middleware: raises ApplicationHandlerStop on
+        # duplicates within a short TTL, answering ONLY the dropped
+        # duplicate (handlers own the ack for taps they process — a
+        # middleware pre-answer would consume Telegram's single
+        # answerCallbackQuery slot and hide handler error toasts). Sits
+        # between the debug logger (group=-10, sees everything including
+        # duplicates) and the conversation/main handlers (group ≥ -2,
+        # never see duplicates). Root-cause fix for the production
+        # "Message to edit/delete not found" warning pair caused by
+        # double-taps on inline buttons. See handlers.callback_dedup.
+        from handlers.callback_dedup import callback_dedup_middleware
+        self.application.add_handler(
+            TypeHandler(Update, callback_dedup_middleware), group=-5
+        )
+        logger.info("Callback dedup middleware installed!")
+
 
         # Command handlers
         self.application.add_handler(CommandHandler("menu", main_menu_handler))
@@ -326,8 +535,20 @@ class WaterBusinessBot:
             CallbackQueryHandler(product_handlers.products_menu, pattern="^menu_products$"),
             CallbackQueryHandler(product_handlers.products_menu, pattern="^back_to_categories$"),
             CallbackQueryHandler(product_handlers.category_handler, pattern="^category_"),
+            # Previous / Next on a category's product list. The pattern comes
+            # from keyboards.py, next to the builder that renders the buttons
+            # and the parser that reads them back, so the shape of this
+            # callback is decided in exactly one place. Registered BEFORE
+            # `^product_` only for readability — the two cannot overlap.
+            CallbackQueryHandler(product_handlers.product_page_handler, pattern=PRODUCT_PAGE_PATTERN),
             CallbackQueryHandler(product_handlers.product_details, pattern="^product_"),
-            CallbackQueryHandler(product_handlers.product_details, pattern="^back_to_product_"),
+            # `\d+` is load-bearing, not tidiness: `product_details` reads
+            # segment 3 as an integer, so a bare `^back_to_product_` prefix
+            # claimed a namespace this handler cannot parse. The subscription
+            # quantity screen's `back_to_product_selection` landed here and
+            # died inside `int('selection')` — and it landed here even once a
+            # conversation claimed it, because PTB walks EVERY group.
+            CallbackQueryHandler(product_handlers.product_details, pattern=r"^back_to_product_\d+$"),
             CallbackQueryHandler(product_handlers.add_to_cart, pattern="^add_to_cart_"),
             CallbackQueryHandler(product_handlers.quantity_handler, pattern="^qty_"),
             CallbackQueryHandler(product_handlers.cart_handler, pattern="^cart_"),
@@ -474,30 +695,65 @@ class WaterBusinessBot:
             self.application.add_handler(handler)
 
         # Conversation handlers for complex flows
+        registration_timeout = self._flow_timeout(
+            'telegram.registration.flow_timed_out',
+            'pending_phone', 'pending_phone_verification', 'pending_link_phone',
+            'awaiting_otp', 'otp_prompted_update_id',
+            offer_menu=False,
+        )
         registration_handler = ConversationHandler(
             entry_points=[
                 CommandHandler("start", profile_handlers.start_registration_new),
                 # CallbackQueryHandler(profile_handlers.start_registration_new, pattern="^/start$")
             ],
             states={
+                # `^set_language_` is ALSO registered standalone in group 0
+                # (language_handler.set_language, for changing language later).
+                # Telegram accepts exactly ONE answerCallbackQuery per query, so
+                # while both ran a brand-new customer's very first tap was
+                # answered by the language-CHANGE handler telling them they
+                # already use the language they had just picked.
                 SELECT_LANGUAGE: [
-                    CallbackQueryHandler(profile_handlers.language_selection, pattern="^set_language_")
+                    CallbackQueryHandler(
+                        self._consumes(profile_handlers.language_selection),
+                        pattern="^set_language_",
+                    )
                 ],
                 PHONE: [
                     MessageHandler(filters.CONTACT, profile_handlers.phone_received),
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.phone_text_received)
+                    MessageHandler(
+                        filters.TEXT & ~filters.COMMAND,
+                        self._consumes(profile_handlers.phone_text_received),
+                    )
                 ],
                 # Account linking states
                 LINK_ACCOUNT_CONFIRM: [
                     CallbackQueryHandler(profile_handlers.link_account_confirm, pattern="^link_")
                 ],
                 LINK_ACCOUNT_OTP: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.link_account_otp)
+                    MessageHandler(
+                        filters.TEXT & ~filters.COMMAND,
+                        self._consumes(profile_handlers.link_account_otp),
+                    )
                 ],
                 # Registration OTP captured in-conversation (Task 12). /cancel
                 # and /start fallbacks below now apply during OTP entry.
                 REGISTER_OTP: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.register_otp_received)
+                    MessageHandler(
+                        filters.TEXT & ~filters.COMMAND,
+                        self._consumes(profile_handlers.register_otp_received),
+                    )
+                ],
+                # 300 seconds is well inside normal Uzbek SMS latency, so this
+                # is the flow the silent timeout hurt most. `awaiting_otp` and
+                # friends MUST go with it: they are read by the group-0 text
+                # catch-all, which would otherwise send the next thing this
+                # customer types to the phone-verification endpoint. No main
+                # menu — they are not registered yet — and ReplyKeyboardRemove
+                # clears the request_contact keyboard the phone step left up.
+                ConversationHandler.TIMEOUT: [
+                    MessageHandler(filters.ALL, registration_timeout),
+                    CallbackQueryHandler(registration_timeout),
                 ],
             },
             fallbacks=[
@@ -522,44 +778,44 @@ class WaterBusinessBot:
                 # and is silently filed as a support ticket.
                 MessageHandler(filters.LOCATION, profile_handlers.location_received),
                 MessageHandler(
-                    filters.TEXT & filters.Regex(
-                        self._label_pattern('telegram.address.enter_manually_button')
+                    filters.TEXT & MenuTapFilter(
+                        'telegram.address.enter_manually_button'
                     ),
-                    profile_handlers.skip_location_sharing,
+                    self._consumes(profile_handlers.skip_location_sharing),
                 ),
                 MessageHandler(
-                    filters.TEXT & filters.Regex(self._label_pattern('telegram.cancel')),
-                    profile_handlers.cancel_address_text,
+                    filters.TEXT & MenuTapFilter('telegram.cancel'),
+                    self._consumes(profile_handlers.cancel_address_text),
                 ),
             ],
             states={
                 # Location sharing or manual entry choice
                 ADDRESS_LOCATION: [
                     MessageHandler(filters.LOCATION, profile_handlers.location_received),
-                    # Handle "Enter Manually" text button (initial choice)
+                    # "Enter manually" (initial choice) and "Re-enter address"
+                    # (the retry keyboard) are one handler: two labels, the same
+                    # destination. They were two identical registrations, which
+                    # is one more place for the pair to drift apart.
                     MessageHandler(
-                        filters.TEXT & filters.Regex(
-                            self._label_pattern('telegram.address.enter_manually_button')
+                        filters.TEXT & MenuTapFilter(
+                            'telegram.address.enter_manually_button',
+                            'telegram.address.reenter_manually_button',
                         ),
-                        profile_handlers.skip_location_sharing,
-                    ),
-                    # Handle "Re-enter Address" text button (retry keyboard)
-                    MessageHandler(
-                        filters.TEXT & filters.Regex(
-                            self._label_pattern('telegram.address.reenter_manually_button')
-                        ),
-                        profile_handlers.skip_location_sharing,
+                        self._consumes(profile_handlers.skip_location_sharing),
                     ),
                     # Handle "Cancel" text button from retry keyboard
                     MessageHandler(
-                        filters.TEXT & filters.Regex(self._label_pattern('telegram.cancel')),
-                        profile_handlers.cancel_address_text,
+                        filters.TEXT & MenuTapFilter('telegram.cancel'),
+                        self._consumes(profile_handlers.cancel_address_text),
                     ),
                 ],
                 # Address title input
                 ADDRESS_TITLE: [
                     CallbackQueryHandler(profile_handlers.address_title_callback, pattern="^addr_title_"),
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.address_title_received)
+                    MessageHandler(
+                        filters.TEXT & ~filters.COMMAND,
+                        self._consumes(profile_handlers.address_title_received),
+                    )
                 ],
                 # Manual entry flow - Region selection
                 ADDRESS_REGION: [
@@ -575,33 +831,59 @@ class WaterBusinessBot:
                 # Manual entry flow - Street input
                 ADDRESS_STREET: [
                     CallbackQueryHandler(profile_handlers.skip_field_handler, pattern="^skip_street$"),
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.street_received),
+                    MessageHandler(
+                        filters.TEXT & ~filters.COMMAND,
+                        self._consumes(profile_handlers.street_received),
+                    ),
                 ],
                 # Manual entry flow - Building input
                 ADDRESS_BUILDING: [
                     CallbackQueryHandler(profile_handlers.skip_field_handler, pattern="^skip_building$"),
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.building_received),
+                    MessageHandler(
+                        filters.TEXT & ~filters.COMMAND,
+                        self._consumes(profile_handlers.building_received),
+                    ),
                 ],
                 # Manual entry flow - Apartment input
                 ADDRESS_APARTMENT: [
                     CallbackQueryHandler(profile_handlers.skip_field_handler, pattern="^skip_apartment$"),
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.apartment_received),
+                    MessageHandler(
+                        filters.TEXT & ~filters.COMMAND,
+                        self._consumes(profile_handlers.apartment_received),
+                    ),
                 ],
                 # Manual entry flow - Floor input
                 ADDRESS_FLOOR: [
                     CallbackQueryHandler(profile_handlers.skip_field_handler, pattern="^skip_floor$"),
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.floor_received),
+                    MessageHandler(
+                        filters.TEXT & ~filters.COMMAND,
+                        self._consumes(profile_handlers.floor_received),
+                    ),
                 ],
                 # Delivery instructions input
                 ADDRESS_DELIVERY_INSTRUCTIONS: [
                     CallbackQueryHandler(profile_handlers.skip_field_handler, pattern="^skip_delivery_instructions$"),
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.delivery_instructions_received),
+                    MessageHandler(
+                        filters.TEXT & ~filters.COMMAND,
+                        self._consumes(profile_handlers.delivery_instructions_received),
+                    ),
                 ],
                 # Geocode confirmation
                 ADDRESS_GEOCODE_CONFIRM: [
                     CallbackQueryHandler(profile_handlers.confirm_geocode, pattern="^confirm_geocode$"),
                     CallbackQueryHandler(profile_handlers.retry_geocode, pattern="^retry_geocode$"),
                     CallbackQueryHandler(profile_handlers.cancel_address, pattern="^cancel_address_creation$"),
+                ],
+                # `conversation_timeout` below is not self-announcing: PTB looks
+                # for handlers under this key when the timer fires and, finding
+                # none, ends the flow in total silence — leaving the customer on
+                # a prompt whose buttons are dead and `address_flow_origin` /
+                # `temp_address_data` stranded in user_data for the next flow to
+                # trip over. `filters.ALL` because the synthetic timeout update
+                # carries whatever the last real one was.
+                ConversationHandler.TIMEOUT: [
+                    MessageHandler(filters.ALL, profile_handlers.address_flow_timeout),
+                    CallbackQueryHandler(profile_handlers.address_flow_timeout),
                 ],
             },
             fallbacks=[
@@ -619,6 +901,10 @@ class WaterBusinessBot:
         logger.info(f"Address conversation handler registered with states: {list(address_handler.states.keys())}")
 
         # Phone verification conversation - for adding/updating phone number and name
+        phone_verification_timeout = self._flow_timeout(
+            'telegram.phone.verification_flow_timed_out',
+            'pending_phone',
+        )
         phone_verification_handler = ConversationHandler(
             entry_points=[
                 CallbackQueryHandler(profile_handlers.add_phone_number, pattern="^add_phone_number$"),
@@ -626,10 +912,20 @@ class WaterBusinessBot:
             states={
                 profile_handlers.PHONE_VERIFY_PHONE: [
                     MessageHandler(filters.CONTACT, profile_handlers.phone_verify_contact_received),
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.phone_verify_text_received),
+                    MessageHandler(
+                        filters.TEXT & ~filters.COMMAND,
+                        self._consumes(profile_handlers.phone_verify_text_received),
+                    ),
                 ],
                 profile_handlers.PHONE_VERIFY_NAME: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.phone_verify_name_received),
+                    MessageHandler(
+                        filters.TEXT & ~filters.COMMAND,
+                        self._consumes(profile_handlers.phone_verify_name_received),
+                    ),
+                ],
+                ConversationHandler.TIMEOUT: [
+                    MessageHandler(filters.ALL, phone_verification_timeout),
+                    CallbackQueryHandler(phone_verification_timeout),
                 ],
             },
             fallbacks=[
@@ -646,6 +942,10 @@ class WaterBusinessBot:
         logger.info(f"Phone verification conversation handler registered")
 
         # Subscription creation conversation
+        subscription_creation_timeout = self._flow_timeout(
+            'telegram.subscription.flow_timed_out',
+            'subscription_creation', 'current_product_id',
+        )
         subscription_creation_handler = ConversationHandler(
             entry_points=[CallbackQueryHandler(subscription_handlers.create_subscription_start, pattern="^create_subscription$")],
             states={
@@ -665,6 +965,11 @@ class WaterBusinessBot:
                     CallbackQueryHandler(subscription_handlers.add_item_with_quantity, pattern="^sub_qty_"),
                     # Handle "add more items" - go back to product selection
                     CallbackQueryHandler(subscription_handlers.add_more_items, pattern="^sub_add_more_items$"),
+                    # The quantity keyboard's Back button. Same destination as
+                    # "add more items", different word on the button; it used
+                    # to fall through to the group-0 ^back_to_product_ handler
+                    # and die in int('selection').
+                    CallbackQueryHandler(subscription_handlers.add_more_items, pattern="^back_to_product_selection$"),
                     # Handle "done with items" - proceed to frequency selection
                     CallbackQueryHandler(subscription_handlers.items_selection_done, pattern="^sub_items_done$"),
                 ],
@@ -677,7 +982,15 @@ class WaterBusinessBot:
                 subscription_handlers.CONFIRM_SUBSCRIPTION: [
                     CallbackQueryHandler(subscription_handlers.confirm_subscription, pattern="^sub_payment_"),
                     CallbackQueryHandler(subscription_handlers.create_subscription_confirmed, pattern="^confirm_create_subscription$"),
+                    # The payment keyboard's Back button, rendered by
+                    # SubscriptionKeyboards.payment_methods since the flow was
+                    # written and claimed by nothing until now.
+                    CallbackQueryHandler(subscription_handlers.back_to_address_selection, pattern="^back_to_address_selection$"),
                     CallbackQueryHandler(subscription_handlers.cancel_subscription_creation, pattern="^cancel_subscription_creation$"),
+                ],
+                ConversationHandler.TIMEOUT: [
+                    MessageHandler(filters.ALL, subscription_creation_timeout),
+                    CallbackQueryHandler(subscription_creation_timeout),
                 ],
             },
             fallbacks=[
@@ -694,6 +1007,10 @@ class WaterBusinessBot:
         logger.info(f"Subscription creation conversation handler registered with states: {list(subscription_creation_handler.states.keys())}")
 
         # Subscription item management conversation
+        item_management_timeout = self._flow_timeout(
+            'telegram.subscription.flow_timed_out',
+            'editing_subscription_id', 'adding_product_id',
+        )
         item_management_handler = ConversationHandler(
             entry_points=[CallbackQueryHandler(subscription_handlers.add_item_start, pattern="^add_item_")],
             states={
@@ -701,8 +1018,20 @@ class WaterBusinessBot:
                     CallbackQueryHandler(subscription_handlers.add_item_select_quantity, pattern="^sub_product_"),
                 ],
                 subscription_handlers.ITEM_SELECT_QUANTITY: [
+                    # `update_item_confirm` used to be listed here too, behind
+                    # the IDENTICAL pattern, so PTB could never reach it. It
+                    # was not merely dead, it was the wrong flow: this
+                    # conversation is entered only through `^add_item_`, its
+                    # quantity step is reached from `add_item_select_quantity`
+                    # (which sets `adding_product_id`), and
+                    # `update_item_confirm` needs `editing_item_id` — which
+                    # only the separate `update_item` conversation ever sets.
                     CallbackQueryHandler(subscription_handlers.add_item_confirm, pattern="^sub_qty_"),
-                    CallbackQueryHandler(subscription_handlers.update_item_confirm, pattern="^sub_qty_"),
+                    CallbackQueryHandler(subscription_handlers.add_item_back_to_products, pattern="^back_to_product_selection$"),
+                ],
+                ConversationHandler.TIMEOUT: [
+                    MessageHandler(filters.ALL, item_management_timeout),
+                    CallbackQueryHandler(item_management_timeout),
                 ],
             },
             fallbacks=[CommandHandler("cancel", subscription_handlers.cancel_subscription_creation)],
@@ -748,11 +1077,19 @@ class WaterBusinessBot:
         # Note: This is handled inline, no need for separate conversation handler
 
         # Item quantity update conversation
+        update_item_timeout = self._flow_timeout(
+            'telegram.subscription.flow_timed_out',
+            'editing_subscription_id', 'editing_item_id',
+        )
         update_item_handler = ConversationHandler(
             entry_points=[CallbackQueryHandler(subscription_handlers.update_item_quantity, pattern="^update_item_")],
             states={
                 subscription_handlers.ITEM_SELECT_QUANTITY: [
                     CallbackQueryHandler(subscription_handlers.update_item_confirm, pattern="^sub_qty_"),
+                ],
+                ConversationHandler.TIMEOUT: [
+                    MessageHandler(filters.ALL, update_item_timeout),
+                    CallbackQueryHandler(update_item_timeout),
                 ],
             },
             fallbacks=[],
@@ -765,7 +1102,11 @@ class WaterBusinessBot:
         self.application.add_handler(update_item_handler, group=-2)
         logger.info(f"Update item conversation handler registered")
 
-        # Message handlers (catch-all)
+        # Message handlers (catch-all). Deliberately still in the DEFAULT
+        # group, BEHIND the conversations: free text with no flow open is a
+        # support message and must reach `_capture_support_message`, while text
+        # a conversation asked for never gets here because that step's callback
+        # is wrapped in `_consumes` and raises ApplicationHandlerStop.
         self.application.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_text_message)
         )

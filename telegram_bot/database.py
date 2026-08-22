@@ -119,6 +119,43 @@ class BotUserRepository:
         state_json = await self.db.fetchval(query, str(telegram_id))
         return json.loads(state_json) if state_json else {}
 
+    async def clear_awaiting_input(self, telegram_id: int, *awaiting_inputs: str) -> bool:
+        """Disarm ONLY the named prompts. The one expression of "they left MY flow".
+
+        A screen that opens on top of a prompt it owns has to disarm that
+        prompt, or the customer's next message is parsed as an answer to a
+        question they walked away from — an unrelated sentence written over an
+        address title. The obvious way to do that, ``update_user_state(id, {})``,
+        is a BLANKET wipe: it also throws away a flow the screen knows nothing
+        about. A customer who tapped "Report an issue" and then browsed
+        Profile -> Addresses lost the armed report in silence, while its prompt
+        and Cancel button stayed on screen still saying a report was open.
+
+        So the caller names the prompts it owns, and a flow it does not own is
+        left exactly as it was.
+
+        WHY CLEARING THE WHOLE DOCUMENT IS THE RIGHT DISARM: ``bot_state`` holds
+        at most ONE armed flow. ``awaiting_input`` is a single slot, and every
+        writer (``handlers/support.py``, ``handlers/profile.py``, ``bot.py``)
+        arms by WRITING A FRESH state rather than merging into the one already
+        there — so every companion key in the document (``support_order_id``,
+        ``support_order_number``, ``support_armed_at``, ``edit_address_id``,
+        ``temp_location``) belongs to the flow being disarmed. Keep that
+        invariant when adding a flow: ARM a new flow by writing a fresh state
+        (a step moving WITHIN one flow may of course carry its own keys
+        forward, as ``bot.py::_handle_location`` does), and this stays the only
+        place that has to know which keys exist.
+
+        Returns True when a flow was disarmed, False when the customer was
+        standing in somebody else's flow (or in none) and the row was untouched.
+        """
+        state = await self.get_user_state(telegram_id)
+        if state.get('awaiting_input') not in awaiting_inputs:
+            return False
+
+        await self.update_user_state(telegram_id, {})
+        return True
+
     async def update_user_language(self, telegram_id: int, language_code: str):
         """Update user's language preference"""
         query = """

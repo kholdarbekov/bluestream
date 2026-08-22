@@ -9,6 +9,7 @@ from pathlib import Path
 
 from config import config
 from database import db_manager
+from shared.i18n_rendering import humanise_key, render_translation
 
 logger = logging.getLogger(__name__)
 
@@ -110,12 +111,33 @@ class Translation:
         is exact even for keys that take kwargs, because the humanised text
         carries no ``{...}`` placeholder, so :meth:`get`'s ``.format()`` step
         leaves it byte-identical.
-        """
-        last_part = key.rsplit('.', 1)[-1] if '.' in key else key
-        return last_part.replace('_', ' ').capitalize()
 
-    def get(self, key: str, language: str = None, *args, **kwargs) -> str:
-        """Get translation for key in specified language"""
+        Delegates to ``shared.i18n_rendering`` — the same formula the staff bot
+        and :meth:`get`'s own broken-copy fallback use.
+        """
+        return humanise_key(key)
+
+    def get(self, key: str, language: str = None, /, *args, **kwargs) -> str:
+        """Get translation for key in specified language.
+
+        ``key`` and ``language`` are POSITIONAL-ONLY on purpose. Every value a
+        call site interpolates arrives in ``**kwargs``, so any parameter name
+        this method binds by keyword is a word the COPY may never use as a
+        placeholder: ``{language}`` was unfillable through the only door
+        allowed to fill it (``get(key, code, language=name)`` raised
+        ``TypeError: got multiple values for argument 'language'``), which is
+        why the seeded language-switch confirmation had to be respelled
+        ``{language_name}``. Behind the ``/`` the names are free again and the
+        collision cannot recur -- see
+        tests/telegram_bot/test_translation_placeholders_are_fillable.py.
+
+        Never raises and never emits an unresolved ``{placeholder}``: the
+        rendering rule (shared with the staff bot) lives in
+        ``shared.i18n_rendering.render_translation``, which degrades broken copy
+        to :meth:`humanised_missing_key`. Callers must therefore pass their
+        values HERE rather than calling ``.format()`` on the result — a template
+        no longer survives the trip out of this method.
+        """
         language = self.normalize_language(language)
         fallback_language = self.normalize_language(self.fallback_language)
 
@@ -133,14 +155,7 @@ class Translation:
             # Derive a readable fallback from the key (e.g. "telegram.menu.products" -> "Products")
             translation = self.humanised_missing_key(key)
 
-        # Format with kwargs if provided
-        if args or kwargs:
-            try:
-                translation = translation.format(*args, **kwargs)
-            except (KeyError, ValueError) as e:
-                logger.warning(f"Failed to format translation '{key}': {e}")
-
-        return translation
+        return render_translation(key, translation, args, kwargs)
 
     def _track_missing_key(self, key: str, language: str):
         """Track missing translation keys for monitoring"""

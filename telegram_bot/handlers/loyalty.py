@@ -510,7 +510,7 @@ class LoyaltyHandlers(BaseHandler):
             # show_alert=True surfaces a dismissable modal (not a 2s toast) so the
             # apply-at-checkout confirmation is unmissable — otherwise the redeem
             # tap appears to "do nothing" as it bounces back to the loyalty menu.
-            await query.answer(confirmation, show_alert=True)
+            await self._ack(query, confirmation, show_alert=True)
 
             # Return to loyalty menu
             await self.loyalty_menu(update, context)

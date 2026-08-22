@@ -106,6 +106,14 @@ def _edited_markup(update):
 
 def _patch_handler(monkeypatch, handler, module, client):
     monkeypatch.setattr(module, "api_client", client)
+    # The stale-card guard (`_anchor_current_delivery`) re-reads /delivery/active
+    # and lives on `BaseHandler`, so its client is `staff_bot.handlers.base`'s,
+    # not the leaf handler module's. Swapping only the leaf module leaves the
+    # guard talking to the REAL backend, which fails as "delivery not found" —
+    # a refusal that looks exactly like the bug these tests are pinning.
+    from staff_bot.handlers import base as _staff_handler_base
+
+    monkeypatch.setattr(_staff_handler_base, "api_client", client)
     monkeypatch.setattr(handler, "_get_language", AsyncMock(return_value="en"))
     monkeypatch.setattr(handler, "_get_auth_token", AsyncMock(return_value="tok"))
 

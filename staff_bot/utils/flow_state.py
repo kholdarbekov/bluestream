@@ -53,12 +53,42 @@ QUEUE_MAX_LENGTH = 5
 
 _redis: Optional[redis_async.Redis] = None
 
-# SSOT for the `context.user_data` keys that, while present, make the bot's
-# catch-all text router treat the next text update as flow input. Consumed by
-# `StaffBot._clear_all_pending_flows`, `_handle_flow_cancel`, and every
-# navigation landing handler (main menu / cash hub) so leaving a flow — by any
-# route — never strands a flag that would mis-route the next text.
+# THE SSOT for "which `context.user_data` keys belong to a FLOW rather than to
+# the staff member's session".  Leaving a flow — by any route — clears exactly
+# this set, through the one function below.
+#
+# Why every one of these lives in ONE tuple
+# -----------------------------------------
+# "Has this staff member left the flow they were in?" used to have two
+# implementations that disagreed.  A reply-keyboard menu tap lands in
+# `StaffBot._conv_menu_escape` when the conversation state it hit reads text,
+# and in `StaffBot._handle_text_message` when it does not — and the two cleared
+# different key sets, so the SAME gesture left different residue depending on
+# where the driver happened to be standing.  Keys written by no-conversation
+# flows (the bottle transfer's inventory ceiling, the address flow's client id)
+# were in NEITHER list and were never cleared by anything: a stale inline button
+# in the scrollback resumed an abandoned flow and re-checked "you cannot
+# transfer more than you have" against a truck load measured hours earlier.
+#
+# So there is one list and one clean-up.  The rule for adding to it is
+# WRITE-side, not read-side: if a flow stamps the key, it goes here, even when
+# nothing reads it back today — a rule you can check by grepping the writes is
+# a rule that stays true, and the day someone starts reading the key the
+# clean-up is already right.
+#
+# The complement — keys that must SURVIVE leaving a flow, because they describe
+# the session and not the step — is deliberately excluded: `language`,
+# `authenticated`, `access_token`, `user_id`, `first_name`, `last_name`,
+# `phone`, `staff_roles`, `delivery_person_id`, `invite_token`,
+# `current_delivery`, `route_card_session`, `live_location_ack_sent`, and the
+# `*_page` pagination cursors.
+#
+# Consumed by `StaffBot._clear_all_pending_flows` (which serves both the
+# conversation escape and the catch-all router), `_handle_flow_cancel`, `/start`
+# and every navigation landing handler (main menu / cash hub).
 PENDING_FLOW_USER_DATA_KEYS = (
+    # -- Text-router flows: while present, the catch-all router feeds the next
+    #    text update to the flow instead of to the menu. --
     'pending_delivery_cash_flow',
     'pending_reconciliation_flow',
     'pending_cod_collection_flow',
@@ -72,12 +102,52 @@ PENDING_FLOW_USER_DATA_KEYS = (
     'tryout_pickup_task_id',
     'tryout_pickup_products',
     'tryout_pickup_state',
+    # -- ConversationHandler working data.  Half-entered clients/orders/
+    #    addresses/try-outs, plus the picker caches the order flow reads back
+    #    when an inline button is tapped.  These used to be a SECOND list
+    #    (`StaffBot._CONVERSATION_WORK_KEYS`) that only the conversation escape
+    #    consumed, which is precisely how one gesture came to mean two things. --
+    'new_client',
+    'new_order',
+    'new_address',
+    'new_tryout',
+    'new_tryout_products',
+    'available_products',
+    'selecting_product_id',
+    'adding_address_for',
+    'managing_addresses_for',
+    # -- Inline-keyboard flows whose entire record is a loose key.  Nothing
+    #    cleared these before, so an abandoned flow stayed armed with numbers
+    #    measured at the moment it opened:
+    #      * `pending_transfer_available` is the "you cannot transfer more than
+    #        you have" ceiling, stamped from the open session by
+    #        `start_transfer_bottles` and enforced by `receive_transfer_quantity`
+    #        — it must never outlive the truck load it was measured from;
+    #      * `pending_transfer_receiver_id` names the colleague the bottles go
+    #        to, chosen from a picker that may be hours old;
+    #      * the `pending_confirm_transfer_*` pair is the receiver-side mirror;
+    #      * `pending_join_session_id` / `pending_invite_driver_id` are the
+    #        co-driver flows' breadcrumbs. --
+    'pending_transfer_available',
+    'pending_transfer_receiver_id',
+    'pending_confirm_transfer_id',
+    'pending_confirm_transfer_qty',
+    'pending_join_session_id',
+    'pending_invite_driver_id',
+    # Stamped by the delivery status flow; write-only today (see the WRITE-side
+    # rule above).
+    'pending_status',
 )
 
 
 async def clear_pending_flows(context, update=None) -> None:
-    """Drop every in-memory flow flag AND the Redis mirror, draining any deferred
-    pool-insertion suggestions.
+    """THE clean-up for leaving a flow: drop every `context.user_data` key a flow
+    owns AND the Redis mirror, draining any deferred pool-insertion suggestions.
+
+    One function, one key list (`PENDING_FLOW_USER_DATA_KEYS`), called from every
+    exit — the conversation menu escape, the catch-all text router, `/cancel`,
+    `/start`, and each navigation landing screen — so "the staff member left"
+    cannot mean two different things depending on which screen they left from.
 
     Duck-typed on PTB's `context`/`update` to stay import-light. Best-effort:
     safe to call when Redis is unconfigured (the drain degrades to a no-op).

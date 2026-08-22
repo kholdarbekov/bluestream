@@ -28,7 +28,7 @@ if _sentry_dsn:
         release=os.environ.get('APP_VERSION', 'staff-bot@1.0.0'),
     )
 
-from telegram import Update, BotCommand
+from telegram import Update, BotCommand, ReplyKeyboardRemove
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
     ConversationHandler, filters, ContextTypes, TypeHandler
@@ -52,6 +52,7 @@ from webhook_server import webhook_server
 from staff_bot.token_manager import TokenManager
 from staff_bot.handlers.start import StartHandler, SELECT_LANGUAGE
 from staff_bot.handlers.menu import main_menu_handler, menu_handler
+from staff_bot.keyboards.menu import MenuKeyboards
 from staff_bot.handlers.language import LanguageHandler
 from staff_bot.handlers.tryouts import TryoutHandler
 from staff_bot.handlers.tryouts import ENTER_TRYOUT_PHONE, ENTER_TRYOUT_NAME, ENTER_TRYOUT_ADDRESS
@@ -98,6 +99,100 @@ from staff_bot.handlers.common.help import HelpHandler
 from staff_bot.permissions import require_auth
 
 logger = logging.getLogger('staff_bot')
+
+
+# ---------------------------------------------------------------------------
+# "Is this text a reply-keyboard tap?" -- ONE rule, one place
+# ---------------------------------------------------------------------------
+# The staff menu is a REPLY keyboard, so every tap arrives as ordinary text
+# carrying a decoration the KEYBOARD added: `MenuKeyboards.main_menu` renders
+# f"<emoji> {label}". Recognising a tap therefore means removing that
+# decoration and comparing what is left against the translated label.
+#
+# The decoration is an EMOJI, and this regex is the only place that says so.
+# It used to be said twice and differently -- "any 2-4 CHARACTERS" inside
+# `_match_menu_action`, "any single \S+ token" inside the escape regex -- and
+# the two answers disagreed in both directions:
+#
+#   * "Aziz Profil" (4 chars + space + the Uzbek Profile label) was read as a
+#     Profile tap and navigated an operator out of the client they were
+#     half-way through creating;
+#   * "Sardor Profil" (6 chars) was claimed by the escape FILTER and resolved
+#     by the MATCHER to nothing, so the conversation was torn down and NOBODY
+#     answered -- the operator watched the bot go silent mid-flow.
+#
+# Ranges rather than a library: `re` has no \p{Emoji}, and the alternative
+# (strip any leading non-alphanumeric run) would quietly re-admit "+998...".
+_EMOJI_PREFIX_RE = re.compile(
+    r"^(?:"
+    r"[\U0001F000-\U0001FAFF]"       # pictographs, transport, flags, extended-A
+    r"|[\u2190-\u21FF]"              # arrows
+    r"|[\u2300-\u23FF]"              # misc technical (watch, hourglass)
+    r"|[\u2460-\u27BF]"              # enclosed alphanumerics .. dingbats (gear, question, check)
+    r"|[\u2B00-\u2BFF]"              # misc symbols and arrows (left arrow, star)
+    r"|[\u3030\u303D\u3297\u3299]"     # wavy dash, part alternation mark, congrat/secret
+    r"|[\uFE00-\uFE0F\u200D\u20E3]"    # variation selectors, ZWJ, combining keycap
+    r")+"
+)
+
+
+def _menu_tap_candidates(text: Optional[str]) -> list:
+    """The label(s) a reply-keyboard tap could be carrying.
+
+    The text as sent (a staff member who retyped the label by hand, or a
+    keyboard rendered before the emoji changed) and, when the text opens with
+    an emoji the keyboard could have added, the text with that emoji removed.
+
+    Nothing else. Anything a person typed in front of a label -- a name, a
+    word, a note -- leaves the text a non-label, which is the whole point.
+    """
+    text = (text or "").strip()
+    if not text:
+        return []
+    candidates = [text]
+    bare = _EMOJI_PREFIX_RE.sub("", text).strip()
+    if bare and bare != text:
+        candidates.append(bare)
+    return candidates
+
+
+class MenuTapFilter(filters.MessageFilter):
+    """``True`` for text that IS a reply-keyboard tap -- asked of the ONE decider.
+
+    Two questions, one rule, one implementation
+    (``StaffBot._resolve_tapped_label``):
+
+    * ``translation_key=None`` -- "is this ANY main-menu tap?". Every
+      ConversationHandler text state is guarded by this so a menu tap ends the
+      flow instead of being swallowed as the phone number / bottle count / cash
+      amount the state was waiting for.
+    * a key -- "is this a tap on THAT button?", for the three operator labels
+      (Create Client / Search Client / Create Order) that ENTER a conversation
+      of their own instead of routing through ``_dispatch_menu_action``.
+
+    Both answer by asking the matcher, so "the filter claimed it" and "the
+    matcher resolved it" can no longer be different answers -- which is what
+    made a conversation die with zero output (see ``_EMOJI_PREFIX_RE`` above).
+
+    The lookup happens HERE, when the tap arrives, never at handler-build time.
+    The keyboard resolves its labels at RENDER time, so a label edited in the
+    admin UI (or any ``i18n.reload_translations()``) is on the staff member's
+    phone immediately; a matcher frozen at startup would keep hunting for the
+    old string and the button they can see would be dead until a restart --
+    silently, with the retired copy still live to hijack typed text.
+    """
+
+    __slots__ = ("_staff_bot", "_translation_key")
+
+    def __init__(self, staff_bot: "StaffBot", translation_key: Optional[str] = None):
+        super().__init__(name="staff_menu_tap:%s" % (translation_key or "main_menu"))
+        self._staff_bot = staff_bot
+        self._translation_key = translation_key
+
+    def filter(self, message) -> bool:
+        if self._translation_key is None:
+            return self._staff_bot._match_menu_action(message.text, None) is not None
+        return self._staff_bot._match_menu_label(message.text, self._translation_key)
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
@@ -398,23 +493,6 @@ class StaffBot:
                 # alert is allowed to make a sound (drivers are driving).
                 await update.message.reply_text(message, disable_notification=True)
 
-    @staticmethod
-    def _menu_text_pattern(translation_key: str) -> str:
-        """Regex pattern to match reply-keyboard label with or without emoji prefix."""
-        labels = []
-        for lang_code in i18n.supported_languages:
-            label = i18n.get(translation_key, lang_code).strip()
-            if label:
-                labels.append(re.escape(label))
-
-        unique_labels = sorted(set(labels), key=len, reverse=True)
-        if not unique_labels:
-            # Never match if label list is empty.
-            return r"$a"
-
-        alternatives = "|".join(unique_labels)
-        return r"^\s*(?:\S+\s+)?(?:%s)\s*$" % alternatives
-
     async def _setup_handlers(self):
         """Set up all bot handlers"""
         start_handler = StartHandler()
@@ -446,27 +524,148 @@ class StaffBot:
         help_handler_instance = HelpHandler()
 
         # ------------------------------------------------------------------
-        # Conversation-fallback wrappers
+        # The four ways a staff member leaves a flow
         # ------------------------------------------------------------------
-        # PTB ConversationHandler keeps the user in their current state when a
-        # fallback handler returns None.  `status_update_handler.show_cash_hub`
-        # and `main_menu_handler` are reused as both regular menu handlers
-        # *and* conversation fallbacks — they correctly re-render the menu but
-        # don't return ConversationHandler.END, so the conversation never
-        # terminates and the user's next text input is captured by the
-        # in-state MessageHandler (e.g. parsed as a bottle quantity).
-        #
-        # That is exactly the trap a driver hit when, after BOTTLE_SESSION_REQUIRED
-        # → "Open session" → quantity prompt, they tapped the inline Back button
-        # and the bot kept asking for the quantity.  These tiny wrappers delegate
-        # to the underlying handler, then explicitly close the conversation.
-        async def _exit_to_cash_hub(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            await status_update_handler.show_cash_hub(update, context)
+        # A reply-keyboard MENU TAP (`menu_escape`, below), a NAVIGATION BUTTON
+        # tapped inside the flow, `/cancel`, and `/start`. Every one of them
+        # runs `self._clear_all_pending_flows` and returns
+        # `ConversationHandler.END`; none of them has its own idea of what
+        # "left" means. A fallback that returns None instead of END re-renders
+        # its message and keeps the driver exactly where they were -- the
+        # BOTTLE_SESSION_REQUIRED trap this bot already shipped, where "Open
+        # session" -> quantity prompt -> inline Back kept asking for the
+        # quantity forever.
+        async def _leave_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            """A navigation button (`staff_cash_hub` / `staff_back_to_main`)
+            tapped INSIDE a conversation. Ends it and renders nothing.
+
+            Rendering is not this handler's job: `show_cash_hub` and
+            `main_menu_handler` are registered at the bottom of this method in
+            group 1 -- AFTER every conversation -- so the destination is drawn
+            exactly once, by the one handler that owns it, whether or not the
+            staff member happened to be in a flow. Drawing it here as well is
+            what made an inline Back inside a bottle flow edit the same message
+            twice and log a Telegram "message is not modified" for every tap.
+
+            The group also matters the other way round: `staff_cash_hub` used
+            to be registered in group 0 BEFORE the conversations, and PTB
+            handles at most one handler per group, so the global hub shadowed
+            the conversation fallback that would have ended the flow. The
+            driver tapped Back, the hub rendered, and the flow stayed armed to
+            swallow the next number they typed.
+            """
+            await self._clear_all_pending_flows(context, update)
             return ConversationHandler.END
 
-        async def _exit_to_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            await main_menu_handler(update, context)
+        async def _cancel_bottle_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            """`/cancel` inside one of the five bottle conversations.
+
+            They have no cancel handler of their own, so this used to be wired
+            to `start_handler.cancel` -- written for abandoning LOGIN. It
+            answered "Authentication cancelled." (untrue: the driver is still
+            logged in) and, far worse, sent `ReplyKeyboardRemove`.
+            `MenuKeyboards.main_menu` is built `is_persistent=True` precisely
+            because a driver's control surface must always be on screen; one
+            `/cancel` at a bottle-count prompt took it away, from the road,
+            with no visible buttons left to guess a way back from.
+            """
+            language = await self._language_handler._get_language(update, context)
+            await self._clear_all_pending_flows(context, update)
+            message = update.effective_message
+            if message is not None:
+                await message.reply_text(
+                    i18n.get('staff.bottle_flow_cancelled', language),
+                    reply_markup=MenuKeyboards.main_menu(
+                        language, context.user_data.get('staff_roles', []) or []
+                    ),
+                    # Drivers are driving: only the head-change alert may ping.
+                    disable_notification=True,
+                )
             return ConversationHandler.END
+
+        async def _start_is_a_hard_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            """`/start` inside any flow: end it.
+
+            `StartHandler.start` calls itself "a hard reset to the top of the
+            bot" and clears every flow flag, but it lives in the `staff_auth`
+            conversation in group -2 and could not touch the ten conversations
+            in group 0 -- they listed only `/cancel` as a fallback, so nothing
+            in them matched `/start` at all. The driver saw "Welcome back" and
+            the main menu and believed they were back at the top, while the
+            prompt they had walked away from was still armed and still
+            outranked the catch-all router: the next bare number they typed
+            opened a real bottle session against their name.
+
+            Renders nothing -- `StartHandler.start` has already answered in
+            group -2, and both groups run for the same update.
+            """
+            await self._clear_all_pending_flows(context, update)
+            return ConversationHandler.END
+
+        start_reset = CommandHandler("start", _start_is_a_hard_reset)
+
+        def _flow_timeout(*, offer_menu: bool = True):
+            """The `ConversationHandler.TIMEOUT` state for one staff flow.
+
+            `conversation_timeout` is not self-announcing: when the timer fires
+            PTB looks for handlers under the TIMEOUT key and, finding none,
+            ends the conversation in TOTAL SILENCE. The staff member is left on
+            a prompt whose buttons are dead and whose keys survive in
+            `user_data` for the next flow to trip over -- the same defect that
+            lost 20 of 33 customer addresses in the customer bot's
+            address_conversation. Eleven staff conversations set a timeout and
+            none of them said so.
+
+            One factory rather than eleven copies: "say so, drop the flow's
+            keys, end" is one rule, and the only per-flow part is whether the
+            person has a main menu to be handed back to (`staff_auth` parks
+            someone who is not linked to a staff account yet, and the step they
+            abandoned left a language reply-keyboard on their screen -- taking
+            it away is the only honest thing to show).
+
+            BOTH a MessageHandler and a CallbackQueryHandler: PTB re-dispatches
+            the LAST update the staff member sent, so a flow abandoned on an
+            inline button times out on a callback query and one abandoned at a
+            text prompt times out on a message. A TIMEOUT state that registers
+            only one of the two is silent for half the flows that reach it.
+
+            Deliberately NOT raising ApplicationHandlerStop: PTB dispatches
+            TIMEOUT handlers itself and documents that it has no effect there.
+            """
+            async def _announce_timeout(update: Update, context: ContextTypes.DEFAULT_TYPE):
+                try:
+                    language = await self._language_handler._get_language(update, context)
+                    await self._clear_all_pending_flows(context, update)
+                    text = i18n.get('staff.flow_timed_out', language)
+                    keyboard = (
+                        MenuKeyboards.main_menu(
+                            language, context.user_data.get('staff_roles', []) or []
+                        )
+                        if offer_menu else ReplyKeyboardRemove()
+                    )
+                    # The timeout update is the staff member's LAST real one, so
+                    # the reply target is derived rather than assumed.
+                    query = update.callback_query
+                    target = query.message if query is not None else update.effective_message
+                    if target is not None:
+                        await target.reply_text(
+                            text, reply_markup=keyboard, disable_notification=True
+                        )
+                    elif update.effective_user is not None:
+                        await context.bot.send_message(
+                            chat_id=update.effective_user.id, text=text,
+                            reply_markup=keyboard, disable_notification=True,
+                        )
+                except Exception as exc:  # noqa: BLE001 -- never surface to the driver
+                    logger.error(
+                        "Failed to announce staff conversation timeout: %s", exc, exc_info=True
+                    )
+                return ConversationHandler.END
+
+            return [
+                MessageHandler(filters.ALL, _announce_timeout),
+                CallbackQueryHandler(_announce_timeout),
+            ]
 
         # Store handler instances for text message routing
         self._delivery_handlers = {
@@ -500,6 +699,8 @@ class StaffBot:
                 SELECT_LANGUAGE: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, start_handler.language_selected)
                 ],
+                # Not linked to a staff account yet, so no main menu to hand back.
+                ConversationHandler.TIMEOUT: _flow_timeout(offer_menu=False),
             },
             fallbacks=[CommandHandler("cancel", start_handler.cancel)],
             per_chat=True,
@@ -524,7 +725,8 @@ class StaffBot:
             # Unified entry points
             CallbackQueryHandler(self._route_new_orders, pattern="^staff_new_orders_unified$"),
             CallbackQueryHandler(tryout_handler.show_hub, pattern="^staff_tryouts_hub$"),
-            CallbackQueryHandler(status_update_handler.show_cash_hub, pattern="^staff_cash_hub$"),
+            # `staff_cash_hub` is deliberately NOT here -- it is registered in
+            # group 1, below the conversations. See the note there.
 
             # --- Delivery handlers ---
             # Order pool
@@ -636,18 +838,31 @@ class StaffBot:
             self.application.add_handler(handler)
 
         # --- Operator conversation handlers ---
-        create_client_text_pattern = self._menu_text_pattern('staff.menu.create_client')
-        search_client_text_pattern = self._menu_text_pattern('staff.menu.search_client')
-        create_order_text_pattern = self._menu_text_pattern('staff.menu.create_order')
+        # The three operator labels that ENTER a conversation instead of
+        # routing. Same decider as the escape below, only narrowed to one
+        # button each -- and, like the escape, it reads the translation when
+        # the tap ARRIVES. These used to be regexes compiled from `i18n` right
+        # here, at handler-build time, so retitling one of these buttons in the
+        # admin UI rendered new copy on a keyboard nothing would answer until
+        # the bot was restarted.
+        create_client_tap = self._menu_label_tap_filter('staff.menu.create_client')
+        search_client_tap = self._menu_label_tap_filter('staff.menu.search_client')
+        create_order_tap = self._menu_label_tap_filter('staff.menu.create_order')
 
-        # Reply-keyboard MAIN-MENU escape for conversation text states. A menu tap
-        # while typing (phone/name/address/note/qty) would otherwise be captured
-        # as that input by the state's own MessageHandler — which wins over the
-        # catch-all menu router. Prepended to each text-input state so a menu label
-        # ends the conversation and navigates, while non-menu text falls through.
-        main_menu_pattern = self._main_menu_text_pattern()
+        # Reply-keyboard MAIN-MENU escape, registered on EVERY state of every
+        # conversation below. A menu tap while typing (phone/name/address/note/
+        # qty) would otherwise be captured as that input by the state's own
+        # MessageHandler -- which wins over the catch-all menu router -- and a
+        # menu tap on a callback-only step (the language picker, the confirm
+        # card, the transfer driver picker) reached no handler at all, so the
+        # destination opened while the conversation stayed armed behind it.
+        #
+        # The guard is `MenuTapFilter`, i.e. `_match_menu_action` itself.
+        # Text that is not a menu tap is never claimed here and falls through
+        # to the state's real receive_* handler; text that IS one can always be
+        # resolved, so this can no longer end a flow with nothing to show for it.
         menu_escape = MessageHandler(
-            filters.Regex(main_menu_pattern) & ~filters.COMMAND, self._conv_menu_escape
+            self._main_menu_tap_filter() & ~filters.COMMAND, self._conv_menu_escape
         )
 
         # Create User conversation
@@ -656,7 +871,7 @@ class StaffBot:
                 CallbackQueryHandler(create_user_handler.start_create_user, pattern="^staff_create_client$"),
                 CallbackQueryHandler(create_user_handler.start_create_user, pattern="^staff_op_create_user$"),
                 MessageHandler(
-                    filters.Regex(create_client_text_pattern) & ~filters.COMMAND,
+                    create_client_tap & ~filters.COMMAND,
                     create_user_handler.start_create_user
                 ),
             ],
@@ -674,15 +889,20 @@ class StaffBot:
                     MessageHandler(filters.TEXT & ~filters.COMMAND, create_user_handler.receive_last_name)
                 ],
                 CREATE_USER_LANG: [
+                    menu_escape,
                     CallbackQueryHandler(create_user_handler.select_client_language, pattern=r"^staff_op_lang_")
                 ],
                 CONFIRM_CREATE: [
+                    menu_escape,
                     CallbackQueryHandler(create_user_handler.confirm_create, pattern="^staff_op_confirm_create_user$")
                 ],
+                ConversationHandler.TIMEOUT: _flow_timeout(),
             },
             fallbacks=[
                 CommandHandler("cancel", create_user_handler.cancel),
+                start_reset,
                 CallbackQueryHandler(create_user_handler.cancel, pattern="^staff_back_to_main$"),
+                CallbackQueryHandler(_leave_conversation, pattern="^staff_cash_hub$"),
             ],
             per_chat=True,
             per_user=True,
@@ -697,7 +917,7 @@ class StaffBot:
             entry_points=[
                 CallbackQueryHandler(search_user_handler.start_search, pattern="^staff_search_client$"),
                 MessageHandler(
-                    filters.Regex(search_client_text_pattern) & ~filters.COMMAND,
+                    search_client_tap & ~filters.COMMAND,
                     search_user_handler.start_search
                 ),
             ],
@@ -706,10 +926,13 @@ class StaffBot:
                     menu_escape,
                     MessageHandler(filters.TEXT & ~filters.COMMAND, search_user_handler.receive_search_query)
                 ],
+                ConversationHandler.TIMEOUT: _flow_timeout(),
             },
             fallbacks=[
                 CommandHandler("cancel", search_user_handler.cancel),
+                start_reset,
                 CallbackQueryHandler(search_user_handler.cancel, pattern="^staff_back_to_main$"),
+                CallbackQueryHandler(_leave_conversation, pattern="^staff_cash_hub$"),
             ],
             per_chat=True,
             per_user=True,
@@ -725,7 +948,7 @@ class StaffBot:
                 CallbackQueryHandler(create_order_handler.start_create_order, pattern="^staff_create_order$"),
                 CallbackQueryHandler(create_order_handler.start_order_for_client, pattern=r"^staff_op_order_\d+$"),
                 MessageHandler(
-                    filters.Regex(create_order_text_pattern) & ~filters.COMMAND,
+                    create_order_tap & ~filters.COMMAND,
                     create_order_handler.start_create_order
                 ),
             ],
@@ -735,16 +958,20 @@ class StaffBot:
                     MessageHandler(filters.TEXT & ~filters.COMMAND, create_order_handler.receive_client_search)
                 ],
                 ORDER_SELECT_ADDRESS: [
+                    menu_escape,
                     CallbackQueryHandler(create_order_handler.select_address, pattern=r"^staff_op_addr_\d+$"),
                 ],
                 ORDER_SELECT_PRODUCTS: [
+                    menu_escape,
                     CallbackQueryHandler(create_order_handler.select_product, pattern=r"^staff_op_product_\d+$"),
                     CallbackQueryHandler(create_order_handler.products_done, pattern="^staff_op_products_done$"),
                 ],
                 ORDER_SELECT_QUANTITY: [
+                    menu_escape,
                     CallbackQueryHandler(create_order_handler.select_quantity, pattern=r"^staff_op_qty_\d+_\d+$"),
                 ],
                 ORDER_SELECT_PAYMENT: [
+                    menu_escape,
                     CallbackQueryHandler(create_order_handler.select_payment, pattern=r"^staff_op_pay_"),
                 ],
                 ORDER_ENTER_NOTES: [
@@ -753,12 +980,16 @@ class StaffBot:
                     CallbackQueryHandler(create_order_handler.skip_notes, pattern="^staff_op_skip_notes$"),
                 ],
                 ORDER_CONFIRM_ORDER: [
+                    menu_escape,
                     CallbackQueryHandler(create_order_handler.confirm_order, pattern="^staff_op_confirm_order$"),
                 ],
+                ConversationHandler.TIMEOUT: _flow_timeout(),
             },
             fallbacks=[
                 CommandHandler("cancel", create_order_handler.cancel),
+                start_reset,
                 CallbackQueryHandler(create_order_handler.cancel, pattern="^staff_back_to_main$"),
+                CallbackQueryHandler(_leave_conversation, pattern="^staff_cash_hub$"),
             ],
             per_chat=True,
             per_user=True,
@@ -780,6 +1011,13 @@ class StaffBot:
                 ],
                 ENTER_ADDRESS: [
                     menu_escape,
+                    # The pin half of the address step. Without it a shared
+                    # location reaches no handler in this state and the operator
+                    # taps the bot's own "Send location" button into silence —
+                    # and, worse, the address is then saved with no coordinates,
+                    # which is precisely what makes the delivery-zone guard
+                    # (`ensure_within_delivery_zone`) a no-op on this path.
+                    MessageHandler(filters.LOCATION, manage_address_handler.receive_location),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, manage_address_handler.receive_address)
                 ],
                 ENTER_DISTRICT: [
@@ -791,12 +1029,16 @@ class StaffBot:
                     MessageHandler(filters.TEXT & ~filters.COMMAND, manage_address_handler.receive_address_notes)
                 ],
                 CONFIRM_ADDRESS: [
+                    menu_escape,
                     CallbackQueryHandler(manage_address_handler.confirm_address, pattern="^staff_op_confirm_address$")
                 ],
+                ConversationHandler.TIMEOUT: _flow_timeout(),
             },
             fallbacks=[
                 CommandHandler("cancel", manage_address_handler.cancel),
+                start_reset,
                 CallbackQueryHandler(manage_address_handler.cancel, pattern="^staff_back_to_main$"),
+                CallbackQueryHandler(_leave_conversation, pattern="^staff_cash_hub$"),
             ],
             per_chat=True,
             per_user=True,
@@ -824,10 +1066,13 @@ class StaffBot:
                     MessageHandler(filters.LOCATION, tryout_handler.receive_create_location),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, tryout_handler.receive_create_address)
                 ],
+                ConversationHandler.TIMEOUT: _flow_timeout(),
             },
             fallbacks=[
                 CommandHandler("cancel", tryout_handler.cancel_create_tryout),
+                start_reset,
                 CallbackQueryHandler(tryout_handler.cancel_create_tryout, pattern="^staff_back_to_main$"),
+                CallbackQueryHandler(_leave_conversation, pattern="^staff_cash_hub$"),
             ],
             per_chat=True,
             per_user=True,
@@ -847,11 +1092,13 @@ class StaffBot:
                     menu_escape,
                     MessageHandler(filters.TEXT & ~filters.COMMAND, bottle_collection_handler.receive_collection_search)
                 ],
+                ConversationHandler.TIMEOUT: _flow_timeout(),
             },
             fallbacks=[
-                CommandHandler("cancel", bottle_collection_handler.cancel if hasattr(bottle_collection_handler, 'cancel') else start_handler.cancel),
-                CallbackQueryHandler(_exit_to_cash_hub, pattern="^staff_cash_hub$"),
-                CallbackQueryHandler(_exit_to_main_menu, pattern="^staff_back_to_main$"),
+                CommandHandler("cancel", _cancel_bottle_flow),
+                start_reset,
+                CallbackQueryHandler(_leave_conversation, pattern="^staff_cash_hub$"),
+                CallbackQueryHandler(_leave_conversation, pattern="^staff_back_to_main$"),
             ],
             per_chat=True,
             per_user=True,
@@ -877,11 +1124,13 @@ class StaffBot:
                     menu_escape,
                     MessageHandler(filters.TEXT & ~filters.COMMAND, bottle_collection_handler.receive_bottles_loaded)
                 ],
+                ConversationHandler.TIMEOUT: _flow_timeout(),
             },
             fallbacks=[
-                CommandHandler("cancel", start_handler.cancel),
-                CallbackQueryHandler(_exit_to_cash_hub, pattern="^staff_cash_hub$"),
-                CallbackQueryHandler(_exit_to_main_menu, pattern="^staff_back_to_main$"),
+                CommandHandler("cancel", _cancel_bottle_flow),
+                start_reset,
+                CallbackQueryHandler(_leave_conversation, pattern="^staff_cash_hub$"),
+                CallbackQueryHandler(_leave_conversation, pattern="^staff_back_to_main$"),
             ],
             per_chat=True,
             per_user=True,
@@ -906,11 +1155,13 @@ class StaffBot:
                     menu_escape,
                     MessageHandler(filters.TEXT & ~filters.COMMAND, bottle_collection_handler.receive_bottles_returned)
                 ],
+                ConversationHandler.TIMEOUT: _flow_timeout(),
             },
             fallbacks=[
-                CommandHandler("cancel", start_handler.cancel),
-                CallbackQueryHandler(_exit_to_cash_hub, pattern="^staff_cash_hub$"),
-                CallbackQueryHandler(_exit_to_main_menu, pattern="^staff_back_to_main$"),
+                CommandHandler("cancel", _cancel_bottle_flow),
+                start_reset,
+                CallbackQueryHandler(_leave_conversation, pattern="^staff_cash_hub$"),
+                CallbackQueryHandler(_leave_conversation, pattern="^staff_back_to_main$"),
             ],
             per_chat=True,
             per_user=True,
@@ -924,19 +1175,33 @@ class StaffBot:
         bottle_transfer_conv = ConversationHandler(
             entry_points=[
                 CallbackQueryHandler(bottle_collection_handler.start_transfer_bottles, pattern="^staff_bottle_transfer_start$"),
+                # A driver button tapped from a picker the driver already walked
+                # away from. Now that a menu tap ENDS this conversation, the
+                # buttons still sitting in the scrollback reach no state -- and a
+                # tap that lands nowhere is the failure this wave is about.
+                # `receive_transfer_driver_select` refuses out loud when
+                # `pending_transfer_available` is gone (i.e. the flow is over)
+                # and re-renders the session menu. Registered as an entry point,
+                # not a second global handler, so the LIVE flow and the stale tap
+                # go to the same function and cannot answer differently.
+                CallbackQueryHandler(bottle_collection_handler.receive_transfer_driver_select, pattern=r"^staff_transfer_driver_\d+$"),
             ],
             states={
                 BOTTLE_TRANSFER_DRIVER_SELECT: [
+                    menu_escape,
                     CallbackQueryHandler(bottle_collection_handler.receive_transfer_driver_select, pattern=r"^staff_transfer_driver_\d+$"),
                 ],
                 BOTTLE_TRANSFER_QTY_INPUT: [
                     menu_escape,
                     MessageHandler(filters.TEXT & ~filters.COMMAND, bottle_collection_handler.receive_transfer_quantity)
                 ],
+                ConversationHandler.TIMEOUT: _flow_timeout(),
             },
             fallbacks=[
-                CommandHandler("cancel", start_handler.cancel),
-                CallbackQueryHandler(_exit_to_main_menu, pattern="^staff_back_to_main$"),
+                CommandHandler("cancel", _cancel_bottle_flow),
+                start_reset,
+                CallbackQueryHandler(_leave_conversation, pattern="^staff_cash_hub$"),
+                CallbackQueryHandler(_leave_conversation, pattern="^staff_back_to_main$"),
             ],
             per_chat=True,
             per_user=True,
@@ -956,10 +1221,13 @@ class StaffBot:
                     menu_escape,
                     MessageHandler(filters.TEXT & ~filters.COMMAND, bottle_collection_handler.receive_transfer_custom_confirm)
                 ],
+                ConversationHandler.TIMEOUT: _flow_timeout(),
             },
             fallbacks=[
-                CommandHandler("cancel", start_handler.cancel),
-                CallbackQueryHandler(_exit_to_main_menu, pattern="^staff_back_to_main$"),
+                CommandHandler("cancel", _cancel_bottle_flow),
+                start_reset,
+                CallbackQueryHandler(_leave_conversation, pattern="^staff_cash_hub$"),
+                CallbackQueryHandler(_leave_conversation, pattern="^staff_back_to_main$"),
             ],
             per_chat=True,
             per_user=True,
@@ -995,9 +1263,27 @@ class StaffBot:
             CallbackQueryHandler(bottle_session_membership_handler.execute_invite_driver, pattern=r"^bottles_invite_execute_\d+$")
         )
 
-        # Keep main-menu back handler after conversations so their fallbacks can run.
+        # ------------------------------------------------------------------
+        # Navigation destinations: registered AFTER the conversations, always
+        # ------------------------------------------------------------------
+        # PTB runs at most ONE handler per group and `handlers[group]` is
+        # insertion-ordered, so a global handler registered in group 0 before a
+        # ConversationHandler SHADOWS that conversation's fallback for the same
+        # callback data. `staff_cash_hub` was registered up there with the other
+        # callbacks: the driver tapped the cash hub's own back button from
+        # inside a bottle flow, the hub rendered, the conversation never got the
+        # update, and it stayed armed until their next typed number opened or
+        # closed a bottle session.
+        #
+        # Group 1 fixes it in both directions: the conversation's fallback ends
+        # the flow in group 0, and these render the destination in group 1 --
+        # once, from one place, whether or not a flow was open.
         self.application.add_handler(
             CallbackQueryHandler(main_menu_handler, pattern="^staff_back_to_main$"),
+            group=1
+        )
+        self.application.add_handler(
+            CallbackQueryHandler(status_update_handler.show_cash_hub, pattern="^staff_cash_hub$"),
             group=1
         )
 
@@ -1070,11 +1356,24 @@ class StaffBot:
             logger.error(f"Failed to set bot commands: {e}")
 
     def _menu_action_map(self, language: str) -> dict:
-        """Reply-keyboard MAIN-MENU label → action, for the labels that have no
+        """Reply-keyboard MAIN-MENU label -> action, for the labels that have no
         dedicated handler and fall through to _handle_text_message. (Operator
         labels Create Client / Search Client / Create Order are handled by their
-        own ConversationHandlers and are intentionally absent here.)"""
-        return {
+        own ConversationHandlers and are intentionally absent here.)
+
+        Rebuilt on every lookup, never cached: `i18n.get` is what the KEYBOARD
+        calls at render time too, so an admin retitling a button is answered by
+        the very next tap rather than by the next restart.
+
+        Keys are STRIPPED, on both sides of the comparison
+        (`_menu_tap_candidates` strips what arrived). This map used the RAW
+        translation row. A row seeded as "Cash " therefore rendered a button
+        that the escape recognised as navigation and this map resolved to
+        nothing -- outside a conversation the driver was bounced back to the
+        menu, inside one their flow died silently. One invisible trailing space
+        in a translations row was enough, and nothing on screen showed it.
+        """
+        raw = {
             i18n.get('staff.menu.new_orders', language): 'staff_new_orders_unified',
             i18n.get('staff.menu.active_deliveries', language): 'staff_active_deliveries',
             i18n.get('staff.menu.tryouts', language): 'staff_tryouts_hub',
@@ -1083,41 +1382,76 @@ class StaffBot:
             i18n.get('staff.menu.settings', language): 'staff_settings',
             i18n.get('staff.menu.help', language): 'staff_help',
         }
+        return {
+            label.strip(): action
+            for label, action in raw.items()
+            if label and label.strip()
+        }
 
-    # Conversation working-dict keys cleared when a reply-keyboard menu tap
-    # abandons an operator/tryout conversation (see _conv_menu_escape).
-    _CONVERSATION_WORK_KEYS = (
-        'new_client', 'new_order', 'new_address', 'new_tryout', 'new_tryout_products',
-    )
+    @staticmethod
+    def _single_menu_label_map(translation_key: str, language: str) -> dict:
+        """`_menu_action_map`'s shape for ONE button, so the two kinds of menu
+        label are matched by the same code.
 
-    def _main_menu_text_pattern(self) -> str:
-        """Regex matching any MAIN-MENU reply-keyboard nav label (the labels
-        routed by _handle_text_message), across languages, with optional emoji
-        prefix. Used to give ConversationHandler text states a menu escape hatch."""
-        keys = (
-            'staff.menu.new_orders', 'staff.menu.active_deliveries', 'staff.menu.tryouts',
-            'staff.menu.cash', 'staff.menu.profile', 'staff.menu.settings', 'staff.menu.help',
-        )
-        labels = []
-        for key in keys:
-            for lang_code in i18n.supported_languages:
-                label = i18n.get(key, lang_code).strip()
-                if label:
-                    labels.append(re.escape(label))
-        unique_labels = sorted(set(labels), key=len, reverse=True)
-        if not unique_labels:
-            return r"$a"  # never matches
-        return r"^\s*(?:\S+\s+)?(?:%s)\s*$" % "|".join(unique_labels)
+        The "action" is the translation key itself: nothing routes on it -- the
+        only caller asks whether the tap resolved at all -- but returning it
+        keeps `_resolve_tapped_label` a single function with a single contract.
+        """
+        label = i18n.get(translation_key, language).strip()
+        return {label: translation_key} if label else {}
+
+    def _main_menu_tap_filter(self) -> "MenuTapFilter":
+        """The filter every ConversationHandler state is guarded by.
+
+        A method rather than a module constant so it binds to THIS bot and its
+        handler instances, and so the escape wiring reads as one thing:
+        `menu_escape = MessageHandler(self._main_menu_tap_filter() & ...)`.
+        """
+        return MenuTapFilter(self)
+
+    def _menu_label_tap_filter(self, translation_key: str) -> "MenuTapFilter":
+        """The filter for ONE reply-keyboard button, by translation key.
+
+        Used by the three operator labels that ENTER a ConversationHandler of
+        their own; the same decider as the escape, narrowed to one button.
+        """
+        return MenuTapFilter(self, translation_key)
+
+    async def _leave_flow_and_navigate(
+        self, action: str, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
+        """Leave the flow AND take the staff member where they tapped.
+
+        The shared body of the two menu-tap routes. Keeping them one function
+        is the point: a tap answered by the conversation escape and the same
+        tap answered by the catch-all router must be indistinguishable to the
+        person who made it.
+        """
+        await self._clear_all_pending_flows(context, update)
+        await self._dispatch_menu_action(action, update, context)
+        # AFTER the dispatch, never before -- see _delete_menu_echo. A menu tap
+        # made INSIDE a conversation leaves exactly the same echo as one made
+        # outside it; without this it piles up and buries the pinned card.
+        await self._delete_menu_echo(update)
 
     async def _conv_menu_escape(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Reply-keyboard MAIN-MENU tap fired inside an operator/tryout conversation
-        text state. Abandon the conversation: clear its half-entered working data
-        and any flow flags, navigate to the tapped menu action, and END so the
-        stale state can't capture the driver's next text. Prepended to each
-        text-input state so non-menu text still reaches the real receive_* handler.
+        """Reply-keyboard MAIN-MENU tap fired inside a ConversationHandler state.
+
+        Abandon the conversation: clear its half-entered working data and any
+        flow flags, navigate to the tapped menu action, and END so the stale
+        state can't capture the staff member's next text. Registered on EVERY
+        state of every conversation -- the callback-only ones too, because a
+        driver parked on an inline-button step who taps a main-menu button has
+        left just as definitely as one parked on a text prompt, and while the
+        conversation stayed armed every inline button on its last message
+        stayed live for the rest of the five-minute timeout.
+
+        Non-menu text still reaches the real receive_* handler: the guard is
+        `MenuTapFilter`, which asks `_match_menu_action` -- so a text this
+        cannot resolve is never claimed here in the first place.
 
         Reads via `effective_message`, exactly like `_handle_text_message` and
-        `_delete_menu_echo`: the `filters.TEXT` states this is prepended to
+        `_delete_menu_echo`: the `filters.TEXT` states this sits in front of
         also match EDITED messages, where `update.message` is None. Without
         this an edited menu-label tap raised AttributeError here -- and now
         that this method deletes the echo too, it would blow up before ever
@@ -1125,61 +1459,123 @@ class StaffBot:
         message = update.effective_message
         if message is None:
             # No message payload at all: nothing to match against and nothing
-            # to delete. Still END -- the tap that routed here matched the
-            # menu regex, so the driver has left this conversation whether or
-            # not we can read the text; leaving the state armed would let it
+            # to delete. Still END -- the tap that routed here was claimed as a
+            # menu tap, so the driver has left this conversation whether or not
+            # we can read the text; leaving the state armed would let it
             # capture their next message. (Unreachable in practice: the
             # registered filter matches on effective_message, so it is
             # non-None whenever this handler actually runs.)
             return ConversationHandler.END
         language = await self._language_handler._get_language(update, context)
         action = self._match_menu_action(message.text, language)
-        for key in self._CONVERSATION_WORK_KEYS:
-            context.user_data.pop(key, None)
-        await self._clear_all_pending_flows(context, update)
-        if action is not None:
-            await self._dispatch_menu_action(action, update, context)
-            # AFTER the dispatch, never before -- same ordering and same
-            # reason as the catch-all router (see _delete_menu_echo). A menu
-            # tap made INSIDE a conversation leaves exactly the same echo as
-            # one made outside it; without this it piles up and buries the
-            # pinned card, which is the bug this branch exists to fix.
-            await self._delete_menu_echo(update)
+        if action is None:
+            # Unreachable through the registered filter, which IS this matcher.
+            # It used to be reachable -- the filter allowed any leading token
+            # while the matcher allowed 2-4 characters -- and the conversation
+            # was then torn down with no output whatsoever. Stay put and say
+            # nothing rather than repeat that; the state's own handler is the
+            # right owner of text this cannot resolve.
+            logger.warning(
+                "menu escape claimed text it cannot resolve (%r); staying in the flow",
+                message.text,
+            )
+            return None
+        await self._leave_flow_and_navigate(action, update, context)
         return ConversationHandler.END
 
-    def _match_menu_action(self, text: str, language: str):
+    def _resolve_tapped_label(self, text: str, label_map, language: str = None):
+        """Which button is this text a tap on? THE rule, and the only copy of it.
+
+        `label_map(language) -> {stripped label: action}` is the only thing the
+        two kinds of menu button differ by: `_menu_action_map` for the labels
+        that route, `_single_menu_label_map` for the three operator labels that
+        enter a conversation of their own. Everything that decides whether a
+        text IS a tap -- the emoji strip, the stripped compare, the
+        cross-language sweep -- lives here, so a change to the rule cannot
+        reach one kind of button and miss the other.
+
+        Resolved WHEN THE TAP ARRIVES: `label_map` calls `i18n.get`, exactly as
+        the keyboard builder does when it renders. Nothing here is memoised
+        across updates, and that is the feature -- an admin retitling a label
+        (or `i18n.reload_translations()`) changes what the button says AND what
+        answers it in the same instant, with no restart, and the retired copy
+        stops matching at the same instant so it cannot hijack typed text.
+
+        Accepts the bare label and the emoji-prefixed variant the reply
+        keyboard emits (e.g. '<emoji> Cash'); see `_menu_tap_candidates` for
+        why the prefix must be an emoji and not "a couple of characters".
+
+        Resolved across EVERY supported language, not just `language`: a
+        keyboard rendered before a language switch lives on the phone until
+        Telegram redraws it, and every tap in that window arrives in the old
+        language. `language` only decides which action wins if two languages
+        happen to render the same label for different buttons -- hence its
+        table is consulted first, and each language's table is built at most
+        once per call and only if the languages before it did not answer.
+
+        Cost, measured rather than assumed: one `i18n.get` -- an in-memory dict
+        lookup -- per label per language, each language's table built at most
+        once per call and the sweep abandoned on the first hit. The BARE label
+        is the candidate that normally matches (the keyboard adds the emoji),
+        and it is only tried once the decorated one has been ruled out
+        everywhere, so a main-menu tap usually visits every language: 7 labels
+        x 3 languages = 21 lookups, ~45us -- the same as it cost before, when
+        only the entry-point labels were frozen. Each of the three operator
+        entry filters adds 1 x 3 = 3 lookups (~9us) in place of one compiled
+        regex. Per text update that is well under a millisecond, against a
+        staff bot whose whole text volume is a handful of drivers.
+        """
+        candidates = _menu_tap_candidates(text)
+        if not candidates:
+            return None
+        if language:
+            language = i18n.normalize_language(language)
+        languages = ([language] if language else []) + [
+            lang_code
+            for lang_code in i18n.supported_languages
+            if lang_code != language
+        ]
+        tables = {}
+        for candidate in candidates:
+            for lang_code in languages:
+                if lang_code not in tables:
+                    tables[lang_code] = label_map(lang_code)
+                action = tables[lang_code].get(candidate)
+                if action is not None:
+                    return action
+        return None
+
+    def _match_menu_action(self, text: str, language: str = None):
         """Return the menu action for a reply-keyboard main-menu label tap, or None.
 
-        Matches the bare label and the emoji-prefixed variants the reply keyboard
-        actually emits (e.g. '💰 Cash'). All menu labels are non-numeric, so a
-        typed cash amount / bottle count / fine quantity can NEVER collide; the
-        only residual collision is a free-text note that literally equals a menu
-        label IN ANY SUPPORTED LANGUAGE -- the map below is merged across every
-        language, so the collision surface is the union of all of them, not just
-        the driver's current one. We accept it as an intentional escape hatch.
+        THE decider for "is this text a main-menu tap, and which button?".
+        `MenuTapFilter` -- the escape hatch guarding every conversation state --
+        asks this and nothing else, and so does the catch-all router and the
+        post-restart session-recovery gate. There is deliberately no second,
+        looser predicate: when this returns None the text was never a tap, and
+        it must fall through to whatever the staff member was actually being
+        asked for.
+
+        All menu labels are non-numeric, so a typed cash amount / bottle count
+        / fine quantity can NEVER collide; the residual collision is a
+        free-text note that literally equals a menu label in some supported
+        language, which we accept as an intentional escape hatch.
         """
-        if not text:
-            return None
-        menu_actions = dict(self._menu_action_map(language))
-        # `_main_menu_text_pattern` (bot.py:1084) builds its escape regex from
-        # EVERY supported language, so a driver holding a keyboard rendered
-        # before a language switch matched the regex but not this map -- and
-        # `_conv_menu_escape` then ended their conversation with no output at
-        # all. One decider, all languages (spec §4.6).
-        for lang_code in i18n.supported_languages:
-            if lang_code == language:
-                continue
-            for label, action in self._menu_action_map(lang_code).items():
-                menu_actions.setdefault(label, action)
-        text = text.strip()
-        candidates = [text]
-        for prefix_len in (2, 3, 4):
-            if len(text) > prefix_len:
-                candidates.append(text[prefix_len:].strip())
-        for candidate in candidates:
-            if candidate in menu_actions:
-                return menu_actions[candidate]
-        return None
+        return self._resolve_tapped_label(text, self._menu_action_map, language)
+
+    def _match_menu_label(self, text: str, translation_key: str, language: str = None) -> bool:
+        """Is this text a tap on the ONE button rendered from `translation_key`?
+
+        The question the three operator entry points ask -- they own a
+        conversation rather than an action, so they need "was it THIS button",
+        not "which button". Same decider, same emoji/strip/cross-language rule
+        as `_match_menu_action`, narrowed to a one-row table.
+        """
+        return self._resolve_tapped_label(
+            text,
+            lambda lang_code: self._single_menu_label_map(translation_key, lang_code),
+            language,
+        ) is not None
 
     async def _dispatch_menu_action(self, action: str, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Route a matched main-menu action to its handler."""
@@ -1343,9 +1739,23 @@ class StaffBot:
         return token
 
     async def _clear_all_pending_flows(self, context: ContextTypes.DEFAULT_TYPE, update: Update = None):
-        """Drop every in-memory flow flag plus the Redis flow mirror, draining any
-        deferred pool-insertion suggestions. Delegates to the SSOT helper so the
-        flag set lives in exactly one place (staff_bot.utils.flow_state)."""
+        """THE expression of "this staff member has left the flow they were in".
+
+        Drops every `user_data` key a flow owns -- the text-router flags, the
+        half-entered conversation working data, the loose inline-flow
+        breadcrumbs -- plus the Redis flow mirror, draining any pool-insertion
+        suggestions deferred while they were busy.
+
+        Every way out calls this and nothing else: a menu tap taken inside a
+        ConversationHandler state (`_conv_menu_escape`) and outside one
+        (`_handle_text_message`), the inline flow-cancel button, `/cancel`,
+        `/start`, a navigation button tapped mid-flow, and a conversation
+        timing out. They used to clear different sets, so the SAME gesture left
+        different residue depending on which screen it landed on.
+
+        The key list is not here either: it is
+        `flow_state.PENDING_FLOW_USER_DATA_KEYS`, the SSOT this delegates to.
+        """
         from staff_bot.utils import flow_state as _flow_state
         await _flow_state.clear_pending_flows(context, update)
 
@@ -1369,7 +1779,9 @@ class StaffBot:
             # /api/staff/auth/login plus two DB queries; running that for
             # arbitrary text would let anyone who never ran /start drive
             # backend load just by typing at the bot.
-            if not re.match(self._main_menu_text_pattern(), text or ""):
+            # Same decider as the escape filter and the router below, so the
+            # three cannot disagree about what a menu label is.
+            if self._match_menu_action(text, None) is None:
                 return
             # Captured BEFORE the attempt: a failed recovery ARMS the cooldown,
             # so reading it afterwards would suppress the very first
@@ -1399,12 +1811,11 @@ class StaffBot:
         # as a cash amount ("Invalid cash amount", the reported bug) or, worse,
         # consumed as a NOTE that finalizes a real transaction. Detect the tap
         # FIRST, drop every in-progress flow, then route to the menu action.
+        # Shared body with `_conv_menu_escape`: the same tap must mean the same
+        # thing whether the staff member was inside a conversation or not.
         menu_action = self._match_menu_action(text, language)
         if menu_action is not None:
-            await self._clear_all_pending_flows(context, update)
-            await self._dispatch_menu_action(menu_action, update, context)
-            # AFTER the dispatch, never before -- see _delete_menu_echo.
-            await self._delete_menu_echo(update)
+            await self._leave_flow_and_navigate(menu_action, update, context)
             return
 
         # Delivery COD collection and reconciliation inputs take precedence over menu text.

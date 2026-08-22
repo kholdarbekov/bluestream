@@ -196,10 +196,15 @@ class BottleSessionMembershipHandler(BaseHandler):
             membership = response.data or {}
             owner_name = membership.get('owner_name') or i18n.get('staff.common.unknown_driver', language)
 
+            # The name goes INTO `get()`: `i18n.get()` no longer returns a
+            # fillable template (copy the caller does not fill is degraded to
+            # the humanised key), so formatting its RESULT rendered a bare
+            # "Joined session" with the owner's name dropped.
+            joined_line = i18n.get(
+                'staff.bottles.joined_session', language, name=owner_name
+            )
             text = (
-                f"✅ <b>"
-                f"{i18n.get('staff.bottles.joined_session', language).format(name=owner_name)}"
-                f"</b>\n\n"
+                f"✅ <b>{joined_line}</b>\n\n"
                 f"{i18n.get('staff.bottles.joined_session_info', language)}"
             )
             await query.edit_message_text(
@@ -289,11 +294,13 @@ class BottleSessionMembershipHandler(BaseHandler):
             owner_name = m.get('owner_name') or i18n.get('staff.common.unknown_driver', language)
             inventory = m.get('current_inventory', 0)
 
+            membership_line = i18n.get(
+                'staff.bottles.current_membership', language,
+                name=owner_name, qty=inventory,
+            )
             text = (
                 f"🤝 <b>{i18n.get('staff.bottles.current_membership_title', language)}</b>\n\n"
-                + i18n.get('staff.bottles.current_membership', language).format(
-                    name=owner_name, qty=inventory
-                )
+                + membership_line
             )
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton(
@@ -473,10 +480,14 @@ class BottleSessionMembershipHandler(BaseHandler):
                 'staff.common.driver_number', language, driver_id=driver_id
             )
 
-            text = (
-                f"✅ <b>"
-                f"{i18n.get('staff.bottles.codriver_invited', language).format(name=member_name)}"
-                f"</b>"
+            # NOT wrapped in `✅ <b>…</b>` the way `execute_join_session`
+            # decorates `staff.bottles.joined_session`: this row is seeded as
+            # "✅ <b>{name}</b> has been added…" in all three languages, so a
+            # wrapper here produced a doubled tick and NESTED <b> tags under
+            # parse_mode='HTML'. The copy already carries its own decoration;
+            # render it as it ships.
+            text = i18n.get(
+                'staff.bottles.codriver_invited', language, name=member_name
             )
             await query.edit_message_text(
                 text,

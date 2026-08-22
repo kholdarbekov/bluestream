@@ -345,10 +345,14 @@ class BottleBalanceHandler(BaseHandler):
         has no saved addresses: the rows derive from `UserAddress`, so a place
         with no ledger activity still yields a row with `place_balance` 0."""
         query = update.callback_query
-        if query:
-            await query.answer()
 
         try:
+            # Cosmetic, and deliberately INSIDE the try via `_ack`: Telegram
+            # refuses a late ack ("query is too old") for every tap it
+            # redelivers after a deploy, and that must not cost the customer
+            # the screen — the fetch and the render below are the work.
+            await self._ack(query)
+
             user = await user_middleware(update)
             if not user:
                 return
@@ -415,10 +419,12 @@ class BottleBalanceHandler(BaseHandler):
         an empty 200) when the caller may not see the address — a stale callback
         from before an unlink/ungroup lands on the generic load-error path."""
         query = update.callback_query
-        if query:
-            await query.answer()
 
         try:
+            # Same shape as show_bottle_balance: a refused ack is cosmetic, and
+            # must never stop the page from being fetched and drawn.
+            await self._ack(query)
+
             user = await user_middleware(update)
             if not user:
                 return

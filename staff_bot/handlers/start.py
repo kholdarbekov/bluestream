@@ -70,11 +70,7 @@ class StartHandler(BaseHandler):
             context.user_data['invite_token'] = invite_arg
 
         # Not linked yet - show language selection then auth attempt
-        keyboard = []
-        for lang_code in ['en', 'uz', 'ru']:
-            flag = i18n.get_language_flag(lang_code)
-            name = i18n.get_language_name(lang_code, lang_code)
-            keyboard.append([f"{flag} {name}"])
+        keyboard = self._language_keyboard()
 
         # The staff member has not picked a language yet, so lean on Telegram's
         # own client locale before falling back to the deployment default.
@@ -85,6 +81,55 @@ class StartHandler(BaseHandler):
             reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         )
         return SELECT_LANGUAGE
+
+    # ------------------------------------------------------------------
+    # The language picker: ONE rule, drawn and read in one place
+    # ------------------------------------------------------------------
+    # "This button means this language code" used to be written twice: `start`
+    # built "{flag} {native name}" out of `i18n`, while `language_selected`
+    # matched hardcoded 'O'zbekcha'/'Русский'/flag literals and answered 'en'
+    # for everything else. The copies disagreed about every text that is not a
+    # picker button — a stale main-menu tap, a typo, a forwarded message — and
+    # the disagreement was silent: the staff member was logged in as ENGLISH
+    # and `update_user_language` wrote that over their stored preference.
+    #
+    # Both halves now come from `i18n`: the same supported-language list, the
+    # same flag, the same native name. A label the picker can draw is a label
+    # the matcher accepts, by construction.
+
+    @staticmethod
+    def _language_option_label(language_code: str) -> str:
+        """The one label the picker draws for ``language_code``."""
+        flag = i18n.get_language_flag(language_code)
+        name = i18n.get_language_name(language_code, language_code)
+        return f"{flag} {name}"
+
+    @classmethod
+    def _language_keyboard(cls) -> list:
+        """The picker's reply keyboard, one supported language per row."""
+        return [[cls._language_option_label(code)] for code in i18n.supported_languages]
+
+    @classmethod
+    def _match_language_choice(cls, text: str):
+        """The language ``text`` names, or ``None`` if it names no language.
+
+        ``None`` is the important half: the caller must NOT guess. Returning a
+        default here is what silently re-languaged staff members.
+        """
+        cleaned = (text or '').strip().casefold()
+        if not cleaned:
+            return None
+
+        for code in i18n.supported_languages:
+            accepted = {
+                cls._language_option_label(code).casefold(),
+                i18n.get_language_flag(code).casefold(),
+                i18n.get_language_name(code, code).casefold(),
+                code.casefold(),
+            }
+            if cleaned in accepted:
+                return code
+        return None
 
     @staticmethod
     def _preferred_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
@@ -104,16 +149,24 @@ class StartHandler(BaseHandler):
 
     async def language_selected(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle language selection then authenticate by Telegram binding."""
-        text = update.message.text.strip()
+        language = self._match_language_choice(update.message.text)
 
-        # Parse language from button text
-        language = 'en'
-        if 'O\'zbekcha' in text or '🇺🇿' in text:
-            language = 'uz'
-        elif 'Русский' in text or '🇷🇺' in text:
-            language = 'ru'
-        elif 'English' in text or '🇺🇸' in text:
-            language = 'en'
+        if language is None:
+            # Not one of the picker's own buttons, so it is not a language
+            # choice: re-prompt instead of picking one on the staff member's
+            # behalf. Login writes the chosen language straight through to
+            # `users.preferred_language`, so a guess here is a silent,
+            # persistent edit of a preference nobody made — which is exactly
+            # what a stale main-menu tap used to do.
+            logger.info(
+                "Staff user %s sent text the language picker does not recognise; re-prompting",
+                update.effective_user.id,
+            )
+            await update.message.reply_text(
+                i18n.get('staff.select_language', self._preferred_language(update, context)),
+                reply_markup=ReplyKeyboardMarkup(self._language_keyboard(), resize_keyboard=True)
+            )
+            return SELECT_LANGUAGE
 
         context.user_data['language'] = i18n.normalize_language(language)
         logger.info(f"Staff user {update.effective_user.id} selected language: {language}")

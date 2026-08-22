@@ -11,7 +11,7 @@ from telegram.helpers import escape_markdown
 
 from eligibility import main_menu_for
 from i18n import i18n
-from keyboards import OrderKeyboards, MenuKeyboards, PaymentKeyboards, ProfileKeyboards
+from keyboards import OrderKeyboards, MenuKeyboards, ProfileKeyboards
 from api_client import api_client
 from database import db_manager, BotUserRepository
 from utils import user_middleware, format_price, MessageBuilder, get_auth_token
@@ -27,6 +27,37 @@ logger = logging.getLogger('handlers')
 # keeps one shared workplace from pushing the orders menu past Telegram's
 # 4096-character message limit.
 _PLACE_ITEM_LIMIT = 10
+
+
+def _cancel_confirmation_callback(order_id: int, decision: str) -> str:
+    """Callback data for one button of the cancel-confirmation card.
+
+    The order id rides on the CALLBACK, not in ``context.user_data``: the
+    Application is built with no ``persistence``, so bot memory is empty after
+    every deploy. A Yes/No card that outlived a restart used to become a dead
+    button — the confirm handler found no id, answered the tap with nothing at
+    all, and left a live-looking card on screen that behaved identically
+    forever.
+
+    ``^cancel_order_\\d+`` (telegram_bot/bot.py) claims this data before the
+    older ``^cancel_order_confirm_(yes|no)$`` handlers can see it, which is why
+    :meth:`OrderHandlers.cancel_order` dispatches the decision itself.
+    """
+    return f"cancel_order_{order_id}_confirm_{decision}"
+
+
+def _cancelling_order_id(query_data) -> int | None:
+    """The order id carried by a cancel/confirm callback; ``None`` when absent.
+
+    Absent means a card rendered by a release older than this one (bare
+    ``cancel_order_confirm_yes``). Tapping one of those must TELL the customer,
+    never fall through in silence. ``0`` is treated as absent — it is not a
+    real order id.
+    """
+    for part in str(query_data or '').split('_'):
+        if part.isdigit() and int(part):
+            return int(part)
+    return None
 
 
 def _money(value) -> str:
@@ -225,18 +256,14 @@ class OrderHandlers(BaseHandler):
                 keyboard = await main_menu_for(update.effective_user.id, language)
 
                 if update.callback_query:
-                    try:
-                        await update.callback_query.edit_message_text(
-                            text=no_orders_text,
-                            reply_markup=keyboard
-                        )
-                    except Exception as edit_error:
-                        # Handle "message is not modified" error silently
-                        if "message is not modified" in str(edit_error).lower():
-                            logger.debug(f"Message not modified for user {user_id} - content is the same")
-                        else:
-                            raise edit_error
-                    await update.callback_query.answer()
+                    # The shared helper is the SSOT for "Telegram refused the
+                    # edit": it treats "message is not modified" as success and
+                    # replaces a bubble it cannot edit. The hand-rolled copy
+                    # that used to live here only knew the first of those.
+                    await self._edit_or_replace_callback_message(
+                        update.callback_query, no_orders_text, reply_markup=keyboard,
+                    )
+                    await self._ack(update.callback_query)
                 else:
                     await update.message.reply_text(
                         text=no_orders_text,
@@ -251,18 +278,10 @@ class OrderHandlers(BaseHandler):
             keyboard = OrderKeyboards.order_list(orders, language)
 
             if update.callback_query:
-                try:
-                    await update.callback_query.edit_message_text(
-                        text=orders_text,
-                        reply_markup=keyboard
-                    )
-                except Exception as edit_error:
-                    # Handle "message is not modified" error silently
-                    if "message is not modified" in str(edit_error).lower():
-                        logger.debug(f"Message not modified for user {user_id} - content is the same")
-                    else:
-                        raise edit_error
-                await update.callback_query.answer()
+                await self._edit_or_replace_callback_message(
+                    update.callback_query, orders_text, reply_markup=keyboard,
+                )
+                await self._ack(update.callback_query)
             else:
                 await update.message.reply_text(
                     text=orders_text,
@@ -350,12 +369,13 @@ class OrderHandlers(BaseHandler):
             keyboard = OrderKeyboards.order_details(order_id, order.get('status', ''), language)
 
             logger.info(f"order_details handler: details_text after escaping: {details_text}")
-            await query.edit_message_text(
-                text=details_text,
+            await self._edit_or_replace_callback_message(
+                query,
+                details_text,
                 reply_markup=keyboard,
-                parse_mode=constants.ParseMode.MARKDOWN_V2
+                parse_mode=constants.ParseMode.MARKDOWN_V2,
             )
-            await query.answer()
+            await self._ack(query)
 
             logger.info(f"Order {order_id} details shown to user {user_id}")
 
@@ -363,49 +383,84 @@ class OrderHandlers(BaseHandler):
             await self._handle_error(update, exc=e, operation="order_details")
 
     async def cancel_order(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle order cancellation"""
+        """Ask the customer to confirm cancelling an order — and route the answer.
+
+        Both buttons on the card this renders carry the order id
+        (``cancel_order_{id}_confirm_{yes|no}``, see
+        :func:`_cancel_confirmation_callback`), which the registered
+        ``^cancel_order_\\d+`` pattern claims before the
+        ``^cancel_order_confirm_(yes|no)$`` handlers ever see it. So the
+        decision is dispatched here rather than by the wiring.
+        """
         try:
             query = update.callback_query
+            data = query.data or ''
+
+            if 'confirm_yes' in data:
+                await self.cancel_order_confirm_yes(update, context)
+                return
+            if 'confirm_no' in data:
+                await self.cancel_order_confirm_no(update, context)
+                return
+
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
             # Extract order ID from callback data (format: cancel_order_123)
-            order_id = int(query.data.split('_')[2])
+            order_id = int(data.split('_')[2])
 
-            # Confirm cancellation
-            if 'confirm' not in query.data:
-                # Ask for confirmation first
-                confirm_keyboard = MenuKeyboards.yes_no_buttons(
-                    language,
-                    yes_callback='cancel_order_confirm_yes',
-                    no_callback='cancel_order_confirm_no'
-                )
+            confirm_keyboard = MenuKeyboards.yes_no_buttons(
+                language,
+                yes_callback=_cancel_confirmation_callback(order_id, 'yes'),
+                no_callback=_cancel_confirmation_callback(order_id, 'no'),
+            )
 
-                # Context needs to know which order we are cancelling
-                context.user_data['cancelling_order_id'] = order_id
-
-                await query.edit_message_text(
-                    text=i18n.get('telegram.orders.cancel_confirm', language),
-                    reply_markup=confirm_keyboard
-                )
-                await query.answer()
-                return
+            await self._edit_or_replace_callback_message(
+                query,
+                i18n.get('telegram.orders.cancel_confirm', language),
+                reply_markup=confirm_keyboard,
+            )
+            await self._ack(query)
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="cancel_order")
 
+    async def _cancel_confirmation_expired(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, language: str
+    ) -> None:
+        """A Yes/No tap whose callback carries no order id: say so, then move on.
+
+        Only a card rendered by a release older than
+        :func:`_cancel_confirmation_callback` can reach this. The old code
+        answered such a tap with an empty ``query.answer()`` and returned, so
+        the card stayed on screen looking live and every later tap did exactly
+        as little — the customer had no way to tell it was broken. Re-rendering
+        their orders replaces the dead card with a screen whose buttons work.
+        """
+        await self._ack(update.callback_query, i18n.get('telegram.error.generic', language))
+        logger.info(
+            "Cancel confirmation carried no order id (card predates this release) "
+            "for user %s; returning them to the orders list",
+            getattr(update.effective_user, 'id', None),
+        )
+        await self.orders_menu(update, context)
+
     async def cancel_order_confirm_yes(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Process confirmed cancellation"""
+        """Process confirmed cancellation.
+
+        The order id comes off the callback data — the only place that survives
+        a redeploy. ``context.user_data`` deliberately holds nothing here: bot
+        memory is wiped by every restart, and a second copy of the id would just
+        be a second answer to the same question.
+        """
         try:
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            # Check if this is for order cancellation
-            order_id = context.user_data.get('cancelling_order_id')
+            order_id = _cancelling_order_id(query.data)
             if not order_id:
-                # Not for us, or expired
-                await query.answer()
+                await self._cancel_confirmation_expired(update, context, language)
                 return
 
             async with api_client as client:
@@ -417,9 +472,7 @@ class OrderHandlers(BaseHandler):
                 response = await client.cancel_order(user_token, order_id)
 
                 if response.success:
-                    await query.answer(i18n.get('telegram.orders.cancel_success', language))
-                    # Clear context
-                    context.user_data.pop('cancelling_order_id', None)
+                    await self._ack(query, i18n.get('telegram.orders.cancel_success', language))
                     # Redirect to orders list
                     await self.orders_menu(update, context)
                 else:
@@ -435,14 +488,10 @@ class OrderHandlers(BaseHandler):
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            # Check if this is for order cancellation
-            order_id = context.user_data.get('cancelling_order_id')
+            order_id = _cancelling_order_id(query.data)
             if not order_id:
-                await query.answer()
+                await self._cancel_confirmation_expired(update, context, language)
                 return
-
-            # Clear context
-            context.user_data.pop('cancelling_order_id', None)
 
             # Return to order details (pass the id explicitly — never mutate
             # the immutable CallbackQuery.data).
@@ -555,12 +604,10 @@ class OrderHandlers(BaseHandler):
             # Create back button (use order_tracking keyboard for tracking view)
             keyboard = OrderKeyboards.order_tracking(order_id, language)
 
-            await query.edit_message_text(
-                text=tracking_text,
-                reply_markup=keyboard,
-                parse_mode='Markdown'
+            await self._edit_or_replace_callback_message(
+                query, tracking_text, reply_markup=keyboard, parse_mode='Markdown',
             )
-            await query.answer()
+            await self._ack(query)
 
             logger.info(f"Order {order_id} tracking with timeline shown to user {user_id}")
 
@@ -618,7 +665,7 @@ class OrderHandlers(BaseHandler):
                 context.user_data['address_flow_origin'] = 'checkout'
 
                 if update.callback_query:
-                    await update.callback_query.answer()
+                    await self._ack(update.callback_query)
                     await update.callback_query.message.reply_text(
                         text=add_address_text,
                         reply_markup=keyboard,
@@ -684,7 +731,7 @@ class OrderHandlers(BaseHandler):
                 await self._edit_or_replace_callback_message(
                     update.callback_query, address_text, reply_markup=keyboard,
                 )
-                await update.callback_query.answer()
+                await self._ack(update.callback_query)
             else:
                 await update.message.reply_text(
                     text=address_text,
@@ -755,7 +802,7 @@ class OrderHandlers(BaseHandler):
                 update.callback_query, address_text,
                 reply_markup=keyboard, parse_mode='Markdown',
             )
-            await update.callback_query.answer()
+            await self._ack(update.callback_query)
         else:
             await update.message.reply_text(
                 text=address_text, reply_markup=keyboard,
@@ -852,7 +899,7 @@ class OrderHandlers(BaseHandler):
             await self._edit_or_replace_callback_message(
                 query, payment_text, reply_markup=keyboard,
             )
-            await query.answer()
+            await self._ack(query)
         else:
             await update.message.reply_text(payment_text, reply_markup=keyboard)
 
@@ -893,11 +940,12 @@ class OrderHandlers(BaseHandler):
             context.user_data.pop('selected_reward_id', None)
             context.user_data.pop('cart_edit_return', None)
 
-            await query.edit_message_text(
-                text=i18n.get('telegram.action_cancelled', language),
+            await self._edit_or_replace_callback_message(
+                query,
+                i18n.get('telegram.action_cancelled', language),
                 reply_markup=await main_menu_for(update.effective_user.id, language),
             )
-            await query.answer(i18n.get('telegram.action_cancelled_short', language))
+            await self._ack(query, i18n.get('telegram.action_cancelled_short', language))
 
             logger.info(f"Checkout cancelled by user {user_id}")
         except Exception as e:
@@ -915,7 +963,7 @@ class OrderHandlers(BaseHandler):
             payment_method = context.user_data.get('selected_payment_method')
 
             if not address_id or not payment_method:
-                await query.answer(i18n.get('telegram.orders.missing_info', language))
+                await self._ack(query, i18n.get('telegram.orders.missing_info', language))
                 return
 
             # Create order
@@ -977,14 +1025,33 @@ class OrderHandlers(BaseHandler):
                             context.user_data['psp_failed_order_id'] = int(cancelled_order_id)
                         error_text = i18n.get('telegram.orders.asl_belgisi_error_message', language)
                         keyboard = OrderKeyboards.asl_belgisi_error(language)
-                        await query.edit_message_text(text=error_text, reply_markup=keyboard)
-                        await query.answer()
+                        await self._edit_or_replace_callback_message(
+                            query, error_text, reply_markup=keyboard,
+                        )
+                        await self._ack(query)
                         return
                     await self._handle_api_error(update, response.error, language)
                     return
 
                 order = response.data['data']['order']
                 response_payload = response.data.get('data', {}) or {}
+
+            # PAST THIS POINT THE ORDER EXISTS: POST /orders returned 2xx.
+            #
+            # DISARM CONFIRM FIRST, on every rail. `confirm_order` re-reads the
+            # address and payment selections out of `user_data`, so while they
+            # are still there the Confirm button on the (not yet updated)
+            # screen can place a SECOND order for the same basket. Everything
+            # that happens from here on — the Asl belgisi wait, the PSP call,
+            # the cart clear, the render — can fail, and every one of those
+            # failures shows the customer something that reads like "it did not
+            # go through". Their next tap must not be able to buy it twice.
+            #
+            # This is deliberately ONE clear for both rails: the cash rail used
+            # to do it after its success render (fixed), and the card rail
+            # never did it at all — a customer whose payment link failed got a
+            # generic error with Confirm still live, and paid for two orders.
+            context.user_data.clear()
 
             # For card/click: show "preparing" message and wait until payment_ready_at
             # so the Tax Committee utilisation is at least PRE_PAYMENT_UTILISATION_WAIT_SECONDS
@@ -1021,10 +1088,14 @@ class OrderHandlers(BaseHandler):
                             "Payment for order %s ready at %s, waiting %.2fs before showing link to user %s",
                             order_number, payment_ready_at_str, remaining, user_id,
                         )
-                        preparing_text = i18n.get('telegram.orders.preparing_payment_message', language).format(
-                            order_number=order.get('order_number', str(order['id']))
+                        # Values go INTO i18n.get: it renders the template and
+                        # never hands one back to format later (see
+                        # shared/i18n_rendering.py).
+                        preparing_text = i18n.get(
+                            'telegram.orders.preparing_payment_message', language,
+                            order_number=order.get('order_number', str(order['id'])),
                         )
-                        await query.edit_message_text(text=preparing_text)
+                        await self._edit_or_replace_callback_message(query, preparing_text)
                         await asyncio.sleep(remaining)
                     elif remaining < -CLOCK_SKEW_WARN_THRESHOLD_SECONDS:
                         # Negative wait of more than a few seconds isn't normal
@@ -1052,10 +1123,6 @@ class OrderHandlers(BaseHandler):
                 # Don't clear cart yet - wait for successful payment
                 from handlers.payments import payment_handlers
 
-                # Store order data for payment flow
-                context.user_data['pending_order_id'] = order['id']
-                context.user_data['pending_order_amount'] = order['total_amount']
-
                 # Build order data with items for invoice
                 order_for_payment = {
                     'id': order['id'],
@@ -1078,23 +1145,32 @@ class OrderHandlers(BaseHandler):
                 )
 
                 if not invoice_sent:
-                    # Invoice failed - show error with options
-                    error_text = i18n.get('telegram.payment.failed_message', language)
-
-                    keyboard = PaymentKeyboards.payment_failed(order['id'], language)
-
-                    await query.edit_message_text(
-                        text=f"❌ {error_text}",
-                        reply_markup=keyboard
+                    # The order EXISTS and only the link is missing, so the
+                    # screen has to say exactly that and NAME the order — a
+                    # generic "payment failed" reads as "nothing happened" and
+                    # the customer's next move is to order again.
+                    #
+                    # `send_payment_link` deliberately renders NOTHING on
+                    # failure (see its docstring): it only knows the PSP said
+                    # no, this call site knows the order stands. The screen
+                    # itself lives in `show_payment_link_failed` so the retry
+                    # call site draws the identical one.
+                    await payment_handlers.show_payment_link_failed(
+                        update, context, order_for_payment, language,
                     )
+                    await self._ack(query)
+                    logger.warning(
+                        "Order %s placed for user %s but no %s payment link could be created; "
+                        "offered retry on the same order",
+                        order.get('order_number', order['id']), user_id, provider_method,
+                    )
+                    return
 
-                # Don't clear context data - needed for payment flow.
-                # But the edit-cart return flag is no longer needed once order is placed.
-                context.user_data.pop('cart_edit_return', None)
                 logger.info(f"{provider_method} payment link sent for order {order['id']} to user {user_id}")
                 return
 
-            # Cash or other payment methods - process immediately
+            # Cash or other payment methods - process immediately. Confirm was
+            # already disarmed the moment the order came back (see above).
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if user_token:
@@ -1115,14 +1191,33 @@ class OrderHandlers(BaseHandler):
 
             keyboard = await main_menu_for(update.effective_user.id, language)
 
-            await query.edit_message_text(
-                text=success_text,
-                reply_markup=keyboard
-            )
-            await query.answer(i18n.get('telegram.orders.placed_success', language))
-
-            # Clear order data
-            context.user_data.clear()
+            # Render through the shared helper: it treats "message is not
+            # modified" as success and REPLACES a bubble it cannot edit
+            # ("message to edit not found" — both appear in this project's
+            # production logs). A bare edit_message_text turned either of those
+            # into the outer except and a generic `telegram.error_occurred`
+            # toast, i.e. a placed order reported to the customer as a failure.
+            try:
+                await self._edit_or_replace_callback_message(
+                    query,
+                    success_text,
+                    reply_markup=keyboard,
+                )
+                await self._ack(query, i18n.get('telegram.orders.placed_success', language))
+            except Exception as render_error:
+                # Telegram refused the edit AND the replacement (blocked bot,
+                # chat gone). The order still stands, so the callback answer —
+                # the only surface left — must say so: an error here reads as
+                # "checkout failed" and the customer orders again.
+                logger.warning(
+                    "Order %s placed for user %s but its success screen could not be rendered: %s",
+                    order.get('order_number', order.get('id')), user_id, render_error,
+                )
+                await self._ack(
+                    query,
+                    i18n.get('telegram.orders.order_placed_screen_not_updated', language),
+                    show_alert=True,
+                )
 
             logger.info(f"Order created successfully for user {user_id} with payment method: {payment_method}")
 
@@ -1186,7 +1281,7 @@ class OrderHandlers(BaseHandler):
             await self._edit_or_replace_callback_message(
                 query, success_text, reply_markup=keyboard,
             )
-            await query.answer(i18n.get('telegram.orders.placed_success', language))
+            await self._ack(query, i18n.get('telegram.orders.placed_success', language))
 
             logger.info(f"Order {order_id} rescued to cash for user {user_id}")
         except Exception as e:
@@ -1391,11 +1486,10 @@ class OrderHandlers(BaseHandler):
             show_reward=show_reward,
         )
 
-        await update.callback_query.edit_message_text(
-            text=confirmation_text,
-            reply_markup=keyboard
+        await self._edit_or_replace_callback_message(
+            update.callback_query, confirmation_text, reply_markup=keyboard,
         )
-        await update.callback_query.answer()
+        await self._ack(update.callback_query)
 
     async def back_to_order_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle back button from payment screen to order confirmation"""
@@ -1512,8 +1606,10 @@ class OrderHandlers(BaseHandler):
                         text += f"🔒 {name} — {cost} {points_unit} ({lock})\n"
 
             keyboard = OrderKeyboards.checkout_reward_picker(affordable, language)
-            await query.edit_message_text(text=text, reply_markup=keyboard)
-            await query.answer()
+            await self._edit_or_replace_callback_message(
+                query, text, reply_markup=keyboard,
+            )
+            await self._ack(query)
         except Exception as e:
             await self._handle_error(update, exc=e, operation="checkout_choose_reward")
 
@@ -1544,7 +1640,7 @@ class OrderHandlers(BaseHandler):
                 return
 
             context.user_data.pop('selected_reward_id', None)
-            await query.answer(i18n.get('telegram.loyalty.reward_removed', language))
+            await self._ack(query, i18n.get('telegram.loyalty.reward_removed', language))
             await self._show_order_confirmation(update, context)
         except Exception as e:
             await self._handle_error(update, exc=e, operation="checkout_remove_reward")

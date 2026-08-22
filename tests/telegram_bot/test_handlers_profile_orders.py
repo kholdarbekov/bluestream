@@ -395,9 +395,16 @@ class TestProfileHandlerFlows:
 
         assert state == profile_module.PHONE
         update.callback_query.answer.assert_awaited_once()
-        update.callback_query.edit_message_text.assert_awaited_once_with(
-            "telegram.phone.verification_code_send_failed_retry_or_different:en",
-            reply_markup=None,
+        # Routed through `_edit_or_replace_callback_message`, so the call is
+        # keyword-shaped and omits `reply_markup` entirely — which is the same
+        # wire request as `reply_markup=None` (PTB drops None params) and has
+        # the same effect: editMessageText without a markup drops the stale
+        # link Yes/No buttons.
+        prompt = update.callback_query.edit_message_text.await_args
+        assert prompt.args == ()
+        assert prompt.kwargs["text"] == "telegram.phone.verification_code_send_failed_retry_or_different:en"
+        assert prompt.kwargs.get("reply_markup") is None, (
+            "the link Yes/No buttons must not survive the answer"
         )
         context.bot.send_message.assert_awaited_once_with(
             chat_id=1201,
@@ -433,9 +440,16 @@ class TestProfileHandlerFlows:
 
         assert state == profile_module.PHONE
         update.callback_query.answer.assert_awaited_once()
-        update.callback_query.edit_message_text.assert_awaited_once_with(
-            "telegram.phone.verification_code_send_failed_generic:en",
-            reply_markup=None,
+        # Routed through `_edit_or_replace_callback_message`, so the call is
+        # keyword-shaped and omits `reply_markup` entirely — which is the same
+        # wire request as `reply_markup=None` (PTB drops None params) and has
+        # the same effect: editMessageText without a markup drops the stale
+        # link Yes/No buttons.
+        prompt = update.callback_query.edit_message_text.await_args
+        assert prompt.args == ()
+        assert prompt.kwargs["text"] == "telegram.phone.verification_code_send_failed_generic:en"
+        assert prompt.kwargs.get("reply_markup") is None, (
+            "the link Yes/No buttons must not survive the answer"
         )
         context.bot.send_message.assert_awaited_once_with(
             chat_id=1202,
@@ -563,11 +577,13 @@ class TestProfileAddressHandlerFlows:
         state = await handler.add_address(update, context)
 
         assert state == ADDRESS_LOCATION
-        handler.user_repo.update_user_state.assert_awaited_once_with(202, {})
         assert context.user_data["conversation_state"] == "address_location"
         assert context.user_data["temp_address_data"] == {}
         update.callback_query.delete_message.assert_awaited_once()
         update.callback_query.answer.assert_awaited_once()
+        # The state clear that used to sit here is gone on purpose: entering
+        # the address flow must not disarm another flow's pending prompt.
+        handler.user_repo.update_user_state.assert_not_awaited()
         update.callback_query.message.reply_text.assert_awaited_once_with(
             text="telegram.address.location_prompt_enhanced:en",
             reply_markup="loc-kbd",
@@ -776,11 +792,21 @@ class TestOrderHandlerFlows:
 
         monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(orders_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
-        monkeypatch.setattr(orders_module.MenuKeyboards, "yes_no_buttons", lambda *_args, **_kwargs: "yes-no-kbd")
+        rendered = {}
+
+        def _yes_no(*_args, **kwargs):
+            rendered.update(kwargs)
+            return "yes-no-kbd"
+
+        monkeypatch.setattr(orders_module.MenuKeyboards, "yes_no_buttons", _yes_no)
 
         await handler.cancel_order(update, context)
 
-        assert context.user_data["cancelling_order_id"] == 123
+        # The order id goes onto the BUTTONS, not into bot memory: user_data is
+        # empty after a deploy while the card stays in the customer's chat.
+        assert rendered["yes_callback"] == "cancel_order_123_confirm_yes"
+        assert rendered["no_callback"] == "cancel_order_123_confirm_no"
+        assert "cancelling_order_id" not in context.user_data
         update.callback_query.edit_message_text.assert_awaited_once_with(
             text="telegram.orders.cancel_confirm:en",
             reply_markup="yes-no-kbd",
@@ -819,9 +845,8 @@ class TestOrderHandlerFlows:
         handler = orders_module.OrderHandlers()
         handler.orders_menu = AsyncMock()
         update = DummyUpdate()
-        update.callback_query = DummyCallbackQuery(data="cancel_order_confirm_yes")
+        update.callback_query = DummyCallbackQuery(data="cancel_order_456_confirm_yes")
         context = make_context()
-        context.user_data["cancelling_order_id"] = 456
 
         monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(orders_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
@@ -842,9 +867,8 @@ class TestOrderHandlerFlows:
         handler = orders_module.OrderHandlers()
         handler.order_details = AsyncMock()
         update = DummyUpdate()
-        update.callback_query = DummyCallbackQuery(data="cancel_order_confirm_no")
+        update.callback_query = DummyCallbackQuery(data="cancel_order_789_confirm_no")
         context = make_context()
-        context.user_data["cancelling_order_id"] = 789
 
         monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
 
@@ -852,6 +876,6 @@ class TestOrderHandlerFlows:
 
         assert "cancelling_order_id" not in context.user_data
         # Callback data is no longer mutated (CallbackQuery is immutable);
-        # the id is passed explicitly instead.
-        assert update.callback_query.data == "cancel_order_confirm_no"
+        # the id is read off it and passed explicitly instead.
+        assert update.callback_query.data == "cancel_order_789_confirm_no"
         handler.order_details.assert_awaited_once_with(update, context, order_id=789)

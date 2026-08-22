@@ -5,9 +5,16 @@ import math
 import uuid
 from decimal import Decimal, InvalidOperation
 
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes, ConversationHandler
 
+# Both quantity bounds are enforced twice -- here, where the driver can still be
+# told what was wrong with what they typed, and at the HTTP boundary by
+# `DriverBottleSessionOpenRequest` / `DriverBottleSessionCloseRequest` -- so the
+# numbers themselves live in exactly one place. They are deliberately DIFFERENT
+# numbers: the load-out is a business ceiling, the return is a storage bound
+# (over-returning is legitimate). See shared/staff_constants.py for both.
+from shared.staff_constants import BOTTLE_RETURN_COLUMN_CEILING, MAX_BOTTLES_PER_SESSION
 from staff_bot.api_client import TRANSPORT_AMBIGUOUS_ERROR_CODE, api_client
 from staff_bot.handlers.base import BaseHandler
 from staff_bot.i18n import i18n
@@ -144,6 +151,50 @@ class BottleCollectionHandler(BaseHandler):
         POST at all.
         """
         return uuid.uuid4().hex
+
+    async def _refuse_stale_tap(self, update: Update, language: str, reply_markup=None):
+        """A tap on an inline button whose flow is already over. Say so, and take
+        the dead buttons away.
+
+        Telegram never removes an old message, so every picker this handler ever
+        drew is still sitting in the driver's scrollback with live-looking
+        buttons on it. The flow behind it, though, is gone the moment the driver
+        taps a main-menu button: `flow_state.clear_pending_flows` drops
+        `pending_bottle_collection_flow` / `pending_transfer_available` and the
+        guards below then refuse the tap.
+
+        Refusing it SILENTLY — a bare `query.answer()` with no `text=` — is what
+        this bot used to do, and it is indistinguishable from a crashed bot: the
+        spinner stops and nothing else happens, so the driver taps harder. One
+        toast plus a screen that no longer offers the dead buttons is the whole
+        fix, and it is written once here because "this tap belongs to a flow
+        that ended" is one rule with several call sites (the collection quantity
+        picker, the transfer driver picker).
+
+        The picker is neutralised on the TAP rather than when the flow clears:
+        `clear_pending_flows` is the SSOT for leaving a flow and it deliberately
+        knows nothing about Telegram message ids — teaching it to reach back and
+        edit screens would mean tracking a message id per flow, i.e. a second
+        piece of state to get wrong, for a message the driver is no longer
+        looking at. The tap is both the moment feedback is wanted and the moment
+        the message handle is in hand.
+        """
+        query = update.callback_query
+        if query is None:
+            return
+        text = i18n.get('staff.cancelled', language)
+        try:
+            await query.answer(text=text)
+        except Exception:
+            logger.debug("stale-tap callback answer failed", exc_info=True)
+        try:
+            await query.edit_message_text(
+                text, reply_markup=reply_markup, parse_mode='HTML'
+            )
+        except Exception:
+            # An unchanged message, a message too old to edit, a deleted one:
+            # the toast already told the driver, so this is best-effort.
+            logger.debug("stale-tap picker cleanup failed", exc_info=True)
 
     async def _handle_submit_failure(self, update: Update, response, language: str):
         """Render a failed collection/fine submit, warning the driver when the
@@ -734,12 +785,20 @@ class BottleCollectionHandler(BaseHandler):
         "💾 Save without note" instead invokes :meth:`save_collection_no_note`.
         """
         query = update.callback_query
-        await query.answer()
         language = await self._get_language(update, context)
 
         flow = context.user_data.get('pending_bottle_collection_flow') or {}
         if flow.get('action') != 'collect':
+            # The picker is still on screen but its flow is gone — the driver
+            # tapped a main-menu button, or already finished this collection.
+            # Answer WITH text (see `_refuse_stale_tap`); a bare answer() here
+            # stopped the spinner and told the driver nothing at all.
+            await self._refuse_stale_tap(
+                update, language,
+                reply_markup=CommonKeyboards.back_button(language, "staff_cash_hub"),
+            )
             return
+        await query.answer()
 
         try:
             # Parse: staff_bottle_qty_{customer_id}_{address_id}_{qty}
@@ -1161,12 +1220,51 @@ class BottleCollectionHandler(BaseHandler):
 
             await query.edit_message_text(
                 text,
-                reply_markup=DeliveryKeyboards.bottle_session_menu(language),
+                reply_markup=self._session_menu_with_codriver_actions(language),
                 parse_mode='HTML',
             )
         except Exception as exc:
             logger.error("Error showing bottle session: %s", exc, exc_info=True)
             await self._handle_error(update, context)
+
+    @staticmethod
+    def _session_menu_with_codriver_actions(language: str) -> InlineKeyboardMarkup:
+        """The session menu plus the two co-driver entry points.
+
+        ``bottles_membership_status`` and ``bottles_invite_driver`` are both
+        registered in ``staff_bot/bot.py`` and were both emitted by NOTHING, so
+        the handlers behind them — including the ONLY keyboard in the bot that
+        carries ``bottles_leave_session`` — could not be reached at all. A
+        driver who joined a colleague's session had no way to leave it, and
+        every bottle they moved kept landing on the colleague's ledger.
+
+        Placed on "📊 My bottle accountability" because that is the one screen
+        that answers "what am I holding, and under whose session?" — the
+        question a driver is already asking at the moment they want out, and the
+        one a session owner is looking at when they decide to let a colleague
+        deliver against their load. (The other candidate, the
+        BOTTLE_SESSION_REQUIRED prompt, is only ever shown after an order accept
+        is refused — a place nobody navigates to on purpose.)
+
+        Built by EXTENDING ``DeliveryKeyboards.bottle_session_menu`` rather than
+        restating it: that keyboard is the single definition of "what can I do
+        with my session" and is rendered from a dozen call sites here, so a row
+        added there must keep appearing here too.
+        """
+        base = DeliveryKeyboards.bottle_session_menu(language)
+        rows = [list(row) for row in base.inline_keyboard]
+        codriver_rows = [
+            [InlineKeyboardButton(
+                f"🤝 {i18n.get('staff.bottles.current_membership_title', language)}",
+                callback_data='bottles_membership_status',
+            )],
+            [InlineKeyboardButton(
+                i18n.get('staff.bottles.invite_codriver', language),
+                callback_data='bottles_invite_driver',
+            )],
+        ]
+        # Above the trailing Back row, which must stay last.
+        return InlineKeyboardMarkup(rows[:-1] + codriver_rows + rows[-1:])
 
     # ------------------------------------------------------------------
     # Session: Open (Load from Warehouse)
@@ -1230,8 +1328,8 @@ class BottleCollectionHandler(BaseHandler):
 
         try:
             count = int(update.message.text.strip())
-            if count <= 0:
-                raise ValueError("non-positive")
+            if count <= 0 or count > MAX_BOTTLES_PER_SESSION:
+                raise ValueError("outside a plausible truck load-out")
         except (TypeError, ValueError):
             await update.message.reply_text(
                 i18n.get('staff.delivery.invalid_bottle_count', language)
@@ -1325,8 +1423,12 @@ class BottleCollectionHandler(BaseHandler):
 
         try:
             count = int(update.message.text.strip())
-            if count < 0:
-                raise ValueError("negative")
+            # A driver may hand back MORE than they took out -- the load plus
+            # every empty collected at a door -- so there is no plausible upper
+            # count to argue with. The only refusal is a number the ledger
+            # column cannot hold, which used to arrive as a generic 500.
+            if count < 0 or count > BOTTLE_RETURN_COLUMN_CEILING:
+                raise ValueError("negative, or past what the ledger column can hold")
         except (TypeError, ValueError):
             await update.message.reply_text(
                 i18n.get('staff.delivery.invalid_bottle_count', language)
@@ -1443,8 +1545,24 @@ class BottleCollectionHandler(BaseHandler):
     async def receive_transfer_driver_select(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Store selected receiver driver and prompt for quantity."""
         query = update.callback_query
-        await query.answer()
         language = await self._get_language(update, context)
+
+        # `pending_transfer_available` IS the flow: `start_transfer_bottles`
+        # stamps it from the open session and it is the ceiling
+        # `receive_transfer_quantity` enforces. Gone means the driver left
+        # (`flow_state.clear_pending_flows` owns it), so this tap is a stale
+        # picker in the scrollback. Prompting anyway asked for a quantity
+        # against an "available: 0" the driver cannot satisfy, on a message with
+        # no buttons — a dead end. Refuse it out loud and put the session menu
+        # back instead.
+        available = context.user_data.get('pending_transfer_available')
+        if available is None:
+            await self._refuse_stale_tap(
+                update, language,
+                reply_markup=DeliveryKeyboards.bottle_session_menu(language),
+            )
+            return ConversationHandler.END
+        await query.answer()
 
         data = query.data  # e.g. "staff_transfer_driver_42"
         try:
@@ -1453,7 +1571,6 @@ class BottleCollectionHandler(BaseHandler):
             await self._handle_error(update, context)
             return ConversationHandler.END
 
-        available = context.user_data.get('pending_transfer_available', 0)
         context.user_data['pending_transfer_receiver_id'] = receiver_id
 
         await query.edit_message_text(

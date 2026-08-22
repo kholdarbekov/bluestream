@@ -14,6 +14,7 @@ from shared.staff_constants import (
     RECONCILIATION_RISK_FLAGS,
     STAFF_BOT_ROLES,
 )
+from shared.i18n_rendering import humanise_key, render_translation
 from shared.enums import (
     DeliveryStatus,
     DriverBottleSessionStatus,
@@ -110,8 +111,24 @@ class Translation:
         await self.load_translations()
         logger.info("Staff translation reload complete")
 
-    def get(self, key: str, language: str = None, *args, **kwargs) -> str:
-        """Get translation for key in specified language"""
+    def get(self, key: str, language: str = None, /, *args, **kwargs) -> str:
+        """Get translation for key in specified language.
+
+        ``key`` and ``language`` are POSITIONAL-ONLY on purpose, exactly as on
+        the customer bot: everything a call site interpolates arrives in
+        ``**kwargs``, so a parameter this method could bind by keyword would be
+        a word the COPY may never use as a placeholder. ``{language}`` was
+        unfillable that way -- ``get(key, code, language=name)`` raised
+        ``TypeError: got multiple values for argument 'language'`` -- and
+        behind the ``/`` the names are free for the copy again.
+
+        Never raises and never emits an unresolved ``{placeholder}``: the
+        rendering rule is ``shared.i18n_rendering.render_translation``, the same
+        one ``telegram_bot/i18n.py`` uses, so one bad translation row cannot
+        mean two different things on the two bots. Callers must pass their
+        values HERE rather than calling ``.format()`` on the result — a template
+        no longer survives the trip out of this method.
+        """
         language = self.normalize_language(language)
         fallback_language = self.normalize_language(self.fallback_language)
 
@@ -124,16 +141,9 @@ class Translation:
         # Derive readable fallback from key
         else:
             self._track_missing_key(key, language)
-            last_part = key.rsplit('.', 1)[-1] if '.' in key else key
-            translation = last_part.replace('_', ' ').capitalize()
+            translation = humanise_key(key)
 
-        if args or kwargs:
-            try:
-                translation = translation.format(*args, **kwargs)
-            except (KeyError, ValueError) as e:
-                logger.warning(f"Failed to format translation '{key}': {e}")
-
-        return translation
+        return render_translation(key, translation, args, kwargs)
 
     def _track_missing_key(self, key: str, language: str):
         """Track missing translation keys"""

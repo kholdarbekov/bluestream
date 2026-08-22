@@ -42,9 +42,10 @@ class TestCancelOrderConfirmNo:
         handler._handle_error = AsyncMock()
 
         update = DummyUpdate()
-        update.callback_query = FrozenCallbackQuery(data="cancel_order_confirm_no")
+        # The id rides on the callback data (it has to survive a redeploy);
+        # `context.user_data` holds nothing for this flow any more.
+        update.callback_query = FrozenCallbackQuery(data="cancel_order_42_confirm_no")
         context = make_context()
-        context.user_data["cancelling_order_id"] = 42
 
         monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
 
@@ -53,8 +54,7 @@ class TestCancelOrderConfirmNo:
         # Re-dispatches into order_details with the id passed explicitly...
         handler.order_details.assert_awaited_once_with(update, context, order_id=42)
         # ...without ever mutating the frozen callback data...
-        assert update.callback_query.data == "cancel_order_confirm_no"
+        assert update.callback_query.data == "cancel_order_42_confirm_no"
         # ...and without falling into the error handler.
         handler._handle_error.assert_not_awaited()
-        # The cancellation context is cleared.
         assert "cancelling_order_id" not in context.user_data

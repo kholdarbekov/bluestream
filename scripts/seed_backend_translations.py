@@ -3483,6 +3483,46 @@ BACKEND_TRANSLATIONS = {
         'uz': '❌ Manzilni saqlashda xatolik. Iltimos, qaytadan urinib ko\'ring.',
         'ru': '❌ Не удалось сохранить адрес. Пожалуйста, попробуйте снова.'
     },
+    'telegram.address.flow_timed_out': {
+        'en': '⌛ The address form timed out and was closed. Nothing was saved — you can start again any time.',
+        'uz': '⌛ Manzil kiritish vaqti tugadi va yopildi. Hech narsa saqlanmadi — istalgan vaqtda qaytadan boshlashingiz mumkin.',
+        'ru': '⌛ Время заполнения адреса истекло, форма закрыта. Ничего не сохранено — вы можете начать заново в любой момент.'
+    },
+    'telegram.address.flow_timed_out_saved': {
+        'en': '⌛ The address form timed out. Your address is saved — you can add the apartment, floor or entry notes later from My Addresses.',
+        'uz': '⌛ Manzil kiritish vaqti tugadi. Manzilingiz saqlandi — kvartira, qavat yoki kirish izohlarini keyinroq "Manzillarim" bo\'limidan qo\'shishingiz mumkin.',
+        'ru': '⌛ Время заполнения адреса истекло. Ваш адрес сохранён — квартиру, этаж и заметки для курьера можно добавить позже в разделе «Мои адреса».'
+    },
+
+    # ------------------------------------------------------------------
+    # Conversation-timeout copy for the five flows wired to
+    # `BotApplication._flow_timeout` (telegram_bot/bot.py). Rendered with
+    # `i18n.get(key, language)` and NO values, so none of these may carry a
+    # {placeholder}: the shared rendering rule treats an unfilled template as
+    # broken copy and would replace the whole message with "Flow timed out".
+    # Pinned by tests/telegram_bot/test_flow_timeout_copy_is_seeded.py.
+    # ------------------------------------------------------------------
+    # The sensitive one. 300s is well inside normal Uzbek SMS latency, so the
+    # customer reading this was waiting for a code that arrived late — the copy
+    # invites them back rather than reporting a failure, and names /start
+    # because a half-registered customer has no menu left on screen.
+    'telegram.registration.flow_timed_out': {
+        'en': '⌛ Sign-up timed out and was closed. Nothing was saved — your code may simply have arrived late. Send /start whenever you\'re ready and we\'ll begin again.',
+        'uz': '⌛ Ro\'yxatdan o\'tish vaqti tugadi va yopildi. Hech narsa saqlanmadi — kodingiz kechikib kelgan bo\'lishi mumkin. Tayyor bo\'lganingizda /start yuboring, qaytadan boshlaymiz.',
+        'ru': '⌛ Время регистрации истекло, форма закрыта. Ничего не сохранено — возможно, код просто пришёл с опозданием. Отправьте /start, когда будете готовы, и мы начнём заново.'
+    },
+    'telegram.phone.verification_flow_timed_out': {
+        'en': '⌛ Phone confirmation timed out and was closed. Your number was not added — you can start again from My Profile any time.',
+        'uz': '⌛ Telefon raqamini tasdiqlash vaqti tugadi va yopildi. Raqamingiz qo\'shilmadi — istalgan vaqtda "Profilim" bo\'limidan qaytadan boshlashingiz mumkin.',
+        'ru': '⌛ Время подтверждения номера истекло, форма закрыта. Номер не добавлен — вы можете начать заново в разделе «Мой профиль» в любой момент.'
+    },
+    # Shared by all three subscription-shaped flows (create subscription, add
+    # item, update item quantity) — the customer's way back is the same screen.
+    'telegram.subscription.flow_timed_out': {
+        'en': '⌛ The auto-delivery form timed out and was closed. Nothing was changed — you can start again from Auto-Delivery any time.',
+        'uz': '⌛ Avto-yetkazib berishni sozlash vaqti tugadi va yopildi. Hech narsa o\'zgartirilmadi — istalgan vaqtda "Avto-yetkazib berish" bo\'limidan qaytadan boshlashingiz mumkin.',
+        'ru': '⌛ Время настройки автодоставки истекло, форма закрыта. Ничего не изменено — вы можете начать заново в разделе «Автодоставка» в любой момент.'
+    },
 
     # ============================================================================
     # Admin UI - Users Page (ui.users.*)
@@ -3926,6 +3966,17 @@ BACKEND_TRANSLATIONS = {
         'uz': '✅ Buyurtma muvaffaqiyatli joylashtirildi!',
         'ru': '✅ Заказ успешно оформлен!'
     },
+    # Rendered by `confirm_order` ONLY when Telegram refused both the edit and
+    # the replacement of the checkout bubble AFTER the order was created. The
+    # callback alert is then the last surface the customer has, so it must say
+    # the order stands — an unseeded key humanises to English here, i.e. an
+    # invitation to order twice. Keep every language under 200 characters:
+    # Telegram rejects a longer answerCallbackQuery outright.
+    'telegram.orders.order_placed_screen_not_updated': {
+        'en': '✅ Your order was placed. We could not refresh this screen — please do not order again. You will find it under «My Orders».',
+        'uz': '✅ Buyurtmangiz qabul qilindi. Bu ekranni yangilay olmadik — iltimos, qayta buyurtma bermang. Uni «Buyurtmalarim» bo\'limidan topasiz.',
+        'ru': '✅ Ваш заказ оформлен. Не удалось обновить этот экран — пожалуйста, не оформляйте его повторно. Он есть в разделе «Мои заказы».'
+    },
     'telegram.orders.preparing_payment_message': {
         'en': (
             '⏳ Your order #{order_number} has been received!\n\n'
@@ -3950,6 +4001,31 @@ BACKEND_TRANSLATIONS = {
         'en': '✅ Order #{order_number} is ready — payment link sent below.',
         'uz': '✅ #{order_number}-sonli buyurtma tayyor — to\'lov havolasi quyida yuborildi.',
         'ru': '✅ Заказ №{order_number} готов — ссылка для оплаты отправлена ниже.',
+    },
+    # Rendered by `confirm_order` when `POST /orders` SUCCEEDED but the PSP
+    # could not mint a payment link. The order exists; only the link is
+    # missing. Saying just "payment failed" here reads as "nothing happened"
+    # and the customer's next move is to order the same basket again — so this
+    # copy leads with the order being placed and names it, and the screen it
+    # sits on carries Retry payment (which re-pays THIS order) and My Orders.
+    'telegram.orders.payment_link_failed_message': {
+        'en': (
+            '✅ Your order #{order_number} has been placed — it is safe.\n\n'
+            '⚠️ We could not create the payment link just now. Please do not order again.\n\n'
+            'Tap «Retry Payment» to get a new link for this same order, or find it under «My Orders».'
+        ),
+        'uz': (
+            '✅ #{order_number}-sonli buyurtmangiz qabul qilindi — u saqlanib turibdi.\n\n'
+            '⚠️ Hozir to\'lov havolasini yaratib bo\'lmadi. Iltimos, qayta buyurtma bermang.\n\n'
+            'Shu buyurtma uchun yangi havola olish uchun «To\'lovni qaytadan amalga oshirish» tugmasini bosing '
+            'yoki uni «Buyurtmalarim» bo\'limidan toping.'
+        ),
+        'ru': (
+            '✅ Ваш заказ №{order_number} оформлен — он сохранён.\n\n'
+            '⚠️ Сейчас не удалось создать ссылку для оплаты. Пожалуйста, не оформляйте заказ повторно.\n\n'
+            'Нажмите «Повторить платеж», чтобы получить новую ссылку для этого же заказа, '
+            'или найдите его в разделе «Мои заказы».'
+        ),
     },
     'telegram.orders.asl_belgisi_error_message': {
         'en': (
@@ -4127,11 +4203,6 @@ BACKEND_TRANSLATIONS = {
         'en': '📞 Contact support: @aqua_element_support',
         'uz': '📞 Yordam bilan bog\'lanish: @aqua_element_support',
         'ru': '📞 Связаться с поддержкой: @aqua_element_support'
-    },
-    'telegram.support.message_received': {
-        'en': 'Support message received: {message}\nOur team will get back to you soon!',
-        'uz': 'Yordam xabaringiz qabul qilindi: {message}\nJamoamiz tez orada siz bilan bog\'lanadi!',
-        'ru': 'Сообщение в поддержку получено: {message}\nНаша команда скоро с вами свяжется!'
     },
     'telegram.admin.panel_coming_soon': {
         'en': '🔧 Admin panel functionality coming soon!',
@@ -5554,10 +5625,33 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Bu til mavjud emas. Iltimos, boshqasini tanlang.',
         'ru': 'Этот язык недоступен. Пожалуйста, выберите другой.'
     },
+    # `{language_name}` is HISTORY, not a live constraint. `Translation.get`
+    # used to bind its second parameter BY KEYWORD (`def get(self, key,
+    # language=None, *args, **kwargs)`), so `i18n.get(key, code,
+    # language=name)` raised "got multiple values for argument 'language'" and
+    # a `{language}` placeholder was unfillable through the only door allowed
+    # to fill it. That is why this row was respelled.
+    #
+    # `key` and `language` are POSITIONAL-ONLY now on both bots (`def get(self,
+    # key, language=None, /, *args, **kwargs)` — telegram_bot/i18n.py,
+    # staff_bot/i18n.py), so `get()` binds NO name by keyword: every keyword a
+    # caller passes lands in `**kwargs` as an interpolation value, and no
+    # parameter name is reserved against the copy any more. `{language}` would
+    # fill today.
+    #
+    # The respelling stays regardless, because reverting it is a DB migration
+    # dressed as a rename: telegram_bot/handlers/language.py passes
+    # `language_name=`, and any deployment whose row was seeded before the
+    # rename would render the humanised key ("Now using") until it was
+    # reseeded — the exact failure the rename was made to end. Guarded by
+    # tests/telegram_bot/test_translation_placeholders_are_fillable.py (the
+    # reserved-name set is empty BECAUSE the signature binds nothing) and
+    # tests/telegram_bot/test_language_confirmation_names_the_language.py (this
+    # row really does render the language's name).
     'telegram.language.now_using': {
-        'en': 'You\'re now using {language}',
-        'uz': 'Endi {language} tilidan foydalanyapsiz',
-        'ru': 'Теперь вы используете язык {language}'
+        'en': 'You\'re now using {language_name}',
+        'uz': 'Endi {language_name} tilidan foydalanyapsiz',
+        'ru': 'Теперь вы используете язык {language_name}'
     },
     'telegram.language.select_prompt': {
         'en': 'Choose your language:',

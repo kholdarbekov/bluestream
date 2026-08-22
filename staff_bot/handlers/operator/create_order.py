@@ -249,7 +249,15 @@ class CreateOrderHandler(BaseHandler):
                     )]
                 ])
                 await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
-                return
+                # SELECT_ADDRESS, not None. This is an ENTRY POINT, and PTB's
+                # `_update_state` IGNORES a None return — so the conversation
+                # was never entered on this branch and `staff_op_addr_<id>`,
+                # registered only inside SELECT_ADDRESS, had no handler. The
+                # operator added the client's first address mid-call, was shown
+                # the picker `confirm_address` re-renders, tapped it, and got
+                # nothing at all. The order genuinely IS at the address step
+                # here — there just are not any addresses yet.
+                return SELECT_ADDRESS
 
             text = i18n.get('staff.operator.select_address', language)
             keyboard = OperatorKeyboards.address_list(language, addresses, client_id)

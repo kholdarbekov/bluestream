@@ -893,6 +893,32 @@ class StaffAPIClient:
             token=token,
         )
 
+    async def geocode_address(self, token: str, address: str,
+                              hint_lat: float = None, hint_lon: float = None) -> APIResponse:
+        """Place an address line on the map; mirrors the customer bot's wrapper.
+
+        Both bots resolve a typed address through this one backend route
+        (`telegram_bot/api_client.geocode_address`), so an operator and a
+        customer typing the same street get the same pin — and the operator
+        flow's delivery-zone check judges the same coordinate the customer's
+        would. Handlers call this by name; the path lives here only.
+
+        The hints are optional on purpose: omitted, the body carries the
+        address alone, which is what the backend serializer expects (an
+        explicit `hint_lat: null` is a different request).
+        """
+        data = {'address': address}
+        if hint_lat is not None:
+            data['hint_lat'] = hint_lat
+        if hint_lon is not None:
+            data['hint_lon'] = hint_lon
+        return await self._make_request(
+            'POST',
+            '/api/v1/addresses/geocode',
+            token=token,
+            data=data,
+        )
+
     async def reverse_geocode_address(self, token: str, latitude: float, longitude: float) -> APIResponse:
         return await self._make_request(
             'POST',

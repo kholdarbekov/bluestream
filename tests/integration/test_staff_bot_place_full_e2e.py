@@ -1460,7 +1460,16 @@ def test_qty_callback_is_ignored_when_the_flow_is_not_a_collect_flow(
 ):
     """Without the ``action`` guard a stale qty tap arms the collect note step
     inside a FINE flow, and the driver's next typed text finalises a collection
-    they never chose."""
+    they never chose.
+
+    The tap is REFUSED, not processed — that is what this test protects. It used
+    to also assert the refusal was SILENT (`edit_message_text.assert_not_called`),
+    which pinned a second defect: a bare `answer()` stops the spinner and tells
+    the driver nothing, which is indistinguishable from a crashed bot, so they
+    tap harder. Since 2026-08-22 the refusal says so and takes the dead buttons
+    away (`BottleCollectionHandler._refuse_stale_tap`). Both halves are asserted
+    below: the fine flow is untouched, AND the driver is told.
+    """
     driver = _staff(db, UserRole.DELIVERY_DRIVER)
     u = _customer(db)
     a = _address(db, u)
@@ -1477,8 +1486,18 @@ def test_qty_callback_is_ignored_when_the_flow_is_not_a_collect_flow(
 
     asyncio.run(handler.pick_collection_qty(update, context))
 
-    update.callback_query.edit_message_text.assert_not_called()
-    assert "quantity" not in context.user_data["pending_bottle_collection_flow"]
+    # The load-bearing half: the FINE flow is not armed for a collection note.
+    flow = context.user_data["pending_bottle_collection_flow"]
+    assert "quantity" not in flow
+    assert flow["action"] == "fine", "the driver's actual flow must survive the refusal"
+    assert flow["fine_quantity"] == 2
+
+    # The other half: the driver is told, rather than left tapping a dead button.
+    update.callback_query.answer.assert_awaited_once()
+    assert update.callback_query.answer.await_args.kwargs.get("text"), (
+        "a refusal with no text is indistinguishable from a crashed bot"
+    )
+    update.callback_query.edit_message_text.assert_called_once()
 
 
 # ===========================================================================

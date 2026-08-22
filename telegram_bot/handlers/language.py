@@ -120,14 +120,27 @@ class LanguageHandler:
 
             # Build detailed confirmation message showing language change
             confirmation_text = f"{flag} {i18n.get('telegram.language.confirmation_title', language_code)}\n\n"
-            now_using_template = i18n.get('telegram.language.now_using', language_code)
-            try:
-                now_using_text = now_using_template.format(
-                    language=language_name,
-                    language_name=language_name,
-                )
-            except Exception:
-                now_using_text = f"{now_using_template} {language_name}"
+            # The value goes INTO `get()`. `i18n.get()` no longer returns a
+            # fillable template: copy the caller does not fill is treated as
+            # broken and degraded to the humanised key, so formatting its
+            # RESULT rendered "✅ Now using" — the confirmation for a language
+            # switch, with the language missing.
+            #
+            # `language_name=` matches the seeded placeholder. It was renamed
+            # from `{language}` on 2026-08-22, back when `Translation.get`
+            # accepted `key`/`language` BY KEYWORD and therefore owned those
+            # names: passing `language=` raised "got multiple values for
+            # argument 'language'", so a `{language}` row was unfillable through
+            # the only interface allowed to fill it. Both parameters are
+            # positional-only now, so that collision cannot recur and the name
+            # here is simply the one the row uses — a DB row still carrying the
+            # old `{language}` degrades to the humanised key until the seed is
+            # re-run.
+            now_using_text = i18n.get(
+                'telegram.language.now_using',
+                language_code,
+                language_name=language_name,
+            )
             confirmation_text += f"✅ {now_using_text}\n\n"
             confirmation_text += f"{i18n.get('telegram.language.confirmation_message', language_code)}"
 

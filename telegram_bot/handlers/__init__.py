@@ -81,13 +81,6 @@ class SimpleHandlers:
             reply_markup=MenuKeyboards.back_button(language),
         )
 
-    async def handle_support_message(self, update, context, text):
-        language = await self._get_language(update)
-        await self._send_response(
-            update,
-            i18n.get('telegram.support.message_received', language).format(message=text)
-        )
-
     async def admin_orders(self, update, context):
         """Admin orders - access controlled by backend API"""
         language = await self._get_language(update)

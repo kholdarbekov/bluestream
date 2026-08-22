@@ -134,6 +134,19 @@ class StatusUpdateHandler(BaseHandler):
         `staff_bottles_none_{id}`, `staff_collect_cash_{id}` … all end in it).
         Falls back rather than raising, because a lost `callback_query.data`
         must degrade to the flow's own id, not to a crash at the door.
+
+        NOT the same helper as the bare `int(query.data.split('_')[-1])` in
+        `view_active_delivery` / `navigate_to_address`, and deliberately so.
+        This one answers "which delivery is this FLOW about" and DEGRADES to the
+        id pinned when the flow started; those answer "which delivery does this
+        callback name", their patterns (`^staff_navigate_` + digits + `$`)
+        guarantee the id,
+        and they have no flow to degrade to — a `None` there would reach
+        `_anchor_current_delivery`, take its "nothing to compare" branch and
+        hand back the stale snapshot, which is the wrong-customer bug itself.
+        Loud is the right failure there; quiet is the right failure here. What
+        both feed — the decision of which delivery to act on — has exactly one
+        expression: `BaseHandler._anchor_current_delivery`.
         """
         query = getattr(update, 'callback_query', None)
         data = getattr(query, 'data', None) if query is not None else None
@@ -141,86 +154,6 @@ class StatusUpdateHandler(BaseHandler):
             return int(str(data).rsplit('_', 1)[-1])
         except (TypeError, ValueError):
             return fallback
-
-    async def _anchor_current_delivery(
-        self,
-        update: Update,
-        context: ContextTypes.DEFAULT_TYPE,
-        delivery_id,
-    ):
-        """Re-anchor ``current_delivery`` on the delivery the driver TAPPED.
-
-        Each active-delivery card is its own Telegram message, but PTB gives a
-        driver ONE ``context.user_data`` and ``current_delivery`` is a single
-        overwritten key. A driver who opens B and then acts on A's older —
-        still perfectly live — card used to drive A's completion with B's
-        anchor: B's "All N returned" posted against A's place, and A's screen
-        titled with B's order number.
-
-        Every handler that reads the snapshot must therefore compare it against
-        the id in the callback and, on a mismatch, re-read the tapped delivery
-        from ``/delivery/active`` (the same source ``view_active_delivery``
-        builds the card from) rather than trust the stale one.
-
-        Returns the snapshot to act on, or ``None`` when the tapped delivery can
-        no longer be found — the caller MUST refuse to act on that.
-        A snapshot without a ``delivery_id`` (pre-deploy card, cleared
-        user_data) is left exactly as it is: there is nothing to compare, and
-        refusing there would strand drivers mid-trip on a deploy.
-        """
-        info = context.user_data.get('current_delivery') or {}
-        current_id = info.get('delivery_id')
-        if delivery_id is None or current_id is None or current_id == delivery_id:
-            return info
-
-        logger.info(
-            "current_delivery snapshot (%s) does not match the tapped delivery "
-            "(%s); re-anchoring from /delivery/active",
-            current_id, delivery_id,
-        )
-        token = await self._get_auth_token(update, context)
-        if not token:
-            return None
-
-        async with api_client as client:
-            response = await client.get_active_deliveries(token)
-        if not response.success:
-            return None
-
-        data = response.data
-        rows = data if isinstance(data, list) else (data or {}).get('items', [])
-        for row in rows or []:
-            if (row.get('delivery_id') or row.get('id')) != delivery_id:
-                continue
-            # The row IS the card payload `view_active_delivery` whitelists
-            # from; copy it wholesale and add only the derived keys that
-            # handler renames, so this can never fall behind that whitelist.
-            snapshot = dict(row)
-            snapshot['delivery_id'] = delivery_id
-            snapshot.setdefault('origin_lat', row.get('current_location_lat'))
-            snapshot.setdefault('origin_lng', row.get('current_location_lng'))
-            snapshot.setdefault('destination_lat', row.get('destination_latitude'))
-            snapshot.setdefault('destination_lng', row.get('destination_longitude'))
-            context.user_data['current_delivery'] = snapshot
-            return snapshot
-        return None
-
-    async def _refuse_stale_card(self, update: Update, language: str):
-        """The tapped delivery is gone from the driver's active list.
-
-        Acting on the snapshot that happens to be loaded is exactly the bug this
-        guard exists to stop, so say so and send them back to the list.
-        """
-        text = i18n.get('staff.delivery.not_found', language)
-        keyboard = CommonKeyboards.back_button(language, "staff_active_deliveries")
-        if update.callback_query:
-            await update.callback_query.edit_message_text(
-                text, reply_markup=keyboard, parse_mode='HTML'
-            )
-        else:
-            await update.message.reply_text(
-                text, reply_markup=keyboard, parse_mode='HTML'
-            )
 
     @staticmethod
     def _order_brief(context: ContextTypes.DEFAULT_TYPE, language: str) -> str:
@@ -579,6 +512,15 @@ class StatusUpdateHandler(BaseHandler):
             parts = query.data.split('_')
             delivery_id = int(parts[3])
             reason = '_'.join(parts[4:])
+
+            # The confirmation below is titled from the snapshot
+            # (`_order_brief`) and stamps `status='failed'` into it, so the
+            # snapshot must be the TAPPED delivery's -- otherwise a reason
+            # picked on an older card tells the driver a live order failed and
+            # corrupts the open stop's cached card.
+            if await self._anchor_current_delivery(update, context, delivery_id) is None:
+                await self._refuse_stale_card(update, language)
+                return
 
             async with api_client as client:
                 response = await client.update_delivery_status(

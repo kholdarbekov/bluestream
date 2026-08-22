@@ -112,18 +112,37 @@ def test_staff_cod_callback_and_reconciliation_wiring_present():
 
 
 def test_staff_operator_text_entry_patterns_present():
-    """Ensure reply-keyboard operator flows enter conversations via message handlers."""
+    """Ensure reply-keyboard operator flows enter conversations via message handlers.
+
+    The three entry filters must ask the SAME decider the menu escape asks
+    (`_menu_label_tap_filter` -> `_match_menu_label` -> `_resolve_tapped_label`),
+    which resolves the label when the tap ARRIVES.
+
+    They used to be `filters.Regex(...)` compiled by `_menu_text_pattern` at
+    handler-build time — a second expression of "is this text a menu tap", and
+    one frozen at startup: retitling one of these buttons in the admin UI
+    rendered new copy (the keyboard reads `i18n` per render) on a button
+    nothing would answer until the bot was restarted, while the retired copy
+    went on opening a conversation nobody asked for. Behaviour is covered by
+    tests/staff_bot/test_staff_menu_routing_journey.py
+    ::test_a_menu_label_retitled_after_startup_still_routes; this is the ratchet
+    that stops the frozen wiring coming back.
+    """
     text = BOT_FILE.read_text(encoding="utf-8")
     required_fragments = [
-        "create_client_text_pattern = self._menu_text_pattern('staff.menu.create_client')",
-        "search_client_text_pattern = self._menu_text_pattern('staff.menu.search_client')",
-        "create_order_text_pattern = self._menu_text_pattern('staff.menu.create_order')",
-        "filters.Regex(create_client_text_pattern) & ~filters.COMMAND",
-        "filters.Regex(search_client_text_pattern) & ~filters.COMMAND",
-        "filters.Regex(create_order_text_pattern) & ~filters.COMMAND",
+        "create_client_tap = self._menu_label_tap_filter('staff.menu.create_client')",
+        "search_client_tap = self._menu_label_tap_filter('staff.menu.search_client')",
+        "create_order_tap = self._menu_label_tap_filter('staff.menu.create_order')",
+        "create_client_tap & ~filters.COMMAND",
+        "search_client_tap & ~filters.COMMAND",
+        "create_order_tap & ~filters.COMMAND",
     ]
     missing = [fragment for fragment in required_fragments if fragment not in text]
     assert not missing, f"Missing operator text-conversation entry fragments: {missing}"
+    assert "_menu_text_pattern" not in text, (
+        "the build-time label regex is back — menu labels must be resolved at "
+        "dispatch time, by the one decider"
+    )
 
 
 def test_staff_tryout_conversation_and_callbacks_present():

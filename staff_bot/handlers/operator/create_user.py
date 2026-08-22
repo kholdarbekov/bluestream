@@ -20,6 +20,26 @@ logger = logging.getLogger(__name__)
 # Conversation states
 ENTER_PHONE, ENTER_FIRST_NAME, ENTER_LAST_NAME, SELECT_LANGUAGE, CONFIRM_CREATE = range(10, 15)
 
+# Name parts the operator can be asked for, in the order they are read out.
+CLIENT_NAME_PARTS = ('first_name', 'last_name')
+
+
+def build_client_display_name(client_data: dict) -> str:
+    """The customer's name, assembled from the parts that are actually there.
+
+    ONE expression of "does this customer have a surname". The confirm screen
+    used ``if client_data.get('last_name')`` while the success screen used
+    ``f"{first} {last}".strip()`` — and ``.strip()`` removes whitespace, not
+    the literal ``"None"`` that formatting a ``None`` produces. Most callers
+    give one name, so the operator's success screen read "👤 Dilnoza None" and
+    they read that line back to the caller.
+
+    A missing surname is the common case, not an error: the WRITE stores
+    ``last_name: null`` and that is correct. Only the rendering was wrong.
+    """
+    parts = [str(client_data.get(part) or '').strip() for part in CLIENT_NAME_PARTS]
+    return ' '.join(part for part in parts if part)
+
 
 class CreateUserHandler(BaseHandler):
     """Handle client user creation flow"""
@@ -176,11 +196,9 @@ class CreateUserHandler(BaseHandler):
         text = (
             f"👤 <b>{i18n.get('staff.operator.confirm_create_user', language)}</b>\n\n"
             f"📞 {escape_html(client_data['phone'])}\n"
-            f"👤 {escape_html(client_data['first_name'])}"
+            f"👤 {escape_html(build_client_display_name(client_data))}\n"
+            f"🌐 {lang_name}"
         )
-        if client_data.get('last_name'):
-            text += f" {escape_html(client_data['last_name'])}"
-        text += f"\n🌐 {lang_name}"
 
         keyboard = CommonKeyboards.confirm_cancel(
             language,
@@ -221,11 +239,10 @@ class CreateUserHandler(BaseHandler):
                 return ConversationHandler.END
 
             created_user = response.data or {}
-            user_name = f"{client_data.get('first_name', '')} {client_data.get('last_name', '')}".strip()
 
             text = (
                 f"✅ {i18n.get('staff.operator.user_created', language)}\n\n"
-                f"👤 {escape_html(user_name)}\n"
+                f"👤 {escape_html(build_client_display_name(client_data))}\n"
                 f"📞 {escape_html(client_data.get('phone', ''))}"
             )
 
@@ -236,7 +253,30 @@ class CreateUserHandler(BaseHandler):
             else:
                 keyboard = CommonKeyboards.back_button(language)
 
-            await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
+            # PAST THIS POINT THE CUSTOMER EXISTS: the POST returned 2xx.
+            #
+            # Telegram refuses `editMessageText` routinely — "message is not
+            # modified", "message to edit not found" after 48 hours, a bubble
+            # the operator deleted. That is a failure of the REDRAW, not of the
+            # write, and the two must not share an `except`: the generic "an
+            # error occurred" told an operator mid-call that a customer who
+            # exists was never created, and the natural next move is to create
+            # them again. Report what is true — it was created — and let the
+            # stale screen be the smaller problem.
+            try:
+                await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
+            except Exception as render_error:
+                logger.warning(
+                    "Client %s created but the operator's success screen could not be "
+                    "rendered: %s",
+                    created_user.get('id'),
+                    render_error,
+                )
+                await self._notify_user(
+                    update,
+                    f"✅ {i18n.get('staff.operator.user_created', language)}",
+                    show_alert=True,
+                )
 
         except Exception as e:
             logger.error(f"Error creating client user: {e}", exc_info=True)

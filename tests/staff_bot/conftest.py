@@ -7,8 +7,18 @@ from pathlib import Path
 
 BOT_DIR = Path(__file__).resolve().parents[2]
 
+# APPENDED, never inserted at position 0. `tests/telegram_bot/conftest.py`
+# ranks `telegram_bot/` FIRST so the customer bot's workdir-relative bare
+# imports (`from config import config`) resolve to `telegram_bot/config.py`.
+# Conftest files are imported once, in collection order, so a `sys.path.insert(
+# 0, repo_root)` here would outrank it for the rest of the worker process and
+# every telegram_bot module would then fail to import with
+#     ImportError: cannot import name 'config' from 'config' (/app/config.py)
+# — which is exactly what running the two bot suites in one pytest invocation
+# used to do. The repo root is already importable as pytest's rootdir; this
+# append only guarantees it.
 if str(BOT_DIR) not in sys.path:
-    sys.path.insert(0, str(BOT_DIR))
+    sys.path.append(str(BOT_DIR))
 
 
 # `staff_bot/bot.py` runs with WORKDIR=/app/staff_bot in production, so it uses

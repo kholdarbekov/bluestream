@@ -20,16 +20,51 @@ BOT_DIR = Path(__file__).resolve().parents[2] / "telegram_bot"
 # must be evicted too. Mirrors `tests/integration/_bot_import.py`, which solves
 # the same collision from the other side.
 _BOT_PATH = str(BOT_DIR)
-while _BOT_PATH in sys.path:
-    sys.path.remove(_BOT_PATH)
-sys.path.insert(0, _BOT_PATH)
 
-for _shadowed in ("config", "i18n", "api_client", "handlers", "keyboards", "utils"):
-    _existing = sys.modules.get(_shadowed)
-    if _existing is not None:
-        _origin = getattr(_existing, "__file__", None) or ""
-        if not _origin.startswith(_BOT_PATH):
-            sys.modules.pop(_shadowed, None)
+
+def _prioritise_bot_path():
+    """Rank ``telegram_bot/`` ahead of the repo root on ``sys.path``.
+
+    PRESENCE IS NOT ENOUGH, and doing this once at conftest-import time is not
+    enough either. pytest's default ``--import-mode=prepend`` inserts a test
+    module's basedir at ``sys.path[0]`` as it imports EACH module, so collecting
+    anything under ``tests/`` re-promotes ``/app`` above ``/app/telegram_bot``.
+    The bot's workdir-relative ``from config import config`` then resolves to
+    the repo-root ``config.py``, which exposes ``Config`` (a class) and not
+    ``config`` (an instance), and every module here fails at COLLECTION:
+
+        ImportError: cannot import name 'config' from 'config' (/app/config.py)
+
+    That is why running ``tests/telegram_bot/`` and ``tests/staff_bot/`` in one
+    pytest invocation used to error out 29 modules while each directory passed
+    alone. Re-asserted from ``pytest_collectstart`` below, immediately before
+    each module in this directory is imported.
+
+    ``sys.path`` is only consulted on a cache MISS, so a stale ``sys.modules``
+    entry pointing outside the bot directory must be evicted too. Mirrors
+    ``tests/integration/_bot_import.py``, which solves the same collision from
+    the other side.
+    """
+    while _BOT_PATH in sys.path:
+        sys.path.remove(_BOT_PATH)
+    sys.path.insert(0, _BOT_PATH)
+
+    for shadowed in ("config", "i18n", "api_client", "handlers", "keyboards", "utils"):
+        existing = sys.modules.get(shadowed)
+        if existing is None:
+            continue
+        origin = getattr(existing, "__file__", None) or ""
+        if not origin.startswith(_BOT_PATH):
+            sys.modules.pop(shadowed, None)
+
+
+_prioritise_bot_path()
+
+
+def pytest_collectstart(collector):
+    """Re-assert the path order before pytest imports a module in this dir."""
+    if str(getattr(collector, "path", "")).startswith(str(BOT_DIR.parent / "tests" / "telegram_bot")):
+        _prioritise_bot_path()
 
 
 # Importing `telegram_bot.bot` (e.g. in test_support_capture.py) runs

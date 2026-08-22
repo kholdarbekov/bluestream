@@ -13,6 +13,11 @@ from telegram.ext import ContextTypes
 
 from staff_bot.i18n import i18n
 from staff_bot.database import db_manager, StaffUserRepository
+from staff_bot.keyboards.common import CommonKeyboards
+# Module-level so this module carries the same `api_client` seam every
+# handler module does — the guard below reads the backend, and a test that
+# swaps a handler module's client has to be able to swap this one too.
+from staff_bot.api_client import api_client
 
 logger = logging.getLogger(__name__)
 
@@ -259,6 +264,98 @@ class BaseHandler:
                 logger.warning("Failed to cache re-auth tokens for user %s: %s", user_id, e)
 
         return access_token
+
+    # ------------------------------------------------------------------
+    # The stale-card guard.
+    #
+    # Every staff card is its own Telegram message; PTB gives the driver ONE
+    # `context.user_data`, and `current_delivery` is a single overwritten key.
+    # "Act on the delivery whose button was tapped" is therefore a rule of the
+    # BOT, not of one handler group — the money handlers needed it first, then
+    # Navigate, and the next screen that reads the snapshot will need it too.
+    # It lives here so a caller inherits it instead of instantiating a sibling
+    # handler to borrow its privates (which is how a second copy starts).
+    # ------------------------------------------------------------------
+
+    async def _anchor_current_delivery(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        delivery_id,
+    ):
+        """Re-anchor ``current_delivery`` on the delivery the driver TAPPED.
+
+        Each active-delivery card is its own Telegram message, but PTB gives a
+        driver ONE ``context.user_data`` and ``current_delivery`` is a single
+        overwritten key. A driver who opens B and then acts on A's older —
+        still perfectly live — card used to drive A's completion with B's
+        anchor: B's "All N returned" posted against A's place, and A's screen
+        titled with B's order number.
+
+        Every handler that reads the snapshot must therefore compare it against
+        the id in the callback and, on a mismatch, re-read the tapped delivery
+        from ``/delivery/active`` (the same source ``view_active_delivery``
+        builds the card from) rather than trust the stale one.
+
+        Returns the snapshot to act on, or ``None`` when the tapped delivery can
+        no longer be found — the caller MUST refuse to act on that.
+        A snapshot without a ``delivery_id`` (pre-deploy card, cleared
+        user_data) is left exactly as it is: there is nothing to compare, and
+        refusing there would strand drivers mid-trip on a deploy.
+        """
+        info = context.user_data.get('current_delivery') or {}
+        current_id = info.get('delivery_id')
+        if delivery_id is None or current_id is None or current_id == delivery_id:
+            return info
+
+        logger.info(
+            "current_delivery snapshot (%s) does not match the tapped delivery "
+            "(%s); re-anchoring from /delivery/active",
+            current_id, delivery_id,
+        )
+        token = await self._get_auth_token(update, context)
+        if not token:
+            return None
+
+        async with api_client as client:
+            response = await client.get_active_deliveries(token)
+        if not response.success:
+            return None
+
+        data = response.data
+        rows = data if isinstance(data, list) else (data or {}).get('items', [])
+        for row in rows or []:
+            if (row.get('delivery_id') or row.get('id')) != delivery_id:
+                continue
+            # The row IS the card payload `view_active_delivery` whitelists
+            # from; copy it wholesale and add only the derived keys that
+            # handler renames, so this can never fall behind that whitelist.
+            snapshot = dict(row)
+            snapshot['delivery_id'] = delivery_id
+            snapshot.setdefault('origin_lat', row.get('current_location_lat'))
+            snapshot.setdefault('origin_lng', row.get('current_location_lng'))
+            snapshot.setdefault('destination_lat', row.get('destination_latitude'))
+            snapshot.setdefault('destination_lng', row.get('destination_longitude'))
+            context.user_data['current_delivery'] = snapshot
+            return snapshot
+        return None
+
+    async def _refuse_stale_card(self, update: Update, language: str):
+        """The tapped delivery is gone from the driver's active list.
+
+        Acting on the snapshot that happens to be loaded is exactly the bug this
+        guard exists to stop, so say so and send them back to the list.
+        """
+        text = i18n.get('staff.delivery.not_found', language)
+        keyboard = CommonKeyboards.back_button(language, "staff_active_deliveries")
+        if update.callback_query:
+            await update.callback_query.edit_message_text(
+                text, reply_markup=keyboard, parse_mode='HTML'
+            )
+        else:
+            await update.message.reply_text(
+                text, reply_markup=keyboard, parse_mode='HTML'
+            )
 
     async def _handle_auth_error(self, update: Update, language: str):
         """Handle authentication error."""

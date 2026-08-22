@@ -546,15 +546,28 @@ class TestCartEditReturnFlagClearing:
         monkeypatch.setattr(orders_module, "get_auth_token", AsyncMock(return_value="tok"))
         monkeypatch.setattr(orders_module, "api_client", fake)
 
-        # Stub out payment_handlers.send_payment_link to avoid import side-effects
-        from unittest.mock import MagicMock, patch
+        # Stub out payment_handlers.send_payment_link to avoid import side-effects.
+        #
+        # ONE patch, via monkeypatch. This used to `patch(...)` the attribute AND
+        # then monkeypatch the SAME attribute inside the with-block, which
+        # inverts the restore: monkeypatch saved the value it found (the mock,
+        # already installed by patch), the with-block put the real object back on
+        # exit, and teardown then reinstalled the MOCK — permanently, for every
+        # later test in the worker.
+        #
+        # `confirm_order` does `from handlers.payments import payment_handlers`
+        # at call time, so it reads this module attribute and one patch is
+        # enough. The leak was invisible until a dispatcher test asked whether
+        # POST /api/v1/payments/create had actually happened: it had not, because
+        # the leaked mock answered True without ever calling the backend.
+        from unittest.mock import MagicMock
+
+        import handlers.payments as payments_module
+
         fake_payment_handlers = MagicMock()
         fake_payment_handlers.send_payment_link = AsyncMock(return_value=True)
+        monkeypatch.setattr(payments_module, "payment_handlers", fake_payment_handlers)
 
-        with patch("handlers.payments.payment_handlers", fake_payment_handlers):
-            # Also patch the import inside confirm_order's local scope
-            import handlers.payments as payments_module
-            monkeypatch.setattr(payments_module, "payment_handlers", fake_payment_handlers)
-            await handler.confirm_order(update, context)
+        await handler.confirm_order(update, context)
 
         assert context.user_data.get("cart_edit_return") is None

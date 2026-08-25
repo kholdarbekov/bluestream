@@ -329,3 +329,116 @@ class TestRefreshAffordance:
         assert "staff_back_to_main" in callbacks
         # Still no optimize button: there is no route left to optimize.
         assert "staff_optimize_routes" not in callbacks
+
+
+@pytest.mark.unit
+class TestAllViewStopDetail:
+    """The all-stops list must name the customer and the goods (2026-08-25).
+
+    A driver reading the hub used to see only `#1042  Chilanzar` — enough to
+    tap, not enough to plan (which stop is the 3-bottle drop, which is the
+    regular). Both fields already ride in the SAME payload the card renders,
+    so this is a render change with no new API surface.
+    """
+
+    def test_each_stop_names_the_customer_and_lists_items(self):
+        items = [_item(11, "1042"), _item(12, "1043", district="Yunusobod")]
+        items[1]["customer_name"] = "Aziza"
+        items[1]["items"] = [
+            {"product_name": "19 litrlik suv", "quantity": 2},
+            {"product_name": "Stakan", "quantity": 1},
+        ]
+        text, _ = route_card.build_all_view(_payload(items), "en")
+
+        # Name and items are SEPARATE lines under the stop row (chosen layout),
+        # and the items line packs a multi-item order onto one comma-joined line.
+        assert "1. #1042  Chilanzar" in text
+        assert "👤 Umar" in text
+        assert "📦 19 litrlik suv ×3" in text
+        assert "👤 Aziza" in text
+        assert "📦 19 litrlik suv ×2, Stakan ×1" in text
+
+        lines = [ln.strip() for ln in text.splitlines()]
+        i = lines.index("👤 Aziza")
+        assert lines[i - 1].endswith("2. #1043  Yunusobod")
+        assert lines[i + 1] == "📦 19 litrlik suv ×2, Stakan ×1"
+
+    def test_missing_name_or_items_skips_only_that_line(self):
+        items = [_item(11, "1042"), _item(12, "1043")]
+        items[0]["customer_name"] = ""
+        items[1]["items"] = []
+        text, _ = route_card.build_all_view(_payload(items), "en")
+
+        assert text.count("👤") == 1  # only the second stop has a name
+        assert text.count("📦") == 1  # only the first stop has items
+        # Both stop rows survive regardless.
+        assert "1. #1042" in text and "2. #1043" in text
+
+    def test_customer_name_and_product_names_are_html_escaped(self):
+        items = [_item(11, "1042")]
+        items[0]["customer_name"] = "A & <b>B</b>"
+        items[0]["items"] = [{"product_name": "5 L <tag>", "quantity": 1}]
+        text, _ = route_card.build_all_view(_payload(items), "en")
+
+        assert "A &amp; &lt;b&gt;B&lt;/b&gt;" in text
+        assert "5 L &lt;tag&gt;" in text
+        assert "<b>B</b>" not in text
+
+    def test_quantities_use_format_quantity_not_int(self):
+        """A 1.5-unit line must read ×1.5, and 3.0 must read ×3 — the same
+        rule the detail card uses (int() would truncate 1.5 to 1)."""
+        items = [_item(11, "1042")]
+        items[0]["items"] = [
+            {"product_name": "Katta suv", "quantity": 1.5},
+            {"product_name": "Kichik suv", "quantity": 3.0},
+        ]
+        text, _ = route_card.build_all_view(_payload(items), "en")
+        assert "📦 Katta suv ×1.5, Kichik suv ×3" in text
+
+    def test_long_route_stays_under_the_telegram_limit(self):
+        """40 stops × 3 lines would blow past 4096 and Telegram would reject
+        the WHOLE card, leaving the driver with a stale message."""
+        items = []
+        for n in range(40):
+            it = _item(100 + n, f"TG_00{n:04d}_26", district=f"Massiv nomi {n}")
+            it["customer_name"] = f"Mijoz Ismi Familiyasi {n}"
+            it["items"] = [
+                {"product_name": "19 litrlik tozalangan suv", "quantity": 3},
+                {"product_name": "Bir martalik stakan to'plami", "quantity": 2},
+            ]
+            items.append(it)
+        text, kb = route_card.build_all_view(_payload(items), "en")
+
+        assert len(text) <= 4096
+        # EVERY stop still has its row and its tap target — only the extra
+        # detail lines are dropped.
+        for n in range(40):
+            assert f"#TG_00{n:04d}_26" in text
+        btns = _buttons(kb)
+        for n in range(40):
+            assert any(c == f"staff_view_active_{100 + n}" for _, c, _ in btns)
+
+    def test_detail_drops_from_the_tail_as_a_contiguous_prefix(self):
+        """Detail must survive on a leading run of stops and stop there — no
+        interleaving where stop 30 gets detail because it happened to be
+        shorter than stop 12."""
+        items = []
+        for n in range(40):
+            it = _item(100 + n, f"TG_00{n:04d}_26", district=f"Massiv nomi {n}")
+            it["customer_name"] = f"Mijoz Ismi Familiyasi {n}"
+            it["items"] = [{"product_name": "19 litrlik tozalangan suv", "quantity": 3}]
+            items.append(it)
+        text, _ = route_card.build_all_view(_payload(items), "en")
+
+        detailed = [n for n in range(40) if f"Mijoz Ismi Familiyasi {n}" in text]
+        assert detailed, "at least the first stops must keep their detail"
+        assert detailed == list(range(len(detailed))), "detail must be a leading run"
+        assert len(detailed) < 40, "this fixture is meant to overflow"
+
+    def test_short_route_keeps_detail_on_every_stop(self):
+        items = [_item(10 + n, f"104{n}") for n in range(6)]
+        for n, it in enumerate(items):
+            it["customer_name"] = f"Mijoz {n}"
+        text, _ = route_card.build_all_view(_payload(items), "en")
+        for n in range(6):
+            assert f"👤 Mijoz {n}" in text

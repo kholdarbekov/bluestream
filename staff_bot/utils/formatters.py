@@ -4,7 +4,7 @@ Format order details, delivery status, addresses, etc. for Telegram messages.
 """
 import html
 from decimal import Decimal, InvalidOperation
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 from datetime import datetime
 from staff_bot.i18n import i18n
 
@@ -251,6 +251,31 @@ def format_order_card(order: Dict[str, Any], language: str) -> str:
     return '\n'.join(lines)
 
 
+def format_delivery_item_labels(delivery: Dict[str, Any]) -> List[str]:
+    """`["19 litrlik suv ×3", "Stakan ×1"]` — the ONE rule for how an order
+    line reads on a driver's screen.
+
+    Two surfaces render these: the compact order card (one label per line,
+    :func:`format_active_delivery_summary`) and the route card's all-stops
+    list (comma-joined onto a single line). Both needed to agree on which
+    payload field holds the name (`product_name`, or `name` on the cached
+    `current_delivery` snapshot), that a nameless line is dropped rather
+    than shown as a bare quantity, and that the quantity goes through
+    :func:`format_quantity` — `int()` would truncate a 1.5-unit line to 1.
+    Written out twice those rules drift silently, so they live here.
+
+    Labels come back HTML-escaped, ready to drop into a Telegram
+    HTML-parse-mode message.
+    """
+    labels = []
+    for item in delivery.get('items') or []:
+        name = escape_html(item.get('product_name') or item.get('name') or '')
+        if not name:
+            continue
+        labels.append(f"{name} ×{format_quantity(item.get('quantity', 1))}")
+    return labels
+
+
 def format_active_delivery_summary(
     delivery: Dict[str, Any],
     language: str,
@@ -314,12 +339,8 @@ def format_active_delivery_summary(
     if instructions:
         lines.append(f"    📝 {instructions}")
 
-    for item in delivery.get('items') or []:
-        name = escape_html(item.get('product_name') or item.get('name') or '')
-        if not name:
-            continue
-        qty = format_quantity(item.get('quantity', 1))
-        lines.append(f"📦 {name} ×{qty}")
+    for label in format_delivery_item_labels(delivery):
+        lines.append(f"📦 {label}")
 
     if include_money:
         total = format_currency(delivery.get('total_amount'), language=language)

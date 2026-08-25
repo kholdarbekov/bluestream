@@ -23,6 +23,7 @@ from staff_bot.utils import route_card_state
 from staff_bot.utils.formatters import (
     escape_html,
     format_active_delivery_summary,
+    format_delivery_item_labels,
     format_local_time,
 )
 from staff_bot.utils.render_signature import compute_render_signature
@@ -47,6 +48,12 @@ class RenderOutcome(str, Enum):
 _KEYCAPS = {1: "1️⃣", 2: "2️⃣", 3: "3️⃣", 4: "4️⃣", 5: "5️⃣",
             6: "6️⃣", 7: "7️⃣", 8: "8️⃣", 9: "9️⃣", 10: "🔟"}
 NAV_URL_MAX_STOPS = 5
+# Telegram rejects a message body over 4096 characters outright, so the
+# all-stops view budgets itself below that and drops per-stop detail rather
+# than let a long route fail to render at all. The margin absorbs the header's
+# HTML tags, which count toward the limit as sent.
+ALL_VIEW_MAX_CHARS = 3900
+_STOP_DETAIL_INDENT = "      "
 
 
 def _stop_number_label(n: int) -> str:
@@ -195,11 +202,58 @@ def build_all_view(payload: Dict[str, Any], language: str, with_seconds: bool = 
         f" · {i18n.get('staff.route.updated_at', language, time=format_local_time(with_seconds=with_seconds))}",
         "",
     ]
+    # Two passes: build every stop's row plus its OPTIONAL detail lines, then
+    # spend the remaining character budget on detail from the top down. The
+    # rows themselves are never dropped -- a stop missing from the text while
+    # its number button still sits on the keyboard is a card that lies.
+    rows: List[Tuple[str, List[str]]] = []
     for pos, item in enumerate(items, start=1):
         marker = "▶️ " if _delivery_id(item) == committed_id and committed_id is not None else "  "
         number = escape_html(item.get("order_number") or "")
         place = escape_html(item.get("district") or item.get("address") or "")
-        lines.append(f"{marker}{pos}. #{number}  {place}")
+        detail = []
+        customer = escape_html(item.get("customer_name") or "")
+        if customer:
+            detail.append(f"{_STOP_DETAIL_INDENT}👤 {customer}")
+        # Comma-joined onto ONE line: a driver planning a route needs to know
+        # this is the three-bottle drop, not to scroll a per-product list.
+        # Labels come from the same SSOT the detail card renders.
+        item_labels = format_delivery_item_labels(item)
+        if item_labels:
+            detail.append(f"{_STOP_DETAIL_INDENT}📦 {', '.join(item_labels)}")
+        rows.append((f"{marker}{pos}. #{number}  {place}", detail))
+
+    # Telegram hard-rejects a message over 4096 chars, and the failure mode is
+    # the WHOLE card going stale, not a truncated one -- so a 40-stop route
+    # must degrade rather than overflow. Detail is kept as a contiguous
+    # LEADING run (`break`, not `continue`): the stops a driver reads first
+    # are the ones worth the budget, and a gappy list where stop 30 has detail
+    # because it happened to be shorter than stop 12 reads as a bug.
+    #
+    # This budgets the DETAIL only; the stop rows themselves are always
+    # emitted. A route long enough that the bare rows alone exceed the limit
+    # (~90+ stops) would still overflow, exactly as it did before this view
+    # carried any detail -- bounding that means dropping stops from a list
+    # whose number buttons still promise them, which is a separate call.
+    #
+    # `chars_used` / `detail_chars`, NOT `used` / `cost`: this counts
+    # CHARACTERS, and `cost` is a money word that trips the show-vs-settle
+    # scanner (tests/unit/test_show_vs_settle_invariant.py). The fix there is
+    # to stop the name claiming to be money, never a LEDGER entry -- that
+    # guard's whole value is that it stays sharp for real money arithmetic.
+    chars_used = sum(len(line) + 1 for line in lines) + sum(len(r) + 1 for r, _ in rows)
+    detailed_through = 0
+    for _stop_row, stop_detail in rows:
+        detail_chars = sum(len(line) + 1 for line in stop_detail)
+        if chars_used + detail_chars > ALL_VIEW_MAX_CHARS:
+            break
+        chars_used += detail_chars
+        detailed_through += 1
+
+    for index, (stop_row, stop_detail) in enumerate(rows):
+        lines.append(stop_row)
+        if index < detailed_through:
+            lines.extend(stop_detail)
     text = "\n".join(lines)
 
     keyboard: List[List[InlineKeyboardButton]] = []

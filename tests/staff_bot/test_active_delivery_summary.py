@@ -171,3 +171,40 @@ class TestFormatActiveDeliverySummary:
         d = _cash_delivery(items=[{"product_name": "suv", "quantity": 2.0}])
         out = format_active_delivery_summary(d, "uz")
         assert "suv ×2" in out and "×2.0" not in out
+
+
+@pytest.mark.unit
+class TestItemLabelSSOT:
+    """`format_delivery_item_labels` is the ONE place that decides how an order
+    line reads. Two surfaces render it — the detail card (one per line) and the
+    route card's all-stops list (comma-joined) — and they must never drift on
+    which field holds the name or how the quantity is formatted.
+    """
+
+    def test_detail_card_item_lines_are_exactly_the_shared_labels(self):
+        from staff_bot.utils.formatters import format_delivery_item_labels
+
+        delivery = _cash_delivery(items=[
+            {"product_name": "19 litrlik suv", "quantity": 3},
+            {"name": "Stakan", "quantity": 1.5},
+            {"product_name": "", "quantity": 9},          # nameless: dropped
+        ])
+        labels = format_delivery_item_labels(delivery)
+        assert labels == ["19 litrlik suv ×3", "Stakan ×1.5"]
+
+        out = format_active_delivery_summary(delivery, "uz")
+        rendered = [ln.strip()[2:].strip() for ln in out.splitlines() if ln.strip().startswith("📦")]
+        assert rendered == labels
+
+    def test_labels_are_html_escaped_once(self):
+        from staff_bot.utils.formatters import format_delivery_item_labels
+
+        labels = format_delivery_item_labels({"items": [{"product_name": "5 L <a & b>", "quantity": 1}]})
+        assert labels == ["5 L &lt;a &amp; b&gt; ×1"]
+
+    def test_missing_or_empty_items_yields_no_labels(self):
+        from staff_bot.utils.formatters import format_delivery_item_labels
+
+        assert format_delivery_item_labels({}) == []
+        assert format_delivery_item_labels({"items": None}) == []
+        assert format_delivery_item_labels({"items": []}) == []

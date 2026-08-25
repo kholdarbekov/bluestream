@@ -360,6 +360,19 @@ class CartService:
                 # Calculate suggested quantity (average per order)
                 suggested_quantity = max(1, min(int(item.total_quantity / item.order_count), 10))  # Cap at 10
 
+                # A marking-code product's stock is its code pool, which gates only
+                # orders that will consume a code -- same reasoning as the cart
+                # guard in _check_product_quantity_availability. Read fresh here
+                # rather than a fixed rail: "your usual" doesn't know the rail
+                # either, and a cash purchase must not be dropped from it.
+                from business_app.services.product_fiscal_service import ProductFiscalService
+
+                in_stock = (
+                    not product.track_inventory
+                    or ProductFiscalService.is_stock_derived(product)
+                    or product.stock_quantity > 0
+                )
+
                 suggestions.append(
                     {
                         "product_id": product.id,
@@ -369,7 +382,7 @@ class CartService:
                         "order_frequency": item.order_count,
                         "total_ordered": item.total_quantity,
                         "last_ordered": item.last_ordered.isoformat() if item.last_ordered else None,
-                        "in_stock": not product.track_inventory or product.stock_quantity > 0,
+                        "in_stock": in_stock,
                         "stock_quantity": product.stock_quantity if product.track_inventory else None,
                     }
                 )
@@ -637,18 +650,15 @@ class CartService:
             subtotal += item_total
             product_images = product.images or []
             product_image = product_images[0] if isinstance(product_images, list) and product_images else None
-            in_stock = True
-            available_quantity = None
-            reserved_quantity = None
-
-            if product.track_inventory:
-                availability_result = self.inventory_service.check_product_availability(
-                    product.id,
-                    cart_item.quantity,
-                )
-                in_stock = availability_result.is_available
-                available_quantity = availability_result.available_quantity
-                reserved_quantity = availability_result.reserved_quantity
+            # Routed through the SAME chokepoint as add/update/checkout
+            # (_product_availability_result) instead of calling the inventory
+            # service directly -- a direct call skipped the marking-code rule and
+            # published in_stock=false for a derived product at an empty pool,
+            # contradicting every other surface.
+            availability_result = self._product_availability_result(product, cart_item.quantity)
+            in_stock = True if availability_result is None else availability_result.is_available
+            available_quantity = availability_result.available_quantity if availability_result else None
+            reserved_quantity = availability_result.reserved_quantity if availability_result else None
 
             items_with_details.append(
                 {
@@ -716,16 +726,38 @@ class CartService:
 
         return effective_price
 
+    def _product_availability_result(self, product: Product, requested_quantity: int):
+        """The reservation-aware availability result, or None when stock does not gate.
+
+        THE cart-side chokepoint for "does stock constrain this line?" -- every
+        cart surface must ask through here, including the read-only summary,
+        or the marking-code rule below is silently skipped on that surface.
+
+        None means nothing here caps the purchase: either the product is not
+        inventory-tracked, or its stock is its marking-code pool, which gates only
+        orders that will consume a code. The cart does not know the payment rail,
+        so it does not gate; create_order does, once the rail is known.
+        """
+        if not product.track_inventory:
+            return None
+
+        from business_app.services.product_fiscal_service import ProductFiscalService
+
+        if ProductFiscalService.is_stock_derived(product):
+            return None
+
+        return self.inventory_service.check_product_availability(product.id, requested_quantity)
+
     def _check_product_quantity_availability(
         self,
         product: Product,
         requested_quantity: int,
     ) -> Tuple[bool, str]:
         """Return availability verdict and user-facing error for inventory-tracked products."""
-        if not product.track_inventory:
+        result = self._product_availability_result(product, requested_quantity)
+        if result is None:
             return True, ""
 
-        result = self.inventory_service.check_product_availability(product.id, requested_quantity)
         if result.is_available:
             return True, ""
 

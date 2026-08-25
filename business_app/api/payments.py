@@ -30,8 +30,9 @@ from business_app.serializers.payment_serializers import (
 )
 from business_app.utils.decorators import validate_json, rate_limit
 from business_app.utils.constants import PaymeErrors, PaymentMethodType
-from shared.enums import PaymentStatus, PaymentMethod
-from shared.payment_methods import normalize_payment_method
+from shared.enums import PaymentStatus, PaymentMethod, OrderStatus
+from shared.payment_methods import canonical_rail, normalize_payment_method
+from shared.status_transitions import is_valid_order_transition
 from business_app.utils.validation_helpers import (
     validate_list_request_params,
     FilterValidator,
@@ -39,6 +40,7 @@ from business_app.utils.validation_helpers import (
     StatusValidator,
 )
 from business_app.utils.error_handlers import handle_api_exception
+from business_app.utils.payment_projection import FISCALIZED_RAILS
 from business_app.utils.exceptions import ValidationError, NotFoundError, ProviderUnavailableError
 from business_app.utils.prometheus_metrics import (
     record_webhook_received,
@@ -285,6 +287,40 @@ def create_payment():
         requested_payment_method = normalize_payment_method(payment_method)
         if requested_payment_method not in _SELF_SERVICE_PAYMENT_METHODS:
             return validation_error_response("Payment method is not available for this order")
+
+        # A cash order may have been accepted while the marking-code pool was
+        # empty, because cash draws no code. Moving it to an online rail makes
+        # it need one. Refuse here with a clear message rather than letting
+        # Click's PREPARE raise into the webhook's generic 503 + Retry-After,
+        # which retries forever and shows the customer nothing.
+        #
+        # This is a FLIP guard: only run it when the rail is actually
+        # changing. An order already on the requested method (e.g. Retry on an
+        # order already sitting on CLICK) must stay payable even though the
+        # shared pool may now read short for that product -- PREPARE would
+        # succeed there because it draws on codes this exact order already
+        # holds, which is exactly what pool_covers_order credits.
+        # CANONICAL rails on both sides -- the THIRD copy of "is this a rail
+        # move", and it was the last one still comparing raw enum members.
+        # `requested_payment_method` is already normalized above, but
+        # `order.payment_method` is not: on a legacy CARD order `CLICK != CARD`
+        # read as a flip, so this guard ran `pool_covers_order` on exactly the
+        # population the rail-lock fix exempted -- and could refuse with
+        # MARKING_CODES_POOL_SHORT for a rail that is not moving at all. That is
+        # the case the comment directly above already declares exempt.
+        if canonical_rail(order.payment_method) != requested_payment_method:
+            from business_app.services.product_fiscal_service import ProductFiscalService
+
+            pool_ok, short_product = ProductFiscalService().pool_covers_order(order, requested_payment_method)
+            if not pool_ok:
+                # get_translation applies **kwargs itself and swallows a bad
+                # placeholder (KeyError/ValueError) by returning the raw
+                # string; a bare `.format(...)` on its result does not, and a
+                # stray "{" in translator-supplied copy would 500 this route.
+                return validation_error_response(
+                    get_translation("api.payments.marking_codes_unavailable", product=short_product),
+                    error_code="MARKING_CODES_POOL_SHORT",
+                )
         existing_payment = Payment.query.filter(
             Payment.order_id == order_id,
             Payment.user_id == current_user_id,
@@ -482,34 +518,184 @@ def get_payments():
     )
 
 
+# --------------------------------------------------------------------------- #
+# The payment-lifecycle refusal vocabulary, SHARED by the two routes that answer
+# "can I get this money back": POST /<payment_id>/cancel (B2) and POST /refund
+# (B4a). Both answer the same two questions, so they speak one VERB-NEUTRAL
+# family rather than two — a second `refund.*` family would put a second copy of
+# the prepaid-balance promise into three languages, which is exactly the drift
+# the project rule forbids. Renamed from `api.payments.error.cancel.*` for that
+# reason: the sentences were never about cancelling specifically.
+# --------------------------------------------------------------------------- #
+
+# REASON keys: one true statement about the PAYMENT.
+R_PENDING_KEY = "api.payments.error.lifecycle.reason_pending"
+R_FISCALIZED_KEY = "api.payments.error.lifecycle.reason_online_fiscalized"
+R_SETTLED_KEY = "api.payments.error.lifecycle.reason_already_settled"
+R_IN_PROGRESS_KEY = "api.payments.error.lifecycle.reason_in_progress"
+R_ENDED_KEY = "api.payments.error.lifecycle.reason_already_ended"
+
+# ADVICE keys: what the customer can actually DO, a property of the ORDER.
+A_CANCEL_ORDER_KEY = "api.payments.error.lifecycle.advice_cancel_order"
+A_ORDER_DELIVERED_KEY = "api.payments.error.lifecycle.advice_order_delivered"
+A_ORDER_ALREADY_CANCELLED_KEY = "api.payments.error.lifecycle.advice_order_already_cancelled"
+A_ORDER_NOT_CANCELLABLE_KEY = "api.payments.error.lifecycle.advice_order_not_cancellable"
+
+# Rails whose COMPLETED payments carry a filed fiscal receipt. Only these are
+# told *why* the money cannot come back — saying "a card or Click payment is
+# never refunded" to someone who paid the driver in cash is simply false.
+#
+# Imported, not re-typed: this is the SAME set `PaymentService.process_refund`
+# refuses on and `CashCollectionService.credit_customer_for_dead_order_prepayment`
+# credits on, so the copy that explains the rule cannot drift from the copy that
+# enforces it.
+_FISCALIZED_RAILS = FISCALIZED_RAILS
+
+# "The money is in" vs "still moving". PENDING is handled separately because it
+# is the only status where nothing has been attempted yet.
+_MONEY_IS_IN_STATUSES = frozenset({PaymentStatus.COMPLETED})
+_IN_FLIGHT_STATUSES = frozenset({PaymentStatus.PROCESSING, PaymentStatus.PARTIALLY_PAID})
+
+
+def _payment_refusal_reason_key(payment):
+    """Which true thing to say about THIS payment.
+
+    Rail-specific copy is gated on the rail; status copy is gated on the status.
+    Nothing here mentions the order — that is the advice's job, so the two halves
+    can be recombined without ever contradicting each other.
+    """
+    if payment.status in _MONEY_IS_IN_STATUSES:
+        if payment.payment_method in _FISCALIZED_RAILS:
+            return R_FISCALIZED_KEY
+        return R_SETTLED_KEY
+    if payment.status in _IN_FLIGHT_STATUSES:
+        return R_IN_PROGRESS_KEY
+    if payment.status == PaymentStatus.PENDING:
+        return R_PENDING_KEY
+    # FAILED / CANCELLED / REFUNDED / PARTIALLY_REFUNDED: over, no money moving.
+    return R_ENDED_KEY
+
+
+def _order_cancel_advice_key(order):
+    """What the customer can actually do about the ORDER — or ``None``.
+
+    Never advises an action ``OrderService.cancel_order`` would refuse: telling a
+    customer with a DELIVERED order to "cancel the order instead" sends them into
+    a ConflictError 400, which is worse than saying nothing.
+    """
+    if order is None:
+        return None
+
+    status = order.status
+    if isinstance(status, str):
+        try:
+            status = OrderStatus(status)
+        except ValueError:
+            # Unknown status: say nothing rather than something false.
+            return None
+
+    # NOT a second copy of the cancellability rule: this asks the same
+    # ``shared/status_transitions.py`` SSOT that ``OrderService.update_order_status``
+    # asks (via ``_is_valid_status_transition``), so the advice cannot drift from
+    # what the cancel path will actually accept. An enumerated
+    # {DELIVERED, CANCELLED} mirror of ``cancel_order``'s explicit guard looked
+    # right and was wrong: RETURNED passes that guard and then dies deeper with
+    # "Cannot change status from returned to cancelled", so the customer would
+    # still have been sent into a 400.
+    if is_valid_order_transition(status, OrderStatus.CANCELLED):
+        return A_CANCEL_ORDER_KEY
+
+    # Not cancellable — pick the most specific TRUE thing we can say.
+    if status == OrderStatus.DELIVERED:
+        return A_ORDER_DELIVERED_KEY
+    if status == OrderStatus.CANCELLED:
+        return A_ORDER_ALREADY_CANCELLED_KEY
+    return A_ORDER_NOT_CANCELLABLE_KEY
+
+
 @payments_bp.route("/<int:payment_id>/cancel", methods=["POST"])
 @jwt_required()
+@handle_api_exception
 def cancel_payment(payment_id):
-    """Cancel a pending payment"""
-    try:
-        current_user_id = get_jwt_identity()
+    """Refuse to cancel a payment, and say something true about what to do.
 
-        payment = Payment.query.filter_by(id=payment_id, user_id=current_user_id).first()
+    A payment is NEVER cancelled on its own. The owner's rule (2026-08-24):
 
-        if not payment:
-            return not_found_response(message=get_translation("api.payments.error.payment_not_found"))
+        "the payment that is done via click/card is non-returnable. We don't
+         return the payment. The reason is we can't undo fiscalization once we
+         submit it. Cancelling payment only makes chaos in the payment vs
+         fiscalization. So our final business logic is we never ever cancel
+         card / click paid payments. We can cancel the order itself, and in that
+         case the payment will settle as prepaid customer balance."
 
-        if payment.status != PaymentStatus.PENDING:
-            return error_response(message=get_translation("api.payments.error.only_pending_cancellable"))
+    which is the customer-facing half of the standing policy
+    (docs/click_payment_policy_rework_plan.md, Phase 4D): *a payment's life ends
+    where the ORDER resolves* — cash at the door, payment of the link, or order
+    cancellation.
 
-        # Cancel payment
-        success = get_payment_service().cancel_payment(payment)
+    Why this route refuses instead of gaining the missing
+    ``PaymentService.cancel_payment`` it used to call (the AttributeError was
+    swallowed by a bare ``except`` and every request 500'd): that method would be
+    a FOURTH way to end a payment independently of its order. B1 has just
+    collapsed the three existing ways into ONE predicate — ``order_is_resolved``
+    (business_app/utils/payment_projection.py) — with four delegating consumers.
+    Adding a fifth expression of "this payment is over" would undo that, and this
+    one would be *customer-triggered*: a cancelled-here-but-live-there payment is
+    precisely the payment/fiscalization divergence the owner's rule forbids.
 
-        if success:
-            return success_response(
-                data={"message": get_translation("api.payments.cancelled"), "payment": serialize_payment(payment)}
-            )
-        else:
-            return internal_error_response(message=get_translation("api.payments.error.cancel_failed"))
+    Why the route is kept rather than deleted: it is a public ``jwt_required``
+    route with no first-party caller (the bot's ``payment_handlers.cancel_payment``
+    is a keyboard-only handler and never calls it), but possible third-party or
+    in-flight clients. For them a correct, translated refusal that names the real
+    action is strictly better than a 404 — and it appears in
+    ``tests/contract/snapshots/api_routes.json``.
 
-    except Exception as e:
-        current_app.logger.error(f"Cancel payment error: {e}")
-        return internal_error_response(message=get_translation("api.payments.error.cancel_failed"))
+    THE MESSAGE IS ``REASON + " " + ADVICE``, along two independent axes:
+
+    * REASON is a function of the PAYMENT (status, and rail only where the rail
+      matters). A single rail-specific message served rail-agnostically told COD
+      customers that "a card or Click payment is never refunded", told holders of
+      a FAILED payment about money that was never taken, and told a PROCESSING
+      payment it had "gone through".
+    * ADVICE is a function of the ORDER. "Cancel the order instead" is only
+      offered when ``OrderService.cancel_order`` would actually accept it;
+      a DELIVERED or already-CANCELLED order gets a true statement instead of
+      advice that dead-ends in a 400.
+
+    Whole sentences joined by a space — never an inline placeholder — so the
+    composition survives translation word order.
+
+    ONE error code, ``PAYMENT_NOT_CANCELLABLE``, because that is the single
+    machine fact this route ever reports. The actionable branch is the typed
+    ``order_cancellable`` flag; a second code saying "cancel the order instead"
+    would be a lie exactly when the order cannot be cancelled.
+    """
+    current_user_id = get_jwt_identity()
+
+    # Ownership is part of the lookup, not a separate check: an id belonging to
+    # someone else must be indistinguishable from an id that does not exist, or
+    # this route becomes a payment-id oracle.
+    payment = Payment.query.filter_by(id=payment_id, user_id=current_user_id).first()
+
+    if not payment:
+        return not_found_response(message=get_translation("api.payments.error.payment_not_found"))
+
+    advice_key = _order_cancel_advice_key(payment.order)
+
+    sentences = [get_translation(_payment_refusal_reason_key(payment))]
+    if advice_key:
+        sentences.append(get_translation(advice_key))
+
+    data = {
+        "error_code": "PAYMENT_NOT_CANCELLABLE",
+        "order_cancellable": advice_key == A_CANCEL_ORDER_KEY,
+    }
+    # ``Payment.order_id`` is nullable and ``exclude_none`` does not reach inside
+    # a plain ``data`` dict, so omit the key rather than emit ``null``.
+    if payment.order_id is not None:
+        data["order_id"] = payment.order_id
+
+    return error_response(message=" ".join(sentences), status_code=400, data=data)
 
 
 @payments_bp.route("/cards", methods=["GET"])
@@ -959,39 +1145,59 @@ def verify_payment(payment_id):
 @payments_bp.route("/refund", methods=["POST"])
 @jwt_required()
 @validate_json(["payment_id"])
+@handle_api_exception
 def request_refund():
-    """Request payment refund"""
-    try:
-        current_user_id = get_jwt_identity()
-        data = request.get_json()
+    """Refuse to refund a payment, and say something true about what to do.
 
-        payment_id = data.get("payment_id")
-        reason = data.get("reason", get_translation("api.payments.refund_reason_customer_request"))
+    THE OWNER'S RULE (2026-08-24): a card/Click payment is never returned,
+    because the fiscal receipt filed for it cannot be undone. Cancel the ORDER
+    instead; the money then settles as prepaid customer balance
+    (``CashCollectionService.credit_customer_for_dead_order_prepayment``).
 
-        payment = Payment.query.filter_by(id=payment_id, user_id=current_user_id).first()
+    WHY THIS ROUTE IS KEPT WHILE THE ADMIN ONE IS DELETED. This is a public
+    ``jwt_required`` surface with no first-party caller but possible in-flight or
+    third-party clients, and it is in ``tests/contract/snapshots/api_routes.json``
+    — for them a translated refusal that names the real action beats a 404. The
+    admin surface (``POST /admin/payments/<id>/refund``) has only first-party
+    callers, admin_ui provably never called it, and keeping it as a refusal would
+    leave exactly the escape hatch the owner ruled out: still listed, still
+    discoverable, one ``if`` from working. The admin's lawful lever is the same
+    as the customer's — cancel the order.
 
-        if not payment:
-            return not_found_response(message=get_translation("api.payments.error.payment_not_found"))
+    Same REASON + ADVICE construction as ``cancel_payment``, sharing its
+    vocabulary: one true statement about the PAYMENT, one about what can be DONE
+    with the ORDER, joined by a space so the composition survives translation
+    word order.
 
-        if payment.status != PaymentStatus.COMPLETED:
-            return error_response(message=get_translation("api.payments.error.only_completed_refundable"))
+    ``PAYMENT_NOT_REFUNDABLE``, not ``PAYMENT_NOT_CANCELLABLE``: a client that
+    asked for a refund must not be answered about cancellability. ``201 -> 400``;
+    ``amount`` and ``reason`` are now ignored — the old handler always passed the
+    full ``payment.amount``, so there is no partial-refund concept to preserve.
+    """
+    current_user_id = get_jwt_identity()
+    payment_id = (request.get_json() or {}).get("payment_id")
 
-        # Request refund
-        refund = get_payment_service().request_refund(payment, reason)
+    # Ownership IS the lookup, never a separate check, or this becomes a
+    # payment-id oracle (see cancel_payment).
+    payment = Payment.query.filter_by(id=payment_id, user_id=current_user_id).first()
+    if not payment:
+        return not_found_response(message=get_translation("api.payments.error.payment_not_found"))
 
-        return created_response(
-            data={
-                "message": get_translation("api.payments.refund_requested"),
-                "refund_id": refund.id,
-                "status": refund.status.value if hasattr(refund.status, "value") else refund.status,
-            }
-        )
+    advice_key = _order_cancel_advice_key(payment.order)
+    sentences = [get_translation(_payment_refusal_reason_key(payment))]
+    if advice_key:
+        sentences.append(get_translation(advice_key))
 
-    except ValueError as e:
-        return error_response(message=str(e))
-    except Exception as e:
-        current_app.logger.error(f"Request refund error: {e}")
-        return internal_error_response(message=get_translation("api.payments.error.refund_failed"))
+    data = {
+        "error_code": "PAYMENT_NOT_REFUNDABLE",
+        "order_cancellable": advice_key == A_CANCEL_ORDER_KEY,
+    }
+    # ``Payment.order_id`` is nullable and ``exclude_none`` does not reach inside
+    # a plain ``data`` dict, so omit the key rather than emit ``null``.
+    if payment.order_id is not None:
+        data["order_id"] = payment.order_id
+
+    return error_response(message=" ".join(sentences), status_code=400, data=data)
 
 
 @payments_bp.route("/exchange-rates", methods=["GET"])

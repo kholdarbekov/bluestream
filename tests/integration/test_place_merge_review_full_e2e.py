@@ -2982,7 +2982,17 @@ def test_the_api_contract_snapshot_still_lists_the_merge_preview_route(db):
     # order to a different delivery day/window post-creation, delegating to
     # OrderScheduleService.reschedule. Unrelated to place-merge; only the
     # estate-wide count moved.
-    assert len(routes) == 566
+    #
+    # 566 -> 565: a route was REMOVED, announced here rather than the count
+    # merely bumped -- POST /api/v1/admin/payments/<int:payment_id>/refund
+    # (admin.refund_payment). Owner ruling 2026-08-24: a card/Click payment is
+    # never returned, because the fiscal receipt filed for it cannot be undone.
+    # The rule binds admins too, so the route was DELETED rather than left
+    # refusing: a refusing admin route is still listed, still discoverable and
+    # one `if` from working. The lawful lever is to cancel the ORDER, which
+    # settles the money as customer prepaid balance. Unrelated to place-merge;
+    # only the estate-wide count moved.
+    assert len(routes) == 565
     entry = next(r for r in routes if r["rule"] == "/api/v1/admin/place-groups/merge-preview")
     assert entry["methods"] == ["GET"]
     assert entry["endpoint"] == "admin.get_place_group_merge_preview"

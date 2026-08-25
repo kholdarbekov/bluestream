@@ -247,11 +247,11 @@ PREPAYMENT_TRANSLATIONS = {
         'uz': '\n🔁 Oldindan to\'langan summadan ishlatildi: {potential_applied} so\'m. Yetkazib berishda to\'lanadi: {payable_after} so\'m.',
         'ru': '\n🔁 Использован предоплаченный остаток: {potential_applied} сум. К оплате при доставке: {payable_after} сум.',
     },
-    'telegram.orders.cod_prepaid_balance': {
-        'en': '💳 COD prepaid balance: {available_balance} UZS',
-        'uz': '💳 Oldindan to\'langan qoldiq: {available_balance} so\'m',
-        'ru': '💳 Предоплаченный остаток: {available_balance} сум',
-    },
+    # MOVED to scripts/seed_backend_translations.py by B4b (one key, one home):
+    # 'telegram.orders.cod_prepaid_balance' and the whole 'telegram.cart.*'
+    # block below it. B4b reworded them so they stop promising an auto-apply
+    # that a card/Click checkout will not honour, and leaving a stale copy here
+    # would mean the next run of this script silently reverted that wording.
     'telegram.orders.cod_prepaid_auto_applied': {
         'en': '🔁 Auto-applied on this COD order: {potential_applied} UZS',
         'uz': '🔁 Ushbu buyurtmaga avtomatik qo\'llaniladi: {potential_applied} so\'m',
@@ -263,24 +263,8 @@ PREPAYMENT_TRANSLATIONS = {
         'ru': '🧾 К оплате при доставке после зачёта: {payable_after} сум',
     },
 
-    # ------------------------------------------------------------------
-    # Telegram bot — cart view (telegram.cart.*)
-    # ------------------------------------------------------------------
-    'telegram.cart.cod_prepaid_balance': {
-        'en': '💳 COD prepaid balance: {available_balance} UZS',
-        'uz': '💳 Oldindan to\'langan qoldiq: {available_balance} so\'m',
-        'ru': '💳 Предоплаченный остаток: {available_balance} сум',
-    },
-    'telegram.cart.cod_prepaid_auto_applied_next': {
-        'en': '🔁 Auto-applied on next COD order: {potential_applied} UZS',
-        'uz': '🔁 Keyingi buyurtmaga avtomatik qo\'llaniladi: {potential_applied} so\'m',
-        'ru': '🔁 Будет зачтено в следующий заказ: {potential_applied} сум',
-    },
-    'telegram.cart.cod_estimated_payable': {
-        'en': '🧾 Estimated COD payable after prepaid: {payable_after} UZS',
-        'uz': '🧾 Predoplata hisobga olingach to\'lanadi: {payable_after} so\'m',
-        'ru': '🧾 К оплате при доставке после зачёта: {payable_after} сум',
-    },
+    # The 'telegram.cart.*' prepayment block lived here until B4b moved it to
+    # scripts/seed_backend_translations.py — see the note above.
 }
 
 

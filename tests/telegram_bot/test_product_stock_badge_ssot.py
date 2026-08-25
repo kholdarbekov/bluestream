@@ -321,3 +321,31 @@ def test_no_hand_written_english_stock_copy_survives_in_utils():
     from utils import MessageBuilder
 
     assert not hasattr(MessageBuilder, "build_product_summary")
+
+
+# ---------------------------------------------------------------------------
+# Task 7 pin: a `None` stock_quantity (a marking-code product whose stock is
+# the code pool, not a warehouse count) means "cannot tell", not "zero" -- so
+# the bot needs no change to stay correct once the backend starts publishing
+# `None` for those products. `test_the_resolver_decides_orderability` above
+# already covers the `(None, 2, True)` case; these two pin the exact claim
+# from the task-7 brief (uncapped quantity selector vs. a real integer zero).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_bot_offers_a_quantity_selector_when_stock_is_uncapped():
+    """A None stock_quantity means 'no cap', so a derived product stays orderable."""
+    product = {"inventory": {"stock_quantity": None, "min_order_quantity": 1}}
+
+    assert ProductHandlers._is_orderable(product) is True
+    floor, ceiling = ProductHandlers._purchase_bounds(product)
+    assert ceiling >= floor
+
+
+@pytest.mark.unit
+def test_bot_still_refuses_when_stock_is_a_real_zero():
+    """Scope boundary: an integer 0 is still a real ceiling of zero."""
+    product = {"inventory": {"stock_quantity": 0, "min_order_quantity": 1}}
+
+    assert ProductHandlers._is_orderable(product) is False

@@ -138,3 +138,94 @@ class TestDualSkuProductGroup:
         r = client.get("/contact")
         assert r.status_code == 200
         assert _find_product_group(r.get_data(as_text=True)) is None
+
+
+@pytest.mark.integration
+class TestDualSkuAvailabilityHonoursDerivedStock:
+    """The ProductGroup on / and /shop is the third publisher of schema.org
+    availability, alongside product_detail.html and /api/public/products.json.
+
+    Its size filter ("10L"/"19L") is exactly the two bottle SKUs, one of which
+    IS the marking-code product -- so reading stock_quantity here advertised
+    OutOfStock on the homepage while the detail page sold the same bottle for
+    cash.
+    """
+
+    @staticmethod
+    def _make_derived(db, product):
+        from business_app.models.product import ProductFiscalProfile
+
+        db.session.add(
+            ProductFiscalProfile(
+                product_id=product.id,
+                fiscalization_enabled=True,
+                requires_marking_codes=True,
+                spic="SPIC-DERIVED",
+            )
+        )
+        product.stock_quantity = 0
+        db.session.commit()
+
+    def test_derived_variant_at_empty_pool_is_in_stock(self, client, two_skus, db):
+        p19, _ = two_skus
+        self._make_derived(db, p19)
+
+        pg = _find_product_group(client.get("/").get_data(as_text=True))
+        big = next(v for v in pg["hasVariant"] if "18.9" in v["size"])
+        assert big["offers"]["availability"] == "https://schema.org/InStock"
+        assert pg["offers"]["availability"] == "https://schema.org/InStock"
+
+    def test_non_derived_variant_at_zero_stock_is_still_out_of_stock(self, client, two_skus, db):
+        """Scope boundary: an ordinary bottle SKU at zero stock still reads OutOfStock."""
+        p19, p10 = two_skus
+        p19.stock_quantity = 0
+        p10.stock_quantity = 0
+        db.session.commit()
+
+        pg = _find_product_group(client.get("/").get_data(as_text=True))
+        assert all(v["offers"]["availability"] == "https://schema.org/OutOfStock" for v in pg["hasVariant"])
+        assert pg["offers"]["availability"] == "https://schema.org/OutOfStock"
+
+
+@pytest.mark.integration
+class TestGoogleMerchantFeedAvailability:
+    """Google Merchant suppresses an out-of-stock item, so publishing OutOfStock
+    for a bottle we are actively selling for cash removes it from Shopping.
+    """
+
+    @staticmethod
+    def _item_for(xml, product_id):
+        for block in re.findall(r"<item>(.*?)</item>", xml, re.S):
+            if f"<g:id>{product_id}</g:id>" in block:
+                return block
+        return None
+
+    def test_derived_product_at_empty_pool_is_in_stock(self, client, two_skus, db):
+        from business_app.models.product import ProductFiscalProfile
+
+        p19, _ = two_skus
+        db.session.add(
+            ProductFiscalProfile(
+                product_id=p19.id,
+                fiscalization_enabled=True,
+                requires_marking_codes=True,
+                spic="SPIC-DERIVED",
+            )
+        )
+        p19.stock_quantity = 0
+        db.session.commit()
+
+        r = client.get("/feeds/google-products.xml")
+        assert r.status_code == 200
+        item = self._item_for(r.get_data(as_text=True), p19.id)
+        assert item is not None, "derived product missing from the Google feed"
+        assert "<g:availability>in stock</g:availability>" in item
+
+    def test_non_derived_product_at_zero_stock_is_still_out_of_stock(self, client, two_skus, db):
+        p19, _ = two_skus
+        p19.stock_quantity = 0
+        db.session.commit()
+
+        r = client.get("/feeds/google-products.xml")
+        item = self._item_for(r.get_data(as_text=True), p19.id)
+        assert "<g:availability>out of stock</g:availability>" in item

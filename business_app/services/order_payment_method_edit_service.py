@@ -188,6 +188,17 @@ class OrderPaymentMethodEditService:
                 else:
                     raise
 
+        if target == "click":
+            # Same pool guard apply_edit's _unwind_to_click enforces at the
+            # money boundary, surfaced here too so get_edit_metadata (which
+            # derives allowed_target_methods from is_editable below) never
+            # offers a target apply_edit is about to refuse.
+            from business_app.services.product_fiscal_service import ProductFiscalService
+
+            pool_ok, short_product = ProductFiscalService().pool_covers_order(order, PaymentMethod.CLICK)
+            if not pool_ok:
+                blocking.append(f"marking_codes_unavailable: {short_product}")
+
         if target == "business_account" and is_delivered:
             warnings.append("delivered_order_will_consume_prepaid_units")
         if current == "business_account" and is_delivered:
@@ -483,6 +494,24 @@ class OrderPaymentMethodEditService:
         with atomic_transaction():
             # 1. Return prepaid units to availability first.
             self.corporate_service.reverse_order_prepayment(order.id, reason=reason, actor_user_id=actor_user_id)
+
+            # Same pool guard as the customer-facing rail move: this sets
+            # consume_marking_codes = True below, so refuse before the flip
+            # rather than after, when only Click's webhook would notice.
+            # `preview()` (above) already blocks this transition for the same
+            # reason, so `apply_edit` never reaches here with a short pool --
+            # this stays as defense-in-depth for a caller that invokes
+            # _unwind_to_click directly, bypassing preview's blocking_reasons
+            # gate. Raising here, inside atomic_transaction(), rolls back step
+            # 1's prepayment reversal too, not just the flip below.
+            from business_app.services.product_fiscal_service import ProductFiscalService
+
+            pool_ok, short_product = ProductFiscalService().pool_covers_order(order, PaymentMethod.CLICK)
+            if not pool_ok:
+                raise ValidationError(
+                    f"Marking codes unavailable for {short_product}; order stays on its current payment method",
+                    error_code="MARKING_CODES_POOL_SHORT",
+                )
 
             # 2. Flip method and reset the payment to a fresh online obligation.
             order.payment_method = PaymentMethod.CLICK

@@ -246,6 +246,79 @@ def test_roundtrip_guard_blocks_target_business_account(db, workplace_user, samp
     assert "business_account" not in metadata["allowed_target_methods"]
 
 
+# 7b. I-5: target click on a marking-code product whose pool is short →
+#     blocking "marking_codes_unavailable", and get_edit_metadata must not
+#     offer click either -- apply_edit is about to refuse it (C-1/I-2's
+#     pool_covers_order), so preview must say so up front rather than
+#     advertise a target the apply step will 400 on.
+def test_preview_blocks_target_click_when_marking_code_pool_is_short(
+    db, workplace_user, sample_product, covered_contract
+):
+    from business_app.models.product import ProductFiscalProfile
+
+    contract, price_row, account, balance = covered_contract
+    order = _make_order(workplace_user, OrderStatus.DELIVERED, PaymentMethod.BUSINESS_ACCOUNT)
+    _add_contract_item(order, sample_product, contract, price_row, quantity=4)
+    db.session.add(
+        ProductFiscalProfile(
+            product_id=sample_product.id,
+            fiscalization_enabled=True,
+            requires_marking_codes=True,
+            spic="SPIC-PREVIEW-SHORT",
+        )
+    )
+    db.session.commit()
+
+    svc = OrderPaymentMethodEditService()
+    plan = svc.preview(order_id=order.id, new_method="click")
+    assert not plan.is_editable
+    assert any(r.startswith("marking_codes_unavailable") for r in plan.blocking_reasons)
+
+    metadata = svc.get_edit_metadata(order)
+    assert "click" not in metadata["allowed_target_methods"]
+    # cash is unaffected -- it never draws a marking code.
+    assert "cash" in metadata["allowed_target_methods"]
+
+
+# 7c. I-5 sufficient-pool counterpart: the same short-pool guard must NOT
+#     block click when the pool actually covers the order -- the risk this
+#     whole task named is a guard that refuses too broadly.
+def test_preview_allows_target_click_when_marking_code_pool_covers_the_order(
+    db, workplace_user, sample_product, covered_contract
+):
+    from business_app.models.product import ProductFiscalProfile, ProductMarkingCode
+    from shared.enums import MarkingCodeStatus
+
+    contract, price_row, account, balance = covered_contract
+    order = _make_order(workplace_user, OrderStatus.DELIVERED, PaymentMethod.BUSINESS_ACCOUNT)
+    _add_contract_item(order, sample_product, contract, price_row, quantity=4)
+    db.session.add(
+        ProductFiscalProfile(
+            product_id=sample_product.id,
+            fiscalization_enabled=True,
+            requires_marking_codes=True,
+            spic="SPIC-PREVIEW-OK",
+        )
+    )
+    for index in range(4):
+        db.session.add(
+            ProductMarkingCode(
+                product_id=sample_product.id,
+                code=f"PREVIEW-OK-{index}",
+                status=MarkingCodeStatus.AVAILABLE,
+            )
+        )
+    db.session.commit()
+
+    svc = OrderPaymentMethodEditService()
+    plan = svc.preview(order_id=order.id, new_method="click")
+    assert plan.is_editable
+    assert not any(r.startswith("marking_codes_unavailable") for r in plan.blocking_reasons)
+
+    metadata = svc.get_edit_metadata(order)
+    assert "click" in metadata["allowed_target_methods"]
+
+
 # --------------------------------------------------------------------------- #
 # apply_edit — into business_account (T1 cash, T2 online)
 # --------------------------------------------------------------------------- #
@@ -665,3 +738,57 @@ def test_apply_t4_business_account_to_click_returns_units_and_creates_link(
     assert result.money_action == "online_payment_link_created"
     assert result.payment_link == fake_link
     assert "business_account_marking_codes_consumed_manual_review" in result.warnings
+
+
+def test_unwind_to_click_short_pool_rolls_back_prepayment_reversal(
+    db, workplace_user, sample_product, covered_contract, delivery_driver
+):
+    """I-3: a short marking-code pool must refuse business_account -> click
+    and leave EVERYTHING as it was.
+
+    _unwind_to_click's own guard (kept as defense-in-depth alongside
+    preview()'s I-5 check) raises INSIDE atomic_transaction(), after step 1
+    (reverse_order_prepayment) has already run -- so the rollback must undo
+    that too, not just skip the payment_method flip. Called directly rather
+    than through apply_edit: apply_edit's preview() pre-check (I-5) would
+    otherwise short-circuit before _unwind_to_click ever starts the
+    transaction this test is proving rolls back correctly.
+    """
+    from business_app.models.product import ProductFiscalProfile
+
+    contract, price_row, account, balance = covered_contract
+    order = _seed_business_account_settled_order(
+        db, workplace_user, sample_product, contract, price_row, account, balance
+    )
+    db.session.add(
+        ProductFiscalProfile(
+            product_id=sample_product.id,
+            fiscalization_enabled=True,
+            requires_marking_codes=True,
+            spic="SPIC-T4-SHORT",
+        )
+    )
+    db.session.commit()
+
+    service = OrderPaymentMethodEditService()
+    plan = service.preview(order_id=order.id, new_method="click")
+    payment_before = order.payment
+    payment_method_before = payment_before.payment_method
+    consume_marking_codes_before = payment_before.consume_marking_codes
+
+    with pytest.raises(ValidationError):
+        service._unwind_to_click(
+            order=order, plan=plan, reason="direct rollback probe", actor_user_id=delivery_driver.id
+        )
+
+    db.session.expire_all()
+    order = Order.query.get(order.id)
+    balance = CorporatePrepaymentBalance.query.get(balance.id)
+    payment = order.payment
+
+    assert order.payment_method == PaymentMethod.BUSINESS_ACCOUNT
+    assert payment.payment_method == payment_method_before
+    assert payment.consume_marking_codes == consume_marking_codes_before
+    # Step 1 (reverse_order_prepayment) must roll back too -- not just the flip.
+    assert balance.consumed_units == Decimal("4.00")
+    assert _reversal_rows(order.id) == []

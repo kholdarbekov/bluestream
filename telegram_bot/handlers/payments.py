@@ -4,7 +4,7 @@ Telegram payment-link handler.
 Implements redirect-based external payment links for the configured PSP.
 """
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
@@ -12,11 +12,33 @@ from telegram.ext import ContextTypes
 from i18n import i18n
 from api_client import api_client
 from utils import get_auth_token, format_price
-from keyboards import PaymentKeyboards
+from keyboards import PaymentKeyboards, customer_may_pay, customer_may_cancel
 from handlers.base import BaseHandler
 from shared.redis_keyspace import RedisKeyspace
 
 logger = logging.getLogger('handlers.payments')
+
+
+class PaymentLinkResult:
+    """Outcome of `send_payment_link`.
+
+    Bool-like on purpose: every existing call site (`orders.py`'s
+    `confirm_order`, this module's `retry_payment`) tests it with
+    `if not result:` and only cares that success is truthy. That keeps this a
+    drop-in replacement for the plain `bool` the method used to return, while
+    still letting a call site that DOES care -- `retry_payment`, which needs
+    to tell a pool-guard refusal apart from every other kind of failure --
+    read `.error_code` off the same object instead of a second return value.
+    """
+
+    __slots__ = ("success", "error_code")
+
+    def __init__(self, success: bool, error_code: Optional[str] = None):
+        self.success = success
+        self.error_code = error_code
+
+    def __bool__(self) -> bool:
+        return self.success
 
 
 class PaymentHandlers(BaseHandler):
@@ -37,7 +59,7 @@ class PaymentHandlers(BaseHandler):
         order_data: Dict[str, Any],
         payment_method: str = 'click',
         send_as_new_message: bool = False,
-    ) -> bool:
+    ) -> "PaymentLinkResult":
         """
         Send external payment link to user via Redirect Method.
 
@@ -50,12 +72,15 @@ class PaymentHandlers(BaseHandler):
         the Asl Belgisi wait so users get a notification the link arrived.
 
         FAILURE IS SIGNALLED, NOT DRAWN. Every failure path below logs and
-        returns False WITHOUT touching the customer's screen. This method
-        cannot know what the failure means: by the time `confirm_order` calls
-        it the order already exists, so "payment failed" would be a lie that
-        makes the customer buy the same basket twice. Only the caller knows,
-        so the caller renders — via `show_payment_link_failed` when the right
-        screen is "the order stands, here is Retry".
+        returns a falsy `PaymentLinkResult` WITHOUT touching the customer's
+        screen. This method cannot know what the failure means: by the time
+        `confirm_order` calls it the order already exists, so "payment
+        failed" would be a lie that makes the customer buy the same basket
+        twice. Only the caller knows, so the caller renders — via
+        `show_payment_link_failed` when the right screen is "the order
+        stands, here is Retry", or, when the backend's `error_code` says the
+        marking-code pool refused the rail move, a message that the order
+        stays on cash.
 
         Drawing a screen here as well as at the call site is not merely
         redundant: when Telegram refuses the first edit,
@@ -77,7 +102,7 @@ class PaymentHandlers(BaseHandler):
                 token = await get_auth_token(update, context, client)
                 if not token:
                     logger.error("Failed to get auth token for payment-link generation")
-                    return False
+                    return PaymentLinkResult(False)
 
                 # 2. Request Payment Link
                 # We use the generic 'POST /payments/create' endpoint via api_client
@@ -94,7 +119,17 @@ class PaymentHandlers(BaseHandler):
 
                 if not result.success:
                     logger.error(f"Failed to create {payment_method} link: {result.error}")
-                    return False
+                    # `_make_request` (api_client.py) surfaces the full error
+                    # body as `result.data` on failure, so a structured
+                    # `data.error_code` (e.g. the pool-guard refusal) survives
+                    # the trip even though this method only returns a bool-like
+                    # result, not the raw response.
+                    error_code = None
+                    if isinstance(result.data, dict):
+                        nested_data = result.data.get('data')
+                        if isinstance(nested_data, dict):
+                            error_code = nested_data.get('error_code')
+                    return PaymentLinkResult(False, error_code=error_code)
 
                 # Let's inspect result structure safely
                 response_body = result.data or {}
@@ -113,7 +148,7 @@ class PaymentHandlers(BaseHandler):
 
                 if not payment_url:
                     logger.error(f"No payment_url in response: {result.data}")
-                    return False
+                    return PaymentLinkResult(False)
 
             # 3. Send Message with Button
             msg_text = i18n.get(
@@ -190,11 +225,11 @@ class PaymentHandlers(BaseHandler):
             await self._ack(update.callback_query)
 
             logger.info(f"{payment_method} link sent for order {order_id}")
-            return True
+            return PaymentLinkResult(True)
 
         except Exception as e:
             logger.error(f"Error sending payment link: {e}", exc_info=True)
-            return False
+            return PaymentLinkResult(False)
 
     async def show_payment_link_failed(
         self,
@@ -225,7 +260,12 @@ class PaymentHandlers(BaseHandler):
             'telegram.orders.payment_link_failed_message', language,
             order_number=order.get('order_number') or str(order_id),
         )
-        keyboard = PaymentKeyboards.payment_failed(order_id, language)
+        keyboard = PaymentKeyboards.payment_failed(
+            order_id,
+            language,
+            may_pay=customer_may_pay(order),
+            may_cancel=customer_may_cancel(order),
+        )
 
         query = update.callback_query
         if query is not None:
@@ -241,7 +281,7 @@ class PaymentHandlers(BaseHandler):
         context: ContextTypes.DEFAULT_TYPE,
         order_data: Dict[str, Any],
         payment_method: str = 'click',
-    ) -> bool:
+    ) -> "PaymentLinkResult":
         """Backward-compatible wrapper for old call sites."""
         return await self.send_payment_link(
             update,
@@ -303,9 +343,41 @@ class PaymentHandlers(BaseHandler):
                 )
                 return
 
+            # THE payability gate. This handler had none: it re-fetched the
+            # order, tested `is_paid` alone and minted a link — so a stale Pay
+            # button on a CANCELLED or already-settled order produced a Click
+            # link that the PREPARE guard (`order_is_payable_online`, the same
+            # authority `customer_may_pay` reads through the published
+            # `is_payable`) then had to refuse with -9. The button is gone from
+            # the keyboard now, but the MESSAGE carrying it survives in the
+            # customer's chat forever, so the handler must refuse too.
+            if not customer_may_pay(order):
+                await query.edit_message_text(
+                    i18n.get('telegram.payment.error_not_payable', language)
+                )
+                logger.info(
+                    "Payment retry refused for order %s by user %s: backend says not payable",
+                    order_id, user_id,
+                )
+                return
+
             payment_info = order.get('payment_info') or {}
             provider_method = payment_info.get('payment_provider') or order.get('payment_method') or 'click'
-            if provider_method in ('card', 'cash'):
+            # Remember the rail this order was actually on BEFORE this retry
+            # rewrites `provider_method` to 'click' below -- the pool-short
+            # refusal only means "stays on cash" when the source really was
+            # cash. An order already on CLICK that gets refused (a genuinely
+            # exhausted pool, unrelated to this task's flip guard, which
+            # credits codes the order already holds) is not on cash and must
+            # not be told so.
+            was_cash = provider_method == 'cash'
+            if provider_method == 'card':
+                provider_method = 'click'
+            elif provider_method == 'cash':
+                # A cash order moves to an online rail only if the backend's
+                # marking-code pool can cover it. Ask, and keep the customer on
+                # cash with a real message when it cannot, instead of silently
+                # rewriting the rail into a payment link that never prepares.
                 provider_method = 'click'
 
             # Send new payment link
@@ -313,6 +385,16 @@ class PaymentHandlers(BaseHandler):
                 update, context, order, payment_method=provider_method
             )
             if not link_sent:
+                if was_cash and getattr(link_sent, "error_code", None) == "MARKING_CODES_POOL_SHORT":
+                    # The backend refused the cash-to-click flip because the
+                    # marking-code pool is short; the order was left on cash.
+                    # Say so in the customer's language rather than showing
+                    # the generic "link failed, retry?" screen -- there is
+                    # nothing to retry, the order already stands as cash.
+                    await query.edit_message_text(
+                        i18n.get('telegram.payment.marking_codes_unavailable', language)
+                    )
+                    return
                 # `send_payment_link` signals, it does not render. This call
                 # site owns the screen: the order is still there and still
                 # unpaid, so the customer needs the same "it stands, here is
@@ -336,40 +418,42 @@ class PaymentHandlers(BaseHandler):
         update: Update,
         context: ContextTypes.DEFAULT_TYPE
     ) -> None:
+        """A tap on a STALE `payment_switch_{id}` button. Delegates to Retry.
+
+        The button is no longer drawn anywhere (`PaymentKeyboards.payment_failed`
+        records why), but Telegram messages are PERMANENT: every recovery screen
+        already sitting in a customer's chat still carries it. Removing the
+        renderer does nothing for those, so the HANDLER has to answer — the same
+        reasoning `retry_payment` carries for its own stale button.
+
+        What it used to do was the defect. It parsed the order id, LOGGED it, and
+        then rendered `OrderKeyboards.payment_methods`, whose callbacks
+        (`payment_cash` / `payment_card`) carry NO order id and route to
+        `orders.payment_handler` -> `_show_order_confirmation` — the CART
+        confirmation. Since an unpaid order deliberately keeps its cart, Confirm
+        there placed a SECOND ORDER FOR THE SAME BASKET: the exact outcome the
+        "your order is placed" copy on the screen it was reached from exists to
+        prevent.
+
+        The REGISTRATION stays (`bot.py`): an unclaimed callback leaves Telegram's
+        spinner running with nothing able to stop it, so a removed pattern is a
+        worse screen than a redirected one.
+
+        Delegating to `retry_payment` rather than drawing a dead end is the
+        honest answer, because Retry IS the rail move a customer has:
+        `POST /api/v1/payments/create` normalizes card->click and flips a pending
+        cash order onto Click behind the marking-code pool guard. It also
+        inherits the payability gate wholesale — a stale tap on a dead order is
+        refused there rather than needing a second copy of the rule here.
+        `retry_payment` reads the id as `query.data.split('_')[-1]`, which reads
+        `payment_switch_{id}` exactly as it reads `payment_retry_{id}`.
         """
-        Handle request to switch payment method.
-        Returns user to payment method selection.
-        """
-        try:
-            query = update.callback_query
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
-
-            # Extract order ID from callback data
-            order_id = int(query.data.split('_')[-1])
-
-            await self._ack(query)
-
-            # Show payment method selection
-            payment_methods = [
-                {'type': 'cash', 'name': i18n.get('telegram.payment_cash', language)},
-                {'type': 'card', 'name': i18n.get('telegram.payment_card', language)},
-            ]
-
-            from keyboards import OrderKeyboards
-
-            payment_text = i18n.get('telegram.orders.select_payment', language)
-            keyboard = OrderKeyboards.payment_methods(payment_methods, language)
-
-            await query.edit_message_text(
-                text=payment_text,
-                reply_markup=keyboard
-            )
-
-            logger.info(f"Payment method switch initiated for order {order_id} by user {user_id}")
-
-        except Exception as e:
-            await self._handle_error(update, context, exc=e, operation="switch_payment_method")
+        logger.info(
+            "Stale payment_switch tap for %s from user %s; delegating to retry_payment",
+            (update.callback_query.data if update.callback_query else None),
+            update.effective_user.id if update.effective_user else None,
+        )
+        await self.retry_payment(update, context)
 
     async def cancel_payment(
         self,

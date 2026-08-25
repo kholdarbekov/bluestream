@@ -731,6 +731,13 @@ def test_j8_redeem_refund_then_reredeem_on_new_order(
     ):
         order_service.cancel_order(order1.id, user_id=sample_user.id, reason="changed mind")
     assert service.get_available_points(sample_user.id) == 1000
+    # B4a: these orders are on the CLICK rail but were never PAID, so cancelling
+    # them settles no money. The credit primitive is gated on
+    # COMPLETED/PARTIALLY_PAID precisely so an abandoned checkout cannot mint
+    # customer credit out of money the gateway never took.
+    from business_app.models.payment import CashCollectionEvent
+
+    assert CashCollectionEvent.query.filter_by(customer_id=sample_user.id).count() == 0
     db.session.refresh(discount_reward)
     assert discount_reward.redemptions_used == 0
 

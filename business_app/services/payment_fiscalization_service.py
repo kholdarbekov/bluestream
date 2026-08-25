@@ -4,7 +4,7 @@ import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from flask import current_app
 from sqlalchemy.orm import joinedload
@@ -24,6 +24,7 @@ from shared.enums import (
     PaymentStatus,
 )
 from business_app.utils.exceptions import NotFoundError, TaxCommitteeUnavailableError, ValidationError
+from business_app.utils.payment_projection import order_is_dead
 
 
 class PaymentFiscalizationService:
@@ -242,7 +243,7 @@ class PaymentFiscalizationService:
         # tax_committee_utilised_at is set on every row), the codes are already
         # APPLIED at the Tax Committee. We can skip the TC roundtrip entirely
         # and the customer pays without the 45-60 s wait.
-        reserved_codes = self._get_reserved_codes(payment)
+        reserved_codes = self._codes_currently_held(payment)
         if reserved_codes and all(code.tax_committee_utilised_at is not None for _, code in reserved_codes):
             if fiscalization.tax_committee_utilised_at is None:
                 fiscalization.tax_committee_utilised_at = datetime.now(timezone.utc)
@@ -311,12 +312,30 @@ class PaymentFiscalizationService:
         method_value = (
             payment.payment_method.value if hasattr(payment.payment_method, "value") else payment.payment_method
         )
-        if method_value not in {PaymentMethod.CLICK.value, PaymentMethod.CARD.value}:
+        if method_value not in ProductFiscalService.MARKING_CODE_PAYMENT_METHODS:
             return False
         if payment.status != PaymentStatus.COMPLETED:
             return False
         order = payment.order
         if not order:
+            return False
+        # A DEAD order is never fiscalized. Goods are not going out, so no
+        # receipt is owed — and under the owner's 2026-08-24 rule the payment on
+        # a cancelled card order deliberately STAYS COMPLETED, which used to be
+        # the only thing this predicate looked at. Without this clause the 7-day
+        # `reconcile_completed_payment_side_effects` sweep re-queues a cancelled
+        # order and `process_click_fiscalization` draws FRESH marking codes for
+        # it. Same rule `convert_electronic_order_to_cash` already relies on:
+        # make the predicate false, then let `queue_click_fiscalization` write
+        # NOT_REQUIRED. An already-COMPLETED fiscalization is protected upstream,
+        # in `process_click_fiscalization`'s COMPLETED short-circuit and in
+        # `queue_click_fiscalization`'s COMPLETED guard.
+        #
+        # This half is MANDATORY and cannot be replaced by the status write: a
+        # `process_click_fiscalization_task` queued before the cancel re-reads
+        # the payment, walks straight past a NOT_REQUIRED status and proceeds to
+        # `reserve_required_marking_codes`. Only the predicate stops it.
+        if order_is_dead(order):
             return False
         return any(
             item.product and item.product.fiscalization_enabled and self._is_fiscalizable_item(item)
@@ -334,6 +353,20 @@ class PaymentFiscalizationService:
         fiscalization = self.ensure_fiscalization_record(payment)
 
         if not self.payment_requires_click_fiscalization(payment):
+            if fiscalization.status == FiscalizationStatus.COMPLETED:
+                # A receipt has been FILED. It cannot be un-filed, so its record
+                # is not rewritten either. This closes the hazard
+                # `OrderEditService` documents the absence of ("queue_click_fiscalization
+                # ... has no completed-guard and would rewrite an issued
+                # receipt's status — erasing the fiscal record of the card-paid
+                # portion"), and it is what makes the B4 cancel cascade safe to
+                # call this method unconditionally.
+                self._log_fiscal_step(
+                    "queue_click_fiscalization_completed_receipt_preserved",
+                    payment=payment,
+                    fiscalization=fiscalization,
+                )
+                return fiscalization
             self._log_fiscal_step(
                 "queue_click_fiscalization_not_required",
                 payment=payment,
@@ -408,6 +441,29 @@ class PaymentFiscalizationService:
             return fiscalization
 
         if not self.payment_requires_click_fiscalization(payment):
+            if fiscalization.status == FiscalizationStatus.COMPLETED:
+                # 🔴 A FILED RECEIPT IS NEVER REWRITTEN — not even under `force`.
+                # The COMPLETED short-circuit above is `and not force`, so the
+                # admin "Retry fiscalization" button
+                # (POST /admin/payments/<id>/fiscalization/retry, which passes
+                # force=True and commits) falls through to here. Once
+                # `payment_requires_click_fiscalization` learned to say False for
+                # a DEAD order, that fall-through would overwrite a COMPLETED
+                # record with NOT_REQUIRED and a fresh `completed_at` —
+                # destroying the record that a receipt was submitted for a real,
+                # already-USED marking code, on exactly the delivered-then-
+                # RETURNED order where that record matters most.
+                #
+                # `force` legitimately means "re-file this receipt"; it has never
+                # meant "erase the evidence that one was filed". The same guard
+                # stands in `queue_click_fiscalization`; both are spec §6.2.
+                self._log_fiscal_step(
+                    "process_click_fiscalization_completed_receipt_preserved",
+                    payment=payment,
+                    fiscalization=fiscalization,
+                    force=force,
+                )
+                return fiscalization
             self._log_fiscal_step(
                 "process_click_fiscalization_not_required",
                 payment=payment,
@@ -952,6 +1008,11 @@ class PaymentFiscalizationService:
 
                 replacement.status = MarkingCodeStatus.RESERVED
                 replacement.reserved_at = datetime.now(timezone.utc)
+                # Ownership must be stamped here exactly as reserve_required_marking_codes
+                # does it. _codes_currently_held keys on code.order_id, so a replacement
+                # left NULL would silently drop out of the payload ("Expected N labels
+                # ... got N-1") and never be released or marked used.
+                replacement.order_id = order.id
                 db.session.add(
                     OrderItemMarkingCodeAllocation(
                         order_item_id=order_item.id,
@@ -1019,7 +1080,7 @@ class PaymentFiscalizationService:
         if not order:
             return {"utilised": 0, "skipped": True}
 
-        reserved_codes = self._get_reserved_codes(payment)
+        reserved_codes = self._codes_currently_held(payment)
         if not reserved_codes:
             self._log_fiscal_step("tax_committee_utilisation_skipped_no_codes", payment=payment)
             return {"utilised": 0, "skipped": True}
@@ -1328,6 +1389,121 @@ class PaymentFiscalizationService:
             "codes_by_order_item": {item_id: sorted(codes) for item_id, codes in codes_by_item.items()},
         }
 
+    def _plan_marking_code_reservation(
+        self,
+        payment: Payment,
+        *,
+        require_fiscalization_enabled: bool,
+        prefer_pre_utilised: bool,
+    ) -> Tuple[List[Tuple[OrderItem, List[ProductMarkingCode]]], List[int]]:
+        """PASS 1 of the all-or-nothing reservation: read + lock, MUTATE NOTHING.
+
+        Walks every code-consuming line, takes the ``FOR UPDATE`` locks, and
+        either returns a complete plan or raises ``ValidationError`` having
+        changed no row and added no ledger entry.
+
+        WHY THIS IS SPLIT FROM THE APPLY PASS (2026-08-24 audit, Task 9):
+        the old single loop RESERVEd and stamped ``order_id`` on each item as it
+        succeeded and raised only on the item that was short, INSIDE the loop.
+        ``handle_prepare`` (click_payment_provider_service.py:428-440) catches
+        that ValidationError, answers Click ``-9 Transaction cancelled``, and
+        ``PaymentService.handle_click_webhook`` (payment_service.py:641) then
+        commits UNCONDITIONALLY -- the -9 is a return value, not an exception.
+        Earlier items' codes were therefore durably committed as RESERVED, owned
+        by the order, on an attempt Click was told was cancelled. Sites :871 and
+        :1015 are worse: they swallow the raise and the payment ends COMPLETED,
+        so the order-cancel release cascade can never free them.
+
+        NOT a SAVEPOINT and NOT a compensating release. ``begin_nested()`` is
+        twice-prohibited in this codebase (bottle_tracking_service.py:1389,
+        :2223) and would only undo a mutation this shape never makes. An
+        unscoped ``release_reserved_marking_codes`` would free the TC-pre-utilised
+        codes ``pre_utilise_marking_codes_for_payment`` already holds while
+        ``fiscalization.tax_committee_utilised_at`` stays stamped -- the next run
+        would then skip the mandatory TC delay (:461-470). See TG_000413_26.
+        """
+        order = payment.order
+        plan: List[Tuple[OrderItem, List[ProductMarkingCode]]] = []
+        planned_code_ids: Set[int] = set()
+        low_water_product_ids: List[int] = []
+
+        # Deterministic lock order. `Order.order_items` (models/order.py:104) has
+        # no ORDER BY, so two concurrent orders sharing two products could take
+        # the FOR UPDATE locks in opposite order and deadlock on Postgres.
+        # Stable sort: two lines carrying the same product keep their relative
+        # order, so code assignment is unchanged.
+        items = sorted(order.order_items or [], key=lambda oi: (oi.product_id or 0, oi.id or 0))
+
+        for order_item in items:
+            product = order_item.product
+            if (
+                not product
+                or (require_fiscalization_enabled and not product.fiscalization_enabled)
+                or not product.requires_marking_codes
+                or not self._is_fiscalizable_item(order_item)
+            ):
+                continue
+
+            already_allocated = [code for _item, code in self._codes_currently_held(payment, order_item)]
+            missing_count = int(order_item.quantity or 0) - len(already_allocated)
+            if missing_count <= 0:
+                continue
+
+            query = ProductMarkingCode.query.filter_by(
+                product_id=order_item.product_id,
+                status=MarkingCodeStatus.AVAILABLE,
+            )
+            if planned_code_ids:
+                # LOAD-BEARING. Two order_items CAN carry the same product_id --
+                # there is no unique constraint and prod/dev both have such
+                # orders (e.g. order 141: items 159 and 160, both product 2).
+                # The old sequential loop kept them apart only because autoflush
+                # had already written item N-1's RESERVED status before item N's
+                # query ran. Planning writes nothing, so without this exclusion
+                # both lines would be handed the SAME physical code.
+                query = query.filter(~ProductMarkingCode.id.in_(planned_code_ids))
+
+            order_by = (
+                (
+                    # Prefer pre-utilised codes so card orders skip the
+                    # synchronous TC call; NULL sorts last via the boolean flip.
+                    ProductMarkingCode.tax_committee_utilised_at.is_(None).asc(),
+                    ProductMarkingCode.created_at.asc(),
+                    ProductMarkingCode.id.asc(),
+                )
+                if prefer_pre_utilised
+                else (ProductMarkingCode.created_at.asc(), ProductMarkingCode.id.asc())
+            )
+
+            available_codes = query.order_by(*order_by).with_for_update().limit(missing_count).all()
+
+            if len(available_codes) != missing_count:
+                self._log_fiscal_step(
+                    "reserve_required_marking_codes_failed_insufficient",
+                    level="error",
+                    payment=payment,
+                    order_item_id=order_item.id,
+                    required=missing_count,
+                    available=len(available_codes),
+                    product_id=order_item.product_id,
+                )
+                # Pool empty for this product -- kick off a replenish so the next
+                # customer doesn't hit the same wall. This is a deliberate
+                # cross-system effect (Redis + Celery) that survives the raise:
+                # the pool genuinely IS empty and the enqueue is deduped.
+                # utils/transactions.py:36-45 asks that this be named explicitly.
+                self._safe_trigger_replenish(order_item.product_id, "on_empty")
+                raise ValidationError(
+                    f"Not enough marking codes for product {product.name}. Required: {missing_count}, available: {len(available_codes)}"  # noqa: E501
+                )
+
+            plan.append((order_item, available_codes))
+            planned_code_ids.update(int(c.id) for c in available_codes)
+            if any(c.tax_committee_utilised_at is None for c in available_codes):
+                low_water_product_ids.append(order_item.product_id)
+
+        return plan, low_water_product_ids
+
     def reserve_required_marking_codes(
         self, payment: Payment, *, actor_user_id: Optional[int] = None
     ) -> Dict[str, Any]:
@@ -1340,7 +1516,7 @@ class PaymentFiscalizationService:
         method_value = (
             payment.payment_method.value if hasattr(payment.payment_method, "value") else payment.payment_method
         )
-        if method_value not in {PaymentMethod.CLICK.value, PaymentMethod.CARD.value}:
+        if method_value not in ProductFiscalService.MARKING_CODE_PAYMENT_METHODS:
             self._log_fiscal_step(
                 "reserve_required_marking_codes_skipped_payment_method",
                 payment=payment,
@@ -1348,65 +1524,22 @@ class PaymentFiscalizationService:
             )
             return {"reserved": 0, "skipped": True}
 
+        # PASS 1 -- plan under FOR UPDATE. Raises before anything is mutated.
+        plan, low_water_product_ids = self._plan_marking_code_reservation(
+            payment,
+            require_fiscalization_enabled=True,
+            prefer_pre_utilised=True,
+        )
+
+        # PASS 2 -- apply. Reached only when EVERY line is covered. The row locks
+        # from pass 1 are still held (they release at transaction end, not here),
+        # so no peer can take a planned code between check and act.
         reserved_count = 0
-        for order_item in order.order_items or []:
-            product = order_item.product
-            if (
-                not product
-                or not product.fiscalization_enabled
-                or not product.requires_marking_codes
-                or not self._is_fiscalizable_item(order_item)
-            ):
-                continue
-
-            already_allocated = self._get_active_allocated_codes(payment, order_item)
-            if len(already_allocated) >= int(order_item.quantity or 0):
-                continue
-
-            missing_count = int(order_item.quantity or 0) - len(already_allocated)
-            # Prefer pre-utilised codes (tax_committee_utilised_at IS NOT NULL)
-            # so card orders skip the synchronous TC call. NULL sorts last via
-            # the boolean flip below — non-NULL rows are picked first.
-            available_codes = (
-                ProductMarkingCode.query.filter_by(
-                    product_id=order_item.product_id,
-                    status=MarkingCodeStatus.AVAILABLE,
-                )
-                .order_by(
-                    ProductMarkingCode.tax_committee_utilised_at.is_(None).asc(),
-                    ProductMarkingCode.created_at.asc(),
-                    ProductMarkingCode.id.asc(),
-                )
-                .with_for_update()
-                .limit(missing_count)
-                .all()
-            )
-            if len(available_codes) != missing_count:
-                self._log_fiscal_step(
-                    "reserve_required_marking_codes_failed_insufficient",
-                    level="error",
-                    payment=payment,
-                    order_item_id=order_item.id,
-                    required=missing_count,
-                    available=len(available_codes),
-                    product_id=order_item.product_id,
-                )
-                # Pool empty for this product — kick off a replenish so the
-                # next customer doesn't hit the same wall.
-                self._safe_trigger_replenish(order_item.product_id, "on_empty")
-                raise ValidationError(
-                    f"Not enough marking codes for product {product.name}. Required: {missing_count}, available: {len(available_codes)}"  # noqa: E501
-                )
-
-            # Track whether we dipped into un-utilised codes — if so, schedule
-            # a replenish so the next card order still gets the fast path.
-            picked_un_utilised = sum(1 for c in available_codes if c.tax_committee_utilised_at is None)
-            if picked_un_utilised:
-                self._safe_trigger_replenish(order_item.product_id, "low_water_during_reservation")
-
-            for code in available_codes:
+        reserved_at = datetime.now(timezone.utc)
+        for order_item, codes in plan:
+            for code in codes:
                 code.status = MarkingCodeStatus.RESERVED
-                code.reserved_at = datetime.now(timezone.utc)
+                code.reserved_at = reserved_at
                 code.order_id = order.id
                 db.session.add(
                     OrderItemMarkingCodeAllocation(
@@ -1428,9 +1561,17 @@ class PaymentFiscalizationService:
                 "reserve_required_marking_codes_item_reserved",
                 payment=payment,
                 order_item_id=order_item.id,
-                reserved_for_item=missing_count,
+                reserved_for_item=len(codes),
                 product_id=order_item.product_id,
             )
+
+        # We dipped into un-utilised codes -- schedule a replenish so the next
+        # card order still gets the fast path. Moved out of the pick loop
+        # deliberately: on the shortfall path nothing was drawn from any pool, so
+        # there is no new low-water condition to report and the `on_empty`
+        # trigger for the short product has already fired.
+        for product_id in low_water_product_ids:
+            self._safe_trigger_replenish(product_id, "low_water_during_reservation")
 
         if reserved_count:
             # Sync stock for all affected products
@@ -1500,7 +1641,7 @@ class PaymentFiscalizationService:
         actor_user_id: Optional[int] = None,
     ) -> int:
         self._log_fiscal_step("release_reserved_marking_codes_started", payment=payment, reason=reason)
-        reserved_codes = self._get_reserved_codes(payment)
+        reserved_codes = self._codes_currently_held(payment)
         released = 0
         for order_item, code in reserved_codes:
             if code.status != MarkingCodeStatus.RESERVED:
@@ -1559,35 +1700,31 @@ class PaymentFiscalizationService:
         if not order:
             return
 
+        # The SIXTH copy of the partial-reservation defect (2026-08-24 audit).
+        # Same all-or-nothing shape as `reserve_required_marking_codes`: plan
+        # under FOR UPDATE, then apply, so a shortfall takes no codes at all.
+        #
+        # SCOPE, HONESTLY: this fixes the CODES half only. By the time the
+        # planner can raise, `consume_marking_codes_for_business_account` (:817)
+        # has already written `fiscalization.status = PROCESSING` and bumped
+        # `attempts`, and its caller (payment_service.py:410-425) has already
+        # completed the payment and synced the paid projection. None of that is
+        # wrapped here, so those rows still depend entirely on the caller
+        # rolling back — unchanged by this fix, and not claimed by it.
+        plan, _low_water = self._plan_marking_code_reservation(
+            payment,
+            require_fiscalization_enabled=False,  # the manual path never checked this
+            prefer_pre_utilised=False,  # deliberate: this path marks codes USED
+            # without a TC call, so spending the
+            # pre-utilised pool here would waste it
+        )
+
         reserved_count = 0
-        for order_item in order.order_items or []:
-            product = order_item.product
-            if not product or not product.requires_marking_codes or not self._is_fiscalizable_item(order_item):
-                continue
-
-            existing_codes = self._get_active_allocated_codes(payment, order_item)
-            missing_count = int(order_item.quantity or 0) - len(existing_codes)
-            if missing_count <= 0:
-                continue
-
-            available_codes = (
-                ProductMarkingCode.query.filter_by(
-                    product_id=order_item.product_id,
-                    status=MarkingCodeStatus.AVAILABLE,
-                )
-                .order_by(ProductMarkingCode.created_at.asc(), ProductMarkingCode.id.asc())
-                .with_for_update()
-                .limit(missing_count)
-                .all()
-            )
-            if len(available_codes) != missing_count:
-                raise ValidationError(
-                    f"Not enough marking codes for product {product.name}. Required: {missing_count}, available: {len(available_codes)}"  # noqa: E501
-                )
-
-            for code in available_codes:
+        reserved_at = datetime.now(timezone.utc)
+        for order_item, codes in plan:
+            for code in codes:
                 code.status = MarkingCodeStatus.RESERVED
-                code.reserved_at = datetime.now(timezone.utc)
+                code.reserved_at = reserved_at
                 code.order_id = order.id
                 db.session.add(
                     OrderItemMarkingCodeAllocation(
@@ -1630,7 +1767,7 @@ class PaymentFiscalizationService:
     ) -> int:
         self._log_fiscal_step("mark_reserved_codes_used_started", payment=payment, fiscalization=fiscalization)
         used = 0
-        for order_item, code in self._get_reserved_codes(payment):
+        for order_item, code in self._codes_currently_held(payment):
             if code.status == MarkingCodeStatus.USED:
                 continue
             code.status = MarkingCodeStatus.USED
@@ -1654,7 +1791,7 @@ class PaymentFiscalizationService:
         if used:
             # Sync stock for affected products
             synced_products = set()
-            for order_item, code in self._get_reserved_codes(payment):
+            for order_item, code in self._codes_currently_held(payment):
                 if order_item.product_id not in synced_products and order_item.product:
                     if order_item.product.requires_marking_codes:
                         self._product_fiscal_service.sync_stock_from_marking_codes(order_item.product)
@@ -1692,61 +1829,81 @@ class PaymentFiscalizationService:
         Only the identification code (before ASCII 29) is sent in fiscalization receipts.
         """
         lookup: Dict[int, List[str]] = defaultdict(list)
-        for order_item, code in self._get_reserved_codes(payment):
+        for order_item, code in self._codes_currently_held(payment):
             lookup[order_item.id].append(self._extract_identification_code(code.code))
         return lookup
 
-    def _get_reserved_codes(self, payment: Payment) -> List[Tuple[OrderItem, ProductMarkingCode]]:
-        allocations = (
-            OrderItemMarkingCodeAllocation.query.options(
-                joinedload(OrderItemMarkingCodeAllocation.marking_code),
-                joinedload(OrderItemMarkingCodeAllocation.order_item),
-            )
-            .filter(
-                OrderItemMarkingCodeAllocation.payment_id == payment.id,
-                OrderItemMarkingCodeAllocation.action == MarkingCodeLedgerEventType.RESERVED,
-            )
-            .order_by(OrderItemMarkingCodeAllocation.created_at.asc(), OrderItemMarkingCodeAllocation.id.asc())
-            .all()
-        )
-        reserved_items: List[Tuple[OrderItem, ProductMarkingCode]] = []
-        seen = set()
-        for allocation in allocations:
-            code = allocation.marking_code
-            order_item = allocation.order_item
-            if not code or not order_item:
-                continue
-            key = (order_item.id, code.id)
-            if key in seen:
-                continue
-            if code.status in {MarkingCodeStatus.RESERVED, MarkingCodeStatus.USED}:
-                reserved_items.append((order_item, code))
-                seen.add(key)
-        return reserved_items
+    # Actions after which the code is still this payment's. UTILISED sits
+    # between RESERVED and USED in the Tax-Committee flow, so it must count as
+    # held or a mid-flight fiscalization would look like it owns nothing.
+    _HOLDING_LEDGER_ACTIONS = frozenset(
+        {
+            MarkingCodeLedgerEventType.RESERVED,
+            MarkingCodeLedgerEventType.USED,
+            MarkingCodeLedgerEventType.UTILISED,
+        }
+    )
 
-    def _get_active_allocated_codes(self, payment: Payment, order_item: OrderItem) -> List[ProductMarkingCode]:
-        allocations = (
-            OrderItemMarkingCodeAllocation.query.options(joinedload(OrderItemMarkingCodeAllocation.marking_code))
-            .filter(
-                OrderItemMarkingCodeAllocation.payment_id == payment.id,
-                OrderItemMarkingCodeAllocation.order_item_id == order_item.id,
-                OrderItemMarkingCodeAllocation.action.in_(
-                    [MarkingCodeLedgerEventType.RESERVED, MarkingCodeLedgerEventType.USED]
-                ),
-            )
-            .order_by(OrderItemMarkingCodeAllocation.created_at.asc(), OrderItemMarkingCodeAllocation.id.asc())
-            .all()
-        )
-        result: List[ProductMarkingCode] = []
-        seen = set()
+    def _codes_currently_held(
+        self, payment: Payment, order_item: Optional[OrderItem] = None
+    ) -> List[Tuple[OrderItem, ProductMarkingCode]]:
+        """The codes this payment holds RIGHT NOW — the single source of truth.
+
+        Replaces ``_get_reserved_codes`` and ``_get_active_allocated_codes``,
+        which both keyed on ``(payment_id, action in {reserved, used})`` and then
+        admitted a code on its CURRENT STATUS ALONE. Neither asked who owns the
+        code now, and neither noticed a later ``released`` row superseding the
+        ``reserved`` row it matched. Prod incident TG_000413_26 (2026-08-20/21):
+        the reconcile timeout released payment 1204's three codes, another order
+        re-reserved and used those exact codes 34 minutes later, and the old
+        helpers still reported them as payment 1204's — so
+        ``reserve_required_marking_codes`` logged ``reserved=0`` and a
+        fiscalization would have printed the other order's labels on this
+        order's tax receipt.
+
+        Two independent conjuncts, both load-bearing:
+
+        * **supersession** — the ledger is append-only, so a code counts only if
+          the LATEST event for ``(payment, order_item, code)`` is a holding one.
+          Ordered by ``occurred_at`` then ``id``; NEVER by ``action`` (``utilised``
+          was appended by ``ALTER TYPE`` in migration 80105c879c6f and therefore
+          sorts last in ``pg_enum``, not in flow order).
+        * **ownership** — ``code.order_id`` must still be this payment's order.
+          This is the belt that catches a code re-reserved by someone else.
+        """
+        query = OrderItemMarkingCodeAllocation.query.options(
+            joinedload(OrderItemMarkingCodeAllocation.marking_code),
+            joinedload(OrderItemMarkingCodeAllocation.order_item),
+        ).filter(OrderItemMarkingCodeAllocation.payment_id == payment.id)
+        if order_item is not None:
+            query = query.filter(OrderItemMarkingCodeAllocation.order_item_id == order_item.id)
+
+        allocations = query.order_by(
+            OrderItemMarkingCodeAllocation.occurred_at.asc(),
+            OrderItemMarkingCodeAllocation.id.asc(),
+        ).all()
+
+        # Last event wins per (order_item, code).
+        latest: Dict[Tuple[int, int], OrderItemMarkingCodeAllocation] = {}
         for allocation in allocations:
-            code = allocation.marking_code
-            if not code or code.id in seen:
+            if not allocation.marking_code or not allocation.order_item:
                 continue
-            if code.status in {MarkingCodeStatus.RESERVED, MarkingCodeStatus.USED}:
-                result.append(code)
-                seen.add(code.id)
-        return result
+            latest[(allocation.order_item_id, allocation.product_marking_code_id)] = allocation
+
+        held: List[Tuple[OrderItem, ProductMarkingCode]] = []
+        for allocation in latest.values():
+            if allocation.action not in self._HOLDING_LEDGER_ACTIONS:
+                continue
+            code = allocation.marking_code
+            if code.status not in {MarkingCodeStatus.RESERVED, MarkingCodeStatus.USED}:
+                continue
+            if code.order_id != payment.order_id:
+                # Released and re-taken by another order — not ours any more.
+                continue
+            held.append((allocation.order_item, code))
+
+        held.sort(key=lambda pair: (pair[0].id, pair[1].id))
+        return held
 
     def _get_payment(self, payment_id: int) -> Payment:
         self._log_fiscal_step("get_payment_started", payment=None, target_payment_id=payment_id)

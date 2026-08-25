@@ -15,6 +15,7 @@ from shared.enums import (
     FiscalizationStatus,
     MarkingCodeLedgerEventType,
     MarkingCodeStatus,
+    OrderStatus,
     PaymentMethod,
     PaymentStatus,
 )
@@ -442,13 +443,36 @@ class TestClickFiscalizationService:
         handle_success.assert_called_once()
         queue_fiscalization.assert_called_once_with(payment.id)
 
+    @pytest.mark.parametrize(
+        "order_status,expected_payment_status,expected_code_status",
+        [
+            (OrderStatus.CANCELLED, PaymentStatus.CANCELLED, MarkingCodeStatus.AVAILABLE),
+            (OrderStatus.PENDING, PaymentStatus.PENDING, MarkingCodeStatus.RESERVED),
+        ],
+        ids=["order_resolved_releases", "order_live_keeps"],
+    )
     def test_click_complete_cancellation_releases_reserved_codes(
         self,
         app,
         db,
         payment_service,
         pending_marked_click_payment,
+        order_status,
+        expected_payment_status,
+        expected_code_status,
     ):
+        """B1 fix round 2 — THIS CELL WAS ASSERTING ONLY THE CANCEL-ON-LIVE ANSWER.
+
+        ``pending_marked_click_payment``'s order is PENDING, i.e. UNRESOLVED, so
+        the original single-case version pinned exactly the defect: a declined
+        Click COMPLETE killing a live order's payment and freeing its codes,
+        which permanently locks the customer out of retrying the same link. It
+        sat ~50 lines from the keep-on-live-order cells, so this file asserted
+        both answers to one question.
+
+        Parametrized rather than deleted: the release genuinely must still fire
+        once the ORDER has resolved, and that is what this cell was really for.
+        """
         payment, marking_code = pending_marked_click_payment
         _configure_click_fiscal_context(app)
         app.config['CLICK_SHOP_SECRET_KEY'] = 'click-secret'
@@ -482,23 +506,27 @@ class TestClickFiscalizationService:
         db.session.refresh(marking_code)
         assert marking_code.status == MarkingCodeStatus.RESERVED
 
+        # Set the order state only AFTER prepare: the Phase 4A PREPARE guard
+        # refuses a resolved order outright (-9), so flipping it earlier would
+        # mean no codes were ever reserved and the cell would prove nothing.
+        payment.order.status = order_status
+        db.session.commit()
+
         response = provider.handle_complete(complete_payload)
 
         db.session.refresh(payment)
         db.session.refresh(marking_code)
+        # The protocol answer is the same either way — the transaction really
+        # was declined. Only OUR payment lifecycle differs.
         assert response['error'] == -9
-        assert payment.status == PaymentStatus.CANCELLED
-        assert payment.failure_reason == 'Cancelled by Click'
-        assert marking_code.status == MarkingCodeStatus.AVAILABLE
+        assert payment.status == expected_payment_status
+        assert marking_code.status == expected_code_status
+        if expected_payment_status == PaymentStatus.CANCELLED:
+            assert payment.failure_reason == 'Cancelled by Click'
         assert (payment.provider_data or {}).get('click', {}).get('click_paydoc_id') == '9988776655'
 
-    def test_update_payment_status_marks_cancelled_and_releases_reserved_codes(
-        self,
-        db,
-        payment_service,
-        pending_marked_click_payment,
-    ):
-        payment, marking_code = pending_marked_click_payment
+    def _cancel_via_provider_status(self, db, payment_service, payment, marking_code):
+        """Reserve real codes, then drive update_payment_status with a gateway cancel."""
         fiscalization_service = PaymentFiscalizationService(click_provider_service=Mock())
         fiscalization_service.reserve_required_marking_codes(payment)
         db.session.refresh(marking_code)
@@ -517,6 +545,48 @@ class TestClickFiscalizationService:
 
         db.session.refresh(payment)
         db.session.refresh(marking_code)
+
+    def test_update_payment_status_keeps_a_LIVE_order_payment_and_its_codes(
+        self,
+        db,
+        payment_service,
+        pending_marked_click_payment,
+    ):
+        """B1 (2026-08-25) — THIS CELL'S EXPECTATION WAS INVERTED.
+
+        It was ``test_update_payment_status_marks_cancelled_and_releases_reserved_codes``
+        and asserted CANCELLED + AVAILABLE unconditionally. Its order
+        (``sample_order``) is PENDING, i.e. LIVE, so it was asserting exactly the
+        defect: a gateway cancel describes ONE abandoned Click attempt, and
+        writing a terminal status makes the Phase 4A PREPARE guard refuse every
+        future attempt on an order the customer still owes for. The release half
+        is still covered — by the dead-order sibling below.
+        """
+        payment, marking_code = pending_marked_click_payment
+        assert payment.order.status == OrderStatus.PENDING, 'fixture must be a LIVE order'
+
+        self._cancel_via_provider_status(db, payment_service, payment, marking_code)
+
+        assert payment.status == PaymentStatus.PENDING
+        assert marking_code.status == MarkingCodeStatus.RESERVED
+
+    def test_update_payment_status_marks_cancelled_and_releases_reserved_codes(
+        self,
+        db,
+        payment_service,
+        pending_marked_click_payment,
+    ):
+        """The release still fires once the ORDER itself has resolved.
+
+        This is the original cell's real subject — that a gateway cancel returns
+        the codes to the pool — re-scoped to the state where that is correct.
+        """
+        payment, marking_code = pending_marked_click_payment
+        payment.order.status = OrderStatus.CANCELLED
+        db.session.commit()
+
+        self._cancel_via_provider_status(db, payment_service, payment, marking_code)
+
         assert payment.status == PaymentStatus.CANCELLED
         assert payment.failure_reason == 'Timed out'
         assert marking_code.status == MarkingCodeStatus.AVAILABLE
@@ -582,8 +652,15 @@ class TestClickFiscalizationService:
         db.session.refresh(payment)
         assert response['error'] == -8
         assert response['error_note'] == 'Error in request'
-        assert payment.status == PaymentStatus.CANCELLED
-        assert payment.failure_reason == 'Click callback missing error code'
+        # B1 fix round 2: the subject of this cell is "does NOT promote", and
+        # that still holds — handle_success is never called and we answer -8.
+        # What changed is the payment's own status: `sample_order` is PENDING,
+        # i.e. UNRESOLVED, and a payload we could not parse is LESS evidence than
+        # an affirmative cancel, so it may not end a live order's payment either.
+        # See tests/unit/test_update_payment_status_live_order_guard.py for the
+        # full ruling and its resolved-order boundary.
+        assert payment.status == PaymentStatus.PENDING
+        assert payment.failure_reason is None
         handle_success.assert_not_called()
         queue_fiscalization.assert_not_called()
 
@@ -617,8 +694,15 @@ class TestClickFiscalizationService:
 
         db.session.refresh(payment)
         assert response['error'] == -8
-        assert payment.status == PaymentStatus.CANCELLED
-        assert payment.failure_reason == 'Click callback missing error code'
+        # B1 fix round 2: the subject of this cell is "does NOT promote", and
+        # that still holds — handle_success is never called and we answer -8.
+        # What changed is the payment's own status: `sample_order` is PENDING,
+        # i.e. UNRESOLVED, and a payload we could not parse is LESS evidence than
+        # an affirmative cancel, so it may not end a live order's payment either.
+        # See tests/unit/test_update_payment_status_live_order_guard.py for the
+        # full ruling and its resolved-order boundary.
+        assert payment.status == PaymentStatus.PENDING
+        assert payment.failure_reason is None
         handle_success.assert_not_called()
         queue_fiscalization.assert_not_called()
 
@@ -651,8 +735,15 @@ class TestClickFiscalizationService:
 
         db.session.refresh(payment)
         assert response['error'] == -8
-        assert payment.status == PaymentStatus.CANCELLED
-        assert payment.failure_reason == 'Click callback claimed success without trans_id/paydoc_id'
+        # B1 fix round 2: the subject of this cell is "does NOT promote", and
+        # that still holds — handle_success is never called and we answer -8.
+        # What changed is the payment's own status: `sample_order` is PENDING,
+        # i.e. UNRESOLVED, and a payload we could not parse is LESS evidence than
+        # an affirmative cancel, so it may not end a live order's payment either.
+        # See tests/unit/test_update_payment_status_live_order_guard.py for the
+        # full ruling and its resolved-order boundary.
+        assert payment.status == PaymentStatus.PENDING
+        assert payment.failure_reason is None
         handle_success.assert_not_called()
         queue_fiscalization.assert_not_called()
 
@@ -685,8 +776,15 @@ class TestClickFiscalizationService:
 
         db.session.refresh(payment)
         assert response['error'] == -8
-        assert payment.status == PaymentStatus.CANCELLED
-        assert payment.failure_reason == 'Click callback claimed success without trans_id/paydoc_id'
+        # B1 fix round 2: the subject of this cell is "does NOT promote", and
+        # that still holds — handle_success is never called and we answer -8.
+        # What changed is the payment's own status: `sample_order` is PENDING,
+        # i.e. UNRESOLVED, and a payload we could not parse is LESS evidence than
+        # an affirmative cancel, so it may not end a live order's payment either.
+        # See tests/unit/test_update_payment_status_live_order_guard.py for the
+        # full ruling and its resolved-order boundary.
+        assert payment.status == PaymentStatus.PENDING
+        assert payment.failure_reason is None
         handle_success.assert_not_called()
         queue_fiscalization.assert_not_called()
 
@@ -775,22 +873,6 @@ class TestClickFiscalizationService:
         kwargs = merchant_request.call_args.kwargs
         assert kwargs['method'] == 'GET'
         assert kwargs['fallback_path'].endswith('/payment/status/98060/22110099')
-
-    def test_refund_payment_uses_docs_delete_path(self, app, db, fiscalized_click_payment):
-        _configure_click_fiscal_context(app)
-        app.config['CLICK_TEST_MODE'] = False
-        provider = ClickPaymentProviderService()
-        payment = Payment.query.get(fiscalized_click_payment.id)
-        payment.provider_data = {'click': {'click_paydoc_id': '77665544'}}
-        db.session.flush()
-
-        with patch.object(provider, 'merchant_request', return_value={'error_code': 0, 'payment_id': 77665544}) as merchant_request:
-            result = provider.refund_payment(payment, Decimal('33000.00'), reason='test')
-
-        assert result['success'] is True
-        kwargs = merchant_request.call_args.kwargs
-        assert kwargs['method'] == 'DELETE'
-        assert kwargs['fallback_path'].endswith('/payment/reversal/98060/77665544')
 
     def test_fiscalize_payment_uses_submit_items_endpoint(self, app, db, fiscalized_click_payment):
         _configure_click_fiscal_context(app)
@@ -956,7 +1038,7 @@ class TestClickFiscalizationService:
         # Must NOT raise "Not enough marking codes" (would, if it tried to reserve 3).
         result = service.reserve_required_marking_codes(payment)
         assert result['reserved'] == 2
-        reserved = [oi for (oi, _code) in service._get_reserved_codes(payment)]
+        reserved = [oi for (oi, _code) in service._codes_currently_held(payment)]
         assert all(oi.is_reward_item is False for oi in reserved)
         assert len(reserved) == 2
 
@@ -1422,6 +1504,43 @@ class TestPrecheckAndReplaceInvalidCodes:
         assert len(archived_events) == 1
         assert archived_events[0].event_metadata['tax_committee_status'] == 'WITHDRAWN'
 
+    def test_precheck_replacement_code_is_owned_by_the_order(self, app, db, fiscalized_click_payment):
+        """A substituted replacement must carry order_id, exactly like a normally
+        reserved code. Without it the ownership conjunct in _codes_currently_held
+        drops the code and build_click_fiscalization_payload raises
+        "Expected N labels ... got N-1"."""
+        _configure_click_fiscal_context(app)
+        sample_product = fiscalized_click_payment.order.order_items[0].product
+        db.session.add(ProductMarkingCode(
+            product_id=sample_product.id, code='MARK-003\x1dVERIFY-003', status=MarkingCodeStatus.AVAILABLE,
+        ))
+        db.session.flush()
+
+        service = PaymentFiscalizationService(click_provider_service=Mock())
+        payment = Payment.query.get(fiscalized_click_payment.id)
+        service.reserve_required_marking_codes(payment)
+        db.session.flush()
+
+        check_responses = [
+            {'MARK-001': 'WITHDRAWN', 'MARK-002': 'RECEIVED'},
+            {'MARK-003': 'RECEIVED', 'MARK-002': 'RECEIVED'},
+            {'MARK-003': 'RECEIVED', 'MARK-002': 'RECEIVED'},
+        ]
+        with patch.object(service.tax_committee_service, 'check_marking_code_statuses',
+                          Mock(side_effect=check_responses)), \
+             patch.object(service.tax_committee_service, 'utilise_marking_codes',
+                          Mock(return_value={'reportId': 'RPT-REPLACED'})):
+            service.utilise_marking_codes_with_tax_committee(payment)
+
+        repl = ProductMarkingCode.query.filter_by(code='MARK-003\x1dVERIFY-003').first()
+        assert repl.order_id == payment.order_id, (
+            'a replacement code must be owned by the order it was substituted into'
+        )
+
+        # And it must survive the ownership filter, so the payload stays complete.
+        held_ids = {code.id for _item, code in service._codes_currently_held(payment)}
+        assert repl.id in held_ids
+
     def test_precheck_written_off_code_replaced(self, app, db, fiscalized_click_payment):
         """WRITTEN_OFF code is also archived and replaced."""
         _configure_click_fiscal_context(app)
@@ -1555,3 +1674,469 @@ class TestPrecheckAndReplaceInvalidCodes:
 
         # All available codes used up: MARK-001 archived, MARK-002 reserved, MARK-003 reserved
         assert sample_product.stock_quantity == 0
+
+
+# ---------------------------------------------------------------------------
+# Marking-code ownership SSOT — regression pins for prod incident TG_000413_26
+# (order 1100 / payment 1204, 2026-08-20/21).
+#
+# The reconcile timeout released payment 1204's three codes; 34 minutes later a
+# different order re-reserved, utilised and USED those exact codes. When the
+# late Click debit arrived, `reserve_required_marking_codes` logged `reserved=0`
+# because the ownership question was answered from the ledger's `reserved` rows
+# plus the code's CURRENT status alone -- never checking who owns the code now,
+# and never noticing the later `released` row. Fiscalizing then would have put
+# the other order's labels on this order's tax receipt.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def two_click_payments_sharing_a_pool(db, sample_order, sample_product):
+    """Two CLICK orders on one product, and a pool of exactly four codes.
+
+    Returns (payment_a, payment_b, [code1..code4]).
+    """
+    from business_app.models.order import Order
+    from shared.enums import OrderStatus
+
+    db.session.add(ProductFiscalProfile(
+        product_id=sample_product.id,
+        spic='SPIC-19L',
+        package_code='PACK-19L',
+        units='1213733',
+        vat_percent=Decimal('12.00'),
+        fiscalization_enabled=True,
+        requires_marking_codes=True,
+    ))
+    db.session.flush()
+
+    sample_order.payment_method = PaymentMethod.CLICK
+    order_b = Order(
+        user_id=sample_order.user_id,
+        order_number='ORD-TEST-002',
+        status=OrderStatus.PENDING,
+        subtotal=Decimal('15000.00'),
+        delivery_fee=Decimal('3000.00'),
+        discount_amount=Decimal('0.00'),
+        loyalty_discount=Decimal('0.00'),
+        total_amount=Decimal('18000.00'),
+        payment_method=PaymentMethod.CLICK,
+    )
+    db.session.add(order_b)
+    db.session.flush()
+
+    payments = []
+    for order in (sample_order, order_b):
+        db.session.add(OrderItem(
+            order_id=order.id,
+            product_id=sample_product.id,
+            quantity=2,
+            unit_price=Decimal('15000.00'),
+            total_price=Decimal('30000.00'),
+        ))
+        payment = Payment(
+            order_id=order.id,
+            user_id=order.user_id,
+            payment_method=PaymentMethod.CLICK,
+            amount=Decimal('18000.00'),
+            currency='UZS',
+            status=PaymentStatus.PENDING,
+            payment_id=f'click-{order.order_number}',
+        )
+        db.session.add(payment)
+        payments.append(payment)
+
+    codes = [
+        ProductMarkingCode(
+            product_id=sample_product.id,
+            code=f'MARK-{i:03d}\x1dVERIFY-{i:03d}',
+            status=MarkingCodeStatus.AVAILABLE,
+        )
+        for i in range(1, 5)
+    ]
+    db.session.add_all(codes)
+    db.session.commit()
+    return payments[0], payments[1], codes
+
+
+class TestMarkingCodeOwnershipSSOT:
+    def test_released_codes_retaken_by_another_order_are_not_still_held(
+        self, db, two_click_payments_sharing_a_pool
+    ):
+        """The exact TG_000413_26 shape: reserve -> release -> another order takes
+        them -> the original payment must NOT believe it still holds them."""
+        payment_a, payment_b, _codes = two_click_payments_sharing_a_pool
+        service = PaymentFiscalizationService(click_provider_service=Mock())
+
+        assert service.reserve_required_marking_codes(payment_a)['reserved'] == 2
+        service.release_reserved_marking_codes(payment_a, reason='payment_timeout')
+        db.session.commit()
+
+        # Payment B now takes the very codes A released (oldest-first draw order).
+        assert service.reserve_required_marking_codes(payment_b)['reserved'] == 2
+        db.session.commit()
+
+        b_code_ids = {
+            c.id for c in ProductMarkingCode.query.filter_by(order_id=payment_b.order_id).all()
+        }
+        assert len(b_code_ids) == 2
+
+        # THE BUG: A's stale `reserved` ledger rows still point at those codes, and
+        # the codes are RESERVED again -- so A believed it already held 2.
+        result = service.reserve_required_marking_codes(payment_a)
+        db.session.commit()
+
+        assert result['reserved'] == 2, (
+            'payment A must draw two FRESH codes; it no longer owns the ones it released'
+        )
+        a_code_ids = {
+            c.id for c in ProductMarkingCode.query.filter_by(order_id=payment_a.order_id).all()
+        }
+        assert len(a_code_ids) == 2
+        assert a_code_ids.isdisjoint(b_code_ids), 'payment A must not re-claim order B codes'
+
+    def test_reserved_code_lookup_never_returns_another_orders_codes(
+        self, db, two_click_payments_sharing_a_pool
+    ):
+        """A fiscal receipt must never carry a label belonging to another order."""
+        payment_a, payment_b, _codes = two_click_payments_sharing_a_pool
+        service = PaymentFiscalizationService(click_provider_service=Mock())
+
+        service.reserve_required_marking_codes(payment_a)
+        service.release_reserved_marking_codes(payment_a, reason='payment_timeout')
+        db.session.commit()
+        service.reserve_required_marking_codes(payment_b)
+        db.session.commit()
+
+        held = service._codes_currently_held(payment_a)
+
+        b_code_ids = {
+            c.id for c in ProductMarkingCode.query.filter_by(order_id=payment_b.order_id).all()
+        }
+        assert not ({code.id for _item, code in held} & b_code_ids), (
+            'payment A must not surface order B codes into its fiscal payload'
+        )
+
+    def test_release_does_not_touch_a_code_another_order_now_owns(
+        self, db, two_click_payments_sharing_a_pool
+    ):
+        """Releasing A a second time must not free B's codes out from under it."""
+        payment_a, payment_b, _codes = two_click_payments_sharing_a_pool
+        service = PaymentFiscalizationService(click_provider_service=Mock())
+
+        service.reserve_required_marking_codes(payment_a)
+        service.release_reserved_marking_codes(payment_a, reason='payment_timeout')
+        db.session.commit()
+        service.reserve_required_marking_codes(payment_b)
+        db.session.commit()
+
+        service.release_reserved_marking_codes(payment_a, reason='payment_timeout')
+        db.session.commit()
+
+        still_b = ProductMarkingCode.query.filter_by(order_id=payment_b.order_id).all()
+        assert len(still_b) == 2
+        assert all(c.status == MarkingCodeStatus.RESERVED for c in still_b)
+
+
+# --------------------------------------------------------------------------- #
+# Reservation is ALL-OR-NOTHING (Task 9 fix, 2026-08-24).
+#
+# `reserve_required_marking_codes` used to loop `order.order_items`
+# sequentially, RESERVE each line's codes as it succeeded, and raise
+# ValidationError from INSIDE the loop on the first short line. Every caller
+# that answers a protocol code instead of re-raising -- `handle_prepare`
+# (-9), `_restore_click_rail_after_offline_settlement`, `_accept_late_complete`
+# -- then reached `PaymentService.handle_click_webhook`'s UNCONDITIONAL commit,
+# so earlier lines' codes were durably stuck RESERVED against an attempt the
+# gateway had been told was cancelled.
+#
+# The fix plans under FOR UPDATE first and mutates only when every line is
+# covered. These tests pin both halves: the all-or-nothing guarantee, and the
+# same-product duplicate-line hazard the restructure could otherwise introduce.
+# --------------------------------------------------------------------------- #
+
+@pytest.fixture
+def order_with_two_lines_of_one_product(db, sample_order, sample_product):
+    """ONE order, TWO OrderItem rows carrying the SAME product (qty 2 + qty 1).
+
+    `order_items` has NO unique constraint on `(order_id, product_id)` and real
+    orders exercise it (dev DB order 141 = items 159 + 160, both product 2).
+    The old sequential loop kept the two lines apart only by accident of
+    autoflush; a planner that reads without writing must exclude codes it has
+    already planned or it hands the same physical code to both lines.
+
+    Returns ``(payment, [code1, code2, code3])``.
+    """
+    db.session.add(ProductFiscalProfile(
+        product_id=sample_product.id,
+        spic='SPIC-DUP',
+        package_code='PACK-DUP',
+        units='1213733',
+        vat_percent=Decimal('12.00'),
+        fiscalization_enabled=True,
+        requires_marking_codes=True,
+    ))
+    sample_order.payment_method = PaymentMethod.CLICK
+    db.session.add_all([
+        OrderItem(
+            order_id=sample_order.id, product_id=sample_product.id, quantity=2,
+            unit_price=Decimal('15000.00'), total_price=Decimal('30000.00'),
+        ),
+        OrderItem(
+            order_id=sample_order.id, product_id=sample_product.id, quantity=1,
+            unit_price=Decimal('15000.00'), total_price=Decimal('15000.00'),
+        ),
+    ])
+    payment = Payment(
+        order_id=sample_order.id,
+        user_id=sample_order.user_id,
+        payment_method=PaymentMethod.CLICK,
+        amount=Decimal('45000.00'),
+        currency='UZS',
+        status=PaymentStatus.PENDING,
+        payment_id='click-dup-lines',
+    )
+    db.session.add(payment)
+    codes = [
+        ProductMarkingCode(
+            product_id=sample_product.id,
+            code=f'DUP-{i:03d}\x1dVERIFY-DUP-{i:03d}',
+            status=MarkingCodeStatus.AVAILABLE,
+        )
+        for i in range(1, 4)
+    ]
+    db.session.add_all(codes)
+    db.session.commit()
+    return payment, codes
+
+
+@pytest.fixture
+def two_product_click_order(db, sample_order, sample_product):
+    """A two-line CLICK order: product A (qty 1) and product B (qty 1).
+
+    Both products require marking codes; the caller decides how deep each pool
+    is. Returns ``(payment, product_a, product_b)``.
+    """
+    product_b = Product(
+        name='Product B (second pool)',
+        category_id=sample_product.category_id,
+        size='19L',
+        volume=19.0,
+        volume_unit='L',
+        base_price=Decimal('15000.00'),
+        stock_quantity=0,
+        is_active=True,
+    )
+    db.session.add(product_b)
+    db.session.flush()
+
+    db.session.add_all([
+        ProductFiscalProfile(
+            product_id=sample_product.id, spic='SPIC-A', package_code='PACK-A',
+            units='1213733', vat_percent=Decimal('12.00'),
+            fiscalization_enabled=True, requires_marking_codes=True,
+        ),
+        ProductFiscalProfile(
+            product_id=product_b.id, spic='SPIC-B', package_code='PACK-B',
+            units='1213733', vat_percent=Decimal('12.00'),
+            fiscalization_enabled=True, requires_marking_codes=True,
+        ),
+    ])
+    sample_order.payment_method = PaymentMethod.CLICK
+    db.session.add_all([
+        OrderItem(
+            order_id=sample_order.id, product_id=sample_product.id, quantity=1,
+            unit_price=Decimal('15000.00'), total_price=Decimal('15000.00'),
+        ),
+        OrderItem(
+            order_id=sample_order.id, product_id=product_b.id, quantity=1,
+            unit_price=Decimal('15000.00'), total_price=Decimal('15000.00'),
+        ),
+    ])
+    payment = Payment(
+        order_id=sample_order.id,
+        user_id=sample_order.user_id,
+        payment_method=PaymentMethod.CLICK,
+        amount=Decimal('30000.00'),
+        currency='UZS',
+        status=PaymentStatus.PENDING,
+        payment_id='click-two-products',
+    )
+    db.session.add(payment)
+    db.session.commit()
+    return payment, sample_product, product_b
+
+
+def _seed_codes(db, product, count, prefix):
+    codes = [
+        ProductMarkingCode(
+            product_id=product.id,
+            code=f'{prefix}-{i:03d}\x1dVERIFY-{prefix}-{i:03d}',
+            status=MarkingCodeStatus.AVAILABLE,
+        )
+        for i in range(1, count + 1)
+    ]
+    db.session.add_all(codes)
+    db.session.commit()
+    return codes
+
+
+@pytest.mark.unit
+@pytest.mark.payment
+class TestReservationIsAllOrNothing:
+    def test_two_lines_of_the_same_product_never_share_a_physical_code(
+        self, db, order_with_two_lines_of_one_product
+    ):
+        """T2 -- the regression only the plan-then-mutate restructure can introduce.
+
+        Planning reads without writing, so without an explicit
+        `planned_code_ids` exclusion both lines' queries see the same three
+        AVAILABLE rows and the qty-1 line is handed a code the qty-2 line
+        already holds. That would print one physical label on two receipt
+        lines: strictly worse than the leak being fixed.
+        """
+        payment, codes = order_with_two_lines_of_one_product
+        service = PaymentFiscalizationService(click_provider_service=Mock())
+
+        assert service.reserve_required_marking_codes(payment)['reserved'] == 3
+        db.session.commit()
+
+        held = service._codes_currently_held(payment)
+        assert len(held) == 3, 'three units ordered, three code allocations'
+        assert len({code.id for _item, code in held}) == 3, (
+            'each order line must hold its OWN physical code -- no code may be '
+            'handed to two lines of the same product'
+        )
+        assert {c.id for c in codes} == {code.id for _item, code in held}
+
+    def test_a_short_pool_across_duplicate_lines_reserves_nothing(
+        self, db, order_with_two_lines_of_one_product
+    ):
+        """Three units ordered, two codes in the pool -> refuse, keep both."""
+        payment, codes = order_with_two_lines_of_one_product
+        codes[2].status = MarkingCodeStatus.ARCHIVED
+        db.session.commit()
+        service = PaymentFiscalizationService(click_provider_service=Mock())
+
+        with pytest.raises(ValidationError):
+            service.reserve_required_marking_codes(payment)
+
+        # The caller (handle_prepare -> handle_click_webhook) COMMITS after a
+        # refusal, because the -9 is a return value and not an exception.
+        # Committing here is what makes the leak durable in production.
+        db.session.commit()
+        db.session.expire_all()
+
+        assert ProductMarkingCode.query.filter_by(status=MarkingCodeStatus.RESERVED).count() == 0
+        assert OrderItemMarkingCodeAllocation.query.filter_by(order_id=payment.order_id).count() == 0
+
+    def test_a_shortfall_on_the_second_product_leaves_the_first_untouched(
+        self, db, two_product_click_order
+    ):
+        """The prod shape: A's pool covers its line, B's is empty."""
+        payment, product_a, _product_b = two_product_click_order
+        _seed_codes(db, product_a, 1, 'A')
+        service = PaymentFiscalizationService(click_provider_service=Mock())
+
+        with pytest.raises(ValidationError):
+            service.reserve_required_marking_codes(payment)
+
+        db.session.commit()
+        db.session.expire_all()
+
+        assert ProductMarkingCode.query.filter_by(
+            product_id=product_a.id, status=MarkingCodeStatus.AVAILABLE
+        ).count() == 1, "product A's code must not be spent by a refused attempt"
+        assert OrderItemMarkingCodeAllocation.query.filter_by(order_id=payment.order_id).count() == 0
+
+    def test_a_covered_line_is_skipped_so_a_retry_never_over_releases(
+        self, db, two_product_click_order
+    ):
+        """T3 -- the idempotent-retry shape driven by :429 / :871 / :1015.
+
+        After a successful reservation, B's pool is emptied. A second reserve
+        must NOT be short (B's line is already fully covered, so the planner
+        skips it), must draw nothing new, and must not release, re-stamp or
+        audit anything. The last two assertions are what a compensating-release
+        fix would fail.
+        """
+        payment, product_a, product_b = two_product_click_order
+        _seed_codes(db, product_a, 1, 'A')
+        b_codes = _seed_codes(db, product_b, 1, 'B')
+        service = PaymentFiscalizationService(click_provider_service=Mock())
+
+        assert service.reserve_required_marking_codes(payment)['reserved'] == 2
+        db.session.commit()
+
+        held_ids = {code.id for _item, code in service._codes_currently_held(payment)}
+        reserved_at_before = {
+            c.id: c.reserved_at for c in ProductMarkingCode.query.filter(
+                ProductMarkingCode.id.in_(held_ids)
+            ).all()
+        }
+        allocations_before = OrderItemMarkingCodeAllocation.query.filter_by(
+            order_id=payment.order_id
+        ).count()
+        stock_a_before = Product.query.get(product_a.id).stock_quantity
+
+        # Product B's pool is now bone dry: a fresh draw for B would be short.
+        assert ProductMarkingCode.query.filter_by(
+            product_id=product_b.id, status=MarkingCodeStatus.AVAILABLE
+        ).count() == 0
+        assert b_codes[0].status == MarkingCodeStatus.RESERVED
+
+        assert service.reserve_required_marking_codes(payment)['reserved'] == 0
+        db.session.commit()
+        db.session.expire_all()
+
+        assert {code.id for _item, code in service._codes_currently_held(payment)} == held_ids
+        held_rows = ProductMarkingCode.query.filter(ProductMarkingCode.id.in_(held_ids)).all()
+        assert all(c.status == MarkingCodeStatus.RESERVED for c in held_rows)
+        assert {c.id: c.reserved_at for c in held_rows} == reserved_at_before, (
+            'a no-op retry must not re-stamp reserved_at'
+        )
+        assert OrderItemMarkingCodeAllocation.query.filter_by(
+            order_id=payment.order_id
+        ).count() == allocations_before, 'the append-only ledger must not grow on a no-op'
+        assert Product.query.get(product_a.id).stock_quantity == stock_a_before
+
+        trail = (Payment.query.get(payment.id).provider_data or {}).get('fiscalization_audit_trail') or []
+        assert not [e for e in trail if e.get('action') == 'payment_marking_codes_released'], (
+            'reserve must never release: a compensating-release fix would leave '
+            'this audit row and free the TC-pre-utilised codes with it'
+        )
+
+    def test_manual_business_account_consumption_is_all_or_nothing(
+        self, db, two_product_click_order
+    ):
+        """T7 -- the sixth, previously undocumented copy of the same defect
+        (`_reserve_codes_for_manual_consumption`).
+
+        Pins the CODES half only, which is all the fix delivers: a shortfall
+        takes no code and writes no ledger row. The `fiscalization.status =
+        PROCESSING` / `attempts` writes its caller made before the raise are
+        still protected only by the caller rolling back, so this test
+        deliberately asserts nothing about them.
+        """
+        payment, product_a, _product_b = two_product_click_order
+        _seed_codes(db, product_a, 1, 'A')
+
+        payment.payment_method = PaymentMethod.BUSINESS_ACCOUNT
+        payment.status = PaymentStatus.COMPLETED
+        payment.consume_marking_codes = True
+        db.session.commit()
+
+        service = PaymentFiscalizationService(click_provider_service=Mock())
+
+        with pytest.raises(ValidationError):
+            service.consume_marking_codes_for_business_account(payment)
+
+        db.session.commit()
+        db.session.expire_all()
+
+        assert ProductMarkingCode.query.filter_by(
+            product_id=product_a.id, status=MarkingCodeStatus.AVAILABLE
+        ).count() == 1
+        assert ProductMarkingCode.query.filter_by(status=MarkingCodeStatus.RESERVED).count() == 0
+        assert ProductMarkingCode.query.filter_by(status=MarkingCodeStatus.USED).count() == 0
+        assert OrderItemMarkingCodeAllocation.query.filter_by(order_id=payment.order_id).count() == 0

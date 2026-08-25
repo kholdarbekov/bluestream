@@ -13,6 +13,77 @@ from shared.constants import ORDER_STATUS_ICONS, SUBSCRIPTION_STATUS_ICONS, DEFA
 MAX_DISPLAYED_ADDRESSES = 5
 
 
+def customer_may_pay(order: Optional[Dict[str, Any]]) -> bool:
+    """Should this customer be offered a way to pay THIS order right now?
+
+    THE bot's single expression of the question. Both keyboards that draw a Pay
+    button and the `retry_payment` handler that services the tap read it, so the
+    button and the handler can never disagree about the same order.
+
+    It is the BACKEND'S answer, plus exactly one case the backend field
+    deliberately does not cover:
+
+    * ``payment_info.is_payable`` is `order_is_payable_online` published
+      verbatim (payment_projection.py, THE authority — the same predicate the
+      Click PREPARE guard refuses on). Under policy 2026-08-24 it stays True
+      THROUGH delivery for an unpaid Click order (case B), which is the whole
+      point of B3: the old gate here was `order_status == 'pending'`, so the one
+      population whose link we deliberately keep payable was shown no way to pay
+      it.
+
+    * A PENDING order whose rail is not online yet. `is_payable` asks "is THIS
+      payment's gateway link live", and a cash order has no link — but the
+      customer has always been able to move a pending cash order onto Click from
+      this screen, and POST /api/v1/payments/create owns that flip together with
+      its marking-code pool guard (`MARKING_CODES_POOL_SHORT`). Without this
+      disjunct B3 would DELETE the Pay button from every cash order, i.e.
+      narrow a change whose entire purpose is to widen. It is deliberately
+      spelled `status == 'pending'` and not "any live order": `cancel_order`
+      and the rail flip are both checkout-window affordances, and widening past
+      the window is a separate decision nobody has made.
+
+    Unpaid is required on both sides — `is_payable` already excludes a settled
+    order, and offering a second payment on a paid one is how double-payments
+    start.
+    """
+    if not order:
+        return False
+    payment_info = order.get('payment_info') or {}
+    if payment_info.get('is_payable'):
+        return True
+    if order.get('is_paid'):
+        return False
+    if (payment_info.get('payment_status') or '').lower() == 'completed':
+        # A COMPLETED payment on an order whose `is_paid` flag has not caught up
+        # yet. The open-checkout arm would otherwise draw a Pay button whose tap
+        # runs `create_payment`, which REWRITES the row to PENDING and mints a
+        # second link -- downgrading a settled payment and inviting a second
+        # debit. `is_payable` already excludes this; the OR-arm has to as well.
+        return False
+    return (order.get('status') or '').lower() == 'pending'
+
+
+def customer_may_cancel(order: Optional[Dict[str, Any]]) -> bool:
+    """May this customer cancel THIS order themselves?
+
+    A SIBLING of :func:`customer_may_pay`, never folded into it. The two used to
+    be one `order_status == 'pending'` test and B3 split them because payability
+    now runs THROUGH delivery while `OrderService.cancel_order`
+    (`order_service.py:1050`) still refuses DELIVERED/CANCELLED. Written down
+    once here so both screens that offer Cancel ask the same question.
+
+    Deliberately still the checkout window and not "anything cancel_order would
+    accept": widening customer self-cancel to CONFIRMED / PREPARING /
+    OUT_FOR_DELIVERY orders is a business decision nobody has made. This helper
+    exists so that decision has exactly one place to land.
+    """
+    if not order:
+        return False
+    if order.get('is_paid'):
+        return False
+    return (order.get('status') or '').lower() == 'pending'
+
+
 def get_product_display_price(product: Dict[str, Any]) -> Any:
     """Return effective product price with schema-compatible fallbacks."""
     pricing = product.get('pricing') or {}
@@ -745,8 +816,20 @@ class OrderKeyboards:
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod
-    def order_details(order_id: int, order_status: str, language: str = 'en') -> InlineKeyboardMarkup:
-        """Order details action buttons"""
+    def order_details(
+        order_id: int,
+        order_status: str,
+        language: str = 'en',
+        may_pay: bool = False,
+        may_cancel: bool = False,
+    ) -> InlineKeyboardMarkup:
+        """Order details action buttons.
+
+        ``may_pay`` is `customer_may_pay(order)`, computed by the caller from
+        the order it already fetched. It is passed in rather than re-derived
+        here because this builder is handed a status STRING and cannot see the
+        published `payment_info.is_payable`.
+        """
         buttons = []
 
         # Add track button for active orders
@@ -756,12 +839,17 @@ class OrderKeyboards:
                 'callback_data': f'track_order_{order_id}'
             }])
 
-        # Add pay and cancel buttons for pending orders
-        if order_status == 'pending':
+        # PAY and CANCEL were one `order_status == 'pending'` block and had to
+        # SPLIT. Payability now runs through delivery (case B), but
+        # `OrderService.cancel_order` still refuses DELIVERED/CANCELLED, so
+        # widening the pair wholesale would have granted customers a self-cancel
+        # button on an out-for-delivery order that can only fail.
+        if may_pay:
             buttons.append([{
                 'text': i18n.get('telegram.payment.pay_now', language),
                 'callback_data': f'payment_retry_{order_id}'
             }])
+        if may_cancel:
             buttons.append([{
                 'text': i18n.get('telegram.payment.cancel_order', language),
                 'callback_data': f'cancel_order_{order_id}'
@@ -1273,7 +1361,12 @@ class PaymentKeyboards:
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod
-    def payment_failed(order_id: int, language: str = 'en') -> InlineKeyboardMarkup:
+    def payment_failed(
+        order_id: int,
+        language: str = 'en',
+        may_pay: bool = True,
+        may_cancel: bool = True,
+    ) -> InlineKeyboardMarkup:
         """Recovery options for an order that exists but is not paid.
 
         Every button carries `order_id` (My Orders needs none — it lists them),
@@ -1283,17 +1376,44 @@ class PaymentKeyboards:
         (`confirm_order`), which is why My Orders is here: after a failed link
         the customer's first question is "so does my order exist?", and the
         answer has to be one tap away.
+
+        ``may_pay`` is `customer_may_pay(order)` and ``may_cancel`` is
+        `customer_may_cancel(order)` — THE SAME SPLIT `order_details` applies,
+        and it belongs here for the same reason. Before B3 a DELIVERED order
+        could never reach this screen; it can now, because `retry_payment`
+        renders it on any link-creation failure and case B is precisely the
+        population B3 routes here. `OrderService.cancel_order` still refuses
+        DELIVERED, so an unconditional Cancel button hands a customer reading
+        Uzbek the backend's raw English "Order cannot be cancelled".
+
+        Both default True for the one caller that holds no order —
+        `cancel_payment`, whose screen by construction runs on an order whose
+        payment attempt just ended without money moving — so that caller's
+        behaviour is unchanged rather than fail-closed into a recovery screen
+        with nothing to recover with.
+
+        SWITCH METHOD IS DELIBERATELY ABSENT. `payment_switch_{id}` parsed the
+        order id, logged it, and then rendered `OrderKeyboards.payment_methods`,
+        whose callbacks (`payment_cash` / `payment_card`) carry NO order id and
+        route to `orders.payment_handler` -> `_show_order_confirmation` — the
+        CART checkout screen. So it never moved the named order's rail, and
+        because an unpaid order deliberately keeps its cart, the Confirm button
+        it leads to places a SECOND order for the same basket: the exact
+        double-order this screen's "your order is placed" copy exists to
+        prevent. The rail move a customer really has is Retry —
+        POST /api/v1/payments/create normalizes card->click and flips a pending
+        cash order onto Click behind the marking-code pool guard. Two
+        expressions of one affordance, one of them broken; this is the deletion.
         """
-        buttons = [
-            [{'text': i18n.get('telegram.payment.retry', language),
-              'callback_data': f'payment_retry_{order_id}'}],
-            [{'text': i18n.get('telegram.menu.orders', language),
-              'callback_data': 'menu_orders'}],
-            [{'text': i18n.get('telegram.payment.switch_method', language),
-              'callback_data': f'payment_switch_{order_id}'}],
-            [{'text': i18n.get('telegram.payment.cancel_order', language),
-              'callback_data': f'cancel_order_{order_id}'}]
-        ]
+        buttons = []
+        if may_pay:
+            buttons.append([{'text': i18n.get('telegram.payment.retry', language),
+                             'callback_data': f'payment_retry_{order_id}'}])
+        buttons.append([{'text': i18n.get('telegram.menu.orders', language),
+                         'callback_data': 'menu_orders'}])
+        if may_cancel:
+            buttons.append([{'text': i18n.get('telegram.payment.cancel_order', language),
+                             'callback_data': f'cancel_order_{order_id}'}])
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod

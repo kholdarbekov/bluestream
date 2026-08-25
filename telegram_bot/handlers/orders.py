@@ -11,7 +11,10 @@ from telegram.helpers import escape_markdown
 
 from eligibility import main_menu_for
 from i18n import i18n
-from keyboards import OrderKeyboards, MenuKeyboards, ProfileKeyboards
+from keyboards import (
+    OrderKeyboards, MenuKeyboards, ProfileKeyboards,
+    customer_may_pay, customer_may_cancel,
+)
 from api_client import api_client
 from database import db_manager, BotUserRepository
 from utils import user_middleware, format_price, MessageBuilder, get_auth_token
@@ -92,14 +95,16 @@ def _build_cod_summary_lines(summary: dict, language: str) -> list:
 
     Two blocks, both derived server-side from the authenticated customer:
 
-    * the CLUSTER block — their linked accounts' unpaid COD total and their
-      cluster-wide prepaid credit, i.e. "as a single customer" (UC1/UC2), and
+    * the CLUSTER block — their linked accounts' unpaid COD total, i.e. "as a
+      single customer" (UC1/UC2),
+    * the PREPAID CREDIT block — shown to EVERY customer carrying a balance,
+      linked or not (B4b; see the gate below for why it is not the cluster's),
+      and
     * one PLACE block per grouped address — that workplace's unified open COD
       total with a per-order breakdown naming the coworker each order belongs to
       (approved full in-group transparency; the payload carries names only).
 
-    Emits NOTHING for an unlinked + ungrouped customer, so their orders menu is
-    byte-identical to today.
+    Emits NOTHING for an unlinked, ungrouped customer with no prepaid credit.
 
     No HTML escaping: ``orders_menu`` sends its body with no ``parse_mode`` and
     the application sets no ``Defaults(parse_mode=...)``, so this text is plain.
@@ -113,19 +118,39 @@ def _build_cod_summary_lines(summary: dict, language: str) -> list:
             'telegram.payments.cluster_debt_total', language,
             total=_money(summary.get('cluster_delivered_outstanding_amount')),
         ))
-        # Prepaid credit is cluster-wide too (2b); showing the debt without it
-        # would overstate what this person still owes. Reuses the key the
-        # checkout/cart surfaces already render this same balance with.
-        prepaid = summary.get('available_prepayment_balance') or 0
-        try:
-            has_prepaid = float(prepaid) > 0
-        except (TypeError, ValueError):
-            has_prepaid = False
-        if has_prepaid:
-            lines.append(i18n.get(
-                'telegram.orders.cod_prepaid_balance', language,
-                available_balance=_money(prepaid),
-            ))
+
+    # 🔴 CREDIT IS NOT GATED ON THE CLUSTER; DEBT IS. These are two different
+    # facts and they were wrongly sharing one `if`.
+    #
+    # The CLUSTER DEBT line answers "what do my linked accounts owe together",
+    # which is meaningless for one account whose own unpaid orders are already
+    # itemised in the list right above — so it stays behind the >1 gate.
+    #
+    # The CREDIT line is the ONLY place in the bot that reports money the
+    # business owes the customer. Before B4a a solo customer's prepaid balance
+    # could only come from a driver over-collecting cash at their own door;
+    # since B4a a cancelled card/Click order settles as prepaid credit too, so a
+    # single-account customer can hold real money here — and under the old gate
+    # they could not see it ANYWHERE (owner's ruling, 2026-08-24).
+    #
+    # Values are cluster-wide already (2b), so a linked customer's block is
+    # unchanged. Reuses the key the checkout/cart surfaces render the same
+    # balance with.
+    prepaid = summary.get('available_prepayment_balance') or 0
+    try:
+        has_prepaid = float(prepaid) > 0
+    except (TypeError, ValueError):
+        has_prepaid = False
+    if has_prepaid:
+        lines.append(i18n.get(
+            'telegram.orders.cod_prepaid_balance', language,
+            available_balance=_money(prepaid),
+        ))
+        # The balance never travels without the sentence naming where it can be
+        # spent: it is usable on CASH/COD orders only, and a customer shown a
+        # bare number that a Click checkout then ignores concludes they were
+        # charged twice. Same key the cart screen renders (one fact, one key).
+        lines.append(i18n.get('telegram.payments.prepaid_cash_only', language))
 
     for place in summary.get('places') or []:
         label = place.get('label') or f"#{place.get('place_group_id')}"
@@ -366,7 +391,15 @@ class OrderHandlers(BaseHandler):
                 # Make order delivery address title bold.
                 details_text += f"\n{i18n.get('telegram.orders.delivery_info', language)}:\n*{escape_markdown(order['delivery_address'].get('title', unknown_text), version=2)}* \\- {escape_markdown(order['delivery_address'].get('full_address', ''), version=2)}"
 
-            keyboard = OrderKeyboards.order_details(order_id, order.get('status', ''), language)
+            # Payability is the BACKEND's answer (`payment_info.is_payable`),
+            # not a second reading of the status string — see `customer_may_pay`.
+            keyboard = OrderKeyboards.order_details(
+                order_id,
+                order.get('status', ''),
+                language,
+                may_pay=customer_may_pay(order),
+                may_cancel=customer_may_cancel(order),
+            )
 
             logger.info(f"order_details handler: details_text after escaping: {details_text}")
             await self._edit_or_replace_callback_message(
@@ -1128,7 +1161,17 @@ class OrderHandlers(BaseHandler):
                     'id': order['id'],
                     'order_number': order.get('order_number', str(order['id'])),
                     'total_amount': order['total_amount'],
-                    'order_items': order.get('order_items', [])
+                    'order_items': order.get('order_items', []),
+                    # The link-failure screen this payload also feeds
+                    # (`show_payment_link_failed`) decides whether to offer
+                    # Retry / Switch method from `customer_may_pay`, which reads
+                    # the order's payability. Dropping these three here left
+                    # that screen with nothing to read and silently withheld
+                    # both recovery buttons on the one screen whose job is
+                    # recovery.
+                    'status': order.get('status'),
+                    'is_paid': order.get('is_paid', False),
+                    'payment_info': order.get('payment_info'),
                 }
 
                 # Send external payment link.

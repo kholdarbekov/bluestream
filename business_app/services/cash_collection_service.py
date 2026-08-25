@@ -29,6 +29,8 @@ from shared.enums import (
 )
 from business_app.utils.exceptions import NotFoundError, ValidationError
 from business_app.utils.payment_projection import (
+    ONLINE_PAYABLE_METHOD_VALUES,
+    unpaid_after_delivery_clause,
     get_payment_projection,
     has_open_receivable,
     is_ledger_receivable,
@@ -45,6 +47,58 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Money the business ALREADY HOLDS, re-booked as customer credit.
+# ---------------------------------------------------------------------------
+# A `CashCollectionEvent` normally means "cash came in". These two flows do not:
+# they take money that has already been counted once — a card/Click payment the
+# gateway settled, or a door collection already booked as an allocation — and
+# re-express it as spendable customer credit.
+#
+# 🔴 THIS IS A REPORTING DISCRIMINATOR, and the reason it has to exist:
+# `AdminReportService.get_financial_summary` counts electronic money through
+# `Payment.amount_collected` and cash money through live allocations. When one
+# of these events is later allocated to a COD debt, the SAME money lands in both
+# totals and `total_revenue` (their sum) reports it twice. `prepaid_reservation`
+# allocations are excluded there for the same reason, one layer down.
+#
+# Written down ONCE, here, next to the code that stamps the marker.
+CUSTOMER_CREDIT_REBOOK_FLOWS = frozenset(
+    {
+        # B4a: a card/Click order was cancelled. The gateway is never reversed
+        # (the fiscal receipt cannot be un-filed), so the money becomes credit.
+        "order_cancel_prepaid_credit",
+        # OrderEditService._cascade_cash: a paid order was edited DOWN and the
+        # difference handed back as credit rather than refunded to the card.
+        "order_edit_refund",
+    }
+)
+
+# Events written before `proof_data['flow']` was stamped carry the marker only in
+# their idempotency key. `OrderEditService._cascade_cash` is the sole writer of
+# this prefix, so matching it cannot over-net.
+_LEGACY_REBOOK_IDEMPOTENCY_PREFIX = "order_edit_refund:"
+
+
+def customer_credit_rebook_event_clause():
+    """SQL predicate: is this event previously-counted money re-booked as credit?
+
+    The ONE expression of :data:`CUSTOMER_CREDIT_REBOOK_FLOWS`, used both by the
+    B4a netting (so a cancel never re-credits an edit-down that already paid the
+    customer back) and by the financial summary (so the same money is not
+    counted as revenue twice). Both `coalesce`s are load-bearing: without them a
+    NULL `proof_data` or a NULL `idempotency_key` makes the whole disjunction
+    NULL, and `~clause` then silently drops ordinary door-cash events from the
+    report.
+    """
+    flow = func.coalesce(CashCollectionEvent.proof_data["flow"].as_string(), "")
+    key = func.coalesce(CashCollectionEvent.idempotency_key, "")
+    return or_(
+        flow.in_(sorted(CUSTOMER_CREDIT_REBOOK_FLOWS)),
+        key.like(f"{_LEGACY_REBOOK_IDEMPOTENCY_PREFIX}%"),
+    )
 
 
 @dataclass
@@ -356,7 +410,7 @@ class CashCollectionService:
             .join(Order, Payment.order_id == Order.id)
             .filter(
                 Payment.user_id.in_(cluster_ids),
-                open_receivable_clause(),
+                unpaid_after_delivery_clause(),
                 Order.status == OrderStatus.DELIVERED,
             )
             .scalar()
@@ -375,7 +429,7 @@ class CashCollectionService:
             .join(Order, Payment.order_id == Order.id)
             .filter(
                 Order.delivery_address_id.in_(member_ids),
-                open_receivable_clause(),
+                unpaid_after_delivery_clause(),
                 Order.status == OrderStatus.DELIVERED,
             )
             .scalar()
@@ -1464,6 +1518,208 @@ class CashCollectionService:
 
         return self._to_decimal(refunded_total)
 
+    def credit_customer_for_dead_order_prepayment(
+        self,
+        payment: Payment,
+        *,
+        reason: str,
+        actor_user_id: Optional[int] = None,
+        commit: bool = False,
+    ) -> Optional[CashCollectionEvent]:
+        """Book a card/Click prepayment on a dead order as customer prepaid credit.
+
+        Owner ruling 2026-08-24: "the payment that is done via click/card is
+        non-returnable ... We can cancel the order itself, and in that case the
+        payment will settle as prepaid customer balance."
+
+        THE RAIL GATE IS THE PAYME CARVE-OUT. ``ONLINE_PAYABLE_METHOD_VALUES`` is
+        {CLICK, CARD}; PAYME is excluded BY CONSTRUCTION, not by a hand-written
+        exclusion that a future edit could drop. Payme keeps its protocol-mandated
+        CancelTransaction reversal and never reaches here.
+
+        NO ``order_id`` IS PASSED, and that is load-bearing, not an oversight.
+        ``_validate_collection_context`` refuses a BACKFILL against a
+        non-DELIVERED, non-CASH order — twice over for a cancelled card order.
+        This is customer-level credit that applies to the NEXT order, exactly as
+        ``ClickPaymentProviderService._credit_late_debit`` books it. It also
+        keeps B4 structurally clear of the ``_sync_completed_prepayment_projection``
+        landmine documented in ``open_receivable_clause``: a free-standing event
+        with no order_id can never be mistaken for a reservation against this
+        payment. The order linkage lives in ``proof_data``.
+
+        THE AMOUNT IS NETTED, NOT GROSS. ``amount_collected`` on a card payment
+        can already have been partly handed back (an edit-down posted the delta
+        through ``_cascade_cash``) or partly funded by door cash (whose
+        allocations are still booked on this payment). Crediting the gross figure
+        books the same money twice. What we owe back is precisely the GATEWAY
+        money still held.
+
+        Returns the credit event, or ``None`` when there is nothing to credit.
+        """
+        from shared.enums import CashCollectionSource
+
+        if payment is None:
+            return None
+        method_value = (
+            payment.payment_method.value if hasattr(payment.payment_method, "value") else str(payment.payment_method)
+        )
+        if method_value not in ONLINE_PAYABLE_METHOD_VALUES:
+            return None
+        # The only two states in which a card/Click row is holding real money:
+        # COMPLETED (paid in full) and PARTIALLY_PAID (paid, then repriced upward).
+        if payment.status not in {PaymentStatus.COMPLETED, PaymentStatus.PARTIALLY_PAID}:
+            return None
+
+        gross = get_payment_projection(payment)["amount_collected"]
+
+        # (1) Money on this payment that came from CASH, not the gateway — the
+        #     door-collected slice of an order that was repriced upward and
+        #     settled in place. Same predicate the financial report's
+        #     `cash_on_payment` subquery uses: live allocations, excluding
+        #     `prepaid_reservation` (reservations never bump `amount_collected`).
+        #
+        #     🔴 IT IS NOT MERELY SUBTRACTED — IT IS HANDED BACK. Subtracting it
+        #     alone is arithmetically right and moral nonsense: the customer who
+        #     paid 100k by card and 30k in banknotes would get 100k of credit and
+        #     we would simply keep the 30k, with no refund route of any kind now
+        #     that the gateway rail is closed. "We keep your cash" is precisely
+        #     what the owner's rule exists to avoid. So each allocation is
+        #     reversed back into its OWN event's unapplied pool, and only the
+        #     gateway remainder becomes a new credit event. The customer ends up
+        #     whole either way; the money simply returns by the road it came in
+        #     on.
+        cash_allocations = (
+            CashCollectionAllocation.query.join(
+                CashCollectionEvent,
+                CashCollectionAllocation.cash_collection_event_id == CashCollectionEvent.id,
+            )
+            .filter(
+                CashCollectionAllocation.payment_id == payment.id,
+                CashCollectionAllocation.reversed_at.is_(None),
+                CashCollectionAllocation.allocation_mode != "prepaid_reservation",
+                CashCollectionEvent.voided_at.is_(None),
+            )
+            .all()
+        )
+        cash_funded = sum(
+            (self._to_decimal(allocation.allocated_amount) for allocation in cash_allocations),
+            Decimal("0.00"),
+        )
+
+        # (2) Gateway money already handed back as credit by the order-edit
+        #     cascade, discovered through the ONE re-booking predicate rather
+        #     than a second hand-written marker test.
+        already_credited = Decimal("0.00")
+        if payment.order_id is not None:
+            already_credited = self._to_decimal(
+                db.session.query(func.coalesce(func.sum(CashCollectionEvent.amount), 0))
+                .filter(
+                    CashCollectionEvent.order_id == payment.order_id,
+                    CashCollectionEvent.voided_at.is_(None),
+                    customer_credit_rebook_event_clause(),
+                )
+                .scalar()
+                or 0
+            )
+
+        creditable = gross - cash_funded - already_credited
+
+        # Hand the door cash back. Modelled on the shipped Case C precedent
+        # (`ClickPaymentProviderService._restore_click_rail_after_offline_settlement`):
+        # `reverse_allocation_to_payment`, never `reverse_collection_event`,
+        # because it touches neither `event.amount` nor `driver_cash_session_id`
+        # — the driver really did hand those notes over and still owes the office
+        # exactly the same total.
+        paid_at_before = payment.paid_at
+        for allocation in cash_allocations:
+            self.reverse_allocation_to_payment(
+                allocation.id,
+                reversed_by_user_id=actor_user_id,
+                reason=(
+                    f"Order {payment.order.order_number if payment.order else ''} died; "
+                    "door cash re-booked as customer prepaid credit"
+                ),
+                commit=False,
+            )
+
+        # 🔴 RE-ASSERT THE DEAD-ORDER TERMINAL PROJECTION. A DEAD ORDER OWES
+        # NOTHING, and this runs on EVERY dead-order credit — deliberately NOT
+        # nested inside the reversal above, which was the bug this replaced.
+        #
+        # Two ways a positive `outstanding_amount` survives to here:
+        #
+        #  1. the reversal just removed the door-cash slice —
+        #     `reverse_allocation_to_payment` calls `sync_payment_projection`,
+        #     which re-derives status from `amount − amount_collected`; and
+        #  2. the payment arrived PARTIALLY_PAID in the first place, which this
+        #     method deliberately accepts: an order repriced UPWARD at the door
+        #     (prod order 961) that is then cancelled. `_recompute_totals` left
+        #     `amount` at the new higher total, and
+        #     `_sync_payment_status_for_terminal_order_state` will not touch it
+        #     because that guard only handles {PENDING, PROCESSING}.
+        #
+        # Either way the row would otherwise read as a PARTIALLY_PAID payment
+        # with a positive outstanding, `is_paid = False`, on a CANCELLED order —
+        # a PHANTOM RECEIVABLE, kept out of the allocators only by the
+        # `Order.status == DELIVERED` conjunct every `open_receivable_clause()`
+        # call site has to remember (see this module's note at the top of
+        # `open_receivable_clause`'s consumers). Do not leave one behind.
+        #
+        # Reducing `amount` to what is actually still held is the same move
+        # `_sync_payment_status_for_terminal_order_state` already makes on a
+        # terminal order ("reduce amount to what was collected so outstanding
+        # stays 0 through any later re-projection"), and it leaves the row a
+        # truthful record of what the GATEWAY took. A no-op for an already
+        # COMPLETED, fully-collected payment; PENDING never reaches this far.
+        collected_now = self._to_decimal(payment.amount_collected)
+        payment.amount = collected_now
+        payment.outstanding_amount = Decimal("0.00")
+        payment.status = PaymentStatus.COMPLETED
+        payment.paid_at = paid_at_before or payment.paid_at
+        if payment.order is not None:
+            payment.order.is_paid = True
+            payment.order.paid_at = payment.order.paid_at or payment.paid_at
+        db.session.flush()
+
+        if creditable <= Decimal("0.00"):
+            return None
+
+        order_number = payment.order.order_number if payment.order else ""
+        return self.post_collection(
+            customer_id=payment.user_id,
+            amount=creditable,
+            source=CashCollectionSource.BACKFILL,
+            recorded_by_user_id=actor_user_id,
+            notes=(
+                f"Order {order_number} cancelled after a {method_value} payment. "
+                f"The card/Click payment is never reversed (fiscal receipt cannot be "
+                f"undone); {creditable} credited to the customer's prepaid balance. "
+                f"Reason: {reason}"
+            ),
+            proof_data={
+                "flow": "order_cancel_prepaid_credit",
+                "payment_id": payment.id,
+                "order_id": payment.order_id,
+                "payment_method": method_value,
+                "provider_transaction_id": payment.provider_transaction_id,
+                "reason": reason,
+            },
+            # The double-credit defence: a retried cancel, a re-dispatched Celery
+            # task and a second admin click all collapse to one event.
+            idempotency_key=f"order-cancel-credit:{payment.id}",
+            # 🔴 THE CORPORATE MIRROR IS SUPPRESSED FOR THIS FLOW (owner ruling).
+            # A grocery customer is credited exactly like everyone else, but
+            # `post_collection`'s `settle_order_collection` mirror must not fire:
+            # for an AMOUNT-mode contract it posts a COLLECT that pays down
+            # contract debt, and a cancelled order was never CHARGEd against that
+            # contract (the CHARGE is posted at DELIVERED). Crediting them and
+            # firing the mirror would double-count; refusing to credit them at
+            # all would be worse still — before this rule they at least got a
+            # gateway reversal, and that route no longer exists.
+            mirror_to_corporate_contract=False,
+            commit=commit,
+        )
+
     def reverse_allocation_to_payment(
         self,
         allocation_id: int,
@@ -1634,7 +1890,7 @@ class CashCollectionService:
             .join(Payment, Payment.user_id == User.id)
             .join(Order, Order.id == Payment.order_id)
             .filter(
-                open_receivable_clause(),
+                unpaid_after_delivery_clause(),
                 Order.status == OrderStatus.DELIVERED,
             )
             .group_by(
@@ -2642,6 +2898,7 @@ class CashCollectionService:
         bypass_driver_block_check: bool = False,
         delivery_address_id: Optional[int] = None,
         replay_scope: Optional["AllocationScope"] = None,
+        mirror_to_corporate_contract: bool = True,
     ) -> CashCollectionEvent:
         customer = User.query.get(customer_id)
         if not customer:
@@ -2867,7 +3124,15 @@ class CashCollectionService:
         # single settle entry point: AMOUNT-mode -> COLLECT (money debt down);
         # legacy UNITS-mode -> amount-scaled TOPUP against the order's reserved/
         # consumed units (funds pre-delivery reservations too). No-op otherwise.
-        if customer.is_grocery_store and normalized_amount > Decimal("0.00"):
+        # `mirror_to_corporate_contract=False` is for the one shape where the
+        # money is NOT a collection against contract debt: a dead order's
+        # card/Click prepayment being handed back as customer credit
+        # (`credit_customer_for_dead_order_prepayment`). A cancelled order was
+        # never CHARGEd against the contract — the CHARGE is posted at DELIVERED
+        # — so a COLLECT here would pay down a debt that does not exist. Owner
+        # ruling: credit a grocery customer exactly like everyone else, and
+        # suppress the mirror for that flow alone.
+        if customer.is_grocery_store and normalized_amount > Decimal("0.00") and mirror_to_corporate_contract:
             from business_app.services.corporate_contract_service import CorporateContractService
 
             CorporateContractService().settle_order_collection(

@@ -7,7 +7,8 @@ Exposes the business-critical counters/gauges/summaries referenced by
 - payment_webhook_total — every inbound webhook delivery, labelled by provider + outcome
 - payment_webhook_failures_total — webhook handler exceptions + signature failures
 - payment_webhook_duplicates_total — idempotency-guard hits (replay or gateway retry)
-- payments_pending_age_seconds — Summary tracking age of PENDING payments (p95 used by alert)
+- payments_pending_total / _oldest_age_seconds / _on_closed_order_total — Gauges,
+  refreshed on the /metrics scrape in the web process
 - pg_pool_in_use / pg_pool_size — SQLAlchemy connection-pool Gauges
 
 Multiprocess: Flask runs under Gunicorn with preload_app=True + 2 workers + 3 gthreads.
@@ -21,12 +22,14 @@ from __future__ import annotations
 
 import os
 import time
-from datetime import timezone
+from datetime import datetime, timezone
 from typing import Optional
 
 from flask import request
-from prometheus_client import Counter, Gauge, Summary, CollectorRegistry, multiprocess
+from prometheus_client import Counter, Gauge, CollectorRegistry, multiprocess
 from prometheus_flask_exporter import PrometheusMetrics
+
+from shared.enums import OrderStatus, PaymentMethod, PaymentStatus
 
 
 # Per-process default registry is replaced in multiproc mode at /metrics scrape time.
@@ -48,11 +51,40 @@ payment_webhook_duplicates_total = Counter(
     labelnames=("provider",),
 )
 
-# Summary produces quantiles natively; the alert expression in alert_rules.yml
-# reads the 0.95 quantile directly.
-payments_pending_age_seconds = Summary(
-    "payments_pending_age_seconds",
-    "Age (in seconds) of PENDING payment records at sampling time.",
+# PENDING-payment observability.
+#
+# These were a `Summary` read by an alert selecting {quantile="0.95"}. The Python
+# prometheus_client Summary emits ONLY _count/_sum — it has no quantile series at
+# all (unlike the Go client) — so that selector matched nothing and
+# StalePaymentsPending could never fire. Confirmed against prod Prometheus on
+# 2026-08-23: the only series present were payments_pending_age_seconds_{count,sum}.
+# The sampler also ran in the Celery worker, which nothing scrapes.
+#
+# Gauges now, refreshed on the /metrics scrape in the web process (the only
+# process Prometheus actually collects). `liveall` because every worker process
+# computes the same DB-derived truth; the collector must not sum them.
+payments_pending_total = Gauge(
+    "payments_pending_total",
+    "PENDING payment rows at scrape time.",
+    multiprocess_mode="liveall",
+)
+
+payments_pending_oldest_age_seconds = Gauge(
+    "payments_pending_oldest_age_seconds",
+    "Age in seconds of the oldest PENDING payment at scrape time.",
+    multiprocess_mode="liveall",
+)
+
+# THE one that matters. A large PENDING age is expected and benign once we stop
+# auto-cancelling abandoned payments; what is never benign is an unpaid
+# electronic payment still PENDING on an order that has already left the door.
+# That is prod incident TG_000413_26's end state (order delivered, unpaid,
+# un-fiscalized) and `open_receivable_clause()` deliberately excludes it, so it
+# is invisible to the debtor lists, the COD statements and the financial report.
+payments_pending_on_closed_order_total = Gauge(
+    "payments_pending_on_closed_order_total",
+    "PENDING electronic payments whose order is DELIVERED, CANCELLED or RETURNED.",
+    multiprocess_mode="liveall",
 )
 
 pg_pool_size = Gauge(
@@ -230,6 +262,7 @@ def setup_prometheus_metrics(app) -> PrometheusMetrics:
         # hit the DB — keep them off every other request path.
         if request.path == "/metrics":
             _refresh_backup_freshness_gauges()
+            _refresh_pending_payment_gauges()
 
     return _flask_exporter
 
@@ -250,11 +283,68 @@ def record_webhook_duplicate(provider: str) -> None:
     payment_webhook_total.labels(provider=provider, outcome="duplicate").inc()
 
 
-def observe_pending_payment_age(age_seconds: float) -> None:
-    """Sample a PENDING payment's age. Called by the reconciliation Celery task."""
-    if age_seconds < 0:
+_PENDING_PAYMENTS_TTL_SECONDS = 30.0
+_pending_payments_last_refresh = 0.0
+
+
+def _pending_payment_rows():
+    """(created_at, order_status) for every PENDING payment on an electronic rail.
+
+    Split out so tests can force a failure and prove the scrape survives it.
+    """
+    from business_app.models.order import Order
+    from business_app.models.payment import Payment
+    from business_app import db as _db
+
+    return (
+        _db.session.query(Payment.created_at, Order.status)
+        .join(Order, Payment.order_id == Order.id)
+        .filter(
+            Payment.status == PaymentStatus.PENDING,
+            Payment.payment_method.in_([PaymentMethod.CLICK, PaymentMethod.CARD, PaymentMethod.PAYME]),
+        )
+        .all()
+    )
+
+
+def _refresh_pending_payment_gauges(force: bool = False) -> None:
+    """Recompute the PENDING-payment gauges from the DB.
+
+    Called on the /metrics scrape in the WEB process — the only process
+    Prometheus collects. TTL-throttled so a scrape storm cannot hammer the DB.
+    Best-effort: on any error the previous values are left intact rather than
+    zeroed, because a zero here reads as "all clear" and would mask exactly the
+    state these gauges exist to surface.
+    """
+    global _pending_payments_last_refresh
+
+    now = time.time()
+    if not force and now - _pending_payments_last_refresh < _PENDING_PAYMENTS_TTL_SECONDS:
         return
-    payments_pending_age_seconds.observe(age_seconds)
+
+    try:
+        rows = _pending_payment_rows()
+    except Exception:  # noqa: BLE001
+        return
+
+    try:
+        closed = {OrderStatus.DELIVERED, OrderStatus.CANCELLED, OrderStatus.RETURNED}
+        oldest = 0.0
+        on_closed = 0
+        now_utc = datetime.now(timezone.utc)
+        for created_at, order_status in rows:
+            if created_at is not None:
+                created = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
+                oldest = max(oldest, (now_utc - created).total_seconds())
+            if order_status in closed:
+                on_closed += 1
+
+        payments_pending_total.set(len(rows))
+        payments_pending_oldest_age_seconds.set(oldest)
+        payments_pending_on_closed_order_total.set(on_closed)
+        _pending_payments_last_refresh = now
+    except Exception:  # noqa: BLE001
+        return
 
 
 def set_stranded_deliveries(count: int) -> None:

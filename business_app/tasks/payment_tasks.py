@@ -18,6 +18,7 @@ from business_app.services.notification_service import NotificationService
 from business_app.utils.audit_logger import audit_logger
 from business_app.utils.constants import NotificationChannel
 from business_app.utils.exceptions import ProviderUnavailableError, PaymentError
+from business_app.utils.payment_projection import FISCALIZED_RAILS, order_is_dead, order_is_resolved
 from shared.enums import PaymentMethod, PaymentStatus, OrderStatus
 from business_app import db
 
@@ -117,45 +118,37 @@ def reconcile_pending_payments():
 
     Runs every 15 minutes per the audit's PAY-007 recommendation. For each
     payment that has been PENDING longer than ``PAYMENT_RECONCILE_AFTER_MINUTES``
-    (default 10 min), polls the gateway's status API and applies the canonical
-    status. Payments older than ``PAYMENT_TIMEOUT_MINUTES`` (default 60 min)
-    that the gateway still does not recognize are auto-cancelled so the order
-    unblocks. Emits audit events on every status flip.
+    (default 10 min), polls the gateway and COMPLETES it on affirmative success.
+
+    It never cancels. See the long comment in the loop: the checkout link has no
+    gateway-side object we could void, so a local cancellation is unenforceable —
+    and under the 2026-08-24 policy the customer may pay right up until delivery.
     """
     from business_app.utils.audit_logger import audit_logger
     from business_app.models.audit import AuditEventType, AuditSeverity
 
     reconcile_after_minutes = int(current_app.config.get("PAYMENT_RECONCILE_AFTER_MINUTES", 10) or 10)
-    timeout_minutes = int(current_app.config.get("PAYMENT_TIMEOUT_MINUTES", 60) or 60)
     now = datetime.now(timezone.utc)
     reconcile_threshold = now - timedelta(minutes=reconcile_after_minutes)
-    timeout_threshold = now - timedelta(minutes=timeout_minutes)
 
     pending_payments = Payment.query.filter(
         Payment.status == PaymentStatus.PENDING,
         Payment.created_at < reconcile_threshold,
     ).all()
 
-    # INF-003: sample each pending payment's age so the StalePaymentsPending
-    # alert has data. The Summary derives the 0.95 quantile the alert reads.
-    from business_app.utils.prometheus_metrics import observe_pending_payment_age
-
-    for payment in pending_payments:
-        created_at = payment.created_at
-        if created_at is not None:
-            if created_at.tzinfo is None:
-                created_at = created_at.replace(tzinfo=timezone.utc)
-            observe_pending_payment_age((now - created_at).total_seconds())
+    # The PENDING-payment gauges used to be sampled here. They are now computed
+    # on the /metrics scrape in the WEB process (prometheus_metrics.
+    # _refresh_pending_payment_gauges): monitoring/prometheus.yml scrapes
+    # business_app only — there has never been a celery_worker target — so every
+    # sample taken here was silently discarded.
 
     logger.info(
-        "Reconciling %d pending payments (reconcile_after=%dm, timeout=%dm)",
+        "Reconciling %d pending payments (reconcile_after=%dm; no auto-cancel)",
         len(pending_payments),
         reconcile_after_minutes,
-        timeout_minutes,
     )
 
     payment_service = PaymentService()
-    fiscalization_service = PaymentFiscalizationService()
     counts = {"completed": 0, "cancelled": 0, "failed": 0, "unchanged": 0, "errors": 0}
     confirmed_payment_ids: List[int] = []
 
@@ -190,106 +183,32 @@ def reconcile_pending_payments():
                 )
                 continue
 
-            new_status = None
-            if normalized_status in {"cancelled", "canceled", PaymentStatus.CANCELLED.value}:
-                new_status = PaymentStatus.CANCELLED
-            elif normalized_status in {"failed", PaymentStatus.FAILED.value}:
-                new_status = PaymentStatus.FAILED
-            elif created_at is not None and created_at < timeout_threshold:
-                order = payment.order
-                order_status = (
-                    order.status.value
-                    if order and hasattr(order.status, "value")
-                    else (order.status if order else None)
-                )
-                # PAY-007 fix: once the order is confirmed / in fulfillment we must
-                # NOT auto-cancel its payment or release its marking codes — the
-                # customer may settle offline at/after delivery (personal card or
-                # cash). Leave it PENDING so the offline-settlement paths apply.
-                # This guard stays FIRST — even affirmative not_found evidence must
-                # not disturb an order that has already moved past PENDING.
-                if order is not None and order_status != OrderStatus.PENDING.value:
-                    logger.info(
-                        "Skipping timeout auto-cancel for payment %s — order %s status=%s past PENDING",
-                        payment.id,
-                        getattr(order, "id", None),
-                        order_status,
-                    )
-                    counts["unchanged"] += 1
-                    continue
-                if normalized_status == "not_found":
-                    # Affirmative evidence: Click does not recognize the order's
-                    # merchant_trans_id on any candidate date — never charged.
-                    new_status = PaymentStatus.CANCELLED
-                    logger.info(
-                        "Auto-cancelling payment %s — gateway affirmatively does not recognize it past timeout",
-                        payment.id,
-                    )
-                else:
-                    # Unknown/ambiguous: the charge may exist. NEVER blind-cancel —
-                    # flag for review exactly once and leave PENDING.
-                    provider_data = dict(payment.provider_data or {})
-                    click_data = dict(provider_data.get("click") or {})
-                    if not click_data.get("reconcile_alerted_at"):
-                        click_data["reconcile_alerted_at"] = now.isoformat()
-                        provider_data["click"] = click_data
-                        payment.provider_data = provider_data
-                        audit_logger.log_event(
-                            event_type=AuditEventType.PAYMENT_FAILED,
-                            action="payment_reconcile_needs_review",
-                            severity=AuditSeverity.HIGH,
-                            resource_type="payment",
-                            resource_id=str(payment.id),
-                            description=(
-                                f"Payment {payment.id} pending past timeout with ambiguous gateway "
-                                f"status ({normalized_status or 'unknown'}) — manual review required"
-                            ),
-                            additional_data={"provider": provider_value, "gateway_status": normalized_status},
-                        )
-                    counts["unchanged"] += 1
-                    continue
-
-            if new_status is None:
-                counts["unchanged"] += 1
-                continue
-
-            past_timeout = created_at is not None and created_at < timeout_threshold
-            payment.status = new_status
-            if new_status == PaymentStatus.CANCELLED and provider_value == PaymentMethod.CLICK.value:
-                fiscalization_service.release_reserved_marking_codes(
-                    payment,
-                    reason="payment_timeout" if past_timeout else "payment_cancelled_gateway",
-                )
-            counts["cancelled" if new_status == PaymentStatus.CANCELLED else "failed"] += 1
-            audit_logger.log_event(
-                event_type=AuditEventType.PAYMENT_FAILED,
-                action=f"payment_reconciled_{new_status.value}",
-                severity=AuditSeverity.MEDIUM,
-                resource_type="payment",
-                resource_id=str(payment.id),
-                description=f"Reconciliation set payment {payment.id} to {new_status.value}",
-                additional_data={
-                    "provider": provider_value,
-                    "gateway_status": normalized_status or "unknown",
-                    "reason": ("timeout" if past_timeout and not normalized_status else "gateway"),
-                },
-            )
-
-            # Notify the customer on every reconcile-cancel so they can retry or
-            # switch payment method. Best-effort — a notification failure must
-            # never abort the reconcile loop or the status write above.
-            if new_status == PaymentStatus.CANCELLED:
-                try:
-                    from business_app.services.notification_service import NotificationService
-
-                    order_number = payment.order.order_number if payment.order else ""
-                    NotificationService().send_notification(
-                        payment.user_id,
-                        "payment_autocancel_retry",
-                        template_data={"order_number": order_number},
-                    )
-                except Exception:  # noqa: BLE001
-                    logger.exception("Failed to notify customer of auto-cancelled payment %s", payment.id)
+            # NOTHING HERE CANCELS ANY MORE (policy 2026-08-24).
+            #
+            # This task used to auto-cancel a payment that was still PENDING past
+            # the old payment-timeout window, and release its marking codes. That is what
+            # destroyed payment 1204 in prod incident TG_000413_26 — and the
+            # cancellation was never enforceable anyway: `create_payment_link`
+            # makes NO Click API call (the checkout URL is a plain urlencode), so
+            # there is no gateway-side object to void. We declared the payment dead
+            # while leaving a fully payable link in the customer's hands; they used
+            # it 28 hours later and the money had nowhere to land.
+            #
+            # A gateway-reported cancel is deliberately NOT terminal either. It
+            # describes ONE failed attempt, not the payability of the order — the
+            # customer can reopen the same link. Writing CANCELLED here would make
+            # the Phase 4A PREPARE guard (which requires PENDING/PROCESSING) refuse
+            # their next attempt on an order they still owe for.
+            #
+            # A payment's life now ends only where the ORDER resolves:
+            #   * cash at the door  -> convert_electronic_order_to_cash (case A)
+            #   * paid via the link -> the normal complete flow, at any time (case B)
+            #   * order cancelled   -> the order-cancellation path
+            # An unpaid delivered order is surfaced by the debt cap, the debtor
+            # lists and the PendingPaymentOnClosedOrder alert instead of by a
+            # silent status write.
+            counts["unchanged"] += 1
+            continue
 
         except Exception as e:
             logger.error("Error reconciling pending payment %s: %s", payment.id, e)
@@ -329,7 +248,7 @@ def reconcile_completed_payment_side_effects():
     payments = Payment.query.filter(
         Payment.status == PaymentStatus.COMPLETED,
         Payment.paid_at >= window_start,
-        Payment.payment_method.in_([PaymentMethod.CLICK, PaymentMethod.CARD]),
+        Payment.payment_method.in_(sorted(FISCALIZED_RAILS, key=lambda m: m.value)),
     ).all()
 
     counts = {"scanned": len(payments), "fiscalization_requeued": 0, "confirmation_redispatched": 0, "errors": 0}
@@ -337,6 +256,17 @@ def reconcile_completed_payment_side_effects():
 
     for payment in payments:
         try:
+            # A DEAD order is out of scope for BOTH repairs. Under the owner's
+            # 2026-08-24 rule a cancelled card/Click order keeps its COMPLETED
+            # payment (the money was really taken and the receipt cannot be
+            # un-filed), so it stays in this sweep's population for seven days.
+            # Re-driving it would file a tax receipt for goods that are not
+            # going out and send the customer a "payment confirmed" message for
+            # an order that no longer exists. The money is settled as customer
+            # prepaid credit by the cancel cascade, not here.
+            if order_is_dead(payment.order):
+                continue
+
             fisc = getattr(payment, "fiscalization", None)
             if fisc is None:
                 payment_service.queue_click_fiscalization(payment.id)
@@ -426,41 +356,6 @@ def reverse_click_payment_task(self, payment_id: int, click_paydoc_id: str, clic
     )
     db.session.commit()
     return {"status": "reversed"}
-
-
-@shared_task(bind=True, max_retries=3, time_limit=300, soft_time_limit=270)
-def process_refund(self, payment_id: int, amount: int, reason: str = None):
-    """Process payment refund"""
-    try:
-        logger.info(f"Processing refund for payment {payment_id}, amount: {amount}")
-
-        payment_service = PaymentService()
-        success = payment_service.process_refund(payment_id, amount, reason)
-
-        if success:
-            # Send refund notification
-            notification_service = NotificationService()
-            payment = Payment.query.get(payment_id)
-            if payment:
-                notification_service.send_notification(
-                    payment.user_id,
-                    "payment_refund",
-                    template_data={
-                        "refund_amount": amount,
-                        "order_number": payment.order.order_number,
-                        "reason": reason,
-                    },
-                )
-
-            logger.info(f"Refund processed successfully for payment {payment_id}")
-            return {"success": True, "refund_amount": amount}
-        else:
-            logger.error(f"Refund processing failed for payment {payment_id}")
-            return {"success": False, "error": "Refund processing failed"}
-
-    except Exception as exc:
-        logger.error(f"Refund processing failed: {exc}")
-        raise self.retry(exc=exc)
 
 
 def _mark_fiscalization_retries_exhausted(payment_id: int, exc: Exception) -> None:
@@ -824,10 +719,45 @@ def process_payment_verification(self, payment_id: int, verification_data: Dict[
             logger.info(f"Payment verification successful for payment {payment_id}")
             return {"success": True, "payment_id": payment_id}
         else:
-            # Mark payment as failed
-            payment.status = PaymentStatus.FAILED
-            payment.failure_reason = verification_result.get("error", "Verification failed")
+            failure_reason = verification_result.get("error", "Verification failed")
 
+            # B1 — the THIRD expression of "may one gateway answer end this
+            # payment", and the one that used to defeat the other two inside a
+            # single request:
+            #
+            #   verify_payment -> check_payment_status -> update_payment_status
+            #     -> B1's guard correctly refuses to end the payment (PENDING)
+            #   -> verify_payment sees "not COMPLETED" -> {"success": False}
+            #   -> this branch wrote FAILED anyway, and committed.
+            #
+            # `PaymentService.verify_payment` returns success=False for ANY
+            # non-COMPLETED payment, so a perfectly healthy PENDING Click payment
+            # on a live order was "verification failed". FAILED fails
+            # `order_is_payable_online`, so the customer's next PREPARE gets -9:
+            # the same permanent lockout, on the same population, triggered by
+            # their own POST /payments/<id>/verify.
+            #
+            # Two conditions, both load-bearing:
+            #  * order_is_resolved — same predicate as update_payment_status and
+            #    the three Click COMPLETE branches, so all four agree.
+            #  * status == PENDING — writing a terminal status OVER an already
+            #    terminal one is its own bug: it would overwrite a CANCELLED
+            #    payment's real reason with a generic "Verification failed", and
+            #    a stray verification could downgrade a COMPLETED payment.
+            may_end = payment.status == PaymentStatus.PENDING and order_is_resolved(payment.order)
+            if may_end:
+                payment.status = PaymentStatus.FAILED
+                payment.failure_reason = failure_reason
+            else:
+                logger.info(
+                    "Verification did not confirm payment %s; leaving status %s untouched "
+                    "(order unresolved or payment already terminal)",
+                    payment_id,
+                    payment.status,
+                )
+
+            # The audit row is written either way — the verification attempt and
+            # its outcome really happened, whatever we did with the payment.
             transaction = PaymentTransaction(
                 payment_id=payment.id,
                 transaction_type="verification",
@@ -838,15 +768,15 @@ def process_payment_verification(self, payment_id: int, verification_data: Dict[
                     "verification_result": verification_result,
                 },
                 success=False,
-                failure_reason=payment.failure_reason,
+                failure_reason=failure_reason,
                 processed_at=datetime.now(timezone.utc),
             )
 
             db.session.add(transaction)
             db.session.commit()
 
-            logger.error(f"Payment verification failed for payment {payment_id}: {payment.failure_reason}")
-            return {"success": False, "error": payment.failure_reason}
+            logger.error(f"Payment verification failed for payment {payment_id}: {failure_reason}")
+            return {"success": False, "error": failure_reason}
 
     except Exception as exc:
         logger.error(f"Payment verification processing failed: {exc}")

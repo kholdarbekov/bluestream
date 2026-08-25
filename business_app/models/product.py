@@ -164,10 +164,27 @@ class Product(db.Model, TimestampMixin, TranslatableMixin):
                 "expire_days": self.expire_days,
                 "min_order_quantity": int(self.min_order_quantity or 1),
                 "fiscal_profile": self.fiscal_profile.to_dict() if self.fiscal_profile else None,
+                "stock_caps_purchase": self.stock_caps_purchase(),
             }
         )
 
         return result
+
+    def stock_caps_purchase(self) -> bool:
+        """Whether stock_quantity limits what a customer may put in a cart.
+
+        False for a marking-code product: its stock is the code pool, which
+        constrains only orders that will draw a code, and the page does not
+        know the payment rail.
+
+        Public because it is the SSOT for schema.org / feed availability too:
+        callers holding a Product (frontend.routes._build_dual_sku_product_group)
+        read it directly, callers holding a serialized dict read the same answer
+        from to_dict()["stock_caps_purchase"].
+        """
+        from business_app.services.product_fiscal_service import ProductFiscalService
+
+        return bool(self.track_inventory) and not ProductFiscalService.is_stock_derived(self)
 
 
 class ProductFiscalProfile(db.Model, TimestampMixin):

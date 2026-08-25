@@ -130,8 +130,40 @@ class InventoryService:
                 reason="Product is not active",
             )
 
-        # Get current stock
-        current_stock = product.stock_quantity or 0
+        # track_inventory=False means "this product is not counted". Every other
+        # layer already honours it -- serialize_product, Product.stock_caps_purchase,
+        # CartService._check_product_quantity_availability -- so answering from the
+        # column here made the page invite, the cart accept and the checkout preview
+        # pass, and only POST /api/v1/orders/ refuse with "Insufficient stock".
+        # Preview and apply have to give the same answer.
+        if not product.track_inventory:
+            return InventoryCheckResult(
+                product_id=product_id,
+                requested_quantity=requested_quantity,
+                # Untracked stock is unbounded; report the request as satisfiable
+                # rather than inventing a ceiling from an uncounted column.
+                available_quantity=requested_quantity,
+                reserved_quantity=0,
+                is_available=True,
+                reason="Available",
+            )
+
+        # For a marking-code product the pool IS the stock, and stock_quantity is
+        # only a projection of it that can be stale between marking-code events.
+        # Ask the pool directly so the gate answers with the fact.
+        from business_app.services.product_fiscal_service import ProductFiscalService
+
+        stock_is_derived = ProductFiscalService.is_stock_derived(product)
+        if stock_is_derived:
+            from business_app.models.product import ProductMarkingCode
+            from shared.enums import MarkingCodeStatus
+
+            current_stock = ProductMarkingCode.query.filter_by(
+                product_id=product_id,
+                status=MarkingCodeStatus.AVAILABLE,
+            ).count()
+        else:
+            current_stock = product.stock_quantity or 0
 
         # Calculate reserved quantities
         reserved_quantity = self._get_reserved_quantity(product_id, exclude_order_id)
@@ -143,7 +175,9 @@ class InventoryService:
         is_available = available_quantity >= requested_quantity
 
         # Check minimum stock levels
-        if is_available and product.min_stock_level:
+        # A minimum-stock reserve is meaningless for a pool of legal codes:
+        # there is no "keep some back" quantity to hold.
+        if is_available and product.min_stock_level and not stock_is_derived:
             remaining_after_request = available_quantity - requested_quantity
             if remaining_after_request < product.min_stock_level:
                 is_available = False
@@ -355,6 +389,27 @@ class InventoryService:
                     logger.error(f"Product {item.product_id} not found during confirmation")
                     continue
 
+                # A marking-code product's stock_quantity IS the available-code
+                # pool (ProductFiscalService.sync_stock_from_marking_codes owns
+                # it). An order-driven decrement here would either double-count
+                # a card order's reserved code or invent a depletion a cash
+                # order never caused -- and the next pool sync erases it either
+                # way. Release the Redis reservation, record the skip, move on.
+                from business_app.services.product_fiscal_service import ProductFiscalService
+
+                if ProductFiscalService.is_stock_derived(product):
+                    confirmed_items.append(
+                        {
+                            "product_id": product.id,
+                            "product_name": product.name,
+                            "quantity_reduced": 0,
+                            "old_stock": product.stock_quantity,
+                            "new_stock": product.stock_quantity,
+                            "skipped_derived": True,
+                        }
+                    )
+                    continue
+
                 old_stock = product.stock_quantity
 
                 # Reduce stock
@@ -391,7 +446,11 @@ class InventoryService:
             for item_info in confirmed_items:
                 audit_logger.log_event(
                     event_type=AuditEventType.INVENTORY_UPDATED,
-                    action="inventory_confirmed_and_reduced",
+                    action=(
+                        "inventory_skipped_derived_stock"
+                        if item_info.get("skipped_derived")
+                        else "inventory_confirmed_and_reduced"
+                    ),
                     severity=AuditSeverity.HIGH,
                     resource_type="product_inventory",
                     resource_id=str(item_info["product_id"]),

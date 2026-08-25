@@ -14,9 +14,14 @@ from flask import current_app
 from business_app import db
 from business_app.models.order import Order
 from business_app.models.payment import CreditCard, Payment, PaymentTransaction
-from shared.enums import OrderStatus, PaymentMethod, PaymentStatus
+from shared.enums import PaymentMethod, PaymentStatus
 from business_app.utils.exceptions import PaymentError, ProviderUnavailableError, ValidationError
 from business_app.utils.http_client import RetryConfig, request_with_retry
+from business_app.utils.payment_projection import (
+    order_is_live_and_unpaid,
+    order_is_payable_online,
+    order_is_resolved,
+)
 
 
 class ClickPaymentProviderService:
@@ -360,6 +365,39 @@ class ClickPaymentProviderService:
             )
             return {"error": -5, "error_note": "Transaction not found"}
 
+        # PAYABILITY GUARD — PREPARE is the sole authority on whether this order
+        # may still be charged, and it must fail CLOSED.
+        #
+        # Answering `error: 0` here IS the authorisation for Click to debit the
+        # card; there is no later point at which we can withhold consent. Prod
+        # incident TG_000413_26: this method had no status, method or order-state
+        # check at all, so a PREPARE arriving 28 hours after we auto-cancelled the
+        # payment was answered "Success, proceed" and 54 000 was taken for an order
+        # that could not absorb it.
+        #
+        # Placed BEFORE the amount check on purpose: replying "-2 Incorrect amount"
+        # for a cancelled order is a lie that invites the customer to retry.
+        if not order_is_payable_online(order, payment):
+            order_status_value = (
+                order.status.value if order is not None and hasattr(order.status, "value") else str(order.status)
+            )
+            already_paid = bool(getattr(order, "is_paid", False)) or payment.status == PaymentStatus.COMPLETED
+            self._log_flow_step(
+                "prepare_refused_not_payable",
+                level="warning",
+                payment=payment,
+                order_status=order_status_value,
+                already_paid=already_paid,
+            )
+            response = (
+                self._build_error_response(-4, "Already paid")
+                if already_paid
+                else self._build_error_response(-9, "Transaction cancelled")
+            )
+            self._append_callback_audit(payment, stage="prepare", request_payload=payload, response_payload=response)
+            db.session.flush()
+            return response
+
         requested_amount = self._normalize_amount(payload.get("amount"))
         expected_amount = self._normalize_amount(payment.amount)
         if expected_amount != requested_amount:
@@ -387,7 +425,23 @@ class ClickPaymentProviderService:
         payment.provider_data = provider_data
         payment.webhook_attempts = int(payment.webhook_attempts or 0) + 1
 
-        self._get_payment_fiscalization_service().reserve_required_marking_codes(payment)
+        # Fail CLOSED on fiscal inventory. reserve_required_marking_codes RAISES
+        # ValidationError when the pool is short; handle_prepare used not to catch
+        # it, so api/payments.py turned it into a 5xx and Click retried the
+        # callback indefinitely. Never authorise a debit we cannot fiscalize.
+        try:
+            self._get_payment_fiscalization_service().reserve_required_marking_codes(payment)
+        except ValidationError as exc:
+            self._log_flow_step(
+                "prepare_refused_marking_codes_unavailable",
+                level="error",
+                payment=payment,
+                reason=str(exc),
+            )
+            response = self._build_error_response(-9, "Transaction cancelled")
+            self._append_callback_audit(payment, stage="prepare", request_payload=payload, response_payload=response)
+            db.session.flush()
+            return response
         self._record_transaction(payment, "click_prepare", payload)
         self._log_flow_step(
             "prepare_processing_completed",
@@ -407,6 +461,43 @@ class ClickPaymentProviderService:
         db.session.flush()
         self._log_flow_step("prepare_response_sent", payment=payment, response_error=response.get("error"))
         return response
+
+    def _may_end_payment(self, payment: Payment, *, reason: str) -> bool:
+        """May this callback write a terminal status and free the reserved codes?
+
+        THE B1 rule, on the callback path. Only once the ORDER has resolved —
+        paid on any rail, or CANCELLED/RETURNED. Shares
+        :func:`order_is_resolved` with ``PaymentService.update_payment_status``
+        so the two CARRIERS of the same gateway fact cannot disagree: a declined
+        Click transaction reaching us by callback and by the reconcile poll must
+        produce the same outcome, and before this guard which one won was a race.
+
+        Why the two malformed-payload sites use it too, not just the affirmative
+        cancel: a payload we could not parse (missing ``error``) or one claiming
+        success without its identifiers is LESS evidence than an affirmative
+        cancel, not more. If a gateway that positively says "cancelled" may not
+        end a live order's payment, a gateway that says nothing intelligible
+        certainly may not — ending it there acts on the ABSENCE of evidence, and
+        on the malformed-success path the money may genuinely have moved.
+
+        This governs only the PAYMENT LIFECYCLE. The protocol response (-8 / -9)
+        and the audit/transaction records are unaffected and still describe the
+        request exactly as before — every ``_record_transaction`` call in
+        ``handle_complete`` sits OUTSIDE its ``if may_end``, deliberately, so a
+        suppressed cancel still leaves a trace. Do not tidy one inside the gate;
+        ``test_the_audit_row_is_written_even_when_the_gate_SUPPRESSES_the_cancel``
+        exists to stop exactly that.
+        """
+        if order_is_resolved(payment.order):
+            return True
+        self._log_flow_step(
+            "complete_terminal_write_suppressed_order_unresolved",
+            level="warning",
+            payment=payment,
+            suppressed_reason=reason,
+            order_id=payment.order_id,
+        )
+        return False
 
     def handle_complete(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         merchant_prepare_id = payload.get("merchant_prepare_id")
@@ -466,8 +557,10 @@ class ClickPaymentProviderService:
                 raw_error_field=payload.get("error"),
                 reason=str(exc),
             )
-            payment.status = PaymentStatus.CANCELLED
-            payment.failure_reason = "Click callback missing error code"
+            may_end = self._may_end_payment(payment, reason="click_complete_invalid_payload")
+            if may_end:
+                payment.status = PaymentStatus.CANCELLED
+                payment.failure_reason = "Click callback missing error code"
             payment.webhook_processed = True
             payment.webhook_attempts = int(payment.webhook_attempts or 0) + 1
             self._record_transaction(
@@ -477,10 +570,11 @@ class ClickPaymentProviderService:
                 success=False,
                 status="cancelled",
             )
-            self._get_payment_fiscalization_service().release_reserved_marking_codes(
-                payment,
-                reason="click_complete_invalid_payload",
-            )
+            if may_end:
+                self._get_payment_fiscalization_service().release_reserved_marking_codes(
+                    payment,
+                    reason="click_complete_invalid_payload",
+                )
             response = self._build_error_response(-8, "Error in request")
             self._append_callback_audit(payment, stage="complete", request_payload=payload, response_payload=response)
             db.session.flush()
@@ -530,8 +624,10 @@ class ClickPaymentProviderService:
                 click_error=click_error,
                 click_error_note=click_error_note,
             )
-            payment.status = PaymentStatus.CANCELLED
-            payment.failure_reason = click_error_note
+            may_end = self._may_end_payment(payment, reason="click_complete_cancelled")
+            if may_end:
+                payment.status = PaymentStatus.CANCELLED
+                payment.failure_reason = click_error_note
             self._record_transaction(
                 payment,
                 "click_complete_cancelled",
@@ -539,10 +635,11 @@ class ClickPaymentProviderService:
                 success=False,
                 status="cancelled",
             )
-            self._get_payment_fiscalization_service().release_reserved_marking_codes(
-                payment,
-                reason="click_complete_cancelled",
-            )
+            if may_end:
+                self._get_payment_fiscalization_service().release_reserved_marking_codes(
+                    payment,
+                    reason="click_complete_cancelled",
+                )
             response = self._build_error_response(-9, "Transaction cancelled")
             self._append_callback_audit(payment, stage="complete", request_payload=payload, response_payload=response)
             db.session.flush()
@@ -564,8 +661,10 @@ class ClickPaymentProviderService:
                 click_trans_id_present=bool(click_trans_id_raw),
                 click_paydoc_id_present=bool(click_paydoc_id_raw),
             )
-            payment.status = PaymentStatus.CANCELLED
-            payment.failure_reason = "Click callback claimed success without trans_id/paydoc_id"
+            may_end = self._may_end_payment(payment, reason="click_complete_invalid_success")
+            if may_end:
+                payment.status = PaymentStatus.CANCELLED
+                payment.failure_reason = "Click callback claimed success without trans_id/paydoc_id"
             self._record_transaction(
                 payment,
                 "click_complete_invalid_success",
@@ -573,10 +672,11 @@ class ClickPaymentProviderService:
                 success=False,
                 status="cancelled",
             )
-            self._get_payment_fiscalization_service().release_reserved_marking_codes(
-                payment,
-                reason="click_complete_invalid_success",
-            )
+            if may_end:
+                self._get_payment_fiscalization_service().release_reserved_marking_codes(
+                    payment,
+                    reason="click_complete_invalid_success",
+                )
             response = self._build_error_response(-8, "Error in request")
             self._append_callback_audit(payment, stage="complete", request_payload=payload, response_payload=response)
             db.session.flush()
@@ -645,16 +745,30 @@ class ClickPaymentProviderService:
         order = payment.order
 
         if payment.status in {PaymentStatus.CANCELLED, PaymentStatus.FAILED}:
-            # Owner amendment (2026-07-08): only re-fulfill when the order is still
-            # a live, fulfillable PENDING order. A genuine debit on a dead/cancelled
-            # order (or one already settled by other means) is kept as prepaid credit.
-            if electronic and order is not None and not order.is_paid and order.status == OrderStatus.PENDING:
+            # Re-fulfil whenever the order is still LIVE and unpaid — not merely
+            # PENDING. TG_000413_26 (2026-08-21): the order was CONFIRMED and out
+            # for delivery when its genuine debit landed, so the old
+            # `order.status == PENDING` gate sent 54 000 of real money to floating
+            # customer credit and the order was delivered unpaid and un-fiscalized.
+            # `order_is_live_and_unpaid` is the SSOT this shares with reconcile's
+            # PAY-007 guard, which reads the very same fact to the opposite end.
+            if electronic and order_is_live_and_unpaid(order):
                 return self._accept_late_complete(payment, payload, merchant_prepare_id)
             # Order settled by other means, or dead/cancelled — keep the debit as
             # unapplied customer prepaid credit rather than re-fulfilling.
             return self._credit_late_debit(payment, payload)
 
         # payment.status == COMPLETED
+        #
+        # CASE C (policy 2026-08-24) — the order was settled as CASH at the door
+        # and a genuine Click debit has now landed. `electronic` is False here
+        # because convert_electronic_order_to_cash flipped the rail, and the
+        # incoming trans id matches the one handle_prepare stamped, so without
+        # this branch control falls into Case D below and answers "-4 Already
+        # paid" while writing NOTHING: no credit event, no receipt, money gone.
+        if self._was_settled_offline_after_electronic(payment):
+            return self._restore_click_rail_after_offline_settlement(payment, payload, merchant_prepare_id)
+
         if incoming_trans_id == original_winner_trans_id or (electronic and not original_winner_trans_id):
             # Case D: true protocol retry of the winning transaction (or winner
             # unknown — be conservative). Protocol-correct idempotent ack.
@@ -716,6 +830,125 @@ class ClickPaymentProviderService:
         # Case C: order settled offline (cash at the door / personal card) while
         # this Click charge was in flight — keep the debit as prepaid credit.
         return self._credit_late_debit(payment, payload)
+
+    @staticmethod
+    def _was_settled_offline_after_electronic(payment: Payment) -> bool:
+        """Was this payment converted to CASH at the door after starting as Click?
+
+        Keyed on the Click identifiers surviving in ``provider_data`` — the rail
+        flip clears neither — plus the row now reading CASH/COMPLETED. Once the
+        rail has been restored this is False again, so a Click re-send falls
+        through to the normal Case D idempotent ack instead of crediting twice.
+        """
+        method_value = (
+            payment.payment_method.value if hasattr(payment.payment_method, "value") else str(payment.payment_method)
+        )
+        if method_value != PaymentMethod.CASH.value:
+            return False
+        if payment.status != PaymentStatus.COMPLETED:
+            return False
+        click_data = (payment.provider_data or {}).get("click") or {}
+        return bool(click_data.get("click_trans_id") or click_data.get("click_paydoc_id"))
+
+    def _restore_click_rail_after_offline_settlement(
+        self, payment: Payment, payload: Dict[str, Any], merchant_prepare_id
+    ) -> Dict[str, Any]:
+        """Case C: settle the order on the rail that actually took the money.
+
+        Owner ruling 2026-08-24. Click processed a real debit, so Click is owed a
+        fiscal receipt and the order should book against the Click rail. The cash
+        the driver already banked becomes the customer's prepaid credit.
+
+        🔴 ORDER OF OPERATIONS IS LOAD-BEARING. The allocations must be reversed
+        BEFORE the payment completes. ``_sync_completed_prepayment_projection``
+        forces ``amount_collected = amount`` on a completed prepaid payment, which
+        would silently swallow the driver's allocation and lose banknotes the
+        business has already taken in — the money bug ``open_receivable_clause``'s
+        docstring exists to describe.
+
+        ``reverse_allocation_to_payment`` is used rather than
+        ``reverse_collection_event`` precisely because it touches neither
+        ``event.amount`` nor ``driver_cash_session_id``: the driver really did
+        hand over those notes and still owes the office exactly the same total.
+        """
+        from business_app.models.payment import CashCollectionAllocation
+        from business_app.services.cash_collection_service import CashCollectionService
+        from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
+
+        order = payment.order
+        incoming_trans_id = str(payload.get("click_trans_id") or "").strip()
+        self._log_flow_step(
+            "complete_restoring_click_rail_after_offline_settlement",
+            payment=payment,
+            level="warning",
+            incoming_click_trans_id=incoming_trans_id,
+        )
+
+        cash_service = CashCollectionService()
+        live_allocations = CashCollectionAllocation.query.filter(
+            CashCollectionAllocation.payment_id == payment.id,
+            CashCollectionAllocation.reversed_at.is_(None),
+        ).all()
+        reversed_total = Decimal("0.00")
+        for allocation in live_allocations:
+            reversed_total += Decimal(str(allocation.allocated_amount or 0))
+            cash_service.reverse_allocation_to_payment(
+                allocation.id,
+                reversed_by_user_id=None,
+                reason=f"Late Click debit {incoming_trans_id} settled order {payment.order_id}; "
+                "door cash re-booked as customer prepaid credit",
+                commit=False,
+            )
+
+        # Restore BOTH rails. Leaving orders.payment_method on cash recreates the
+        # desync class pinned by tests/integration/test_cod_rail_desync_settlement.py.
+        payment.payment_method = PaymentMethod.CLICK
+        if order is not None:
+            order.payment_method = PaymentMethod.CLICK
+
+        self._apply_click_callback_identifiers(payment, payload, merchant_prepare_id)
+        payment.status = PaymentStatus.COMPLETED
+        payment.failure_reason = None
+        payment.paid_at = payment.paid_at or datetime.now(timezone.utc)
+        payment.amount_collected = Decimal("0.00")
+        payment.outstanding_amount = Decimal("0.00")
+        self._record_transaction(payment, "click_late_complete_after_cash_settlement", payload)
+
+        try:
+            # Conversion released these; re-reserving is idempotent.
+            self._get_payment_fiscalization_service().reserve_required_marking_codes(payment)
+        except Exception:  # noqa: BLE001
+            current_app.logger.exception(
+                "Case C: marking-code re-reserve failed for payment %s (fiscalization sweep will retry)",
+                payment.id,
+            )
+
+        audit_logger.log_event(
+            event_type=AuditEventType.PAYMENT_PROCESSED,
+            action="click_late_complete_rail_restored",
+            severity=AuditSeverity.HIGH,
+            resource_type="payment",
+            resource_id=str(payment.id),
+            description=(
+                f"Late Click debit on offline-settled order {payment.order_id}: Click rail restored, "
+                f"{reversed_total} of door cash re-booked as customer {payment.user_id} prepaid credit"
+            ),
+            additional_data={
+                "click_trans_id": incoming_trans_id,
+                "click_paydoc_id": str(payload.get("click_paydoc_id") or ""),
+                "reversed_cash_amount": str(reversed_total),
+                "allocations_reversed": len(live_allocations),
+            },
+        )
+
+        if self.payment_service:
+            self.payment_service._handle_successful_payment(payment)
+            self.payment_service.queue_click_fiscalization(payment.id)
+
+        response = self._build_success_response(payment, payload)
+        self._append_callback_audit(payment, stage="complete", request_payload=payload, response_payload=response)
+        db.session.flush()
+        return response
 
     def _credit_late_debit(self, payment: Payment, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Case C: a genuine Click debit arrived after the order was settled by
@@ -826,7 +1059,12 @@ class ClickPaymentProviderService:
         self._record_transaction(payment, "click_complete_late_accepted", payload)
 
         try:
-            # Reconcile released these on cancel; re-reserving is idempotent.
+            # Re-reserving is idempotent: `_codes_currently_held` skips any
+            # line this payment still owns, and the reservation is
+            # all-or-nothing, so a short pool leaves nothing behind. (The
+            # old note said "reconcile released these on cancel" -- it no
+            # longer does: payment_tasks.py:186 cancels nothing since the
+            # 2026-08-24 policy change, so the codes may still be held.)
             self._get_payment_fiscalization_service().reserve_required_marking_codes(payment)
         except Exception:  # noqa: BLE001
             current_app.logger.exception(
@@ -1236,20 +1474,65 @@ class ClickPaymentProviderService:
         payment.provider_data = provider_data
         db.session.flush()
 
+    # Click error codes that genuinely mean "no such transaction for this
+    # merchant_trans_id on this date". ONLY these may be read as evidence of
+    # absence; everything else is the gateway declining to answer.
+    #
+    # -16 "Payment not found" is the only one confirmed against the live
+    # merchant API. Keep this set closed: adding a code here re-arms an
+    # automatic, money-destroying cancel, so a new entry needs a captured
+    # response proving the code means absence and not rejection.
+    ABSENCE_ERROR_CODES = frozenset({-16})
+
+    def _mti_ambiguous(self, payment: Payment, *, reason: str, error_code: Optional[int]) -> Dict[str, Any]:
+        """The gateway did not answer the question. Never absence."""
+        self._log_flow_step(
+            "check_payment_status_by_mti_ambiguous_result",
+            level="warning",
+            payment=payment,
+            reason=reason,
+            error_code=error_code,
+        )
+        return {
+            "status": "unknown",
+            "not_found": False,
+            "ambiguous": True,
+            "ambiguous_reason": reason,
+            "gateway_error_code": error_code,
+            "provider_transaction_id": None,
+            "raw": None,
+        }
+
     def check_payment_status_by_mti(self, payment: Payment) -> Dict[str, Any]:
         """Discover a payment's Click id via GET /payment/status_by_mti/:service_id/:mti/:date.
 
-        Returns the normal check_payment_status payload once the id is found
-        (persisting it permanently), or a literal not_found payload when Click
-        affirmatively does not recognize the merchant_trans_id on any candidate
-        date. Transport errors propagate — callers must NOT treat them as
-        not-found (reconcile's cancel branch keys on affirmative evidence only).
+        Three possible outcomes, and the distinction is load-bearing because
+        reconcile's auto-cancel keys on affirmative absence:
+
+        * **found**    — the normal check_payment_status payload, id persisted.
+        * **absent**   — ``{"status": "not_found", "not_found": True}``. Only a
+          code in ``ABSENCE_ERROR_CODES`` produces this.
+        * **ambiguous** — ``{"status": "unknown", "ambiguous": True}``. Anything
+          else: the gateway rejected our request, or answered without an id.
+
+        Transport errors propagate — callers must NOT treat them as not-found.
+
+        Prod incident TG_000413_26 (2026-08-20): this method used to collapse
+        EVERY non-zero error_code into "not found for this date" and report the
+        exhausted date loop as affirmative absence. Click returned
+        ``-12 "Неверные данные поставщика"`` — a request/credential-level
+        rejection carrying no information about the transaction — on 279 of 279
+        calls in the surrounding 30 days, so every timed-out Click payment was
+        being cancelled on manufactured evidence. One of them was cancelled
+        while its order was still live; the customer paid the still-valid link
+        28 hours later and the money had nowhere to go.
         """
         self._log_flow_step("check_payment_status_by_mti_started", payment=payment)
         if self.test_mode:
             return {
                 "status": payment.status.value if hasattr(payment.status, "value") else payment.status,
                 "not_found": False,
+                "ambiguous": False,
                 "provider_transaction_id": payment.provider_transaction_id,
                 "raw": None,
             }
@@ -1282,24 +1565,38 @@ class ClickPaymentProviderService:
             )
             error_code = self._extract_error_code(response)
             if error_code not in (None, 0):
-                # Affirmative "not found for this date" — try the next candidate.
-                continue
+                if error_code in self.ABSENCE_ERROR_CODES:
+                    # Affirmative "no such transaction on this date" — next candidate.
+                    continue
+                # Any other code is the gateway refusing to answer, not an answer.
+                # Never let it reach the caller as evidence of absence.
+                self._log_flow_step(
+                    "check_payment_status_by_mti_ambiguous",
+                    level="warning",
+                    payment=payment,
+                    error_code=error_code,
+                    error_note=str(response.get("error_note") or ""),
+                    candidate_date=candidate_date.isoformat(),
+                )
+                return self._mti_ambiguous(payment, reason="gateway_error", error_code=error_code)
             click_payment_id = response.get("payment_id")
             if click_payment_id in (None, ""):
-                continue
+                # error 0 with no id: the gateway answered without telling us
+                # anything. Absence would be a guess.
+                return self._mti_ambiguous(payment, reason="missing_payment_id", error_code=error_code)
             if not str(click_payment_id).strip().isdigit():
                 # _resolve_click_payment_id only accepts numeric ids; persisting a
                 # non-numeric value here would make it invisible to that check,
                 # so the next status poll would re-raise missing_click_payment_id
-                # and recurse back into this method forever. Treat a non-numeric
-                # payment_id as not-found-for-this-date instead of persisting it.
+                # and recurse back into this method forever. It is equally not
+                # evidence the transaction is absent.
                 self._log_flow_step(
                     "check_payment_status_by_mti_non_numeric_id_skipped",
                     level="warning",
                     payment=payment,
                     raw_payment_id=click_payment_id,
                 )
-                continue
+                return self._mti_ambiguous(payment, reason="non_numeric_payment_id", error_code=error_code)
             self._persist_click_payment_id(payment, click_payment_id)
             self._log_flow_step(
                 "check_payment_status_by_mti_discovered",
@@ -1308,8 +1605,15 @@ class ClickPaymentProviderService:
             )
             return self.check_payment_status(payment)
 
+        # Every candidate date answered with a documented absence code.
         self._log_flow_step("check_payment_status_by_mti_not_found", payment=payment, level="warning")
-        return {"status": "not_found", "not_found": True, "provider_transaction_id": None, "raw": None}
+        return {
+            "status": "not_found",
+            "not_found": True,
+            "ambiguous": False,
+            "provider_transaction_id": None,
+            "raw": None,
+        }
 
     def reverse_by_click_payment_id(self, click_payment_id: int) -> Dict[str, Any]:
         """Reverse a specific Click charge by ITS paydoc id.
@@ -1332,51 +1636,6 @@ class ClickPaymentProviderService:
             endpoint_label="payment_reversal",
             expect_error_code=True,
         )
-
-    def refund_payment(self, payment: Payment, amount: Decimal, reason: Optional[str] = None) -> Dict[str, Any]:
-        self._log_flow_step(
-            "refund_payment_started",
-            payment=payment,
-            amount=str(Decimal(str(amount or 0)).quantize(Decimal("0.01"))),
-            reason=reason,
-        )
-        if self.test_mode:
-            return {
-                "success": True,
-                "status": "refunded",
-                "provider_transaction_id": payment.provider_transaction_id,
-                "receipt_payload": {
-                    "amount": float(Decimal(str(amount or 0)).quantize(Decimal("0.01"))),
-                    "reason": reason,
-                },
-            }
-
-        service_id = self._service_id_as_int()
-        click_payment_id = self._resolve_click_payment_id(payment)
-        response = self.merchant_request(
-            method="DELETE",
-            configured_url=current_app.config.get("CLICK_MERCHANT_REFUND_URL"),
-            fallback_path=self._with_payment_path_params(
-                current_app.config.get("CLICK_MERCHANT_API_REFUND_PATH") or "/payment/reversal",
-                service_id,
-                click_payment_id,
-            ),
-            endpoint_label="payment_reversal",
-            expect_error_code=True,
-        )
-        result = {
-            "success": True,
-            "status": "refunded",
-            "provider_transaction_id": str(response.get("payment_id") or click_payment_id),
-            "receipt_payload": response,
-        }
-        self._log_flow_step(
-            "refund_payment_completed",
-            payment=payment,
-            click_payment_id=click_payment_id,
-            provider_transaction_id=result["provider_transaction_id"],
-        )
-        return result
 
     def fetch_ofd_data(self, payment: Payment) -> Dict[str, Any]:
         self._log_flow_step("fetch_ofd_data_started", payment=payment)

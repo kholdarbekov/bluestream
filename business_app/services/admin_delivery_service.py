@@ -12,7 +12,7 @@ from business_app.models.order import Order, OrderItem
 from business_app.models.user import User, UserAddress
 from business_app.serializers.order_serializers import format_order_items_summary
 from business_app.services.staff_service import StaffService
-from shared.enums import DeliveryStatus, OrderStatus, PaymentMethod
+from shared.enums import DeliveryStatus, OrderStatus
 from business_app.utils.exceptions import NotFoundError, ValidationError
 from business_app.utils.payment_projection import net_open_receivable_amount
 
@@ -386,23 +386,37 @@ class AdminDeliveryService:
             if delivery.order:
                 delivery.order.status = OrderStatus.RETURNED
                 delivery.order.updated_at = now
-                if delivery.order.payment_method == PaymentMethod.CASH:
-                    from business_app.services.cash_collection_service import CashCollectionService
 
-                    cash_collection_service = CashCollectionService()
-                    # Refund prepaid credit applied at order creation (full
-                    # coverage) for an order returned before it was ever
-                    # delivered; no-op for delivered-then-returned orders.
-                    cash_collection_service.release_pre_delivery_prepaid_settlement_for_order(
-                        order_id=delivery.order.id,
-                        actor_user_id=actor_id,
-                        reason="Order marked as returned via admin delivery workflow",
-                    )
-                    cash_collection_service.release_reserved_prepayment_for_order(
-                        order_id=delivery.order.id,
-                        actor_user_id=actor_id,
-                        reason="Order marked as returned via admin delivery workflow",
-                    )
+                # 🔴 THE ORDER JUST DIED, SO ITS MONEY MUST SETTLE HERE TOO.
+                # This path writes `order.status` DIRECTLY rather than through
+                # `OrderService.update_order_status`, because the order
+                # transition table only permits RETURNED from OUT_FOR_DELIVERY
+                # while a DELIVERY may be returned from SCHEDULED / PENDING /
+                # ASSIGNED / PICKED_UP / IN_TRANSIT / ARRIVED — i.e. from orders
+                # still CONFIRMED or PREPARING. Routing through
+                # `update_order_status` would refuse most of this screen's own
+                # workflow.
+                #
+                # What it must NOT do is re-implement the cascade. It used to
+                # duplicate only the CASH half, so a customer who had paid by
+                # Click and had their delivery marked RETURNED lost everything:
+                # payment left COMPLETED with no credit event, marking codes
+                # stranded RESERVED forever, and the fiscalization sweep still
+                # free to file a tax receipt for a dead order. Since the admin
+                # refund route was removed (owner's no-reversal rule), that state
+                # had no in-app remedy at all.
+                #
+                # ONE expression, called from both places. It never commits, so
+                # the `db.session.commit()` at the end of this method still owns
+                # the boundary, and it is idempotent — which matters here,
+                # because this path has no `_claim_status_transition` guard.
+                from business_app.services.order_service import OrderService
+
+                OrderService().settle_dead_order_side_effects(
+                    delivery.order,
+                    OrderStatus.RETURNED,
+                    updated_by=actor_id,
+                )
 
         history = DeliveryStatusHistory(
             delivery_id=delivery.id,

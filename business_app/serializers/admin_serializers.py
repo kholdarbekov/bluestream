@@ -672,6 +672,7 @@ def serialize_order_admin(order: Order) -> Dict[str, Any]:
         # cross-service import in this function (see order_serializers below)
         # is already lazy -- matching that keeps this module importable before
         # the service layer is fully wired up.
+        from business_app.serializers.order_serializers import payability_fields
         from business_app.services.order_schedule_service import OrderScheduleService
 
         awaiting_release = OrderScheduleService.is_awaiting_release(order)
@@ -756,6 +757,10 @@ def serialize_order_admin(order: Order) -> Dict[str, Any]:
                 fiscalization and getattr(fiscalization, "retries_exhausted_at", None)
             )
             data["fiscalization"] = fiscalization.to_dict() if fiscalization else None
+            # B3 -- the backend answers payability instead of letting the two
+            # "Open Payment Link" buttons in Orders.js infer it from "we stored
+            # a link once". See `payability_fields`.
+            data.update(payability_fields(order, order.payment))
         else:
             data["payment_id"] = None
             data["payment_status"] = "pending"
@@ -765,6 +770,10 @@ def serialize_order_admin(order: Order) -> Dict[str, Any]:
             data["consume_marking_codes"] = False
             data["fiscalization_status"] = None
             data["fiscalization_retries_exhausted"] = False
+            # DEFAULTED, never omitted: an absent key reaches JS as `undefined`
+            # and silently flips every truthiness test that reads it.
+            data["is_payable"] = False
+            data["payable_payment_link"] = None
 
         if getattr(order, "payment", None):
             from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
@@ -789,6 +798,23 @@ def serialize_order_admin(order: Order) -> Dict[str, Any]:
         }
 
 
+def _admin_stock_quantity(product: Product, marking_code_counts: Dict[str, int]) -> Optional[int]:
+    """The stock value to publish for the admin listing/edit views.
+
+    ``marking_code_counts`` is the SAME dict serialize_product_admin already
+    computed via ProductFiscalService.build_product_fiscal_snapshot -- reused
+    here rather than re-querying, so the AVAILABLE count is computed once per
+    product, not once per consumer.
+    """
+    from business_app.services.product_fiscal_service import ProductFiscalService
+
+    if ProductFiscalService.is_stock_derived(product):
+        # SSOT: the same call the admin write guard makes, so what we publish
+        # here is exactly what an echoed payload is measured against.
+        return ProductFiscalService.published_stock_quantity(product, marking_code_counts=marking_code_counts)
+    return product.stock_quantity if product.track_inventory else None
+
+
 def serialize_product_admin(product: Product) -> Dict[str, Any]:
     """
     Serialize product for admin view
@@ -804,6 +830,13 @@ def serialize_product_admin(product: Product) -> Dict[str, Any]:
         images = product.images or []
         image_url = images[0] if images else None
 
+        # Computed once, up front: both the derived stock_quantity below and
+        # the marking_code_counts merged in later read from this SAME dict,
+        # so the AVAILABLE count is one query, not two.
+        from business_app.services.product_fiscal_service import ProductFiscalService
+
+        fiscal_snapshot = ProductFiscalService().build_product_fiscal_snapshot(product)
+
         data = {
             "id": product.id,
             "name": product.name,
@@ -818,7 +851,10 @@ def serialize_product_admin(product: Product) -> Dict[str, Any]:
             "category_id": product.category_id,
             "volume": product.volume,
             "volume_unit": product.volume_unit,
-            "stock_quantity": product.stock_quantity if product.track_inventory else None,
+            # For a marking-code product the pool IS the stock; the column is a
+            # projection that goes stale between marking-code events and that no
+            # admin can correct by hand. Publish the fact instead.
+            "stock_quantity": _admin_stock_quantity(product, fiscal_snapshot["marking_code_counts"]),
             "min_stock_level": product.min_stock_level,
             "min_order_quantity": int(getattr(product, "min_order_quantity", 1) or 1),
             "is_active": product.is_active,
@@ -846,9 +882,7 @@ def serialize_product_admin(product: Product) -> Dict[str, Any]:
         if product.category:
             data["category_name"] = product.category.name
 
-        from business_app.services.product_fiscal_service import ProductFiscalService
-
-        data.update(ProductFiscalService().build_product_fiscal_snapshot(product))
+        data.update(fiscal_snapshot)
 
         # Add performance metrics
         data["total_sold"] = getattr(product, "total_sold", 0)

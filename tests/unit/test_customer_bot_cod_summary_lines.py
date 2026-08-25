@@ -84,12 +84,26 @@ def test_unlinked_ungrouped_renders_nothing():
 
 
 @pytest.mark.unit
-def test_solo_customer_with_prepaid_credit_and_debt_still_renders_nothing():
-    """Regression baseline (global constraint): an unlinked + ungrouped customer's
-    orders menu must stay byte-identical to today, debt or credit notwithstanding."""
+def test_solo_customer_with_prepaid_credit_sees_it():
+    """B4b: a single-account customer can now hold real credit, so show it.
+
+    Before B4a a solo customer's prepaid balance could only come from a driver
+    over-collecting cash at their own door, and the whole block was gated behind
+    `cluster_member_count > 1` — so it was hidden from exactly the person who
+    has no second account to explain it. B4a made a cancelled card/Click order
+    settle as prepaid credit, and that customer had NOWHERE in the bot to see
+    the money they are owed.
+
+    The CLUSTER DEBT line stays gated (a solo customer's own unpaid orders are
+    already itemised in the list right above); the CREDIT line is not, because
+    nothing else in the bot reports it.
+    """
     summary = {"cluster_member_count": 1, "cluster_delivered_outstanding_amount": 42000.0,
                "available_prepayment_balance": 9000.0, "places": []}
-    assert _build_cod_summary_lines(summary, "en") == []
+    assert _build_cod_summary_lines(summary, "en") == [
+        "telegram.orders.cod_prepaid_balance 9,000",
+        "telegram.payments.prepaid_cash_only",
+    ]
 
 
 @pytest.mark.unit
@@ -114,6 +128,10 @@ def test_linked_customer_sees_cluster_wide_prepaid_credit():
     assert lines == [
         "telegram.payments.cluster_debt_total 30,000",
         "telegram.orders.cod_prepaid_balance 12,500",
+        # B4b: the balance never travels without the sentence saying where it
+        # can be spent. Surfacing a number a card checkout will ignore is how
+        # the customer concludes the bot double-charged them.
+        "telegram.payments.prepaid_cash_only",
     ]
 
 
@@ -268,4 +286,5 @@ def test_only_the_three_task15_keys_plus_the_existing_prepaid_key_are_used(monke
         "telegram.payments.place_debt_total",
         "telegram.payments.place_order_line",
         "telegram.orders.cod_prepaid_balance",
+        "telegram.payments.prepaid_cash_only",
     }

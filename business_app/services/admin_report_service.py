@@ -14,6 +14,7 @@ from business_app.models.payment import CashCollectionAllocation, CashCollection
 from business_app.models.product import Product
 from business_app.models.subscription import Subscription
 from business_app.models.user import User
+from business_app.services.cash_collection_service import customer_credit_rebook_event_clause
 from business_app.utils.payment_projection import open_receivable_clause
 from business_app.utils.api_responses import success_response
 from shared.enums import (
@@ -27,10 +28,21 @@ from shared.enums import (
 from business_app.utils.exceptions import ValidationError
 
 # Statuses whose `amount_collected` is stale money that must never be reported
-# as revenue. `PaymentService.process_refund` sets CANCELLED (full refund) or
-# PARTIALLY_REFUNDED (partial) and deliberately leaves `amount_collected` and
-# `paid_at` untouched as an audit trail, so a collected-based revenue sum has to
-# exclude them explicitly. FAILED is included for the same reason.
+# as revenue: the row records money that was taken and given back (or never
+# taken), while `amount_collected` and `paid_at` are deliberately left in place
+# as an audit trail — so a collected-based revenue sum has to exclude them
+# explicitly. FAILED is included for the same reason.
+#
+# 🔴 WHO STILL WRITES THESE, after B4a (owner ruling 2026-08-24). NOT a
+# card/Click order cancellation: such a payment now stays COMPLETED forever (the
+# gateway is never reversed, because the fiscal receipt cannot be un-filed) and
+# its money settles as customer prepaid credit instead — which is why
+# `cash_allocations_query` below excludes that credit rather than this guard
+# catching it. The remaining writers are Payme `CancelTransaction`
+# (`PaymentService.process_refund`'s surviving caller),
+# `_sync_payment_status_for_terminal_order_state` cancelling payments that never
+# took money, gateway-reported failures, and historic rows. Keep the guard: all
+# of those still occur.
 _NON_REVENUE_PAYMENT_STATUSES = (
     PaymentStatus.REFUNDED,
     PaymentStatus.PARTIALLY_REFUNDED,
@@ -376,11 +388,12 @@ class AdminReportService:
                 Payment.payment_method != PaymentMethod.CASH,
                 Payment.amount_collected > 0,
                 # Refunds and cancellations never reset `amount_collected` and
-                # leave `paid_at` intact (PaymentService.process_refund), so
-                # without this a fully refunded card payment would report its
-                # whole value as revenue forever. The old query was implicitly
-                # protected by `status == COMPLETED`; summing what was actually
-                # collected means the exclusion has to be stated.
+                # leave `paid_at` intact, so without this a refunded Payme
+                # payment (or a historic card row) would report its whole value
+                # as revenue forever. The old query was implicitly protected by
+                # `status == COMPLETED`; summing what was actually collected
+                # means the exclusion has to be stated. See
+                # `_NON_REVENUE_PAYMENT_STATUSES` for who still writes them.
                 Payment.status.notin_(_NON_REVENUE_PAYMENT_STATUSES),
             )
             .scalar()
@@ -400,17 +413,41 @@ class AdminReportService:
                 Payment.payment_method != PaymentMethod.CASH,
                 Payment.amount_collected > 0,
                 # Refunds and cancellations never reset `amount_collected` and
-                # leave `paid_at` intact (PaymentService.process_refund), so
-                # without this a fully refunded card payment would report its
-                # whole value as revenue forever. The old query was implicitly
-                # protected by `status == COMPLETED`; summing what was actually
-                # collected means the exclusion has to be stated.
+                # leave `paid_at` intact, so without this a refunded Payme
+                # payment (or a historic card row) would report its whole value
+                # as revenue forever. The old query was implicitly protected by
+                # `status == COMPLETED`; summing what was actually collected
+                # means the exclusion has to be stated. See
+                # `_NON_REVENUE_PAYMENT_STATUSES` for who still writes them.
                 Payment.status.notin_(_NON_REVENUE_PAYMENT_STATUSES),
             )
             .group_by(Payment.payment_method)
             .all()
         )
 
+        # 🔴 RE-BOOKED MONEY IS EXCLUDED, and that exclusion is load-bearing.
+        # Two flows mint a CashCollectionEvent out of money this report has
+        # ALREADY counted, rather than out of cash coming in:
+        #
+        #   * `order_cancel_prepaid_credit` — a cancelled card/Click order. Under
+        #     the owner's 2026-08-24 rule the gateway is never reversed, so the
+        #     payment stays COMPLETED with `amount_collected` intact and keeps
+        #     counting in `electronic_total` above. Counting the credit's
+        #     allocations here too would report the same som twice.
+        #   * `order_edit_refund` — an edit-down on a paid order. Same shape,
+        #     and this leak is already in production: `_recompute_totals`
+        #     deliberately leaves `payment.amount` at the original collected
+        #     figure, so the full original charge is still counted.
+        #
+        # The money is counted ONCE, on the side it actually arrived on —
+        # electronic for a gateway charge, cash for a door collection. Same
+        # principle as the `prepaid_reservation` exclusion in `cash_on_payment`
+        # above, one layer up: that one excludes allocations that never moved
+        # `amount_collected`; this one excludes events that were never income.
+        #
+        # The predicate is imported, never re-typed: `CashCollectionService` owns
+        # the flow vocabulary and stamps the markers, so the report cannot drift
+        # from what the writers actually write.
         cash_allocations_query = (
             db.session.query(
                 CashCollectionEvent.source,
@@ -426,6 +463,7 @@ class AdminReportService:
                 CashCollectionEvent.occurred_at <= end_dt,
                 CashCollectionEvent.voided_at.is_(None),
                 CashCollectionAllocation.reversed_at.is_(None),
+                ~customer_credit_rebook_event_clause(),
             )
             .group_by(CashCollectionEvent.source)
             .all()
@@ -488,6 +526,12 @@ class AdminReportService:
             else:
                 aging["31_plus_days"] += bucket_amount
 
+        # Same join, same filters and therefore the SAME exclusion as
+        # `cash_allocations_query` in the financial summary: this is that total
+        # sliced by day, so re-booked customer credit must drop out here too or
+        # the chart contradicts the summary sitting above it — and keeps the
+        # pre-existing `order_edit_refund` double-count that the summary now
+        # nets out. Pinned by an equality assertion between the two.
         daily_collected = (
             db.session.query(
                 func.date(CashCollectionEvent.occurred_at).label("date"),
@@ -502,6 +546,7 @@ class AdminReportService:
                 CashCollectionEvent.occurred_at <= end_dt,
                 CashCollectionEvent.voided_at.is_(None),
                 CashCollectionAllocation.reversed_at.is_(None),
+                ~customer_credit_rebook_event_clause(),
             )
             .group_by("date")
             .order_by("date")

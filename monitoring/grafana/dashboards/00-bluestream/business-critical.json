@@ -324,18 +324,18 @@
       "targets": [
         {
           "refId": "A",
-          "legendFormat": "p50",
-          "expr": "payments_pending_age_seconds{quantile=\"0.5\"}"
+          "legendFormat": "oldest pending",
+          "expr": "max(payments_pending_oldest_age_seconds)"
         },
         {
           "refId": "B",
-          "legendFormat": "p95",
-          "expr": "payments_pending_age_seconds{quantile=\"0.95\"}"
+          "legendFormat": "pending count",
+          "expr": "max(payments_pending_total)"
         },
         {
           "refId": "C",
-          "legendFormat": "max",
-          "expr": "payments_pending_age_seconds{quantile=\"0.99\"}"
+          "legendFormat": "ON CLOSED ORDER",
+          "expr": "max(payments_pending_on_closed_order_total)"
         }
       ],
       "fieldConfig": {

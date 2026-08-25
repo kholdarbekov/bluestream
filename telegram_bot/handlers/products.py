@@ -1257,6 +1257,19 @@ class ProductHandlers(BaseHandler):
                     language,
                     payable_after=format_price(payable_after),
                 ))
+                # 🔴 THIS SCREEN IS DRAWN BEFORE THE RAIL IS CHOSEN, so the two
+                # lines above can only ever be conditional statements — and the
+                # condition has to be on screen. The prepaid credit is spendable
+                # on CASH/COD orders ONLY (CashCollectionService refuses every
+                # other rail), and after B4a the credit itself can have come
+                # from a cancelled CARD order, so the customer holding it has no
+                # reason to assume a cash-only rule.
+                #
+                # The other two prepayment surfaces do NOT need this line
+                # because they already know the rail and are gated on it:
+                # handlers/orders.py:1427 (`if payment_method == 'cash'`) and
+                # `_build_cod_prepayment_brief` at its cash-only call site.
+                lines.append(i18n.get('telegram.payments.prepaid_cash_only', language))
 
             # Minimum-order gate. `min_order_shortfall` is the ONE expression
             # behind both the gate and the "add N more" copy, and it is fed the

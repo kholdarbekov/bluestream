@@ -490,11 +490,6 @@ BACKEND_TRANSLATIONS = {
         'uz': 'To\'lovlar muvaffaqiyatli olindi',
         'ru': 'Платежи успешно получены'
     },
-    'api.payments.cancelled': {
-        'en': 'Payment cancelled successfully',
-        'uz': 'To\'lov muvaffaqiyatli bekor qilindi',
-        'ru': 'Платеж успешно отменен'
-    },
     'api.payments.cash_payment_created': {
         'en': 'Cash payment created. Pay on delivery.',
         'uz': 'Naqd to\'lov yaratildi. Yetkazilganda to\'lang.',
@@ -515,16 +510,13 @@ BACKEND_TRANSLATIONS = {
         'uz': 'To\'lovni tekshirish boshlandi',
         'ru': 'Проверка платежа запущена'
     },
-    'api.payments.refund_requested': {
-        'en': 'Refund request submitted',
-        'uz': 'Qaytarish so\'rovi yuborildi',
-        'ru': 'Запрос на возврат отправлен'
-    },
-    'api.payments.refund_reason_customer_request': {
-        'en': 'Customer request',
-        'uz': 'Mijoz so\'rovi',
-        'ru': 'Запрос клиента'
-    },
+    # DELETED with B4a: 'api.payments.refund_requested' and
+    # 'api.payments.refund_reason_customer_request' had exactly one reader each —
+    # the POST /payments/refund handler, which now REFUSES instead of submitting
+    # a refund. A card/Click payment is never returned (the fiscal receipt cannot
+    # be undone); the customer cancels the ORDER and the money settles as prepaid
+    # balance. The refusal speaks the shared 'api.payments.error.lifecycle.*'
+    # vocabulary below.
     'api.payments.error.payment_not_found': {
         'en': 'Payment not found',
         'uz': 'To\'lov topilmadi',
@@ -565,15 +557,179 @@ BACKEND_TRANSLATIONS = {
         'uz': 'To\'lov holatini olishda xatolik',
         'ru': 'Не удалось получить статус платежа'
     },
-    'api.payments.error.only_pending_cancellable': {
-        'en': 'Only pending payments can be cancelled',
-        'uz': 'Faqat kutilayotgan to\'lovlarni bekor qilish mumkin',
-        'ru': 'Отменить можно только ожидающие платежи'
+    # ---------------------------------------------------------------- #
+    # POST /api/v1/payments/<id>/cancel REFUSES, always (blocker B2).
+    #
+    # A payment is never cancelled on its own; its life ends where its ORDER
+    # resolves (docs/click_payment_policy_rework_plan.md, Phase 4D). The
+    # refusal message is assembled as REASON + " " + ADVICE:
+    #
+    #   reason_*  -- one true statement about THIS payment. The fiscal-receipt
+    #                sentence appears ONLY for a COMPLETED card/Click payment,
+    #                because saying it about a cash payment is simply false.
+    #   advice_*  -- what the customer can actually DO, which is a property of
+    #                the ORDER, not the payment. Never advises cancelling an
+    #                order that OrderService.cancel_order would refuse.
+    #
+    # Full sentences joined by a space, never an inline placeholder, so the
+    # composition survives translation word order.
+    #
+    # Replaces 'api.payments.error.only_pending_cancellable' (deleted: its copy
+    # promised that pending payments ARE cancellable, and none are) and
+    # 'api.payments.error.cancel_failed' / 'api.payments.cancelled' (deleted:
+    # zero readers once the endpoint stopped attempting a cancel).
+    'api.payments.error.lifecycle.reason_pending': {
+        'en': 'A payment cannot be cancelled or refunded on its own.',
+        'uz': 'To\'lovni alohida bekor qilib yoki qaytarib bo\'lmaydi.',
+        'ru': 'Платеж нельзя отменить или вернуть отдельно.'
     },
-    'api.payments.error.cancel_failed': {
-        'en': 'Failed to cancel payment',
-        'uz': 'To\'lovni bekor qilib bo\'lmadi',
-        'ru': 'Не удалось отменить платеж'
+    'api.payments.error.lifecycle.reason_online_fiscalized': {
+        'en': 'This payment has already gone through. A card or Click payment is never '
+              'cancelled or refunded here, because the fiscal receipt filed for it cannot '
+              'be undone.',
+        'uz': 'Bu to\'lov allaqachon amalga oshirilgan. Karta yoki Click orqali to\'lov hech '
+              'qachon bekor qilinmaydi va qaytarilmaydi, chunki u uchun rasmiylashtirilgan '
+              'fiskal chekni bekor qilib bo\'lmaydi.',
+        'ru': 'Этот платеж уже прошел. Платеж картой или через Click здесь никогда не '
+              'отменяется и не возвращается, так как оформленный по нему фискальный чек '
+              'нельзя аннулировать.'
+    },
+    'api.payments.error.lifecycle.reason_already_settled': {
+        'en': 'This payment has already been paid, so it cannot be cancelled or refunded.',
+        'uz': 'Bu to\'lov allaqachon to\'langan, shuning uchun uni bekor qilib yoki qaytarib bo\'lmaydi.',
+        'ru': 'Этот платеж уже оплачен, поэтому отменить или вернуть его нельзя.'
+    },
+    'api.payments.error.lifecycle.reason_in_progress': {
+        'en': 'This payment is already being processed, so it can no longer be cancelled or refunded.',
+        'uz': 'Bu to\'lov allaqachon amalga oshirilmoqda, shuning uchun uni endi bekor qilib '
+              'yoki qaytarib bo\'lmaydi.',
+        'ru': 'Этот платеж уже обрабатывается, поэтому отменить или вернуть его больше нельзя.'
+    },
+    'api.payments.error.lifecycle.reason_already_ended': {
+        'en': 'This payment has already ended, so there is nothing to cancel or return.',
+        'uz': 'Bu to\'lov allaqachon yakunlandi, shuning uchun bekor qiladigan yoki qaytariladigan narsa yo\'q.',
+        'ru': 'Этот платеж уже завершен, отменять или возвращать нечего.'
+    },
+    'api.payments.error.lifecycle.advice_cancel_order': {
+        'en': 'If you no longer want the order, cancel the order instead - anything already '
+              'paid stays on your account as prepaid balance.',
+        'uz': 'Agar buyurtma sizga kerak bo\'lmasa, buyurtmani bekor qiling - to\'langan summa '
+              'hisobingizda oldindan to\'lov sifatida saqlanadi.',
+        'ru': 'Если заказ больше не нужен, отмените заказ - уже оплаченная сумма останется на '
+              'вашем счете как предоплата.'
+    },
+    'api.payments.error.lifecycle.advice_order_delivered': {
+        'en': 'This order has already been delivered, so it can no longer be cancelled either.',
+        'uz': 'Bu buyurtma allaqachon yetkazib berilgan, shuning uchun uni ham endi bekor qilib '
+              'bo\'lmaydi.',
+        'ru': 'Этот заказ уже доставлен, поэтому его тоже больше нельзя отменить.'
+    },
+    'api.payments.error.lifecycle.advice_order_not_cancellable': {
+        'en': 'This order can no longer be cancelled either.',
+        'uz': 'Bu buyurtmani ham endi bekor qilib bo\'lmaydi.',
+        'ru': 'Этот заказ тоже больше нельзя отменить.'
+    },
+    'api.payments.error.lifecycle.advice_order_already_cancelled': {
+        'en': 'This order is already cancelled - anything paid on it stays on your account as '
+              'prepaid balance.',
+        'uz': 'Bu buyurtma allaqachon bekor qilingan - u bo\'yicha to\'langan summa hisobingizda '
+              'oldindan to\'lov sifatida saqlanadi.',
+        'ru': 'Этот заказ уже отменен - оплаченная по нему сумма останется на вашем счете как '
+              'предоплата.'
+    },
+    # Rail-flip refusal when the marking-code pool cannot cover the order: the
+    # API-facing half here, the customer-bot half as
+    # 'telegram.payment.marking_codes_unavailable' below.
+    #
+    # Both moved here from the now-deleted
+    # scripts/seed_marking_codes_pool_short_translations.py. That script seeded
+    # the bot copy under category "telegram_bot", and telegram_bot/i18n.py:67
+    # loads ONLY `category = 'telegram'` (the staff bot loads 'staff_bot' OR
+    # key LIKE 'staff.%'), so the row was invisible to BOTH bots: the handler at
+    # telegram_bot/handlers/payments.py:372 fell through to i18n's missing-key
+    # path and showed every customer, in every language, the humanised English
+    # "Marking codes unavailable" -- on the one screen whose job is to explain
+    # that their order stays on Cash on Delivery.
+    #
+    # Seeding from HERE is what fixes that: `_category_for` derives the category
+    # from the key's first segment, so 'telegram.*' lands under 'telegram',
+    # which is exactly the category the bot reads. It also makes both keys
+    # visible to scripts/audit_translation_keys.py, which maps the 'api' and
+    # 'telegram' prefixes to this file and reported both as unseeded references
+    # while they lived in a one-off script.
+    'api.payments.marking_codes_unavailable': {
+        'en': '{product} cannot be paid for by card right now. Please pay with cash on delivery.',
+        'uz': '{product} hozir karta bilan to\'lab bo\'lmaydi. Iltimos, yetkazib berishda naqd '
+              'pul bilan to\'lang.',
+        'ru': '{product} сейчас нельзя оплатить картой. Пожалуйста, оплатите наличными при '
+              'доставке.'
+    },
+    'telegram.payment.marking_codes_unavailable': {
+        'en': 'This order cannot be switched to online payment right now due to a temporary stock issue.\n\nYour order stays on Cash on Delivery -- you can pay in cash when it arrives.',
+        'uz': "Ushbu buyurtmani hozircha onlayn to'lovga o'tkazib bo'lmaydi (vaqtinchalik ombor muammosi tufayli).\n\nBuyurtmangiz naqd pul (Cash on Delivery) usulida qoladi -- yetkazib berilganda naqd pul bilan to'lashingiz mumkin.",
+        'ru': 'Сейчас невозможно перевести этот заказ на онлайн-оплату из-за временной проблемы со складом.\n\nВаш заказ остаётся с оплатой наличными при доставке -- вы сможете оплатить наличными при получении.'
+    },
+    # ---------------------------------------------------------------- #
+    # B4b -- the customer-facing half of "a cancelled card/Click order settles
+    # as prepaid credit" (B4a).
+    #
+    # That credit is spendable on CASH/COD orders ONLY: CashCollectionService
+    # refuses every other rail (nine `payment_method != PaymentMethod.CASH`
+    # early-returns, plus the `Payment.payment_method == PaymentMethod.CASH`
+    # filter in `auto_reserve_against_pending_payments`). The owner accepted
+    # that constraint on 2026-08-24 and ruled that the COPY must stop promising
+    # an auto-apply that will not happen, and that the balance must be visible
+    # to single-account customers.
+    #
+    # The CART screen (telegram_bot/handlers/products.py::show_cart) renders
+    # this block BEFORE a rail is chosen, so it cannot be gated the way the
+    # confirmation screen (handlers/orders.py:1427) and the post-order brief
+    # (`_build_cod_prepayment_brief`) already are -- both sit behind
+    # `payment_method == 'cash'`. It therefore has to be true for BOTH rails,
+    # which means naming the condition out loud, in all three languages. The
+    # uz/ru copy was the sharpest lie: "Keyingi buyurtmaga avtomatik
+    # qo'llaniladi" / "Будет зачтено в следующий заказ" -- "applied to your
+    # next ORDER", no rail qualifier at all, one tap from the Click button.
+    #
+    # Moved here from scripts/seed_prepayment_translations.py (which keeps the
+    # ui.* half). One key, one home: a second copy there means the next reseed
+    # silently reverts this wording. Seeding from HERE also derives the
+    # category from the key prefix, so 'telegram.*' lands under 'telegram' --
+    # the ONLY category telegram_bot/i18n.py:67 loads.
+    'telegram.payments.prepaid_cash_only': {
+        'en': 'This balance can only be used for cash on delivery. Card and Click payments '
+              'are charged in full and the balance stays on your account.',
+        'uz': 'Bu qoldiqdan faqat yetkazib berishda naqd to\'lashda foydalanish mumkin. Karta '
+              'va Click orqali to\'lovlar to\'liq summada yechiladi, qoldiq esa hisobingizda '
+              'saqlanib qoladi.',
+        'ru': 'Этот остаток можно использовать только при оплате наличными при доставке. '
+              'Оплата картой и через Click списывается полностью, а остаток остается на вашем '
+              'счете.'
+    },
+    # The label lost its "COD " prefix: after B4a the money can just as easily
+    # come from a cancelled CARD order, so calling the balance itself "COD" is
+    # wrong at its source. Where it can be SPENT is the note above's job.
+    'telegram.cart.cod_prepaid_balance': {
+        'en': '💳 Prepaid balance: {available_balance} UZS',
+        'uz': '💳 Oldindan to\'langan qoldiq: {available_balance} so\'m',
+        'ru': '💳 Предоплаченный остаток: {available_balance} сум'
+    },
+    'telegram.orders.cod_prepaid_balance': {
+        'en': '💳 Prepaid balance: {available_balance} UZS',
+        'uz': '💳 Oldindan to\'langan qoldiq: {available_balance} so\'m',
+        'ru': '💳 Предоплаченный остаток: {available_balance} сум'
+    },
+    'telegram.cart.cod_prepaid_auto_applied_next': {
+        'en': '🔁 Applied automatically if you choose cash on delivery: {potential_applied} UZS',
+        'uz': '🔁 Yetkazib berishda naqd to\'lashni tanlasangiz, avtomatik hisobga olinadi: '
+              '{potential_applied} so\'m',
+        'ru': '🔁 Будет зачтено автоматически, если выбрать оплату наличными при доставке: '
+              '{potential_applied} сум'
+    },
+    'telegram.cart.cod_estimated_payable': {
+        'en': '🧾 Then you pay on delivery: {payable_after} UZS',
+        'uz': '🧾 Shunda yetkazib berishda to\'laysiz: {payable_after} so\'m',
+        'ru': '🧾 Тогда при доставке вы платите: {payable_after} сум'
     },
     'api.payments.error.get_cards_failed': {
         'en': 'Failed to get saved cards',
@@ -600,16 +756,11 @@ BACKEND_TRANSLATIONS = {
         'uz': 'To\'lovni tekshirib bo\'lmadi',
         'ru': 'Не удалось проверить платеж'
     },
-    'api.payments.error.only_completed_refundable': {
-        'en': 'Only completed payments can be refunded',
-        'uz': 'Faqat yakunlangan to\'lovlarni qaytarish mumkin',
-        'ru': 'Возврат возможен только для завершенных платежей'
-    },
-    'api.payments.error.refund_failed': {
-        'en': 'Failed to request refund',
-        'uz': 'Qaytarish so\'rovini yuborib bo\'lmadi',
-        'ru': 'Не удалось отправить запрос на возврат'
-    },
+    # DELETED with B4a: 'api.payments.error.only_completed_refundable' promised
+    # that COMPLETED payments ARE refundable — the exact opposite of the rule —
+    # and 'api.payments.error.refund_failed' described a failure of a request
+    # that is no longer made. Both had zero readers once the route began
+    # refusing.
     'api.payments.error.get_rates_failed': {
         'en': 'Failed to get exchange rates',
         'uz': 'Valyuta kurslarini olishda xatolik',
@@ -3741,6 +3892,38 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Bu buyurtma allaqachon to\'langan.',
         'ru': 'Этот заказ уже оплачен.'
     },
+    # B3 -- `retry_payment` refuses when the backend's published `is_payable`
+    # says no (a cancelled/returned order, or a payment the gateway already
+    # ended). The Pay button is gone from the keyboard, but the MESSAGE that
+    # carried it stays in the chat forever, so this is the copy for a tap on a
+    # stale one. Deliberately NOT "payment failed": nothing failed, and the
+    # order may well have been settled in cash at the door.
+    #
+    # Category is derived from the key's first segment, so 'telegram.*' lands
+    # under 'telegram' -- the ONLY category telegram_bot/i18n.py:67 loads.
+    # Seeding it anywhere else renders the humanised English fallback.
+    # The WEB twin of `telegram.payment.error_not_payable`, shown on
+    # frontend/payment_cancelled.html when the published payability says the
+    # Retry button must not be drawn. Dotless English-literal key, so
+    # `_category_for` files it under 'general' — the category the Jinja `|t`
+    # filter reads. Copy kept identical to the bot's on purpose: one message,
+    # two surfaces, no chance of them drifting apart.
+    'This order can no longer be paid online. If anything is still owed on it, our team will settle it with you.': {
+        'en': 'This order can no longer be paid online. If anything is still owed on it, '
+              'our team will settle it with you.',
+        'uz': 'Bu buyurtmani endi onlayn to\'lab bo\'lmaydi. Agar u bo\'yicha qarz qolgan '
+              'bo\'lsa, jamoamiz siz bilan bog\'lanib hal qiladi.',
+        'ru': 'Этот заказ больше нельзя оплатить онлайн. Если по нему остался долг, '
+              'наша команда свяжется с вами и решит вопрос.'
+    },
+    'telegram.payment.error_not_payable': {
+        'en': 'This order can no longer be paid online. If anything is still owed on it, '
+              'our team will settle it with you.',
+        'uz': 'Bu buyurtmani endi onlayn to\'lab bo\'lmaydi. Agar u bo\'yicha qarz qolgan '
+              'bo\'lsa, jamoamiz siz bilan bog\'lanib hal qiladi.',
+        'ru': 'Этот заказ больше нельзя оплатить онлайн. Если по нему остался долг, '
+              'наша команда свяжется с вами и решит вопрос.'
+    },
     'telegram.payment.cancelled_message': {
         'en': 'You cancelled the payment. Your order is still pending.\n\nWould you like to try again?',
         'uz': 'Siz to\'lovni bekor qildingiz. Buyurtmangiz hali ham kutilmoqda.\n\nYana urinib ko\'rishni xohlaysizmi?',
@@ -6345,6 +6528,15 @@ ADMIN_UI_ORDER_TRANSLATIONS = {
     ),
     'ui.orders.pagination_text': _ui_tr('orders'),
     'ui.orders.payment_link': _ui_tr('Payment Link', "To'lov havolasi", 'Ссылка оплаты'),
+    # B3 -- shown INSTEAD of a clickable link when `payable_payment_link` is
+    # null but `payment_link` is not: a link was issued and the backend says it
+    # is no longer payable. Keeps "issued, now dead" distinguishable from
+    # "never issued" without offering an admin a link that cannot work.
+    'ui.orders.payment_link_not_payable': _ui_tr(
+        'Link issued, no longer payable',
+        "Havola yaratilgan, endi to'lab bo'lmaydi",
+        'Ссылка была создана, оплата больше недоступна',
+    ),
     'ui.orders.payment_link_ready': _ui_tr('Payment link created'),
     'ui.orders.payment_method': _ui_tr('Payment Method', "To'lov usuli", 'Способ оплаты'),
     'ui.orders.payment_method_required': _ui_tr('Please select a payment method'),

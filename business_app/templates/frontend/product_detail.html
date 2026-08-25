@@ -16,7 +16,7 @@
 <meta property="og:image" content="{{ product_image }}">
 <meta property="product:price:amount" content="{{ product.discount_price if product.discount_price else product.base_price }}">
 <meta property="product:price:currency" content="UZS">
-{% set availability = 'https://schema.org/InStock' if product.stock_quantity > 0 else 'https://schema.org/OutOfStock' %}
+{% set availability = 'https://schema.org/OutOfStock' if (product.stock_caps_purchase and product.stock_quantity <= 0) else 'https://schema.org/InStock' %}
 {% set product_schema = {
   "@context": "https://schema.org",
   "@type": "Product",
@@ -246,7 +246,12 @@
                                 {% endif %}
                             </div>
                             <div class="stock-box">
-                                {% if product.stock_quantity > 0 %}
+                                {% if not product.stock_caps_purchase %}
+                                <span class="stock-label stock-available">
+                                    <i class="fas fa-check-circle"></i>
+                                    {{ 'In Stock'|t }}
+                                </span>
+                                {% elif product.stock_quantity > 0 %}
                                     {% if product.stock_quantity <= 10 %}
                                     <span class="stock-label stock-low">
                                         <i class="fas fa-exclamation-circle"></i>
@@ -323,7 +328,7 @@
                                     <button type="button" class="qty-plus" data-action="change-qty" data-delta="1">+</button>
                                 </div>
                             </div>
-                            <button class="add-to-cart-btn theme-btn btn-one" data-action="add-to-cart-qty" data-product-id="{{ product.id }}" {% if product.stock_quantity <= 0 %}disabled{% endif %}>
+                            <button class="add-to-cart-btn theme-btn btn-one" data-action="add-to-cart-qty" data-product-id="{{ product.id }}" {% if product.stock_caps_purchase and product.stock_quantity <= 0 %}disabled{% endif %}>
                                 <i class="far fa-shopping-cart"></i>
                                 {{ 'landing.button.add_to_cart'|t }}
                             </button>
@@ -476,7 +481,7 @@
 {% block extra_js %}
 {% from "frontend/macros/page_data.html" import render_page_data %}
 {{ render_page_data({
-    'max_qty': product.stock_quantity or 999,
+    'max_qty': (product.stock_quantity if product.stock_caps_purchase else None) or config['MAX_QUANTITY_PER_ITEM'],
     'min_order_quantity': product.min_order_quantity or 1,
     'i18n': {'added_to_wishlist': 'Added to wishlist!' | t},
 }) }}

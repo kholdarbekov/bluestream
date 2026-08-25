@@ -1475,11 +1475,24 @@ const Orders = () => {
               <Descriptions.Item label={t('ui.orders.consume_marking_codes', 'Consume Marking Codes')}>
                 {selectedOrder.consume_marking_codes ? t('ui.common.yes', 'Yes') : t('ui.common.no', 'No')}
               </Descriptions.Item>
+              {/* B3: `payment_link` is an ARCHIVAL column — it survives
+                  cancellation, delivery, settlement in cash at the door and a
+                  rail conversion, so its truthiness never meant "payable". The
+                  backend publishes `payable_payment_link`: the same URL, but
+                  non-null only when `order_is_payable_online` says following it
+                  works, so the gate and the href are one value. The raw column
+                  is still read HERE and only here, to keep "issued, now dead"
+                  distinguishable from "never issued" — the audit signal that is
+                  the reason two fields exist instead of one boolean. */}
               <Descriptions.Item label={t('ui.orders.payment_link', 'Payment Link')}>
-                {selectedOrder.payment_link ? (
-                  <a href={selectedOrder.payment_link} target="_blank" rel="noreferrer">
+                {selectedOrder.payable_payment_link ? (
+                  <a href={selectedOrder.payable_payment_link} target="_blank" rel="noreferrer">
                     {t('ui.orders.open_payment_link', 'Open payment link')}
                   </a>
+                ) : selectedOrder.payment_link ? (
+                  <span style={{ color: 'rgba(0, 0, 0, 0.45)' }}>
+                    {t('ui.orders.payment_link_not_payable', 'Link issued, no longer payable')}
+                  </span>
                 ) : '—'}
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.orders.receipt_link', 'Receipt Link')}>
@@ -1950,8 +1963,15 @@ const Orders = () => {
 
             <div style={{ marginTop: 16, textAlign: 'right' }}>
               <Space>
-                {selectedOrder.payment_link ? (
-                  <Button icon={<LinkOutlined />} href={selectedOrder.payment_link} target="_blank">
+                {/* Same published answer as the Payment Link row above. An
+                    action button has no audit duty, so there is no dead-link
+                    branch here — it simply is not offered. */}
+                {selectedOrder.payable_payment_link ? (
+                  <Button
+                    icon={<LinkOutlined />}
+                    href={selectedOrder.payable_payment_link}
+                    target="_blank"
+                  >
                     {t('ui.orders.open_payment_link', 'Open Payment Link')}
                   </Button>
                 ) : null}

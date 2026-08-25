@@ -95,6 +95,29 @@ def normalize_payment_method(value: Union[str, PaymentMethod, None]) -> PaymentM
     return method
 
 
+def canonical_rail(value: Union[str, PaymentMethod, None]) -> Any:
+    """The RAIL a value really names, aliases folded in — TOTAL, never raises.
+
+    The comparison form of :func:`normalize_payment_method`, for the guards that
+    ask "is this a rail MOVE". Three of those existed and all three compared raw
+    enum members, so ``card`` — a legacy alias that ``PAYMENT_METHOD_ALIASES``
+    folds into ``CLICK`` and that is never written again — read as a different
+    rail from the click it IS. One guard then refused a delivered legacy-card
+    order's payment link forever; another ran the marking-code pool check on a
+    rail that was not moving.
+
+    Anything unrecognised (``None`` on a legacy subscription order,
+    ``loyalty_points``, a stray string) is handed back UNCHANGED rather than
+    raising. A guard that raises on unfamiliar input fails the request instead of
+    guarding it, and a NULL ``orders.payment_method`` records no rail to move
+    away from — it must compare unequal to a real rail without exploding.
+    """
+    try:
+        return normalize_payment_method(value)
+    except UnknownPaymentMethodError:
+        return value
+
+
 def assert_customer_selectable(method: PaymentMethod) -> None:
     """Raise ``UnsupportedPaymentMethodError`` unless a surface may offer ``method``."""
     if method not in CUSTOMER_SELECTABLE_METHODS:
@@ -134,7 +157,13 @@ PAYMENT_METHOD_CATALOG: List[Dict[str, Any]] = [
         "max_amount": 50000000,
         "processing_fee": 0.0,
         "supports_recurring": True,
-        "supports_refunds": True,
+        # THE OWNER'S RULE (2026-08-24): a Click/card payment is never returned,
+        # because the fiscal receipt filed for it cannot be undone. This is a
+        # TYPED FIELD of GET /payments/methods that both admin_ui and the bot
+        # read, so publishing True here told every client the opposite of what
+        # `PaymentService.process_refund` will now do. Cancelling the ORDER is
+        # the lawful action; the money settles as customer prepaid balance.
+        "supports_refunds": False,
     },
 ]
 

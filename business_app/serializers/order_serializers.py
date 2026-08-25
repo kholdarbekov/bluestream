@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, ConfigDict
 from pydantic.alias_generators import to_camel
 
 from business_app.utils.delivery_window import format_delivery_window
-from business_app.utils.payment_projection import get_payment_projection
+from business_app.utils.payment_projection import get_payment_projection, order_is_payable_online
 from business_app.models.order import Order, OrderItem
 from business_app.serializers.types import MoneyFloat
 
@@ -350,7 +350,7 @@ def serialize_order(order: Order, include_items=False, include_delivery=False, i
             order_data["delivery_info"] = serialize_order_delivery(order.delivery)
 
         if include_payment and hasattr(order, "payment") and order.payment:
-            order_data["payment_info"] = serialize_order_payment(order.payment)
+            order_data["payment_info"] = serialize_order_payment(order.payment, order)
 
         # Always include delivery address if available
         if hasattr(order, "delivery_address") and order.delivery_address:
@@ -514,10 +514,57 @@ def serialize_order_delivery(delivery) -> Dict[str, Any]:
         return {"id": delivery.id, "tracking_number": delivery.tracking_number, "status": str(delivery.status)}
 
 
-def serialize_order_payment(payment) -> Dict[str, Any]:
-    """Serialize payment information"""
+def payability_fields(order, payment) -> Dict[str, Any]:
+    """THE published answer to "may money still be taken for this order online".
+
+    `order_is_payable_online` (payment_projection.py) is the single authority —
+    the same function the Click PREPARE guard refuses on, derived from
+    `order_is_resolved`, so reconcile, PREPARE and every client agree by
+    construction. Until B3 nothing published it, and five client surfaces each
+    re-derived payability from whatever they could see: the admin Orders page
+    from "we stored a payment_link once", the customer bot from
+    `order_status == 'pending'`. Both copies are wrong for policy case B
+    (DELIVERED, unpaid, Click rail, payment PENDING), which is payable BY
+    DESIGN — the money can still arrive and the receipt still has to be issued.
+
+    TWO fields, because the clients take two different ACTIONS on the answer and
+    neither value can serve the other:
+
+    * ``is_payable`` is a PERMISSION. The customer bot's Pay / Retry buttons are
+      callbacks that mint a FRESH link server-side (POST /payments/create), so
+      there is no URL to hand them — only a yes/no.
+    * ``payable_payment_link`` is the STORED link, non-null ONLY when following
+      it would work. The admin's two buttons open THAT link, so they need a
+      URL. Publishing the boolean and the raw URL separately would leave every
+      call site to pair them by hand (`payment_link && is_payable`, href from
+      the other one) — which is exactly the two-values-out-of-step shape that
+      let `Orders.js` ship the same wrong test twice. Collapsed into one value,
+      the truthiness test and the href are the same expression and a button
+      aimed at a dead link is not writable.
+
+    ``payment_link`` stays published RAW alongside this. The admin audit row has
+    to distinguish "a link was issued and is now dead" from "no link was ever
+    issued", and that needs both values — which is also the reason one boolean
+    could never have served both questions.
+    """
+    payable = order_is_payable_online(order, payment)
+    return {
+        "is_payable": payable,
+        "payable_payment_link": (getattr(payment, "payment_link", None) if payable else None),
+    }
+
+
+def serialize_order_payment(payment, order=None) -> Dict[str, Any]:
+    """Serialize payment information.
+
+    ``order`` is the payability half's other operand. It defaults to the
+    payment's own ``order`` relationship so the handful of call sites that hold
+    only a payment keep working; ``serialize_order`` passes the instance it
+    already has rather than re-loading it.
+    """
     projection = get_payment_projection(payment)
     fiscalization = getattr(payment, "fiscalization", None)
+    payability = payability_fields(order if order is not None else getattr(payment, "order", None), payment)
 
     try:
         return {
@@ -536,6 +583,7 @@ def serialize_order_payment(payment) -> Dict[str, Any]:
             "provider_transaction_id": getattr(payment, "provider_transaction_id", None),
             "payment_provider": getattr(payment, "payment_provider", None),
             "payment_link": getattr(payment, "payment_link", None),
+            **payability,
             "paid_at": payment.paid_at.isoformat() if getattr(payment, "paid_at", None) else None,
             "last_collected_at": (
                 payment.last_collected_at.isoformat() if getattr(payment, "last_collected_at", None) else None
@@ -555,6 +603,7 @@ def serialize_order_payment(payment) -> Dict[str, Any]:
             "amount_collected": float(projection["amount_collected"]),
             "outstanding_amount": float(projection["outstanding_amount"]),
             "payment_link": getattr(payment, "payment_link", None),
+            **payability,
         }
 
 

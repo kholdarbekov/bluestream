@@ -219,3 +219,50 @@ class TestPaymentLifecycleRules:
         process_refund.assert_called_once_with(sample_payment.id, sample_payment.amount, "Payme Cancel: 42")
         assert transaction.status == "refunded"
         assert result["result"]["state"] == PaymeState.REFUNDED.value
+
+    def test_payme_cancel_transaction_end_to_end_is_unaffected_by_the_card_refund_ban(
+        self, payment_service, sample_payment, db
+    ):
+        """B4a §6.1 — PAYME MUST NOT CHANGE, and this drives it UNPATCHED.
+
+        The cell above patches `process_refund`, so it would keep passing even if
+        the real method started refusing every rail. This one runs the real
+        method end to end on a real PAYME payment and pins the three things
+        Payme's protocol response depends on: `success is True`, the payment
+        flipped to CANCELLED, and `_sync_order_paid_projection` ran
+        (`order.is_paid` back to False). Payme `CancelTransaction` is a
+        merchant-agreement obligation the GATEWAY initiates — refusing it would
+        breach that agreement, which is why the B4a guard is rail-gated on
+        {CLICK, CARD} rather than blanket.
+
+        And no `CashCollectionEvent`: Payme money really does go back to the
+        customer's card, so it must not ALSO become customer prepaid credit.
+        """
+        from business_app.models.payment import CashCollectionEvent
+
+        sample_payment.payment_method = PaymentMethod.PAYME
+        sample_payment.status = PaymentStatus.COMPLETED
+        sample_payment.amount_collected = sample_payment.amount
+        sample_payment.order.payment_method = PaymentMethod.PAYME
+        sample_payment.order.status = OrderStatus.CONFIRMED
+        sample_payment.order.is_paid = True
+        transaction = PaymentTransaction(
+            payment_id=sample_payment.id,
+            transaction_type="charge",
+            amount=sample_payment.amount,
+            currency="UZS",
+            status="completed",
+            provider_transaction_id="payme-tx-b4a",
+            success=True,
+        )
+        db.session.add(transaction)
+        db.session.commit()
+
+        with patch("business_app.services.order_service.OrderService"):
+            result = payment_service._payme_cancel_transaction({"id": "payme-tx-b4a", "reason": 5})
+
+        db.session.refresh(sample_payment)
+        assert result["result"]["state"] == PaymeState.REFUNDED.value
+        assert sample_payment.status == PaymentStatus.CANCELLED
+        assert sample_payment.order.is_paid is False
+        assert CashCollectionEvent.query.filter_by(customer_id=sample_payment.user_id).count() == 0

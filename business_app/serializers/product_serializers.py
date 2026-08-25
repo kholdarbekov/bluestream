@@ -397,7 +397,13 @@ def serialize_product(product: Product, language: str = "uz", user=None, quantit
                 # 'brand': product.brand
             },
             "inventory": {
-                "stock_quantity": product.stock_quantity if product.track_inventory else None,
+                # A marking-code product's stock is the code pool, and the pool
+                # constrains only orders that will draw a code. The customer
+                # surfaces do not know the rail, so they are told the stock does
+                # not cap the purchase; create_order applies the rail-aware gate.
+                "stock_quantity": (
+                    None if (not product.track_inventory or _stock_is_derived(product)) else product.stock_quantity
+                ),
                 "track_inventory": product.track_inventory,
                 "min_stock_level": product.min_stock_level,
                 "is_low_stock": is_product_low_stock(product),
@@ -581,9 +587,19 @@ def calculate_product_price(product, user, quantity: int) -> float:
     return effective_price
 
 
+def _stock_is_derived(product) -> bool:
+    from business_app.services.product_fiscal_service import ProductFiscalService
+
+    return ProductFiscalService.is_stock_derived(product)
+
+
 def is_product_low_stock(product) -> bool:
     """Check if product is low in stock"""
     if not product.track_inventory:
+        return False
+    if _stock_is_derived(product):
+        # The pool has its own signal (marking_codes_low_stock); stock_quantity
+        # is not a warehouse figure for these products.
         return False
     return (product.stock_quantity or 0) <= (product.min_stock_level or 0)
 
@@ -591,6 +607,8 @@ def is_product_low_stock(product) -> bool:
 def is_product_in_stock(product) -> bool:
     """Check if product is in stock"""
     if not product.track_inventory:
+        return True
+    if _stock_is_derived(product):
         return True
     return (product.stock_quantity or 0) > 0
 

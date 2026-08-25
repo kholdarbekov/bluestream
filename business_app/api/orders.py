@@ -16,6 +16,7 @@ from business_app.utils.service_factory import (
     get_payment_service,
 )
 from business_app.utils.translations import get_translation
+from business_app.utils.payment_projection import is_settled_prepayment, order_is_resolved
 from business_app.serializers.order_serializers import (
     serialize_order,
     serialize_order_delivery,
@@ -506,6 +507,41 @@ def retry_order_payment(order_id):
         order = get_order_service().get_order(order_id, current_user_id)
 
         if getattr(order, "is_paid", False):
+            return error_response(
+                message=get_translation("api.payments.error.already_paid"),
+                status_code=409,
+            )
+
+        # PAYABILITY GUARD (B3 fix round 1). This endpoint is the WEB twin of the
+        # customer bot's Retry, fired by an ungated button on
+        # `templates/frontend/payment_cancelled.html` via
+        # `static/js/pages/payment-cancelled.js`, and it had no order-status test
+        # at all. On a CANCELLED / RETURNED order it did not merely send the
+        # customer to a checkout PREPARE would refuse with -9: `create_payment`
+        # rewrites `payment.status = PENDING` and `payment.amount =
+        # order.total_amount`, undoing the zeroing
+        # `_sync_payment_status_for_terminal_order_state` applied when the order
+        # died — so a dead order RE-APPEARED as owing money to
+        # `open_receivable_amount`, on every debtor list and toward the COD cap.
+        #
+        # 🔴 The order-side half only, deliberately. `order_is_payable_online` is
+        # the fuller authority and `order_is_resolved` is its documented ORDER
+        # half (derived from it, not a second copy) — but the payment half also
+        # requires the rail to be in FISCALIZED_RAILS, which excludes PAYME BY
+        # CONSTRUCTION, while this endpoint's own whitelist below admits payme.
+        # Gating on the full predicate would silently delete Payme retry, the
+        # same narrowing the bot's cash rail would have suffered. The money bug
+        # is entirely the dead-order cell, and this is exactly that cell.
+        payment = getattr(order, "payment", None)
+        if order_is_resolved(order):
+            return error_response(
+                message=get_translation("api.payments.error.lifecycle.advice_order_already_cancelled"),
+                status_code=409,
+            )
+        # A settled prepayment whose order flag has not caught up: retrying
+        # REWRITES a COMPLETED payment back to PENDING and mints a second link.
+        # `is_settled_prepayment` is the same carve-out every read surface uses.
+        if payment is not None and is_settled_prepayment(payment):
             return error_response(
                 message=get_translation("api.payments.error.already_paid"),
                 status_code=409,

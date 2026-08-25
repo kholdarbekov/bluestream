@@ -142,13 +142,19 @@
 
             <div class="info-notice">
                 <i class="far fa-info-circle"></i>
+                {% if payable %}
                 {{ 'Your order is still pending. You can retry the payment or choose a different payment method.'|t }}
+                {% else %}
+                {{ 'This order can no longer be paid online. If anything is still owed on it, our team will settle it with you.'|t }}
+                {% endif %}
             </div>
 
             <div class="action-buttons">
+                {% if payable %}
                 <button data-action="retry-payment" class="theme-btn btn-one">
                     <i class="far fa-redo"></i> {{ 'Retry Payment'|t }}
                 </button>
+                {% endif %}
                 <a href="{{ url_for('frontend.my_orders') }}" class="theme-btn btn-two">
                     <i class="far fa-list"></i> {{ 'landing.account.orders'|t }}
                 </a>

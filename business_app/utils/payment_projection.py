@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional
 
 from sqlalchemy import and_, or_
 
-from shared.enums import PaymentMethod, PaymentStatus
+from shared.enums import OrderStatus, PaymentMethod, PaymentStatus
 
 PREPAID_METHOD_VALUES = {
     PaymentMethod.CARD.value,
@@ -17,6 +17,200 @@ PREPAID_METHOD_VALUES = {
     PaymentMethod.LOYALTY_POINTS.value,
     PaymentMethod.BUSINESS_ACCOUNT.value,
 }
+
+
+# Order statuses in which the order still exists and has not left the door.
+# The complement ({DELIVERED, CANCELLED, RETURNED}) is derived from this set in
+# PaymentService rather than written out a second time — two hand-maintained
+# halves of one partition drift.
+LIVE_ORDER_STATUSES = frozenset(
+    {
+        OrderStatus.PENDING,
+        OrderStatus.CONFIRMED,
+        OrderStatus.PREPARING,
+        OrderStatus.OUT_FOR_DELIVERY,
+    }
+)
+
+
+# Order statuses in which the order is GONE — it will never be delivered and can
+# never be paid for. The other terminal status, DELIVERED, is deliberately NOT
+# here: a delivered order may still owe money and may still be paid by link
+# (policy case B), which is exactly what `order_is_resolved` turns on.
+#
+# Four services still spell this set out by hand. This is where they migrate to:
+# B1's whole thesis is that a question gets written down once.
+DEAD_ORDER_STATUSES = frozenset({OrderStatus.CANCELLED, OrderStatus.RETURNED})
+
+
+def order_is_live(order: Any) -> bool:
+    """Does this order still exist, and has it NOT yet left the door?
+
+    The ORDER-LIFECYCLE half on its own, with NO money conjunct — the sibling
+    :func:`order_is_live_and_unpaid` is defined in terms of this one, so the
+    status set is written down exactly once.
+
+    Used where the question is purely "has this order left the door yet".
+
+    🔴 NOT the predicate for the marking-code release / payment-cancel guard in
+    ``PaymentService.update_payment_status`` — that is :func:`order_is_resolved`.
+    This set stops at OUT_FOR_DELIVERY, but policy case B keeps a
+    DELIVERED-but-unpaid order's link payable AND its codes reserved, so a guard
+    written against this predicate would strip both from the exact population
+    Phase 4 exists to serve. Reach for :func:`order_is_resolved` for any
+    "may we end this payment" question; this one is a lifecycle test only.
+
+    Kept public although :func:`order_is_live_and_unpaid` is now its only
+    production caller: it is the named half that makes that derivation readable,
+    and "has it left the door" is a question that recurs. It is a lifecycle
+    predicate, never a payment one — that is the whole of its contract.
+    """
+    if order is None:
+        return False
+    status = getattr(order, "status", None)
+    if status is not None and not hasattr(status, "value"):
+        # Tolerate a raw string status from a serialized/legacy row.
+        return str(status) in {s.value for s in LIVE_ORDER_STATUSES}
+    return status in LIVE_ORDER_STATUSES
+
+
+def order_is_live_and_unpaid(order: Any) -> bool:
+    """The order still exists, has not left the door, and still owes money.
+
+    THE single order-side expression of "is this order still fulfillable".
+    Shared by the Click late-COMPLETE re-fulfil gate and (as its complement) the
+    reconcile PAY-007 guard.
+
+    Prod incident TG_000413_26: those two places each rolled their own version of
+    this question from `order.status` and reached OPPOSITE conclusions about the
+    same order. reconcile read past-PENDING as "still live, don't touch it";
+    the re-fulfil gate read past-PENDING as "dead, don't fulfil it". A genuine
+    54 000 debit on a CONFIRMED, unpaid, out-for-delivery order was therefore
+    diverted to floating customer credit while the order was delivered unpaid.
+
+    Deliberately carries NO payment-status conjunct. Each call site composes it
+    with its own payment test, because they ask genuinely different questions
+    about the payment (may we still take money / did a dead payment just get
+    paid / may we auto-cancel).
+
+    DERIVED from :func:`order_is_live` — the lifecycle half is expressed once,
+    here composed with the money conjunct.
+    """
+    if getattr(order, "is_paid", False):
+        return False
+    return order_is_live(order)
+
+
+def order_is_resolved(order: Any) -> bool:
+    """Has this order reached its END STATE — nothing further owed, nothing
+    further to deliver?
+
+    THE single expression of "this order is finished with", and the ORDER-SIDE
+    half of :func:`order_is_payable_online`, which is DERIVED from it below so
+    the question is written down exactly once.
+
+    An order resolves in exactly two ways:
+
+    * it is **paid** — settled on whatever rail, including cash at the door; or
+    * it is **dead** — CANCELLED / RETURNED, so there is nothing left to pay for.
+
+    Everything else is unresolved, INCLUDING ``DELIVERED`` while unpaid. That
+    carve-out is the whole point and is deliberately NOT
+    :func:`order_is_live`, whose set stops at OUT_FOR_DELIVERY. Policy 2026-08-24
+    case B: a customer who took delivery without paying the driver keeps the
+    Click rail, a live payable link AND its reserved marking codes, because the
+    money can still arrive and the receipt still has to be issued. A predicate
+    that stopped at the door would declare exactly that population finished and
+    strip both.
+
+    USE THIS for any "may one abandoned gateway transaction end this payment or
+    free its codes" question — see ``PaymentService.update_payment_status``. A
+    missing order counts as resolved: there is nothing left to protect.
+    """
+    if order is None:
+        return True
+    if getattr(order, "is_paid", False):
+        return True
+    return _enum_value(getattr(order, "status", None)) in {s.value for s in DEAD_ORDER_STATUSES}
+
+
+def order_is_dead(order: Any) -> bool:
+    """Is this order GONE — cancelled or returned, never to be delivered or paid?
+
+    THE single expression of :data:`DEAD_ORDER_STATUSES`, so the four services
+    that used to spell the set out by hand have one place to ask. Distinct from
+    :func:`order_is_resolved`, which also counts a *paid* order as finished:
+    a cancelled order is dead whether or not money was taken for it, and a paid
+    live order is resolved without being dead.
+
+    A missing order counts as dead: there is nothing left to fiscalize, notify
+    about, or collect for.
+    """
+    if order is None:
+        return True
+    return _enum_value(getattr(order, "status", None)) in {s.value for s in DEAD_ORDER_STATUSES}
+
+
+# The rails whose money arrives through the Click merchant gateway and whose
+# COMPLETED payments therefore carry a filed (or owed) fiscal receipt. PAYME is
+# excluded BY CONSTRUCTION, and that exclusion is the payme carve-out for the
+# owner's 2026-08-24 no-reversal rule: every Payme payment is created and looked
+# up as ``PaymentMethod.PAYME`` (payme_provider.py:236, :483, :500), so a gate
+# written against this set can never be reached by Payme's protocol-mandated
+# CancelTransaction — no hand-written "unless payme" exclusion that a later edit
+# could drop.
+#
+# 🔴 NOT the same set as ``prometheus_metrics._pending_payment_rows``, which
+# deliberately includes PAYME: that query asks "which PENDING payments are
+# stuck at a gateway", a question Payme shares. This one asks "whose receipt
+# cannot be un-filed", which Payme does not.
+FISCALIZED_RAILS = frozenset({PaymentMethod.CLICK, PaymentMethod.CARD})
+
+# Value-string projection of the same set, for the string-keyed call sites.
+# Derived, never re-typed — two hand-maintained halves of one set drift.
+ONLINE_PAYABLE_METHOD_VALUES = {method.value for method in FISCALIZED_RAILS}
+
+
+def order_is_payable_online(order: Any, payment: Any) -> bool:
+    """May the customer still pay this order's gateway link RIGHT NOW?
+
+    THE single authority on payability, consumed by the Click PREPARE guard.
+    Under the 2026-08-24 policy the payable window runs from order creation
+    until the order is SETTLED or dead — deliberately THROUGH delivery, because
+    a customer who took delivery without paying cash keeps the Click rail and
+    may pay the link afterwards (case B). That is why this is NOT
+    :func:`order_is_live_and_unpaid`, which excludes DELIVERED.
+
+    Refused when:
+    * the order is gone (CANCELLED / RETURNED) — nothing left to pay for;
+    * the order is already paid — including one settled as cash at the door,
+      which is what stops most double-payments at the card rather than having
+      to reverse them afterwards;
+    * the payment is not awaiting money (already COMPLETED, or cancelled by the
+      gateway itself);
+    * the rail is not one we can actually fiscalize.
+
+    A PREPARE that passes this and a COMPLETE that lands after the order was
+    settled at the door is still possible — the customer's bank step sits
+    between the two — so ``handle_complete`` keeps its own late-debit handling.
+    """
+    if order is None or payment is None:
+        return False
+
+    # DERIVED — the order-side half is order_is_resolved, never a second copy of
+    # "paid or dead". reconcile's guard and this payability test must agree by
+    # construction: the guard exists precisely so we never write a status that
+    # would make THIS function refuse a link it would otherwise accept.
+    if order_is_resolved(order):
+        return False
+
+    if _enum_value(getattr(payment, "payment_method", None)) not in ONLINE_PAYABLE_METHOD_VALUES:
+        return False
+
+    return _enum_value(getattr(payment, "status", None)) in {
+        PaymentStatus.PENDING.value,
+        PaymentStatus.PROCESSING.value,
+    }
 
 
 def _enum_value(value: Any) -> Optional[str]:
@@ -161,6 +355,49 @@ def net_open_receivable_amount(payment: Any) -> Decimal:
     delivery, which is what closes the remaining gap.
     """
     return max(Decimal("0.00"), open_receivable_amount(payment) - reserved_prepayment_amount(payment))
+
+
+def unpaid_after_delivery_clause():
+    """ "Owes money after taking delivery" — DISPLAY AND DEBT-CAP ONLY.
+
+    🔴 NEVER pass this to an allocator. :func:`open_receivable_clause` is
+    deliberately narrower and that asymmetry is a money-safety guard; read its
+    docstring before touching either.
+
+    Policy 2026-08-24, case B: a customer who takes delivery without paying the
+    driver keeps the Click rail and a live payable link, so the money can still
+    arrive and the receipt can still be issued. Until it does, the business is
+    owed money — but ``open_receivable_clause`` excludes a PENDING electronic
+    payment on purpose, so that debt was invisible to the debtor lists, the COD
+    statements and the debt cap. That invisibility IS prod incident
+    TG_000413_26's end state.
+
+    The fix is a SECOND, wider clause used only where we DISPLAY or COUNT debt,
+    never where we ALLOCATE cash against it. Widening the allocator instead
+    would let an unrelated customer's banknotes be absorbed by an unpaid Click
+    order and then destroyed when that Click payment completes.
+
+    Callers add their own ``Order.status == DELIVERED`` conjunct, exactly as
+    they do for ``open_receivable_clause``.
+    """
+    from business_app.models.order import Order
+    from business_app.models.payment import Payment
+
+    return or_(
+        open_receivable_clause(),
+        and_(
+            Payment.payment_method.in_(list(ONLINE_PAYABLE_METHOD_VALUES)),
+            Payment.status.in_(
+                [
+                    PaymentStatus.PENDING.value,
+                    PaymentStatus.CANCELLED.value,
+                    PaymentStatus.FAILED.value,
+                ]
+            ),
+            Payment.outstanding_amount > Decimal("0.00"),
+            Order.is_paid.is_(False),
+        ),
+    )
 
 
 def open_receivable_clause():

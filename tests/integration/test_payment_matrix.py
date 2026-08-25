@@ -41,6 +41,7 @@ from shared.enums import (
     PaymentStatus,
 )
 from business_app.utils.exceptions import ProviderUnavailableError
+from business_app.utils.payment_projection import order_is_payable_online
 from tests.integration.fake_gateways import (
     FakeClickMerchant,
     FakePayme,
@@ -223,7 +224,7 @@ class TestWebhookStateMachine:
         refreshed = Order.query.get(order.id)
         assert refreshed.status == OrderStatus.CONFIRMED
 
-    def test_click_complete_with_provider_error_cancels_payment(
+    def test_click_complete_with_provider_error_keeps_live_payment_payable(
         self, matrix_app, matrix_client, db, sample_order, no_fiscalization,
     ):
         _seed_click_payment(db, sample_order)
@@ -259,9 +260,14 @@ class TestWebhookStateMachine:
         )
         assert resp.status_code == 200
 
+        # B1 fix round 2: this cell asserted cancel-on-live-order, which is
+        # the defect. A declined attempt on an unresolved order leaves the
+        # payment payable so the customer can retry the same link; the -9
+        # protocol answer to Click is unchanged. The release/cancel boundary is
+        # covered by the resolved-order cells in the unit guard file.
         payment = Payment.query.filter_by(order_id=sample_order.id).one()
-        assert payment.status == PaymentStatus.CANCELLED
-        assert payment.failure_reason == 'User cancelled'
+        assert payment.status == PaymentStatus.PENDING
+        assert payment.failure_reason is None
 
     def test_click_amount_mismatch_returns_error_minus_2(
         self, matrix_app, matrix_client, db, sample_order, no_fiscalization,
@@ -371,9 +377,14 @@ class TestWebhookStateMachine:
         assert resp.status_code == 200
         assert resp.get_json()['error'] == -8
 
+        # B1 fix round 2: `sample_order` is PENDING, i.e. UNRESOLVED, so this
+        # callback may no longer end the payment. The cell's real subject —
+        # "does not mark paid" — is untouched: the -8 answer and the order
+        # staying out of CONFIRMED still assert it. See
+        # tests/unit/test_update_payment_status_live_order_guard.py for the rule.
         payment = Payment.query.filter_by(order_id=sample_order.id).one()
-        assert payment.status == PaymentStatus.CANCELLED
-        assert payment.failure_reason == 'Click callback missing error code'
+        assert payment.status == PaymentStatus.PENDING
+        assert payment.failure_reason is None
         order = Order.query.get(sample_order.id)
         assert order.status != OrderStatus.CONFIRMED
 
@@ -400,8 +411,13 @@ class TestWebhookStateMachine:
         assert resp.status_code == 200
         assert resp.get_json()['error'] == -8
 
+        # B1 fix round 2: `sample_order` is PENDING, i.e. UNRESOLVED, so this
+        # callback may no longer end the payment. The cell's real subject —
+        # "does not mark paid" — is untouched: the -8 answer and the order
+        # staying out of CONFIRMED still assert it. See
+        # tests/unit/test_update_payment_status_live_order_guard.py for the rule.
         payment = Payment.query.filter_by(order_id=sample_order.id).one()
-        assert payment.status == PaymentStatus.CANCELLED
+        assert payment.status == PaymentStatus.PENDING
         order = Order.query.get(sample_order.id)
         assert order.status != OrderStatus.CONFIRMED
 
@@ -427,9 +443,14 @@ class TestWebhookStateMachine:
         assert resp.status_code == 200
         assert resp.get_json()['error'] == -8
 
+        # B1 fix round 2: `sample_order` is PENDING, i.e. UNRESOLVED, so this
+        # callback may no longer end the payment. The cell's real subject —
+        # "does not mark paid" — is untouched: the -8 answer and the order
+        # staying out of CONFIRMED still assert it. See
+        # tests/unit/test_update_payment_status_live_order_guard.py for the rule.
         payment = Payment.query.filter_by(order_id=sample_order.id).one()
-        assert payment.status == PaymentStatus.CANCELLED
-        assert payment.failure_reason == 'Click callback claimed success without trans_id/paydoc_id'
+        assert payment.status == PaymentStatus.PENDING
+        assert payment.failure_reason is None
         order = Order.query.get(sample_order.id)
         assert order.status != OrderStatus.CONFIRMED
 
@@ -737,49 +758,52 @@ class TestRefundReversalsMidFlow:
         db.session.commit()
         return payment
 
-    def test_full_refund_flips_to_cancelled(
+    # INVERTED BY B4a (owner ruling 2026-08-24). These two cells used to assert
+    # that a full refund flips a Click payment to CANCELLED and a partial one to
+    # PARTIALLY_REFUNDED — i.e. they PINNED the behaviour the owner's rule
+    # outlaws: "we never ever cancel card / click paid payments", because the
+    # fiscal receipt filed for the payment cannot be un-submitted. They now
+    # assert the refusal, and that the gateway is never dialled.
+    #
+    # `PaymentStatus.PARTIALLY_REFUNDED` becomes unreachable in production with
+    # them: `payment_service.py` was its only writer and Payme — the one
+    # surviving caller of `process_refund` — always passes the full amount.
+
+    def test_full_refund_of_a_click_payment_is_refused(
         self, matrix_app, db, sample_order, fake_click_merchant, no_fiscalization,
     ):
         from business_app.services.payment_service import PaymentService
+        from business_app.utils.exceptions import ValidationError
         payment = self._completed_click_payment(db, sample_order)
 
-        fake_click_merchant.script(
-            method='DELETE',
-            url_contains='',  # match any URL — refund hits a configured endpoint
-            json_body={'error_code': 0, 'error_note': 'OK'},
-            label='click-refund-ok',
-        )
-
         with matrix_app.app_context():
-            ok = PaymentService().process_refund(
-                payment.id, payment.amount, reason='customer-requested',
-            )
-        assert ok is True
+            with pytest.raises(ValidationError):
+                PaymentService().process_refund(
+                    payment.id, payment.amount, reason='customer-requested',
+                )
 
         _db.session.expire_all()
         payment_refreshed = Payment.query.get(payment.id)
-        assert payment_refreshed.status == PaymentStatus.CANCELLED
+        assert payment_refreshed.status == PaymentStatus.COMPLETED
+        assert fake_click_merchant.calls == [], (
+            'the Click merchant API must never be dialled for a refund'
+        )
 
-    def test_partial_refund_flips_to_partially_refunded(
+    def test_partial_refund_of_a_click_payment_is_refused_too(
         self, matrix_app, db, sample_order, fake_click_merchant, no_fiscalization,
     ):
         from business_app.services.payment_service import PaymentService
+        from business_app.utils.exceptions import ValidationError
         payment = self._completed_click_payment(db, sample_order)
-        fake_click_merchant.script(
-            method='DELETE',
-            url_contains='',
-            json_body={'error_code': 0, 'error_note': 'OK'},
-            label='click-partial-refund',
-        )
 
-        partial = Decimal('5000.00')
         with matrix_app.app_context():
-            ok = PaymentService().process_refund(payment.id, partial, reason='partial')
-        assert ok is True
+            with pytest.raises(ValidationError):
+                PaymentService().process_refund(payment.id, Decimal('5000.00'), reason='partial')
 
         _db.session.expire_all()
         payment_refreshed = Payment.query.get(payment.id)
-        assert payment_refreshed.status == PaymentStatus.PARTIALLY_REFUNDED
+        assert payment_refreshed.status == PaymentStatus.COMPLETED
+        assert fake_click_merchant.calls == []
 
     def test_payme_cancel_after_complete_refunds_via_order_service(
         self, matrix_app, matrix_client, db, order_with_address, no_fiscalization, payme_basic_auth_header,
@@ -857,33 +881,40 @@ class TestProviderTimeoutCircuit:
     def test_click_outbound_timeout_raises_provider_unavailable(
         self, matrix_app, db, sample_order, fake_click_merchant, no_fiscalization,
     ):
-        """Click outbound timeout surfaces as ProviderUnavailableError to the caller."""
+        """Click outbound timeout surfaces as ProviderUnavailableError to the caller.
+
+        RETARGETED BY B4a. This cell used to drive the timeout through
+        ``process_refund``, which no longer makes an outbound call at all (the
+        owner's rule: a card/Click payment is never reversed) — and it was the
+        ONLY PAY-003 coverage of the click merchant client's timeout behaviour,
+        so deleting it with the refund branch would have dropped that silently.
+        It now drives the same seam through ``check_payment_status``, the
+        outbound GET the reconcile sweep really makes.
+        """
         from business_app.services.payment_service import PaymentService
 
         payment = _seed_click_payment(db, sample_order)
-        payment.status = PaymentStatus.COMPLETED
-        payment.paid_at = datetime.now(timezone.utc)
+        payment.status = PaymentStatus.PENDING
+        payment.provider_data = {'click': {'click_paydoc_id': '20240101000007'}}
         db.session.commit()
 
         fake_click_merchant.script(
-            method='DELETE',
+            method='GET',
             url_contains='',
             raise_exc=ProviderUnavailableError(
                 'Click upstream timed out', provider='click', retry_after_seconds=30,
             ),
-            label='click-refund-timeout',
+            label='click-status-timeout',
         )
 
         with matrix_app.app_context():
             with pytest.raises(ProviderUnavailableError):
-                PaymentService().process_refund(
-                    payment.id, payment.amount, reason='timeout-test',
-                )
+                PaymentService()._get_click_provider_service().check_payment_status(payment)
 
-        # Payment status preserved — refund did not partially apply.
+        # Payment status preserved — nothing partially applied.
         _db.session.expire_all()
         payment_refreshed = Payment.query.get(payment.id)
-        assert payment_refreshed.status == PaymentStatus.COMPLETED
+        assert payment_refreshed.status == PaymentStatus.PENDING
 
 
 # --------------------------------------------------------------------------- #
@@ -1055,18 +1086,28 @@ class TestReconcilePreventionGate:
             "Payment must remain PENDING — order is in-fulfillment"
         )
 
-    def test_reconcile_cancels_pending_order_on_affirmative_gateway_cancel(
+    def test_reconcile_does_not_cancel_a_live_order_on_affirmative_gateway_cancel(
         self, matrix_app, db, sample_order, fake_click_merchant, no_fiscalization,
     ):
-        """PAY-007 gate + positive-evidence contract (Task 7): a genuinely-PENDING
-        order's payment is still cancelled when the gateway AFFIRMS cancellation
-        (``payment_status=-2`` -> CANCELLED). The gate only suppresses *timeout*
-        auto-cancel for orders past PENDING; it never blocks a PENDING order, and
-        affirmative gateway evidence cancels regardless of age.
+        """B1 (2026-08-25) — THIS CELL'S EXPECTATION WAS INVERTED.
 
-        (Under the old contract this cell drove the timeout branch with an
-        unknown status; that path no longer cancels — see the sibling
-        ``..._leaves_pending_and_alerts`` cell for the unknown case.)
+        It used to assert that affirmative gateway evidence
+        (``payment_status=-2`` -> CANCELLED) cancels our payment row regardless of
+        the order's state, and it was named
+        ``test_reconcile_cancels_pending_order_on_affirmative_gateway_cancel``.
+        That is now the OPPOSITE of the governing rule, so it was rewritten rather
+        than left to contradict
+        ``tests/unit/test_update_payment_status_live_order_guard.py``.
+
+        Why the old expectation was wrong: a gateway cancel describes ONE
+        abandoned Click attempt, not the payability of the order. Writing
+        CANCELLED makes the Phase 4A PREPARE guard (``order_is_payable_online``,
+        which requires PENDING/PROCESSING) refuse every future attempt — so the
+        customer could never pay again on an order they still owe for, under a
+        policy (Phase 4D) that promises the link stays payable through delivery.
+
+        NOTE this cell never actually ran in the default lane: it self-skips on
+        SQLite, which is a large part of why the defect survived.
 
         Skipped on SQLite — same timezone-awareness limitation.
         """
@@ -1081,8 +1122,9 @@ class TestReconcilePreventionGate:
 
         # payment_status = -2 maps to CANCELLED via ``_map_payment_status``
         # (corrected 2026-07-09: negative codes are Click's error/cancel
-        # range) — this is affirmative gateway evidence (not a mere timeout),
-        # which the positive-evidence contract requires before cancelling.
+        # range). This is the STRONGEST evidence the gateway can give us — and
+        # under B1 even that must not end the payment while the order is live,
+        # because it describes one abandoned attempt, not the order's fate.
         fake_click_merchant.script(
             method='GET',
             url_contains='',
@@ -1098,10 +1140,13 @@ class TestReconcilePreventionGate:
         with matrix_app.app_context():
             result = reconcile_pending_payments()
 
-        assert result['cancelled'] >= 1, (
-            f"PENDING order with affirmative gateway cancel should be cancelled; got counts={result}"
+        assert result['cancelled'] == 0, (
+            f"a live order's payment must survive an abandoned Click attempt; got counts={result}"
         )
 
         _db.session.expire_all()
         payment_refreshed = Payment.query.get(payment.id)
-        assert payment_refreshed.status == PaymentStatus.CANCELLED
+        assert payment_refreshed.status == PaymentStatus.PENDING
+        assert order_is_payable_online(payment_refreshed.order, payment_refreshed) is True, (
+            "the customer must still be able to PREPARE a fresh attempt on the same link"
+        )

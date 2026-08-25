@@ -703,11 +703,6 @@ def mock_payment_service():
         'transaction_id': 'test_tx_456',
         'status': 'completed'
     }
-    mock.refund_payment.return_value = {
-        'success': True,
-        'refund_id': 'test_refund_123',
-        'status': 'refunded'
-    }
     return mock
 
 

@@ -25,12 +25,20 @@ from shared.enums import (
     PaymentMethod,
     FiscalizationStatus,
 )
-from shared.payment_methods import CUSTOMER_SELECTABLE_METHODS, ORDER_PAYMENT_METHODS, PAYMENT_METHOD_CATALOG
+from shared.payment_methods import (
+    CUSTOMER_SELECTABLE_METHODS,
+    ORDER_PAYMENT_METHODS,
+    PAYMENT_METHOD_CATALOG,
+    canonical_rail,
+)
 from business_app.utils.helpers import generate_random_string
 from business_app.utils.timezone_utils import ensure_utc
 from business_app.utils.payment_projection import (
+    FISCALIZED_RAILS,
+    LIVE_ORDER_STATUSES,
     get_payment_projection,
     is_settled_prepayment,
+    order_is_resolved,
 )
 from business_app.utils.translations import get_translation
 from business_app.utils.state_validators import assert_cash_payment_collector
@@ -41,9 +49,11 @@ from business_app import db
 
 
 # Statuses past which a self-service rail switch has no settlement path left.
-_RAIL_LOCKED_ORDER_STATUSES = frozenset(
-    {OrderStatus.DELIVERED, OrderStatus.CANCELLED, OrderStatus.RETURNED}
-)
+# DERIVED, not hand-listed: this and LIVE_ORDER_STATUSES are the two halves of
+# one partition over OrderStatus, and two hand-maintained halves drift the
+# moment a status is added. Adding a status to the enum now forces a deliberate
+# choice in exactly one place.
+_RAIL_LOCKED_ORDER_STATUSES = frozenset(OrderStatus) - LIVE_ORDER_STATUSES
 
 
 class PaymentContext(str, Enum):
@@ -262,7 +272,31 @@ class PaymentService:
         # row without moving the order strands the order in a shape no settlement
         # path handles, so move both or neither — and never move a rail that
         # already absorbed money (a later completion would zero amount_collected).
-        rail_moves = payment is not None and payment.payment_method != payment_method
+        # THE RAIL IS TWO COLUMNS, so the guard compares BOTH — and compares
+        # CANONICAL rails, not raw enum members.
+        #
+        # Keyed on `payments.payment_method` alone it was wrong twice, and B3
+        # routes a customer tap at each:
+        #   * FALSE POSITIVE — `PaymentMethod.CARD` is a legacy ALIAS of CLICK
+        #     (`shared/payment_methods.py`: "card always normalizes to CLICK; it
+        #     is never written again"). A delivered unpaid CARD row is `is_payable`,
+        #     so the bot draws Pay, normalizes to click, and the raw comparison
+        #     called that a rail move — a rendered button that could only 400.
+        #   * FALSE NEGATIVE — with `order.payment_method == CASH` and
+        #     `payment.payment_method == CLICK` (the desync commit 6c2951d
+        #     addressed) a requested CLICK read as "no move", the lock was
+        #     skipped, and the `order.payment_method` write below then moved a
+        #     DELIVERED COD debt onto a gateway rail: exactly what this lock's
+        #     comment forbids.
+        #
+        # Normalisation is `shared.payment_methods`' own, never re-spelled here.
+        # A NULL `orders.payment_method` (legacy subscription rows) records no
+        # rail to move away from, so it does not vote.
+        requested_rail = canonical_rail(payment_method)
+        rail_moves = payment is not None and (
+            canonical_rail(payment.payment_method) != requested_rail
+            or (order.payment_method is not None and canonical_rail(order.payment_method) != requested_rail)
+        )
         if rail_moves and Decimal(str(payment.amount_collected or 0)) > Decimal("0.00"):
             raise ValidationError("Payment method cannot be changed after cash has been collected")
         if rail_moves and order.status in _RAIL_LOCKED_ORDER_STATUSES:
@@ -643,7 +677,22 @@ class PaymentService:
             raise
 
     def process_refund(self, payment_id: int, amount: int, reason: str = None) -> bool:
-        """Process payment refund"""
+        """Bookkeep a refund. NEVER for a card/Click payment.
+
+        ITS ONE SURVIVING PRODUCTION CALLER IS PAYME `CancelTransaction`
+        (``payme_provider.py:643``), which is a merchant-agreement obligation the
+        gateway INITIATES: Payme tells us the transaction is cancelled and our
+        protocol response must report ``state: REFUNDED``. Refusing it would
+        breach that agreement, which is why the guard below is rail-gated rather
+        than blanket.
+
+        ``LOYALTY_POINTS`` and ``CASH`` remain reachable only because they share
+        Payme's bookkeeping branch. Both are effectively dead in practice —
+        points are no longer a payment method and
+        ``LoyaltyService.cancel_redemption_for_order`` already returns points on
+        cancel — so ``_process_points_refund`` is the next branch to remove; it
+        is deliberately left alone here.
+        """
         payment: Payment = Payment.query.get(payment_id)
         if not payment:
             raise NotFoundError(get_translation("error.not_found"))
@@ -654,31 +703,30 @@ class PaymentService:
         if amount > payment.amount:
             raise ValidationError(get_translation("error.validation.amount_exceeds_total"))
 
+        # THE OWNER'S RULE, ENFORCED AT THE METHOD (ruling 2026-08-24):
+        # a card/Click payment is never reversed, because the fiscal receipt
+        # cannot be un-submitted and a cancelled payment row holding real money
+        # is the payment-vs-fiscalization chaos the rule exists to prevent. The
+        # lawful action is to cancel the ORDER; the money then settles as
+        # customer prepaid credit
+        # (``CashCollectionService.credit_customer_for_dead_order_prepayment``).
+        #
+        # A RAIL GATE, NOT A CALLER-SIDE CARVE-OUT. A caller-side check leaves
+        # the reversal one ``if`` away from firing; this cannot be reached by
+        # Payme even in principle, because ``FISCALIZED_RAILS`` excludes PAYME by
+        # construction. It turns the rule from currently-unbroken into
+        # unbreakable — and the gateway branch it used to guard, along with
+        # ``ClickPaymentProviderService.refund_payment``, is deleted outright so
+        # there is nothing left for the next caller to find.
+        if payment.payment_method in FISCALIZED_RAILS:
+            raise ValidationError(get_translation("error.payment.cannot_refund"))
+
         # Process refund based on payment method
         if payment.payment_method == PaymentMethod.LOYALTY_POINTS:
             success = self._process_points_refund(payment, amount, reason)
-        elif payment.payment_method in {PaymentMethod.CLICK, PaymentMethod.CARD}:
-            response = self._get_click_provider_service().refund_payment(payment, amount, reason)
-            success = bool(response.get("success", True))
-            if success:
-                provider_data = dict(payment.provider_data or {})
-                provider_data["refunded_amount"] = float(amount)
-                provider_data["refunded_at"] = datetime.now(timezone.utc).isoformat()
-                provider_data["click_refund_response"] = response
-                payment.provider_data = provider_data
-                fiscalization = getattr(payment, "fiscalization", None)
-                fiscalization_status = (
-                    fiscalization.status.value
-                    if fiscalization and hasattr(fiscalization.status, "value")
-                    else fiscalization
-                )
-                if fiscalization_status != FiscalizationStatus.COMPLETED.value:
-                    self._get_payment_fiscalization_service().release_reserved_marking_codes(
-                        payment,
-                        reason="payment_refunded_before_fiscalization",
-                    )
         else:
-            # Cash refund - manual process
+            # Payme (gateway-initiated cancel) and cash (manual, at the door):
+            # bookkeeping only, no outbound call of ours.
             success = True
 
         if success:
@@ -691,28 +739,6 @@ class PaymentService:
             db.session.commit()
 
         return success
-
-    def request_refund(self, payment: Payment, reason: Optional[str] = None) -> PaymentTransaction:
-        """Create and process a refund request for a completed payment."""
-        refund_reason = reason or "Refund requested"
-        refund_success = self.process_refund(payment.id, payment.amount, refund_reason)
-        transaction = PaymentTransaction(
-            payment_id=payment.id,
-            transaction_type="refund",
-            amount=payment.amount,
-            currency=payment.currency,
-            status="completed" if refund_success else "failed",
-            provider_transaction_id=payment.provider_transaction_id,
-            provider_reference=payment.payment_id,
-            provider_response=dict(payment.provider_data or {}),
-            success=refund_success,
-            failure_reason=None if refund_success else refund_reason,
-            processed_at=datetime.now(timezone.utc),
-            notes=refund_reason,
-        )
-        db.session.add(transaction)
-        db.session.commit()
-        return transaction
 
     def queue_click_fiscalization(self, payment_id: int):
         payment = Payment.query.get(payment_id)
@@ -788,6 +814,60 @@ class PaymentService:
                 PaymentStatus.FAILED.value,
                 "error",
             }:
+                # B1 — a provider-reported cancel describes ONE abandoned
+                # gateway attempt, NOT the end of the payment. Until the ORDER
+                # itself has RESOLVED we must neither write a terminal status nor
+                # release the codes:
+                #
+                #  * the status write locks the customer out permanently. The
+                #    Phase 4A PREPARE guard (order_is_payable_online) requires
+                #    PENDING/PROCESSING, so once CANCELLED lands here the
+                #    customer can NEVER pay that link again — on an order they
+                #    still owe for, under a policy (Phase 4D) that explicitly
+                #    promises the link stays payable through delivery. The
+                #    owner's 2026-08-24 ruling says the same: a payment ends
+                #    where the ORDER resolves — cash at the door, payment of the
+                #    link, or order cancellation. Nothing else.
+                #  * the release hands this order's reserved codes back to the
+                #    pool while the order still needs them — either to reach the
+                #    door, or (case B) to have its receipt issued when the money
+                #    finally lands after an unpaid delivery. In prod
+                #    (TG_000413_26 / TG_000414_26) another order re-reserved and
+                #    used those exact codes 34 minutes later, so this order was
+                #    delivered un-fiscalizable and its labels printed on someone
+                #    else's tax receipt.
+                #
+                # Reachable from a CUSTOMER-FACING GET (api/payments.py:454), so
+                # before this guard a customer refreshing their own payment page
+                # could strip their own unresolved order's marking codes.
+                #
+                # The predicate is order_is_resolved — "has this ORDER reached
+                # its end state", NOT "is this order pre-delivery". A guard
+                # written as order_is_live would stop at OUT_FOR_DELIVERY and so
+                # still cancel a DELIVERED-but-unpaid order: policy case B, the
+                # exact population Phase 4 exists to serve, whose contract is
+                # "link stays payable, codes retained". That would be the same
+                # permanent lockout one status further on.
+                if not order_is_resolved(payment.order):
+                    current_app.logger.info(
+                        "Gateway reported %s on an unresolved order; leaving payment PENDING and codes reserved",
+                        provider_status,
+                        extra={
+                            "payment_id": payment.id,
+                            "order_id": payment.order_id,
+                            "gateway_status": provider_status,
+                        },
+                    )
+                    # Deliberately NOT db.session.rollback(). Nothing in this
+                    # branch mutates the payment, but the provider call above may
+                    # have persisted a freshly-DISCOVERED Click payment id via
+                    # check_payment_status_by_mti -> _persist_click_payment_id.
+                    # Rolling back would throw that discovery away and force the
+                    # next poll to re-derive it. That gain is real only on the
+                    # reconcile path, whose trailing commit persists it; on the
+                    # customer-facing GET nothing commits and teardown discards
+                    # it either way, so there the choice is simply harmless.
+                    return payment
                 payment.status = (
                     PaymentStatus.CANCELLED
                     if provider_status in {"cancelled", "canceled", PaymentStatus.CANCELLED.value}
@@ -901,7 +981,34 @@ class PaymentService:
         }
 
     def verify_payment(self, payment_id: int, verification_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Compatibility wrapper used by background verification tasks."""
+        """Compatibility wrapper used by background verification tasks.
+
+        READ BEFORE ADDING A SECOND CALLER (B2, 2026-08-24).
+
+        ``success`` here means ONLY "the payment is COMPLETED right now". It does
+        NOT mean the gateway rejected anything. A perfectly healthy PENDING Click
+        payment on a live order returns::
+
+            {"success": False, "error": "Verification failed", "status": "pending"}
+
+        Acting on that boolean as if it were a failure is the root defect behind
+        B1 round 3: ``process_payment_verification`` wrote ``FAILED``, ``FAILED``
+        fails ``order_is_payable_online``, and the customer's next Click PREPARE
+        answered ``-9`` — a permanent lockout, triggered by their own
+        ``POST /api/v1/payments/<id>/verify``.
+
+        The discriminator you want is already in this payload: ``status`` carries
+        the real state ("pending" / "failed" / "cancelled" / "completed" / ...).
+        Branch on that, and gate any terminal write on ``order_is_resolved``
+        (business_app/utils/payment_projection.py) exactly as the existing caller
+        does — a payment's life ends where its ORDER resolves, nowhere else.
+
+        The two-valued ``success`` and the always-"Verification failed" ``error``
+        are kept deliberately: the only caller writes ``error`` into
+        ``payment.failure_reason`` and into the ``PaymentTransaction`` audit row,
+        so changing either would change persisted data. Pinned by
+        tests/unit/test_verify_payment_return_contract.py.
+        """
         verification_data = verification_data or {}
         payment = Payment.query.get(payment_id)
         if not payment:

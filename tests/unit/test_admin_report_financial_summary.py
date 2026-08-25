@@ -246,3 +246,185 @@ def test_refunded_electronic_payment_is_not_counted_as_revenue(
         )
         report = _report()
         assert report["summary"]["total_electronic_collected"] == 0.0
+
+
+@pytest.mark.unit
+class TestCustomerCreditRebookIsNotCountedTwice:
+    """B4a §8: money the business already holds, re-booked as customer credit.
+
+    `total_revenue` is `electronic_total + cash_collected_total`. Those two are
+    computed from different sources — `Payment.amount_collected` on one side,
+    live `CashCollectionAllocation` rows on the other — and `cash_on_payment`
+    only nets allocations landing on the SAME payment. So when a credit event
+    born of already-counted money is later allocated to a DIFFERENT payment, the
+    same som is counted twice.
+
+    Two flows create such an event, and both are pinned here:
+
+    * `order_cancel_prepaid_credit` — B4a. A cancelled card/Click order's payment
+      stays COMPLETED (the owner's rule: the gateway is never reversed), so its
+      `amount_collected` keeps counting as electronic revenue; the credit it
+      mints must therefore not count again as cash.
+    * `order_edit_refund` — `OrderEditService._cascade_cash`. The SAME bug,
+      already in production and undetected: an edit-down leaves
+      `payment.amount` at the original collected figure on purpose, so the
+      original charge is still counted in full.
+    """
+
+    def _cod_debt(self, db, user, driver, amount):
+        """A delivered COD order carrying an open receivable for the credit to land on."""
+        from business_app.models.order import Order
+        from business_app.models.payment import Payment
+        from shared.enums import PaymentStatus
+
+        order = Order(
+            user_id=user.id,
+            order_number=f"ORD-CREDIT-SINK-{amount}",
+            status=OrderStatus.DELIVERED,
+            subtotal=Decimal(str(amount)),
+            delivery_fee=Decimal("0.00"),
+            total_amount=Decimal(str(amount)),
+            payment_method=PaymentMethod.CASH,
+        )
+        db.session.add(order)
+        db.session.flush()
+        db.session.add(
+            Delivery(
+                order_id=order.id,
+                delivery_person_id=driver.id,
+                status=DeliveryStatus.DELIVERED,
+                scheduled_date=datetime.now(UTC),
+                scheduled_time_slot="09:00-12:00",
+                actual_delivery_time=datetime.now(UTC),
+                delivered_at=datetime.now(UTC),
+            )
+        )
+        db.session.add(
+            Payment(
+                order_id=order.id,
+                user_id=user.id,
+                payment_method=PaymentMethod.CASH,
+                amount=Decimal(str(amount)),
+                amount_collected=Decimal("0.00"),
+                outstanding_amount=Decimal(str(amount)),
+                currency="UZS",
+                status=PaymentStatus.PENDING,
+                payment_id=f"pay-credit-sink-{amount}",
+            )
+        )
+        db.session.commit()
+        return order
+
+    @pytest.mark.parametrize(
+        "flow,idempotency_key",
+        [
+            ("order_cancel_prepaid_credit", "order-cancel-credit:9999"),
+            ("order_edit_refund", "order_edit_refund:9999:40000.00"),
+        ],
+    )
+    def test_spending_the_credit_does_not_double_count_it(
+        self, app, db, sample_order, sample_user, delivery_driver, flow, idempotency_key
+    ):
+        from shared.enums import CashCollectionSource, PaymentStatus
+
+        with app.app_context():
+            # 40,000 really taken by the gateway, still counted as electronic.
+            _delivered_order_with_payment(
+                sample_order,
+                sample_user,
+                delivery_driver,
+                method=PaymentMethod.CLICK,
+                status=PaymentStatus.COMPLETED,
+                total=40000,
+                collected=40000,
+            )
+            # Deliberately LARGER than the credit: a fully-settled COD payment
+            # would flip to COMPLETED and trip
+            # `ck_payments_cash_completed_requires_collector`, and this test is
+            # about the report, not the collector rule.
+            self._cod_debt(db, sample_user, delivery_driver, 60000)
+
+            # That same 40,000, re-booked as customer credit and spent on the
+            # COD debt. `post_collection` auto-allocates it oldest-first.
+            CashCollectionService().post_collection(
+                customer_id=sample_user.id,
+                amount=Decimal("40000.00"),
+                source=CashCollectionSource.BACKFILL,
+                notes="re-booked, not new money",
+                proof_data={"flow": flow},
+                idempotency_key=idempotency_key,
+            )
+
+            summary = _report()["summary"]
+
+        assert summary["total_electronic_collected"] == 40000.0, "the gateway money is ours; keep counting it"
+        assert summary["total_cash_collected"] == 0.0, (
+            "the credit spend is re-booked money, not cash taken in"
+        )
+        assert summary["total_revenue"] == 40000.0, "40,000 arrived once and must be reported once"
+
+    def test_ordinary_door_cash_is_still_counted(self, app, db, sample_user, delivery_driver):
+        """The exclusion must be surgical. A plain door collection carries no
+        flow marker and no re-booking idempotency key, and NULL columns must not
+        make the exclusion swallow it."""
+        from shared.enums import CashCollectionSource
+
+        with app.app_context():
+            order = self._cod_debt(db, sample_user, delivery_driver, 12000)
+            CashCollectionService().post_collection(
+                customer_id=sample_user.id,
+                amount=Decimal("12000.00"),
+                source=CashCollectionSource.DELIVERY_COMPLETION,
+                collector_user_id=delivery_driver.id,
+                recorded_by_user_id=delivery_driver.id,
+                order_id=order.id,
+                delivery_id=order.delivery.id,
+                notes="real cash, at the door",
+            )
+            summary = _report()["summary"]
+
+        assert summary["total_cash_collected"] == 12000.0
+        assert summary["total_revenue"] == 12000.0
+
+
+@pytest.mark.unit
+def test_revenue_trend_agrees_with_the_summary_it_sits_under(app, db, sample_user, delivery_driver):
+    """I2 — `revenue_trend.daily_collected` is the same total sliced by day.
+
+    It did NOT get the re-booked-credit exclusion that `cash_allocations_query`
+    got, one row lower in the same file: the summary netted the credit out and
+    the chart beside it still double-counted, including the pre-existing
+    `order_edit_refund` leak. Asserting the two agree pins them together rather
+    than restating the exclusion a third time.
+    """
+    from shared.enums import CashCollectionSource, PaymentStatus
+
+    with app.app_context():
+        helper = TestCustomerCreditRebookIsNotCountedTwice()
+        order = helper._cod_debt(db, sample_user, delivery_driver, 60000)
+        CashCollectionService().post_collection(
+            customer_id=sample_user.id,
+            amount=Decimal("12000.00"),
+            source=CashCollectionSource.DELIVERY_COMPLETION,
+            collector_user_id=delivery_driver.id,
+            recorded_by_user_id=delivery_driver.id,
+            order_id=order.id,
+            delivery_id=order.delivery.id,
+            notes="real cash, at the door",
+        )
+        CashCollectionService().post_collection(
+            customer_id=sample_user.id,
+            amount=Decimal("40000.00"),
+            source=CashCollectionSource.BACKFILL,
+            notes="re-booked, not new money",
+            proof_data={"flow": "order_cancel_prepaid_credit"},
+            idempotency_key="order-cancel-credit:4242",
+        )
+
+        report = _report()
+
+    trend_total = sum(Decimal(str(point["revenue"])) for point in report["revenue_trend"])
+    assert float(trend_total) == report["summary"]["total_cash_collected"], (
+        "the chart and the summary above it must report the same money"
+    )
+    assert float(trend_total) == 12000.0

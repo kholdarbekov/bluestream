@@ -239,6 +239,64 @@ class TestProductHandlerWave2:
         assert "telegram.cart.cod_prepaid_balance:en" in text
         assert "telegram.cart.cod_prepaid_auto_applied_next:en" in text
 
+    async def test_show_cart_prepayment_block_says_the_credit_is_cash_only(self, monkeypatch):
+        """B4b: the cart screen is rendered BEFORE the rail is chosen.
+
+        The confirmation screen and the post-order brief are already gated on
+        `payment_method == 'cash'`; this one cannot be, so it must carry the
+        condition. After B4a the balance can come from a cancelled CARD order,
+        and a customer who reads "will be applied to your next order" and then
+        pays by Click is charged in full.
+        """
+        handler = products_module.ProductHandlers()
+        update = DummyUpdate()
+        update.callback_query = DummyCallbackQuery(data="cart_view")
+        context = make_context()
+
+        cart_payload = served_cart(
+            ({"name": "Bottle", "current_price": 25000}, 1),
+            cod_prepayment={
+                "available_balance": 40000,
+                "potential_applied_amount": 25000,
+                "estimated_payable_after_prepayment": 0,
+            },
+        )
+        monkeypatch.setattr(products_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(products_module.i18n, "get", _i18n_get)
+        monkeypatch.setattr(products_module, "get_auth_token", AsyncMock(return_value="jwt"))
+        monkeypatch.setattr(products_module, "api_client", FakeAPIClientContext(get_cart=_resp(success=True, data=cart_payload)))
+
+        await handler.show_cart(update, context)
+
+        text = update.callback_query.edit_message_text.await_args.kwargs["text"]
+        assert "telegram.payments.prepaid_cash_only:en" in text
+
+    async def test_show_cart_omits_the_prepayment_block_without_a_balance(self, monkeypatch):
+        """The note is part of the block, not a permanent fixture of the cart."""
+        handler = products_module.ProductHandlers()
+        update = DummyUpdate()
+        update.callback_query = DummyCallbackQuery(data="cart_view")
+        context = make_context()
+
+        cart_payload = served_cart(
+            ({"name": "Bottle", "current_price": 25000}, 1),
+            cod_prepayment={
+                "available_balance": 0,
+                "potential_applied_amount": 0,
+                "estimated_payable_after_prepayment": 25000,
+            },
+        )
+        monkeypatch.setattr(products_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(products_module.i18n, "get", _i18n_get)
+        monkeypatch.setattr(products_module, "get_auth_token", AsyncMock(return_value="jwt"))
+        monkeypatch.setattr(products_module, "api_client", FakeAPIClientContext(get_cart=_resp(success=True, data=cart_payload)))
+
+        await handler.show_cart(update, context)
+
+        text = update.callback_query.edit_message_text.await_args.kwargs["text"]
+        assert "telegram.payments.prepaid_cash_only:en" not in text
+        assert "telegram.cart.cod_prepaid_balance:en" not in text
+
     async def test_clear_cart_success_answers_and_refreshes(self, monkeypatch):
         handler = products_module.ProductHandlers()
         handler.show_cart = AsyncMock()

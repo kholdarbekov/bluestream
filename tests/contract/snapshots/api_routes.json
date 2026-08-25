@@ -1155,13 +1155,6 @@
     "rule": "/api/v1/admin/payments/<int:payment_id>/fiscalization/retry"
   },
   {
-    "endpoint": "admin.refund_payment",
-    "methods": [
-      "POST"
-    ],
-    "rule": "/api/v1/admin/payments/<int:payment_id>/refund"
-  },
-  {
     "endpoint": "admin.get_payment_status",
     "methods": [
       "GET"

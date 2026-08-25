@@ -148,6 +148,13 @@ const Products = () => {
   const [createCodesForm] = Form.useForm();
   const [editCodeForm] = Form.useForm();
 
+  // For a marking-code product the backend derives stock_quantity from the
+  // available marking-code pool and refuses a hand-typed change, so the edit
+  // form locks the field. Watching the form's own switch rather than the loaded
+  // product keeps the lock in step with the value the submit would establish —
+  // the same value the backend guard reads.
+  const editRequiresMarkingCodes = Form.useWatch('requires_marking_codes', editForm);
+
   const { data: categoriesData } = useQuery({
     queryKey: ['categories'],
     queryFn: () => adminService.getCategories({ per_page: 100 }),
@@ -414,6 +421,7 @@ const Products = () => {
       name_en: product.name_translations?.en || '',
       description_en: product.description_translations?.en || '',
       category_id: product.category_id,
+      sku: product.sku,
       price: product.price,
       stock_quantity: product.stock_quantity,
       min_order_quantity: product.min_order_quantity ?? 1,
@@ -1021,8 +1029,10 @@ const Products = () => {
       ]
     : [];
 
+  // scrollToFirstError: a failed required rule otherwise renders off-screen below
+  // the Tabs, so the submit button reads as simply doing nothing.
   const buildProductForm = (form, onFinish, fileList, setFileList, loading) => (
-    <Form form={form} layout="vertical" onFinish={onFinish} initialValues={{ is_tryout_eligible: true, min_order_quantity: 1 }}>
+    <Form form={form} layout="vertical" onFinish={onFinish} scrollToFirstError initialValues={{ is_tryout_eligible: true, min_order_quantity: 1 }}>
       <Tabs
         defaultActiveKey="uz"
         items={[
@@ -1121,8 +1131,19 @@ const Products = () => {
           </Form.Item>
         </Col>
         <Col span={12}>
-          <Form.Item name="stock_quantity" label={t('ui.products.stock_quantity_label', 'Stock Quantity')} rules={[{ required: true, message: t('ui.products.stock_quantity_required', 'Stock quantity is required') }]}>
-            <InputNumber style={{ width: '100%' }} min={0} />
+          <Form.Item
+            name="stock_quantity"
+            label={t('ui.products.stock_quantity_label', 'Stock Quantity')}
+            rules={[{ required: true, message: t('ui.products.stock_quantity_required', 'Stock quantity is required') }]}
+            extra={form === editForm && editRequiresMarkingCodes
+              ? t('ui.products.stock_derived_from_marking_codes', 'Derived from available marking codes — add or manage codes to change it.')
+              : null}
+          >
+            <InputNumber
+              style={{ width: '100%' }}
+              min={0}
+              disabled={form === editForm && Boolean(editRequiresMarkingCodes)}
+            />
           </Form.Item>
         </Col>
       </Row>

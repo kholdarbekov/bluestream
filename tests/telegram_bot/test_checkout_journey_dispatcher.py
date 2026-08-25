@@ -144,6 +144,12 @@ TRANSLATIONS = {
     # act on.
     "telegram.orders.payment_link_failed_message":
         "Order {order_number} is placed. We could not create the payment link.",
+    # N-2: the retry path's OTHER screen -- rendered instead of the generic
+    # payment_link_failed_message above when the backend refuses a cash-order
+    # rail flip for a short marking-code pool. Distinguishable text on
+    # purpose, so a test can prove WHICH of the two screens rendered.
+    "telegram.payment.marking_codes_unavailable":
+        "Your order stays on Cash on Delivery.",
     "telegram.order.number": "Order {0}",
     "telegram.order.total": "Total {0} UZS",
     # Seeded on purpose while `telegram.orders.cod_restricted_place` is left
@@ -1027,10 +1033,16 @@ async def test_a_failed_payment_link_leaves_one_order_and_a_retry_that_reuses_it
     )
 
     # Retry pays this order; My Orders lets them go look at it.
+    #
+    # Switch method is deliberately GONE (B3 fix round 1): its callbacks carried
+    # no order id and routed to the CART confirmation screen, so — with the cart
+    # still holding this basket — it led to a SECOND order for the same items,
+    # the exact outcome the copy above exists to prevent. Retry is the rail move
+    # a customer actually has (POST /payments/create normalizes card->click and
+    # flips a pending cash order behind the pool guard).
     assert failure.callback_data() == [
         f"payment_retry_{order_id}",
         "menu_orders",
-        f"payment_switch_{order_id}",
         f"cancel_order_{order_id}",
     ]
 
@@ -1108,7 +1120,6 @@ async def test_a_refused_edit_on_a_failed_payment_link_still_leaves_one_screen(
     assert delivered[0].callback_data() == [
         f"payment_retry_{order['id']}",
         "menu_orders",
-        f"payment_switch_{order['id']}",
         f"cancel_order_{order['id']}",
     ], "the surviving screen must still carry the recovery keyboard"
     assert_no_swallowed_crash(bot)
@@ -1152,6 +1163,87 @@ async def test_a_retry_that_the_psp_refuses_again_keeps_the_retry_loop_on_screen
         "a retry that cannot be retried again is a dead end"
     )
     assert shop.orders == [order], "a retry must never create a second order"
+    assert_no_swallowed_crash(bot)
+
+
+async def test_a_retry_on_a_cash_order_refused_for_a_short_marking_code_pool_shows_the_cash_stays_message(
+    bot, shop, user
+):
+    """N-2(a): the backend's MARKING_CODES_POOL_SHORT refusal must reach the
+    customer as words, and ONLY as the cash-stays copy when the order's rail
+    really is cash -- `retry_payment`'s `was_cash` gate (I-1), pinned end to
+    end through the real dispatcher with the exact wire literal both
+    processes (this backend-shaped body, and the bot's error_code check) have
+    to agree on. Nothing under tests/ pinned that literal before this test;
+    a one-sided rename of it would previously degrade to the generic screen
+    with no test going red.
+    """
+    add_address(bot, 900, "Uy", "Chilonzor 15")
+    await fill_cart(bot, user, BOTTLE_19L, quantity=3)
+    await reach_confirmation(bot, user, 900, payment="card")
+
+    shop.raw_responses[("POST", "/api/v1/payments/create")] = api_failure_with_body(
+        "Marking codes unavailable", 400,
+        {"data": {"error_code": "MARKING_CODES_POOL_SHORT"}},
+    )
+    await bot.send(user.tap("confirm_order"))
+
+    (order,) = shop.orders
+    order_id = order["id"]
+    # By retry time the order's rail reads CASH -- e.g. an earlier attempt
+    # already refused the flip and left it there.
+    cash_order = {**order, "payment_method": "cash"}
+    bot.backend.route(
+        "GET", f"/api/v1/orders/{order_id}", lambda call: {"data": {"order": cash_order}}
+    )
+
+    await bot.send(user.tap(f"payment_retry_{order_id}"))
+
+    shown = bot.telegram.last_shown()
+    assert shown.text == "Your order stays on Cash on Delivery.", (
+        "a cash order refused for a short pool must show the cash-stays "
+        "copy, not the generic link-failed screen"
+    )
+    assert shop.orders == [order], "a refused retry must never create a second order"
+    assert_no_swallowed_crash(bot)
+
+
+async def test_a_retry_on_a_click_order_refused_for_a_short_marking_code_pool_falls_through_to_the_generic_screen(
+    bot, shop, user
+):
+    """N-2(b): the I-1 regression pin. The SAME refusal body on an order that
+    is NOT on cash must not claim it is -- a money-facing false statement
+    that sets a COD expectation the driver's rail will not match. It falls
+    through to the ordinary "order stands, here is Retry" screen instead,
+    same as any other payment-link failure.
+    """
+    add_address(bot, 900, "Uy", "Chilonzor 15")
+    await fill_cart(bot, user, BOTTLE_19L, quantity=3)
+    await reach_confirmation(bot, user, 900, payment="card")
+
+    shop.raw_responses[("POST", "/api/v1/payments/create")] = api_failure_with_body(
+        "Marking codes unavailable", 400,
+        {"data": {"error_code": "MARKING_CODES_POOL_SHORT"}},
+    )
+    await bot.send(user.tap("confirm_order"))
+
+    (order,) = shop.orders
+    order_id = order["id"]
+    click_order = {**order, "payment_method": "click"}
+    bot.backend.route(
+        "GET", f"/api/v1/orders/{order_id}", lambda call: {"data": {"order": click_order}}
+    )
+
+    await bot.send(user.tap(f"payment_retry_{order_id}"))
+
+    shown = bot.telegram.last_shown()
+    assert shown.text == (
+        f"Order BS-{order_id} is placed. We could not create the payment link."
+    ), "an order not on cash must fall through to the generic retry screen"
+    assert "Cash on Delivery" not in shown.text, (
+        "must never tell the customer they are on cash when they are not"
+    )
+    assert shop.orders == [order]
     assert_no_swallowed_crash(bot)
 
 

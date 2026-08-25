@@ -2,15 +2,15 @@ import csv
 import io
 from collections import Counter
 from decimal import Decimal
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from sqlalchemy import func
+from sqlalchemy import and_, func, or_
 
 from business_app import db
 from business_app.models.product import Product, ProductFiscalProfile, ProductMarkingCode
 from business_app.models.audit import AuditEventType, AuditSeverity
 from business_app.utils.audit_logger import audit_logger
-from shared.enums import MarkingCodeStatus
+from shared.enums import MarkingCodeStatus, PaymentMethod
 from business_app.utils.exceptions import NotFoundError, ValidationError
 
 # Composite filter-only values for the admin Marking-codes dropdown. They are NOT
@@ -24,6 +24,74 @@ class ProductFiscalService:
 
     REQUIRED_FISCAL_FIELDS = ("spic",)
     LOW_STOCK_THRESHOLD = 10
+
+    # Single wording for the refusal, shared by every endpoint that can be asked
+    # to set stock by hand, so the two admin routes cannot drift apart again.
+    STOCK_DERIVED_MESSAGE = (
+        "Stock quantity is derived from available marking codes for this product. "
+        "Add or manage marking codes instead of setting stock directly."
+    )
+
+    @staticmethod
+    def is_stock_derived(product: Product, *, requires_marking_codes: Optional[bool] = None) -> bool:
+        """Whether stock_quantity is owned by the marking-code pool rather than the admin.
+
+        ``requires_marking_codes`` lets a caller ask about the value a request is
+        establishing rather than the one it is replacing: a payload that turns
+        marking codes off frees the stock field in that same request. Pass None
+        (the default) to ask about the product as it stands.
+        """
+        if requires_marking_codes is None:
+            return bool(product.requires_marking_codes)
+        return bool(requires_marking_codes)
+
+    @classmethod
+    def published_stock_quantity(
+        cls, product: Product, *, marking_code_counts: Optional[Dict[str, int]] = None
+    ) -> Optional[int]:
+        """The stock value every surface publishes for ``product``.
+
+        For a derived product the AVAILABLE marking-code pool IS the stock;
+        ``stock_quantity`` is only a projection of it that goes stale between
+        marking-code events and that no admin can correct by hand.
+
+        This lives next to ``is_stock_derived`` on purpose: the admin serializer
+        publishes this number and the admin write guard compares the incoming
+        payload against it, so both must read ONE answer. A private second copy
+        of the lookup is exactly how the two drifted apart -- the serializer
+        started publishing the pool while the guard still compared the column,
+        and every edit of a marking-code product 400'd.
+
+        ``marking_code_counts`` reuses a snapshot the caller already computed
+        (``build_product_fiscal_snapshot``) instead of re-querying.
+        """
+        if not cls.is_stock_derived(product):
+            return product.stock_quantity
+        if marking_code_counts is not None:
+            return int(marking_code_counts.get(MarkingCodeStatus.AVAILABLE.value, 0))
+        return ProductMarkingCode.query.filter_by(
+            product_id=product.id,
+            status=MarkingCodeStatus.AVAILABLE,
+        ).count()
+
+    # The rails whose payments draw a marking code from the pool. Cash never does,
+    # which is why a cash order is neither gated by the pool nor moves it.
+    MARKING_CODE_PAYMENT_METHODS = frozenset({PaymentMethod.CLICK.value, PaymentMethod.CARD.value})
+
+    @classmethod
+    def consumes_marking_code(cls, product: Product, payment_method) -> bool:
+        """Whether this order line will draw a marking code from the pool.
+
+        Accepts a PaymentMethod, its raw string value, or None. None means the
+        rail is not known to be a code-consuming one, so it answers False --
+        never treat an unknown rail as cash, and never treat it as card.
+        """
+        if not cls.is_stock_derived(product):
+            return False
+        if payment_method is None:
+            return False
+        value = payment_method.value if hasattr(payment_method, "value") else str(payment_method)
+        return value.strip().lower() in cls.MARKING_CODE_PAYMENT_METHODS
 
     def get_product_or_raise(self, product_id: int) -> Product:
         product = Product.query.get(product_id)
@@ -144,6 +212,57 @@ class ProductFiscalService:
             status_value = status.value if hasattr(status, "value") else str(status)
             counts[status_value] = int(count)
         return counts
+
+    def pool_covers_order(self, order, payment_method) -> Tuple[bool, Optional[str]]:
+        """Can the marking-code pool cover every code-consuming line of this order?
+
+        Returns (True, None) when it can, or (False, product_name) naming the
+        first product that falls short. Only lines that would actually draw a
+        code are considered, so this is always True for cash.
+
+        Two carve-outs, both required for this to answer the question it
+        claims to answer rather than a stricter one:
+
+        * Reward/bonus lines (``is_reward_item``) never draw a code -- mirrors
+          ``PaymentFiscalizationService._is_fiscalizable_item``, the same test
+          ``reserve_required_marking_codes`` uses to skip them entirely.
+          Counting a reward line here would refuse an order the pool actually
+          covers.
+        * A code already RESERVED **or USED** by THIS order (a prior PREPARE
+          already reserved it, an admin business_account settlement already
+          consumed it, or this is a retry after abandoning checkout) counts as
+          covered even though it is no longer sitting in the shared AVAILABLE
+          pool -- the order already holds it, so completing the payment does
+          not need to draw a new one. The status set mirrors exactly what
+          ``PaymentFiscalizationService._codes_currently_held`` admits for
+          "does this payment still hold this code" (RESERVED, USED, and
+          UTILISED all count there; USED is the one this method also needs,
+          since RESERVED-only under-credited a settled business_account order
+          whose codes were already marked USED at settlement -- see
+          ``_marking_codes_consumed_warnings`` below, which exists for exactly
+          that shape). Ownership is read off ``product_marking_codes.order_id``
+          (migration f2b7c4e91a35 backfilled that column specifically so it
+          can be trusted for this).
+        """
+        for order_item in order.order_items or []:
+            if getattr(order_item, "is_reward_item", False):
+                continue
+            product = order_item.product
+            if product is None or not self.consumes_marking_code(product, payment_method):
+                continue
+            effectively_available = ProductMarkingCode.query.filter(
+                ProductMarkingCode.product_id == product.id,
+                or_(
+                    ProductMarkingCode.status == MarkingCodeStatus.AVAILABLE,
+                    and_(
+                        ProductMarkingCode.order_id == order.id,
+                        ProductMarkingCode.status.in_((MarkingCodeStatus.RESERVED, MarkingCodeStatus.USED)),
+                    ),
+                ),
+            ).count()
+            if effectively_available < order_item.quantity:
+                return False, product.name
+        return True, None
 
     def build_product_fiscal_snapshot(self, product: Product) -> Dict[str, Any]:
         counts = self.get_marking_code_counts(product.id)

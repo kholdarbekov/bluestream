@@ -193,3 +193,86 @@ def order_with_address(db, sample_order, sample_address):
     sample_order.delivery_address_id = sample_address.id
     db.session.commit()
     return sample_order
+
+
+@pytest.fixture
+def two_line_order_with_one_short_pool(db):
+    """Factory: make an order fiscally unfulfillable *after* its first line.
+
+    Gives ``order`` two marking-code-requiring lines — product A, whose pool
+    holds exactly the one code its line needs, and a fresh product B whose pool
+    is empty. Any reservation attempt therefore covers A and is short on B,
+    which is the shape that used to leave A's code durably RESERVED on webhook
+    paths that answer a protocol code instead of re-raising
+    (``handle_prepare`` → ``-9``, and the two bare-``except`` sites
+    ``_restore_click_rail_after_offline_settlement`` /
+    ``_accept_late_complete``, where the payment still ends COMPLETED).
+
+    Returns ``(product_a, product_b)``.
+    """
+    from decimal import Decimal
+
+    from business_app.models.order import OrderItem
+    from business_app.models.product import Product, ProductFiscalProfile, ProductMarkingCode
+    from shared.enums import MarkingCodeStatus
+
+    def _apply(order, product_a):
+        product_b = Product(
+            name="Product B (empty pool)",
+            category_id=product_a.category_id,
+            size="19L",
+            volume=19.0,
+            volume_unit="L",
+            base_price=Decimal("15000.00"),
+            stock_quantity=0,
+            is_active=True,
+        )
+        db.session.add(product_b)
+        db.session.flush()
+
+        # The planner walks lines in `(product_id, id)` order, so B must sort
+        # AFTER A or the shortfall raises before A's line is ever planned and
+        # every test built on this fixture silently pins nothing.
+        assert product_a.id < product_b.id, (
+            "B is created second precisely so it plans second; do not reorder"
+        )
+
+        db.session.add_all(
+            [
+                ProductFiscalProfile(
+                    product_id=product_a.id,
+                    fiscalization_enabled=True,
+                    requires_marking_codes=True,
+                    spic="SPIC-A",
+                ),
+                ProductFiscalProfile(
+                    product_id=product_b.id,
+                    fiscalization_enabled=True,
+                    requires_marking_codes=True,
+                    spic="SPIC-B",
+                ),
+                ProductMarkingCode(
+                    product_id=product_a.id,
+                    code=f"A-CODE-{product_a.id}",
+                    status=MarkingCodeStatus.AVAILABLE,
+                ),
+                OrderItem(
+                    order_id=order.id,
+                    product_id=product_a.id,
+                    quantity=1,
+                    unit_price=Decimal("15000.00"),
+                    total_price=Decimal("15000.00"),
+                ),
+                OrderItem(
+                    order_id=order.id,
+                    product_id=product_b.id,
+                    quantity=1,
+                    unit_price=Decimal("15000.00"),
+                    total_price=Decimal("15000.00"),
+                ),
+            ]
+        )
+        db.session.commit()
+        return product_a, product_b
+
+    return _apply

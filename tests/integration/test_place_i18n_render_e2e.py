@@ -135,20 +135,25 @@ def _run_seed(app, name, entry="run"):
         module.create_app = original
 
 
-def _seed_backend_place_slice(app):
-    """The ``api.addresses.error.in_place_group`` slice of the backend seed.
+def _seed_backend_slice(app, key):
+    """Seed ONE key out of the canonical ``BACKEND_TRANSLATIONS``.
 
-    Uses the script's OWN ``_category_for`` so the category this key lands in is
-    the shipped rule ('api' from the first segment), not a guess — the whole
-    point of the ownership tests below.
+    Uses the script's OWN ``_category_for`` so the category the key lands in is
+    the shipped rule (first key segment), not a guess — the whole point of the
+    ownership tests below. Running the full 2000-key seeder per test would cost
+    more than it proves.
     """
     mod = _load_seed("seed_backend_translations")
-    key = "api.addresses.error.in_place_group"
     row = mod.BACKEND_TRANSLATIONS[key]
     Translation.bulk_create_or_update(
         {lang: {key: row[lang]} for lang in LANGUAGES},
         category=mod._category_for(key),
     )
+
+
+def _seed_backend_place_slice(app):
+    """The ``api.addresses.error.in_place_group`` slice of the backend seed."""
+    _seed_backend_slice(app, "api.addresses.error.in_place_group")
 
 
 # The scripts that OWN place copy, in the order a deploy runbook lists them.
@@ -1890,29 +1895,39 @@ def test_the_wallet_block_emits_nothing_for_a_solo_ungrouped_customer(
 def test_the_reused_prepaid_key_on_the_cluster_surface_is_trilingual_and_formats(
     app, monkeypatch, place_seeds, lang
 ):
-    """``telegram.orders.cod_prepaid_balance`` is owned by
-    ``seed_prepayment_translations.py``, not by any place seed, yet it only
-    appears on the CLUSTER surface.
+    """``telegram.orders.cod_prepaid_balance`` and the cash-only note B4b made
+    travel with it are owned by ``seed_backend_translations.py``, not by any
+    place seed, yet they only appear on the wallet surface.
 
-    Two halves, both asserted: with only the place seeds run the line is MISSING
-    (a deploy that skips the prepayment seed leaves the linked-accounts block
-    half-translated), and once that seed runs it renders trilingually.
+    B4b moved BOTH out of the one-off ``seed_prepayment_translations.py``: the
+    balance label because its audience widened from linked customers to everyone
+    holding credit, the note because it is new. The owner asserted here moved
+    with them — a stale copy in two seeders means the next reseed silently
+    reverts the wording.
+
+    Two halves, both asserted: with only the place seeds run the lines are
+    MISSING (a deploy that skips the canonical seed leaves the wallet block
+    half-translated), and once that seed runs they render trilingually.
     """
     key = "telegram.orders.cod_prepaid_balance"
+    note = "telegram.payments.prepaid_cash_only"
     summary = {
         "cluster_member_count": 2,
         "cluster_delivered_outstanding_amount": 0,
         "available_prepayment_balance": 5000,
         "places": [],
     }
-    assert Translation.query.filter_by(key=key).count() == 0, (
-        "no place seed owns this key — if one now does, drop this test's first half"
-    )
+    for unseeded in (key, note):
+        assert Translation.query.filter_by(key=unseeded).count() == 0, (
+            f"no place seed owns {unseeded} — if one now does, drop this test's first half"
+        )
     monkeypatch.setattr(tg_orders, "i18n", _tg_i18n())
     half_translated = tg_orders._build_cod_summary_lines(summary, lang)
     assert any(_humanised(key) in line for line in half_translated), half_translated
+    assert any(_humanised(note) in line for line in half_translated), half_translated
 
-    _run_seed(app, "seed_prepayment_translations", "main")
+    _seed_backend_slice(app, key)
+    _seed_backend_slice(app, note)
     monkeypatch.setattr(tg_orders, "i18n", _tg_i18n())
 
     lines = tg_orders._build_cod_summary_lines(summary, lang)
@@ -1922,7 +1937,10 @@ def test_the_reused_prepaid_key_on_the_cluster_surface_is_trilingual_and_formats
     # would pass on a Russian row served to an English customer, and on a row
     # that dropped ``{available_balance}`` altogether.
     assert _row(key, lang).format(available_balance="5,000") in lines, lines
+    # The balance NEVER ships without the sentence saying where it can be spent.
+    assert _row(note, lang) in lines, lines
     assert not any(_humanised(key) in line for line in lines), lines
+    assert not any(_humanised(note) in line for line in lines), lines
     for line in lines:
         assert "{" not in line and "}" not in line, line
 

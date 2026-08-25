@@ -202,17 +202,32 @@ groups:
           summary: "Postgres connection pool saturated"
           description: "Pool utilisation > 90% for 5m — investigate long-running queries or raise pool size."
 
-      # Stale PENDING payments: webhooks may have failed to land; orders frozen.
-      # Pairs with PAY-007 (reconciliation beat) once implemented.
-      - alert: StalePaymentsPending
-        expr: payments_pending_age_seconds{quantile="0.95"} > 900
+      # A PENDING electronic payment on an order that has already left the door.
+      # This replaces StalePaymentsPending, which selected
+      # payments_pending_age_seconds{quantile="0.95"} — a Summary in the Python
+      # client emits no quantile series at all, so that alert could never fire
+      # (verified against prod Prometheus 2026-08-23: only _count and _sum
+      # existed) and its sampler ran in the unscraped Celery worker.
+      #
+      # Raw PENDING age is deliberately NOT alerted on any more: a customer may
+      # pay their Click link right up to delivery, so age is expected to be
+      # large and benign. What is never benign is money owed on a closed order.
+      # open_receivable_clause() excludes this shape on purpose, so it is
+      # invisible to the debtor lists, COD statements and financial report —
+      # this gauge is the only thing that sees it. Prod incident TG_000413_26.
+      - alert: PendingPaymentOnClosedOrder
+        expr: max(payments_pending_on_closed_order_total) > 0
         for: 15m
         labels:
-          severity: warning
+          severity: critical
           area: payments
         annotations:
-          summary: "Stale PENDING payments"
-          description: "p95 PENDING payment age > 15 minutes — check gateway status and reconcile."
+          summary: "Unpaid electronic payment on a closed order"
+          description: >-
+            An order is DELIVERED/CANCELLED/RETURNED while its electronic payment is
+            still PENDING — the customer may have been debited with nothing recorded,
+            and the order is invisible to every debtor surface. Check the payment
+            against the gateway, then settle or convert the rail.
 
       # Webhook idempotency hit rate too high = replay flood or misconfigured gateway.
       - alert: WebhookDuplicateFlood

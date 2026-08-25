@@ -812,6 +812,15 @@ class OrderEditService:
             )
             if product is None:
                 raise ValidationError(f"product_not_found during inventory adjust: id={change.product_id}")
+            # A marking-code product's stock is the code pool, which no order
+            # delta may move. Skipping BEFORE the insufficiency test below is
+            # deliberate: testing first would refuse a legitimate edit at zero
+            # pool, and preview() never runs this method, so the refusal would
+            # only surface on apply.
+            from business_app.services.product_fiscal_service import ProductFiscalService
+
+            if ProductFiscalService.is_stock_derived(product):
+                continue
             stock_delta = -change.delta  # qty up → stock down, and vice versa
             new_stock = (product.stock_quantity or 0) + stock_delta
             if new_stock < 0:
@@ -1144,6 +1153,19 @@ class OrderEditService:
                                                            else 'unknown'
                                                            })"
                     ),
+                    # THE FLOW MARKER, not decoration. This event is money the
+                    # business already holds being re-booked as customer credit,
+                    # so two surfaces must be able to recognise it:
+                    # `CashCollectionService.credit_customer_for_dead_order_prepayment`
+                    # nets it out (or a later cancel pays the customer twice),
+                    # and the financial summary excludes its allocations from
+                    # cash revenue (or the same money counts twice in
+                    # `total_revenue`). See CUSTOMER_CREDIT_REBOOK_FLOWS.
+                    proof_data={
+                        "flow": "order_edit_refund",
+                        "payment_id": order.payment.id if order.payment else None,
+                        "order_id": order.id,
+                    },
                     idempotency_key=f"order_edit_refund:{order.id}:{refund_amount}",
                     commit=False,
                 )

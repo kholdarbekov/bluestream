@@ -106,7 +106,23 @@ class ProductService:
             query = query.filter(Product.base_price <= max_price)
 
         if in_stock_only:
-            query = query.filter(or_(Product.track_inventory == False, Product.stock_quantity > 0))
+            from business_app.models.product import ProductFiscalProfile
+
+            # A marking-code product's stock is its code pool, which gates only orders that will
+            # draw a code. It must stay findable for a cash shopper even at an empty pool. This is
+            # a SQL filter (cannot call ProductFiscalService.is_stock_derived per row), so the rule
+            # is spelled directly as a requires_marking_codes EXISTS subquery instead.
+            derived = (
+                db.session.query(ProductFiscalProfile.product_id)
+                .filter(
+                    ProductFiscalProfile.product_id == Product.id,
+                    ProductFiscalProfile.requires_marking_codes.is_(True),
+                )
+                .exists()
+            )
+            query = query.filter(
+                or_(Product.track_inventory == False, Product.stock_quantity > 0, derived)  # noqa: E712
+            )
 
         # Apply sorting
         order_field = self._get_sort_field(sort_by)

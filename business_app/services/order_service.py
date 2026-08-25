@@ -28,6 +28,7 @@ from shared.enums import (  # noqa: E402
     UserRole,
 )
 from shared.status_transitions import is_valid_order_transition  # noqa: E402
+from business_app.utils.payment_projection import FISCALIZED_RAILS  # noqa: E402
 from shared.payment_methods import (  # noqa: E402
     UnknownPaymentMethodError,
     UnsupportedPaymentMethodError,
@@ -142,7 +143,8 @@ class OrderService:
 
         # Validate and calculate order items
         items_data = order_data["items"]
-        order_items, subtotal = self._process_order_items(items_data, user_id=user_id)
+        is_cash_order = self._requested_method_is_cash(order_data)
+        order_items, subtotal = self._process_order_items(items_data, user_id=user_id, is_cash_order=is_cash_order)
 
         # Calculate delivery fee via DeliveryService (single source of truth).
         delivery_address = order_data["delivery_address"]
@@ -282,7 +284,7 @@ class OrderService:
                 # alongside the Redis self-rollback in release_reservations.
                 reservation_result = self.inventory_service.reserve_inventory(
                     order_id=order.id,
-                    items=items_data,
+                    items=self._stock_gated_items(items_data, is_cash=is_cash_order),
                     user_id=user_id,
                 )
                 logger.info(f"CREATE ORDER: reservation_result: {reservation_result}")
@@ -1061,6 +1063,21 @@ class OrderService:
             OrderStatus.OUT_FOR_DELIVERY,
         ]
 
+        # 🔴 THE STATUS TRANSITION RUNS FIRST, AND THE INVENTORY WORK AFTER IT.
+        # `InventoryService.adjust_inventory` COMMITS per item, so with the
+        # restock ahead of this call a failure inside the cancel cascade —
+        # notably the deliberate `raise` when a card prepayment cannot be
+        # settled — aborted a transaction that had already made the restock
+        # durable, and the operator's retry restocked the same units a second
+        # time. In a change series about derived stock that is not a risk worth
+        # carrying. Settling the money is the step allowed to fail; nothing
+        # irreversible may precede it.
+        #
+        # `stock_was_deducted` is computed above from the PRE-transition
+        # status, so moving the work does not change what it decides.
+        # Cancel order
+        order = self.update_order_status(order_id, OrderStatus.CANCELLED, actor_id, reason)
+
         if stock_was_deducted:
             # Restore stock quantities for confirmed orders
             self._restore_stock_for_order(order, reason)
@@ -1076,9 +1093,6 @@ class OrderService:
                     )
             except Exception:
                 logger.exception("Error releasing inventory reservations for order %s", order_id)
-
-        # Cancel order
-        order = self.update_order_status(order_id, OrderStatus.CANCELLED, actor_id, reason)
 
         # Reverse any applied reward redemption: refund spent points (non-tier-
         # qualifying), flip the redemption to cancelled, decrement reward usage.
@@ -1101,13 +1115,18 @@ class OrderService:
 
         db.session.commit()
 
-        # Handle refund if payment was made
-        if process_payment_refund and order.payment and order.payment.status == PaymentStatus.COMPLETED:
-            from .payment_service import PaymentService
-
-            payment_service = PaymentService()
-            payment_service.process_refund(order.payment.id, order.total_amount, reason)
-
+        # NO GATEWAY REFUND. Owner ruling 2026-08-24: "we never ever cancel
+        # card / click paid payments ... We can cancel the order itself, and in
+        # that case the payment will settle as prepaid customer balance." The
+        # money is settled as customer credit inside update_order_status's
+        # CANCELLED cascade (_handle_status_change_actions) — centralised there
+        # for the same reason the marking-code and delivery cascades were, so the
+        # admin status dropdown's direct call settles the money too.
+        #
+        # `process_payment_refund` stays in the signature: Payme's
+        # CancelTransaction passes False at payme_provider.py:630 and its
+        # protocol response depends on that call shape.
+        #
         # Note: reserved marking codes AND the linked delivery are both released
         # in cascade inside update_order_status (_handle_status_change_actions,
         # CANCELLED branch) above, so every order-cancel path — including the
@@ -1223,6 +1242,13 @@ class OrderService:
         cancellation_reason = reason or "Order cancelled"
 
         for item in order.order_items:
+            # A marking-code product's stock is the code pool; this order never
+            # took units out of it, so there is nothing to give back. Restoring
+            # here would inflate the pool on every cancellation.
+            from business_app.services.product_fiscal_service import ProductFiscalService
+
+            if item.product is not None and ProductFiscalService.is_stock_derived(item.product):
+                continue
             try:
                 result = inventory_service.adjust_inventory(
                     product_id=item.product_id,
@@ -1365,11 +1391,59 @@ class OrderService:
             if field not in address:
                 raise ValidationError(f"Missing required address field: {field}")
 
+    def _requested_method_is_cash(self, order_data: Dict[str, Any]) -> bool:
+        """Is the caller explicitly asking for cash?
+
+        Read from the RAW payload because _resolve_payment_method runs after the
+        first stock gate and needs order_items to default an omitted method. An
+        omitted method resolves to business_account, which is never cash, so the
+        raw read agrees with the resolved value and fails toward checking.
+        Written as == CASH, never as `not in {...}`: payment_method is nullable,
+        and the inverse form would exempt NULL from both the gate and the
+        deduction.
+
+        DIVERGENCE RISK -- this deliberately does NOT call
+        shared.payment_methods.normalize_payment_method (it must run before
+        _resolve_payment_method, and normalize raises on the omitted/NULL values
+        this has to answer False for). It agrees with normalize today only
+        because PAYMENT_METHOD_ALIASES (shared/payment_methods.py:54) holds a
+        single entry, "card" -> CLICK, and no alias for cash. Adding ANY cash
+        alias there -- e.g. "cod" -> CASH -- would make normalize() answer CASH
+        while this answers False, and a cash order placed under that alias would
+        silently be gated by, and deduct from, a marking-code pool it never
+        draws from. If a cash alias is ever added, this must alias-map too.
+        """
+        raw = order_data.get("payment_method")
+        if raw is None:
+            return False
+        value = raw.value if hasattr(raw, "value") else str(raw)
+        return value.strip().lower() == PaymentMethod.CASH.value
+
+    def _stock_gated_items(self, items_data: List[Dict[str, Any]], *, is_cash: bool) -> List[Dict[str, Any]]:
+        """The subset of lines whose stock actually gates this order.
+
+        A cash order draws no marking code, so a marking-code product's pool
+        does not constrain it. Every other combination is gated as before.
+        """
+        if not is_cash:
+            return items_data
+
+        from business_app.services.product_fiscal_service import ProductFiscalService
+
+        gated = []
+        for item in items_data:
+            product = Product.query.get(item["product_id"])
+            if product is not None and ProductFiscalService.is_stock_derived(product):
+                continue
+            gated.append(item)
+        return gated
+
     def _process_order_items(
         self,
         items_data: List[Dict[str, Any]],
         user_id: int,
         order_id: Optional[int] = None,
+        is_cash_order: bool = False,
     ) -> Tuple[List[Dict[str, Any]], Decimal]:
         """Process and validate order items with comprehensive inventory checks"""
         processed_items = []
@@ -1390,7 +1464,7 @@ class OrderService:
 
         # Perform comprehensive inventory availability check
         availability_results = self.inventory_service.check_multiple_products_availability(
-            items_data, exclude_order_id=order_id
+            self._stock_gated_items(items_data, is_cash=is_cash_order), exclude_order_id=order_id
         )
 
         # Check for any unavailable items
@@ -1704,53 +1778,7 @@ class OrderService:
             if commit:
                 db.session.commit()
         elif new_status in {OrderStatus.CANCELLED, OrderStatus.RETURNED}:
-            released_reserved_prepayment = False
-            refunded_pre_delivery_settlement = False
-            if order.payment_method == PaymentMethod.CASH:
-                from business_app.services.cash_collection_service import CashCollectionService
-
-                cash_collection_service = CashCollectionService()
-                # Refund any prepaid credit that was APPLIED at order creation
-                # (full prepaid coverage) FIRST, so the payment rolls back to
-                # unpaid and the terminal-state sync below then cancels it.
-                # No-op for delivered orders and for reservation-only orders.
-                refunded = cash_collection_service.release_pre_delivery_prepaid_settlement_for_order(
-                    order_id=order.id,
-                    actor_user_id=getattr(order, "updated_by", None),
-                    reason=f"Order moved to {new_status.value}",
-                )
-                refunded_pre_delivery_settlement = bool(refunded)
-                # Release any still-reserved (un-consumed) prepayment.
-                cash_collection_service.release_reserved_prepayment_for_order(
-                    order_id=order.id,
-                    actor_user_id=getattr(order, "updated_by", None),
-                    reason=f"Order moved to {new_status.value}",
-                )
-                released_reserved_prepayment = True
-
-            payment_synced = self._sync_payment_status_for_terminal_order_state(order, new_status)
-
-            # Return any still-reserved (un-consumed) marking codes to the pool.
-            # Centralised here — like the delivery cascade below — so EVERY path
-            # that moves an order to CANCELLED/RETURNED frees the codes, not just
-            # cancel_order(). Without this, the admin status-dropdown's direct
-            # update_order_status call leaked reserved marking codes into
-            # RESERVED forever (codes 2283–2288 on prod). Already-USED codes are
-            # left untouched by release_reserved_marking_codes, so a fiscalised
-            # then RETURNED order keeps its receipts.
-            marking_codes_released = False
-            if order.payment:
-                try:
-                    from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
-
-                    released = PaymentFiscalizationService().release_reserved_marking_codes(
-                        order.payment,
-                        reason=f"order_{new_status.value}",
-                        actor_user_id=updated_by,
-                    )
-                    marking_codes_released = bool(released)
-                except Exception:
-                    logger.exception("Failed to release reserved marking codes for order %s", order.id)
+            settled = self.settle_dead_order_side_effects(order, new_status, updated_by=updated_by)
 
             # Cascade an order cancellation onto its delivery so a cancelled
             # order never leaves a live/scheduled delivery behind. Centralised
@@ -1758,18 +1786,169 @@ class OrderService:
             # to CANCELLED — including the admin status dropdown's direct
             # update_order_status call — cancels the delivery. One-directional:
             # this never changes the order status.
+            #
+            # NOT part of `settle_dead_order_side_effects`: that helper is also
+            # called BY the admin delivery surface, which is itself the thing
+            # setting the delivery status. Cascading back onto the delivery from
+            # there would fight the caller.
             delivery_cancelled = False
             if new_status == OrderStatus.CANCELLED:
                 delivery_cancelled = self._cancel_delivery_for_cancelled_order(order)
 
-            if commit and (
-                payment_synced
-                or released_reserved_prepayment
-                or refunded_pre_delivery_settlement
-                or marking_codes_released
-                or delivery_cancelled
-            ):
+            if commit and (settled or delivery_cancelled):
                 db.session.commit()
+
+    def settle_dead_order_side_effects(
+        self,
+        order: Order,
+        new_status: OrderStatus,
+        *,
+        updated_by: Optional[int] = None,
+    ) -> bool:
+        """Settle the MONEY, the MARKING CODES and the FISCAL STATE of an order
+        that has just become dead (CANCELLED / RETURNED).
+
+        🔴 ONE EXPRESSION, TWO CALLERS, and that is the whole point of it being a
+        method rather than an inline block. `update_order_status` reaches it for
+        every ordinary transition; `AdminDeliveryService._apply_status_update`
+        reaches it for the admin Deliveries screen, which writes
+        `order.status = RETURNED` DIRECTLY because the order transition table
+        (shared/status_transitions.py) only permits RETURNED from
+        OUT_FOR_DELIVERY — while a delivery may be returned from SCHEDULED,
+        PENDING, ASSIGNED, PICKED_UP, IN_TRANSIT or ARRIVED, i.e. from orders
+        still CONFIRMED or PREPARING. Routing that surface through
+        `update_order_status` would therefore refuse most of its own workflow.
+
+        Before this was extracted, that surface duplicated ONLY the CASH block,
+        so a customer who had paid by Click and had their delivery marked
+        RETURNED lost the lot: payment left COMPLETED, no credit event, marking
+        codes stranded RESERVED forever — and, since B4a deleted the admin refund
+        route, no in-app way back.
+
+        Idempotent by construction, because the admin path does not get
+        `_claim_status_transition`'s once-only guarantee:
+        `credit_customer_for_dead_order_prepayment` short-circuits on its
+        idempotency key, `release_reserved_marking_codes` skips anything not
+        RESERVED, and both prepayment releases are no-ops when there is nothing
+        left to release.
+
+        Never commits — the caller owns the transaction boundary. Returns True
+        when anything changed, so the caller knows whether a commit is owed.
+        """
+        released_reserved_prepayment = False
+        refunded_pre_delivery_settlement = False
+        if order.payment_method == PaymentMethod.CASH:
+            from business_app.services.cash_collection_service import CashCollectionService
+
+            cash_collection_service = CashCollectionService()
+            # Refund any prepaid credit that was APPLIED at order creation
+            # (full prepaid coverage) FIRST, so the payment rolls back to
+            # unpaid and the terminal-state sync below then cancels it.
+            # No-op for delivered orders and for reservation-only orders.
+            refunded = cash_collection_service.release_pre_delivery_prepaid_settlement_for_order(
+                order_id=order.id,
+                actor_user_id=updated_by if updated_by is not None else getattr(order, "updated_by", None),
+                reason=f"Order moved to {new_status.value}",
+            )
+            refunded_pre_delivery_settlement = bool(refunded)
+            # Release any still-reserved (un-consumed) prepayment.
+            cash_collection_service.release_reserved_prepayment_for_order(
+                order_id=order.id,
+                actor_user_id=updated_by if updated_by is not None else getattr(order, "updated_by", None),
+                reason=f"Order moved to {new_status.value}",
+            )
+            released_reserved_prepayment = True
+
+        payment_synced = self._sync_payment_status_for_terminal_order_state(order, new_status)
+
+        # A card/Click payment on a dead order is NEVER reversed at the
+        # gateway — the fiscal receipt cannot be un-submitted, and a
+        # cancelled payment row holding real money is the payment-vs-
+        # fiscalization divergence the owner's rule exists to prevent
+        # (ruling 2026-08-24). The money becomes customer prepaid credit
+        # instead. `payment.status`, `order.is_paid` and any filed receipt
+        # are deliberately left untouched: a cancelled, PAID order is the
+        # honest description of what happened.
+        #
+        # A SIBLING of the `payment_method == CASH` block above, never inside
+        # it. That CASH gate is precisely why a cancelled card order's money
+        # vanished before B4.
+        prepayment_credited = False
+        if order.payment is not None:
+            from business_app.services.cash_collection_service import CashCollectionService
+
+            try:
+                event = CashCollectionService().credit_customer_for_dead_order_prepayment(
+                    order.payment,
+                    reason=f"Order moved to {new_status.value}",
+                    actor_user_id=updated_by,
+                    commit=False,
+                )
+                prepayment_credited = event is not None
+            except Exception:
+                # `raise`, not swallow. The loyalty and marking-code cascades
+                # are best-effort because losing them costs a reconcilable
+                # record. Losing this costs the customer their money, so a
+                # cancel that cannot settle the money must not commit.
+                logger.exception("Failed to credit card prepayment for dead order %s", order.id)
+                raise
+
+        # Return any still-reserved (un-consumed) marking codes to the pool.
+        # Centralised here so EVERY path that moves an order to
+        # CANCELLED/RETURNED frees the codes, not just cancel_order(). Without
+        # this, the admin status-dropdown's direct update_order_status call
+        # leaked reserved marking codes into RESERVED forever (codes 2283–2288
+        # on prod). Already-USED codes are left untouched by
+        # release_reserved_marking_codes, so a fiscalised then RETURNED order
+        # keeps its receipts.
+        marking_codes_released = False
+        if order.payment:
+            try:
+                from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
+
+                released = PaymentFiscalizationService().release_reserved_marking_codes(
+                    order.payment,
+                    reason=f"order_{new_status.value}",
+                    actor_user_id=updated_by,
+                )
+                marking_codes_released = bool(released)
+            except Exception:
+                logger.exception("Failed to release reserved marking codes for order %s", order.id)
+
+        # THE BRAKE. Until B4, `process_refund` writing `status = CANCELLED`
+        # was the only thing stopping `reconcile_completed_payment_side_effects`
+        # (payment_tasks.py) from re-queueing this payment for up to SEVEN
+        # DAYS — at which point `process_click_fiscalization` reserves FRESH
+        # marking codes, utilises them with the Tax Committee, and files a
+        # tax receipt for a cancelled order. The owner's rule requires the
+        # payment to stay COMPLETED, so the brake has to become explicit.
+        #
+        # RAIL-GATED. `queue_click_fiscalization` calls
+        # `ensure_fiscalization_record`, which CREATES a Click fiscalization row
+        # — so firing this for every rail gave payme and cash orders a
+        # `PaymentFiscalization` they never had, and made "payme is unchanged"
+        # false. Only the rails the sweep actually scans need braking.
+        #
+        # `queue_click_fiscalization` never downgrades a COMPLETED record, so a
+        # filed receipt survives this untouched.
+        fiscalization_settled = False
+        if order.payment is not None and order.payment.payment_method in FISCALIZED_RAILS:
+            try:
+                from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
+
+                PaymentFiscalizationService().queue_click_fiscalization(order.payment.id, actor_user_id=updated_by)
+                fiscalization_settled = True
+            except Exception:
+                logger.exception("Failed to settle fiscalization state for dead order %s", order.id)
+
+        return bool(
+            payment_synced
+            or released_reserved_prepayment
+            or refunded_pre_delivery_settlement
+            or prepayment_credited
+            or marking_codes_released
+            or fiscalization_settled
+        )
 
     def _cancel_delivery_for_cancelled_order(self, order: Order) -> bool:
         """Cascade an order cancellation onto its delivery.

@@ -2516,6 +2516,7 @@ def apply_order_payment_method_edit(order_id):
 def get_order_details(order_id):
     """Get detailed information about a specific order including all items"""
     try:
+        from business_app.serializers.order_serializers import payability_fields
         from business_app.utils.payment_projection import get_payment_projection
 
         # Get order with all related data
@@ -2555,6 +2556,12 @@ def get_order_details(order_id):
             "payment_id": order.payment.id if order.payment else None,
             "payment_provider": getattr(order.payment, "payment_provider", None) if order.payment else None,
             "payment_link": getattr(order.payment, "payment_link", None) if order.payment else None,
+            # B3 -- payability is PUBLISHED, not inferred from "a link exists".
+            # This payload REPLACES the list row in Orders.js's `selectedOrder`
+            # halfway through opening the modal, so it has to answer the same
+            # question `serialize_order_admin` answers or the two payment-link
+            # buttons change meaning while the admin is looking at them.
+            **payability_fields(order, order.payment),
             "provider_transaction_id": (
                 getattr(order.payment, "provider_transaction_id", None) if order.payment else None
             ),
@@ -2969,6 +2976,40 @@ def update_product(product_id):
         if not product:
             return not_found_response(resource_type="Product")
 
+        # stock_quantity is DERIVED from the available marking-code pool for products
+        # that require marking codes: the pool OWNS the column, so this endpoint
+        # never writes it, and a hand-typed change is refused up front instead of
+        # being dropped behind a 200 "Product updated successfully".
+        #
+        # Computed ONCE and reused by the assignment further down, so the refusal
+        # and the write can never disagree about which products the rule covers.
+        # The fiscal flags in this same payload decide whether the rule applies, so
+        # it reads the value the request is establishing, not the one it is
+        # replacing -- a payload that turns marking codes off frees the stock field
+        # in that same submit.
+        stock_is_derived = ProductFiscalService.is_stock_derived(
+            product, requires_marking_codes=data.get("requires_marking_codes")
+        )
+
+        # Only an ACTUAL change is refused: the admin edit modal always echoes the
+        # current value back (antd submits disabled fields), and rejecting on the
+        # mere presence of the key would make marking-code products entirely
+        # uneditable. "Current" means the value we PUBLISH -- the pool count from
+        # ProductFiscalService.published_stock_quantity, which is what the modal
+        # prefills -- NOT the stored column, which is stale by design here and
+        # whose use in this comparison 400'd every edit of a marking-code product.
+        # The column is tolerated as well: it is what older payloads and cached
+        # modal state still carry, and it is never written for a derived product
+        # anyway, so refusing it would buy nothing. Anything else is a hand-typed
+        # number and is refused loudly.
+        if stock_is_derived and "stock_quantity" in data:
+            unchanged_values = (
+                ProductFiscalService.published_stock_quantity(product),
+                product.stock_quantity,
+            )
+            if data["stock_quantity"] not in unchanged_values:
+                return validation_error_response(ProductFiscalService.STOCK_DERIVED_MESSAGE)
+
         # Update fields
         if "name" in data:
             product.name = data["name"]
@@ -3041,7 +3082,10 @@ def update_product(product_id):
             product.tracks_returnable_bottles = data["tracks_returnable_bottles"]
         if "returnable_bottles_per_unit" in data:
             product.returnable_bottles_per_unit = data["returnable_bottles_per_unit"]
-        if "stock_quantity" in data and not product.requires_marking_codes:
+        # The marking-code pool owns the column for a derived product; this
+        # endpoint must not write it even with an echoed value. Same
+        # `stock_is_derived` the guard above used, so the two cannot disagree.
+        if "stock_quantity" in data and not stock_is_derived:
             product.stock_quantity = data["stock_quantity"]
         if "expire_days" in data:
             product.expire_days = data["expire_days"]
@@ -3285,11 +3329,8 @@ def update_product_stock(product_id):
         if not isinstance(new_stock, int) or new_stock < 0:
             return validation_error_response("Invalid stock quantity")
 
-        if product.requires_marking_codes:
-            return validation_error_response(
-                "Stock quantity is derived from available marking codes for this product. "
-                "Add or manage marking codes instead of setting stock directly."
-            )
+        if ProductFiscalService.is_stock_derived(product):
+            return validation_error_response(ProductFiscalService.STOCK_DERIVED_MESSAGE)
 
         product.stock_quantity
         product.stock_quantity = new_stock
@@ -5240,51 +5281,6 @@ def retry_payment_fiscalization(payment_id):
         db.session.rollback()
         current_app.logger.error(f"Retry payment fiscalization error: {e}")
         return internal_error_response("Failed to retry payment fiscalization")
-
-
-@admin_bp.route("/payments/<int:payment_id>/refund", methods=["POST"])
-@jwt_required()
-@validate_admin_action(["manage_orders"])
-def refund_payment(payment_id):
-    """Process a payment refund"""
-    try:
-        data = request.get_json() or {}
-        refund_amount = data.get("amount")
-        reason = data.get("reason", "Refund requested by administrator")
-
-        if not refund_amount:
-            return validation_error_response("Refund amount is required")
-
-        payment = Payment.query.get(payment_id)
-        if not payment:
-            return not_found_response("Payment not found")
-
-        # Validate refund amount
-        try:
-            refund_amount = int(refund_amount)
-            if refund_amount <= 0:
-                return validation_error_response("Refund amount must be greater than 0")
-            if refund_amount > payment.amount:
-                return validation_error_response("Refund amount cannot exceed payment amount")
-        except ValueError:
-            return validation_error_response("Invalid refund amount")
-
-        # Process refund using payment service
-        payment_service = PaymentService()
-        success = payment_service.process_refund(payment_id=payment_id, amount=refund_amount, reason=reason)
-
-        if success:
-            current_app.logger.info(f"Payment refunded by admin: {payment_id}, Amount: {refund_amount}")
-            return success_response(
-                data={"payment_id": payment.payment_id, "refund_amount": refund_amount},
-                message="Refund processed successfully",
-            )
-        else:
-            return internal_error_response("Refund processing failed")
-
-    except Exception as e:
-        current_app.logger.error(f"Refund payment error: {e}")
-        return internal_error_response(f"Failed to process refund: {str(e)}")
 
 
 @admin_bp.route("/payments/<int:payment_id>/status", methods=["GET"])

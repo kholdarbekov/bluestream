@@ -251,7 +251,12 @@ def _build_dual_sku_product_group(language="en"):
         effective_price = float(product.discount_price or product.base_price or 0)
         if effective_price > 0:
             prices.append(effective_price)
-        in_stock = (product.stock_quantity or 0) > 0
+        # A marking-code product's stock is its code pool, not stock_quantity, and
+        # the pool gates only code-consuming rails -- so it must not be advertised
+        # OutOfStock on / and /shop while the detail page sells it for cash. The
+        # size filter above is exactly the two bottle SKUs, one of which IS the
+        # marking-code product. Same SSOT as the product page and the JSON feed.
+        in_stock = not product.stock_caps_purchase() or (product.stock_quantity or 0) > 0
         any_in_stock = any_in_stock or in_stock
 
         product_url = (
@@ -615,9 +620,22 @@ def payment_cancel():
         order = Order.query.filter_by(id=order_id, user_id=current_user_id).first()
 
         if order:
-            # Show payment cancelled message
+            # Show payment cancelled message.
+            #
+            # `payable` is the PUBLISHED answer (`order_is_payable_online`, the
+            # single authority) and it gates the Retry button below. The button
+            # is not the guard — `POST /orders/<id>/retry-payment` refuses a
+            # resolved order on its own — but offering a customer a button that
+            # can only fail, on a page that also tells them the order is
+            # "Pending Payment", is how a cancelled order reads as a live one.
+            from business_app.utils.payment_projection import order_is_payable_online
+
             flash("Payment was cancelled. You can try again or choose a different payment method.", "warning")
-            return render_template("frontend/payment_cancelled.html", order=order)
+            return render_template(
+                "frontend/payment_cancelled.html",
+                order=order,
+                payable=order_is_payable_online(order, getattr(order, "payment", None)),
+            )
 
     flash("Order not found", "error")
     return redirect(url_for("frontend.cart"))
@@ -1767,7 +1785,16 @@ def google_products_feed():
             base_price_value = discount_price_value
             discount_price_value = 0.0
         use_sale_price = discount_price_value > 0 and discount_price_value < base_price_value
-        product_availability = "in stock" if (product.stock_quantity or 0) > 0 else "out of stock"
+        # Google Merchant suppresses an out-of-stock item, so a marking-code
+        # product -- whose stock is its code pool, not this column -- must not be
+        # advertised out of stock while we sell it for cash. `product_data` already
+        # carries the SSOT flag (Product.stock_caps_purchase), so this costs no
+        # extra query.
+        product_availability = (
+            "in stock"
+            if (not product_data.get("stock_caps_purchase", True) or (product.stock_quantity or 0) > 0)
+            else "out of stock"
+        )
 
         if product.slug:
             product_link = _absolute_public_url(url_for("frontend.product_detail_slug", slug=product.slug))
@@ -2027,7 +2054,15 @@ def public_products_feed():
         discount_price = float(discount_price_raw) if discount_price_raw is not None else 0.0
         sale_price = discount_price if (0 < discount_price < base_price) else None
 
-        availability = "InStock" if (product.stock_quantity or 0) > 0 else "OutOfStock"
+        # A marking-code product's stock is its code pool, not stock_quantity, so
+        # it must not be advertised as OutOfStock to crawlers/assistants while the
+        # product detail page still sells it for cash. `product_dict` already
+        # carries the SSOT flag (Product.stock_caps_purchase).
+        availability = (
+            "InStock"
+            if (not product_dict.get("stock_caps_purchase", True) or (product.stock_quantity or 0) > 0)
+            else "OutOfStock"
+        )
 
         # Size-aware structured fields. The codebase's ProductSizeEnum carries
         # values like "10L"/"19L"; we expose both the human label and a

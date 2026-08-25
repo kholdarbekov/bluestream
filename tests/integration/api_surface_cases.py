@@ -246,7 +246,6 @@ API_SURFACE_CASES = [
     ('POST', '/api/v1/admin/notification-templates/1/preview', 'admin.preview_notification_template'),
     ('POST', '/api/v1/admin/notification-templates/1/test-send', 'admin.test_send_notification_template'),
     ('POST', '/api/v1/admin/orders', 'admin.create_order_for_user'),
-    ('POST', '/api/v1/admin/payments/1/refund', 'admin.refund_payment'),
     ('POST', '/api/v1/admin/price-rules', 'admin.create_price_rule'),
     ('POST', '/api/v1/admin/products', 'admin.create_product'),
     ('POST', '/api/v1/admin/reports/generate', 'admin.generate_report'),

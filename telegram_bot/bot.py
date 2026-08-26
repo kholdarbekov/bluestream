@@ -57,6 +57,7 @@ from config import config
 from database import db_manager, BotUserRepository
 from i18n import i18n
 from api_client import api_client
+from support_capture import capture_support_message
 from webhook_server import webhook_server
 from token_manager import TokenManager
 from handlers import (
@@ -74,7 +75,7 @@ from handlers.profile import (
     ADDRESS_DELIVERY_INSTRUCTIONS, ADDRESS_GEOCODE_CONFIRM
 )
 from eligibility import main_menu_for
-from utils import error_handler, rate_limiter, user_middleware, get_auth_token
+from utils import error_handler, rate_limiter, user_middleware, get_auth_token, is_awaiting_location_stale
 from keyboards import MenuKeyboards, PRODUCT_PAGE_PATTERN
 
 logger = logging.getLogger('bot')
@@ -235,15 +236,91 @@ class WaterBusinessBot:
         particular NOT the `ConversationHandler.TIMEOUT` handlers — PTB
         dispatches those itself and warns that ApplicationHandlerStop there has
         no effect — and not steps whose update kind no group-0 handler claims
-        (CONTACT, LOCATION, and the callback patterns that appear only inside a
+        (CONTACT and the callback patterns that appear only inside a
         conversation), because stopping dispatch there would buy nothing and
-        would silence the group -1 callback logger for no reason.
+        would silence the group -1 callback logger for no reason. Also NOT the
+        address conversation's entry-point LOCATION handler — that one's stop
+        decision is conditional, not unconditional, so it manages its own
+        `ApplicationHandlerStop` in `_route_address_location_entry` instead.
         """
         @functools.wraps(callback)
         async def _stop_after_this_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE):
             raise ApplicationHandlerStop(await callback(update, context))
 
         return _stop_after_this_conversation
+
+    def _route_address_location_entry(self, callback):
+        """Entry point for a bare LOCATION update onto the address conversation.
+
+        `filters.LOCATION` matches EVERY pin a customer shares, so this entry
+        point cannot rely on "no conversation is active" the way a plain
+        `ConversationHandler` normally would — a pin the bot never asked for
+        looks identical, from PTB's perspective, to one it did (the
+        zero-address-checkout keyboard, for instance, shows the pin prompt
+        WITHOUT ever starting this conversation). Decide from an explicit
+        marker instead:
+
+        * `awaiting_location` in `context.user_data` — the bot just asked for
+          this pin (`utils.arm_location_request`, called at every site that
+          sends `ProfileKeyboards.location_request(...)`, and cleared at every
+          teardown site by `ProfileHandlers._clear_address_flow_keys` so it
+          never outlives the flow that armed it). Consume the marker and hand
+          off to `location_received` — UNLESS the arming has gone stale (see
+          below), in which case treat it as though it were never armed.
+        * `temp_address_data` in `context.user_data` — an address draft is
+          already mid-flow (a re-entrant pin, which `allow_reentry=True`
+          routes back through THIS entry point rather than
+          `states[ADDRESS_LOCATION]`). Also hand off to `location_received`.
+        * Neither — a spontaneous pin nobody asked for. Route it through the
+          same guarded capture every other unsolicited attachment uses
+          (`_capture_support_with_guards`) and end with no conversation
+          started, so it is never mistaken for an address later.
+
+        `filters.LOCATION` matches `edited_message` too (a live-location share
+        emits one of those per tick), which carries no `update.message` at
+        all — bail out before touching either branch, or a null message falls
+        into `capture_support_message` and posts one junk
+        `message_type=unsupported` row per tick.
+
+        Staleness: `arm_location_request` is the ONLY site that sets
+        `awaiting_location`, and the zero-address-checkout call site never
+        starts a `ConversationHandler` — it just shows a keyboard and waits.
+        If the customer neither pins nor cancels, no timeout ever fires and
+        `_clear_address_flow_keys` is never reached, so the flag would
+        otherwise survive for the life of the process. Treat an arming older
+        than `utils.AWAITING_LOCATION_STALE_MINUTES` as not armed at all —
+        same pattern `handlers/support.py::_is_stale` uses for the concern
+        flow.
+
+        Product ruling 2026-08-25: a pin only belongs to the address flow when
+        the bot actually asked for one; an unprompted pin is a support
+        message. See tests/telegram_bot/test_support_attachment_dispatch.py.
+
+        Every branch raises `ApplicationHandlerStop`: this handler fully owns
+        the update whichever way it decides.
+        """
+        bot = self
+
+        @functools.wraps(callback)
+        async def _route(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if update.message is None:
+                raise ApplicationHandlerStop(ConversationHandler.END)
+
+            armed = context.user_data.pop('awaiting_location', False)
+            armed_at = context.user_data.pop('awaiting_location_at', None)
+            if armed and is_awaiting_location_stale(armed_at):
+                armed = False
+            mid_flow = 'temp_address_data' in context.user_data
+            if armed or mid_flow:
+                raise ApplicationHandlerStop(await callback(update, context))
+
+            try:
+                await bot._capture_support_with_guards(update, context)
+            except Exception as e:
+                logger.error(f"Error handling spontaneous location message: {e}")
+            raise ApplicationHandlerStop(ConversationHandler.END)
+
+        return _route
 
     @staticmethod
     def _flow_timeout(message_key: str, *state_keys: str, offer_menu: bool = True):
@@ -772,11 +849,27 @@ class WaterBusinessBot:
         address_handler = ConversationHandler(
             entry_points=[
                 CallbackQueryHandler(profile_handlers.add_address, pattern="^add_new_address(_checkout)?$"),
-                # A pin (or a manual/cancel tap) can arrive BEFORE the flow has
-                # started, because zero-address checkout arms the keyboard
-                # itself. Without these the tap escapes to the group-0 catch-all
-                # and is silently filed as a support ticket.
-                MessageHandler(filters.LOCATION, profile_handlers.location_received),
+                # A pin can arrive BEFORE the flow has "started" in the
+                # ConversationHandler sense, because zero-address checkout
+                # shows the pin keyboard without ever entering this
+                # conversation. `allow_reentry=True` below means THIS entry
+                # point — not the states block's copy further down — is what
+                # actually runs for every location update this conversation
+                # ever sees, tap or no tap. `_route_address_location_entry`
+                # decides per-update whether the bot actually asked for this
+                # pin (address flow) or it is spontaneous (support ticket) —
+                # see that method's docstring.
+                #
+                # filters.VENUE is explicit here rather than relied-upon: a
+                # venue share ALSO sets `message.location` (Telegram keeps
+                # that field for backward compatibility), which is an
+                # undocumented external guarantee, not a contract PTB or we
+                # control. Matching VENUE directly means venue capture keeps
+                # working even if Telegram ever stops duplicating the field.
+                MessageHandler(
+                    filters.LOCATION | filters.VENUE,
+                    self._route_address_location_entry(profile_handlers.location_received),
+                ),
                 MessageHandler(
                     filters.TEXT & MenuTapFilter(
                         'telegram.address.enter_manually_button'
@@ -789,9 +882,17 @@ class WaterBusinessBot:
                 ),
             ],
             states={
-                # Location sharing or manual entry choice
+                # Location sharing or manual entry choice. With
+                # `allow_reentry=True`, PTB re-checks entry_points on every
+                # update before falling back to this state's handlers, and the
+                # entry-point LOCATION handler above matches unconditionally —
+                # so this LOCATION registration never actually runs. Wrapped in
+                # `_consumes` anyway (belt-and-suspenders): if that shadowing
+                # ever stops holding, an unstopped pin here would reach the
+                # group-0 attachment catch-all and get filed as a support
+                # ticket right after being saved as an address.
                 ADDRESS_LOCATION: [
-                    MessageHandler(filters.LOCATION, profile_handlers.location_received),
+                    MessageHandler(filters.LOCATION, self._consumes(profile_handlers.location_received)),
                     # "Enter manually" (initial choice) and "Re-enter address"
                     # (the retry keyboard) are one handler: two labels, the same
                     # destination. They were two identical registrations, which
@@ -1114,13 +1215,40 @@ class WaterBusinessBot:
         # Contact messages are handled by ConversationHandlers in higher priority groups
         # (registration_handler and phone_verification_handler)
 
-        # Location messages are handled by conversation handlers in higher priority groups
+        # Location (and venue) messages are routed entirely by the address
+        # conversation's entry point in group -2 — see
+        # `_route_address_location_entry` — which decides per-update whether
+        # a pin is address-bound or a spontaneous support message. They are
+        # deliberately NOT in the filter set below: this handler would only
+        # ever see a location/venue update AFTER that entry point already
+        # claimed and stopped it, so including them here would be dead code
+        # that could only double-handle.
 
-        # Handle voice messages if enabled
-        if config.features.enable_voice_messages:
-            self.application.add_handler(
-                MessageHandler(filters.VOICE, self._handle_voice_message)
+        # Other attachments with no flow open are support messages. DEFAULT
+        # group and registered AFTER the text catch-all on purpose:
+        #   * the address and registration conversations own filters.CONTACT
+        #     in group -2 and stop propagation;
+        #   * within one group only the first matching handler runs.
+        # Sticker/Animation/Poll/Dice have no dedicated `message_type` — they
+        # fall through `build_support_payload` to UNSUPPORTED (type label
+        # only, no payload) so a customer's sticker is recorded rather than
+        # silently dropped, matching Goal 4. See
+        # tests/telegram_bot/test_support_attachment_dispatch.py.
+        self.application.add_handler(
+            MessageHandler(
+                filters.PHOTO
+                | filters.Document.ALL
+                | filters.VIDEO
+                | filters.VIDEO_NOTE
+                | filters.AUDIO
+                | filters.VOICE
+                | filters.Sticker.ALL
+                | filters.ANIMATION
+                | filters.POLL
+                | filters.Dice.ALL,
+                self._handle_attachment_message,
             )
+        )
 
     async def _setup_bot_commands(self):
         """Set up bot command menu"""
@@ -1207,21 +1335,65 @@ class WaterBusinessBot:
             await update.message.reply_text(i18n.get('telegram.error_occurred', language))
 
     async def _capture_support_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
-                                       text: str):
-        """Silently persist an unsolicited free-text message so an admin can reply
-        from the admin UI. No auto-acknowledgement is sent to the customer."""
+                                       text: str = None):
+        """Silently persist an unsolicited message so an admin can reply from the
+        admin UI. Extraction and posting live in `support_capture` — see that
+        module's docstring for why."""
+        await capture_support_message(update, context)
+
+    async def _capture_support_with_guards(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Guard sequence shared by every path that silently files an
+        unsolicited update to the support inbox: rate limit -> user_middleware
+        -> the armed "Report an issue" concern-flow check -> capture.
+
+        Used by `_handle_attachment_message` (photo/document/video/audio/
+        voice) AND `_route_address_location_entry`'s spontaneous-pin branch.
+        Before this was extracted, the pin branch called
+        `capture_support_message` directly and skipped every one of these —
+        with "Report an issue" armed, a photo correctly acked under the
+        `[Order #N]` prefix and cleared the concern state, but a pin was filed
+        bare, unacked, left the concern armed, and the customer's NEXT
+        unrelated message was then wrongly acked under that order number. Pins
+        also got no rate limiting at all. One implementation, two call sites.
+        """
+        user_id = update.effective_user.id
+
+        if not await rate_limiter.allow_request(user_id):
+            language = await i18n.get_user_language(user_id)
+            await update.message.reply_text(
+                i18n.get('telegram.bot.rate_limit_exceeded', language)
+            )
+            return
+
+        user = await user_middleware(update)
+        if not user:
+            return
+
+        user_state = await self.user_repository.get_user_state(user_id)
+        if user_state.get('awaiting_input') == 'support_message':
+            # The armed "Report an issue" concern flow: same prefix, same ack.
+            await support_flow_handlers.handle_support_attachment(update, context)
+            return
+
+        await capture_support_message(update, context)
+
+    async def _handle_attachment_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Capture a photo/document/voice/video sent with no flow open.
+
+        Location and venue pins are NOT handled here — see
+        `_route_address_location_entry` — because a pin's disposition depends
+        on whether the bot asked for it, which only the address conversation's
+        entry point can decide. Both paths share the same guard sequence via
+        `_capture_support_with_guards`.
+
+        Mirrors `_handle_text_message`'s guards exactly. An attachment arriving
+        while some OTHER flow awaits text is still support: that flow did not
+        ask for a photo.
+        """
         try:
-            async with api_client as client:
-                user_token = await get_auth_token(update, context, client)
-                if user_token:
-                    await client.record_support_message(user_token, text)
-                else:
-                    logger.warning(
-                        "Support capture skipped: no auth token for user %s",
-                        update.effective_user.id,
-                    )
-        except Exception as exc:
-            logger.error(f"Failed to record support message: {exc}")
+            await self._capture_support_with_guards(update, context)
+        except Exception as e:
+            logger.error(f"Error handling attachment message: {e}")
 
     async def _handle_otp_verification(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
                                        text: str, language: str):
@@ -1401,21 +1573,6 @@ class WaterBusinessBot:
             logger.error(f"Error handling location: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
-
-    async def _handle_voice_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle voice messages (if voice feature is enabled)"""
-        try:
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
-
-            # For now, just acknowledge voice message
-            # In the future, could integrate speech-to-text
-            await update.message.reply_text(
-                i18n.get('telegram.bot.voice.not_supported', language),
-            )
-
-        except Exception as e:
-            logger.error(f"Error handling voice message: {e}")
 
     def run(self):
         """Run the bot (synchronous wrapper for async run)"""

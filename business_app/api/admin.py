@@ -6,6 +6,7 @@ This file should be placed in business_app/api/admin.py
 from typing import List
 
 from flask import Blueprint, request, current_app, g, Response
+from werkzeug.exceptions import HTTPException
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy import and_, or_, desc, func, text, cast, String
 from sqlalchemy.exc import IntegrityError
@@ -61,10 +62,15 @@ from business_app.serializers.admin_serializers import (
     InactiveCustomersQuerySchema,
     CustomerMapPinSchema,
 )
-from business_app.utils.service_factory import get_analytics_service, get_support_conversation_service
+from business_app.utils.service_factory import (
+    get_analytics_service,
+    get_support_conversation_service,
+    get_support_attachment_service,
+)
 from business_app.serializers.support_serializers import (
     AdminSupportReplyRequest,
     AdminStartConversationRequest,
+    AdminSupportLocationRequest,
 )
 from pydantic import ValidationError as PydanticValidationError
 
@@ -95,11 +101,18 @@ from shared.enums import (
     PaymentStatus,
 )
 from business_app import db
-from business_app.utils.helpers import get_current_language
+from business_app.utils.helpers import get_current_language, is_allowed_file, sanitize_filename
 from business_app.utils.user_types import normalize_user_type
 from business_app.utils.user_search import build_user_search_filter
 from business_app.utils.translations import get_translation
-from business_app.utils.exceptions import ValidationError, ConflictError, NotFoundError, ForbiddenError
+from business_app.utils.exceptions import (
+    ValidationError,
+    ConflictError,
+    NotFoundError,
+    ForbiddenError,
+    AttachmentTooLargeError,
+    AttachmentUnavailableError,
+)
 from business_app.utils.api_responses import (
     success_response,
     error_response,
@@ -13075,6 +13088,31 @@ def get_support_thread(conversation_id):
         return internal_error_response("Failed to load conversation")
 
 
+@admin_bp.route("/support/messages/<int:message_id>/attachment", methods=["GET"])
+@jwt_required()
+@validate_admin_action(["manage_support"])
+def get_support_attachment(message_id):
+    """Stream one support attachment, resolved from Telegram by the stored file_id.
+
+    Takes only a message id — never a caller-supplied file_id, which would make
+    our bot token an open Telegram download proxy.
+    """
+    try:
+        return get_support_attachment_service().stream_attachment(message_id)
+    except NotFoundError as exc:
+        return not_found_response(resource_type="Attachment", message=str(exc))
+    except AttachmentTooLargeError as exc:
+        return error_response(message=str(exc), status_code=413)
+    except AttachmentUnavailableError as exc:
+        # str(exc) is already scrubbed of the bot token by the service before
+        # it raises — never log a raw requests exception here.
+        current_app.logger.warning("support attachment unavailable for %s: %s", message_id, exc)
+        return not_found_response(message="Attachment is no longer available")
+    except Exception:  # noqa: BLE001
+        current_app.logger.exception("support attachment stream failed for %s", message_id)
+        return internal_error_response("Failed to load attachment")
+
+
 @admin_bp.route("/support/conversations/<int:conversation_id>/read", methods=["POST"])
 @jwt_required()
 @validate_admin_action(["manage_support"])
@@ -13113,6 +13151,92 @@ def reply_support_conversation(conversation_id):
     except Exception:  # noqa: BLE001
         current_app.logger.exception("support reply failed for %s", conversation_id)
         return internal_error_response("Failed to send message")
+
+
+@admin_bp.route("/support/conversations/<int:conversation_id>/attachment", methods=["POST"])
+@jwt_required()
+@validate_admin_action(["manage_support"])
+def send_support_attachment(conversation_id):
+    """Send an image/document to the customer via the customer bot."""
+    try:
+        uploaded = request.files.get("file")
+        if not uploaded:
+            return validation_error_response("A file is required")
+        file_bytes = uploaded.read()
+        if not file_bytes:
+            return validation_error_response("The uploaded file is empty")
+
+        # No path-traversal risk to guard against: these bytes stream straight
+        # to Telegram and never touch disk. `secure_filename` was dropped
+        # because it silently destroys non-ASCII names (our customers are
+        # Uzbek/Russian-speaking) — e.g. "отчёт.pdf" -> "pdf". Only normalize
+        # away path separators and cap the length to the DB column width.
+        raw_filename = sanitize_filename(uploaded.filename or "").strip()
+        filename = (raw_filename or "attachment")[:255]
+
+        # Spec §5: reuse the app's extension allowlist rather than accepting
+        # any file type. An admin could otherwise push an arbitrary file to a
+        # customer via the support bot.
+        allowed_extensions = current_app.config.get("ALLOWED_EXTENSIONS", set())
+        if not is_allowed_file(filename, allowed_extensions):
+            return validation_error_response(
+                "File type not allowed. Allowed types: " f"{', '.join(sorted(allowed_extensions))}"
+            )
+
+        admin_id = int(get_jwt_identity())
+        result = get_support_conversation_service().send_media_to_user(
+            conversation_id,
+            admin_id,
+            file_bytes=file_bytes,
+            filename=filename,
+            mime_type=uploaded.mimetype,
+            caption=(request.form.get("caption") or "").strip() or None,
+        )
+        return success_response(
+            data={"message": result["message"].to_dict(), "delivery": result["delivery"]},
+            message="Attachment sent",
+        )
+    except NotFoundError as exc:
+        return not_found_response(resource_type="Conversation", message=str(exc))
+    except ValidationError as exc:
+        return validation_error_response(str(exc))
+    except HTTPException:
+        # e.g. Werkzeug's own RequestEntityTooLarge (413) when the body
+        # exceeds MAX_CONTENT_LENGTH, raised lazily on the request.files
+        # access above. Must reach Flask's normal handling with its real
+        # status code, never get swallowed into a generic 500 below.
+        raise
+    except Exception:  # noqa: BLE001
+        current_app.logger.exception("support attachment send failed for %s", conversation_id)
+        return internal_error_response("Failed to send attachment")
+
+
+@admin_bp.route("/support/conversations/<int:conversation_id>/location", methods=["POST"])
+@jwt_required()
+@validate_admin_action(["manage_support"])
+def send_support_location(conversation_id):
+    """Send a map pin to the customer via the customer bot."""
+    try:
+        payload = AdminSupportLocationRequest(**(request.get_json(silent=True) or {}))
+        admin_id = int(get_jwt_identity())
+        result = get_support_conversation_service().send_media_to_user(
+            conversation_id, admin_id, latitude=payload.latitude, longitude=payload.longitude
+        )
+        return success_response(
+            data={"message": result["message"].to_dict(), "delivery": result["delivery"]},
+            message="Location sent",
+        )
+    except PydanticValidationError as exc:
+        return validation_error_response(str(exc))
+    except NotFoundError as exc:
+        return not_found_response(resource_type="Conversation", message=str(exc))
+    except ValidationError as exc:
+        return validation_error_response(str(exc))
+    except HTTPException:
+        raise
+    except Exception:  # noqa: BLE001
+        current_app.logger.exception("support location send failed for %s", conversation_id)
+        return internal_error_response("Failed to send location")
 
 
 @admin_bp.route("/support/conversations", methods=["POST"])

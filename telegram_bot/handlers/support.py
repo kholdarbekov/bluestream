@@ -15,13 +15,11 @@ from api_client import api_client
 from handlers.base import BaseHandler
 from i18n import i18n
 from keyboards import KeyboardBuilder
+from support_capture import capture_support_message
 from utils import get_auth_token
 
 logger = logging.getLogger('handlers')
 
-# Support content is capped by the serializer (support_serializers.py:5) AND by
-# Telegram's own 4096-char message limit, so prefix + user text must fit 4096.
-_MAX_SUPPORT_CONTENT = 4096
 # A Report tap arms the state; typing much later means the order reference is no
 # longer trustworthy, so we fall back to an unprefixed silent capture.
 _SUPPORT_STALE_MINUTES = 30
@@ -103,31 +101,33 @@ class SupportHandlers(BaseHandler):
             return
 
         prefix = f"[Order #{order_number}] "
-        # Serializer cap (4096) also bounds a single Telegram message; prefix +
-        # full-length text would 422, so truncate the user text to fit.
-        truncated = text[: max(0, _MAX_SUPPORT_CONTENT - len(prefix))]
-        content = prefix + truncated
-
-        try:
-            async with api_client as client:
-                user_token = await get_auth_token(update, context, client)
-                if not user_token:
-                    await update.message.reply_text(i18n.get('telegram.support.send_failed', language))
-                    await self.user_repo.update_user_state(user_id, {})
-                    return
-                response = await client.record_support_message(user_token, content)
-
-            if response.success:
-                await self.user_repo.update_user_state(user_id, {})
-                await update.message.reply_text(i18n.get('telegram.support.ack', language))
-            else:
-                logger.warning("Support concern rejected for user %s: %s", user_id, response.error)
-                await update.message.reply_text(i18n.get('telegram.support.send_failed', language))
-                await self.user_repo.update_user_state(user_id, {})
-        except Exception as exc:
-            logger.error("Failed to post support concern for user %s: %s", user_id, exc)
+        ok = await capture_support_message(update, context, prefix=prefix)
+        await self.user_repo.update_user_state(user_id, {})
+        if ok:
+            await update.message.reply_text(i18n.get('telegram.support.ack', language))
+        else:
+            logger.warning("Support concern capture failed for user %s", user_id)
             await update.message.reply_text(i18n.get('telegram.support.send_failed', language))
+
+    async def handle_support_attachment(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """An attachment sent while the concern flow is armed: same order prefix
+        and same acknowledgement as the text path."""
+        user_id = update.effective_user.id
+        language = await i18n.get_user_language(user_id)
+
+        state = await self.user_repo.get_user_state(user_id)
+        order_number = state.get('support_order_number')
+
+        if self._is_stale(state.get('support_armed_at')) or not order_number:
             await self.user_repo.update_user_state(user_id, {})
+            await capture_support_message(update, context)
+            return
+
+        ok = await capture_support_message(update, context, prefix=f"[Order #{order_number}] ")
+        await self.user_repo.update_user_state(user_id, {})
+        await update.message.reply_text(
+            i18n.get('telegram.support.ack' if ok else 'telegram.support.send_failed', language)
+        )
 
     @staticmethod
     def _is_stale(armed_at_raw) -> bool:
@@ -142,22 +142,9 @@ class SupportHandlers(BaseHandler):
             armed_at = armed_at.replace(tzinfo=timezone.utc)
         return (datetime.now(timezone.utc) - armed_at) > timedelta(minutes=_SUPPORT_STALE_MINUTES)
 
-    async def _silent_capture(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
-        """Persist unprefixed free text for admin reply; no ack. Cross-module reuse
-        of bot._capture_support_message would be circular, so the pattern is
-        replicated here."""
-        try:
-            async with api_client as client:
-                user_token = await get_auth_token(update, context, client)
-                if user_token:
-                    await client.record_support_message(user_token, text)
-                else:
-                    logger.warning(
-                        "Support capture skipped: no auth token for user %s",
-                        update.effective_user.id,
-                    )
-        except Exception as exc:
-            logger.error(f"Failed to record support message: {exc}")
+    async def _silent_capture(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str = None):
+        """Persist unprefixed input for admin reply; no ack."""
+        await capture_support_message(update, context)
 
     async def cancel_issue_report(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Cancel an armed concern flow: clear state and confirm."""

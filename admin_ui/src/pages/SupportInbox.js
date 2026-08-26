@@ -3,14 +3,19 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import {
-  Row, Col, Card, List, Input, Button, Space, Badge, Empty, Typography, Tag, Modal, Select, message, Spin,
+  Row, Col, Card, Input, Button, Space, Empty, Modal, Select, message, Spin, Typography,
 } from 'antd';
-import { SendOutlined, PlusOutlined, MessageOutlined } from '@ant-design/icons';
+import { PlusOutlined, MessageOutlined } from '@ant-design/icons';
 import adminService from '../services/adminService';
 import { extractApiErrorMessages } from '../utils/apiError';
+import ConversationList from '../components/support/ConversationList';
+import MessageThread from '../components/support/MessageThread';
+import SupportAttachment from '../components/support/SupportAttachment';
+import LocationBubble from '../components/support/LocationBubble';
+import SupportComposer from '../components/support/SupportComposer';
 
-const { Text } = Typography;
 const { TextArea } = Input;
+const { Text } = Typography;
 
 const SupportInbox = () => {
   const { t } = useTranslation('common');
@@ -19,7 +24,6 @@ const SupportInbox = () => {
   const [search, setSearch] = useState('');
   const [searchInput, setSearchInput] = useState('');
   const [activeId, setActiveId] = useState(null);
-  const [reply, setReply] = useState('');
   const [newOpen, setNewOpen] = useState(false);
   const [newUserId, setNewUserId] = useState(null);
   const [newContent, setNewContent] = useState('');
@@ -55,19 +59,6 @@ const SupportInbox = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId]);
 
-  const replyMutation = useMutation({
-    mutationFn: ({ id, content }) => adminService.replySupportMessage(id, content),
-    onSuccess: (resp, variables) => {
-      const delivered = resp?.data?.delivery?.success;
-      if (delivered) message.success(t('ui.support.sent', 'Message sent'));
-      else message.warning(t('ui.support.delivery_failed', 'Not delivered'));
-      setReply('');
-      queryClient.invalidateQueries({ queryKey: ['support-thread', variables.id] });
-      queryClient.invalidateQueries({ queryKey: ['support-conversations'] });
-    },
-    onError: (error) => message.error(extractApiErrorMessages(error, t('ui.support.send_failed', 'Failed to send message'))[0]),
-  });
-
   const startMutation = useMutation({
     mutationFn: ({ userId, content }) => adminService.startSupportConversation(userId, content),
     onSuccess: (resp) => {
@@ -102,6 +93,22 @@ const SupportInbox = () => {
 
   const submitSearch = () => setSearch(searchInput.trim());
 
+  const renderBody = (m) => {
+    if (m.message_type === 'location') return <LocationBubble message={m} />;
+    if (m.has_attachment) return <SupportAttachment message={m} />;
+    // An `unsupported` message (a sticker, animation, poll, dice) has no
+    // attachment and no content — without this branch it renders as an
+    // empty bubble with just a timestamp, which reads as a blank message.
+    if (m.message_type === 'unsupported') {
+      return (
+        <Text type="secondary" italic>
+          {t('ui.support.unsupported_attachment', 'Unsupported attachment')}
+        </Text>
+      );
+    }
+    return null;
+  };
+
   return (
     <Card
       title={t('ui.support.title', 'Support Inbox')}
@@ -126,32 +133,8 @@ const SupportInbox = () => {
 
           {convLoading ? (
             <Spin />
-          ) : conversations.length === 0 ? (
-            <Empty description={t('ui.support.no_conversations', 'No conversations yet')} />
           ) : (
-            <List
-              dataSource={conversations}
-              renderItem={(c) => (
-                <List.Item
-                  onClick={() => setActiveId(c.id)}
-                  style={{
-                    cursor: 'pointer',
-                    background: c.id === activeId ? '#e6f4ff' : undefined,
-                    padding: '8px 12px',
-                  }}
-                >
-                  <List.Item.Meta
-                    title={(
-                      <Space>
-                        <span>{c.user?.name}</span>
-                        {c.unread_count > 0 && <Badge count={c.unread_count} />}
-                      </Space>
-                    )}
-                    description={<Text type="secondary" ellipsis>{c.last_message_preview}</Text>}
-                  />
-                </List.Item>
-              )}
-            />
+            <ConversationList conversations={conversations} activeId={activeId} onSelect={setActiveId} />
           )}
         </Col>
 
@@ -164,50 +147,15 @@ const SupportInbox = () => {
                 <MessageOutlined /> {activeConv?.user?.name}
               </div>
               <div style={{ maxHeight: 420, overflowY: 'auto', padding: 8, background: '#fafafa', borderRadius: 6 }}>
-                {messages.length === 0 ? (
-                  <Empty description={t('ui.support.empty_thread', 'No messages in this conversation')} />
-                ) : (
-                  messages.map((m) => (
-                    <div key={m.id} style={{ textAlign: m.direction === 'outbound' ? 'right' : 'left', margin: '6px 0' }}>
-                      <div
-                        style={{
-                          display: 'inline-block',
-                          maxWidth: '75%',
-                          padding: '6px 10px',
-                          borderRadius: 8,
-                          background: m.direction === 'outbound' ? '#d6e4ff' : '#fff',
-                          border: '1px solid #eee',
-                          textAlign: 'left',
-                          whiteSpace: 'pre-wrap',
-                        }}
-                      >
-                        <div>{m.content}</div>
-                        {m.direction === 'outbound' && m.delivery_status === 'failed' && (
-                          <Tag color="red" style={{ marginTop: 4 }}>{t('ui.support.delivery_failed', 'Not delivered')}</Tag>
-                        )}
-                      </div>
-                    </div>
-                  ))
-                )}
+                <MessageThread messages={messages} renderBody={renderBody} />
               </div>
-              <Space.Compact style={{ width: '100%', marginTop: 12 }}>
-                <TextArea
-                  placeholder={t('ui.support.message_placeholder', 'Type a message…')}
-                  value={reply}
-                  onChange={(e) => setReply(e.target.value)}
-                  maxLength={4096}
-                  autoSize={{ minRows: 1, maxRows: 4 }}
-                />
-                <Button
-                  type="primary"
-                  icon={<SendOutlined />}
-                  loading={replyMutation.isPending}
-                  disabled={!reply.trim()}
-                  onClick={() => replyMutation.mutate({ id: activeId, content: reply.trim() })}
-                >
-                  {t('ui.support.send', 'Send')}
-                </Button>
-              </Space.Compact>
+              <SupportComposer
+                conversationId={activeId}
+                onSent={() => {
+                  queryClient.invalidateQueries({ queryKey: ['support-thread', activeId] });
+                  queryClient.invalidateQueries({ queryKey: ['support-conversations'] });
+                }}
+              />
             </div>
           )}
         </Col>

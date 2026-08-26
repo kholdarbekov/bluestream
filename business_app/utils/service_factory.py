@@ -160,6 +160,12 @@ def get_support_conversation_service():
     return ServiceFactory.get_service(SupportConversationService, "support_conversation_service")
 
 
+def get_support_attachment_service():
+    from business_app.services.support_attachment_service import SupportAttachmentService
+
+    return SupportAttachmentService()
+
+
 def get_loyalty_service():
     """Get LoyaltyService instance"""
     from business_app.services.loyalty_service import LoyaltyService

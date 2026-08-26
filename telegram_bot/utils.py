@@ -711,6 +711,61 @@ async def maybe_remove_stale_reply_keyboard(
         return False
 
 
+def arm_location_request(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Record that the BOT asked for a pin, so the next location update is
+    routed to the address flow rather than filed as a spontaneous support
+    message.
+
+    SSOT for the "did the bot ask for a pin?" question `bot.py`'s address
+    conversation entry point has to answer: `filters.LOCATION` matches every
+    pin a customer shares, prompted or not, so the entry point cannot rely on
+    "a conversation is active" the way a plain `ConversationHandler` normally
+    would — the zero-address-checkout keyboard shows the pin prompt WITHOUT
+    ever starting the conversation. Call this at every site that sends
+    `ProfileKeyboards.location_request(...)`. A missed site means that flow's
+    pin silently becomes a support ticket instead of an address.
+
+    Deliberately a DIFFERENT key from `address_flow_origin`: that one means
+    "route back to checkout after save" and must not be overloaded with a
+    second, unrelated job.
+
+    `awaiting_location_at` stamps when this arming happened. No
+    `ConversationHandler` is running at the zero-address-checkout site (the
+    keyboard is shown without ever entering the conversation), so there is no
+    timeout to fall back on if the customer neither pins nor cancels —
+    without a timestamp the flag would survive for the life of the process
+    and a much later, unrelated pin would wrongly reopen address creation.
+    `_route_address_location_entry` treats an arming older than
+    `AWAITING_LOCATION_STALE_MINUTES` as not armed at all, mirroring the
+    pattern `handlers/support.py`'s `_is_stale` already uses for the concern
+    flow.
+    """
+    context.user_data['awaiting_location'] = True
+    context.user_data['awaiting_location_at'] = datetime.now(timezone.utc).isoformat()
+
+
+# Mirrors `handlers/support.py::_SUPPORT_STALE_MINUTES` — same 30-minute
+# window, same rationale: a marker with no time-based expiry outlives the
+# flow that armed it once event-based teardown is skipped (no conversation
+# ever started, so no cancel/timeout ever fires).
+AWAITING_LOCATION_STALE_MINUTES = 30
+
+
+def is_awaiting_location_stale(armed_at_raw) -> bool:
+    """True when the `awaiting_location_at` stamp is missing/invalid or older
+    than `AWAITING_LOCATION_STALE_MINUTES`. Shared so bot.py's routing and any
+    test asserting staleness agree on one definition."""
+    if not armed_at_raw:
+        return True
+    try:
+        armed_at = datetime.fromisoformat(armed_at_raw)
+    except (TypeError, ValueError):
+        return True
+    if armed_at.tzinfo is None:
+        armed_at = armed_at.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - armed_at) > timedelta(minutes=AWAITING_LOCATION_STALE_MINUTES)
+
+
 async def validate_phone_number(phone: str) -> bool:
     """Validate phone number format (delegates to shared validator)"""
     from shared.validators import validate_phone_number as _validate

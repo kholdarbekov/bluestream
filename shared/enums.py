@@ -280,3 +280,23 @@ class DriverSessionMembershipStatus(Enum):
     ACTIVE  = 'active'   # Member is currently using the owner's session
     LEFT    = 'left'     # Member voluntarily left the session
     REVOKED = 'revoked'  # Session was closed/force-closed; membership auto-terminated
+
+
+class SupportMessageType(Enum):
+    """Kind of payload a support message carries.
+
+    Shared because the customer bot produces these values and the backend
+    validates them; `shared/` is the only tree mounted into both containers.
+    """
+    TEXT = 'text'
+    PHOTO = 'photo'
+    DOCUMENT = 'document'
+    LOCATION = 'location'
+    VOICE = 'voice'
+    VIDEO = 'video'
+    VIDEO_NOTE = 'video_note'
+    AUDIO = 'audio'
+    # A sticker/animation/anything else. Recorded with a type label and NO
+    # payload, so the admin sees "the customer sent something" instead of an
+    # unexplained silence they will misread.
+    UNSUPPORTED = 'unsupported'

@@ -30,6 +30,7 @@ from utils import (
     get_auth_token,
     otp_rate_limiter,
     maybe_remove_stale_reply_keyboard,
+    arm_location_request,
 )
 from config import config
 from handlers.base import BaseHandler
@@ -1904,6 +1905,7 @@ class ProfileHandlers(BaseHandler):
                 language,
                 extra_rows=(i18n.get('telegram.address.enter_manually_button', language),),
             )
+            arm_location_request(context)
 
             if update.callback_query:
                 logger.info(f"Editing message via callback query")
@@ -1969,6 +1971,7 @@ class ProfileHandlers(BaseHandler):
                     f"User {user_id} shared out-of-zone location: "
                     f"{location.latitude}, {location.longitude}"
                 )
+                arm_location_request(context)
                 await update.message.reply_text(
                     i18n.get('telegram.address.outside_delivery_area', language),
                     reply_markup=ProfileKeyboards.location_request(
@@ -2064,6 +2067,28 @@ class ProfileHandlers(BaseHandler):
             logger.error(f"Traceback: {traceback.format_exc()}")
             return ConversationHandler.END
 
+    @staticmethod
+    def _clear_address_flow_keys(context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Clear every key an address-creation flow may leave in `user_data`.
+
+        One place for all five keys so a future addition can never again be
+        forgotten at one of the flow's several teardown sites the way
+        `awaiting_location` originally was: it was armed by
+        `utils.arm_location_request` but only ever cleared by
+        `_route_address_location_entry` popping it off an ARRIVING pin
+        (bot.py) — every path that ends the flow WITHOUT a pin (cancel,
+        text-cancel, timeout, or a successful save) left it `True` forever,
+        so a customer who armed the checkout keyboard and then backed out
+        had every later, unrelated pin misrouted into address creation
+        instead of the support inbox. Call this at every such teardown site.
+        """
+        context.user_data.pop('temp_location', None)
+        context.user_data.pop('temp_address', None)
+        context.user_data.pop('temp_address_data', None)
+        context.user_data.pop('address_flow_origin', None)
+        context.user_data.pop('awaiting_location', None)
+        context.user_data.pop('awaiting_location_at', None)
+
     async def cancel_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Cancel address adding process"""
         try:
@@ -2092,10 +2117,7 @@ class ProfileHandlers(BaseHandler):
                 )
 
             # Clear all temporary address data
-            context.user_data.pop('temp_location', None)
-            context.user_data.pop('temp_address', None)
-            context.user_data.pop('temp_address_data', None)
-            context.user_data.pop('address_flow_origin', None)
+            self._clear_address_flow_keys(context)
 
             return ConversationHandler.END
 
@@ -2140,10 +2162,7 @@ class ProfileHandlers(BaseHandler):
                 )
 
             # Clear all temporary address data
-            context.user_data.pop('temp_location', None)
-            context.user_data.pop('temp_address', None)
-            context.user_data.pop('temp_address_data', None)
-            context.user_data.pop('address_flow_origin', None)
+            self._clear_address_flow_keys(context)
 
             return ConversationHandler.END
 
@@ -2170,10 +2189,7 @@ class ProfileHandlers(BaseHandler):
             addr_data = context.user_data.get('temp_address_data') or {}
             saved_address_id = addr_data.get('address_id')
 
-            context.user_data.pop('temp_address_data', None)
-            context.user_data.pop('temp_location', None)
-            context.user_data.pop('temp_address', None)
-            context.user_data.pop('address_flow_origin', None)
+            self._clear_address_flow_keys(context)
 
             logger.info(
                 f"Address flow timed out for user {user_id} "
@@ -2803,6 +2819,7 @@ class ProfileHandlers(BaseHandler):
             final_lng = addr_data.get('longitude')
             if final_lat is not None and final_lng is not None and not is_within_tashkent(final_lat, final_lng):
                 logger.info(f"User {user_id} geocoded to out-of-zone point: {final_lat}, {final_lng}")
+                arm_location_request(context)
                 await target.reply_text(
                     i18n.get('telegram.address.outside_delivery_area', language),
                     reply_markup=ProfileKeyboards.location_request(
@@ -2886,6 +2903,7 @@ class ProfileHandlers(BaseHandler):
             # Offer location sharing or manual re-entry
             retry_text = i18n.get('telegram.address.retry_location', language)
 
+            arm_location_request(context)
             keyboard = ProfileKeyboards.location_request(
                 language,
                 extra_rows=(
@@ -3041,12 +3059,10 @@ class ProfileHandlers(BaseHandler):
 
                 return ADDRESS_TITLE
 
-            resume_checkout_after_save = context.user_data.pop('address_flow_origin', None) == 'checkout'
+            resume_checkout_after_save = context.user_data.get('address_flow_origin') == 'checkout'
 
             # Clear temp data
-            context.user_data.pop('temp_address_data', None)
-            context.user_data.pop('temp_location', None)
-            context.user_data.pop('temp_address', None)
+            self._clear_address_flow_keys(context)
 
             if resume_checkout_after_save:
                 await self._resume_checkout_after_address(update, context)

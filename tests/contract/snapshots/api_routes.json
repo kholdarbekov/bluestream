@@ -1694,6 +1694,20 @@
     "rule": "/api/v1/admin/support/conversations"
   },
   {
+    "endpoint": "admin.send_support_attachment",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/support/conversations/<int:conversation_id>/attachment"
+  },
+  {
+    "endpoint": "admin.send_support_location",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/support/conversations/<int:conversation_id>/location"
+  },
+  {
     "endpoint": "admin.get_support_thread",
     "methods": [
       "GET"
@@ -1713,6 +1727,13 @@
       "POST"
     ],
     "rule": "/api/v1/admin/support/conversations/<int:conversation_id>/reply"
+  },
+  {
+    "endpoint": "admin.get_support_attachment",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/support/messages/<int:message_id>/attachment"
   },
   {
     "endpoint": "admin.get_system_settings",

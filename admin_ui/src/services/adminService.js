@@ -1527,6 +1527,33 @@ class AdminService {
     const response = await api.post('/admin/support/conversations', { user_id: userId, content });
     return response.data;
   }
+
+  async getSupportAttachmentBlob(messageId) {
+    const response = await api.get(`/admin/support/messages/${messageId}/attachment`, {
+      responseType: 'blob',
+    });
+    return response.data;
+  }
+
+  async sendSupportAttachment(conversationId, file, caption) {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (caption) formData.append('caption', caption);
+    const response = await api.post(
+      `/admin/support/conversations/${conversationId}/attachment`,
+      formData,
+      { headers: { 'Content-Type': 'multipart/form-data' }, withCredentials: true },
+    );
+    return response.data;
+  }
+
+  async sendSupportLocation(conversationId, latitude, longitude) {
+    const response = await api.post(
+      `/admin/support/conversations/${conversationId}/location`,
+      { latitude, longitude },
+    );
+    return response.data;
+  }
 }
 
 const adminService = new AdminService();

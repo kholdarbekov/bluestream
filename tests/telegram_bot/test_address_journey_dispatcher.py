@@ -218,7 +218,20 @@ async def test_a_failed_edit_cannot_take_the_saved_address_with_it(bot, user):
 async def test_a_pin_arriving_before_the_flow_starts_still_opens_it(bot, user):
     """Zero-address checkout arms the location keyboard before the conversation
     exists, so the pin must be an ENTRY POINT. Without it the pin escapes to
-    the group-0 catch-all and is filed as a support ticket."""
+    the group-0 catch-all and is filed as a support ticket.
+
+    2026-08-25 ruling: a pin only opens the address flow when the bot actually
+    ASKED for one (`utils.arm_location_request`, set by `checkout_handler`'s
+    zero-address branch below) — a pin with NOTHING armed is a spontaneous
+    support message instead (test_support_attachment_dispatch.py). So this
+    test now genuinely triggers that arming via `orders.checkout_handler`
+    rather than sending a bare pin with no setup; `FakeBackend` starts with
+    zero saved addresses, so one tap is enough to reach the branch — no cart
+    needed, since `checkout_handler` checks addresses before it ever looks at
+    the cart.
+    """
+    await bot.send(user.tap("checkout"))
+
     await bot.send(user.location(PIN_LAT, PIN_LNG))
 
     assert bot.conversation_state("address_conversation") == ADDRESS_TITLE

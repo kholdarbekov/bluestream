@@ -23,7 +23,20 @@ def create_support_message():
         data = request.get_json(silent=True) or {}
         payload = InboundSupportMessageRequest(**data)
         user_id = int(get_jwt_identity())
-        msg = get_support_conversation_service().record_inbound_message(user_id, payload.content)
+        msg = get_support_conversation_service().record_inbound_message(
+            user_id,
+            payload.content,
+            message_type=payload.message_type,
+            telegram_file_id=payload.telegram_file_id,
+            attachment_mime_type=payload.attachment_mime_type,
+            attachment_file_name=payload.attachment_file_name,
+            attachment_size=payload.attachment_size,
+            latitude=payload.latitude,
+            longitude=payload.longitude,
+            forwarded_from=payload.forwarded_from,
+            forwarded_origin_type=payload.forwarded_origin_type,
+            forwarded_date=payload.forwarded_date,
+        )
         return success_response(data=msg.to_dict(), message="Message received")
     except PydanticValidationError as exc:
         return validation_error_response(str(exc))

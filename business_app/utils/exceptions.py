@@ -345,3 +345,11 @@ class FileValidationError(WaterBusinessException):
         super().__init__(message, details, error_code)
         self.file_name = file_name
         self.validation_errors = validation_errors or []
+
+
+class AttachmentUnavailableError(Exception):
+    """Telegram cannot give us this file — dead file_id, rotated bot token, or an outage."""
+
+
+class AttachmentTooLargeError(Exception):
+    """Larger than the Bot API's 20 MB download ceiling."""

@@ -2992,7 +2992,19 @@ def test_the_api_contract_snapshot_still_lists_the_merge_preview_route(db):
     # one `if` from working. The lawful lever is to cancel the ORDER, which
     # settles the money as customer prepaid balance. Unrelated to place-merge;
     # only the estate-wide count moved.
-    assert len(routes) == 565
+    #
+    # 565 -> 568: the support-inbox rich-messages plan added three routes --
+    # GET /api/v1/admin/support/messages/<int:message_id>/attachment
+    # (admin.get_support_attachment, Task 7: proxies a stored attachment back
+    # to the admin UI so a customer's photo/document/voice note is viewable
+    # without exposing Telegram's file URLs directly), POST
+    # /api/v1/admin/support/conversations/<int:conversation_id>/attachment
+    # (admin.send_support_attachment) and POST
+    # /api/v1/admin/support/conversations/<int:conversation_id>/location
+    # (admin.send_support_location) (Task 8: let an operator reply to a
+    # customer's support conversation with a file or a pin, not just text).
+    # Unrelated to place-merge; only the estate-wide count moved.
+    assert len(routes) == 568
     entry = next(r for r in routes if r["rule"] == "/api/v1/admin/place-groups/merge-preview")
     assert entry["methods"] == ["GET"]
     assert entry["endpoint"] == "admin.get_place_group_merge_preview"

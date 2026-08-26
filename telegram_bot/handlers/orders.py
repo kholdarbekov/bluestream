@@ -17,7 +17,7 @@ from keyboards import (
 )
 from api_client import api_client
 from database import db_manager, BotUserRepository
-from utils import user_middleware, format_price, MessageBuilder, get_auth_token
+from utils import user_middleware, format_price, MessageBuilder, get_auth_token, arm_location_request
 from shared.constants import ORDER_STATUS_ICONS, DEFAULT_STATUS_ICON, DISPLAY_TIMEZONE
 from shared.business_config import MIN_ORDER_AMOUNT
 from handlers.base import BaseHandler
@@ -682,7 +682,9 @@ class OrderHandlers(BaseHandler):
                 # an inline card whose only real button led to the same prompt.
                 # The pin is a conversation ENTRY POINT (telegram_bot/bot.py),
                 # so it starts the address flow rather than falling through to
-                # the group-0 catch-all and being filed as a support ticket.
+                # the group-0 catch-all and being filed as a support ticket —
+                # but only because `arm_location_request` below marks this pin
+                # as one the bot actually asked for.
                 add_address_text = i18n.get('telegram.orders.no_address_prompt', language)
                 keyboard = ProfileKeyboards.location_request(
                     language,
@@ -691,6 +693,7 @@ class OrderHandlers(BaseHandler):
                         i18n.get('telegram.cancel', language),
                     ),
                 )
+                arm_location_request(context)
 
                 # Read by the address flow on save to route back into checkout
                 # instead of dumping the customer on the main menu with a full

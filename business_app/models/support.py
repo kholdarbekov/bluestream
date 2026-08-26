@@ -3,6 +3,7 @@ from __future__ import annotations
 import enum
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Column,
     DateTime,
@@ -10,6 +11,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
 )
@@ -17,6 +19,7 @@ from sqlalchemy.orm import relationship
 
 from business_app import db
 from business_app.models import TimestampMixin
+from shared.enums import SupportMessageType
 
 
 class SupportMessageDirection(enum.Enum):
@@ -102,17 +105,42 @@ class SupportMessage(db.Model, TimestampMixin):
         index=True,
     )
     direction = _enum_col(SupportMessageDirection, "support_message_direction", nullable=False)
-    content = Column(Text, nullable=False)
+    content = Column(Text, nullable=True)
     sender_admin_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     telegram_message_id = Column(String(64), nullable=True)
     delivery_status = _enum_col(SupportMessageDeliveryStatus, "support_message_delivery_status", nullable=True)
     delivery_error = Column(String(500), nullable=True)
     is_read = Column(Boolean, nullable=False, default=False)
+    message_type = _enum_col(
+        SupportMessageType,
+        "support_message_type",
+        nullable=False,
+        default=SupportMessageType.TEXT,
+        server_default=SupportMessageType.TEXT.value,
+    )
+    telegram_file_id = Column(String(256), nullable=True)
+    attachment_mime_type = Column(String(128), nullable=True)
+    attachment_file_name = Column(String(255), nullable=True)
+    attachment_size = Column(BigInteger, nullable=True)
+    latitude = Column(Numeric(10, 7), nullable=True)
+    longitude = Column(Numeric(10, 7), nullable=True)
+    forwarded_from = Column(String(255), nullable=True)
+    forwarded_origin_type = Column(String(32), nullable=True)
+    forwarded_date = Column(DateTime(timezone=True), nullable=True)
 
     conversation = relationship("SupportConversation", back_populates="messages")
     sender_admin = relationship("User", foreign_keys=[sender_admin_id])
 
     def to_dict(self) -> dict:
+        # Local import: `support_attachment_service` imports `SupportMessage`
+        # from this module, so a module-level import here would cycle. The
+        # backend constant (`TELEGRAM_MAX_DOWNLOAD_BYTES`) stays the single
+        # definition of the 20 MB rule — this just publishes the derived
+        # answer as a field so the frontend never re-implements the rule.
+        from business_app.services.support_attachment_service import TELEGRAM_MAX_DOWNLOAD_BYTES
+
+        attachment_too_large = self.attachment_size is not None and self.attachment_size > TELEGRAM_MAX_DOWNLOAD_BYTES
+
         return {
             "id": self.id,
             "conversation_id": self.conversation_id,
@@ -126,4 +154,17 @@ class SupportMessage(db.Model, TimestampMixin):
             "delivery_error": self.delivery_error,
             "is_read": self.is_read,
             "created_at": self.created_at.isoformat() if self.created_at else None,
+            "message_type": (self.message_type.value if hasattr(self.message_type, "value") else self.message_type),
+            "telegram_file_id": self.telegram_file_id,
+            "attachment_mime_type": self.attachment_mime_type,
+            "attachment_file_name": self.attachment_file_name,
+            "attachment_size": int(self.attachment_size) if self.attachment_size is not None else None,
+            "attachment_too_large": attachment_too_large,
+            # react-leaflet cannot take a Decimal or a string.
+            "latitude": float(self.latitude) if self.latitude is not None else None,
+            "longitude": float(self.longitude) if self.longitude is not None else None,
+            "forwarded_from": self.forwarded_from,
+            "forwarded_origin_type": self.forwarded_origin_type,
+            "forwarded_date": self.forwarded_date.isoformat() if self.forwarded_date else None,
+            "has_attachment": bool(self.telegram_file_id),
         }

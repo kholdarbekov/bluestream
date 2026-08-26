@@ -37,6 +37,7 @@ Everything between those seams is production code.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
@@ -226,6 +227,14 @@ class FakeDatabase:
             return self.user.get("preferred_language")
         if "loyalty" in query.lower():
             return self.loyalty_eligible
+        if "bot_state" in query:
+            # `BotUserRepository.get_user_state` reads this column through
+            # `fetchval`; `execute` above already writes it on every
+            # `update_user_state` call. Wired to the same dict so a test that
+            # arms a flow (concern report, OTP, address-title prompt, ...)
+            # and then sends a follow-up update sees the state it just wrote,
+            # instead of every customer silently looking permanently unarmed.
+            return self.user.get("bot_state")
         return None
 
 
@@ -386,6 +395,42 @@ async def build_bot_harness(monkeypatch, *, translations=None, database=None) ->
     from handlers import callback_dedup
 
     callback_dedup._in_memory_locks.clear()
+
+    # `rate_limiter` connects to whatever `config.redis.url` says. TODAY that
+    # already lands on the test-isolated DB because `USE_SECRETS_FALLBACK`
+    # defaults on (unset here — this harness runs via plain `docker run`, not
+    # `docker compose`, so docker-compose.yml's explicit `USE_SECRETS_FALLBACK=true`
+    # never even applies) and `config.py`'s local fallback `get_redis_url()`
+    # checks the `REDIS_URL` env var first, which `scripts/precommit-backend-tests.sh`
+    # points at DB 15. But that is incidental, not guaranteed: the moment
+    # `USE_SECRETS_FALLBACK=false`, `shared.secrets_manager.get_redis_url()`
+    # takes over instead, and it ignores `REDIS_URL` entirely — it rebuilds
+    # the URL from `REDIS_HOST`/`REDIS_PORT`/`REDIS_DB`, and `.env` sets
+    # `REDIS_DB=0`, the DEV STACK'S REAL DATABASE. Pin the actual attribute
+    # `RateLimiter`/`OTPRateLimiter` read so isolation holds no matter which
+    # of the two `get_redis_url` implementations resolves at import time.
+    import config as config_module
+
+    _test_redis_url = os.environ.get('REDIS_URL')
+    if _test_redis_url:
+        config_module.config.redis.url = _test_redis_url
+
+    # `rate_limiter`/`otp_rate_limiter` are module-level singletons that cache
+    # their `redis.asyncio` connection on `._redis` plus a sticky `._redis_available`
+    # flag. Each test function gets its own event loop, so a connection opened
+    # under a PREVIOUS test's loop fails every pipeline call under this one with
+    # "Event loop is closed" — and because `._redis_available` was left True, the
+    # ensure-connected check short-circuits straight past reconnecting, straight
+    # into that broken pipeline. Fail-closed then denies the request outright, so
+    # any handler gated by `rate_limiter.allow_request` (e.g. `_handle_text_message`,
+    # `_handle_attachment_message`) silently no-ops for every test after the first
+    # one in a file. Force a fresh connection attempt per test.
+    utils_module.rate_limiter._redis = None
+    utils_module.rate_limiter._redis_available = False
+    utils_module.rate_limiter._last_connect_attempt = None
+    utils_module.otp_rate_limiter._redis = None
+    utils_module.otp_rate_limiter._redis_available = False
+    utils_module.otp_rate_limiter._last_connect_attempt = None
 
     telegram.reset()
     return BotHarness(application, telegram, backend, db)

@@ -1381,7 +1381,7 @@ async def test_backing_out_of_the_rename_stops_the_next_message_being_eaten_as_a
 
     assert updates(bot) == [], "an unrelated message was written as the address title"
     assert address_book[901]["title"] == "Uy"
-    assert support_posts(bot) == [{"content": "qachon yetkazasiz"}], (
+    assert support_posts(bot) == [{"content": "qachon yetkazasiz", "message_type": "text"}], (
         "with no pending edit the message should reach the support inbox"
     )
 

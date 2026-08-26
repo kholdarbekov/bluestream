@@ -837,11 +837,14 @@ class BusinessAPIClient:
         return await self._make_request('POST', '/api/v1/auth/verify-phone',
                                        user_token=user_token, data={'otp': otp})
 
-    async def record_support_message(self, user_token: str, content: str) -> APIResponse:
-        """Persist an inbound free-text customer message as a support message."""
+    async def record_support_message(self, user_token: str, content: str = None, **payload) -> APIResponse:
+        """Persist an inbound customer message (text, media, location) as a support message."""
+        body = {k: v for k, v in payload.items() if v is not None}
+        if content is not None:
+            body['content'] = content
         return await self._make_request(
             'POST', '/api/v1/support/messages',
-            user_token=user_token, data={'content': content}
+            user_token=user_token, data=body
         )
 
     async def get_user_addresses(self, user_token: str) -> APIResponse:

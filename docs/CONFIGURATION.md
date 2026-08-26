@@ -125,6 +125,23 @@ JWT_SECRET_KEY=your-jwt-secret-key
 SENDGRID_API_KEY=your-sendgrid-api-key
 ```
 
+### Telegram Bot Token
+
+```bash
+TELEGRAM_BOT_TOKEN=your-telegram-bot-token
+```
+
+> **⚠️ Rotating `TELEGRAM_BOT_TOKEN` permanently breaks every previously
+> received support attachment.** Inbound photos, documents, voice notes,
+> videos and video notes captured by the Support Inbox (`telegram_bot/`,
+> `business_app/services/support_attachment_service.py`) are stored as
+> Telegram `file_id`s, never as bytes on disk. A `file_id` is scoped to the
+> bot token that received it — after a rotation, Telegram will 404 every one
+> of those file_ids forever. Message **text and captions survive**; **media
+> does not** and the admin UI will show "attachment unavailable" for every
+> historical attachment. This is a known, accepted trade-off (no re-download
+> is possible after the fact) — plan any token rotation with that in mind.
+
 ### Security Best Practices
 
 1. **Never commit secrets to version control**

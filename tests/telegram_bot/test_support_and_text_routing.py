@@ -57,7 +57,7 @@ from handlers.profile import (
     ADDRESS_LOCATION,
     ADDRESS_TITLE,
 )
-from handlers.support import _MAX_SUPPORT_CONTENT
+from support_capture import MAX_SUPPORT_CONTENT
 
 from tests.telegram_bot.ptb_harness import (
     FakeDatabase,
@@ -493,7 +493,7 @@ async def test_an_unprompted_question_is_filed_for_an_operator_and_never_auto_an
 
     await bot.send(user.text(question))
 
-    assert support_posts(bot) == [{"content": question}], (
+    assert support_posts(bot) == [{"content": question, "message_type": "text"}], (
         "the exact words the customer typed must reach the inbox unaltered"
     )
     assert bot.telegram.shown == [], (
@@ -527,7 +527,7 @@ async def test_a_backend_500_on_capture_never_reaches_the_customer(bot, user):
 
     await bot.send(user.text("Salom"))
 
-    assert support_posts(bot) == [{"content": "Salom"}], "it was attempted"
+    assert support_posts(bot) == [{"content": "Salom", "message_type": "text"}], "it was attempted"
     assert bot.telegram.shown == [], (
         "a failed silent capture stays silent — an error toast here would be "
         "about a request the customer never made"
@@ -913,13 +913,13 @@ async def test_a_very_long_concern_is_truncated_to_something_telegram_will_accep
     The cap comes from the production constant, so retuning it retunes this.
     """
     await arm_the_concern_flow(bot, user)
-    essay = "a" * (_MAX_SUPPORT_CONTENT * 2)
+    essay = "a" * (MAX_SUPPORT_CONTENT * 2)
     bot.telegram.reset()
 
     await bot.send(user.text(essay))
 
     (content,) = filed_contents(bot)
-    assert len(content) == _MAX_SUPPORT_CONTENT
+    assert len(content) == MAX_SUPPORT_CONTENT
     assert content.startswith(f"[Order #{ORDER_NUMBER}] "), (
         "truncation must eat the customer's text, never the order reference "
         "an operator needs to route it"

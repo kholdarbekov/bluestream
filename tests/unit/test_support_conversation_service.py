@@ -3,9 +3,13 @@ from unittest.mock import MagicMock
 from business_app import db
 from business_app.models.user import User
 from business_app.models.support import SupportConversation, SupportMessageDirection, SupportMessageDeliveryStatus
-from business_app.services.support_conversation_service import SupportConversationService
+from business_app.services.support_conversation_service import (
+    SupportConversationService,
+    build_preview,
+)
 from business_app.utils.exceptions import NotFoundError, ValidationError as _VE
 from business_app.utils.password_security import hash_password
+from shared.enums import SupportMessageType
 
 
 def _make_user(**kw):
@@ -142,3 +146,130 @@ def test_list_unread_only_and_search(db):
 def test_get_thread_missing_raises(db):
     with pytest.raises(NotFoundError):
         SupportConversationService().get_thread(123456)
+
+
+@pytest.mark.unit
+def test_photo_without_caption_is_accepted_and_previewed(db):
+    user = _make_user(email="svc-photo1@example.com", telegram_id="tg-photo-1")
+
+    msg = SupportConversationService().record_inbound_message(
+        user.id,
+        content=None,
+        message_type=SupportMessageType.PHOTO,
+        telegram_file_id="file-abc",
+        attachment_mime_type="image/jpeg",
+        attachment_size=1024,
+    )
+
+    assert msg.content is None
+    assert msg.message_type == SupportMessageType.PHOTO
+    assert msg.conversation.last_message_preview == "📷 Photo"
+
+
+@pytest.mark.unit
+def test_document_preview_uses_the_file_name(db):
+    user = _make_user(email="svc-doc1@example.com", telegram_id="tg-doc-1")
+
+    msg = SupportConversationService().record_inbound_message(
+        user.id,
+        content=None,
+        message_type=SupportMessageType.DOCUMENT,
+        telegram_file_id="file-doc",
+        attachment_file_name="receipt.pdf",
+    )
+
+    assert msg.conversation.last_message_preview == "📎 receipt.pdf"
+
+
+@pytest.mark.unit
+def test_caption_wins_over_the_generic_label(db):
+    user = _make_user(email="svc-photo2@example.com", telegram_id="tg-photo-2")
+
+    msg = SupportConversationService().record_inbound_message(
+        user.id,
+        content="the cap is cracked",
+        message_type=SupportMessageType.PHOTO,
+        telegram_file_id="file-xyz",
+    )
+
+    assert msg.conversation.last_message_preview == "the cap is cracked"
+
+
+@pytest.mark.unit
+def test_location_requires_coordinates(db):
+    user = _make_user(email="svc-loc1@example.com", telegram_id="tg-loc-1")
+
+    with pytest.raises(_VE):
+        SupportConversationService().record_inbound_message(
+            user.id, content=None, message_type=SupportMessageType.LOCATION
+        )
+
+
+@pytest.mark.unit
+def test_location_requires_both_coordinates_not_just_one(db):
+    """FIX 9 regression: passing only ONE coordinate must be rejected exactly
+    like passing none — matching the serializer's `has_coords` (both-or-
+    neither). Both directions covered so a guard that only checks `latitude`
+    (or only `longitude`) cannot slip back in."""
+    user = _make_user(email="svc-loc3@example.com", telegram_id="tg-loc-3")
+
+    with pytest.raises(_VE):
+        SupportConversationService().record_inbound_message(
+            user.id, content=None, message_type=SupportMessageType.LOCATION, latitude=41.31
+        )
+
+    with pytest.raises(_VE):
+        SupportConversationService().record_inbound_message(
+            user.id, content=None, message_type=SupportMessageType.LOCATION, longitude=69.25
+        )
+
+
+@pytest.mark.unit
+def test_a_lone_coordinate_with_no_content_or_file_is_rejected(db):
+    """FIX 9: the general "some payload is required" guard used to test only
+    `latitude is None`, so a message with `latitude` set but `longitude`
+    missing (and no content, no file, message_type left at its TEXT default)
+    slipped through — creating a row the admin UI would render as a
+    completely blank bubble. The serializer's own `has_coords` requires
+    both; the service guard must match."""
+    user = _make_user(email="svc-loc4@example.com", telegram_id="tg-loc-4")
+
+    with pytest.raises(_VE):
+        SupportConversationService().record_inbound_message(
+            user.id, content=None, latitude=41.31
+        )
+
+    with pytest.raises(_VE):
+        SupportConversationService().record_inbound_message(
+            user.id, content=None, longitude=69.25
+        )
+
+
+@pytest.mark.unit
+def test_media_type_requires_a_file_id(db):
+    user = _make_user(email="svc-doc2@example.com", telegram_id="tg-doc-2")
+
+    with pytest.raises(_VE):
+        SupportConversationService().record_inbound_message(
+            user.id, content=None, message_type=SupportMessageType.DOCUMENT
+        )
+
+
+@pytest.mark.unit
+def test_empty_text_message_is_still_rejected(db):
+    """The pre-existing guard must survive the widening."""
+    user = _make_user(email="svc-empty1@example.com", telegram_id="tg-empty-1")
+
+    with pytest.raises(_VE):
+        SupportConversationService().record_inbound_message(user.id, content="   ")
+
+
+@pytest.mark.unit
+def test_unsupported_type_needs_no_payload_at_all(db):
+    user = _make_user(email="svc-unsup1@example.com", telegram_id="tg-unsup-1")
+
+    msg = SupportConversationService().record_inbound_message(
+        user.id, content=None, message_type=SupportMessageType.UNSUPPORTED
+    )
+
+    assert msg.conversation.last_message_preview == "📩 Attachment"

@@ -281,6 +281,106 @@ class UpdateFactory:
             ),
         })
 
+    def photo(self, caption: str = None, file_id: str = "photo-file-id") -> Update:
+        """A photo, in Telegram's real ascending-size form."""
+        extra = {
+            "photo": [
+                {"file_id": f"{file_id}-s", "file_unique_id": "u-s",
+                 "width": 90, "height": 90, "file_size": 1234},
+                {"file_id": file_id, "file_unique_id": "u-l",
+                 "width": 1280, "height": 1280, "file_size": 98765},
+            ]
+        }
+        if caption is not None:
+            extra["caption"] = caption
+        return self._build({
+            "update_id": self._next_update_id(),
+            "message": self._message_envelope(**extra),
+        })
+
+    def document(self, file_name: str = "receipt.pdf", mime_type: str = "application/pdf",
+                 file_id: str = "doc-file-id", caption: str = None) -> Update:
+        extra = {
+            "document": {
+                "file_id": file_id,
+                "file_unique_id": "u-doc",
+                "file_name": file_name,
+                "mime_type": mime_type,
+                "file_size": 20480,
+            }
+        }
+        if caption is not None:
+            extra["caption"] = caption
+        return self._build({
+            "update_id": self._next_update_id(),
+            "message": self._message_envelope(**extra),
+        })
+
+    def voice(self, file_id: str = "voice-file-id") -> Update:
+        return self._build({
+            "update_id": self._next_update_id(),
+            "message": self._message_envelope(
+                voice={
+                    "file_id": file_id,
+                    "file_unique_id": "u-voice",
+                    "duration": 7,
+                    "mime_type": "audio/ogg",
+                    "file_size": 8192,
+                }
+            ),
+        })
+
+    def video(self, file_id: str = "video-file-id", caption: str = None) -> Update:
+        extra = {
+            "video": {
+                "file_id": file_id,
+                "file_unique_id": "u-video",
+                "width": 640,
+                "height": 480,
+                "duration": 5,
+                "mime_type": "video/mp4",
+                "file_size": 51200,
+            }
+        }
+        if caption is not None:
+            extra["caption"] = caption
+        return self._build({
+            "update_id": self._next_update_id(),
+            "message": self._message_envelope(**extra),
+        })
+
+    def sticker(self, file_id: str = "sticker-file-id") -> Update:
+        """A sticker — matches none of PHOTO/Document/VIDEO/etc, so this is
+        what exercises the UNSUPPORTED branch of `build_support_payload`."""
+        return self._build({
+            "update_id": self._next_update_id(),
+            "message": self._message_envelope(
+                sticker={
+                    "file_id": file_id,
+                    "file_unique_id": "u-sticker",
+                    "type": "regular",
+                    "width": 512,
+                    "height": 512,
+                    "is_animated": False,
+                    "is_video": False,
+                }
+            ),
+        })
+
+    def forwarded_text(self, text: str, sender_name: str = "Dilnoza K") -> Update:
+        """Text forwarded from a named user (`MessageOriginUser`)."""
+        return self._build({
+            "update_id": self._next_update_id(),
+            "message": self._message_envelope(
+                text=text,
+                forward_origin={
+                    "type": "user",
+                    "date": 1_699_000_000,
+                    "sender_user": {"id": 55_001, "is_bot": False, "first_name": sender_name},
+                },
+            ),
+        })
+
     def tap(self, callback_data: str, message_id: int = None) -> Update:
         """An inline-button tap on the message the customer is looking at."""
         return self._build({

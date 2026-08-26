@@ -808,9 +808,23 @@ async def test_incident_20260821_a_timed_out_checkout_origin_cannot_hijack_the_n
     that second, innocent save used to fling the customer into a checkout they
     never asked for — with whatever was in their cart.
 
-    The second flow deliberately enters by SHARING A PIN rather than by tapping
-    "Add address": `add_address` clears the origin key on entry, so the pin
-    entry point is the path on which a stale origin actually survives.
+    UPDATED 2026-08-26 (pin-routing ruling, Task 6): the fix for this incident
+    is no longer merely "the second flow happens not to see the stale key" —
+    `ProfileHandlers._clear_address_flow_keys` (added to close a SEPARATE
+    hole: `awaiting_location` outliving a cancelled/timed-out flow) now pops
+    `address_flow_origin` on every teardown, timeout included. A stale origin
+    can no longer survive a timed-out checkout flow AT ALL, so this test now
+    asserts that directly — the strongest available statement, independent of
+    how the second flow is entered.
+
+    The second flow re-enters by TAPPING "Add address", not by sharing a bare
+    pin. That is not merely a simplification: as of the 2026-08-25 pin ruling,
+    a pin the bot never asked for is filed as a support message rather than
+    opening the address conversation (`_route_address_location_entry` in
+    bot.py — see tests/telegram_bot/test_support_attachment_dispatch.py), so a
+    bare unprompted pin is no longer a valid way to open this second flow at
+    all. Do not "restore" the old vehicle; it would silently re-break that
+    rule while looking like a faithful revert of this test.
     """
     await open_address_flow(bot, user, from_checkout=True)
     await drop_pin_and_name_it(bot, user)
@@ -818,13 +832,19 @@ async def test_incident_20260821_a_timed_out_checkout_origin_cannot_hijack_the_n
     await bot.send(last)
     await expire_the_conversation(bot, last)
 
+    assert "address_flow_origin" not in user_data(bot), (
+        "a timed-out checkout flow must not leave a stale address_flow_origin "
+        "behind — this incident is now structurally impossible, not merely "
+        "defended against"
+    )
+
     bot.telegram.reset()
     cart_reads_before = len([c for c in bot.backend.calls if c.endpoint == "/api/v1/cart"])
 
-    # An hour later, a different address, entered by dropping a pin.
-    await bot.send(user.location(CORRECTED_LAT, CORRECTED_LNG))
-    assert bot.conversation_state("address_conversation") == ADDRESS_TITLE
-    await deliberate_retap(bot, user.tap("addr_title_work"))
+    # An hour later, a different, unrelated address from the profile screen —
+    # armed the ordinary way (tap "Add address"), not a bare unprompted pin.
+    await open_address_flow(bot, user)
+    await drop_pin_and_name_it(bot, user, lat=CORRECTED_LAT, lng=CORRECTED_LNG)
     await deliberate_retap(bot, user.tap("skip_apartment"))
     await deliberate_retap(bot, user.tap("skip_floor"))
     await deliberate_retap(bot, user.tap("skip_delivery_instructions"))

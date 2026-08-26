@@ -505,7 +505,7 @@ async def test_an_abandoned_rename_does_not_survive_the_screen_it_was_left_for(
 
     assert updates(bot) == [], "an unrelated message was written as the address title"
     assert address_book[901]["title"] == HOSTILE_TITLE
-    assert support_posts(bot) == [{"content": "qachon yetkazasiz"}], (
+    assert support_posts(bot) == [{"content": "qachon yetkazasiz", "message_type": "text"}], (
         "with no pending edit the message should reach the support inbox"
     )
 

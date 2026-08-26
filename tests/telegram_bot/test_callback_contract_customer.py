@@ -1203,14 +1203,19 @@ async def test_the_free_text_catch_all_is_the_last_handler_in_group_zero(bot):
     )
 
     trailing = group_zero[catch_alls[0] + 1:]
-    non_voice = [
+    # `_handle_attachment_message` is exempt for the same reason the voice
+    # handler used to be: its filter (PHOTO/Document/VIDEO/VIDEO_NOTE/AUDIO/
+    # VOICE — LOCATION/VENUE are routed entirely by the address conversation's
+    # entry point instead) cannot match a text update, so sitting behind the
+    # text catch-all costs it nothing.
+    non_attachment = [
         handler
         for handler in trailing
-        if getattr(handler.callback, "__name__", "") != "_handle_voice_message"
+        if getattr(handler.callback, "__name__", "") != "_handle_attachment_message"
     ]
-    assert not non_voice, (
+    assert not non_attachment, (
         "handlers registered after the group-0 text catch-all can never run for "
-        f"a text update: {[type(h).__name__ for h in non_voice]}"
+        f"a text update: {[type(h).__name__ for h in non_attachment]}"
     )
 
 

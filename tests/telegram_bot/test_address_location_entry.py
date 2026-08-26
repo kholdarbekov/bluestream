@@ -2,9 +2,22 @@
 THAT message, and the address flow starts with the checkout origin intact.
 
 Drives the real handlers, not the service layer: the break this guards against
-is a contract one. A pin arriving before the conversation exists has no
-registered handler today, so it escapes to the group-0 catch-all and is
-silently filed as a support ticket with no reply."""
+is a contract one. A pin arriving before the conversation exists (zero-address
+checkout arms the location keyboard without ever starting the
+`ConversationHandler`) still has to land in `location_received`, not be
+dropped or misrouted.
+
+RULING 2026-08-25 (see `.superpowers/sdd/2026-08-25-support-inbox-rich-messages/
+progress.md`, "SPEC DEFECT: 'a pin with no flow open' does not exist"): a
+spontaneous pin the bot never asked for is now, BY DESIGN, filed as a support
+message — that is the correct outcome, not a bug. Filing to support only
+becomes wrong when the bot DID ask for the pin (via
+`utils.arm_location_request`, called at every `location_request(...)` site,
+including the zero-address-checkout prompt this file drives). Do not restore
+the old assumption that any bare pin should always start address creation —
+the address entry point (`bot.py::_route_address_location_entry`) decides
+per-update whether an arming marker is present, not whether a conversation
+happens to be "active"."""
 
 from unittest.mock import AsyncMock, MagicMock
 

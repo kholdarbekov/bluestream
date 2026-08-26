@@ -60,6 +60,22 @@ describe('SupportInbox page', () => {
     await waitFor(() => expect(adminService.markSupportRead).toHaveBeenCalledWith(1));
   });
 
+  it('renders a muted line for an unsupported attachment instead of a blank bubble', async () => {
+    adminService.getSupportThread.mockResolvedValue({
+      data: {
+        conversation: { id: 1, user: { id: 9, name: 'Ann Lee' } },
+        items: [
+          { id: 13, direction: 'inbound', message_type: 'unsupported', content: null,
+            has_attachment: false, created_at: '2026-06-24T10:00:00Z', is_read: false },
+        ],
+        total: 1, page: 1, per_page: 50,
+      },
+    });
+    render(<SupportInbox />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByText('Ann Lee'));
+    expect(await screen.findByText('Unsupported attachment')).toBeInTheDocument();
+  });
+
   it('sends a reply with the typed content', async () => {
     render(<SupportInbox />, { wrapper: wrapper() });
     fireEvent.click(await screen.findByText('Ann Lee'));

@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+import support_capture as support_capture_module
 from handlers import support as support_module
 from tests.telegram_bot.helpers import DummyCallbackQuery, DummyUpdate, make_context
 
@@ -122,8 +123,11 @@ async def test_capture_posts_prefixed_content_and_acks(monkeypatch):
     handler.user_repo = _armed_repo()
 
     client = _FakeClient(record_support_message=AsyncMock(return_value=SimpleNamespace(success=True)))
-    monkeypatch.setattr(support_module, "api_client", client)
-    monkeypatch.setattr(support_module, "get_auth_token", AsyncMock(return_value="tok-1"))
+    # `handle_support_message` now delegates to `support_capture.capture_support_message`,
+    # which resolves `api_client`/`get_auth_token` from ITS OWN module namespace —
+    # patching `support_module`'s bindings no longer reaches it.
+    monkeypatch.setattr(support_capture_module, "api_client", client)
+    monkeypatch.setattr(support_capture_module, "get_auth_token", AsyncMock(return_value="tok-1"))
     _patch_i18n(monkeypatch)
 
     update = DummyUpdate()
@@ -133,7 +137,7 @@ async def test_capture_posts_prefixed_content_and_acks(monkeypatch):
     await handler.handle_support_message(update, context, "the bottle arrived cracked")
 
     client.record_support_message.assert_awaited_once_with(
-        "tok-1", "[Order #ORD-1234] the bottle arrived cracked"
+        "tok-1", content="[Order #ORD-1234] the bottle arrived cracked", message_type="text"
     )
     handler.user_repo.update_user_state.assert_awaited_once_with(update.effective_user.id, {})
     update.message.reply_text.assert_awaited_once_with("telegram.support.ack:en")
@@ -146,8 +150,8 @@ async def test_capture_truncates_to_fit_serializer_cap(monkeypatch):
     handler.user_repo = _armed_repo()
 
     client = _FakeClient(record_support_message=AsyncMock(return_value=SimpleNamespace(success=True)))
-    monkeypatch.setattr(support_module, "api_client", client)
-    monkeypatch.setattr(support_module, "get_auth_token", AsyncMock(return_value="tok-1"))
+    monkeypatch.setattr(support_capture_module, "api_client", client)
+    monkeypatch.setattr(support_capture_module, "get_auth_token", AsyncMock(return_value="tok-1"))
     _patch_i18n(monkeypatch)
 
     long_text = "x" * 5000
@@ -157,7 +161,7 @@ async def test_capture_truncates_to_fit_serializer_cap(monkeypatch):
 
     await handler.handle_support_message(update, context, long_text)
 
-    posted = client.record_support_message.await_args.args[1]
+    posted = client.record_support_message.await_args.kwargs["content"]
     assert len(posted) == 4096
     assert posted.startswith("[Order #ORD-1234] ")
     update.message.reply_text.assert_awaited_once_with("telegram.support.ack:en")
@@ -170,8 +174,8 @@ async def test_capture_no_token_sends_failed_no_ack(monkeypatch):
     handler.user_repo = _armed_repo()
 
     client = _FakeClient(record_support_message=AsyncMock(return_value=SimpleNamespace(success=True)))
-    monkeypatch.setattr(support_module, "api_client", client)
-    monkeypatch.setattr(support_module, "get_auth_token", AsyncMock(return_value=None))
+    monkeypatch.setattr(support_capture_module, "api_client", client)
+    monkeypatch.setattr(support_capture_module, "get_auth_token", AsyncMock(return_value=None))
     _patch_i18n(monkeypatch)
 
     update = DummyUpdate()
@@ -194,8 +198,8 @@ async def test_capture_api_error_sends_failed_no_ack(monkeypatch):
     client = _FakeClient(
         record_support_message=AsyncMock(return_value=SimpleNamespace(success=False, error="422"))
     )
-    monkeypatch.setattr(support_module, "api_client", client)
-    monkeypatch.setattr(support_module, "get_auth_token", AsyncMock(return_value="tok-1"))
+    monkeypatch.setattr(support_capture_module, "api_client", client)
+    monkeypatch.setattr(support_capture_module, "get_auth_token", AsyncMock(return_value="tok-1"))
     _patch_i18n(monkeypatch)
 
     update = DummyUpdate()
@@ -204,7 +208,9 @@ async def test_capture_api_error_sends_failed_no_ack(monkeypatch):
 
     await handler.handle_support_message(update, context, "broken")
 
-    client.record_support_message.assert_awaited_once_with("tok-1", "[Order #ORD-1234] broken")
+    client.record_support_message.assert_awaited_once_with(
+        "tok-1", content="[Order #ORD-1234] broken", message_type="text"
+    )
     update.message.reply_text.assert_awaited_once_with("telegram.support.send_failed:en")
     handler.user_repo.update_user_state.assert_awaited_once_with(update.effective_user.id, {})
 
@@ -217,8 +223,8 @@ async def test_capture_stale_falls_back_to_silent_no_prefix(monkeypatch):
     handler.user_repo = _armed_repo(armed_at=stale_at)
 
     client = _FakeClient(record_support_message=AsyncMock(return_value=SimpleNamespace(success=True)))
-    monkeypatch.setattr(support_module, "api_client", client)
-    monkeypatch.setattr(support_module, "get_auth_token", AsyncMock(return_value="tok-1"))
+    monkeypatch.setattr(support_capture_module, "api_client", client)
+    monkeypatch.setattr(support_capture_module, "get_auth_token", AsyncMock(return_value="tok-1"))
     _patch_i18n(monkeypatch)
 
     update = DummyUpdate()
@@ -228,7 +234,9 @@ async def test_capture_stale_falls_back_to_silent_no_prefix(monkeypatch):
     await handler.handle_support_message(update, context, "much later message")
 
     # Silent capture: raw text, NO order prefix, NO ack.
-    client.record_support_message.assert_awaited_once_with("tok-1", "much later message")
+    client.record_support_message.assert_awaited_once_with(
+        "tok-1", content="much later message", message_type="text"
+    )
     update.message.reply_text.assert_not_awaited()
     handler.user_repo.update_user_state.assert_awaited_once_with(update.effective_user.id, {})
 
@@ -247,8 +255,8 @@ async def test_capture_missing_order_number_falls_back_to_silent(monkeypatch):
     )
 
     client = _FakeClient(record_support_message=AsyncMock(return_value=SimpleNamespace(success=True)))
-    monkeypatch.setattr(support_module, "api_client", client)
-    monkeypatch.setattr(support_module, "get_auth_token", AsyncMock(return_value="tok-1"))
+    monkeypatch.setattr(support_capture_module, "api_client", client)
+    monkeypatch.setattr(support_capture_module, "get_auth_token", AsyncMock(return_value="tok-1"))
     _patch_i18n(monkeypatch)
 
     update = DummyUpdate()
@@ -257,7 +265,9 @@ async def test_capture_missing_order_number_falls_back_to_silent(monkeypatch):
 
     await handler.handle_support_message(update, context, "no order reference here")
 
-    client.record_support_message.assert_awaited_once_with("tok-1", "no order reference here")
+    client.record_support_message.assert_awaited_once_with(
+        "tok-1", content="no order reference here", message_type="text"
+    )
     update.message.reply_text.assert_not_awaited()
     handler.user_repo.update_user_state.assert_awaited_once_with(update.effective_user.id, {})
 

@@ -171,6 +171,20 @@ def sanitize_filename(filename: str) -> str:
     return filename.strip()
 
 
+def scrub_bot_token(text: Optional[str], token: Optional[str]) -> Optional[str]:
+    """Strip a Telegram bot token out of arbitrary text before it is logged.
+
+    A `requests` connection/DNS/timeout error stringifies to the full request
+    URL, which embeds the bot token — and our logs ship to Loki. Shared so
+    every caller that surfaces a raw Telegram-request exception (notification
+    sends, the support-attachment read proxy) scrubs it the same way instead
+    of each inventing its own redaction.
+    """
+    if token and text:
+        return text.replace(token, "***")
+    return text
+
+
 def get_file_extension(filename: str) -> str:
     """Get file extension from filename"""
     return filename.rsplit(".", 1)[1].lower() if "." in filename else ""

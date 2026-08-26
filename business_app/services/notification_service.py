@@ -50,6 +50,7 @@ from shared.enums import (
     UserRole,
 )
 from business_app.utils.translations import get_translation
+from business_app.utils.helpers import scrub_bot_token
 from business_app.services.email_template_service import get_email_template_service
 from business_app.services.bottle_tracking_service import (
     BottleTrackingService,
@@ -3205,6 +3206,117 @@ class NotificationService:
                 exc,
             )
             return {"success": False, "error": str(exc)}
+
+    # Telegram refuses sendPhoto over 10 MB. base.py's default MAX_CONTENT_LENGTH
+    # is 16 MB, so on dev/staging an image in between passes our gate and would
+    # fail at Telegram — send those as documents instead. Spec §5.
+    #
+    # Production hardcodes MAX_CONTENT_LENGTH to 10 MB (config/production.py),
+    # matching this exact constant, so an image ever reaching this branch above
+    # 10 MB is currently impossible in prod — Werkzeug's body-size gate 413s it
+    # first. The branch stays correct dead code for prod as configured today,
+    # and becomes live the moment that cap is ever raised; don't assume it runs.
+    TELEGRAM_MAX_PHOTO_BYTES = 10 * 1024 * 1024
+
+    def send_user_telegram_media(
+        self, user: User, file_bytes: bytes, filename: str, mime_type: str, caption: str = None
+    ) -> Dict[str, Any]:
+        """Stream an admin upload straight to Telegram; persist nothing locally.
+
+        Returns the file_id Telegram assigns so the same bytes can be read back
+        through the support attachment proxy.
+        """
+        if not self.telegram_bot_token:
+            return {"success": False, "error": "Telegram bot token is not configured"}
+        telegram_chat_id = getattr(user, "telegram_id", None)
+        if not telegram_chat_id:
+            return {"success": False, "error": get_translation("error.validation.no_telegram_id")}
+
+        mime_type = mime_type or "application/octet-stream"
+        is_photo = mime_type.startswith("image/") and len(file_bytes) <= self.TELEGRAM_MAX_PHOTO_BYTES
+        if is_photo:
+            method, field, message_type = "sendPhoto", "photo", "photo"
+        elif mime_type.startswith("video/"):
+            method, field, message_type = "sendVideo", "video", "video"
+        else:
+            method, field, message_type = "sendDocument", "document", "document"
+
+        url = f"https://api.telegram.org/bot{self.telegram_bot_token}/{method}"
+        data = {"chat_id": telegram_chat_id}
+        if caption:
+            data["caption"] = caption
+
+        try:
+            response = requests.post(
+                url,
+                data=data,
+                files={field: (filename, file_bytes, mime_type)},
+                timeout=60,
+            )
+            result = response.json()
+        except (requests.RequestException, ValueError) as exc:
+            scrubbed = scrub_bot_token(str(exc), self.telegram_bot_token)
+            logger.warning("Telegram media send failed: user_id=%s error=%s", getattr(user, "id", None), scrubbed)
+            # Report the routing decision even on failure, so a failed PHOTO
+            # send isn't mis-recorded as a DOCUMENT by the caller.
+            return {"success": False, "error": scrubbed, "message_type": message_type}
+
+        if response.status_code >= 400 or not result.get("ok", False):
+            description = result.get("description") or f"Telegram API error (status={response.status_code})"
+            logger.warning(
+                "Telegram media send rejected: user_id=%s method=%s description=%s",
+                getattr(user, "id", None),
+                method,
+                description,
+            )
+            return {"success": False, "error": description, "message_type": message_type}
+
+        sent = result.get("result", {}) or {}
+        if message_type == "photo":
+            sizes = sent.get("photo") or []
+            file_id = sizes[-1].get("file_id") if sizes else None
+        else:
+            file_id = (sent.get(field) or {}).get("file_id")
+
+        if not file_id:
+            # A successfully-recorded SENT row with no file_id can never render
+            # through the attachment read proxy — silent today, so at least
+            # make it visible in the logs.
+            logger.warning(
+                "Telegram accepted the media send but returned no file_id: user_id=%s method=%s",
+                getattr(user, "id", None),
+                method,
+            )
+
+        return {
+            "success": True,
+            "message_id": sent.get("message_id"),
+            "file_id": file_id,
+            "message_type": message_type,
+        }
+
+    def send_user_telegram_location(self, user: User, latitude: float, longitude: float) -> Dict[str, Any]:
+        """Send a map pin to a customer."""
+        if not self.telegram_bot_token:
+            return {"success": False, "error": "Telegram bot token is not configured"}
+        telegram_chat_id = getattr(user, "telegram_id", None)
+        if not telegram_chat_id:
+            return {"success": False, "error": get_translation("error.validation.no_telegram_id")}
+
+        url = f"https://api.telegram.org/bot{self.telegram_bot_token}/sendLocation"
+        try:
+            response = requests.post(
+                url,
+                json={"chat_id": telegram_chat_id, "latitude": latitude, "longitude": longitude},
+                timeout=15,
+            )
+            result = response.json()
+        except (requests.RequestException, ValueError) as exc:
+            return {"success": False, "error": scrub_bot_token(str(exc), self.telegram_bot_token)}
+
+        if response.status_code >= 400 or not result.get("ok", False):
+            return {"success": False, "error": result.get("description") or "Telegram rejected the location"}
+        return {"success": True, "message_id": result.get("result", {}).get("message_id")}
 
     def _send_telegram_notification(
         self,

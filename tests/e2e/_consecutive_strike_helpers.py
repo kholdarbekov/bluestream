@@ -464,9 +464,11 @@ def silence_loyalty_notifications(monkeypatch) -> None:
         def _silence(monkeypatch):
             silence_loyalty_notifications(monkeypatch)
     """
-    monkeypatch.setattr(LoyaltyService, "_send_points_notification", lambda *a, **k: None)
-    monkeypatch.setattr(LoyaltyService, "_send_tier_upgrade_notification", lambda *a, **k: None)
-    monkeypatch.setattr(LoyaltyService, "_send_points_expiry_notification", lambda *a, **k: None)
+    # Signature-enforcing spies, not no-ops — see the conftest docstring: a
+    # ``lambda *a, **k: None`` stub swallows a drifted payload silently.
+    from tests.conftest import install_loyalty_notification_spies
+
+    return install_loyalty_notification_spies(monkeypatch)
 
 
 # ---------------------------------------------------------------------------

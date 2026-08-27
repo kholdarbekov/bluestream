@@ -200,42 +200,16 @@ def update_loyalty_tiers() -> Dict[str, Any]:
         logger.info("Updating loyalty tiers")
 
         loyalty_service = LoyaltyService()
-        notification_service = NotificationService()
 
-        # Get all users with loyalty accounts
+        # Get all users with loyalty accounts. Upgrades detected here are
+        # announced by the post-commit dispatcher registered in
+        # business_app/utils/loyalty_award_dispatch.py — the single place that
+        # turns a tier change into a customer message. Do NOT re-announce them
+        # from this task.
         result = loyalty_service.update_all_tiers()
 
         upgrades = result.get("upgrades", [])
         downgrades = result.get("downgrades", [])
-
-        # Send notifications for tier changes
-        for user_data in upgrades:
-            try:
-                notification_service.send_notification(
-                    user_data["user_id"],
-                    "tier_upgraded",
-                    template_data={
-                        "old_tier": user_data.get("old_tier"),
-                        "new_tier": user_data.get("new_tier"),
-                        "benefits": user_data.get("benefits", []),
-                    },
-                )
-            except Exception as e:
-                logger.error(f"Failed to send tier upgrade notification: {e}")
-
-        for user_data in downgrades:
-            try:
-                notification_service.send_notification(
-                    user_data["user_id"],
-                    "tier_downgraded",
-                    template_data={
-                        "old_tier": user_data.get("old_tier"),
-                        "new_tier": user_data.get("new_tier"),
-                        "points_needed": user_data.get("points_needed_for_restore"),
-                    },
-                )
-            except Exception as e:
-                logger.error(f"Failed to send tier downgrade notification: {e}")
 
         logger.info(f"Loyalty tiers updated: {len(upgrades)} upgrades, {len(downgrades)} downgrades")
 

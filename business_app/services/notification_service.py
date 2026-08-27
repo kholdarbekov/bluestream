@@ -64,6 +64,43 @@ from sqlalchemy import func
 # logger = logging.getLogger(__name__)
 logger = get_task_logger(__name__)
 
+# SSOT: loyalty event_type -> NotificationType. Every event a caller can emit
+# needs an entry here AND its own template; send_loyalty_notification refuses
+# to send anything not listed rather than falling back to LOYALTY_REWARD.
+LOYALTY_EVENT_NOTIFICATION_TYPES = {
+    "earned": NotificationType.LOYALTY_REWARD,
+    "redeemed": NotificationType.REWARD_REDEEMED,
+    "tier_upgrade": NotificationType.LOYALTY_TIER_UPGRADE,
+    "points_expired": NotificationType.LOYALTY_POINTS_EXPIRED,
+}
+
+# Customer-facing AquaCoins messages delivered on exactly ONE channel
+# (Telegram when the bot is connected, else email) — never both, never SMS.
+_LOYALTY_SINGLE_CHANNEL_TYPES = frozenset(
+    {
+        NotificationType.LOYALTY_REWARD,
+        NotificationType.LOYALTY_TIER_UPGRADE,
+        NotificationType.LOYALTY_POINTS_EXPIRED,
+    }
+)
+
+# Notification types whose message is pure courtesy: a leaked {placeholder}
+# means the copy is wrong, so drop it rather than show the customer a broken
+# message. Operational types (orders, deliveries, payments) are only logged —
+# a slightly-wrong message still beats no message at all.
+_PLACEHOLDER_STRICT_TYPES = frozenset(
+    {
+        NotificationType.LOYALTY_REWARD.value,
+        NotificationType.REWARD_REDEEMED.value,
+        NotificationType.LOYALTY_TIER_UPGRADE.value,
+        NotificationType.LOYALTY_POINTS_EXPIRED.value,
+    }
+)
+
+# A placeholder is a bare snake_case identifier in braces. CSS blocks
+# ("body { font-family: x; }") and JSON ('{"a": 1}') never match.
+_PLACEHOLDER_RE = re.compile(r"\{([a-z_][a-z0-9_]*)\}", re.IGNORECASE)
+
 # Configure logger to ensure it outputs in both Flask and Celery
 # if not logger.handlers:
 #     handler = logging.StreamHandler()
@@ -154,6 +191,8 @@ class NotificationService:
         "loyalty": [
             NotificationType.LOYALTY_REWARD.value,
             NotificationType.REWARD_REDEEMED.value,
+            NotificationType.LOYALTY_TIER_UPGRADE.value,
+            NotificationType.LOYALTY_POINTS_EXPIRED.value,
         ],
         "security": [NotificationType.SECURITY.value],
         "reminder": [NotificationType.SUBSCRIPTION_REMINDER.value],
@@ -669,26 +708,39 @@ class NotificationService:
         """
         template_data = {"event_type": event_type, **data}
 
-        # Use provided notification type or default to LOYALTY_REWARD
-        notif_type = notification_type if notification_type else NotificationType.LOYALTY_REWARD
+        # Route on event_type. An explicit notification_type still wins for
+        # back-compat, but an UNMAPPED event must never fall through to
+        # LOYALTY_REWARD: that fallback is what made a tier_upgrade event
+        # render the "AquaCoins earned" template with raw {points}/{balance}.
+        notif_type = notification_type or LOYALTY_EVENT_NOTIFICATION_TYPES.get(event_type)
+        if notif_type is None:
+            logger.error(
+                "Refusing to send unmapped loyalty event: user_id=%s event_type=%s. "
+                "Add it to LOYALTY_EVENT_NOTIFICATION_TYPES with its own template.",
+                user_id,
+                event_type,
+            )
+            return {"skipped": True, "reason": "unmapped_loyalty_event", "event_type": event_type}
 
         user = User.query.get(user_id)
         if not user:
             raise NotificationError(get_translation("error.not_found"))
 
-        # Inject a per-language reason label for the reason-aware templates.
-        # Always inject (even when caller omits 'reason') so {reason_label}
-        # never leaks as a literal into Telegram templates.
-        if "reason_label" not in template_data:
-            reason = template_data.get("reason")
-            language = getattr(user, "preferred_language", None) or "uz"
-            template_data["reason_label"] = self._loyalty_reason_label(reason or "", language)
+        language = getattr(user, "preferred_language", None) or "uz"
 
-        # Telegram-else-email applies ONLY to coin-award notifications
-        # (event_type == "earned"). Other loyalty events (tier_upgrade,
-        # points_expired, redeemed) keep the existing channel default so this
-        # change stays scoped to the spec (do not alter their behavior).
-        if event_type == "earned":
+        # Inject the per-language labels the templates interpolate. Always
+        # inject (even when the caller omits the source field) so no label
+        # placeholder can leak as a literal.
+        if notif_type == NotificationType.LOYALTY_REWARD and "reason_label" not in template_data:
+            template_data["reason_label"] = self._loyalty_reason_label(template_data.get("reason") or "", language)
+        if notif_type == NotificationType.LOYALTY_TIER_UPGRADE and "tier_label" not in template_data:
+            template_data["tier_label"] = self._loyalty_tier_label(
+                template_data.get("tier_config_id"), template_data.get("tier") or "", language
+            )
+
+        # Telegram-else-email for every customer-facing AquaCoins message —
+        # never both, never SMS (same policy as coin awards).
+        if notif_type in _LOYALTY_SINGLE_CHANNEL_TYPES:
             channels = self._resolve_loyalty_award_channels(user)
         else:
             channels = None
@@ -2699,6 +2751,11 @@ class NotificationService:
             NotificationType.PASSWORD_RESET.value: [NotificationChannel.EMAIL],
             NotificationType.LOYALTY_REWARD.value: [NotificationChannel.EMAIL, NotificationChannel.TELEGRAM],
             NotificationType.REWARD_REDEEMED.value: [NotificationChannel.EMAIL],
+            NotificationType.LOYALTY_TIER_UPGRADE.value: [NotificationChannel.EMAIL, NotificationChannel.TELEGRAM],
+            NotificationType.LOYALTY_POINTS_EXPIRED.value: [
+                NotificationChannel.EMAIL,
+                NotificationChannel.TELEGRAM,
+            ],
         }
         return defaults.get(notification_type, [NotificationChannel.EMAIL])
 
@@ -2765,6 +2822,65 @@ class NotificationService:
             return labels.get(lang) or labels.get("uz")
         fallback = NotificationService._LOYALTY_REASON_FALLBACK
         return fallback.get(lang) or fallback["uz"]
+
+    @staticmethod
+    def _loyalty_tier_label(tier_config_id: Optional[int], tier_name: str, language: str) -> str:
+        """Localized tier name.
+
+        LoyaltyTierConfig is @translatable("name") — it is the single source of
+        truth for what a tier is called in each language, so read it rather
+        than keeping a second copy of Bronze/Silver/Gold/Platinum here. An
+        admin-created tier with no translations (or a config we can no longer
+        resolve) falls back to the raw stored name, which is still readable.
+        """
+        if tier_config_id:
+            from business_app.models.loyalty import LoyaltyTierConfig
+
+            config = LoyaltyTierConfig.query.get(tier_config_id)
+            if config:
+                translated = config.get_translated("name", language)
+                if translated:
+                    return translated
+                return config.name
+        return tier_name
+
+    @staticmethod
+    def _unrendered_placeholders(content: str) -> List[str]:
+        """Placeholder names still literal in a rendered message, in order."""
+        if not content:
+            return []
+        return _PLACEHOLDER_RE.findall(content)
+
+    def _guard_unrendered_placeholders(
+        self, notification_type, channel: str, content: str, user_id: Optional[int]
+    ) -> Optional[Dict[str, Any]]:
+        """Backstop: never show a customer a raw ``{placeholder}``.
+
+        Returns a skip-result for courtesy notification types, or None to let
+        the send proceed. Always logs, so a leak in any type is visible.
+        """
+        leaked = self._unrendered_placeholders(content)
+        if not leaked:
+            return None
+
+        notification_type_value = self._status_value(notification_type)
+        strict = notification_type_value in _PLACEHOLDER_STRICT_TYPES
+        logger.error(
+            "Unrendered template placeholders: user_id=%s notification_type=%s channel=%s " "placeholders=%s action=%s",
+            user_id,
+            notification_type_value,
+            channel,
+            leaked,
+            "skipped" if strict else "sent_anyway",
+        )
+        if not strict:
+            return None
+        return {
+            "success": False,
+            "skipped": True,
+            "reason": "unrendered_placeholders",
+            "placeholders": leaked,
+        }
 
     @staticmethod
     def _user_has_connected_telegram(user: User) -> bool:
@@ -3015,6 +3131,15 @@ class NotificationService:
             # Render template
             subject = self._render_template(template_subject, template_data_with_user, language)
             content = self._render_template(template_content, template_data_with_user, language)
+
+        skip = self._guard_unrendered_placeholders(
+            notification_type,
+            NotificationChannel.EMAIL.value,
+            f"{subject or ''}\n{content or ''}",
+            getattr(user, "id", None),
+        )
+        if skip:
+            return skip
 
         # Build Brevo API request
         url = "https://api.brevo.com/v3/smtp/email"
@@ -3370,6 +3495,12 @@ class NotificationService:
         if notification_type_value == NotificationType.DELIVERY_UPDATE.value:
             content = self._strip_driver_info_from_delivery_message(content)
 
+        skip = self._guard_unrendered_placeholders(
+            notification_type, NotificationChannel.TELEGRAM.value, content, getattr(user, "id", None)
+        )
+        if skip:
+            return skip
+
         # Send via Telegram Bot API
         url = f"https://api.telegram.org/bot{effective_bot_token}/sendMessage"
         payload = {"chat_id": telegram_chat_id, "text": content, "parse_mode": "HTML"}
@@ -3473,12 +3604,24 @@ class NotificationService:
             template.get_translated("content", language) if hasattr(template, "get_translated") else template.content
         )
 
+        title = self._render_template(
+            template_subject or notification_type.value.replace("_", " ").title(), template_data, language
+        )
+        content = self._render_template(template_content or "", template_data, language)
+
+        skip = self._guard_unrendered_placeholders(
+            notification_type,
+            NotificationChannel.IN_APP.value,
+            f"{title}\n{content}",
+            getattr(user, "id", None),
+        )
+        if skip:
+            return skip
+
         return {
             "success": True,
-            "title": self._render_template(
-                template_subject or notification_type.value.replace("_", " ").title(), template_data, language
-            ),
-            "content": self._render_template(template_content or "", template_data, language),
+            "title": title,
+            "content": content,
             "message_id": f"in-app:{uuid.uuid4()}",
         }
 
@@ -3508,6 +3651,8 @@ class NotificationService:
             NotificationType.SYSTEM: [NotificationChannel.EMAIL],
             NotificationType.LOYALTY_REWARD: [NotificationChannel.EMAIL, NotificationChannel.TELEGRAM],
             NotificationType.REWARD_REDEEMED: [NotificationChannel.EMAIL],
+            NotificationType.LOYALTY_TIER_UPGRADE: [NotificationChannel.EMAIL, NotificationChannel.TELEGRAM],
+            NotificationType.LOYALTY_POINTS_EXPIRED: [NotificationChannel.EMAIL, NotificationChannel.TELEGRAM],
         }
 
         return default_channels.get(notification_type, [NotificationChannel.EMAIL])
@@ -3988,6 +4133,103 @@ Joriy balans: {balance} AquaCoins""",
 Reason: {reason_label}
 You've earned {points} AquaCoins.
 Current balance: {balance} AquaCoins""",
+            },
+        },
+    },
+    # Loyalty tier upgrade - Telegram (its own copy; must never reuse the
+    # "AquaCoins earned" template, whose {points}/{balance} this event cannot fill)
+    ("loyalty_tier_upgrade", "telegram"): {
+        "name": "loyalty_tier_upgrade_telegram",
+        "translations": {
+            "uz": {
+                "content": """🎉 <b>Tabriklaymiz!</b>
+
+Siz {tier_label} darajasiga ko'tarildingiz.
+Joriy balans: {balance} AquaCoins""",
+            },
+            "ru": {
+                "content": """🎉 <b>Поздравляем!</b>
+
+Вы достигли уровня {tier_label}.
+Текущий баланс: {balance} AquaCoins""",
+            },
+            "en": {
+                "content": """🎉 <b>Congratulations!</b>
+
+You've reached the {tier_label} tier.
+Current balance: {balance} AquaCoins""",
+            },
+        },
+    },
+    # Loyalty tier upgrade - Email
+    ("loyalty_tier_upgrade", "email"): {
+        "name": "loyalty_tier_upgrade_email",
+        "translations": {
+            "uz": {
+                "subject": "Yangi daraja: {tier_label} - {{company_name}}",
+                "content": """<h2>Tabriklaymiz!</h2>
+<p>Siz {tier_label} darajasiga ko'tarildingiz.</p>
+<p>Joriy balans: <strong>{balance} AquaCoins</strong></p>""",
+            },
+            "ru": {
+                "subject": "Новый уровень: {tier_label} - {{company_name}}",
+                "content": """<h2>Поздравляем!</h2>
+<p>Вы достигли уровня {tier_label}.</p>
+<p>Текущий баланс: <strong>{balance} AquaCoins</strong></p>""",
+            },
+            "en": {
+                "subject": "New tier: {tier_label} - {{company_name}}",
+                "content": """<h2>Congratulations!</h2>
+<p>You've reached the {tier_label} tier.</p>
+<p>Current balance: <strong>{balance} AquaCoins</strong></p>""",
+            },
+        },
+    },
+    # Loyalty points expired - Telegram
+    ("loyalty_points_expired", "telegram"): {
+        "name": "loyalty_points_expired_telegram",
+        "translations": {
+            "uz": {
+                "content": """⏳ <b>AquaCoins muddati tugadi</b>
+
+{points} AquaCoins muddati tugadi.
+Joriy balans: {balance} AquaCoins""",
+            },
+            "ru": {
+                "content": """⏳ <b>Срок AquaCoins истёк</b>
+
+Сгорело {points} AquaCoins.
+Текущий баланс: {balance} AquaCoins""",
+            },
+            "en": {
+                "content": """⏳ <b>AquaCoins expired</b>
+
+{points} AquaCoins have expired.
+Current balance: {balance} AquaCoins""",
+            },
+        },
+    },
+    # Loyalty points expired - Email
+    ("loyalty_points_expired", "email"): {
+        "name": "loyalty_points_expired_email",
+        "translations": {
+            "uz": {
+                "subject": "AquaCoins muddati tugadi - {{company_name}}",
+                "content": """<h2>AquaCoins muddati tugadi</h2>
+<p>{points} AquaCoins muddati tugadi.</p>
+<p>Joriy balans: <strong>{balance} AquaCoins</strong></p>""",
+            },
+            "ru": {
+                "subject": "Срок AquaCoins истёк - {{company_name}}",
+                "content": """<h2>Срок AquaCoins истёк</h2>
+<p>Сгорело {points} AquaCoins.</p>
+<p>Текущий баланс: <strong>{balance} AquaCoins</strong></p>""",
+            },
+            "en": {
+                "subject": "AquaCoins expired - {{company_name}}",
+                "content": """<h2>AquaCoins expired</h2>
+<p>{points} AquaCoins have expired.</p>
+<p>Current balance: <strong>{balance} AquaCoins</strong></p>""",
             },
         },
     },

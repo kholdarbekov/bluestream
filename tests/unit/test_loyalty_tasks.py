@@ -83,7 +83,16 @@ class TestLoyaltyTasks:
             },
         )
 
-    def test_update_loyalty_tiers_sends_upgrade_and_downgrade_notifications(self, app):
+    def test_update_loyalty_tiers_does_not_send_its_own_notifications(self, app):
+        """Tier changes are announced by the post-commit dispatch SSOT only.
+
+        The task used to loop over upgrades/downgrades calling
+        send_notification(user_id, "tier_upgraded", ...) — a raw string with no
+        NotificationType and no template, so it could never deliver anything.
+        Keeping it would leave a second, divergent expression of "announce a
+        tier change"; LoyaltyService._check_tier_upgrade owns that now and
+        parks it for the after_commit dispatcher.
+        """
         with (
             app.app_context(),
             patch("business_app.tasks.loyalty_tasks.LoyaltyService") as loyalty_service_cls,
@@ -109,10 +118,4 @@ class TestLoyaltyTasks:
         assert result["success"] is True
         assert result["upgrades_count"] == 1
         assert result["downgrades_count"] == 1
-        assert notification_service.send_notification.call_count == 2
-        first_call = notification_service.send_notification.call_args_list[0]
-        second_call = notification_service.send_notification.call_args_list[1]
-        assert first_call.args[0] == 21
-        assert first_call.args[1] == "tier_upgraded"
-        assert second_call.args[0] == 22
-        assert second_call.args[1] == "tier_downgraded"
+        assert notification_service.send_notification.call_count == 0

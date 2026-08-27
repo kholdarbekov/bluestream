@@ -45,9 +45,7 @@ def loyalty_service(app):
 
 
 @pytest.fixture(autouse=True)
-def _silence(loyalty_service, monkeypatch):
-    monkeypatch.setattr(loyalty_service, "_send_points_notification", lambda *a, **k: None)
-    monkeypatch.setattr(loyalty_service, "_send_tier_upgrade_notification", lambda *a, **k: None)
+def _silence(loyalty_service, loyalty_notification_spy):
     return loyalty_service
 
 

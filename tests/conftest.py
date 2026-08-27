@@ -871,3 +871,65 @@ def test_categories():
         'medium': ['notification', 'subscription', 'reporting'],
         'low': ['ui', 'logging', 'caching']
     }
+
+
+# ---------------------------------------------------------------------------
+# Loyalty notification spies
+# ---------------------------------------------------------------------------
+
+
+def install_loyalty_notification_spies(monkeypatch):
+    """Install signature-enforcing spies for LoyaltyService's notification senders.
+
+    Loyalty tests used to silence these with ``lambda *a, **k: None``, which
+    accepts ANY call. That is how the tier-upgrade notification shipped for
+    months sending a payload its template could not render: every test stayed
+    green because the stub swallowed the call unexamined.
+
+    These spies bind each call against the REAL signature (so a payload or
+    signature drift raises here, not in Telegram) and record it, so a test can
+    assert what the customer would actually have been sent.
+
+    Usage::
+
+        def test_x(loyalty_notification_spy, ...):
+            ...
+            assert loyalty_notification_spy.tier_upgrade.calls == [
+                ((user_id,), {"tier": "Silver", "tier_config_id": 2, "balance": 600})
+            ]
+    """
+    import inspect
+    from types import SimpleNamespace
+
+    from business_app.services.loyalty_service import LoyaltyService
+
+    spies = SimpleNamespace()
+
+    def _make_spy(real):
+        signature = inspect.signature(real)
+        calls = []
+
+        def _spy(self, *args, **kwargs):
+            signature.bind(self, *args, **kwargs)  # TypeError on signature drift
+            calls.append((args, kwargs))
+            return None
+
+        _spy.calls = calls
+        return _spy
+
+    for attr, alias in (
+        ("_send_points_notification", "earned"),
+        ("_send_tier_upgrade_notification", "tier_upgrade"),
+        ("_send_points_expiry_notification", "points_expired"),
+    ):
+        spy = _make_spy(getattr(LoyaltyService, attr))
+        monkeypatch.setattr(LoyaltyService, attr, spy)
+        setattr(spies, alias, spy)
+
+    return spies
+
+
+@pytest.fixture
+def loyalty_notification_spy(monkeypatch):
+    """Fixture wrapper around :func:`install_loyalty_notification_spies`."""
+    return install_loyalty_notification_spies(monkeypatch)

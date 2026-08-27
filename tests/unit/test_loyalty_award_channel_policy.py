@@ -69,9 +69,12 @@ def test_resolve_award_channels_helper():
 
 
 @pytest.mark.unit
-def test_non_earned_event_type_channels_is_none(db, sample_user):
-    """Non-'earned' event types must NOT apply the Telegram-else-email policy."""
-    # Give user a connected telegram to confirm the policy is NOT applied
+def test_redemption_keeps_the_default_channels(db, sample_user):
+    """The single-channel policy is scoped to AquaCoins *messages*.
+
+    A redemption (REWARD_REDEEMED) is not one of them and must keep the
+    default channel resolution, even for a user with a connected bot.
+    """
     sample_user.telegram_id = 777000222
     sample_user.is_bot_active = True
     db.session.commit()
@@ -82,14 +85,38 @@ def test_non_earned_event_type_channels_is_none(db, sample_user):
     ) as mock_send:
         mock_send.return_value = {"email": {"success": True}}
         service.send_loyalty_notification(
-            sample_user.id,
-            "redeemed",
-            {"points": 10, "balance": 90},
-            NotificationType.LOYALTY_REWARD,
+            sample_user.id, "redeemed", {"points": 10, "balance": 90}
         )
-    _self, user_id, notif_type, channels, template_data = mock_send.call_args.args
-    # channels must be None (preserve existing default behavior for non-award events)
+    _self, _user_id, notif_type, channels, _template_data = mock_send.call_args.args
+    assert notif_type == NotificationType.REWARD_REDEEMED
     assert channels is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "event_type,data",
+    [
+        ("earned", {"points": 10, "balance": 90}),
+        ("tier_upgrade", {"tier": "Silver", "balance": 90}),
+        ("points_expired", {"points": 10, "balance": 90}),
+    ],
+)
+def test_every_aquacoins_message_goes_to_exactly_one_channel(
+    db, sample_user, event_type, data
+):
+    """Telegram-else-email — never both, so a tier upgrade is one congratulation."""
+    sample_user.telegram_id = 777000222
+    sample_user.is_bot_active = True
+    db.session.commit()
+
+    service = NotificationService()
+    with patch.object(
+        NotificationService, "send_notification", autospec=True
+    ) as mock_send:
+        mock_send.return_value = {"telegram": {"success": True}}
+        service.send_loyalty_notification(sample_user.id, event_type, data)
+    _self, _user_id, _notif_type, channels, _template_data = mock_send.call_args.args
+    assert channels == [NotificationChannel.TELEGRAM]
 
 
 @pytest.mark.unit

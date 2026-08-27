@@ -29,11 +29,9 @@ from business_app.utils.constants import LoyaltyActionType, LoyaltyTransactionTy
 
 
 @pytest.fixture(autouse=True)
-def _silence_notifications(monkeypatch):
-    """Tier/award flows fire notifications; stub them all out for every test."""
-    monkeypatch.setattr(LoyaltyService, "_send_points_notification", lambda *a, **k: None)
-    monkeypatch.setattr(LoyaltyService, "_send_tier_upgrade_notification", lambda *a, **k: None)
-    monkeypatch.setattr(LoyaltyService, "_send_points_expiry_notification", lambda *a, **k: None)
+def _silence_notifications(loyalty_notification_spy):
+    """Tier/award flows fire notifications; spy on them (signature-enforcing)."""
+    return loyalty_notification_spy
 
 
 @pytest.fixture
@@ -144,6 +142,31 @@ class TestTierProgression:
         )
         db.session.refresh(account)
         assert account.current_tier == "Gold"
+
+    def test_tier_upgrade_notification_carries_what_its_template_renders(
+        self, loyalty_service, account, tiers, db, _silence_notifications
+    ):
+        """The payload the old no-op stub swallowed.
+
+        The message says "you reached <tier>, balance <n>", so the sender must
+        carry the tier's config id (its translated name lives there) and the
+        post-award balance. Missing either is what leaked {points}/{balance}
+        to a customer in production.
+        """
+        loyalty_service.award_points(
+            user_id=account.user_id, points=1600, description="big purchase",
+            action_type=LoyaltyActionType.PURCHASE,
+        )
+
+        calls = _silence_notifications.tier_upgrade.calls
+        assert len(calls) == 1
+        args, kwargs = calls[0]
+        assert args == (account.user_id,)
+        assert kwargs == {
+            "tier": "Gold",
+            "tier_config_id": tiers["Gold"].id,
+            "balance": 1600,
+        }
 
     def test_requalify_same_tier_refreshes_lock(self, loyalty_service, account, tiers, db):
         # First award lands at Silver and sets the lock.

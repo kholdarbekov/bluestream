@@ -798,11 +798,12 @@ class LoyaltyService:
         # once by the after_commit listener in
         # business_app/utils/loyalty_award_dispatch.py). This fires whether the
         # caller commits here or via an outer transaction (commit=False).
-        from business_app.utils.loyalty_award_dispatch import PENDING_KEY
+        from business_app.utils.loyalty_award_dispatch import KIND_AWARD, PENDING_KEY
 
         reason = action_type.value if hasattr(action_type, "value") else str(action_type)
         db.session.info.setdefault(PENDING_KEY, []).append(
             {
+                "kind": KIND_AWARD,
                 "user_id": user_id,
                 "points": points,
                 "reason": reason,
@@ -1400,7 +1401,10 @@ class LoyaltyService:
                 db.session.commit()
                 if expired > 0:
                     total_expired_points += expired
-                    affected_users.append(user_id)
+                    # Carry the numbers the expiry message interpolates; the
+                    # balance is read post-commit so it reflects the write.
+                    account = self.get_or_create_loyalty_account(user_id)
+                    affected_users.append((user_id, expired, account.current_balance))
             except Exception as exc:  # one user's failure must not abort the batch
                 db.session.rollback()
                 current_app.logger.error(f"Failed to expire loyalty points for user {user_id}: {exc}")
@@ -1408,9 +1412,9 @@ class LoyaltyService:
         # Notify only users who actually lost points (after successful commits).
         # Guarded so a single failed enqueue (e.g. broker outage) cannot drop the
         # remaining already-committed users' notifications.
-        for user_id in affected_users:
+        for user_id, expired_points, balance in affected_users:
             try:
-                self._send_points_expiry_notification(user_id)
+                self._send_points_expiry_notification(user_id, expired_points, balance)
             except Exception as exc:
                 current_app.logger.error(f"Failed to enqueue loyalty expiry notification for user {user_id}: {exc}")
 
@@ -1539,7 +1543,19 @@ class LoyaltyService:
             # Update points to next tier
             self._update_points_to_next_tier(account, target_tier_config)
 
-            self._send_tier_upgrade_notification(account.user_id, target_tier_name)
+            # SSOT: park post-commit (same listener as awards) so a rolled-back
+            # transaction never congratulates the customer on a tier they lost.
+            from business_app.utils.loyalty_award_dispatch import KIND_TIER_UPGRADE, PENDING_KEY
+
+            db.session.info.setdefault(PENDING_KEY, []).append(
+                {
+                    "kind": KIND_TIER_UPGRADE,
+                    "user_id": account.user_id,
+                    "tier": target_tier_name,
+                    "tier_config_id": target_tier_config.id,
+                    "balance": account.current_balance,
+                }
+            )
 
         # CASE 2: Downgrade Check
         # Only downgrade if lock expired AND qualifying points are insufficient.
@@ -2115,17 +2131,42 @@ class LoyaltyService:
 
         send_loyalty_notification_task.delay(user_id, action, data, notification_type_str)
 
-    def _send_tier_upgrade_notification(self, user_id: int, new_tier: str):
-        """Send tier upgrade notification"""
+    def _send_tier_upgrade_notification(
+        self,
+        user_id: int,
+        *,
+        tier: str,
+        tier_config_id: int = None,
+        balance: int = None,
+    ):
+        """Send tier upgrade notification.
+
+        Args:
+            user_id: User to notify
+            tier: Raw LoyaltyTierConfig.name of the tier just reached
+            tier_config_id: Its id, so the message can use the tier's own
+                translated name (LoyaltyTierConfig is @translatable("name"))
+            balance: AquaCoins balance to show alongside the congratulation
+        """
         from ..tasks.notification_tasks import send_loyalty_notification_task
 
-        send_loyalty_notification_task.delay(user_id, "tier_upgrade", {"tier": new_tier})
+        send_loyalty_notification_task.delay(
+            user_id,
+            "tier_upgrade",
+            {"tier": tier, "tier_config_id": tier_config_id, "balance": balance},
+        )
 
-    def _send_points_expiry_notification(self, user_id: int):
-        """Send points expiry notification"""
+    def _send_points_expiry_notification(self, user_id: int, points: int = 0, balance: int = 0):
+        """Send points expiry notification.
+
+        Args:
+            user_id: User to notify
+            points: AquaCoins that just expired
+            balance: Remaining balance after the expiry
+        """
         from ..tasks.notification_tasks import send_loyalty_notification_task
 
-        send_loyalty_notification_task.delay(user_id, "points_expired", {})
+        send_loyalty_notification_task.delay(user_id, "points_expired", {"points": points, "balance": balance})
 
     def create_loyalty_account(self, user_id: int) -> LoyaltyPoints:
         """Create a new loyalty account for user (alias for get_or_create_loyalty_account)"""

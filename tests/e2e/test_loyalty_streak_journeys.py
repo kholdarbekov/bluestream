@@ -184,11 +184,15 @@ def _make_order_service(mock_inventory_service, availability):
 
 
 @pytest.fixture(autouse=True)
-def _silence_loyalty_notifications(monkeypatch):
-    """No-op every loyalty notification path."""
-    monkeypatch.setattr(LoyaltyService, "_send_points_notification", lambda *a, **k: None)
-    monkeypatch.setattr(LoyaltyService, "_send_tier_upgrade_notification", lambda *a, **k: None)
-    monkeypatch.setattr(LoyaltyService, "_send_points_expiry_notification", lambda *a, **k: None)
+def _silence_loyalty_notifications(loyalty_notification_spy):
+    """Signature-enforcing spies rather than no-ops.
+
+    A ``lambda *a, **k: None`` stub accepts ANY call, so a sender whose
+    payload or signature drifts keeps every test green — that is how the
+    tier-upgrade notification shipped rendering the wrong template. The
+    shared fixture binds each call against the real signature instead.
+    """
+    return loyalty_notification_spy
 
 
 # ---------------------------------------------------------------------------

@@ -37,11 +37,9 @@ def loyalty_service(app):
 
 
 @pytest.fixture(autouse=True)
-def _silence_notifications(monkeypatch):
-    """All LoyaltyService notification hooks are no-ops for every test here."""
-    monkeypatch.setattr(LoyaltyService, "_send_points_notification", lambda *a, **k: None)
-    monkeypatch.setattr(LoyaltyService, "_send_tier_upgrade_notification", lambda *a, **k: None)
-    monkeypatch.setattr(LoyaltyService, "_send_points_expiry_notification", lambda *a, **k: None)
+def _silence_notifications(loyalty_notification_spy):
+    """All LoyaltyService notification hooks are spied (signature-enforcing)."""
+    return loyalty_notification_spy
 
 
 @pytest.fixture

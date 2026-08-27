@@ -36,11 +36,14 @@ def loyalty_service(app):
 
 
 @pytest.fixture(autouse=True)
-def _silence_notifications(loyalty_service, monkeypatch):
-    """Make every notification path a no-op so no Celery task is enqueued."""
-    monkeypatch.setattr(loyalty_service, "_send_points_notification", lambda *a, **k: None)
-    monkeypatch.setattr(loyalty_service, "_send_tier_upgrade_notification", lambda *a, **k: None)
-    monkeypatch.setattr(loyalty_service, "_send_points_expiry_notification", lambda *a, **k: None)
+def _silence_notifications(loyalty_service, loyalty_notification_spy):
+    """Signature-enforcing spies rather than no-ops.
+
+    A ``lambda *a, **k: None`` stub accepts ANY call, so a sender whose
+    payload or signature drifts keeps every test green — that is how the
+    tier-upgrade notification shipped rendering the wrong template. The
+    shared fixture binds each call against the real signature instead.
+    """
     return loyalty_service
 
 

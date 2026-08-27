@@ -17,6 +17,7 @@ cart, no menu, no keyboard at all — and the cleanup pops of
 Drives the real handler chain (`profile.cancel_address_text` ->
 `products.show_cart`); the only thing mocked is the API client underneath."""
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -50,6 +51,10 @@ async def test_cancel_at_zero_address_checkout_shows_cart_and_cleans_up(echo_i18
     Cancel button. Must not crash, must end with a usable keyboard (the
     cart), and must clear the leaked address-flow state."""
     handler = ProfileHandlers()
+    # `_clear_address_flow_keys` now also clears the durable `address_draft`
+    # twin (SDD 2026-08-26-address-flow-bot-state, Task 6); the real
+    # BotUserRepository needs a connected pool this unit test never sets up.
+    handler.user_repo = SimpleNamespace(clear_address_draft=AsyncMock())
 
     update = DummyUpdate()
     # This is the exact shape that crashed: a MessageHandler update with no
@@ -97,6 +102,7 @@ async def test_cancel_outside_checkout_still_goes_to_main_menu(echo_i18n, monkey
     """Guard against overcorrecting: a plain (non-checkout) address-flow
     cancel must keep going to the main menu, not the cart."""
     handler = ProfileHandlers()
+    handler.user_repo = SimpleNamespace(clear_address_draft=AsyncMock())
 
     update = DummyUpdate()
     ctx = make_context()

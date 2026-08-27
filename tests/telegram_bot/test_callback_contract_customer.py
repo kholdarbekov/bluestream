@@ -464,6 +464,34 @@ async def test_the_address_conversation_answers_its_own_timeout(bot):
     )
 
 
+async def test_the_address_flow_gives_the_customer_a_full_day(bot):
+    """The window is a product decision, so it is pinned rather than inferred.
+
+    It was 600s until 2026-08-26. Manual entry is seven prompts long and
+    customers put the phone down mid-way, so the same-afternoon expiry returned
+    them to dead buttons.
+
+    Pinned because the cost of the long window is invisible from bot.py: while
+    this flow is open, `_consumes` stops every typed message at the step that
+    asked for it, so nothing the customer types reaches the group-0 support
+    catch-all. Shortening or lengthening it again should be a decision someone
+    makes on purpose, not a number someone tunes in passing.
+
+    Note this is NOT `utils.AWAITING_LOCATION_STALE_MINUTES`, which bounds a
+    pin arriving with no conversation open (the zero-address checkout prompt)
+    and is deliberately shorter — see test_address_location_entry.py.
+    """
+    address = bot.conversation("address_conversation")
+
+    assert address.conversation_timeout == 86400, (
+        f"address_conversation expires after {address.conversation_timeout}s, "
+        "not the 24h the flow is meant to give a customer who walks away "
+        "mid-form. Change the number in telegram_bot/bot.py and here together, "
+        "and re-read what a longer window costs: the support-inbox catch-all "
+        "sees nothing this customer types until the flow ends."
+    )
+
+
 async def test_every_expiring_conversation_covers_BOTH_shapes_of_timeout_update(bot):
     """A TIMEOUT state that registers only one handler kind is half a fix.
 

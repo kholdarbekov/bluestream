@@ -519,9 +519,13 @@ async def test_an_over_long_apartment_or_floor_is_refused_without_costing_the_cu
     assert rejection.text == UZ["telegram.address.field_too_long"].format(
         max_length=ADDRESS_DETAIL_MAX_LENGTH
     )
-    assert rejection.callback_data() == ["skip_apartment"], (
+    assert "skip_apartment" in rejection.callback_data(), (
         "the re-prompt dropped the Skip button, so a customer who cannot "
         "shorten their answer is trapped"
+    )
+    assert "cancel_address_creation" in rejection.callback_data(), (
+        "the re-prompt must still offer a way out of the 24h-long flow (C1, "
+        "final whole-branch review)"
     )
 
     await bot.send(user.text("45"))
@@ -529,7 +533,9 @@ async def test_an_over_long_apartment_or_floor_is_refused_without_costing_the_cu
 
     await bot.send(user.text("9" * (ADDRESS_DETAIL_MAX_LENGTH + 5)))
     assert state(bot) == ADDRESS_FLOOR
-    assert bot.telegram.last_shown().callback_data() == ["skip_floor"]
+    floor_rejection_callbacks = bot.telegram.last_shown().callback_data()
+    assert "skip_floor" in floor_rejection_callbacks
+    assert "cancel_address_creation" in floor_rejection_callbacks
 
     await bot.send(user.text("9"))
     await bot.send(user.text("domofon 45"))
@@ -836,6 +842,55 @@ async def test_every_button_the_manual_flow_renders_is_claimed_by_a_working_hand
                 f"the {data!r} button rendered {where} lands nowhere: no "
                 f"registered handler claims it in this conversation state"
             )
+
+
+async def test_every_text_swallowing_step_still_renders_a_cancel_button(bot, user):
+    """C1 (final whole-branch review): `conversation_timeout` on this
+    conversation grew from 10 minutes to 24 hours (bot.py), but six states —
+    title/street/building/apartment/floor/delivery_instructions — match
+    `filters.TEXT & ~filters.COMMAND` and, via `_consumes`, swallow ANY typed
+    text as the answer to whatever they asked, before it can reach the
+    group-0 support catch-all. `location_received` had already sent
+    `ReplyKeyboardRemove()` by then, so there was no menu to fall back to
+    either. A customer who abandoned at delivery-instructions and came back
+    hours later to ask "Where is my order?" had that sentence saved as their
+    delivery instructions instead of reaching the Support Inbox.
+
+    The previous test proves whatever IS rendered works; it says nothing
+    about whether an escape is rendered AT ALL — a keyboard with zero buttons
+    passes it trivially. This one checks every one of those six prompts
+    carries `cancel_address_creation`, already wired in the conversation's
+    own `fallbacks` (bot.py) with zero new registration needed.
+    """
+    journey = [
+        (user.tap("add_new_address"), ADDRESS_LOCATION, None),
+        (user.text(MANUAL_BUTTON), ADDRESS_REGION, None),
+        (user.tap("region_tashkent_city"), ADDRESS_DISTRICT, None),
+        (user.tap(f"district_{DISTRICT_KEY}"), ADDRESS_STREET, "street"),
+        (user.text("Bunyodkor"), ADDRESS_BUILDING, "building"),
+        (user.text("15"), ADDRESS_APARTMENT, "apartment"),
+        (user.text("45"), ADDRESS_FLOOR, "floor"),
+        (user.text("9"), ADDRESS_DELIVERY_INSTRUCTIONS, "delivery_instructions"),
+        (user.text("domofon 45"), ADDRESS_GEOCODE_CONFIRM, None),
+        (user.tap("confirm_geocode"), ADDRESS_TITLE, "title"),
+    ]
+
+    for update, expected_state, vulnerable_step in journey:
+        bot.telegram.reset()
+        await bot.send(update)
+        assert state(bot) == expected_state
+
+        if vulnerable_step is None:
+            # Callback-only steps (region/district picks) or a step that
+            # already carried Cancel before this fix (geocode confirmation)
+            # — not part of C1's six.
+            continue
+
+        rendered = bot.telegram.last_shown()
+        assert "cancel_address_creation" in rendered.callback_data(), (
+            f"the {vulnerable_step} prompt swallows any typed text for up "
+            "to 24h and rendered no way to back out of the flow"
+        )
 
 
 async def test_a_telegram_edit_rejection_at_the_district_step_keeps_the_flow_alive(

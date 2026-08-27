@@ -26,8 +26,6 @@ class BotState(BaseModel):
         'profile_edit',           # Editing user profile
         'edit_profile_name',      # Editing profile first/last name
         'edit_profile_birthday',  # Editing profile birthday (DD-MM-YYYY text entry)
-        'address_location',       # Waiting for location share
-        'address_title',          # Naming a new address
         'edit_address_title',     # Editing address name
         'edit_address_instructions',  # Editing delivery instructions
         'search_products',        # Product search query

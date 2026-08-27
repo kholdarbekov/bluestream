@@ -19,6 +19,7 @@ the address entry point (`bot.py::_route_address_location_entry`) decides
 per-update whether an arming marker is present, not whether a conversation
 happens to be "active"."""
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -88,6 +89,10 @@ async def test_pin_at_checkout_stores_coordinates_and_keeps_the_origin(echo_i18n
     """The pin must reach location_received, populate temp_address_data, and
     leave address_flow_origin alone so the save routes back into checkout."""
     handler = ProfileHandlers()
+    # `location_received` now dual-writes the draft (SDD
+    # 2026-08-26-address-flow-bot-state, Task 6); the real BotUserRepository
+    # needs a connected pool this unit test never sets up.
+    handler.user_repo = SimpleNamespace(save_address_draft=AsyncMock())
 
     # In-zone Tashkent coordinates; the zone check is the real SSOT function.
     update = DummyUpdate()

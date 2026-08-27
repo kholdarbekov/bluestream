@@ -34,7 +34,7 @@ def _patch_i18n(monkeypatch):
 @pytest.mark.anyio
 async def test_start_arms_state_and_prompts(monkeypatch):
     handler = support_module.SupportHandlers()
-    handler.user_repo = SimpleNamespace(update_user_state=AsyncMock())
+    handler.user_repo = SimpleNamespace(arm_awaiting_input=AsyncMock())
 
     client = _FakeClient(
         get_order=AsyncMock(
@@ -58,13 +58,18 @@ async def test_start_arms_state_and_prompts(monkeypatch):
     update.callback_query.answer.assert_awaited_once()
     client.get_order.assert_awaited_once_with("tok-1", 42)
 
-    handler.user_repo.update_user_state.assert_awaited_once()
-    uid, state = handler.user_repo.update_user_state.await_args.args
+    # Was: update_user_state.await_args.args == (uid, {"awaiting_input": "support_message",
+    # "support_order_id": 42, "support_order_number": "ORD-1234", "support_armed_at": ...}).
+    # Same facts, now split across arm_awaiting_input's positional flow-name arg and
+    # its companion kwargs.
+    handler.user_repo.arm_awaiting_input.assert_awaited_once()
+    call = handler.user_repo.arm_awaiting_input.await_args
+    uid, flow = call.args
     assert uid == update.effective_user.id
-    assert state["awaiting_input"] == "support_message"
-    assert state["support_order_id"] == 42
-    assert state["support_order_number"] == "ORD-1234"
-    armed = datetime.fromisoformat(state["support_armed_at"])
+    assert flow == "support_message"
+    assert call.kwargs["support_order_id"] == 42
+    assert call.kwargs["support_order_number"] == "ORD-1234"
+    armed = datetime.fromisoformat(call.kwargs["support_armed_at"])
     assert before <= armed <= after
 
     # Prompt is a NEW message (delivered summary + its button stay tappable),
@@ -78,7 +83,7 @@ async def test_start_arms_state_and_prompts(monkeypatch):
 @pytest.mark.anyio
 async def test_start_falls_back_to_raw_id_when_lookup_fails(monkeypatch):
     handler = support_module.SupportHandlers()
-    handler.user_repo = SimpleNamespace(update_user_state=AsyncMock())
+    handler.user_repo = SimpleNamespace(arm_awaiting_input=AsyncMock())
 
     client = _FakeClient(
         get_order=AsyncMock(
@@ -95,9 +100,11 @@ async def test_start_falls_back_to_raw_id_when_lookup_fails(monkeypatch):
 
     await handler.start_order_issue_report(update, context)
 
-    _uid, state = handler.user_repo.update_user_state.await_args.args
-    assert state["support_order_id"] == 77
-    assert state["support_order_number"] == "77"
+    # Was: update_user_state.await_args.args[1]["support_order_id"/"support_order_number"].
+    # Same facts, now in arm_awaiting_input's companion kwargs.
+    call = handler.user_repo.arm_awaiting_input.await_args
+    assert call.kwargs["support_order_id"] == 77
+    assert call.kwargs["support_order_number"] == "77"
     update.callback_query.message.reply_text.assert_awaited_once()
 
 
@@ -112,7 +119,7 @@ def _armed_repo(order_number="ORD-1234", armed_at=None):
     }
     return SimpleNamespace(
         get_user_state=AsyncMock(return_value=state),
-        update_user_state=AsyncMock(),
+        disarm=AsyncMock(),
     )
 
 
@@ -139,7 +146,9 @@ async def test_capture_posts_prefixed_content_and_acks(monkeypatch):
     client.record_support_message.assert_awaited_once_with(
         "tok-1", content="[Order #ORD-1234] the bottle arrived cracked", message_type="text"
     )
-    handler.user_repo.update_user_state.assert_awaited_once_with(update.effective_user.id, {})
+    # Was: update_user_state.assert_awaited_once_with(update.effective_user.id, {}).
+    # Same facts (same user id, the flow this handler owns), against the new method.
+    handler.user_repo.disarm.assert_awaited_once_with(update.effective_user.id, 'support_message')
     update.message.reply_text.assert_awaited_once_with("telegram.support.ack:en")
 
 
@@ -186,7 +195,8 @@ async def test_capture_no_token_sends_failed_no_ack(monkeypatch):
 
     client.record_support_message.assert_not_awaited()
     update.message.reply_text.assert_awaited_once_with("telegram.support.send_failed:en")
-    handler.user_repo.update_user_state.assert_awaited_once_with(update.effective_user.id, {})
+    # Was: update_user_state.assert_awaited_once_with(update.effective_user.id, {}).
+    handler.user_repo.disarm.assert_awaited_once_with(update.effective_user.id, 'support_message')
 
 
 @pytest.mark.unit
@@ -212,7 +222,8 @@ async def test_capture_api_error_sends_failed_no_ack(monkeypatch):
         "tok-1", content="[Order #ORD-1234] broken", message_type="text"
     )
     update.message.reply_text.assert_awaited_once_with("telegram.support.send_failed:en")
-    handler.user_repo.update_user_state.assert_awaited_once_with(update.effective_user.id, {})
+    # Was: update_user_state.assert_awaited_once_with(update.effective_user.id, {}).
+    handler.user_repo.disarm.assert_awaited_once_with(update.effective_user.id, 'support_message')
 
 
 @pytest.mark.unit
@@ -238,7 +249,8 @@ async def test_capture_stale_falls_back_to_silent_no_prefix(monkeypatch):
         "tok-1", content="much later message", message_type="text"
     )
     update.message.reply_text.assert_not_awaited()
-    handler.user_repo.update_user_state.assert_awaited_once_with(update.effective_user.id, {})
+    # Was: update_user_state.assert_awaited_once_with(update.effective_user.id, {}).
+    handler.user_repo.disarm.assert_awaited_once_with(update.effective_user.id, 'support_message')
 
 
 @pytest.mark.unit
@@ -251,7 +263,7 @@ async def test_capture_missing_order_number_falls_back_to_silent(monkeypatch):
             "support_order_id": 42,
             "support_armed_at": datetime.now(timezone.utc).isoformat(),
         }),
-        update_user_state=AsyncMock(),
+        disarm=AsyncMock(),
     )
 
     client = _FakeClient(record_support_message=AsyncMock(return_value=SimpleNamespace(success=True)))
@@ -269,14 +281,15 @@ async def test_capture_missing_order_number_falls_back_to_silent(monkeypatch):
         "tok-1", content="no order reference here", message_type="text"
     )
     update.message.reply_text.assert_not_awaited()
-    handler.user_repo.update_user_state.assert_awaited_once_with(update.effective_user.id, {})
+    # Was: update_user_state.assert_awaited_once_with(update.effective_user.id, {}).
+    handler.user_repo.disarm.assert_awaited_once_with(update.effective_user.id, 'support_message')
 
 
 @pytest.mark.unit
 @pytest.mark.anyio
 async def test_cancel_clears_state_and_confirms(monkeypatch):
     handler = support_module.SupportHandlers()
-    handler.user_repo = SimpleNamespace(update_user_state=AsyncMock())
+    handler.user_repo = SimpleNamespace(disarm=AsyncMock())
     _patch_i18n(monkeypatch)
 
     update = DummyUpdate()
@@ -286,7 +299,11 @@ async def test_cancel_clears_state_and_confirms(monkeypatch):
     await handler.cancel_issue_report(update, context)
 
     update.callback_query.answer.assert_awaited_once()
-    handler.user_repo.update_user_state.assert_awaited_once_with(update.effective_user.id, {})
+    # Was: update_user_state.assert_awaited_once_with(update.effective_user.id, {}) — an
+    # unconditional blanket wipe. Converted (2026-08-26 Task 5, ruling 1): a stale Cancel
+    # tap now only cancels the support report it names, via disarm(uid, 'support_message'),
+    # and leaves any other armed flow (or an open address_draft) untouched.
+    handler.user_repo.disarm.assert_awaited_once_with(update.effective_user.id, 'support_message')
     update.callback_query.edit_message_text.assert_awaited_once()
     assert update.callback_query.edit_message_text.await_args.kwargs["text"] == "telegram.support.cancelled:en"
 

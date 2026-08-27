@@ -319,16 +319,32 @@ async def test_starting_the_address_flow_leaves_a_pending_concern_report_armed(
     impossible — so the guard is obsolete while its damage was not. The concern
     survives the detour, and the complaint the customer types once the address
     is saved is filed against the right order and acknowledged.
+
+    UPDATED (SDD 2026-08-26-address-flow-bot-state, Task 6): the address flow
+    now ALSO dual-writes its own progress onto `bot_state` as `address_draft`
+    (P2 — nothing reads it back yet). The equality assertion below is popped
+    apart rather than widened in place so the exact same 4-key document is
+    still checked byte-for-byte where it always was — the concern's arming
+    surviving the detour is pinned exactly as strongly as before — with a
+    SEPARATE, positive assertion that the draft key sits beside it, proving
+    the two flows' writes coexist rather than one clobbering the other.
     """
     await arm_the_concern_flow(bot, user)
 
     await walk_to_delivery_instructions(bot, user)
-    assert json.loads(bot.database.user["bot_state"]) == {
+    state = json.loads(bot.database.user["bot_state"])
+    address_draft = state.pop("address_draft", None)
+    assert state == {
         "awaiting_input": "support_message",
         "support_order_id": ORDER_ID,
         "support_order_number": ORDER_NUMBER,
-        "support_armed_at": json.loads(bot.database.user["bot_state"])["support_armed_at"],
+        "support_armed_at": state["support_armed_at"],
     }, "entering the address flow must not wipe another flow's armed state"
+    assert address_draft is not None and address_draft["step"] == "delivery_instructions", (
+        "the address flow's own draft must be written too — proof P2's "
+        "dual-write actually reaches bot_state alongside the untouched "
+        "concern arming, not just that the concern's keys happen to survive"
+    )
 
     bot.telegram.reset()
     instructions = "Eshik oldiga qo'ying"
@@ -341,6 +357,18 @@ async def test_starting_the_address_flow_leaves_a_pending_concern_report_armed(
     assert support_posts(bot) == [], (
         "a delivery note must not be filed in the Support Inbox with no order "
         "reference and no way to tell it apart from a genuine message"
+    )
+    # I1 (coordinator review, Task 6): the save above completed the flow via
+    # `save_address_final`, which tears it down through `_clear_address_flow_keys`
+    # -> `clear_address_draft`. That teardown call was previously exercised in
+    # tests only through `SimpleNamespace(clear_address_draft=AsyncMock())`
+    # fakes nothing asserted on, and is wrapped in `except Exception` for
+    # `test_customer_bot_address_detail_flow.py`'s sake (see report) — so a
+    # wiring mistake there (wrong id, renamed method) would log one warning
+    # and leave the whole suite green while a later phase resumed the
+    # customer straight back into an address they already finished.
+    assert "address_draft" not in json.loads(bot.database.user["bot_state"]), (
+        "a completed flow must not leave a draft for a later phase to resume into"
     )
 
     # The address flow is over. The report the customer armed before it is

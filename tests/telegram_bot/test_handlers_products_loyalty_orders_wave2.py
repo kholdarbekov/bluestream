@@ -329,7 +329,7 @@ class TestProductHandlerWave2:
 
     async def test_search_products_with_results_clears_search_state(self, monkeypatch):
         handler = products_module.ProductHandlers()
-        handler.user_repo = SimpleNamespace(update_user_state=AsyncMock())
+        handler.user_repo = SimpleNamespace(disarm=AsyncMock())
         update = DummyUpdate()
         context = make_context()
 
@@ -352,7 +352,9 @@ class TestProductHandlerWave2:
         await handler.search_products(update, context, "bottle")
 
         update.message.reply_text.assert_awaited_once()
-        handler.user_repo.update_user_state.assert_awaited_once_with(update.effective_user.id, {})
+        # Was: update_user_state.assert_awaited_once_with(update.effective_user.id, {})
+        # Same facts (same user id, the flow this screen owns), against the new method.
+        handler.user_repo.disarm.assert_awaited_once_with(update.effective_user.id, 'search_products')
 
 
 @pytest.mark.unit

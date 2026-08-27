@@ -219,6 +219,49 @@ async def test_an_edited_location_message_is_not_filed_as_junk_support(bot, user
     )
 
 
+async def test_a_live_location_tick_does_not_kill_an_open_address_flow(bot, user):
+    """The null-message guard must skip the update, not END the conversation.
+
+    `filters.LOCATION` is a `MessageFilter`, so it matches `edited_message` —
+    and `allow_reentry=True` makes PTB search entry points BEFORE the current
+    state's handlers (conversationhandler.py:765-771), so a live-location tick
+    reaches this entry point even mid-flow.
+
+    `ApplicationHandlerStop(ConversationHandler.END)` is not "skip this update":
+    PTB catches it at conversationhandler.py:853 (`new_state = exception.state`)
+    and `_update_state` then does `del self._conversations[key]`. So one tick of
+    a live-location share silently deleted the customer's open address form —
+    leaving `temp_address_data` stranded, which sends their next typed answer to
+    the Support Inbox and lets a later pin resurrect the dead draft.
+
+    A BARE `ApplicationHandlerStop()` carries `state=None`, and `_update_state`
+    no-ops on None — dispatch still stops, the conversation is untouched.
+
+    The neighbouring `test_an_edited_location_message_is_not_filed_as_junk_support`
+    cannot catch this: it sends the tick with NO conversation open, so its
+    `conversation_state(...) is None` assertion passes either way.
+    """
+    await bot.send(user.tap("add_new_address"))
+    await bot.send(user.location(41.32354, 69.241036))
+    assert bot.conversation_state("address_conversation") == ADDRESS_TITLE, (
+        "precondition: the customer is parked mid-flow on the title prompt"
+    )
+
+    tick = user.location(41.3236, 69.2411).to_dict()
+    tick["edited_message"] = tick.pop("message")
+    tick["update_id"] += 1000
+    await bot.send(Update.de_json(tick, user.bot))
+
+    assert bot.conversation_state("address_conversation") == ADDRESS_TITLE, (
+        "a live-location tick ended the customer's open address conversation; "
+        "the null-message guard in _route_address_location_entry must raise a "
+        "BARE ApplicationHandlerStop, never ApplicationHandlerStop(END)"
+    )
+    assert _support_calls(bot) == [], (
+        "the tick must not be filed as support either"
+    )
+
+
 async def test_a_photo_with_no_flow_open_is_captured_silently(bot, user):
     await bot.send(user.photo(caption="the cap is cracked", file_id="tg-photo-9"))
 

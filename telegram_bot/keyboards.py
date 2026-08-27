@@ -1257,13 +1257,52 @@ class ProfileKeyboards:
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod
+    def _cancel_address_row(language: str = 'en') -> List[Dict[str, str]]:
+        """One row: Cancel, routed to `cancel_address_creation`.
+
+        That callback is already registered in the address conversation's
+        `fallbacks` (`bot.py`), so it answers from EVERY state with zero new
+        wiring — the same reason `region_selection` and `geocode_confirmation`
+        already render it. Reuses `telegram.cancel`, the same translation key
+        those two already use for this exact button, rather than adding a new
+        DB-backed key that would render as raw text until seeded.
+
+        C1 (final whole-branch review, SDD 2026-08-26-address-flow-bot-state):
+        `conversation_timeout` on this conversation grew from 10 minutes to
+        24 hours, but six states (title/street/building/apartment/floor/
+        delivery_instructions) matched `filters.TEXT & ~filters.COMMAND` and
+        swallowed ANY typed text as an answer to whatever they asked, with no
+        button on screen to back out of it — location_received had already
+        sent `ReplyKeyboardRemove()`, so there was no menu either. A customer
+        who abandoned at, say, delivery-instructions and came back nine hours
+        later to ask "Where is my order?" had that sentence written down as
+        their delivery instructions instead of reaching the Support Inbox.
+        """
+        return [{'text': i18n.get('telegram.cancel', language),
+                 'callback_data': 'cancel_address_creation'}]
+
+    @staticmethod
     def optional_field_keyboard(field_name: str, language: str = 'en') -> InlineKeyboardMarkup:
         """Keyboard for optional address fields with skip option"""
         buttons = [
             [{'text': i18n.get('telegram.address.skip_field', language),
-              'callback_data': f'skip_{field_name}'}]
+              'callback_data': f'skip_{field_name}'}],
+            ProfileKeyboards._cancel_address_row(language),
         ]
         return KeyboardBuilder.build_inline_keyboard(buttons)
+
+    @staticmethod
+    def required_field_keyboard(language: str = 'en') -> InlineKeyboardMarkup:
+        """Cancel-only keyboard for a required (non-Skip-able) address step.
+
+        The one caller today is the street prompt (`district_selected`,
+        `handlers/profile.py`): street has deliberately no Skip button (see
+        `handlers/address_flow.py::_render_street`), so it cannot reuse
+        `optional_field_keyboard` without resurrecting that removed Skip
+        affordance. It still needs the escape `_cancel_address_row` documents
+        — see C1 there for the incident this prevents.
+        """
+        return KeyboardBuilder.build_inline_keyboard([ProfileKeyboards._cancel_address_row(language)])
 
     @staticmethod
     def geocode_confirmation(language: str = 'en', show_edit: bool = True) -> InlineKeyboardMarkup:
@@ -1310,7 +1349,8 @@ class ProfileKeyboards:
             [
                 {'text': titles['other'].get(language, titles['other']['en']),
                  'callback_data': 'addr_title_other'}
-            ]
+            ],
+            ProfileKeyboards._cancel_address_row(language),
         ]
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
@@ -1341,7 +1381,8 @@ class ProfileKeyboards:
         """Keyboard for delivery instructions step"""
         buttons = [
             [{'text': i18n.get('telegram.address.skip_instructions', language),
-              'callback_data': 'skip_delivery_instructions'}]
+              'callback_data': 'skip_delivery_instructions'}],
+            ProfileKeyboards._cancel_address_row(language),
         ]
         return KeyboardBuilder.build_inline_keyboard(buttons)
 

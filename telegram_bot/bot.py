@@ -304,7 +304,14 @@ class WaterBusinessBot:
         @functools.wraps(callback)
         async def _route(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if update.message is None:
-                raise ApplicationHandlerStop(ConversationHandler.END)
+                # BARE stop, never `ApplicationHandlerStop(ConversationHandler.END)`:
+                # PTB reads `exception.state` (conversationhandler.py:853) and
+                # `_update_state` deletes the conversation on END. With
+                # `allow_reentry=True` this entry point runs mid-flow too, so
+                # passing END here let ONE live-location tick silently kill a
+                # customer's open address form. `state=None` no-ops instead,
+                # and dispatch still stops.
+                raise ApplicationHandlerStop()
 
             armed = context.user_data.pop('awaiting_location', False)
             armed_at = context.user_data.pop('awaiting_location_at', None)
@@ -318,7 +325,12 @@ class WaterBusinessBot:
                 await bot._capture_support_with_guards(update, context)
             except Exception as e:
                 logger.error(f"Error handling spontaneous location message: {e}")
-            raise ApplicationHandlerStop(ConversationHandler.END)
+            # BARE stop, same reasoning as the null-message guard above: this
+            # branch is reachable only while `temp_address_data` happens to be
+            # absent, an accident of the current marker rather than a real
+            # guarantee no conversation is open. Passing END would delete an
+            # open conversation on the day that accident stops holding.
+            raise ApplicationHandlerStop()
 
         return _route
 
@@ -459,8 +471,12 @@ class WaterBusinessBot:
             # fiscalization settles, which froze the WHOLE bot for everyone.
             #
             # A bare `.concurrent_updates(True)` is not safe here: PTB warns
-            # against it with stateful handlers and this bot's checkout is a
-            # ConversationHandler. PerChatSerialUpdateProcessor keeps each
+            # against it with stateful handlers and this bot runs eight
+            # ConversationHandlers (registration, address, phone verification,
+            # and the subscription flows). Checkout is NOT one of them — it is
+            # a plain CallbackQueryHandler in group 0, which is precisely why
+            # `utils.arm_location_request` has to exist; do not let this
+            # comment imply otherwise. PerChatSerialUpdateProcessor keeps each
             # customer's updates ordered while unblocking everyone else — and
             # it also removes the head-of-line queuing that
             # `handlers/callback_dedup.py` documents as the cause of
@@ -994,7 +1010,29 @@ class WaterBusinessBot:
             per_chat=True,
             per_user=True,
             name="address_conversation",
-            conversation_timeout=600,  # 10 minutes timeout for manual entry
+            # 24h, not the 10 minutes this carried until 2026-08-26. Manual
+            # entry is seven prompts long and customers routinely put the phone
+            # down mid-way; expiring the same afternoon meant they came back to
+            # dead buttons. Two consequences of the long window, both real:
+            #
+            # * While this flow is open every text the customer types is eaten
+            #   by the step that asked for it (`_consumes` stops dispatch before
+            #   the group-0 support catch-all), so it never reaches the Support
+            #   Inbox. `/cancel` and the inline Cancel are the escapes.
+            # * The Application has no `persistence`, so the state AND the
+            #   APScheduler timeout job are in memory: a restart ends the flow
+            #   silently, without this timeout's message. In practice the
+            #   window is "24h or the next deploy, whichever comes first".
+            #
+            # NOT the same clock as `utils.AWAITING_LOCATION_STALE_MINUTES`.
+            # That one governs a pin arriving with NO conversation open (the
+            # zero-address checkout keyboard in handlers/orders.py, which arms
+            # a pin prompt without entering this flow), so it is deliberately
+            # shorter — it is what distinguishes a pin the bot asked for from a
+            # spontaneous one bound for support. Inside THIS flow it is
+            # bypassed: `temp_address_data` makes `mid_flow` true in
+            # `_route_address_location_entry`.
+            conversation_timeout=86400,  # 24 hours
             allow_reentry=True
         )
         # Add conversation handler in higher priority group
@@ -1478,8 +1516,10 @@ class WaterBusinessBot:
             # Handle profile birthday editing (DD-MM-YYYY text entry)
             await profile_handlers.handle_profile_birthday_edit(update, context, text, user_state)
         else:
-            # Unknown state, clear it
-            await self.user_repository.update_user_state(user_id, {})
+            # Unknown state, clear it. `input_type` is `user_state['awaiting_input']`,
+            # read immediately before this dispatch (`_handle_text_message`), so
+            # it names exactly the flow(s) armed here.
+            await self.user_repository.disarm(user_id, input_type)
             await update.message.reply_text(i18n.get('telegram.error.invalid_input', language))
 
     async def _handle_general_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
@@ -1521,58 +1561,6 @@ class WaterBusinessBot:
 
         except Exception as e:
             logger.error(f"Error handling contact: {e}")
-
-    async def _handle_location(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle location sharing outside of conversation"""
-        try:
-            logger.info(f"=== GENERAL LOCATION HANDLER CALLED ===")
-            logger.info(f"User: {update.effective_user.id}")
-            location = update.message.location
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
-
-            logger.info(f"Location: lat={location.latitude}, lng={location.longitude}")
-            logger.info(f"Context user_data: {context.user_data}")
-
-            # Check if user is in address adding flow
-            user_state = await self.user_repository.get_user_state(user_id)
-            logger.info(f"Database user state: {user_state}")
-
-            if user_state.get('awaiting_input') == 'address_location':
-                logger.info(f"User is in address_location flow, handling as address creation")
-                # Handle as part of address creation
-                user_state['temp_location'] = {
-                    'latitude': location.latitude,
-                    'longitude': location.longitude
-                }
-                await self.user_repository.update_user_state(user_id, user_state)
-
-                await update.message.reply_text(
-                    i18n.get('telegram.bot.location.received_prompt', language),
-                    reply_markup=ReplyKeyboardRemove()
-                )
-
-                # Set state for address title input
-                user_state['awaiting_input'] = 'address_title'
-                await self.user_repository.update_user_state(user_id, user_state)
-                logger.info(f"Updated user state to address_title")
-            else:
-                logger.info(f"Location shared outside of any specific flow, showing general response")
-                # Location shared outside of any specific flow
-                await update.message.reply_text(
-                    i18n.get(
-                        'telegram.bot.location.shared_general',
-                        language,
-                        latitude=location.latitude,
-                        longitude=location.longitude
-                    ),
-                    reply_markup=await main_menu_for(update.effective_user.id, language)
-                )
-
-        except Exception as e:
-            logger.error(f"Error handling location: {e}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
 
     def run(self):
         """Run the bot (synchronous wrapper for async run)"""

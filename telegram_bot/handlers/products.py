@@ -1089,8 +1089,10 @@ class ProductHandlers(BaseHandler):
                 reply_markup=keyboard
             )
 
-            # Clear search state
-            await self.user_repo.update_user_state(user_id, {})
+            # Clear search state. Reached only via `_handle_contextual_input`'s
+            # `input_type == 'search_products'` branch, so `awaiting_input` is
+            # guaranteed to be this flow's own name.
+            await self.user_repo.disarm(user_id, 'search_products')
 
         except Exception as e:
             logger.error(f"Error in product search: {e}")

@@ -4,8 +4,8 @@ User profile and registration handlers
 import logging
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from typing import Callable, Dict, Any, NamedTuple
-from telegram import constants, InlineKeyboardMarkup, Update, ReplyKeyboardRemove
+from typing import Dict, Any
+from telegram import constants, Update, ReplyKeyboardRemove
 from telegram.helpers import escape_markdown
 from telegram.ext import ContextTypes, ConversationHandler
 from telegram.error import BadRequest
@@ -21,6 +21,25 @@ from shared.constants import (
     is_within_tashkent,
 )
 from handlers.menu import main_menu_handler
+# Conversation states live in `handlers.conversation_states`. The
+# optional-detail step table (`_ADDRESS_STEPS` / `_SKIP_TARGETS` /
+# `_ADDRESS_FIELD_DATA_KEYS` / `_cleared_by_skip`) and its pure renderer live
+# in `handlers.address_flow` (split out so the step machine can be read and
+# tested without an Update, a bot, or a ConversationHandler — see that
+# module's docstring), which re-exports the states. Imported here so every
+# existing reader in this file, and every external `from handlers.profile
+# import ADDRESS_BUILDING`-style import (bot.py, several tests), keeps
+# working unchanged.
+from handlers.address_flow import (
+    SELECT_LANGUAGE, PHONE, ADDRESS_LOCATION, ADDRESS_TITLE,
+    ADDRESS_REGION, ADDRESS_DISTRICT, ADDRESS_STREET, ADDRESS_BUILDING,
+    ADDRESS_APARTMENT, ADDRESS_FLOOR,
+    ADDRESS_DELIVERY_INSTRUCTIONS, ADDRESS_GEOCODE_CONFIRM,
+    PHONE_VERIFY_PHONE, PHONE_VERIFY_NAME,
+    LINK_ACCOUNT_CONFIRM, LINK_ACCOUNT_OTP, REGISTER_OTP,
+    _ADDRESS_STEPS, _SKIP_TARGETS, _ADDRESS_FIELD_DATA_KEYS,
+    _cleared_by_skip, render_prompt, RenderTarget, handle_input,
+)
 from api_client import api_client
 from database import db_manager, BotUserRepository
 from utils import (
@@ -36,18 +55,6 @@ from config import config
 from handlers.base import BaseHandler
 
 logger = logging.getLogger('handlers')
-
-# Conversation states.
-# NOTE: renumbering these is safe. No `persistence` is configured on the
-# Application (see telegram_bot/bot.py), so conversation state lives only in
-# memory and already resets on every restart — no stored state can survive a
-# deploy carrying a different numbering.
-(SELECT_LANGUAGE, PHONE, ADDRESS_LOCATION, ADDRESS_TITLE,
- ADDRESS_REGION, ADDRESS_DISTRICT, ADDRESS_STREET, ADDRESS_BUILDING,
- ADDRESS_APARTMENT, ADDRESS_FLOOR,
- ADDRESS_DELIVERY_INSTRUCTIONS, ADDRESS_GEOCODE_CONFIRM,
- PHONE_VERIFY_PHONE, PHONE_VERIFY_NAME,
- LINK_ACCOUNT_CONFIRM, LINK_ACCOUNT_OTP, REGISTER_OTP) = range(17)
 
 # Column widths of UserAddress.apartment_number / floor_number (both String(20)).
 # A longer answer reaches Postgres as a DataError -> 500, and the customer loses
@@ -90,91 +97,6 @@ def _markdown_copy(key: str, language: str, **data: Any) -> str:
         **{name: escape_markdown(str(value)) for name, value in data.items()},
     )
 
-
-class AddressStep(NamedTuple):
-    """One step of the optional address-detail chain.
-
-    Named rather than a bare tuple because all three members are read at
-    unrelated call sites: the prompt key by the prompt helper, the keyboard by
-    both the prompt and the too-long re-prompt, and the state by every caller
-    that returns it to the ConversationHandler.
-    """
-
-    prompt_key: str
-    keyboard: Callable[[str], InlineKeyboardMarkup]
-    state: int
-
-
-# SSOT for the optional-detail chain both address flows converge on.
-# There is deliberately no 'entrance' step. UserAddress has no entrance column,
-# so entrance is captured as free text by the delivery-instructions prompt.
-_ADDRESS_STEPS = {
-    'building': AddressStep(
-        'telegram.address.enter_building',
-        lambda language: ProfileKeyboards.optional_field_keyboard('building', language),
-        ADDRESS_BUILDING,
-    ),
-    'apartment': AddressStep(
-        'telegram.address.enter_apartment',
-        lambda language: ProfileKeyboards.optional_field_keyboard('apartment', language),
-        ADDRESS_APARTMENT,
-    ),
-    'floor': AddressStep(
-        'telegram.address.enter_floor',
-        lambda language: ProfileKeyboards.optional_field_keyboard('floor', language),
-        ADDRESS_FLOOR,
-    ),
-    'delivery_instructions': AddressStep(
-        'telegram.address.enter_delivery_instructions',
-        ProfileKeyboards.delivery_instructions_keyboard,
-        ADDRESS_DELIVERY_INSTRUCTIONS,
-    ),
-}
-
-# Where a Skip tap lands. Skipping the building number means there is no building
-# to be inside, so apartment and floor are skipped along with it (private house).
-# Street is required and renders no Skip button; it stays here as a safety net.
-_SKIP_TARGETS = {
-    'street': 'building',
-    'building': 'delivery_instructions',
-    'apartment': 'floor',
-    'floor': 'delivery_instructions',
-}
-
-# Which key in temp_address_data each step writes, IN FLOW ORDER. Skip CLEARS
-# it, so Skip means what it says: retry_geocode reruns the whole chain, so a
-# value typed before the retry would otherwise survive a later Skip and still be
-# saved. The order is load-bearing — `_cleared_by_skip` walks it to find the
-# steps a Skip jumps OVER.
-_ADDRESS_FIELD_DATA_KEYS = {
-    'street': 'street_address',
-    'building': 'building_number',
-    'apartment': 'apartment_number',
-    'floor': 'floor_number',
-    'delivery_instructions': 'delivery_instructions',
-}
-
-
-def _cleared_by_skip(field: str) -> tuple[str, ...]:
-    """The temp_address_data keys a Skip on `field` must clear.
-
-    Not just the field that was tapped: a Skip that JUMPS OVER steps clears
-    those too. Skipping the building number means there is no building to be
-    inside, so `_SKIP_TARGETS` lands on delivery instructions — and an
-    apartment and floor typed before a `retry_geocode` rerun would otherwise be
-    saved onto a house whose owner has just said it has neither.
-
-    An unknown field (a Skip button rendered by an older deploy) clears
-    nothing: it must not take somebody's real answers with it on its way out.
-    """
-    fields = list(_ADDRESS_FIELD_DATA_KEYS)
-    if field not in fields:
-        return ()
-
-    start = fields.index(field)
-    target = _SKIP_TARGETS.get(field)
-    stop = fields.index(target) if target in fields else start + 1
-    return tuple(_ADDRESS_FIELD_DATA_KEYS[name] for name in fields[start:stop])
 
 # The columns the optional-detail chain owns, i.e. everything a shared-pin
 # address can still gain AFTER it has been created. Sent in full on every
@@ -1703,7 +1625,7 @@ class ProfileHandlers(BaseHandler):
             )
             await self._ack(query)
 
-            await self.user_repo.update_user_state(user_id, {'awaiting_input': 'edit_profile_name'})
+            await self.user_repo.arm_awaiting_input(user_id, 'edit_profile_name')
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="edit_profile_name_prompt")
@@ -1769,7 +1691,7 @@ class ProfileHandlers(BaseHandler):
             )
             await self._ack(query)
 
-            await self.user_repo.update_user_state(user_id, {'awaiting_input': 'edit_profile_birthday'})
+            await self.user_repo.arm_awaiting_input(user_id, 'edit_profile_birthday')
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="edit_profile_birthday_start")
@@ -1867,6 +1789,50 @@ class ProfileHandlers(BaseHandler):
         except Exception as e:
             await self._handle_error(update, exc=e, operation="manage_addresses")
 
+    async def _persist_address_draft(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, step: str
+    ) -> None:
+        """Dual-write the in-flight `temp_address_data` onto `bot_state`.
+
+        SDD 2026-08-26-address-flow-bot-state, Task 6 (P2): every handler
+        below that mutates `temp_address_data` calls this right after making
+        its change, naming the step the flow is moving TO. Reads still come
+        entirely from `context.user_data` — nothing about how this flow runs
+        changes in this task; the durable copy exists purely so a later phase
+        can resume it after a restart or an interruption. Deliberately never
+        arms `awaiting_input` — see `BotUserRepository.save_address_draft`'s
+        docstring for why arming here, before P3a wires up the read path,
+        would route an escaped text update into `bot.py`'s
+        "invalid input" branch instead of the flow.
+
+        BEST-EFFORT, on purpose: `context.user_data` stays the live source of
+        truth for THIS conversation (nothing reads `address_draft` back yet),
+        so a failure writing the durable twin — a DB hiccup, a disconnected
+        pool — must never abort a flow the customer is actively standing in.
+        Every step handler already wraps its own body the identical way
+        (`except Exception: ... return ConversationHandler.END`) for the same
+        reason. Logged, not silent, so a real regression still surfaces.
+
+        `address_id` is excluded from the `data` snapshot: it already has its
+        own field below (`save_address_draft`'s `address_id=` kwarg is the
+        single source of truth a resume reads it from), so carrying it a
+        second time inside `data` would let the two silently disagree if a
+        future edit ever wrote one without the other (M3, final whole-branch
+        review).
+        """
+        try:
+            addr_data = context.user_data.get('temp_address_data') or {}
+            snapshot = {k: v for k, v in addr_data.items() if k != 'address_id'}
+            await self.user_repo.save_address_draft(
+                update.effective_user.id,
+                step=step,
+                data=snapshot,
+                address_id=addr_data.get('address_id'),
+                origin=context.user_data.get('address_flow_origin'),
+            )
+        except Exception as e:
+            logger.warning(f"Could not persist address draft at step {step!r}: {e}")
+
     async def add_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start address adding process - entry point for enhanced address flow"""
         try:
@@ -1896,8 +1862,7 @@ class ProfileHandlers(BaseHandler):
 
             # Initialize temp address data
             context.user_data['temp_address_data'] = {}
-            context.user_data['conversation_state'] = 'address_location'
-            logger.info(f"Set conversation state to: address_location")
+            await self._persist_address_draft(update, context, 'location')
 
             # Use enhanced location request with skip option
             location_text = i18n.get('telegram.address.location_prompt_enhanced', language)
@@ -2000,6 +1965,8 @@ class ProfileHandlers(BaseHandler):
                         context.user_data['temp_address_data']['full_address'] = reverse_geocoded_address
                         logger.info(f"Reverse geocoded address: {reverse_geocoded_address}")
 
+            await self._persist_address_draft(update, context, 'title')
+
             # Remove reply keyboard
             await update.message.reply_text(
                 i18n.get('telegram.address.location_received', language),
@@ -2049,6 +2016,7 @@ class ProfileHandlers(BaseHandler):
             if 'temp_address_data' not in context.user_data:
                 context.user_data['temp_address_data'] = {}
             context.user_data['temp_address_data']['title'] = title
+            await self._persist_address_draft(update, context, 'title')
 
             # The title step sits at a different position in each flow: a
             # shared pin asks for the title early, right after the location,
@@ -2057,7 +2025,7 @@ class ProfileHandlers(BaseHandler):
             # after geocode confirmation, so titling here is the save.
             if _is_shared_pin_address(context):
                 await self._create_address_now(update, context, language)
-                return await self._prompt_address_step(update, language, 'apartment')
+                return await self._prompt_address_step(update, context, language, 'apartment')
 
             return await self.save_address_final(update, context)
 
@@ -2067,13 +2035,24 @@ class ProfileHandlers(BaseHandler):
             logger.error(f"Traceback: {traceback.format_exc()}")
             return ConversationHandler.END
 
-    @staticmethod
-    def _clear_address_flow_keys(context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Clear every key an address-creation flow may leave in `user_data`.
+    async def _clear_address_flow_keys(
+        self, context: ContextTypes.DEFAULT_TYPE, telegram_id: int,
+        *, touch_activity: bool = True,
+    ) -> None:
+        """Clear every key an address-creation flow may leave behind, both in
+        `user_data` and in the durable twin now shadowing it.
 
-        One place for all five keys so a future addition can never again be
-        forgotten at one of the flow's several teardown sites the way
-        `awaiting_location` originally was: it was armed by
+        `touch_activity=False` is for `address_flow_timeout` ONLY: a timeout
+        fires on a synthetic PTB update, not a customer action, so clearing
+        the draft there must not stamp `last_bot_interaction` (M1, final
+        whole-branch review — see `BotUserRepository.clear_address_draft`'s
+        docstring for the incident). Every other teardown (cancel,
+        cancel-text, a completed save) is a real customer action and keeps
+        the default.
+
+        One place for all five `user_data` keys so a future addition can
+        never again be forgotten at one of the flow's several teardown sites
+        the way `awaiting_location` originally was: it was armed by
         `utils.arm_location_request` but only ever cleared by
         `_route_address_location_entry` popping it off an ARRIVING pin
         (bot.py) — every path that ends the flow WITHOUT a pin (cancel,
@@ -2081,6 +2060,20 @@ class ProfileHandlers(BaseHandler):
         so a customer who armed the checkout keyboard and then backed out
         had every later, unrelated pin misrouted into address creation
         instead of the support inbox. Call this at every such teardown site.
+
+        Also clears `BotUserRepository`'s `address_draft` (SDD
+        2026-08-26-address-flow-bot-state, Task 6) for the identical reason:
+        a cancelled, timed-out, or completed flow must not leave a draft
+        behind for a later phase to wrongly resume into once nothing is
+        actually mid-conversation any more. Turned this from a `@staticmethod`
+        into an instance method for exactly this — `self.user_repo` and a
+        `telegram_id` are both needed to reach the database.
+
+        The database call is BEST-EFFORT for the same reason
+        `_persist_address_draft` is: the `user_data` pops above are what
+        actually end the flow the customer is standing in, so a failure
+        clearing the durable twin must not stop those, or surface as a crash
+        on top of an otherwise-successful cancel/save.
         """
         context.user_data.pop('temp_location', None)
         context.user_data.pop('temp_address', None)
@@ -2088,6 +2081,10 @@ class ProfileHandlers(BaseHandler):
         context.user_data.pop('address_flow_origin', None)
         context.user_data.pop('awaiting_location', None)
         context.user_data.pop('awaiting_location_at', None)
+        try:
+            await self.user_repo.clear_address_draft(telegram_id, touch_activity=touch_activity)
+        except Exception as e:
+            logger.warning(f"Could not clear address draft for {telegram_id}: {e}")
 
     async def cancel_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Cancel address adding process"""
@@ -2117,7 +2114,7 @@ class ProfileHandlers(BaseHandler):
                 )
 
             # Clear all temporary address data
-            self._clear_address_flow_keys(context)
+            await self._clear_address_flow_keys(context, user_id)
 
             return ConversationHandler.END
 
@@ -2162,7 +2159,7 @@ class ProfileHandlers(BaseHandler):
                 )
 
             # Clear all temporary address data
-            self._clear_address_flow_keys(context)
+            await self._clear_address_flow_keys(context, user_id)
 
             return ConversationHandler.END
 
@@ -2189,7 +2186,10 @@ class ProfileHandlers(BaseHandler):
             addr_data = context.user_data.get('temp_address_data') or {}
             saved_address_id = addr_data.get('address_id')
 
-            self._clear_address_flow_keys(context)
+            # touch_activity=False: this fires on a SYNTHETIC PTB update, not
+            # something the customer did — see `_clear_address_flow_keys`'s
+            # docstring (M1, final whole-branch review).
+            await self._clear_address_flow_keys(context, user_id, touch_activity=False)
 
             logger.info(
                 f"Address flow timed out for user {user_id} "
@@ -2233,6 +2233,7 @@ class ProfileHandlers(BaseHandler):
             if 'temp_address_data' not in context.user_data:
                 context.user_data['temp_address_data'] = {}
             context.user_data['temp_address_data']['location_source'] = 'manual'
+            await self._persist_address_draft(update, context, 'region')
 
             # Remove reply keyboard
             await update.message.reply_text(
@@ -2273,6 +2274,7 @@ class ProfileHandlers(BaseHandler):
                 context.user_data['temp_address_data'] = {}
             context.user_data['temp_address_data']['region'] = region
             context.user_data['temp_address_data']['city'] = 'Tashkent'
+            await self._persist_address_draft(update, context, 'district')
 
             await self._ack(query)
 
@@ -2339,6 +2341,7 @@ class ProfileHandlers(BaseHandler):
             center = get_district_center(district_key)
             context.user_data['temp_address_data']['hint_lat'] = center[0]
             context.user_data['temp_address_data']['hint_lon'] = center[1]
+            await self._persist_address_draft(update, context, 'street')
 
             await self._ack(query)
 
@@ -2347,7 +2350,10 @@ class ProfileHandlers(BaseHandler):
                 i18n.get('telegram.address.enter_street_required', language, district_name=district_name),
                 version=2
             )
-            # No skip keyboard - street is required
+            # No Skip keyboard - street is required. It still needs an escape:
+            # this state matches any typed text as the answer for up to 24h
+            # (`conversation_timeout`), with no menu on screen to fall back to
+            # (see C1, keyboards.py::ProfileKeyboards._cancel_address_row).
 
             # A refused edit ("message to edit not found" — the customer
             # deleted the bubble) used to unwind into `except Exception` and
@@ -2356,6 +2362,7 @@ class ProfileHandlers(BaseHandler):
             await self._edit_or_replace_callback_message(
                 query,
                 street_prompt,
+                reply_markup=ProfileKeyboards.required_field_keyboard(language),
                 parse_mode=constants.ParseMode.MARKDOWN_V2
             )
 
@@ -2541,33 +2548,124 @@ class ProfileHandlers(BaseHandler):
         except Exception as e:
             logger.error(f"Error deleting cancelled address {address_id}: {e}")
 
-    async def _prompt_address_step(self, update: Update, language: str, field: str):
-        """Send one optional address step's prompt and return its state.
+    def _send_for(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> RenderTarget:
+        """The delivery target for `update`, as a `RenderTarget`.
 
-        Both address flows converge on this chain, and every step is reachable
-        from either a typed answer (message) or a Skip tap (callback), so the
-        send path is derived from the update rather than passed by each caller.
+        Both address flows converge on this chain, and every step is
+        reachable from either a typed answer (message) or a Skip tap
+        (callback), so the delivery target is derived from the update rather
+        than passed by each caller.
 
-        The callback path goes through `_edit_or_replace_callback_message`
-        because a REFUSED edit is a rendering problem, not a flow problem: this
-        bare edit used to unwind into the caller's `except Exception: return
-        ConversationHandler.END`, so Telegram's most benign rejection
-        ("message is not modified") left the customer looking at a
-        correct-looking prompt whose Skip button was wired to nothing.
+        `send_text`'s callback branch keeps `_edit_or_replace_callback_message`
+        because a REFUSED edit is a rendering problem, not a flow problem: a
+        bare edit used to unwind into
+        `except Exception: return ConversationHandler.END`, so Telegram's most
+        benign rejection ("message is not modified") left the customer looking
+        at a correct prompt whose Skip button was wired to nothing.
+
+        `send_markdown_or_plain` and `send_location` always operate on a
+        MESSAGE (the callback's own `query.message` when there is one,
+        `update.message` otherwise) rather than editing in place — matching
+        `geocode_and_confirm`, whose pin and confirmation bubble are new
+        messages below whatever bubble carried the Skip button that led here,
+        not an edit of it.
+
+        `request_location` cannot edit-in-place either: Telegram does not let
+        `editMessageText` attach a `ReplyKeyboardMarkup` (only
+        `InlineKeyboardMarkup`), which is exactly why `add_address` always
+        SENDS a fresh message for this prompt. It calls `arm_location_request`
+        first — this closure's own site for it, baked into the transport so a
+        caller reaching this RenderTarget cannot forget it the way a
+        hand-rolled call site could (`utils.arm_location_request`). It is not
+        the only arm site: six call `arm_location_request` in total — this one
+        (this method's `request_location`), `profile.py::add_address`,
+        `profile.py::location_received` (out-of-zone re-prompt),
+        `profile.py::geocode_and_confirm` (out-of-zone re-prompt),
+        `profile.py::retry_geocode`, and `orders.py::checkout_handler`
+        (zero-address checkout) — each arming its own location prompt
+        separately, for the same reason. Cited by function name, not line
+        number: this exact list has already rotted FOUR times now from a
+        docstring edit shifting the very lines it cited (M2, final
+        whole-branch review) — a line number in a cross-file citation does
+        not survive an edit to the file it points into. `request_location`
+        then acks and replies to the callback's own message when there is
+        one, falling back to `context.bot.send_message` when a callback
+        arrived with no message attached, mirroring `add_address`'s own
+        fallback.
         """
-        step = _ADDRESS_STEPS[field]
+        query = update.callback_query
 
-        text = i18n.get(step.prompt_key, language)
-        keyboard = step.keyboard(language)
+        async def send_text(text, keyboard=None, parse_mode=None):
+            if query is not None:
+                await self._edit_or_replace_callback_message(
+                    query, text, reply_markup=keyboard, parse_mode=parse_mode
+                )
+            else:
+                await update.message.reply_text(text, reply_markup=keyboard, parse_mode=parse_mode)
 
-        if update.callback_query is not None:
-            await self._edit_or_replace_callback_message(
-                update.callback_query, text, reply_markup=keyboard
-            )
-        else:
-            await update.message.reply_text(text, reply_markup=keyboard)
+        async def send_markdown_or_plain(text, keyboard=None):
+            message = query.message if query is not None else update.message
+            await self._reply_markdown_or_plain(message, text, keyboard)
 
-        return step.state
+        async def send_location(latitude, longitude):
+            message = query.message if query is not None else update.message
+            await message.reply_location(latitude=latitude, longitude=longitude)
+
+        async def request_location(text, keyboard):
+            arm_location_request(context)
+            if query is not None:
+                await self._ack(query)
+                if query.message:
+                    await query.message.reply_text(text, reply_markup=keyboard, parse_mode='Markdown')
+                else:
+                    await context.bot.send_message(
+                        chat_id=update.effective_user.id,
+                        text=text,
+                        reply_markup=keyboard,
+                        parse_mode='Markdown',
+                    )
+            else:
+                await update.message.reply_text(text, reply_markup=keyboard, parse_mode='Markdown')
+
+        return SimpleNamespace(
+            send_text=send_text,
+            send_markdown_or_plain=send_markdown_or_plain,
+            send_location=send_location,
+            request_location=request_location,
+        )
+
+    async def _prompt_address_step(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, language: str, field: str
+    ):
+        """Render one step's prompt AND dual-write the draft moving to it.
+
+        Every caller of this method — `street_received`, `building_received`,
+        `apartment_received`, `floor_received`, `skip_field_handler`'s
+        non-terminal branch, and the pin branch of `address_title_received` /
+        `address_title_callback` — passes the step the flow is advancing to,
+        so a single `_persist_address_draft` call here covers all of them
+        instead of repeating it at each call site (they only ever call this
+        with a field in `_ADDRESS_STEPS`: building/apartment/floor/
+        delivery_instructions). Persisted BEFORE rendering so the durable
+        draft reflects reality even if sending the prompt itself later fails.
+
+        `data` is passed through to `render_prompt` on every call, not just
+        the fields that currently need it. I3 (final whole-branch review):
+        this used to call `render_prompt(field, language, target)` with no
+        `data` at all — every existing caller only ever names a field in
+        `_ADDRESS_STEPS`, none of which read `data`, so it was silently fine
+        today. But `_render_street` and `_render_geocode_confirm`
+        (`handlers/address_flow.py`) both raise `ValueError` without it, and
+        every caller here is wrapped in `except Exception: return
+        ConversationHandler.END` — a future caller that reaches this method
+        with `field='street'` or `'geocode_confirm'` (a Task 4 draft-resume
+        driver, say) would silently kill the customer's conversation with no
+        message at all. Passing it unconditionally costs nothing for today's
+        callers and closes that trap for tomorrow's.
+        """
+        await self._persist_address_draft(update, context, field)
+        data = context.user_data.get('temp_address_data') or {}
+        return await render_prompt(field, language, self._send_for(update, context), data)
 
     async def _reject_overlong_detail(self, update: Update, language: str, field: str):
         """Re-prompt the same step when an answer is too long for its column.
@@ -2596,9 +2694,9 @@ class ProfileHandlers(BaseHandler):
             street = update.message.text.strip()
 
             logger.info(f"User {user_id} entered street: {street}")
-            context.user_data['temp_address_data']['street_address'] = street
+            next_field = handle_input('street', street, context.user_data['temp_address_data'])
 
-            return await self._prompt_address_step(update, language, 'building')
+            return await self._prompt_address_step(update, context, language, next_field)
 
         except Exception as e:
             logger.error(f"Error in street_received: {e}")
@@ -2612,9 +2710,9 @@ class ProfileHandlers(BaseHandler):
             building = update.message.text.strip()
 
             logger.info(f"User {user_id} entered building: {building}")
-            context.user_data['temp_address_data']['building_number'] = building
+            next_field = handle_input('building', building, context.user_data['temp_address_data'])
 
-            return await self._prompt_address_step(update, language, 'apartment')
+            return await self._prompt_address_step(update, context, language, next_field)
 
         except Exception as e:
             logger.error(f"Error in building_received: {e}")
@@ -2632,10 +2730,10 @@ class ProfileHandlers(BaseHandler):
                 return await self._reject_overlong_detail(update, language, 'apartment')
 
             logger.info(f"User {user_id} entered apartment: {apartment}")
-            context.user_data['temp_address_data']['apartment_number'] = apartment
+            next_field = handle_input('apartment', apartment, context.user_data['temp_address_data'])
 
             await self._sync_address_details(update, context)
-            return await self._prompt_address_step(update, language, 'floor')
+            return await self._prompt_address_step(update, context, language, next_field)
 
         except Exception as e:
             logger.error(f"Error in apartment_received: {e}")
@@ -2653,10 +2751,10 @@ class ProfileHandlers(BaseHandler):
                 return await self._reject_overlong_detail(update, language, 'floor')
 
             logger.info(f"User {user_id} entered floor: {floor}")
-            context.user_data['temp_address_data']['floor_number'] = floor
+            next_field = handle_input('floor', floor, context.user_data['temp_address_data'])
 
             await self._sync_address_details(update, context)
-            return await self._prompt_address_step(update, language, 'delivery_instructions')
+            return await self._prompt_address_step(update, context, language, next_field)
 
         except Exception as e:
             logger.error(f"Error in floor_received: {e}")
@@ -2670,7 +2768,11 @@ class ProfileHandlers(BaseHandler):
             instructions = update.message.text.strip()
 
             logger.info(f"User {user_id} entered delivery instructions")
-            context.user_data['temp_address_data']['delivery_instructions'] = instructions
+            # Terminal step (handle_input returns None here): what comes next
+            # is a save, not another prompt, so the return value has no
+            # `_prompt_address_step` call to feed.
+            handle_input('delivery_instructions', instructions, context.user_data['temp_address_data'])
+            await self._persist_address_draft(update, context, 'delivery_instructions')
 
             # A shared pin is already an exact coordinate, so it saves straight
             # away; a manually typed address still has to be geocoded first.
@@ -2712,6 +2814,7 @@ class ProfileHandlers(BaseHandler):
                 # Terminal step. A shared pin is already an exact coordinate, so
                 # it saves straight away; a manually typed address still has to
                 # be geocoded and confirmed first.
+                await self._persist_address_draft(update, context, 'delivery_instructions')
                 if _is_shared_pin_address(context):
                     logger.info("Location already set from sharing, saving address directly")
                     return await self.save_address_final(update, context, is_callback=True)
@@ -2727,7 +2830,7 @@ class ProfileHandlers(BaseHandler):
             # over a field that was never answered changes nothing and costs
             # no HTTP call.
             await self._sync_address_details(update, context)
-            return await self._prompt_address_step(update, language, next_field)
+            return await self._prompt_address_step(update, context, language, next_field)
 
         except Exception as e:
             logger.error(f"Error in skip_field_handler: {e}")
@@ -2802,6 +2905,14 @@ class ProfileHandlers(BaseHandler):
                 addr_data['longitude'] = center[1]
                 addr_data['full_address'] = address_string
 
+            # Persisted so a RESUMED draft's `geocode_confirm` render
+            # (`_render_geocode_confirm`, address_flow.py) can reproduce the
+            # same safety disclosure `confirm_text` gets below
+            # (`geocode_note_approximate_center`) — without a producer here,
+            # `data['approximate']` stays unset forever and that warning
+            # silently never reaches a customer confirming a fallback pin.
+            addr_data['approximate'] = not geocode_success
+
             context.user_data['temp_address_data'] = addr_data
 
             # The bubble that carried the Skip button is spent either way: what
@@ -2820,6 +2931,7 @@ class ProfileHandlers(BaseHandler):
             if final_lat is not None and final_lng is not None and not is_within_tashkent(final_lat, final_lng):
                 logger.info(f"User {user_id} geocoded to out-of-zone point: {final_lat}, {final_lng}")
                 arm_location_request(context)
+                await self._persist_address_draft(update, context, 'location')
                 await target.reply_text(
                     i18n.get('telegram.address.outside_delivery_area', language),
                     reply_markup=ProfileKeyboards.location_request(
@@ -2851,6 +2963,7 @@ class ProfileHandlers(BaseHandler):
             # refused and end the flow on the last step before the save.
             await self._reply_markdown_or_plain(target, confirm_text, keyboard)
 
+            await self._persist_address_draft(update, context, 'geocode_confirm')
             return ADDRESS_GEOCODE_CONFIRM
 
         except Exception as e:
@@ -2899,6 +3012,7 @@ class ProfileHandlers(BaseHandler):
             # Keep temp address data but reset for potential location share
             if 'temp_address_data' in context.user_data:
                 context.user_data['temp_address_data']['location_source'] = 'retry'
+                await self._persist_address_draft(update, context, 'location')
 
             # Offer location sharing or manual re-entry
             retry_text = i18n.get('telegram.address.retry_location', language)
@@ -2941,6 +3055,7 @@ class ProfileHandlers(BaseHandler):
 
             logger.info(f"User {user_id} selected title: {title}")
             context.user_data['temp_address_data']['title'] = title
+            await self._persist_address_draft(update, context, 'title')
 
             await self._ack(query)
 
@@ -2951,7 +3066,7 @@ class ProfileHandlers(BaseHandler):
             # after geocode confirmation, so titling here is the save.
             if _is_shared_pin_address(context):
                 await self._create_address_now(update, context, language)
-                return await self._prompt_address_step(update, language, 'apartment')
+                return await self._prompt_address_step(update, context, language, 'apartment')
 
             return await self.save_address_final(update, context, is_callback=True)
 
@@ -3062,7 +3177,7 @@ class ProfileHandlers(BaseHandler):
             resume_checkout_after_save = context.user_data.get('address_flow_origin') == 'checkout'
 
             # Clear temp data
-            self._clear_address_flow_keys(context)
+            await self._clear_address_flow_keys(context, user_id)
 
             if resume_checkout_after_save:
                 await self._resume_checkout_after_address(update, context)
@@ -3515,14 +3630,16 @@ class ProfileHandlers(BaseHandler):
                         )
                         await self._ack(query)
 
-                        # Arm by WRITING A FRESH state, never by merging into
-                        # the one already there: `clear_awaiting_input` relies
-                        # on every key in the document belonging to the single
-                        # flow that is armed.
-                        await self.user_repo.update_user_state(user_id, {
-                            'awaiting_input': 'edit_address_title',
-                            'edit_address_id': address_id
-                        })
+                        # Arm via `arm_awaiting_input`, which read-modify-writes
+                        # the document: every key it sets (besides
+                        # `_PRESERVED_KEYS`, e.g. `address_draft`) still belongs
+                        # to the single flow being armed here, so
+                        # `clear_awaiting_input`/`disarm` can keep assuming that.
+                        await self.user_repo.arm_awaiting_input(
+                            user_id,
+                            'edit_address_title',
+                            edit_address_id=address_id,
+                        )
 
                         return
 
@@ -3596,12 +3713,13 @@ class ProfileHandlers(BaseHandler):
                         )
                         await self._ack(query)
 
-                        # A fresh state, for the reason spelled out at the
-                        # title prompt above.
-                        await self.user_repo.update_user_state(user_id, {
-                            'awaiting_input': 'edit_address_instructions',
-                            'edit_address_id': address_id
-                        })
+                        # Armed via `arm_awaiting_input`, for the reason spelled
+                        # out at the title prompt above.
+                        await self.user_repo.arm_awaiting_input(
+                            user_id,
+                            'edit_address_instructions',
+                            edit_address_id=address_id,
+                        )
 
                         return
 

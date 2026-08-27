@@ -21,6 +21,7 @@ lives in the seam between the handlers, not inside any of them — which is
 exactly why a suite full of green single-handler tests shipped it.
 """
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -142,7 +143,19 @@ def api(monkeypatch, echo_i18n):
 
 @pytest.fixture
 def handler():
-    return ProfileHandlers()
+    handler = ProfileHandlers()
+    # This suite drives every handler directly (DummyUpdate/make_context, no
+    # real DB), and every one of them now dual-writes the draft
+    # (SDD 2026-08-26-address-flow-bot-state, Task 6) via `self.user_repo`.
+    # The real `BotUserRepository` needs a connected pool these tests never
+    # set up; stub the three draft methods so the JOURNEY under test (what
+    # `temp_address_data` and the return states end up as) is unaffected.
+    handler.user_repo = SimpleNamespace(
+        save_address_draft=AsyncMock(),
+        clear_address_draft=AsyncMock(),
+        get_address_draft=AsyncMock(return_value=None),
+    )
+    return handler
 
 
 def pin_update(lat=PIN_LAT, lng=PIN_LNG):
@@ -379,9 +392,12 @@ async def test_a_failed_create_at_the_title_step_still_saves_at_the_end(
 
 
 async def test_the_address_conversation_registers_a_timeout_state():
-    """`conversation_timeout=600` with no TIMEOUT handler ends the flow with no
+    """`conversation_timeout` with no TIMEOUT handler ends the flow with no
     message and leaves temp_address_data / address_flow_origin stranded in
     user_data, where a stale 'checkout' origin can hijack a later save.
+
+    The value itself is pinned in tests/telegram_bot/test_callback_contract_customer.py;
+    what matters here is only that SOMETHING answers when it fires.
 
     Reads the built Application rather than bot.py's TEXT: a source-substring
     check is satisfied by `ConversationHandler.TIMEOUT: []`, which registers the
@@ -444,6 +460,65 @@ async def test_the_timeout_keeps_an_address_that_was_already_created(handler, ap
     await handler.address_flow_timeout(DummyUpdate(), ctx)
 
     assert api.deleted == [], "a timeout must not delete the saved address"
+
+
+async def test_the_timeout_teardown_clears_the_draft_without_stamping_activity(
+    handler, api
+):
+    """M1 (final whole-branch review): `address_flow_timeout` fires on a
+    SYNTHETIC PTB update the customer never sent, so clearing the durable
+    draft here must not bump `last_bot_interaction` — see
+    `BotUserRepository.clear_address_draft`'s docstring for the incident this
+    prevents: a customer who went silent 24h ago (`conversation_timeout`)
+    would otherwise look active to `session_cleanup_service`'s 180-day sweep
+    and the admin UI's "Last Bot Interaction" column.
+    """
+    ctx = make_context()
+    await share_pin_and_name_it(handler, ctx)
+    update = DummyUpdate()
+
+    await handler.address_flow_timeout(update, ctx)
+
+    handler.user_repo.clear_address_draft.assert_awaited_once_with(
+        update.effective_user.id, touch_activity=False
+    )
+
+
+async def test_cancelling_the_flow_clears_the_draft_and_still_stamps_activity(
+    handler, api
+):
+    """The mirror image of the timeout test above: Cancel IS something the
+    customer did, so the default (`touch_activity=True`) must survive it —
+    only the synthetic timeout path opts out."""
+    ctx = make_context()
+    await share_pin_and_name_it(handler, ctx)
+    update = tap("cancel_address_creation")
+
+    await handler.cancel_address(update, ctx)
+
+    handler.user_repo.clear_address_draft.assert_awaited_once_with(
+        update.effective_user.id, touch_activity=True
+    )
+
+
+async def test_the_draft_snapshot_does_not_carry_address_id_a_second_time(handler, api):
+    """M3 (final whole-branch review): `address_id` has its own field in the
+    stored draft (`save_address_draft`'s `address_id=` kwarg), so a resume
+    reads it from exactly one place. Carrying it a second time inside `data`
+    — which already holds it, verbatim, via `context.user_data['temp_address_data']`
+    — would let the two silently disagree if a future edit ever wrote one
+    without the other.
+    """
+    ctx = make_context()
+    await share_pin_and_name_it(handler, ctx)  # creates address 501
+
+    await handler.apartment_received(typed("45"), ctx)
+
+    kwargs = handler.user_repo.save_address_draft.await_args.kwargs
+    assert kwargs["address_id"] == 501, "the dedicated field must still carry it"
+    assert "address_id" not in kwargs["data"], (
+        "address_id must not ALSO live inside the data snapshot"
+    )
 
 
 # ---------------------------------------------------------------------------

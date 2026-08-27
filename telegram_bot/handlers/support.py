@@ -55,14 +55,12 @@ class SupportHandlers(BaseHandler):
             except Exception as exc:
                 logger.warning("Order lookup failed while arming issue report %s: %s", order_id, exc)
 
-            await self.user_repo.update_user_state(
+            await self.user_repo.arm_awaiting_input(
                 user_id,
-                {
-                    'awaiting_input': 'support_message',
-                    'support_order_id': order_id,
-                    'support_order_number': order_number,
-                    'support_armed_at': datetime.now(timezone.utc).isoformat(),
-                },
+                'support_message',
+                support_order_id=order_id,
+                support_order_number=order_number,
+                support_armed_at=datetime.now(timezone.utc).isoformat(),
             )
 
             cancel_keyboard = KeyboardBuilder.build_inline_keyboard([
@@ -95,14 +93,16 @@ class SupportHandlers(BaseHandler):
 
         # Stale or malformed arming: clear state and record the raw text without a
         # misleading order prefix (mirrors the bot's general silent capture).
+        # Reached only via `_handle_contextual_input`'s `input_type ==
+        # 'support_message'` branch, so `awaiting_input` is guaranteed ours.
         if self._is_stale(state.get('support_armed_at')) or not order_number:
-            await self.user_repo.update_user_state(user_id, {})
+            await self.user_repo.disarm(user_id, 'support_message')
             await self._silent_capture(update, context, text)
             return
 
         prefix = f"[Order #{order_number}] "
         ok = await capture_support_message(update, context, prefix=prefix)
-        await self.user_repo.update_user_state(user_id, {})
+        await self.user_repo.disarm(user_id, 'support_message')
         if ok:
             await update.message.reply_text(i18n.get('telegram.support.ack', language))
         else:
@@ -118,13 +118,15 @@ class SupportHandlers(BaseHandler):
         state = await self.user_repo.get_user_state(user_id)
         order_number = state.get('support_order_number')
 
+        # Reached only via `_capture_support_with_guards`'s `awaiting_input ==
+        # 'support_message'` check, so `awaiting_input` is guaranteed ours.
         if self._is_stale(state.get('support_armed_at')) or not order_number:
-            await self.user_repo.update_user_state(user_id, {})
+            await self.user_repo.disarm(user_id, 'support_message')
             await capture_support_message(update, context)
             return
 
         ok = await capture_support_message(update, context, prefix=f"[Order #{order_number}] ")
-        await self.user_repo.update_user_state(user_id, {})
+        await self.user_repo.disarm(user_id, 'support_message')
         await update.message.reply_text(
             i18n.get('telegram.support.ack' if ok else 'telegram.support.send_failed', language)
         )
@@ -147,14 +149,35 @@ class SupportHandlers(BaseHandler):
         await capture_support_message(update, context)
 
     async def cancel_issue_report(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Cancel an armed concern flow: clear state and confirm."""
+        """Cancel an armed concern flow: clear state and confirm.
+
+        Converted to `disarm(user_id, 'support_message')` (2026-08-26
+        address-flow-bot-state, Task 5) — a DELIBERATE behaviour change, not a
+        mechanical rename. Unlike every other call in this module, this
+        handler is wired with no `awaiting_input` gate at all
+        (`CallbackQueryHandler(cancel_issue_report, pattern="^support_cancel$")`
+        in bot.py) — the Cancel button lives on its own message and stays
+        tappable after the customer has moved on and armed something else.
+        The old unconditional wipe silently destroyed whichever OTHER flow
+        (and any open `address_draft`) happened to be armed at tap time. With
+        `disarm`, a stale Cancel tap only cancels the currently armed
+        `support_message` flow — if the customer is no longer in that flow,
+        there is nothing for Cancel to cancel, so it correctly does nothing
+        instead of blanket-wiping unrelated state.
+
+        NOTE what this does NOT give: per-order precision. `disarm` names a
+        FLOW (`support_message`), not a specific report — tapping Report A's
+        stale Cancel button after Report B (a different order) has since
+        armed still cancels B. Unchanged from the old behaviour; not
+        introduced or fixed by this conversion.
+        """
         query = update.callback_query
         try:
             await query.answer()
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            await self.user_repo.update_user_state(user_id, {})
+            await self.user_repo.disarm(user_id, 'support_message')
             await self._edit_or_replace_callback_message(
                 query,
                 text=i18n.get('telegram.support.cancelled', language),

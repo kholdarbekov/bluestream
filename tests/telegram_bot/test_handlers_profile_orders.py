@@ -560,7 +560,9 @@ class TestProfileHandlerFlows:
 class TestProfileAddressHandlerFlows:
     async def test_add_address_continues_when_delete_message_fails(self, monkeypatch):
         handler = profile_module.ProfileHandlers()
-        handler.user_repo = SimpleNamespace(update_user_state=AsyncMock())
+        handler.user_repo = SimpleNamespace(
+            arm_awaiting_input=AsyncMock(), disarm=AsyncMock(), save_address_draft=AsyncMock(),
+        )
         update = DummyUpdate(user_id=202)
         update.callback_query = DummyCallbackQuery(data="add_new_address")
         update.callback_query.delete_message = AsyncMock(
@@ -577,13 +579,15 @@ class TestProfileAddressHandlerFlows:
         state = await handler.add_address(update, context)
 
         assert state == ADDRESS_LOCATION
-        assert context.user_data["conversation_state"] == "address_location"
         assert context.user_data["temp_address_data"] == {}
         update.callback_query.delete_message.assert_awaited_once()
         update.callback_query.answer.assert_awaited_once()
         # The state clear that used to sit here is gone on purpose: entering
         # the address flow must not disarm another flow's pending prompt.
-        handler.user_repo.update_user_state.assert_not_awaited()
+        # Was: update_user_state.assert_not_awaited(); repointed to the methods
+        # that could now perform that disarm (or an arm), same intent.
+        handler.user_repo.arm_awaiting_input.assert_not_awaited()
+        handler.user_repo.disarm.assert_not_awaited()
         update.callback_query.message.reply_text.assert_awaited_once_with(
             text="telegram.address.location_prompt_enhanced:en",
             reply_markup="loc-kbd",
@@ -592,7 +596,9 @@ class TestProfileAddressHandlerFlows:
 
     async def test_add_address_uses_bot_send_when_callback_message_missing(self, monkeypatch):
         handler = profile_module.ProfileHandlers()
-        handler.user_repo = SimpleNamespace(update_user_state=AsyncMock())
+        handler.user_repo = SimpleNamespace(
+            update_user_state=AsyncMock(), save_address_draft=AsyncMock(),
+        )
         update = DummyUpdate(user_id=203)
         update.callback_query = DummyCallbackQuery(data="add_new_address")
         update.callback_query.message = None
@@ -617,7 +623,9 @@ class TestProfileAddressHandlerFlows:
 
     async def test_add_address_skips_delete_for_stale_callback_message(self, monkeypatch):
         handler = profile_module.ProfileHandlers()
-        handler.user_repo = SimpleNamespace(update_user_state=AsyncMock())
+        handler.user_repo = SimpleNamespace(
+            update_user_state=AsyncMock(), save_address_draft=AsyncMock(),
+        )
         update = DummyUpdate(user_id=204)
         update.callback_query = DummyCallbackQuery(data="add_new_address")
         update.callback_query.message.date = datetime.now(timezone.utc) - timedelta(hours=49)
@@ -642,7 +650,9 @@ class TestProfileAddressHandlerFlows:
 
     async def test_add_address_from_checkout_marks_checkout_origin(self, monkeypatch):
         handler = profile_module.ProfileHandlers()
-        handler.user_repo = SimpleNamespace(update_user_state=AsyncMock())
+        handler.user_repo = SimpleNamespace(
+            update_user_state=AsyncMock(), save_address_draft=AsyncMock(),
+        )
         update = DummyUpdate(user_id=205)
         update.callback_query = DummyCallbackQuery(data="add_new_address_checkout")
         context = make_context()
@@ -660,6 +670,10 @@ class TestProfileAddressHandlerFlows:
 
     async def test_save_address_final_from_checkout_resumes_checkout(self, monkeypatch):
         handler = profile_module.ProfileHandlers()
+        # A successful save tears the flow down via `_clear_address_flow_keys`,
+        # which now also clears the durable `address_draft` twin — the real
+        # BotUserRepository would need a connected pool for that.
+        handler.user_repo = SimpleNamespace(clear_address_draft=AsyncMock())
         update = DummyUpdate(user_id=206)
         update.callback_query = DummyCallbackQuery(data="addr_title_home")
         context = make_context()

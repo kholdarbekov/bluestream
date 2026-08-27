@@ -46,7 +46,9 @@ class TestEditProfileSubMenu:
         """
         handler = profile_module.ProfileHandlers()
         handler.user_repo = SimpleNamespace(
-            update_user_state=AsyncMock(), clear_awaiting_input=AsyncMock(return_value=False)
+            clear_awaiting_input=AsyncMock(return_value=False),
+            arm_awaiting_input=AsyncMock(),
+            disarm=AsyncMock(),
         )
         update = DummyUpdate(user_id=501)
         update.callback_query = DummyCallbackQuery(data="edit_profile")
@@ -61,7 +63,14 @@ class TestEditProfileSubMenu:
         handler.user_repo.clear_awaiting_input.assert_awaited_once_with(
             501, "edit_profile_name", "edit_profile_birthday"
         )
-        handler.user_repo.update_user_state.assert_not_awaited()
+        # Was: update_user_state.assert_not_awaited() — "this screen must not
+        # blanket-wipe". `update_user_state` is no longer a call surface any
+        # handler reaches directly; `arm_awaiting_input`/`disarm` are the two
+        # methods that could now perform a raw whole-document write, so the
+        # same intent ("must not disarm or arm anything beyond its own named
+        # clear") is asserted against those.
+        handler.user_repo.arm_awaiting_input.assert_not_awaited()
+        handler.user_repo.disarm.assert_not_awaited()
         update.callback_query.edit_message_text.assert_awaited_once_with(
             text="telegram.profile.edit_menu_title:en",
             reply_markup="edit-menu-kbd",
@@ -74,7 +83,7 @@ class TestEditProfileSubMenu:
 class TestProfileNameEdit:
     async def test_edit_profile_name_prompt_sets_state(self, monkeypatch):
         handler = profile_module.ProfileHandlers()
-        handler.user_repo = SimpleNamespace(update_user_state=AsyncMock())
+        handler.user_repo = SimpleNamespace(arm_awaiting_input=AsyncMock())
         update = DummyUpdate(user_id=601)
         update.callback_query = DummyCallbackQuery(data="edit_profile_name")
         context = make_context()
@@ -84,7 +93,9 @@ class TestProfileNameEdit:
 
         await handler.edit_profile_name_prompt(update, context)
 
-        handler.user_repo.update_user_state.assert_awaited_once_with(601, {"awaiting_input": "edit_profile_name"})
+        # Was: update_user_state.assert_awaited_once_with(601, {"awaiting_input": "edit_profile_name"})
+        # Same facts (user id, flow name, no companions), against the new method.
+        handler.user_repo.arm_awaiting_input.assert_awaited_once_with(601, 'edit_profile_name')
         update.callback_query.edit_message_text.assert_awaited_once()
         update.callback_query.answer.assert_awaited_once()
 
@@ -125,7 +136,7 @@ class TestProfileNameEdit:
 
     async def test_handle_profile_name_edit_rejects_too_short(self, monkeypatch):
         handler = profile_module.ProfileHandlers()
-        handler.user_repo = SimpleNamespace(update_user_state=AsyncMock())
+        handler.user_repo = SimpleNamespace(arm_awaiting_input=AsyncMock(), disarm=AsyncMock())
         update = DummyUpdate(user_id=603)
         context = make_context()
 
@@ -135,7 +146,10 @@ class TestProfileNameEdit:
         await handler.handle_profile_name_edit(update, context, "J", {})
 
         update.message.reply_text.assert_awaited_once_with("telegram.name.too_short:en")
-        handler.user_repo.update_user_state.assert_not_awaited()
+        # Was: update_user_state.assert_not_awaited() — a rejected edit must not
+        # touch state. Repointed to the methods that could now do that.
+        handler.user_repo.arm_awaiting_input.assert_not_awaited()
+        handler.user_repo.disarm.assert_not_awaited()
 
 
 @pytest.mark.unit
@@ -145,7 +159,7 @@ class TestBirthdayTextEntry:
 
     async def test_edit_profile_birthday_start_sets_state(self, monkeypatch):
         handler = profile_module.ProfileHandlers()
-        handler.user_repo = SimpleNamespace(update_user_state=AsyncMock())
+        handler.user_repo = SimpleNamespace(arm_awaiting_input=AsyncMock())
         update = DummyUpdate(user_id=701)
         update.callback_query = DummyCallbackQuery(data="edit_profile_birthday")
         context = make_context()
@@ -156,9 +170,9 @@ class TestBirthdayTextEntry:
 
         await handler.edit_profile_birthday_start(update, context)
 
-        handler.user_repo.update_user_state.assert_awaited_once_with(
-            701, {"awaiting_input": "edit_profile_birthday"}
-        )
+        # Was: update_user_state.assert_awaited_once_with(701, {"awaiting_input": "edit_profile_birthday"})
+        # Same facts (user id, flow name, no companions), against the new method.
+        handler.user_repo.arm_awaiting_input.assert_awaited_once_with(701, 'edit_profile_birthday')
         update.callback_query.edit_message_text.assert_awaited_once_with(
             text="telegram.profile.birthday_prompt:en",
             reply_markup="cancel-kbd",

@@ -533,27 +533,98 @@ async def test_the_profile_edit_menu_disarms_its_own_prompt_and_nothing_else(
     assert profile_writes == [], "an unrelated message was written as the user's name"
 
 
-def test_leaving_a_flow_has_exactly_one_expression_in_this_handler_group():
-    """The SSOT guard, not a style rule.
+async def test_a_stale_cancel_tap_does_not_disarm_a_foreign_flow(bot, user, address_book):
+    """The other direction from `test_browsing_the_profile_leaves_an_armed_concern_report_alone`.
 
-    This whole defect class is one rule with two expressions: a screen that
-    disarms with `update_user_state(user_id, {})` cannot know whose flow it is
-    wiping, and every copy of that line is a fresh chance to wipe somebody
-    else's. `BotUserRepository.clear_awaiting_input` is now the single door —
-    the caller names the prompts it owns — so a blanket wipe reappearing in
-    this module is the regression, whatever screen it sits on.
+    That test proves browsing OUT of the concern flow into unrelated screens
+    must not disarm it. This one proves the reverse: the concern flow's own
+    Cancel button (`support_cancel`) must not disarm somebody ELSE's flow.
 
-    `update_user_state` itself stays legitimate for ARMING: those calls write a
-    fresh state document, which is the invariant `clear_awaiting_input` relies
-    on (see its docstring).
+    `cancel_issue_report`'s callback carries no `awaiting_input` gate — the
+    Cancel button lives on its own message and stays tappable long after the
+    customer has moved on. Before this was fixed it called
+    `update_user_state(uid, {})`, an unconditional wipe: a customer who tapped
+    "Report an issue", wandered off to rename an address, and then tapped the
+    now-stale Cancel button lost the rename mid-edit with no notice — its
+    prompt and Cancel button stayed on screen still asking for a new title,
+    but the next thing typed would silently reach the general Support Inbox
+    instead of updating the address.
+
+    Now it calls `disarm(uid, 'support_message')`, which only clears state it
+    owns: a stale tap over a FOREIGN flow does nothing at all, and that flow —
+    here `edit_address_title` — survives to consume the next message exactly
+    as it would have without the stray tap.
     """
-    import inspect
+    await arm_the_concern_flow(bot, user)
 
-    source = inspect.getsource(profile_module)
-    blanket_wipes = re.findall(r"update_user_state\(\s*\w+\s*,\s*\{\s*\}\s*\)", source)
-
-    assert blanket_wipes == [], (
-        "a blanket bot_state wipe is back in handlers/profile.py; use "
-        "`clear_awaiting_input(user_id, *<the prompts this screen owns>)` so a "
-        "concern report armed elsewhere is not thrown away with it"
+    await bot.send(user.tap("edit_title_901"))
+    assert armed_state(bot)["awaiting_input"] == "edit_address_title", (
+        "the rename prompt did not arm, so nothing below is being tested"
     )
+
+    await bot.send(user.tap("support_cancel"))
+
+    assert armed_state(bot)["awaiting_input"] == "edit_address_title", (
+        "a stale Cancel tap for the concern flow wiped a rename it does not own"
+    )
+
+    await bot.send(user.text("Yangi nom"))
+
+    assert updates(bot) == [(901, {"title": "Yangi nom"})], (
+        "the rename prompt must still consume the next message"
+    )
+    assert support_posts(bot) == [], (
+        "the rename must not also leak into the support inbox"
+    )
+
+
+def test_no_module_arms_or_disarms_bot_state_with_a_raw_whole_document_write():
+    """The SSOT guard, not a style rule — and wider than it used to be.
+
+    `update_user_state(uid, {...})` REPLACES THE WHOLE DOCUMENT, so a raw arm
+    OR disarm destroys an open `address_draft` (R3) the instant it fires, no
+    matter which flow's book-keeping it was written for — not just the "{}"
+    blanket wipes this test used to look for. Arming goes through
+    `arm_awaiting_input`, disarming through `disarm` (`clear_awaiting_input`
+    is a thin alias for `disarm`) — both read-modify-write and carry
+    `BotUserRepository._PRESERVED_KEYS` forward across the replace.
+
+    SCOPE IS THE WHOLE PACKAGE, NOT FOUR NAMED MODULES. `BaseHandler.__init__`
+    hands every handler module the same `self.user_repo =
+    BotUserRepository(db_manager)` — about 17 files, not just `support`,
+    `profile`, `products` and `bot`. A hardcoded module list only guards the
+    ones it happens to name; `handlers/address_flow.py` (where `address_draft`
+    itself will live) is exactly the kind of file such a list quietly leaves
+    open to a fresh raw write. So this walks every `.py` file under
+    `telegram_bot/` by PATH instead of importing a fixed set of modules, and
+    asserts per file so a failure names the offending file directly.
+    `telegram_bot/database.py` is excluded by path: `update_user_state` is
+    legitimate there — it is `arm_awaiting_input`'s/`disarm`'s own primitive,
+    not a call site to convert.
+
+    NO OTHER EXCEPTIONS: even `SupportHandlers.cancel_issue_report` (the
+    "Report an issue" Cancel button, wired with no `awaiting_input` gate — it
+    can be tapped after a DIFFERENT flow has armed over it) now goes through
+    `disarm(uid, 'support_message')`. That is a deliberate behaviour change,
+    not a mechanical rename: a stale Cancel tap now only cancels the
+    currently armed `support_message` flow — if the customer is no longer in
+    that flow, there is nothing for Cancel to cancel, so it correctly does
+    nothing instead of blanket-wiping unrelated state (and any open
+    `address_draft`).
+    """
+    import pathlib
+
+    repo_root = pathlib.Path(__file__).resolve().parents[2]
+    telegram_bot_root = repo_root / "telegram_bot"
+    excluded_files = {telegram_bot_root / "database.py"}
+
+    for path in sorted(telegram_bot_root.rglob("*.py")):
+        if path in excluded_files:
+            continue
+        source = path.read_text(encoding="utf-8")
+        assert "update_user_state(" not in source, (
+            f"{path.relative_to(repo_root)} writes bot_state directly with "
+            f"`update_user_state(...)`; use `arm_awaiting_input()` to arm and "
+            f"`disarm()` to disarm instead, so an open `address_draft` "
+            f"survives the whole-document replace"
+        )

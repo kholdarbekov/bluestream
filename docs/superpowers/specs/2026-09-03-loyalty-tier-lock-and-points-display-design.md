@@ -1,4 +1,4 @@
-# Honor the locked loyalty tier, and show the number that decides it
+# Make the price follow the tier badge, and show the number that decides it
 
 **Date:** 2026-09-03
 **Branch:** new_architecture
@@ -24,20 +24,22 @@ member"**:
 | Consumer | Basis | Answer for user 1 |
 |---|---|---|
 | Every display surface | stored `loyalty_points.current_tier` | Silver |
-| Earning multiplier (`calculate_points_for_purchase`) | stored `current_tier`, expiry ignored | Silver (1.05×) |
+| Earning multiplier (`calculate_points_for_purchase`) | stored `current_tier` | Silver (1.05×) |
 | **Cash discount (`quote_tier_discount`)** | **recomputed live from trailing-365d points** | **Bronze (0%)** |
 
-`_check_tier_upgrade` promoted user 1 to Silver on 2026-08-31 and locked the tier
-for 365 days (`tier_valid_until = 2027-08-31`). On 2026-09-02 at 18:01 an admin
-raised `Silver.min_points` from 3000 to 4000 (and Gold 12000→15000, Platinum
+`_check_tier_upgrade` promoted user 1 to Silver on 2026-08-31 and set a 365-day
+downgrade guarantee (`tier_valid_until = 2027-08-31`; see §1a — a floor on
+demotion, not an expiry). On 2026-09-02 at 18:01 an admin raised
+`Silver.min_points` from 3000 to 4000 (and Gold 12000→15000, Platinum
 →50000, plus the discount rates). User 1's 3,488 qualifying points now fall below
 the new floor, so the live recomputation returns Bronze while the badge — and
 every screen — still says Silver.
 
-**Blast radius:** 12 members hold a valid Silver lock but live-resolve to Bronze:
-user ids 1, 8, 10, 25, 40, 54, 56, 58, 68, 115, 236, 281. All 12 locks are valid
-(2027-08-31 to 2027-09-02), so no data backfill is required. Across all 1,223
-orders in production, zero have ever carried `tier_discount > 0`.
+**Blast radius:** 12 members carry a Silver badge but live-resolve to Bronze:
+user ids 1, 8, 10, 25, 40, 54, 56, 58, 68, 115, 236, 281. All 12 hold an
+unexpired downgrade guarantee (2027-08-31 to 2027-09-02), so no data backfill is
+required. Across all 1,223 orders in production, zero have ever carried
+`tier_discount > 0`.
 
 `loyalty_tier_configs` has no `audit_logs` resource type, so the threshold change
 left no audit trail.
@@ -51,35 +53,39 @@ changes no pricing behaviour. It is a display defect only (see §5, §6).
 
 ## Design
 
-### 1. `effective_tier()` — one answer to "which tier applies now"
+### 1. `effective_tier()` — price follows the badge
 
 A module-level helper in `business_app/services/loyalty_service.py`, beside
 `clamp_tier_discount` and `apply_tier_discount_for_rail`:
 
 ```python
 def effective_tier(account) -> Optional[LoyaltyTierConfig]:
-    """The tier a member is entitled to right now.
+    """The tier the member's badge shows — the one their benefits follow.
 
-    While tier_valid_until is in the future the stored tier counts, so a
-    threshold raise cannot revoke a tier the member was promised. The live
-    tier always counts, so a mid-lock promotion is never held back. The
-    higher of the two wins.
+    Price follows the badge, never a second opinion, so a threshold edit
+    can never reprice a member without also visibly demoting them. The
+    live tier is still considered so a badge that has not caught up yet
+    can only ever help, never hold someone back.
+
+    tier_valid_until is deliberately NOT consulted here. It is a
+    downgrade guarantee owned by _check_tier_upgrade, not an expiry, and
+    reading it here would drop the discount up to a month before the
+    badge changed.
     """
+    stored = LoyaltyTierConfig.query.filter_by(
+        name=account.current_tier, program_id=account.program_id, is_active=True
+    ).first()
     live = LoyaltyTierConfig.get_tier_for_points(
         LoyaltyService().calculate_qualifying_points(account.user_id),
         account.program_id,
     )
-    stored = LoyaltyTierConfig.query.filter_by(
-        name=account.current_tier, program_id=account.program_id, is_active=True
-    ).first()
-    locked = account.tier_valid_until and ensure_utc(account.tier_valid_until) >= datetime.now(timezone.utc)
-    candidates = [t for t in ([live, stored] if locked else [live]) if t]
+    candidates = [t for t in (stored, live) if t]
     return max(candidates, key=lambda t: t.display_order, default=None)
 ```
 
-Taking the maximum rather than preferring `stored` matters: a member who earns
-their way to Gold mid-lock must not be pinned at Silver until the monthly job
-catches up.
+Taking the maximum rather than `stored` alone matters when an admin *lowers* a
+threshold: live jumps immediately while the badge waits for the member's next
+award or the monthly job, and the benefit should not wait with it.
 
 **Callers changed:**
 
@@ -91,19 +97,45 @@ catches up.
   (loyalty_service.py:245-256) route through `effective_tier` so the earning
   multiplier and the discount can never diverge again.
 
-**Deliberate behaviour change:** the earning multiplier begins respecting
-`tier_valid_until`. A member whose lock has lapsed but whom the monthly
-`update_loyalty_tiers` job has not yet downgraded stops earning at the stale
-higher multiplier. No account is in that state today.
+Neither caller can lose a benefit from this change: both previously read the
+badge or something lower, and `effective_tier` never returns below the badge.
 
-`_check_tier_upgrade` keeps using live qualifying points. It **owns** the stored
-tier and must never read its own output.
+`_check_tier_upgrade` keeps using live qualifying points and remains the **only**
+writer of the badge. It owns the stored tier and must never read its own output.
+
+### 1a. What `tier_valid_until` is, and is not
+
+A tier does **not** expire. `tier_valid_until` is a downgrade *guarantee floor*:
+`_check_tier_upgrade` CASE 2 demotes only when live points fall below the
+threshold **and** that date has passed, and CASE 3 pushes it forward another 365
+days every time the member is re-confirmed — which happens on every award. For an
+active member it rolls forward indefinitely. The column comment
+(`models/loyalty.py:425`) and the web page's `guaranteed_until` label
+(`static/js/pages/loyalty.js:109-113`) already state it this way.
+
+This behaviour is unchanged by this work. It is recorded here because it is the
+only thing currently protecting the 12 affected members, and because customer
+copy must never render this date as an expiry.
+
+**Known gap, deliberately not solved here.** The system cannot distinguish "the
+member's activity declined" from "an admin raised the bar under them" — CASE 2
+compares live points against whatever the threshold is *today*, with no memory of
+the bar the member actually cleared. Today only the guarantee window separates
+those cases, and it protects both indiscriminately. Grandfathering the attained
+threshold (a `tier_attained_min_points` column) would solve it properly; that is
+a separate task, and §4's impact confirmation is the interim mitigation.
 
 ### 2. Bot loyalty screen shows the deciding number
 
 `LoyaltyService.get_points_summary_for_user` (loyalty_service.py:380-390) gains
-`qualifying_points`, `tier_valid_until`, `next_tier`, `points_to_next_tier` and
-the effective tier's `discount_percentage`.
+`qualifying_points`, `next_tier`, `points_to_next_tier`, `points_needed_to_keep`
+and the effective tier's `discount_percentage`.
+
+**No date is shown.** A tier does not expire (§1a), and any date on this screen
+reads as one — it would also shift forward silently on every order.
+`points_needed_to_keep` is the actionable equivalent, reusing
+`get_requalification_info` (loyalty_service.py:1780-1793):
+`max(0, current_tier.min_points − qualifying_points)`.
 
 `telegram_bot/handlers/loyalty.py:242-255` stops reading `lifetime_earned` and
 renders:
@@ -111,13 +143,19 @@ renders:
 ```
 🏆 Мои AquaCoins
 
-🥈 Уровень: Silver · действует до 31.08.2027
+🥈 Уровень: Silver
    Скидка 1,5% при оплате наличными
+   ⚠️ Ещё 512 AquaCoins, чтобы сохранить уровень
 
 🏆 Текущий баланс: 988 AquaCoins
 📈 За последние 12 месяцев: 3 488 AquaCoins
    До Gold: ещё 11 512
 ```
+
+When `points_needed_to_keep` is 0 the warning line becomes `✅ Статус закреплён`.
+The 512 above is real: it is what user 1 now needs to clear Silver's raised
+4,000 bar. The member keeps the discount meanwhile, because price follows the
+badge.
 
 New keys, seeded in `en`/`ru`/`uz` through `scripts/seed_backend_translations.py`
 under category `telegram`:
@@ -125,18 +163,19 @@ under category `telegram`:
 | Key | en |
 |---|---|
 | `telegram.loyalty.qualifying_12m` | Last 12 months |
-| `telegram.loyalty.tier_line` | Level: {tier} · valid until {date} |
+| `telegram.loyalty.tier_line` | Level: {tier} |
 | `telegram.loyalty.tier_cod_perk` | {pct}% off when you pay cash on delivery |
+| `telegram.loyalty.tier_secured` | Status secured |
+| `telegram.loyalty.tier_keep_hint` | {points} more AquaCoins to keep this level |
 | `telegram.loyalty.to_next_tier` | To {tier}: {points} more |
 
 `telegram.loyalty.lifetime_earned` stays in the catalogue (other surfaces use it)
 but leaves this screen. The web loyalty page needs no change —
-`calculate_tier_progress` already runs on qualifying points.
+`calculate_tier_progress` already runs on qualifying points, and it already
+renders the same retention hint.
 
-`{date}` renders as `DD.MM.YYYY` in the member's timezone-naive local date. The
-tier line renders without the perk clause when the effective tier's
-`discount_percentage` is 0, without the validity clause when `tier_valid_until`
-is NULL, and without the "to next" line at the top tier.
+The tier line renders without the perk clause when the effective tier's
+`discount_percentage` is 0, and without the "to next" line at the top tier.
 
 ### 3. Notifications
 
@@ -161,12 +200,12 @@ Behaviour matrix:
 | Transition | Message |
 |---|---|
 | Stored tier moves up | Congratulation (unchanged) |
-| Re-qualifies at the same tier | Silent, lock refreshed (unchanged) |
+| Re-qualifies at the same tier | Silent, guarantee pushed forward (unchanged) |
 | Stored tier moves down | New notice naming qualifying points and the threshold missed |
 | Admin edits a threshold | Nothing directly; the monthly job's resulting downgrades notify |
 
 CASE 2 also gains the `_update_points_to_next_tier(account, current_tier_config)`
-call it currently skips when the lock blocks a downgrade — the stale-number fix
+call it currently skips when the guarantee blocks a downgrade — the stale-number fix
 folded in from review. `points_to_next_tier` for the 12 affected accounts is
 currently computed against Gold's retired 12,000 floor (user 1 shows 8,512; the
 correct figure is 11,512).
@@ -185,7 +224,7 @@ Both gain, before commit:
    Violations return `422` with `{"error": "threshold_gap" | "threshold_overlap",
    "detail": ...}`.
 2. **Impact confirmation.** Count accounts whose stored tier is the edited tier,
-   whose lock is still valid, and whose qualifying points fall below the new
+   whose downgrade guarantee has not lapsed, and whose qualifying points fall below the new
    `min_points`. If that count is above zero and the payload lacks
    `confirm_impact: true`, return `409 impact_confirmation_required` with the
    count and tier breakdown. Re-submitting with `confirm_impact: true` proceeds.
@@ -226,7 +265,8 @@ Clamp `current` and `points_needed` at zero server-side.
 
 ## Data changes
 
-No backfill. Every affected lock is valid, so §1 alone restores all 12 members.
+No backfill. §1 alone restores all 12 members: their badges already read Silver,
+and the price now follows the badge.
 
 One optional cosmetic correction: `Bronze.max_points` 3000 → 4000, so the
 published tier table has no visible hole. It must be done **through the admin UI**,
@@ -235,15 +275,17 @@ does not. It changes no pricing.
 
 ## Testing
 
-- **Unit** — `effective_tier` matrix: locked with stored higher; locked with live
-  higher; lock lapsed; `tier_valid_until` NULL; stored name with no active config;
-  no tiers configured at all.
-- **Integration, pinned to the real shape** — stored Silver, lock valid,
-  qualifying 3,488, `Silver.min_points` 4,000: a cash estimate returns
+- **Unit** — `effective_tier` matrix: badge higher than live; live higher than
+  badge (an admin threshold cut); badge and live equal; stored name with no active
+  config; no tiers configured at all. Plus an explicit test that the result does
+  **not** change when `tier_valid_until` is moved into the past — pricing must not
+  read the guarantee.
+- **Integration, pinned to the real shape** — badge Silver, qualifying 3,488,
+  `Silver.min_points` 4,000: a cash estimate returns
   `tier_discount` = 1.5% of subtotal and `tier_discount_percentage` = 1.5; the
   same basket on `click` returns 0.
-- **Consistency** — earning multiplier and discount resolve the same tier for a
-  locked account and for a lapsed one.
+- **Consistency** — earning multiplier and discount resolve the same tier for the
+  same account, and neither ever resolves below the badge.
 - **Notifications** — a blocked downgrade parks nothing and refreshes
   `points_to_next_tier`; a real downgrade parks exactly one `tier_downgrade`
   entry with both point figures; re-qualifying at the same tier parks nothing.

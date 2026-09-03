@@ -15,7 +15,7 @@
 - **This repository root is a PRODUCTION host.** Never run the test suite in the `bluestream-business_app-1` container: its `REDIS_URL` points at production Redis and `tests/conftest.py`'s autouse `reset_redis_state` fixture calls `flushdb()`. Use the isolated runner in "Test Runner Setup" below, always.
 - **Never `git add -A`.** A ~258 MB untracked `netwatch.log` sits in the tree. Stage explicit paths only.
 - **No migration in this plan.** No column is added or altered.
-- **No tier percentage or threshold may be hardcoded in a test.** Production, dev and an older migration hold three different sets. Every test seeds its own rates through `tests/integration/tier_discount_factory.py`.
+- **No test may assert a tier percentage or threshold it did not itself seed.** Production, dev and an older migration hold three different sets, so no assertion may reference a DB-resident number. Integration tests seed through `tests/integration/tier_discount_factory.py`; unit tests may build `LoyaltyTierConfig` rows directly. Literal numbers in a test are correct exactly when that test seeded them.
 - **Customer-facing copy is never rendered as a tier expiry.** A tier does not expire; `tier_valid_until` is a downgrade guarantee floor. No new copy may show that date.
 - **All new customer copy ships in `en`, `uz` and `ru`.** Bot copy goes in `scripts/seed_backend_translations.py` under category `telegram`; notification copy goes in `DEFAULT_TEMPLATES` in `business_app/services/notification_service.py`.
 - **Comment style:** compact and factual. Explain the invariant, never the incident history.
@@ -402,13 +402,13 @@ def test_earning_multiplier_follows_the_same_tier_as_the_discount(db, sample_use
     assert points == 1050
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [ ] **Step 2: Run it to confirm it passes**
 
 ```bash
 docker exec bs-test-app python -m pytest tests/unit/test_effective_tier.py::test_earning_multiplier_follows_the_same_tier_as_the_discount -n0 --no-cov -q
 ```
 
-Expected: PASS already, because `calculate_points_for_purchase` reads `account.current_tier` and the badge is Silver. That is the point — this test pins existing behaviour so the refactor cannot regress it. Continue to Step 3.
+Expected: PASS. This is a characterization test, not the TDD red step — it pins the behaviour the refactor in Step 5 must preserve. The red step for this task is Step 3. Do not "fix" this test if it passes; that is the required outcome.
 
 - [ ] **Step 3: Add the test that actually fails**
 

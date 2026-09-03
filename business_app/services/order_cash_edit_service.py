@@ -20,8 +20,10 @@ from business_app.models.payment import CashCollectionEvent, DriverCashSession
 from business_app.services.cash_collection_service import CashCollectionService
 from business_app.services.driver_reconciliation_service import DriverReconciliationService
 from business_app.utils.audit_logger import AuditEventType, AuditSeverity, audit_logger
+from business_app.utils.cod_cap import cod_cap_reached
 from business_app.utils.exceptions import NotFoundError, ValidationError
 from business_app.utils.order_timing import delivered_at_utc
+from business_app.utils.payment_projection import net_open_receivable_amount
 from business_app.utils.transactions import atomic_transaction
 from shared.enums import CashCollectionSource, DriverCashSessionStatus, OrderStatus, PaymentMethod
 
@@ -291,12 +293,29 @@ class OrderCashEditService:
                 # when they never were. Read the exemption straight off the
                 # context this service already computed — never re-derive it.
                 if not ctx["cod_exempt"] and not ctx["is_grocery_store"]:
-                    limit = self.cash_service.COD_ACTIVE_DEBT_LIMIT
                     extra = 1 if becomes_open_debt else 0
+                    # The cap has an AMOUNT arm as well as a count arm, so the
+                    # projection has to move money too: this order's contribution
+                    # to its scope's NET open receivable changes from what it owes
+                    # now to what it will owe after the correction. Both scope
+                    # totals are read off the context that already gated on them
+                    # — never re-derived here.
+                    delta = projected_outstanding - net_open_receivable_amount(order_payment)
+                    cluster_total = max(Decimal("0.00"), to_dec(ctx["cluster_net_open_cod_debt_total"]) + delta)
                     projected_cluster = ctx["active_cod_debt_count"] + extra
+
                     place_count = ctx.get("place_active_cod_debt_count")
+                    place_total_now = ctx.get("place_net_open_cod_debt_total")
                     projected_place = (place_count + extra) if place_count is not None else None
-                    if projected_cluster >= limit or (projected_place is not None and projected_place >= limit):
+                    place_total = (
+                        max(Decimal("0.00"), to_dec(place_total_now) + delta) if place_total_now is not None else None
+                    )
+
+                    if cod_cap_reached(projected_cluster, cluster_total) or (
+                        projected_place is not None
+                        and place_total is not None
+                        and cod_cap_reached(projected_place, place_total)
+                    ):
                         warnings.append(
                             "correction_pushes_cod_over_cap - the customer's cluster or this "
                             "place will be at/over the COD active-debt limit after this edit"

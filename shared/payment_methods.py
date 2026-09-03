@@ -118,6 +118,22 @@ def canonical_rail(value: Union[str, PaymentMethod, None]) -> Any:
         return value
 
 
+def is_cod_rail(method: Union[str, PaymentMethod, None]) -> bool:
+    """Is this the COD rail — cash on delivery?
+
+    ``PaymentMethod.CASH`` and nothing else. Settled at the door either by
+    physical notes or by driver personal-card transfer; both keep whatever
+    benefit attaches to COD, because both avoid the fiscalized gateway. PCT
+    needs no branch here: it is a ``CashCollectionSource``, not a
+    ``PaymentMethod``, and only ever occurs against an order already on CASH.
+
+    Compared through :func:`canonical_rail` rather than a raw ``==`` so the
+    legacy ``card`` value folds into CLICK and a NULL / unknown rail is handed
+    back unchanged — both answer False instead of accidentally matching.
+    """
+    return canonical_rail(method) is PaymentMethod.CASH
+
+
 def assert_customer_selectable(method: PaymentMethod) -> None:
     """Raise ``UnsupportedPaymentMethodError`` unless a surface may offer ``method``."""
     if method not in CUSTOMER_SELECTABLE_METHODS:

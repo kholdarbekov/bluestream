@@ -807,6 +807,18 @@
                                     {{ 'Subtotal'|t }}:
                                     <span id="summary-subtotal">0 UZS</span>
                                 </li>
+                                <li id="summary-discount-row" style="display: none;">
+                                    <span id="summary-discount-label"></span>:
+                                    <span id="summary-discount">0 UZS</span>
+                                </li>
+                                <li id="summary-reward-row" style="display: none;">
+                                    <span id="summary-reward-label"></span>:
+                                    <span id="summary-reward">0 UZS</span>
+                                </li>
+                                <li id="summary-tier-row" style="display: none;">
+                                    <span id="summary-tier-label"></span>:
+                                    <span id="summary-tier">0 UZS</span>
+                                </li>
                                 <li>
                                     {{ 'Delivery Fee'|t }}:
                                     <span id="summary-delivery">0 UZS</span>
@@ -814,6 +826,9 @@
                                 <li class="total">
                                     {{ 'Total'|t }}:
                                     <span id="summary-total">0 UZS</span>
+                                </li>
+                                <li id="summary-cod-savings-row" style="display: none;">
+                                    <span id="summary-cod-savings"></span>
                                 </li>
                             </ul>
 
@@ -1061,6 +1076,10 @@
         'window_morning': 'Morning (09:00-12:00)' | t,
         'window_afternoon': 'Afternoon (12:00-18:00)' | t,
         'window_evening': 'Evening (18:00-21:00)' | t,
+        'discount': 'Discount' | t,
+        'reward_discount': 'Reward discount' | t,
+        'tier_discount_line': '{tier} discount ({percent}%)' | t,
+        'cod_savings': 'Pay cash on delivery and save {amount}' | t,
     },
 }) }}
 <script src="{{ url_for('static', filename='js/pages/checkout.js') }}"></script>

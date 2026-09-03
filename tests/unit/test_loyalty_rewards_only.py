@@ -23,6 +23,11 @@ def test_order_edit_projection_is_rewards_only(app):
         order = SimpleNamespace(
             discount_amount=Decimal("0"),
             delivery_fee=Decimal("500"),
+            # A real Order always has this column. The projection reads it now
+            # (it used to hardcode 0.0), so the stand-in must model it.
+            loyalty_discount=Decimal("0"),
+            # Same reason: _project_totals_after also reads order.tier_discount now.
+            tier_discount=Decimal("0"),
             loyalty_points_used=5,
         )
         changes = [SimpleNamespace(direction="add", unit_price=Decimal("1000"), new_quantity=3)]

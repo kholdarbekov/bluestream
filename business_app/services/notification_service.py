@@ -10,6 +10,7 @@ import re
 import uuid
 from celery.utils.log import get_task_logger
 from datetime import datetime, timezone, timedelta
+from decimal import Decimal, InvalidOperation
 from types import SimpleNamespace
 from typing import Dict, Any, List, Optional
 from flask import current_app
@@ -28,7 +29,7 @@ from business_app.models.loyalty import LoyaltyPoints
 from business_app.models.user import User
 from business_app.models.order import Order
 from business_app.models.delivery import Delivery, DeliveryStatusHistory
-from business_app.models.payment import Payment
+from business_app.models.payment import Payment, CashCollectionEvent, CashCollectionAllocation
 from business_app.models.subscription import Subscription
 from business_app.models.translation import Translation
 from business_app.utils.exceptions import (
@@ -57,6 +58,7 @@ from business_app.services.bottle_tracking_service import (
     format_bottle_quantity,
 )
 from business_app.utils.bot_webhook import trigger_bot_webhook
+from business_app.utils.payment_projection import get_payment_projection
 from business_app import db, redis_client
 from sqlalchemy import func
 
@@ -259,6 +261,108 @@ class NotificationService:
         "ru": {
             "processing": "Ваш заказ обрабатывается. Мы сообщим вам о следующем обновлении статуса.",
             "delivered": "Ваш заказ уже доставлен. Это сообщение подтверждает, что ваша оплата получена.",
+        },
+    }
+
+    # The customer-facing name of a payment rail, WITH the icon the rest of the
+    # product already uses for it. These are the same DB-backed translation
+    # rows the customer Telegram bot's checkout screens read via
+    # `i18n.get('telegram.payment_*', language)` (see
+    # `telegram_bot/handlers/orders.py::_payment_method_label` and
+    # `scripts/seed_backend_translations.py`, "Telegram Payment Method
+    # Buttons") — one label per rail, reused here rather than re-translating
+    # `payment.payment_method.value` a second time. `Translation.get_translation`
+    # looks up by (key, language) only, not by category, so a business_app-side
+    # `get_translation()` call resolves the exact same row the bot renders.
+    # "click" and the legacy "card" alias both show the "Card" label: the UI
+    # has always called the Click rail "Card" (see
+    # `shared/payment_methods.py::PAYMENT_METHOD_ALIASES`).
+    _PAYMENT_METHOD_LABEL_KEYS = {
+        "cash": "telegram.payment_cash",
+        "click": "telegram.payment_card",
+        "card": "telegram.payment_card",
+        "payme": "telegram.payment_payme",
+        "business_account": "telegram.payment_business_account",
+    }
+
+    # The opening line of the Telegram payment-confirmation message. Case-aware
+    # because "shortfall" is the ONE case where `payment.status` is
+    # PARTIALLY_PAID rather than COMPLETED (see
+    # `_build_payment_collection_breakdown`) — "Payment confirmed!" is false
+    # when a balance still remains, so that case gets its own, equally short
+    # header. The other three cases (exact/reserved/debt_settled) all mean the
+    # payment reached COMPLETED, so "confirmed" stays accurate for them and
+    # their rendered copy is unchanged.
+    PAYMENT_STATUS_HEADERS = {
+        "uz": {
+            "confirmed": "✅ <b>To'lov tasdiqlandi!</b>",
+            "partial": "💰 <b>To'lov qabul qilindi!</b>",
+        },
+        "en": {
+            "confirmed": "✅ <b>Payment Confirmed!</b>",
+            "partial": "💰 <b>Payment Received!</b>",
+        },
+        "ru": {
+            "confirmed": "✅ <b>Оплата подтверждена!</b>",
+            "partial": "💰 <b>Оплата получена!</b>",
+        },
+    }
+
+    # Extra sentence(s) appended to a payment-confirmation message once the
+    # cash-collection ledger says the collected amount and the order total
+    # disagree. Kept out of the base template (unlike
+    # PAYMENT_FOLLOW_UP_MESSAGES) because case "debt_settled" needs to name a
+    # variable number of orders — see `_render_payment_collection_details`.
+    PAYMENT_COLLECTION_DETAIL_MESSAGES = {
+        "uz": {
+            "reserved": (
+                "Buyurtma summasi {order_total} so'm edi; ortiqcha {reserved} so'm "
+                "keyingi buyurtmalaringiz uchun hisobingizda saqlab qo'yildi."
+            ),
+            "debt_single": (
+                "Ushbu to'lovdan {amount} so'm #{order_number} ({date}) buyurtmangizdagi "
+                "qarzni yopish uchun ishlatildi."
+            ),
+            "debt_intro": "Ushbu to'lovdan quyidagi buyurtmalardagi qarz yopildi:",
+            "debt_item": "• #{order_number} ({date}): {amount} so'm",
+            "debt_remainder": ("Qolgan {reserved} so'm keyingi buyurtmalaringiz uchun hisobingizda saqlab qo'yildi."),
+            "shortfall": (
+                "Buyurtma summasidan {shortfall} so'm yetishmadi; qolgan summani keyingi "
+                "yetkazib berishda undiramiz."
+            ),
+        },
+        "en": {
+            "reserved": (
+                "Your order total was {order_total} UZS; the extra {reserved} UZS has been "
+                "saved as credit for your future orders."
+            ),
+            "debt_single": (
+                "{amount} UZS of this payment was used to settle the outstanding balance on "
+                "order #{order_number} ({date})."
+            ),
+            "debt_intro": "This payment settled the outstanding balance on:",
+            "debt_item": "• #{order_number} ({date}): {amount} UZS",
+            "debt_remainder": ("The remaining {reserved} UZS has been saved as credit for your future orders."),
+            "shortfall": (
+                "{shortfall} UZS short of the order total; we'll collect the remaining balance "
+                "on your next delivery."
+            ),
+        },
+        "ru": {
+            "reserved": (
+                "Сумма заказа составляла {order_total} сум; излишек {reserved} сум сохранён как "
+                "кредит для будущих заказов."
+            ),
+            "debt_single": (
+                "{amount} сум из этого платежа было использовано для погашения задолженности по "
+                "заказу #{order_number} ({date})."
+            ),
+            "debt_intro": "Этим платежом погашена задолженность по заказу(ам):",
+            "debt_item": "• #{order_number} ({date}): {amount} сум",
+            "debt_remainder": "Оставшиеся {reserved} сум сохранены как кредит для будущих заказов.",
+            "shortfall": (
+                "Не хватает {shortfall} сум от суммы заказа; оставшуюся сумму мы получим при " "следующей доставке."
+            ),
         },
     }
 
@@ -661,12 +765,20 @@ class NotificationService:
 
         language = self._normalize_language_code(getattr(user, "preferred_language", "en") or "en")
 
+        # SSOT: everything the customer needs to know about WHAT was actually
+        # handed over — as opposed to `payment.amount`, the order's own total
+        # — is read straight out of the cash-collection ledger. See
+        # `_build_payment_collection_breakdown`.
+        breakdown = self._build_payment_collection_breakdown(payment)
+
         template_data = {
             "order_number": payment.order.order_number if payment.order else "N/A",
-            "payment_amount": float(payment.amount) if payment.amount is not None else 0.0,
-            "payment_method": payment.payment_method.value if payment.payment_method else "unknown",
+            "payment_amount": self._format_money(breakdown["received_total"]),
+            "payment_method": self._payment_method_label(payment.payment_method, language),
             "payment_reference": payment.payment_id,  # Use payment_id as reference
             "payment_follow_up_message": self._get_payment_follow_up_message(payment, language),
+            "payment_details": self._render_payment_collection_details(breakdown, language),
+            "payment_status_header": self._payment_status_header(breakdown["case"], language),
         }
 
         # Determine channels: use Telegram if user has telegram_id, otherwise email
@@ -3061,6 +3173,295 @@ class NotificationService:
         delivery_status = self._normalize_delivery_status_code(getattr(delivery, "status", None)) if delivery else None
         return delivery_status == DeliveryStatus.DELIVERED.value
 
+    @staticmethod
+    def _to_decimal(value: Any) -> Decimal:
+        if value is None:
+            return Decimal("0.00")
+        try:
+            return Decimal(str(value))
+        except (InvalidOperation, ValueError, TypeError):
+            return Decimal("0.00")
+
+    @staticmethod
+    def _format_money(value: Any) -> str:
+        """Thousands-separated, no trailing ``.0`` — the codebase's established
+        idiom for money that lands in a notification body (see
+        ``driver_reconciliation_service._send_driver_reconciliation_reminder``
+        and the COD-limit messages in ``cash_collection_service``/
+        ``staff_service``, all of which format money as ``f"{value:,.0f}"``
+        before handing it to ``get_translation``). No dedicated formatter is
+        actually wired into any notification send today, so this centralizes
+        that idiom in ONE place for this notification rather than repeating the
+        inline f-string at every new call site here.
+
+        Deliberately NOT `business_app.utils.helpers.format_currency`: that
+        helper hardcodes the Uzbek word "so'm" onto the number regardless of
+        the language argument, which would leak Uzbek text into the en/ru
+        copy — the exact class of bug (an untranslated literal) this
+        notification is being fixed to stop shipping.
+        """
+        try:
+            return f"{float(value or 0):,.0f}"
+        except (TypeError, ValueError):
+            return "0"
+
+    @staticmethod
+    def _payment_method_label(payment_method: Any, language: str) -> str:
+        """Localized, iconed label for a payment rail — never the raw enum value."""
+        value = payment_method.value if hasattr(payment_method, "value") else str(payment_method or "")
+        translation_key = NotificationService._PAYMENT_METHOD_LABEL_KEYS.get(value)
+        if not translation_key:
+            return value
+        return get_translation(translation_key, language)
+
+    @staticmethod
+    def _order_delivered_at(order: Optional[Order]) -> Optional[datetime]:
+        """The one place an order's delivery date lives. ``Order`` itself has no
+        ``delivered_at`` column — the timestamp is on its ``Delivery`` row."""
+        if order is None:
+            return None
+        delivery = getattr(order, "delivery", None)
+        return getattr(delivery, "delivered_at", None) if delivery else None
+
+    @staticmethod
+    def _format_debt_date(delivered_at: Optional[datetime], language: str) -> str:
+        if not delivered_at:
+            return ""
+        from business_app.utils.helpers import format_datetime
+
+        return format_datetime(delivered_at, format_type="date", language=language)
+
+    def _build_payment_collection_breakdown(self, payment: Payment) -> Dict[str, Any]:
+        """Classify what the cash-collection ledger says happened to the money
+        behind ``payment`` into exactly one of four cases: ``exact``,
+        ``reserved`` (surplus, no debt), ``debt_settled`` (surplus that cleared
+        one or more other orders' debt, maybe with a reserved remainder), or
+        ``shortfall``.
+
+        Every figure that the ledger already records is READ, never
+        recomputed: `payment.amount_collected` (via `get_payment_projection`,
+        which IS the running total `CashCollectionService._allocate_to_payment`
+        maintains from `cash_collection_allocations` — re-summing those rows
+        here would be a second expression of the same figure) for what this
+        order itself has collected, `CashCollectionEvent.amount` for what the
+        customer physically handed over, and `CashCollectionAllocation.
+        allocated_amount` for where every portion of it went. Reversed
+        allocations (`reversed_at IS NOT NULL`) are excluded throughout — they
+        never happened.
+
+        The ONE arithmetic operation performed here is
+        ``order_total - amount_collected`` for the shortfall case: nothing in
+        the ledger records "how much is still owed", because nothing was
+        collected for it yet — there is no ledger row to read instead.
+
+        Debt vs. reservation signal: a cross-order allocation is "debt being
+        cleared" when its target order has ALREADY BEEN DELIVERED (reusing
+        `_is_payment_order_delivered`, the same check this service already
+        uses to choose the follow-up message), and "money held for the
+        future" otherwise — matching `CashCollectionService._allocate_scoped`,
+        which only ever spills surplus onto another order's debt when that
+        order is DELIVERED (`_allocate_scoped`'s "other delivered COD debts"
+        pass), and only ever writes `allocation_mode="prepaid_reservation"`
+        against a PENDING order (`auto_reserve_against_pending_payments`,
+        gated on `RESERVABLE_ORDER_STATUSES`, which excludes DELIVERED).
+        Order status is used directly, rather than branching on
+        `allocation_mode`, because delivered-vs-pending is the real-world
+        distinction being reported ("has this order already happened"), while
+        `allocation_mode` is an artifact of which code path wrote the row — a
+        future write path could use a different mode string for the same
+        real-world fact, and status would still classify it correctly.
+        `unapplied_amount` left over on a funding event, and any allocation
+        with no delivered target, both fall into the same "reserved" bucket by
+        construction: neither is tied to a debt that has already come due.
+        """
+        projection = get_payment_projection(payment)
+        order_total = projection["amount"]
+        amount_collected = projection["amount_collected"]
+
+        this_payment_allocations = CashCollectionAllocation.query.filter(
+            CashCollectionAllocation.payment_id == payment.id,
+            CashCollectionAllocation.reversed_at.is_(None),
+        ).all()
+        funding_event_ids = {a.cash_collection_event_id for a in this_payment_allocations}
+
+        if not funding_event_ids:
+            # Nothing in the cash-collection ledger funds this payment at all —
+            # an online rail (Click/Payme/business account) that settles
+            # directly, never through `cash_collection_events`. Those rails
+            # can only ever be exactly paid once COMPLETED (see
+            # `is_settled_prepayment`), so the order total IS what was
+            # received.
+            return {
+                "case": "exact",
+                "received_total": order_total,
+                "order_total": order_total,
+                "shortfall": Decimal("0.00"),
+                "reserved_total": Decimal("0.00"),
+                "debts": [],
+            }
+
+        events = CashCollectionEvent.query.filter(CashCollectionEvent.id.in_(funding_event_ids)).all()
+        received_total = sum((self._to_decimal(event.amount) for event in events), Decimal("0.00"))
+
+        unapplied_remainder = sum((self._to_decimal(event.unapplied_amount) for event in events), Decimal("0.00"))
+        other_allocations = CashCollectionAllocation.query.filter(
+            CashCollectionAllocation.cash_collection_event_id.in_(funding_event_ids),
+            CashCollectionAllocation.payment_id != payment.id,
+            CashCollectionAllocation.reversed_at.is_(None),
+        ).all()
+
+        debts_by_order: Dict[Any, Dict[str, Any]] = {}
+        reserved_total = unapplied_remainder
+        for allocation in other_allocations:
+            target_payment = allocation.payment
+            amount = self._to_decimal(allocation.allocated_amount)
+            if target_payment is not None and self._is_payment_order_delivered(target_payment):
+                order = target_payment.order
+                key = allocation.order_id or (order.id if order else id(allocation))
+                entry = debts_by_order.setdefault(
+                    key,
+                    {
+                        "order_number": order.order_number if order else None,
+                        "delivered_at": self._order_delivered_at(order),
+                        "amount": Decimal("0.00"),
+                    },
+                )
+                entry["amount"] += amount
+            else:
+                reserved_total += amount
+
+        # The shortfall test comes AFTER the cross-order allocations are
+        # gathered, and carries them, because the two facts are not exclusive:
+        # `_allocate_scoped` pays the customer's OLDER delivered debts before
+        # the order at the door, so a customer who hands over the exact order
+        # total routinely leaves THIS order short while their earlier orders
+        # get settled from the same banknotes.
+        #
+        # Reconstructable from committed rows: event 27 = 90,000.00 handed over
+        # against TG_000066_26, whose total is 90,000.00. It paid 10,000 to
+        # TG_000059_26, 30,000 to TG_000060_26 and only 50,000 to this order,
+        # leaving payment 118 at 50,000/90,000 -> PARTIALLY_PAID. Returning
+        # `debts: []` here told that customer "40,000 short" and said nothing
+        # about the 40,000 that cleared their two older orders. Fourteen events
+        # in dev have this split shape; two of them (events 7 and 25) put NOTHING
+        # on the order at the door, so the message claimed the entire total was
+        # still owed while every banknote had in fact been applied.
+        if amount_collected < order_total:
+            return {
+                "case": "shortfall",
+                "received_total": received_total,
+                "order_total": order_total,
+                "shortfall": order_total - amount_collected,
+                "reserved_total": reserved_total,
+                "debts": list(debts_by_order.values()),
+            }
+
+        if debts_by_order:
+            return {
+                "case": "debt_settled",
+                "received_total": received_total,
+                "order_total": order_total,
+                "shortfall": Decimal("0.00"),
+                "reserved_total": reserved_total,
+                "debts": list(debts_by_order.values()),
+            }
+
+        if reserved_total > Decimal("0.00"):
+            return {
+                "case": "reserved",
+                "received_total": received_total,
+                "order_total": order_total,
+                "shortfall": Decimal("0.00"),
+                "reserved_total": reserved_total,
+                "debts": [],
+            }
+
+        return {
+            "case": "exact",
+            "received_total": received_total,
+            "order_total": order_total,
+            "shortfall": Decimal("0.00"),
+            "reserved_total": Decimal("0.00"),
+            "debts": [],
+        }
+
+    def _payment_status_header(self, case: str, language: Optional[str]) -> str:
+        """The Telegram message's opening line — accurate to whether the
+        payment actually reached COMPLETED (``case != "shortfall"``) or is
+        still PARTIALLY_PAID (``case == "shortfall"``). See
+        ``PAYMENT_STATUS_HEADERS`` for why only this one case differs."""
+        lang = language if language in ("uz", "ru", "en") else "uz"
+        headers = self.PAYMENT_STATUS_HEADERS.get(lang, self.PAYMENT_STATUS_HEADERS["uz"])
+        return headers["partial"] if case == "shortfall" else headers["confirmed"]
+
+    def _render_payment_collection_details(self, breakdown: Dict[str, Any], language: Optional[str]) -> str:
+        """The extra sentence(s) a payment-confirmation message needs, or ``""``
+        for the exact-payment case (which needs none). Prefixed with its own
+        blank-line separator so the base template's single
+        ``{payment_details}`` placeholder produces no stray blank line when
+        this returns empty — see `DEFAULT_TEMPLATES[("payment_confirmation", …)]`.
+        """
+        lang = language if language in ("uz", "ru", "en") else "uz"
+        copy = self.PAYMENT_COLLECTION_DETAIL_MESSAGES.get(lang, self.PAYMENT_COLLECTION_DETAIL_MESSAGES["uz"])
+        case = breakdown["case"]
+
+        if case == "reserved":
+            line = copy["reserved"].format(
+                order_total=self._format_money(breakdown["order_total"]),
+                reserved=self._format_money(breakdown["reserved_total"]),
+            )
+            return f"\n\n{line}"
+
+        if case == "debt_settled":
+            lines = self._render_debt_lines(breakdown, copy, lang)
+            return "\n\n" + "\n".join(lines)
+
+        if case == "shortfall":
+            # Where the money WENT comes first, then what is still owed. A
+            # customer who handed over the full order total and saw only
+            # "40,000 short" had no way to know their older orders had just been
+            # settled from the same cash — see the note in
+            # `_build_payment_collection_breakdown`. Same fragments as
+            # `debt_settled`, so the two cases can never word this differently.
+            lines = self._render_debt_lines(breakdown, copy, lang)
+            lines.append(copy["shortfall"].format(shortfall=self._format_money(breakdown["shortfall"])))
+            return "\n\n" + "\n".join(lines)
+
+        return ""
+
+    def _render_debt_lines(self, breakdown: Dict[str, Any], copy: Dict[str, str], lang: str) -> List[str]:
+        """The "this payment settled order #N" sentence(s), plus any reserved
+        remainder. Empty when nothing went to another order.
+
+        Shared by the ``debt_settled`` and ``shortfall`` cases: both can carry
+        cross-order allocations, and a customer must read the same account of
+        where their banknotes went either way.
+        """
+        debts = breakdown.get("debts") or []
+        lines: List[str] = []
+        if len(debts) == 1:
+            debt = debts[0]
+            lines.append(
+                copy["debt_single"].format(
+                    amount=self._format_money(debt["amount"]),
+                    order_number=debt["order_number"],
+                    date=self._format_debt_date(debt["delivered_at"], lang),
+                )
+            )
+        elif debts:
+            lines.append(copy["debt_intro"])
+            for debt in debts:
+                lines.append(
+                    copy["debt_item"].format(
+                        order_number=debt["order_number"],
+                        date=self._format_debt_date(debt["delivered_at"], lang),
+                        amount=self._format_money(debt["amount"]),
+                    )
+                )
+        if breakdown.get("reserved_total", Decimal("0.00")) > Decimal("0.00"):
+            lines.append(copy["debt_remainder"].format(reserved=self._format_money(breakdown["reserved_total"])))
+        return lines
+
     def _get_payment_follow_up_message(self, payment: Payment, language: Optional[str]) -> str:
         """Resolve localized payment follow-up copy based on fulfillment stage."""
         normalized_language = self._normalize_language_code(language)
@@ -3952,6 +4353,7 @@ Tracking: {tracking_code}
     <li>Usul: {payment_method}</li>
     <li>Havola: {payment_reference}</li>
 </ul>
+<p>{payment_details}</p>
 <p>{payment_follow_up_message}</p>""",
             },
             "en": {
@@ -3964,6 +4366,7 @@ Tracking: {tracking_code}
     <li>Method: {payment_method}</li>
     <li>Reference: {payment_reference}</li>
 </ul>
+<p>{payment_details}</p>
 <p>{payment_follow_up_message}</p>""",
             },
             "ru": {
@@ -3976,42 +4379,46 @@ Tracking: {tracking_code}
     <li>Способ: {payment_method}</li>
     <li>Ссылка: {payment_reference}</li>
 </ul>
+<p>{payment_details}</p>
 <p>{payment_follow_up_message}</p>""",
             },
         },
     },
     # Payment confirmation - Telegram
+    # Opening line is `{payment_status_header}` — see PAYMENT_STATUS_HEADERS —
+    # rather than a hardcoded "confirmed" line, because a shortfall (case D)
+    # leaves the payment PARTIALLY_PAID and "confirmed" would be false there.
     ("payment_confirmation", "telegram"): {
         "name": "payment_confirmation_telegram",
         "translations": {
             "uz": {
-                "content": """✅ <b>To'lov tasdiqlandi!</b>
+                "content": """{payment_status_header}
 
 Buyurtma: #{order_number}
 Summa: {payment_amount} so'm
-Usul: {payment_method}
+Usul: {payment_method}{payment_details}
 
 {payment_follow_up_message}
 
 Xaridingiz uchun rahmat!"""
             },
             "en": {
-                "content": """✅ <b>Payment Confirmed!</b>
+                "content": """{payment_status_header}
 
 Order: #{order_number}
 Amount: {payment_amount} UZS
-Method: {payment_method}
+Method: {payment_method}{payment_details}
 
 {payment_follow_up_message}
 
 Thank you for your purchase!"""
             },
             "ru": {
-                "content": """✅ <b>Оплата подтверждена!</b>
+                "content": """{payment_status_header}
 
 Заказ: #{order_number}
 Сумма: {payment_amount} сум
-Способ: {payment_method}
+Способ: {payment_method}{payment_details}
 
 {payment_follow_up_message}
 

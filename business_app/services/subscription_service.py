@@ -16,6 +16,7 @@ from business_app.models.order import Order
 from business_app.models.payment import Payment
 from business_app.models.delivery import DeliveryTimeSlot
 from business_app.utils.exceptions import ValidationError, NotFoundError, ConflictError
+from business_app.utils.order_totals import compute_order_total
 from shared.enums import SubscriptionStatus, SubscriptionFrequency, PaymentMethod
 from business_app.utils.translations import get_translation
 from sqlalchemy.orm import joinedload
@@ -1940,13 +1941,21 @@ class SubscriptionService:
 
         # Apply discount
         discount_amount = (subtotal * discount_percentage / 100) if discount_percentage > 0 else 0
-        total_after_discount = subtotal - discount_amount
 
         # Calculate delivery fee (if applicable)
         delivery_fee = 0  # Can be calculated based on address/distance
 
-        # Calculate final total
-        total_amount = total_after_discount + delivery_fee
+        # Calculate final total. A subscription preview is a QUOTE, so it must
+        # use the same expression as the order it previews.
+        total_amount = compute_order_total(
+            subtotal=Decimal(str(subtotal)),
+            discount_amount=Decimal(str(discount_amount)),
+            delivery_fee=Decimal(str(delivery_fee)),
+            # Rewards are redeemed against an existing order; a preview has none.
+            loyalty_discount=Decimal("0.00"),
+            # No `tier_discount` column exists yet.
+            tier_discount=Decimal("0.00"),
+        )
 
         # Calculate frequency-based pricing
         frequency_multiplier = {"daily": 30, "weekly": 4, "biweekly": 2, "monthly": 1}.get(delivery_frequency, 1)

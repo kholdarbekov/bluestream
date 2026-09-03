@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 from business_app.models.order import Order, OrderItem  # noqa: E402
 from business_app.models.product import Product  # noqa: E402
+from business_app.utils.order_totals import compute_order_total  # noqa: E402
 from business_app.models.subscription import Subscription  # noqa: E402
 from business_app.models.user import User, UserAddress  # noqa: E402
 from business_app.utils.exceptions import ValidationError, NotFoundError, ConflictError, ForbiddenError  # noqa: E402
@@ -169,22 +170,56 @@ class OrderService:
             if discount_amount > subtotal:
                 raise ValidationError("Subscription discount cannot exceed the order subtotal")
 
-        # Mirrors Order.calculate_total() (models/order.py) — the declared SSOT
-        # for this formula, which create_order previously bypassed.
-        total_amount = subtotal - discount_amount + delivery_fee
-
-        # A zero-total order is degenerate: there is nothing to charge, nothing
-        # for a driver to collect, and initialize_order_payment cannot mint a
-        # zero-amount Payment. Reject it rather than persisting the row.
-        if total_amount <= 0:
-            raise ValidationError("Order total must be positive after discounts")
-
+        # THE RAIL MUST BE KNOWN BEFORE THE ORDER CAN BE PRICED. This call used
+        # to sit below the total; the loyalty tier discount is a COD-only
+        # benefit, so the rail is now an input to the price. Nothing in
+        # _resolve_payment_method reads total_amount (it normalizes the method,
+        # asserts customer-selectability, runs the two-armed COD cap and
+        # validates business-account coverage), so moving it up is safe. The
+        # MIN_ORDER_AMOUNT floor above stays gated on the GROSS basket and does
+        # not move.
         payment_method = self._resolve_payment_method(
             order_data,
             user=user,
             order_items=order_items,
             bypass_cod_check=bypass_cod_check,
         )
+
+        # Loyalty tier discount — COD rail only. LoyaltyService is the ONE
+        # place that decides whether it applies and at what live rate; this
+        # method never holds a percentage. The basis is the full subtotal
+        # (design §4.3), and the result is clamped LAST so no combination of
+        # independently-configurable rates can drive the total negative or
+        # violate ck_orders_tier_discount_nonneg. loyalty_discount is zero at
+        # this point — a redeemed reward is applied further down, inside the
+        # transaction, and re-clamps there.
+        from business_app.services.loyalty_service import LoyaltyService, clamp_tier_discount
+
+        tier_discount = clamp_tier_discount(
+            LoyaltyService().quote_tier_discount(user, subtotal, payment_method).amount,
+            subtotal=subtotal,
+            discount_amount=discount_amount,
+            loyalty_discount=Decimal("0.00"),
+        )
+
+        # `Order.calculate_total()` cannot be used here: no Order row exists yet
+        # and this total GATES its own creation (the `<= 0` check below). Both
+        # call `compute_order_total`, so they cannot disagree.
+        total_amount = compute_order_total(
+            subtotal=subtotal,
+            discount_amount=discount_amount,
+            delivery_fee=Decimal(str(delivery_fee)),
+            # Rewards are redeemed against an EXISTING order
+            # (LoyaltyService.apply_reward_to_order); none can be attached yet.
+            loyalty_discount=Decimal("0.00"),
+            tier_discount=tier_discount,
+        )
+
+        # A zero-total order is degenerate: there is nothing to charge, nothing
+        # for a driver to collect, and initialize_order_payment cannot mint a
+        # zero-amount Payment. Reject it rather than persisting the row.
+        if total_amount <= 0:
+            raise ValidationError("Order total must be positive after discounts")
 
         # Create order
         order_source = order_data.get("order_source", "web")
@@ -200,6 +235,7 @@ class OrderService:
             subtotal=subtotal,
             discount_amount=discount_amount,
             delivery_fee=delivery_fee,
+            tier_discount=tier_discount,
             total_amount=total_amount,
             delivery_address_id=delivery_address["delivery_address_id"],
             payment_method=payment_method,

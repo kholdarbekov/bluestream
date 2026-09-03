@@ -23,6 +23,7 @@ from business_app.utils.constants import (
     ORDER_SOURCE_PREFIXES,
 )
 from business_app.utils.delivery_window import format_delivery_window
+from business_app.utils.order_totals import compute_order_total
 from shared.enums import (
     OrderStatus,
     PaymentMethod,
@@ -63,6 +64,17 @@ class Order(db.Model, TimestampMixin):
     discount_amount = Column(Numeric(precision=10, scale=2), default=Decimal("0.00"))
     delivery_fee = Column(Numeric(precision=10, scale=2), default=Decimal("0.00"))
     loyalty_discount = Column(Numeric(precision=10, scale=2), default=Decimal("0.00"))
+    # Loyalty TIER discount, granted only on the COD rail. Distinct from
+    # discount_amount (subscription %) and loyalty_discount (redeemed reward):
+    # all three can co-exist on one order, and this one must never reach a
+    # Click fiscal receipt. The ck_orders_tier_discount_nonneg CHECK lives in
+    # migration a1b7c3d9e5f2, alongside the five sibling guards from b8e3c9f5d2a4.
+    tier_discount = Column(
+        Numeric(precision=10, scale=2),
+        nullable=False,
+        default=Decimal("0.00"),
+        server_default="0.00",
+    )
     total_amount = Column(Numeric(precision=10, scale=2), nullable=False, default=Decimal("0.00"))
 
     # Delivery information
@@ -161,16 +173,24 @@ class Order(db.Model, TimestampMixin):
             return f"WB{timestamp}{random_suffix}"
 
     def calculate_total(self):
-        """Calculate order total including discounts and delivery fee"""
+        """Calculate order total including discounts and delivery fee.
+
+        The ARITHMETIC lives in `business_app.utils.order_totals` — the single
+        implementation of the formula. This method's job is to source the
+        operands off the row and write the result back.
+        """
         self.subtotal = sum(item.total_price for item in self.order_items)
 
         # loyalty_discount holds the discount from a redeemed loyalty reward
         # (rewards-only; never a points->UZS conversion). Preserve whatever the
         # redemption engine set; defaults to Decimal("0.00") for non-reward orders.
-        loyalty_discount = self.loyalty_discount or Decimal("0.00")
-
-        # Calculate final total
-        self.total_amount = self.subtotal - self.discount_amount + self.delivery_fee - loyalty_discount
+        self.total_amount = compute_order_total(
+            subtotal=Decimal(str(self.subtotal or 0)),
+            discount_amount=Decimal(str(self.discount_amount or 0)),
+            delivery_fee=Decimal(str(self.delivery_fee or 0)),
+            loyalty_discount=Decimal(str(self.loyalty_discount or 0)),
+            tier_discount=Decimal(str(self.tier_discount or 0)),
+        )
 
         # NOTE: loyalty_points_earned is calculated by LoyaltyService.calculate_points_for_purchase()
         # when the order is confirmed/processed, using LoyaltyProgram configuration and tier multipliers.
@@ -191,6 +211,7 @@ class Order(db.Model, TimestampMixin):
             "discount_amount": self.discount_amount,
             "delivery_fee": self.delivery_fee,
             "loyalty_discount": self.loyalty_discount,
+            "tier_discount": self.tier_discount,
             "total_amount": self.total_amount,
             "delivery_date": self.delivery_date.isoformat() if self.delivery_date else None,
             "delivery_window": format_delivery_window(self.delivery_window_start, self.delivery_window_end),

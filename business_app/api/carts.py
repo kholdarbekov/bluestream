@@ -117,7 +117,16 @@ def get_cart_estimate():
     delivery_address_id = data.get("delivery_address_id")
     delivery_date = data.get("delivery_date")
     loyalty_points_used = data.get("loyalty_points_used", 0)
-    promo_code = data.get("promo_code")
+    # promo_code deliberately NOT read from the request here (F3, 2026-08-27):
+    # this route is @jwt_required only, so any authenticated customer could
+    # set it, and OrderService.create_order never applies a promo code to a
+    # created order -- so pricing one into this quote made the quote lower
+    # than what confirming the order would actually charge.
+    # This route and orders.estimate_cart reach the SAME service method. Both
+    # must carry the rail, or whichever one a client adopts, the other becomes a
+    # second quote surface answering a different number.
+    payment_method = data.get("payment_method")
+    reward_id = data.get("reward_id")
 
     cart_service = get_cart_service()
     estimate = cart_service.calculate_cart_estimate(
@@ -126,7 +135,8 @@ def get_cart_estimate():
         delivery_address_id=delivery_address_id,
         delivery_date=delivery_date,
         loyalty_points_used=loyalty_points_used,
-        promo_code=promo_code,
+        payment_method=payment_method,
+        reward_id=reward_id,
     )
 
     return success_response(data={"estimate": estimate})

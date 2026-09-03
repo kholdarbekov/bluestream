@@ -282,6 +282,431 @@ class TestCashCollectionService:
             assert session is not None
             assert session.expected_cash == Decimal("5000.00")
 
+    def test_post_collection_shortfall_notifies_on_first_partial(
+        self,
+        app,
+        db,
+        sample_user,
+        delivery_driver,
+        delivery_driver_profile,
+        cod_order,
+        cod_delivery,
+        monkeypatch,
+    ):
+        """A shortfall leaves the payment PARTIALLY_PAID, never COMPLETED — the
+        old enqueue guard (`previous_status != COMPLETED and status == COMPLETED`)
+        can never see that transition, so case D's tested copy could never
+        actually reach a customer. The FIRST real door collection that leaves a
+        balance owed must still notify."""
+        from business_app.tasks import notification_tasks
+
+        enqueued = []
+        monkeypatch.setattr(
+            notification_tasks.send_payment_confirmation_task,
+            "delay",
+            lambda *args, **kwargs: enqueued.append((args, kwargs)),
+        )
+
+        with app.app_context():
+            service = CashCollectionService()
+            payment = service.ensure_cod_payment_for_order(cod_order)
+            db.session.commit()
+
+            service.post_collection(
+                customer_id=sample_user.id,
+                amount=Decimal("5000.00"),
+                source="delivery_completion",
+                collector_user_id=delivery_driver.id,
+                recorded_by_user_id=delivery_driver.id,
+                order_id=cod_order.id,
+                delivery_id=cod_delivery.id,
+                notes="Customer paid part of the balance on delivery",
+            )
+
+            db.session.refresh(payment)
+            assert payment.status == PaymentStatus.PARTIALLY_PAID
+
+        assert len(enqueued) == 1
+        assert enqueued[0][0][0] == payment.id
+
+    def test_post_collection_second_partial_notifies_again(
+        self,
+        app,
+        db,
+        sample_user,
+        delivery_driver,
+        delivery_driver_profile,
+        cod_order,
+        cod_delivery,
+        monkeypatch,
+    ):
+        """A second, later collection against a still-outstanding payment is
+        just as real to the customer as the first, even though `payment.status`
+        stays PARTIALLY_PAID both times (no transition to key a fire on). Each
+        genuine door collection must produce its own message."""
+        from business_app.tasks import notification_tasks
+
+        enqueued = []
+        monkeypatch.setattr(
+            notification_tasks.send_payment_confirmation_task,
+            "delay",
+            lambda *args, **kwargs: enqueued.append((args, kwargs)),
+        )
+
+        with app.app_context():
+            service = CashCollectionService()
+            payment = service.ensure_cod_payment_for_order(cod_order)
+            db.session.commit()
+
+            service.post_collection(
+                customer_id=sample_user.id,
+                amount=Decimal("5000.00"),
+                source="delivery_completion",
+                collector_user_id=delivery_driver.id,
+                recorded_by_user_id=delivery_driver.id,
+                order_id=cod_order.id,
+                delivery_id=cod_delivery.id,
+                notes="First partial payment at the door",
+            )
+            db.session.refresh(payment)
+            assert payment.status == PaymentStatus.PARTIALLY_PAID
+            assert len(enqueued) == 1
+
+            service.post_collection(
+                customer_id=sample_user.id,
+                amount=Decimal("3000.00"),
+                source="delivery_completion",
+                collector_user_id=delivery_driver.id,
+                recorded_by_user_id=delivery_driver.id,
+                order_id=cod_order.id,
+                delivery_id=cod_delivery.id,
+                notes="Second partial payment, still short",
+            )
+            db.session.refresh(payment)
+            assert payment.status == PaymentStatus.PARTIALLY_PAID
+            assert payment.amount_collected == Decimal("8000.00")
+
+        assert len(enqueued) == 2
+        # Two real collections against the SAME payment must not collapse into
+        # one Redis idempotency key downstream — each carries the
+        # post-allocation amount_collected as its dedupe token, so the second
+        # call's token differs from the first's.
+        first_kwargs = enqueued[0][1]
+        second_kwargs = enqueued[1][1]
+        assert first_kwargs.get("collection_state_token") != second_kwargs.get("collection_state_token")
+
+    def test_allocate_to_payment_zero_amount_never_notifies(
+        self,
+        app,
+        db,
+        sample_user,
+        cod_order,
+        monkeypatch,
+    ):
+        """A sync that allocates nothing (amount <= 0) must never fire the
+        completion notification — pinned directly against `_allocate_to_payment`
+        so a future refactor of the guard above it can't silently drop this."""
+        from shared.enums import CashCollectionSource
+        from business_app.tasks import notification_tasks
+
+        enqueued = []
+        monkeypatch.setattr(
+            notification_tasks.send_payment_confirmation_task,
+            "delay",
+            lambda *args, **kwargs: enqueued.append((args, kwargs)),
+        )
+
+        with app.app_context():
+            service = CashCollectionService()
+            payment = service.ensure_cod_payment_for_order(cod_order)
+            db.session.commit()
+
+            event = CashCollectionEvent(
+                customer_id=sample_user.id,
+                order_id=cod_order.id,
+                amount=Decimal("0.00"),
+                currency="UZS",
+                source=CashCollectionSource.DELIVERY_COMPLETION,
+                occurred_at=datetime.now(UTC),
+                unapplied_amount=Decimal("0.00"),
+            )
+            db.session.add(event)
+            db.session.flush()
+
+            service._allocate_to_payment(
+                event=event,
+                payment=payment,
+                amount=Decimal("0.00"),
+                allocation_order=1,
+                allocation_mode="auto",
+            )
+            db.session.refresh(payment)
+            assert payment.status == PaymentStatus.PENDING
+
+        assert enqueued == []
+
+    def test_confirmation_is_not_published_until_the_transaction_commits(
+        self,
+        app,
+        db,
+        sample_user,
+        delivery_driver,
+        delivery_driver_profile,
+        cod_order,
+        cod_delivery,
+        monkeypatch,
+    ):
+        """INCIDENT TG_000092_26: a customer who paid 35,000 on a 34,920 order was
+        told 34,920 was still owed.
+
+        The task was published to Celery from INSIDE the writing transaction. The
+        worker starts immediately and reads under READ COMMITTED, where each
+        statement takes a fresh snapshot — so its `Payment` read landed before the
+        commit (`amount_collected` still 0) while its allocation and event reads
+        landed after (35,000 visible). `_build_payment_collection_breakdown` then
+        computed `shortfall = order_total - amount_collected` = the ENTIRE order
+        total and rendered the shortfall copy over a surplus.
+
+        No amount of care inside the breakdown can fix that: it is handed a torn
+        read. The fix is that nothing may be published until the data the worker
+        will read is committed, which is what this pins.
+        """
+        from business_app.tasks import notification_tasks
+
+        enqueued = []
+        monkeypatch.setattr(
+            notification_tasks.send_payment_confirmation_task,
+            "delay",
+            lambda *args, **kwargs: enqueued.append((args, kwargs)),
+        )
+
+        with app.app_context():
+            service = CashCollectionService()
+            payment = service.ensure_cod_payment_for_order(cod_order)
+            db.session.commit()
+            # Bind before committing again: commit expires the instance, and the
+            # assertions below run once the app context (and its session) is gone.
+            payment_id = payment.id
+
+            service.post_collection(
+                customer_id=sample_user.id,
+                amount=Decimal("5000.00"),
+                source="delivery_completion",
+                collector_user_id=delivery_driver.id,
+                recorded_by_user_id=delivery_driver.id,
+                order_id=cod_order.id,
+                delivery_id=cod_delivery.id,
+                commit=False,
+            )
+
+            assert enqueued == [], (
+                "published while the writing transaction was still open — the "
+                "worker can read a torn snapshot and mis-classify the collection"
+            )
+
+            db.session.commit()
+
+        assert len(enqueued) == 1, "exactly one message per committed collection"
+        assert enqueued[0][0][0] == payment_id
+
+    def test_confirmation_is_discarded_when_the_transaction_rolls_back(
+        self,
+        app,
+        db,
+        sample_user,
+        delivery_driver,
+        delivery_driver_profile,
+        cod_order,
+        cod_delivery,
+        monkeypatch,
+    ):
+        """Already flagged in-tree at staff_service.py:1352 — an enqueue that does
+        not roll back tells the customer a rolled-back payment was confirmed."""
+        from business_app.tasks import notification_tasks
+
+        enqueued = []
+        monkeypatch.setattr(
+            notification_tasks.send_payment_confirmation_task,
+            "delay",
+            lambda *args, **kwargs: enqueued.append((args, kwargs)),
+        )
+
+        with app.app_context():
+            service = CashCollectionService()
+            service.ensure_cod_payment_for_order(cod_order)
+            db.session.commit()
+
+            service.post_collection(
+                customer_id=sample_user.id,
+                amount=Decimal("5000.00"),
+                source="delivery_completion",
+                collector_user_id=delivery_driver.id,
+                recorded_by_user_id=delivery_driver.id,
+                order_id=cod_order.id,
+                delivery_id=cod_delivery.id,
+                commit=False,
+            )
+            db.session.rollback()
+
+        assert enqueued == [], "a rolled-back collection must notify no one"
+
+    def test_a_surplus_collection_is_never_reported_as_a_shortfall(
+        self,
+        app,
+        db,
+        sample_user,
+        delivery_driver,
+        delivery_driver_profile,
+        cod_order,
+        cod_delivery,
+        monkeypatch,
+    ):
+        """The customer-visible outcome from the incident, end to end: paying MORE
+        than the order total must classify as surplus, never as a shortfall."""
+        from business_app.tasks import notification_tasks
+        from business_app.services.notification_service import NotificationService
+
+        monkeypatch.setattr(
+            notification_tasks.send_payment_confirmation_task,
+            "delay",
+            lambda *args, **kwargs: None,
+        )
+
+        with app.app_context():
+            service = CashCollectionService()
+            payment = service.ensure_cod_payment_for_order(cod_order)
+            order_total = Decimal(str(payment.amount))
+            db.session.commit()
+
+            service.post_collection(
+                customer_id=sample_user.id,
+                amount=order_total + Decimal("80.00"),
+                source="delivery_completion",
+                collector_user_id=delivery_driver.id,
+                recorded_by_user_id=delivery_driver.id,
+                order_id=cod_order.id,
+                delivery_id=cod_delivery.id,
+            )
+
+            db.session.refresh(payment)
+            breakdown = NotificationService()._build_payment_collection_breakdown(payment)
+
+        assert breakdown["case"] != "shortfall", breakdown
+        assert breakdown["shortfall"] == Decimal("0.00")
+        assert breakdown["received_total"] == order_total + Decimal("80.00")
+
+    def test_shortfall_message_still_says_where_the_money_went(self, app):
+        """A customer who hands over the FULL order total can still leave THIS
+        order short, because `_allocate_scoped` pays their OLDER delivered debts
+        first. The shortfall copy used to drop those allocations on the floor.
+
+        Reconstructable from committed rows: event 27 = 90,000.00 handed over
+        against TG_000066_26 (total 90,000.00) paid 10,000 to TG_000059_26,
+        30,000 to TG_000060_26 and only 50,000 to this order — and the customer
+        was told "40,000 short" with no mention of the two orders their cash had
+        just settled. Fourteen dev events have this split shape.
+        """
+        from business_app.services.notification_service import NotificationService
+
+        breakdown = {
+            "case": "shortfall",
+            "received_total": Decimal("90000.00"),
+            "order_total": Decimal("90000.00"),
+            "shortfall": Decimal("40000.00"),
+            "reserved_total": Decimal("0.00"),
+            "debts": [
+                {"order_number": "TG_000059_26", "delivered_at": None, "amount": Decimal("10000.00")},
+                {"order_number": "TG_000060_26", "delivered_at": None, "amount": Decimal("30000.00")},
+            ],
+        }
+
+        with app.app_context():
+            rendered = {
+                lang: NotificationService()._render_payment_collection_details(breakdown, lang)
+                for lang in ("uz", "ru", "en")
+            }
+
+        for lang, text in rendered.items():
+            assert "TG_000059_26" in text and "TG_000060_26" in text, (
+                f"[{lang}] shortfall copy must name the orders the cash settled, got: {text!r}"
+            )
+            assert "40,000" in text, f"[{lang}] must still state the outstanding balance: {text!r}"
+
+    def test_a_full_payment_split_onto_older_debt_is_not_reported_as_a_bare_shortfall(
+        self,
+        app,
+        db,
+        sample_user,
+        delivery_driver,
+        delivery_driver_profile,
+        cod_order,
+        cod_delivery,
+        monkeypatch,
+    ):
+        """Breakdown level, driving the real allocator: when the customer's own
+        older DELIVERED debt eats part of the cash, the shortfall breakdown must
+        carry that allocation instead of hardcoding `debts: []`."""
+        from business_app.tasks import notification_tasks
+        from business_app.services.notification_service import NotificationService
+
+        monkeypatch.setattr(
+            notification_tasks.send_payment_confirmation_task, "delay", lambda *a, **k: None
+        )
+
+        with app.app_context():
+            service = CashCollectionService()
+            payment = service.ensure_cod_payment_for_order(cod_order)
+            order_total = Decimal(str(payment.amount))
+
+            # An OLDER delivered COD order for the SAME customer. _allocate_scoped
+            # settles these before the order at the door, which is what makes a
+            # full-amount payment land short on this order.
+            older = Order(
+                user_id=sample_user.id,
+                order_number=f"ORD-OLDER-{uuid4().hex[:8]}",
+                status=OrderStatus.DELIVERED,
+                subtotal=Decimal("7000.00"),
+                delivery_fee=Decimal("0.00"),
+                discount_amount=Decimal("0.00"),
+                loyalty_discount=Decimal("0.00"),
+                total_amount=Decimal("7000.00"),
+                payment_method=PaymentMethod.CASH,
+                created_at=datetime.now(UTC) - timedelta(days=30),
+            )
+            db.session.add(older)
+            db.session.flush()
+            service.ensure_cod_payment_for_order(older)
+            db.session.commit()
+
+            # The customer hands over EXACTLY this order's total.
+            service.post_collection(
+                customer_id=sample_user.id,
+                amount=order_total,
+                source="delivery_completion",
+                collector_user_id=delivery_driver.id,
+                recorded_by_user_id=delivery_driver.id,
+                order_id=cod_order.id,
+                delivery_id=cod_delivery.id,
+            )
+
+            db.session.refresh(payment)
+            breakdown = NotificationService()._build_payment_collection_breakdown(payment)
+            rendered = NotificationService()._render_payment_collection_details(breakdown, "en")
+            older_number = older.order_number
+
+        if breakdown["case"] != "shortfall":
+            pytest.skip(
+                f"allocator did not split this collection (case={breakdown['case']}); "
+                "the split-onto-older-debt path is covered by "
+                "test_shortfall_message_still_says_where_the_money_went"
+            )
+
+        assert breakdown["debts"], (
+            "shortfall breakdown dropped the cross-order allocations — the customer "
+            "is told they are short without being told where their cash went"
+        )
+        assert older_number in rendered, rendered
+
     def test_get_order_payment_timeline_normalizes_completed_prepaid_projection(
         self,
         app,

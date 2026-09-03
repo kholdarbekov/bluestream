@@ -260,6 +260,34 @@ class OrderPaymentMethodEditService:
         payment = order.payment
 
         with atomic_transaction():
+            # 0. Release every LIVE prepaid_reservation this payment is holding,
+            #    BEFORE the rail flip below, while payment.payment_method still
+            #    reads CASH. Every reservation release/consume path
+            #    (reserve_customer_prepaid_credit_for_payment,
+            #    consume_reserved_prepayment_for_payment,
+            #    release_reserved_prepayment_for_order) is CASH-gated, so once
+            #    step 1 flips the rail a reservation funded by a
+            #    non-DELIVERY_COMPLETION event (standalone_meeting,
+            #    personal_card_transfer, admin_adjustment — the ones
+            #    `_reverse_collected_cash` below never touches, since it only
+            #    reverses DELIVERY_COMPLETION-sourced allocations) becomes
+            #    unreachable forever: the customer's cash stays locked and the
+            #    funding event's unapplied_amount stays decremented with no
+            #    surface left to notice. `release_reserved_prepayment_for_order`
+            #    performs no allocation sweep — it only stamps rows and
+            #    increments `unapplied_amount` — so releasing here cannot let
+            #    the freed cash re-apply to THIS order before the flip, which is
+            #    exactly what "flip first" protects against. A reservation that
+            #    happens to be DELIVERY_COMPLETION-funded is released here too;
+            #    `_reverse_collected_cash`'s later query simply finds it already
+            #    reversed and no-ops on it (no double-processing).
+            if current == "cash":
+                from business_app.services.cash_collection_service import CashCollectionService
+
+                CashCollectionService().release_reserved_prepayment_for_order(
+                    order.id, actor_user_id=actor_user_id, reason=reason
+                )
+
             # 1. Flip method FIRST (payment + order). Critical precondition: while
             #    the payment still reads CASH a freed-cash auto-allocation could
             #    re-apply to this same order, and the corporate reserve/consume
@@ -268,6 +296,23 @@ class OrderPaymentMethodEditService:
                 payment.payment_method = PaymentMethod.BUSINESS_ACCOUNT
             order.payment_method = PaymentMethod.BUSINESS_ACCOUNT
             db.session.flush()
+
+            # 1b. THE TIER DISCOUNT FOLLOWS THE RAIL. business_account is not a
+            #     COD rail, so a COD-only tier discount must not survive onto
+            #     it: the corporate account must be billed the same
+            #     undiscounted amount a fiscalized rail would be. This is a
+            #     revenue-correctness point rather than a fiscal one
+            #     (business_account is never fiscalized) -- same rule as
+            #     apply_tier_discount_for_rail's other two call sites
+            #     (PaymentService.create_payment and Case C in
+            #     click_payment_provider_service.py). A no-op for the
+            #     click/payme -> business_account transitions, whose orders
+            #     never carried a tier discount to begin with.
+            from business_app.services.loyalty_service import apply_tier_discount_for_rail
+
+            apply_tier_discount_for_rail(order, PaymentMethod.BUSINESS_ACCOUNT)
+            if payment is not None:
+                payment.amount = order.total_amount
 
             # 2. Reverse / release whatever the superseded method left behind.
             if current == "cash":
@@ -513,12 +558,27 @@ class OrderPaymentMethodEditService:
                     error_code="MARKING_CODES_POOL_SHORT",
                 )
 
+            # 1b. THE TIER DISCOUNT FOLLOWS THE RAIL — it is a COD-only benefit
+            #     and must never reach a Click fiscal receipt:
+            #     build_click_fiscalization_payload prices received_card off
+            #     order.total_amount while filling per-item Discount from
+            #     loyalty_discount ALONE, so a tier-discounted total here would
+            #     make Sum(Price - Discount) != received_card -- the same
+            #     tax-committee reconciliation failure Case C
+            #     (ClickPaymentProviderService._restore_click_rail_after_offline_settlement)
+            #     guards against. Revoke before the flip below so payment.amount
+            #     and outstanding_amount are computed off the corrected total.
+            from business_app.services.loyalty_service import apply_tier_discount_for_rail
+
+            apply_tier_discount_for_rail(order, PaymentMethod.CLICK)
+
             # 2. Flip method and reset the payment to a fresh online obligation.
             order.payment_method = PaymentMethod.CLICK
             if payment is not None:
                 payment.payment_method = PaymentMethod.CLICK
                 payment.status = PaymentStatus.PENDING
                 payment.amount_collected = Decimal("0.00")
+                payment.amount = order.total_amount
                 payment.outstanding_amount = order.total_amount
                 payment.consume_marking_codes = True
                 payment.paid_at = None

@@ -60,6 +60,13 @@ def get_membership_tiers():
             data={
                 "tiers": tiers,
                 "tier_count": len(tiers),
+                # Each tier's `discount_percentage` is a COD-rail benefit. This
+                # route is unauthenticated and 3600 s cached, and /my-loyalty
+                # renders the rate straight from it — publishing the number
+                # without the condition promises a discount checkout refuses on
+                # Click/Payme/card. cache_response keys on the language, so the
+                # sentence is translated per request, not frozen in English.
+                "tier_discount_condition": get_translation("api.loyalty.tier_discount_condition"),
             }
         )
     except Exception as exc:

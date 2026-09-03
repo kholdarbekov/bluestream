@@ -363,15 +363,32 @@ def send_delivery_update_task(self, history_id: int):
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=120, soft_time_limit=100)
-def send_payment_confirmation_task(self, payment_id: int):
-    """Send payment confirmation notification"""
+def send_payment_confirmation_task(self, payment_id: int, collection_state_token: str = None):
+    """Send payment confirmation notification.
+
+    ``collection_state_token`` distinguishes one real cash collection against
+    ``payment_id`` from a LATER, separate one (e.g. a shortfall today, the
+    remainder collected on the next delivery): `cash_collection_service.
+    _allocate_to_payment` now enqueues this task on every collection that
+    moves money, not only once ever per payment, so the 24h key below can no
+    longer be scoped to the payment alone — that would swallow every
+    genuine second collection that happens to land within the same 24h
+    window. Passing the post-allocation ``amount_collected`` as the token
+    keys the dedupe window to the SPECIFIC collection that triggered this
+    send: a Celery retry of this exact task instance carries the same token
+    and is still deduped, but a later, different collection gets its own
+    key. Callers that can only ever complete a payment exactly once (online
+    rails, via `PaymentService`) omit the token and keep the original
+    payment-only key, unchanged.
+    """
     try:
         logger.info(f"Sending payment confirmation for payment {payment_id}")
 
         # Idempotency check via Redis
         from business_app import redis_client
 
-        idempotency_key = f"notif:payment_confirm:{payment_id}"
+        key_suffix = f":{collection_state_token}" if collection_state_token is not None else ""
+        idempotency_key = f"notif:payment_confirm:{payment_id}{key_suffix}"
         if redis_client.get(idempotency_key):
             logger.info(f"Payment confirmation already sent for {payment_id}, skipping")
             return {"success": True, "skipped": True, "reason": "already_sent"}

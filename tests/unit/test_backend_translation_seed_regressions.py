@@ -51,3 +51,25 @@ def test_seed_script_includes_marking_code_utilisation_filter_keys():
 
     assert "'ui.products.marking_code_status_available_unutilised': _ui_tr(" in text
     assert "'ui.products.marking_code_status_available_pre_utilised': _ui_tr(" in text
+
+
+def test_seed_script_includes_order_money_breakdown_keys():
+    """Orders.js passes an English fallback, so a missing row degrades silently
+    to English for a ru/uz operator instead of failing loudly. Pin the rows."""
+    text = SEED_SCRIPT.read_text(encoding="utf-8")
+
+    assert "'ui.orders.money_breakdown': _ui_tr(" in text
+    assert "'ui.orders.subtotal': _ui_tr(" in text
+    assert "'ui.orders.subscription_discount': _ui_tr(" in text
+    assert "'ui.orders.loyalty_discount': _ui_tr(" in text
+    assert "'ui.orders.tier_discount': _ui_tr(" in text
+    assert "'ui.orders.delivery_fee': _ui_tr(" in text
+
+
+def test_seed_script_includes_the_tier_discount_condition_key():
+    """GET /loyalty/tiers renders this key. get_translation returns the KEY
+    itself when the row is missing, so an unseeded deploy publishes the literal
+    string 'api.loyalty.tier_discount_condition' to every /my-loyalty visitor."""
+    text = SEED_SCRIPT.read_text(encoding="utf-8")
+
+    assert "'api.loyalty.tier_discount_condition': {" in text

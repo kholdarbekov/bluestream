@@ -906,6 +906,23 @@ class ClickPaymentProviderService:
         if order is not None:
             order.payment_method = PaymentMethod.CLICK
 
+            # THE TIER DISCOUNT FOLLOWS THE RAIL — including back onto Click.
+            # A tier discount is a COD-only benefit and must never reach a
+            # Click fiscal receipt: build_click_fiscalization_payload prices
+            # received_card off order.total_amount while filling per-item
+            # Discount from loyalty_discount ALONE, so a tier-discounted total
+            # here would make Sum(Price - Discount) != received_card — the
+            # tax-committee reconciliation failure this feature exists to
+            # prevent. Revoking is also arithmetically correct, not merely
+            # safe: Click debited the ORIGINAL, undiscounted amount, so that
+            # is what the receipt must state.
+            from business_app.services.loyalty_service import apply_tier_discount_for_rail
+
+            apply_tier_discount_for_rail(order, PaymentMethod.CLICK)
+            # Click debited the undiscounted figure; re-price the payment to
+            # match the restored (possibly re-undiscounted) order total.
+            payment.amount = order.total_amount
+
         self._apply_click_callback_identifiers(payment, payload, merchant_prepare_id)
         payment.status = PaymentStatus.COMPLETED
         payment.failure_reason = None

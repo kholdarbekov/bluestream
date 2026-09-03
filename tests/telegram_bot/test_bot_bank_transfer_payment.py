@@ -86,13 +86,28 @@ async def test_show_order_confirmation_business_account_label(monkeypatch):
             "cart": {
                 "cart_items": [
                     {
-                        "product": {"name": "Bottle", "current_price": 12000},
+                        "product": {"id": 1, "name": "Bottle", "current_price": 12000},
                         "quantity": 1,
                         "total_price": 12000,
                     },
                 ],
                 "subtotal": 12000,
             }
+        }
+    }
+    estimate_data = {
+        "data": {
+            "items": [
+                {"product_id": 1, "product_name": "Bottle", "quantity": 1,
+                 "unit_price": 12000, "subtotal": 12000},
+            ],
+            "pricing": {
+                "items_subtotal": 12000.0, "delivery_fee": 0.0,
+                "discount_amount": 0.0, "loyalty_discount": 0.0,
+                "tier_discount": 0.0, "tier_name": None,
+                "tier_discount_percentage": 0.0, "cod_savings": 0.0,
+                "payment_method": "business_account", "final_total": 12000.0,
+            },
         }
     }
     monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
@@ -102,6 +117,7 @@ async def test_show_order_confirmation_business_account_label(monkeypatch):
     monkeypatch.setattr(orders_module.OrderKeyboards, "order_confirmation", lambda *_a, **_k: "confirm-kbd")
     monkeypatch.setattr(orders_module, "api_client", FakeAPIClientContext(
         get_cart=_resp(success=True, data=cart_data),
+        estimate_cart=_resp(success=True, data=estimate_data),
     ))
 
     await handler._show_order_confirmation(update, context)

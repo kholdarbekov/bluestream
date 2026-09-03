@@ -127,6 +127,19 @@ class TestConsecutiveStrikeJoinerRender:
         db.session.commit()
 
         try:
+            # Jinja compiles+caches templates by filename on an app that is
+            # session-scoped across the whole suite (tests/conftest.py's `app`
+            # fixture). A PLAIN `{{ 'key' | t }}` call (no dynamic kwargs) is a
+            # compile-time constant to Jinja's optimizer -- the `t` filter is
+            # registered without `@pass_context` -- so whichever test renders
+            # loyalty_guide.html FIRST on this worker bakes that render's
+            # translation values into the compiled template for the rest of the
+            # worker's life. This test passes alone but fails inside the full
+            # suite for exactly that reason. Clearing the cache forces a fresh
+            # compile against the sentinel rows this test just seeded, mirroring
+            # tests/integration/test_loyalty_guide_cod_section.py's identical fix.
+            client.application.jinja_env.cache.clear()
+
             resp = client.get("/loyalty-guide?lang=uz", follow_redirects=True)
             assert resp.status_code == 200, resp.get_data(as_text=True)[:500]
             html = resp.get_data(as_text=True)

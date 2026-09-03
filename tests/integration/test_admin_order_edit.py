@@ -22,7 +22,9 @@ import pytest
 from business_app import db as _db
 from business_app.models.order import Order, OrderEditHistory, OrderItem
 from business_app.models.payment import Payment
+from business_app.services.loyalty_service import LoyaltyService
 from shared.enums import OrderStatus, PaymentMethod, PaymentStatus
+from tests.integration.tier_discount_factory import seed_program, seed_tier
 
 
 # -------------------------------------------------------------------------
@@ -38,6 +40,8 @@ def _seed_order_with_item(
     payment_method: PaymentMethod = PaymentMethod.CASH,
     is_paid: bool = False,
     quantity: int = 4,
+    loyalty_discount: Decimal = Decimal("0.00"),
+    tier_discount: Decimal = Decimal("0.00"),
 ) -> Order:
     unit_price = Decimal(str(sample_product.base_price))
     subtotal = unit_price * Decimal(quantity)
@@ -47,8 +51,9 @@ def _seed_order_with_item(
         subtotal=subtotal,
         discount_amount=Decimal("0.00"),
         delivery_fee=Decimal("3000.00"),
-        loyalty_discount=Decimal("0.00"),
-        total_amount=subtotal + Decimal("3000.00"),
+        loyalty_discount=loyalty_discount,
+        tier_discount=tier_discount,
+        total_amount=subtotal + Decimal("3000.00") - loyalty_discount - tier_discount,
         payment_method=payment_method,
         is_paid=is_paid,
         created_at=datetime.now(UTC),
@@ -900,3 +905,286 @@ def test_apply_edit_delivered_cash_increase_reclaims_overcollection_reserved_els
     db.session.refresh(payment_b)
     reserved_b = Decimal(str((payment_b.provider_data or {}).get("cod_prepayment_reserved_amount", 0) or 0))
     assert reserved_b == Decimal("0.00")
+
+
+# -------------------------------------------------------------------------
+# BUG 2: editing an UNPAID cash order's total DOWN below its live reservation
+# must trim the reservation to the new outstanding, refunding the excess back
+# to the funding event's unapplied_amount. Before the fix, `_recompute_totals`
+# re-priced Payment.amount/outstanding_amount for an unpaid order and returned
+# without touching `prepaid_reservation` allocations — the oversized
+# reservation stayed live, invisible (reserved_prepayment_amount clamps to the
+# receivable), and locked real customer cash until the order was delivered or
+# cancelled.
+# -------------------------------------------------------------------------
+
+
+def test_apply_edit_pre_delivery_decrease_below_reservation_trims_it(
+    client, db, admin_auth_headers, sample_user, sample_product
+):
+    from business_app.models.payment import CashCollectionAllocation, CashCollectionEvent
+    from business_app.services.cash_collection_service import CashCollectionService
+
+    cash_service = CashCollectionService()
+    order = _seed_order_with_item(
+        sample_user, sample_product, status=OrderStatus.CONFIRMED, is_paid=False, quantity=8
+    )
+    original_total = Decimal(str(order.total_amount))
+    assert original_total == Decimal("123000.00")
+
+    payment = Payment(
+        user_id=sample_user.id,
+        order_id=order.id,
+        amount=original_total,
+        amount_collected=Decimal("0.00"),
+        outstanding_amount=original_total,
+        payment_method=PaymentMethod.CASH,
+        status=PaymentStatus.PENDING,
+    )
+    _db.session.add(payment)
+    _db.session.commit()
+
+    event = _grant_unapplied_cash_credit(sample_user.id, Decimal("100000.00"))
+    reserved = cash_service.reserve_customer_prepaid_credit_for_payment(payment)
+    _db.session.commit()
+    assert reserved == Decimal("100000.00")
+    db.session.refresh(event)
+    assert event.unapplied_amount == Decimal("0.00")
+
+    payload = {
+        "items": [
+            {"orderItemId": order.order_items[0].id, "productId": sample_product.id, "quantity": 1}
+        ],
+        "reason": "customer cut the order down to a single bottle",
+    }
+    resp = client.post(
+        f"/api/v1/admin/orders/{order.id}/edit", json=payload, headers=admin_auth_headers
+    )
+    assert resp.status_code == 200
+
+    refreshed = Order.query.get(order.id)
+    new_total = Decimal(str(refreshed.total_amount))
+    assert new_total == Decimal("18000.00")
+
+    db.session.refresh(payment)
+    db.session.refresh(event)
+
+    # The excess (100 000 reserved - 18 000 new outstanding) returns to the
+    # customer's available (unapplied) balance instead of staying locked.
+    assert event.unapplied_amount == Decimal("82000.00")
+
+    # What remains reserved on the payment matches the new outstanding exactly
+    # — never more than what this order can still absorb.
+    reservation = CashCollectionAllocation.query.filter_by(
+        payment_id=payment.id, allocation_mode="prepaid_reservation", reversed_at=None
+    ).one()
+    assert reservation.allocated_amount == Decimal("18000.00")
+    assert Decimal(str(payment.outstanding_amount)) == Decimal("18000.00")
+
+    # Conservation law: live allocations + unapplied_amount == event.amount.
+    live_total = sum(
+        (
+            Decimal(str(a.allocated_amount))
+            for a in CashCollectionAllocation.query.filter_by(
+                cash_collection_event_id=event.id, reversed_at=None
+            ).all()
+        ),
+        Decimal("0.00"),
+    )
+    assert live_total + event.unapplied_amount == event.amount
+
+
+# -------------------------------------------------------------------------
+# The preview must project the discount the apply is going to write
+# -------------------------------------------------------------------------
+
+
+def test_edit_preview_carries_the_redeemed_reward_discount_the_apply_writes(
+    client, db, admin_auth_headers, sample_user, sample_product
+):
+    """🔴 REGRESSION PIN. `_project_totals_after` hardcoded `loyalty_discount: 0.0`
+    while `_recompute_totals` -> `Order.calculate_total()` read the column.
+
+    The admin confirmed a projection that understated the discount by exactly
+    the reward, then the apply wrote a different (lower) total. Asserted here
+    against the REAL apply rather than against a recomputed expectation: the
+    point is not that two numbers match, it is that the preview and the write
+    are the same expression.
+    """
+    reward_discount = Decimal("2500.00")
+    order = _seed_order_with_item(
+        sample_user, sample_product, quantity=4, loyalty_discount=reward_discount
+    )
+    payload = {
+        "items": [
+            {
+                "orderItemId": order.order_items[0].id,
+                "productId": sample_product.id,
+                "quantity": 6,
+            }
+        ],
+        "reason": "customer added 2 bottles to a rewarded order",
+    }
+
+    preview = client.post(
+        f"/api/v1/admin/orders/{order.id}/edit-preview",
+        json=payload,
+        headers=admin_auth_headers,
+    )
+    assert preview.status_code == 200, preview.get_data(as_text=True)
+    projected = preview.get_json()["data"]
+    assert projected["blocking_reasons"] == []
+
+    # The reward is persisted on the row and the edit does not touch it, so the
+    # BEFORE and AFTER snapshots must agree on it.
+    assert projected["totals_before"]["loyalty_discount"] == float(reward_discount)
+    assert projected["totals_after"]["loyalty_discount"] == float(reward_discount)
+
+    applied = client.post(
+        f"/api/v1/admin/orders/{order.id}/edit",
+        json=payload,
+        headers=admin_auth_headers,
+    )
+    assert applied.status_code == 200, applied.get_data(as_text=True)
+
+    refreshed = Order.query.get(order.id)
+    assert float(refreshed.loyalty_discount) == float(reward_discount)
+    # THE INVARIANT: the number the admin confirmed is the number that was written.
+    assert float(refreshed.total_amount) == projected["totals_after"]["total_amount"]
+
+
+def test_edit_preview_carries_the_tier_discount_the_apply_writes(
+    client, db, admin_auth_headers, sample_user, sample_product
+):
+    """🔴 REGRESSION PIN, ``tier_discount`` edition.
+
+    Mirrors ``test_edit_preview_carries_the_redeemed_reward_discount_the_apply_writes``:
+    Task 12 added the ``orders.tier_discount`` column and routed
+    ``Order.calculate_total()`` through it, but ``_project_totals_after``
+    still hardcoded ``tier_discount=Decimal("0.00")`` because the column did
+    not exist when that method was written. Left alone, the admin's preview
+    would understate the tier discount on every COD order that carries one,
+    and the apply would then write a lower total than the one confirmed —
+    exactly the bug already fixed once for ``loyalty_discount``.
+    """
+    tier_discount = Decimal("1500.00")
+    order = _seed_order_with_item(
+        sample_user, sample_product, quantity=4, tier_discount=tier_discount
+    )
+    payload = {
+        "items": [
+            {
+                "orderItemId": order.order_items[0].id,
+                "productId": sample_product.id,
+                "quantity": 6,
+            }
+        ],
+        "reason": "customer added 2 bottles to a tier-discounted order",
+    }
+
+    preview = client.post(
+        f"/api/v1/admin/orders/{order.id}/edit-preview",
+        json=payload,
+        headers=admin_auth_headers,
+    )
+    assert preview.status_code == 200, preview.get_data(as_text=True)
+    projected = preview.get_json()["data"]
+    assert projected["blocking_reasons"] == []
+
+    applied = client.post(
+        f"/api/v1/admin/orders/{order.id}/edit",
+        json=payload,
+        headers=admin_auth_headers,
+    )
+    assert applied.status_code == 200, applied.get_data(as_text=True)
+
+    refreshed = Order.query.get(order.id)
+    # The edit does not touch the tier discount; it must survive unchanged.
+    assert Decimal(str(refreshed.tier_discount)) == tier_discount
+    # THE INVARIANT: the number the admin confirmed is the number that was written.
+    assert float(refreshed.total_amount) == projected["totals_after"]["total_amount"]
+
+
+def test_edit_preview_totals_dicts_publish_every_line_the_total_subtracts(
+    client, db, admin_auth_headers, sample_user, sample_product
+):
+    """🔴 REGRESSION PIN for the addendum itself.
+
+    ``_snapshot_totals`` (``totals_before``) and ``_project_totals_after``
+    (``totals_after``) both COMPUTE with ``tier_discount`` via
+    ``compute_order_total`` — but until this task neither one PUBLISHED it in
+    the dict it returns. An admin then saw a breakdown whose visible lines
+    could not sum to the total: the same invisible-term defect already fixed
+    once for ``loyalty_discount``
+    (``test_edit_preview_carries_the_redeemed_reward_discount_the_apply_writes``).
+
+    That earlier fix's own regression test only compares ``total_amount``
+    end-to-end; nothing asserts that ``totals_before``/``totals_after``
+    actually CONTAIN ``tier_discount``, so a future edit could drop the key
+    again and the suite would stay green. Rather than pin ``tier_discount``
+    alone, this asserts the stronger, general property the addendum exists to
+    protect: every line the formula subtracts is published, and reconstructing
+    the total from exactly those published lines reproduces the published
+    total_amount. Dropping ANY term — not just tier_discount — fails this.
+
+    The tier rate is DB-backed, seeded here via ``tier_discount_factory``
+    (never hardcoded as a UZS figure): the published ``tier_discount`` is
+    asserted equal to what ``LoyaltyService.quote_tier_discount`` actually
+    quotes for this seeded rate, so a hardcoded-zero regression cannot pass.
+    """
+    program = seed_program(db)
+    seed_tier(db, program, name="Base", rate=Decimal("7"))
+
+    unit_price = Decimal(str(sample_product.base_price))
+    quantity = 4
+    subtotal = unit_price * Decimal(quantity)
+    tier_discount = LoyaltyService().quote_tier_discount(sample_user, subtotal, PaymentMethod.CASH).amount
+    assert tier_discount > Decimal("0.00")  # the seeded rate is actually doing something
+
+    order = _seed_order_with_item(
+        sample_user,
+        sample_product,
+        quantity=quantity,
+        loyalty_discount=Decimal("800.00"),
+        tier_discount=tier_discount,
+    )
+    payload = {
+        "items": [
+            {
+                "orderItemId": order.order_items[0].id,
+                "productId": sample_product.id,
+                "quantity": 6,
+            }
+        ],
+        "reason": "regression pin: preview totals must publish every line the total subtracts",
+    }
+
+    preview = client.post(
+        f"/api/v1/admin/orders/{order.id}/edit-preview",
+        json=payload,
+        headers=admin_auth_headers,
+    )
+    assert preview.status_code == 200, preview.get_data(as_text=True)
+    projected = preview.get_json()["data"]
+    assert projected["blocking_reasons"] == []
+
+    def _assert_lines_sum_to_total(breakdown, label):
+        reconstructed = (
+            Decimal(str(breakdown["subtotal"]))
+            - Decimal(str(breakdown["discount_amount"]))
+            + Decimal(str(breakdown["delivery_fee"]))
+            - Decimal(str(breakdown["loyalty_discount"]))
+            - Decimal(str(breakdown["tier_discount"]))
+        )
+        assert reconstructed == Decimal(str(breakdown["total_amount"])), (
+            f"{label}'s own published lines do not sum to its own published "
+            f"total_amount: {breakdown}"
+        )
+
+    _assert_lines_sum_to_total(projected["totals_before"], "totals_before")
+    _assert_lines_sum_to_total(projected["totals_after"], "totals_after")
+
+    # Not merely present — the published value is the one actually used in
+    # the total, so a hardcoded-zero (or any other wrong constant) still fails.
+    assert Decimal(str(projected["totals_before"]["tier_discount"])) == tier_discount
+    assert Decimal(str(projected["totals_after"]["tier_discount"])) == tier_discount

@@ -684,8 +684,15 @@ def serialize_order_admin(order: Order) -> Dict[str, Any]:
             "user_id": order.user_id,
             "status": order.status.value if order.status else None,
             "total_amount": float(order.total_amount),
+            # The full money breakdown. Orders.js renders each line separately and
+            # must never derive one from the others: subtotal, all three discounts
+            # and the fee are independent columns, and the total is computed once
+            # by compute_order_total.
+            "subtotal": float(getattr(order, "subtotal", 0) or 0),
             "tax_amount": float(getattr(order, "tax_amount", 0)),
             "discount_amount": float(getattr(order, "discount_amount", 0)),
+            "loyalty_discount": float(getattr(order, "loyalty_discount", 0) or 0),
+            "tier_discount": float(getattr(order, "tier_discount", 0) or 0),
             "delivery_fee": float(getattr(order, "delivery_fee", 0)),
             "payment_method": order.payment_method.value if order.payment_method else None,
             "is_subscription_order": bool(order.is_subscription_order),

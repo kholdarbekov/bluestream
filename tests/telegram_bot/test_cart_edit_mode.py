@@ -302,6 +302,24 @@ class TestDoneAndBelowMinimum:
         fake = FakeAPIClientContext()
         fake.get_cart = AsyncMock(return_value=_cart_items_response())  # qty 3, price 18000 -> meets min
         fake.get_loyalty_rewards = AsyncMock(return_value=APIResponse(success=True, data={"data": {"rewards": []}}))
+        # The confirmation screen's money now comes from the quote, not the
+        # cart payload directly — this mirrors what CartService.
+        # calculate_cart_estimate would return for the SAME cart, undiscounted.
+        fake.estimate_cart = AsyncMock(return_value=APIResponse(success=True, data={
+            "data": {
+                "items": [
+                    {"product_id": 7, "product_name": "Aqua Element 18.9 l",
+                     "quantity": 3, "unit_price": 18000, "subtotal": 54000},
+                ],
+                "pricing": {
+                    "items_subtotal": 54000.0, "delivery_fee": 0.0,
+                    "discount_amount": 0.0, "loyalty_discount": 0.0,
+                    "tier_discount": 0.0, "tier_name": None,
+                    "tier_discount_percentage": 0.0, "cod_savings": 0.0,
+                    "payment_method": "cash", "final_total": 54000.0,
+                },
+            }
+        }))
 
         update = DummyUpdate()
         update.callback_query = DummyCallbackQuery(data="back_to_order_confirm")
@@ -324,7 +342,9 @@ class TestDoneAndBelowMinimum:
         update.callback_query.edit_message_text.assert_awaited_once()
         text = update.callback_query.edit_message_text.await_args.kwargs["text"]
         assert "Aqua Element 18.9 l" in text
-        assert "x3" in text  # reflects edited quantity from live cart
+        # The item line now lives in the quote block ("• name × qty — amount
+        # UZS"); reflects edited quantity from the live cart.
+        assert "× 3" in text
 
     async def test_below_minimum_after_edit_disables_confirm(self, monkeypatch):
         handler = orders_module.OrderHandlers()
@@ -336,6 +356,24 @@ class TestDoneAndBelowMinimum:
         # Subtotal = 1 * 1000 = 1000 UZS, far below MIN_ORDER_AMOUNT.
         fake.get_cart = AsyncMock(return_value=_low_cart_response(amount_qty=1, price=1000))
         fake.get_loyalty_rewards = AsyncMock(return_value=APIResponse(success=True, data={"data": {"rewards": []}}))
+        # meets_minimum is decided from the cart's own subtotal, not the
+        # quote — but the confirmation screen still fetches a quote to render
+        # the money block, so the fake backend has to answer it.
+        fake.estimate_cart = AsyncMock(return_value=APIResponse(success=True, data={
+            "data": {
+                "items": [
+                    {"product_id": 7, "product_name": "Aqua Element 18.9 l",
+                     "quantity": 1, "unit_price": 1000, "subtotal": 1000},
+                ],
+                "pricing": {
+                    "items_subtotal": 1000.0, "delivery_fee": 0.0,
+                    "discount_amount": 0.0, "loyalty_discount": 0.0,
+                    "tier_discount": 0.0, "tier_name": None,
+                    "tier_discount_percentage": 0.0, "cod_savings": 0.0,
+                    "payment_method": "cash", "final_total": 1000.0,
+                },
+            }
+        }))
 
         captured = {}
 

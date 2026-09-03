@@ -167,6 +167,9 @@ class FakeAPIClientContext:
     async def get_cart(self, *_args, **_kwargs):
         return self._method_results.get("get_cart")
 
+    async def estimate_cart(self, *_args, **_kwargs):
+        return self._method_results.get("estimate_cart")
+
     async def clear_cart(self, *_args, **_kwargs):
         return self._method_results.get("clear_cart")
 

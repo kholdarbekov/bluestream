@@ -32,6 +32,7 @@ from business_app.services.corporate_contract_service import CorporateContractSe
 from business_app.services.inventory_service import InventoryService
 from business_app.services.loyalty_service import LoyaltyService
 from business_app.utils.exceptions import NotFoundError, ValidationError
+from business_app.utils.order_totals import compute_order_total
 from business_app.utils.payment_projection import has_open_receivable
 from business_app.utils.transactions import atomic_transaction
 from shared.enums import (
@@ -590,16 +591,30 @@ class OrderEditService:
             subtotal += change.unit_price * Decimal(change.new_quantity)
         discount = Decimal(str(order.discount_amount or 0))
         delivery_fee = Decimal(str(order.delivery_fee or 0))
-        # Loyalty is rewards-only: points are NEVER converted to a UZS order
-        # discount (matches Order.calculate_total() and cart_service). So the
-        # projection carries no loyalty discount and no redemption clamp/refund;
+        # Loyalty POINTS are rewards-only: they are NEVER converted to a UZS
+        # order discount, so no redemption clamp or refund is projected and
         # loyalty_points_used is left unchanged.
-        total = subtotal - discount + delivery_fee
+        #
+        # `order.loyalty_discount` is a different thing: a REDEEMED REWARD
+        # already persisted on the row, which `_recompute_totals` ->
+        # `Order.calculate_total()` keeps. Projecting 0.0 here (as this method
+        # used to) understated the discount on every reward order — the preview
+        # the admin confirmed and the total the apply wrote were two numbers.
+        loyalty_discount = Decimal(str(order.loyalty_discount or 0))
+        tier_discount = Decimal(str(order.tier_discount or 0))
+        total = compute_order_total(
+            subtotal=subtotal,
+            discount_amount=discount,
+            delivery_fee=delivery_fee,
+            loyalty_discount=loyalty_discount,
+            tier_discount=tier_discount,
+        )
         return {
             "subtotal": float(subtotal),
             "discount_amount": float(discount),
             "delivery_fee": float(delivery_fee),
-            "loyalty_discount": 0.0,
+            "loyalty_discount": float(loyalty_discount),
+            "tier_discount": float(tier_discount),
             "loyalty_points_used": int(order.loyalty_points_used or 0),
             "loyalty_points_refunded": 0,
             "total_amount": float(total),
@@ -611,6 +626,7 @@ class OrderEditService:
             "discount_amount": float(order.discount_amount or 0),
             "delivery_fee": float(order.delivery_fee or 0),
             "loyalty_discount": float(order.loyalty_discount or 0),
+            "tier_discount": float(order.tier_discount or 0),
             "total_amount": float(order.total_amount or 0),
         }
 
@@ -1322,6 +1338,13 @@ class OrderEditService:
                     amount=new_total,
                     payment_method=payment.payment_method,
                 )
+            db.session.flush()
+            # A live prepaid_reservation may now exceed what this order can
+            # still absorb (edited DOWN below the reserved amount). Trim it to
+            # the new capacity so the excess goes back to the customer's
+            # available balance instead of staying locked, invisible, against
+            # an order too small to ever consume it.
+            self.cash_service.trim_reserved_prepayment_to_capacity(payment, actor_user_id=actor_user_id)
             db.session.flush()
             return
 

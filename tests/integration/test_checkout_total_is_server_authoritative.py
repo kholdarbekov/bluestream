@@ -167,7 +167,21 @@ def _served_cart(user_id):
     return CartService().get_cart_details(user_id)
 
 
-async def _render_confirmation(monkeypatch, cart_payload, payment_method="cash"):
+def _served_estimate(user_id, product_id, quantity, payment_method):
+    """The payload `POST /api/v1/orders/cart/estimate` actually serves.
+
+    The REAL service, over the REAL rows — the fake below is transport only, so
+    the money in the screen still comes out of production code.
+    """
+    return CartService().calculate_cart_estimate(
+        user_id=user_id,
+        items=[{"product_id": product_id, "quantity": quantity}],
+        payment_method=payment_method,
+    )
+
+
+async def _render_confirmation(monkeypatch, cart_payload, payment_method="cash",
+                               estimate_payload=None):
     """Drive the REAL ``_show_order_confirmation`` over a REAL cart payload and
     return the string the customer reads."""
     import eligibility
@@ -189,7 +203,14 @@ async def _render_confirmation(monkeypatch, cart_payload, payment_method="cash")
     monkeypatch.setattr(
         orders_module,
         "api_client",
-        FakeAPIClientContext(get_cart=_resp(data={"data": {"cart": cart_payload}})),
+        FakeAPIClientContext(
+            get_cart=_resp(data={"data": {"cart": cart_payload}}),
+            estimate_cart=(
+                _resp(data={"data": estimate_payload})
+                if estimate_payload is not None
+                else _resp(success=False, data={})
+            ),
+        ),
     )
 
     await handler._show_order_confirmation(update, context)
@@ -269,7 +290,10 @@ async def test_grand_total_on_the_confirm_screen_is_what_the_server_charges(
     One number, read off the screen the customer confirms, compared with the
     order the server then creates from the same cart.
     """
-    screen = await _render_confirmation(monkeypatch, _served_cart(contract_customer.id))
+    estimate = _served_estimate(contract_customer.id, sample_product.id, QUANTITY, "cash")
+    screen = await _render_confirmation(
+        monkeypatch, _served_cart(contract_customer.id), estimate_payload=estimate,
+    )
 
     order = _charged_subtotal(
         contract_customer.id, sample_product.id, delivery_address, mock_inventory_service
@@ -303,7 +327,8 @@ async def test_the_per_line_amount_is_the_servers_line_total(
     line = served["cart_items"][0]
     assert line["total_price"] == float(CONTRACT_PRICE) * QUANTITY
 
-    screen = await _render_confirmation(monkeypatch, served)
+    estimate = _served_estimate(contract_customer.id, sample_product.id, QUANTITY, "cash")
+    screen = await _render_confirmation(monkeypatch, served, estimate_payload=estimate)
 
     from utils import format_price
 
@@ -353,25 +378,282 @@ async def test_the_bot_performs_no_price_arithmetic_of_its_own(
     A second client-side calculation is the defect itself, not a safety net: it
     is what disagreed with the server. The handler must therefore never multiply
     a unit price by a quantity.
+
+    THE MONEY RENDERS IN THREE FUNCTIONS NOW, not one: item-line and total
+    rendering moved out of `_show_order_confirmation` into the shared
+    `_build_estimate_block`, and `_show_payment_picker` renders that same
+    block's output on the payment-method step (Task 23). A pin that only
+    scanned `_show_order_confirmation` would pass green even if arithmetic
+    were reintroduced into the helper both screens actually render through —
+    which is precisely what happened once this rendering moved and the pin
+    was not updated to follow it. All three are scanned below.
     """
     source = (REPO_ROOT / "telegram_bot" / "handlers" / "orders.py").read_text(encoding="utf-8")
-    start = source.index("async def _show_order_confirmation")
-    end = source.index("\n    async def ", start + 1)
-    # Comment lines are stripped: the fix's own explanatory comment quotes the
-    # code it replaced, and a scan that counted that would be unfixable.
-    body = "\n".join(
-        line for line in source[start:end].splitlines()
-        if not line.lstrip().startswith("#")
+
+    def _method_body(start_marker: str, end_marker: str) -> str:
+        """One method's source, comments stripped (a fix's own explanatory
+        comment may quote the code it replaced, and a scan that counted that
+        would be unfixable)."""
+        start = source.index(start_marker)
+        end = source.index(end_marker, start + 1)
+        return "\n".join(
+            line for line in source[start:end].splitlines()
+            if not line.lstrip().startswith("#")
+        )
+
+    confirmation_body = _method_body(
+        "async def _show_order_confirmation", "\n    async def back_to_order_confirm",
+    )
+    estimate_block_body = _method_body(
+        "def _build_estimate_block", "\n    @staticmethod\n    def _cod_restriction_notice",
+    )
+    payment_picker_body = _method_body(
+        "async def _show_payment_picker", "\n    async def payment_handler",
     )
 
-    for forbidden in ("current_price'] *", "current_price') *", "current_price', 0) *"):
-        assert forbidden not in body, (
-            f"_show_order_confirmation re-derives money ({forbidden!r}); the "
-            "server's cart subtotal / line total_price is the one decision"
+    for label, body in (
+        ("_show_order_confirmation", confirmation_body),
+        ("_build_estimate_block", estimate_block_body),
+        ("_show_payment_picker", payment_picker_body),
+    ):
+        for forbidden in (
+            "current_price'] *", "current_price') *", "current_price', 0) *",
+            " * ", "round(",
+        ):
+            assert forbidden not in body, (
+                f"{label} re-derives money ({forbidden!r}); the server's cart "
+                "subtotal / line total_price / estimate is the one decision"
+            )
+
+    # " - " (not bare "-": `-> str` return-type arrows are exempt) is only
+    # forbidden in the two functions that must never touch money arithmetic
+    # at all. `_show_order_confirmation` keeps legitimate NON-money "-" uses
+    # out of this task's scope (a per-product remaining-quantity count, the
+    # MIN_ORDER_AMOUNT-shortfall message, and the pre-existing cod_prepayment
+    # display fallback) — pinning those away is a different test's job.
+    for label, body in (
+        ("_build_estimate_block", estimate_block_body),
+        ("_show_payment_picker", payment_picker_body),
+    ):
+        assert " - " not in body, (
+            f"{label} re-derives money (' - ' found); every figure it shows "
+            "must be read, never subtracted, from the estimate"
         )
-    assert "cart.get('subtotal')" in body, (
-        "the shown total must be read from the server's cart payload"
+
+    assert "cart.get('subtotal')" in confirmation_body, (
+        "the MIN-ORDER gate still reads the server's cart subtotal"
     )
-    assert "item.get('total_price')" in body, (
-        "the per-line money must be the server's line total"
+    # The invariant moved and got stronger: the money on this screen is no
+    # longer assembled from the cart payload at all, it is one server-computed
+    # QUOTE that already knows the rail, the reward and the tier.
+    assert "estimate_cart" in confirmation_body, (
+        "the shown money must come from the server's cart estimate"
+    )
+    for forbidden in ("reward_discount =", "grand_total_amount ="):
+        assert forbidden not in confirmation_body, (
+            f"_show_order_confirmation re-derives money ({forbidden!r}); "
+            "LoyaltyService and the estimate are the one decision"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 🔴 THE PIN — the tier discount is the server's too
+# ---------------------------------------------------------------------------
+
+TIER_RATE = 4.0          # invented for this file only; never the dev DB's values
+TIER_NAME = "Nimbus"
+TIER_MIN_POINTS = 700
+
+
+@pytest.fixture
+def tiered_program(db):
+    from business_app.models.loyalty import LoyaltyProgram, LoyaltyTierConfig
+
+    program = LoyaltyProgram(
+        name="Confirm screen program", description="d",
+        is_active=True, is_default=True, uzs_per_point=250,
+    )
+    db.session.add(program)
+    db.session.flush()
+    db.session.add_all([
+        LoyaltyTierConfig(program_id=program.id, name="Ground", display_order=0,
+                          min_points=0, discount_percentage=0.0, is_active=True),
+        LoyaltyTierConfig(program_id=program.id, name=TIER_NAME, display_order=1,
+                          min_points=TIER_MIN_POINTS, discount_percentage=TIER_RATE,
+                          is_active=True),
+    ])
+    db.session.commit()
+    return program
+
+
+@pytest.fixture
+def tiered_contract_customer(db, contract_customer, tiered_program):
+    from business_app.models.corporate import CorporateContract
+    from business_app.models.loyalty import LoyaltyPoints, LoyaltyTransaction
+    from business_app.utils.constants import LoyaltyTransactionType
+
+    # `contract_customer` is a WORKPLACE entity user; `LoyaltyService.
+    # is_user_loyalty_eligible` gates entity users on an active contract with
+    # `is_loyalty_points_eligible=True`, which `contract_customer`'s contract
+    # does not set (it exists only to prove contract pricing, not loyalty).
+    # Flip it HERE, scoped to the tiered fixture, so the shared fixture keeps
+    # its original meaning for every other test in this file.
+    CorporateContract.query.filter_by(user_id=contract_customer.id).update(
+        {"is_loyalty_points_eligible": True}
+    )
+
+    db.session.add(LoyaltyPoints(
+        user_id=contract_customer.id, program_id=tiered_program.id,
+        total_earned=TIER_MIN_POINTS, current_balance=TIER_MIN_POINTS,
+        current_tier=TIER_NAME, points_to_next_tier=0,
+    ))
+    db.session.add(LoyaltyTransaction(
+        user_id=contract_customer.id,
+        transaction_type=LoyaltyTransactionType.EARNED,
+        points=TIER_MIN_POINTS, description="qualifying",
+        remaining_points=TIER_MIN_POINTS, is_expired=False,
+    ))
+    db.session.commit()
+    return contract_customer
+
+
+@pytest.mark.integration
+@pytest.mark.anyio
+async def test_the_cash_confirm_screen_shows_the_tier_discounted_total(
+    app, db, monkeypatch, tiered_contract_customer, sample_product, stocked_cart,
+):
+    """🔴 THE INVARIANT, extended. The tier discount is a SIXTH term in the
+    total; the screen may not know it exists except through the quote."""
+    user_id = tiered_contract_customer.id
+    estimate = _served_estimate(user_id, sample_product.id, QUANTITY, "cash")
+    pricing = estimate["pricing"]
+    assert pricing["tier_discount"] > 0, "the fixture must actually discount"
+
+    screen = await _render_confirmation(
+        monkeypatch, _served_cart(user_id), estimate_payload=estimate,
+    )
+
+    from utils import format_price
+
+    assert format_price(pricing["final_total"]) in screen, screen
+    assert format_price(pricing["tier_discount"]) in screen, (
+        "the customer must SEE the tier line — that is the point of the feature"
+    )
+    assert TIER_NAME in screen, screen
+    assert format_price(pricing["items_subtotal"]) not in screen.split("────")[-1], (
+        "the undiscounted subtotal must not be the amount to pay"
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.anyio
+async def test_a_card_confirm_screen_pays_full_price_with_no_savings_pitch(
+    app, db, monkeypatch, tiered_contract_customer, sample_product, stocked_cart,
+):
+    """A fiscalized rail earns no discount. This screen used to ALSO name what
+    cash would have saved (`cod_savings`) — owner screenshot review (2026-08-27
+    bot UX rework) moved that motivator to the payment-method PICKER's cash
+    button, a screen earlier where the rail choice is still open. Restating it
+    here, after the choice is already final, read as a confusing second pitch,
+    so the card confirm screen must render NONE of it."""
+    user_id = tiered_contract_customer.id
+    estimate = _served_estimate(user_id, sample_product.id, QUANTITY, "card")
+    pricing = estimate["pricing"]
+    assert pricing["tier_discount"] == 0
+    assert pricing["cod_savings"] > 0, (
+        "the fixture must actually offer a saving to prove it is withheld here"
+    )
+
+    screen = await _render_confirmation(
+        monkeypatch, _served_cart(user_id), payment_method="card",
+        estimate_payload=estimate,
+    )
+
+    from utils import format_price
+
+    assert format_price(pricing["final_total"]) in screen, screen
+    # `_i18n_get` echoes the KEY itself, so this also proves the call site was
+    # removed, not just that this particular amount happens not to appear.
+    assert "estimate_cod_savings" not in screen, (
+        "the card confirm screen must no longer render the cash-savings pitch: "
+        f"{screen!r}"
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.anyio
+async def test_a_failed_quote_shows_no_money_rather_than_a_guessed_one(
+    app, db, monkeypatch, tiered_contract_customer, sample_product, stocked_cart,
+):
+    """When the quote does not come back the screen must go quiet. Falling back
+    to a locally summed total is the defect this whole file exists to prevent —
+    a fallback price IS a second expression of the money."""
+    screen = await _render_confirmation(
+        monkeypatch, _served_cart(tiered_contract_customer.id), estimate_payload=None,
+    )
+
+    from utils import format_price
+
+    assert format_price(float(CONTRACT_PRICE) * QUANTITY) not in screen, (
+        f"the screen invented a total with no server quote behind it: {screen!r}"
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.anyio
+async def test_the_cod_prepayment_block_agrees_with_the_tier_discounted_to_pay_line(
+    app, db, monkeypatch, tiered_contract_customer, sample_product, stocked_cart,
+):
+    """F2: the COD-prepayment block must not show a SECOND, contradictory
+    "what you pay" figure below the tier-discounted "To pay" line.
+
+    ``cart['cod_prepayment']`` (``CartService.get_cart_summary``) prices its
+    ``estimated_payable_after_prepayment`` off ``estimated_total``, which is
+    computed with every discount — the tier discount included — zeroed. The
+    handler must derive the prepayment lines from the SAME quote
+    (``estimate['pricing']['final_total']``) the "To pay" line above them
+    already reads, not from that discount-blind server field.
+    """
+    from business_app.models.payment import CashCollectionEvent
+    from shared.enums import CashCollectionSource
+
+    user_id = tiered_contract_customer.id
+    balance = Decimal("5000.00")
+    db.session.add(
+        CashCollectionEvent(
+            customer_id=user_id,
+            amount=balance,
+            currency="UZS",
+            source=CashCollectionSource.DELIVERY_COMPLETION,
+            unapplied_amount=balance,
+            occurred_at=datetime.now(UTC),
+        )
+    )
+    db.session.commit()
+
+    cart = _served_cart(user_id)
+    assert float(cart["cod_prepayment"]["available_balance"]) == float(balance)
+
+    estimate = _served_estimate(user_id, sample_product.id, QUANTITY, "cash")
+    pricing = estimate["pricing"]
+    assert pricing["tier_discount"] > 0, "the fixture must actually discount"
+
+    # The wrong (discount-blind) figure the OLD code trusted, and the correct
+    # one derived off the SAME quote the "To pay" line shows.
+    wrong_payable = float(cart["cod_prepayment"]["estimated_payable_after_prepayment"])
+    correct_payable = max(0.0, float(pricing["final_total"]) - min(float(balance), float(pricing["final_total"])))
+    assert wrong_payable != correct_payable, (
+        "fixture must actually create the divergence (tier_discount otherwise "
+        "washes out of both figures)"
+    )
+
+    screen = await _render_confirmation(monkeypatch, cart, estimate_payload=estimate)
+
+    from utils import format_price
+
+    assert format_price(pricing["final_total"]) in screen, screen
+    assert format_price(correct_payable) in screen, screen
+    assert format_price(wrong_payable) not in screen, (
+        "the discount-blind cart['cod_prepayment'] figure reached the screen "
+        f"anyway -- two contradictory 'what you pay' numbers on one card: {screen!r}"
     )

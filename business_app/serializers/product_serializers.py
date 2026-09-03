@@ -532,7 +532,6 @@ def calculate_product_price(product, user, quantity: int) -> float:
     """Calculate product price with discounts"""
     base_price = float(product.base_price)
     effective_price = base_price
-    bulk_rule_applied = False
 
     # Apply bulk discounts
     if hasattr(product, "price_rules") and product.price_rules:
@@ -544,25 +543,14 @@ def calculate_product_price(product, user, quantity: int) -> float:
                     else:
                         discount = float(rule.discount_value)
                     effective_price = max(0, base_price - discount)
-                    bulk_rule_applied = True
                     break
 
-    # Apply user-specific discounts (VIP, loyalty tier, etc.) when no bulk rule was applied.
-    if user and not bulk_rule_applied:
-        discount_percentage = 0
-
-        # VIP discount
-        if getattr(user, "is_vip", False):
-            discount_percentage += 5  # 5% VIP discount
-
-        # Loyalty tier discount
-        if hasattr(user, "loyalty_tier"):
-            tier_discounts = {"bronze": 0, "silver": 2, "gold": 5, "platinum": 10}
-            discount_percentage += tier_discounts.get(user.loyalty_tier, 0)
-
-        if discount_percentage > 0:
-            discount = base_price * (discount_percentage / 100)
-            effective_price = max(0, base_price - discount)
+    # NOTE: there is deliberately NO user-tier or VIP adjustment here. A
+    # hardcoded {bronze:0, silver:2, gold:5, platinum:10} table plus a 5% VIP
+    # bump used to live at this spot — a THIRD copy of the tier table, keyed
+    # on attributes `User` does not have. Tier percentages come from
+    # `LoyaltyTierConfig.discount_percentage`, read live, and reduce the ORDER
+    # TOTAL on the COD rail — never a catalogue price. Do not restore it.
 
     # Corporate contract pricing is the canonical override for legal-entity users.
     user_id = getattr(user, "id", None)

@@ -237,6 +237,33 @@ PREPAYMENT_TRANSLATIONS = {
         'uz': 'Sizda {active_debt_count} ta to\'lanmagan naqd buyurtma bo\'lgani uchun yetkazib berishda naqd to\'lash mavjud emas. Iltimos, karta to\'lovini tanlang.',
         'ru': 'Оплата наличными при доставке недоступна: у вас {active_debt_count} непогашенных задолженностей. Пожалуйста, выберите оплату картой.',
     },
+    # Task 30A: a NEW, separate key rather than a retrofit of the one above.
+    # `cod_restricted_has_debts` also serves as the degrade target when the
+    # PLACE arm's key is unseeded (telegram_bot/handlers/orders.py) — for
+    # that path the customer's own count is the only safe thing to state,
+    # since their own balance is not necessarily over the floor. This key is
+    # used ONLY for a genuine PERSON-arm restriction, where the balance named
+    # is the customer's own money and really is over {threshold} — the
+    # actionable fact a bare count can't give them (they can't "reduce" a
+    # count, only pay down money). Degrades to `cod_restricted_has_debts` on
+    # an unseeded environment, same guard as the place key.
+    'telegram.orders.cod_restricted_person': {
+        'en': (
+            'Cash on delivery is unavailable: your outstanding balance is {net_debt_total} UZS, '
+            'over the {threshold} UZS limit. Please pay down your balance or choose a card '
+            'payment method.'
+        ),
+        'uz': (
+            'Yetkazib berishda naqd to\'lash mavjud emas: balansingizdagi qarz {net_debt_total} '
+            'so\'m bo\'lib, bu {threshold} so\'mlik chegaradan yuqori. Iltimos, qarzingizni '
+            'kamaytiring yoki karta to\'lovini tanlang.'
+        ),
+        'ru': (
+            'Оплата наличными при доставке недоступна: ваш непогашенный остаток составляет '
+            '{net_debt_total} сум, что превышает лимит в {threshold} сум. Пожалуйста, погасите '
+            'часть долга или выберите оплату картой.'
+        ),
+    },
     'telegram.orders.cod_restricted_unavailable': {
         'en': 'Cash on delivery is temporarily unavailable. Please choose a card payment method.',
         'uz': 'Yetkazib berishda naqd to\'lash vaqtincha mavjud emas. Iltimos, karta to\'lovini tanlang.',

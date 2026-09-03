@@ -20,6 +20,8 @@ from business_app.models.payment import (
 )
 from business_app.models.user import User, UserAddress
 from business_app.utils.audit_logger import AuditEventType, AuditSeverity, audit_logger
+from business_app.utils.cod_cap import cod_cap_reached
+from shared import business_config
 from shared.enums import (
     CashCollectionSource,
     OrderStatus,
@@ -149,7 +151,11 @@ class PersonalCardTransferPlan:
 class CashCollectionService:
     """COD receivable and cash collection service."""
 
-    COD_ACTIVE_DEBT_LIMIT = 2
+    # Re-exported from the business-config SSOT, never re-declared here: the
+    # literal lives once in shared/business_config.py. Kept as a class attribute
+    # because the breach-notification copy (staff_service.py:1534) and a number
+    # of tests read it from here.
+    COD_ACTIVE_DEBT_LIMIT = business_config.COD_ACTIVE_DEBT_LIMIT
 
     # Terminal, non-collectible order states.
     _TERMINAL_ORDER_STATUSES = frozenset({OrderStatus.CANCELLED, OrderStatus.RETURNED})
@@ -436,6 +442,34 @@ class CashCollectionService:
         )
         return int(count or 0)
 
+    def get_cluster_open_cod_debt_total(self, customer_id: int) -> Decimal:
+        """Sum of outstanding delivered COD debt across a customer's linked cluster.
+
+        DISPLAY / COLLECTION-CEILING figure, and deliberately GROSS. Extracted
+        verbatim from the inline query that used to live inside
+        :meth:`get_customer_cod_statement`, where it is published as
+        ``cluster_delivered_outstanding_amount`` — the ceiling
+        ``cod_collect_ceiling.resolve_collect_scope`` offers a driver. Both its
+        grossness and its clause are therefore load-bearing.
+
+        The COD debt cap does NOT gate on this: it gates on a separate NET total
+        (net of reserved prepayment, over the wider debt-cap clause). Do not
+        "unify" the two — they answer different questions.
+        """
+        from business_app.services.customer_link_service import CustomerLinkService
+
+        cluster_ids = CustomerLinkService().get_cluster_user_ids(customer_id)
+        total = db.session.query(func.coalesce(func.sum(Payment.outstanding_amount), Decimal("0.00"))).select_from(
+            Payment
+        ).join(Order, Payment.order_id == Order.id).filter(
+            Payment.user_id.in_(cluster_ids),
+            open_receivable_clause(),
+            Order.status == OrderStatus.DELIVERED,
+        ).scalar() or Decimal(
+            "0.00"
+        )
+        return self._to_decimal(total)
+
     def get_place_open_cod_debt_total(self, group_id: int) -> Decimal:
         """Sum of outstanding COD debt across a place group's addresses."""
         address_ids = [
@@ -453,6 +487,63 @@ class CashCollectionService:
             "0.00"
         )
         return self._to_decimal(total)
+
+    def get_cluster_net_open_cod_debt_total(self, customer_id: int) -> Decimal:
+        """NET open COD debt across a customer's linked cluster — THE CAP'S INPUT.
+
+        Deliberately NOT :meth:`get_cluster_open_cod_debt_total`, on two axes:
+
+        * NET, not gross. ``net_open_receivable_amount`` subtracts prepayment the
+          customer has already handed over and that is reserved against the
+          payment. Gating on gross refuses cash over money already paid.
+        * The SAME ROWS as :meth:`get_cluster_active_cod_debt_count` — the wider
+          ``unpaid_after_delivery_clause()`` — so the cap's count arm and its
+          amount arm describe one set of debts rather than two.
+
+        Summed in Python, not SQL, because the reservation lives in the payment's
+        ``provider_data`` JSON and ``net_open_receivable_amount`` is the SSOT for
+        the subtraction. It reads columns only, so loading the rows costs no
+        extra query.
+        """
+        from business_app.services.customer_link_service import CustomerLinkService
+
+        cluster_ids = CustomerLinkService().get_cluster_user_ids(customer_id)
+        payments = (
+            Payment.query.join(Order, Payment.order_id == Order.id)
+            .filter(
+                Payment.user_id.in_(cluster_ids),
+                unpaid_after_delivery_clause(),
+                Order.status == OrderStatus.DELIVERED,
+            )
+            .all()
+        )
+        return self._to_decimal(sum((net_open_receivable_amount(p) for p in payments), Decimal("0.00")))
+
+    def get_place_net_open_cod_debt_total(self, address_id: int) -> Decimal:
+        """NET open COD debt at one address's place group — THE CAP'S PLACE INPUT.
+
+        Keyed on ``address_id`` rather than the group id so it takes exactly the
+        argument :meth:`get_place_active_cod_debt_count` takes and sums exactly
+        the rows that method counts. Ungrouped addresses degrade to the single
+        address, as they do there.
+
+        Distinct from :meth:`get_place_open_cod_debt_total` for the same two
+        reasons as the cluster pair above; that one is the driver's collection
+        ceiling and must stay gross.
+        """
+        from business_app.services.customer_link_service import CustomerLinkService
+
+        member_ids = CustomerLinkService().get_address_group_member_ids(address_id)
+        payments = (
+            Payment.query.join(Order, Payment.order_id == Order.id)
+            .filter(
+                Order.delivery_address_id.in_(member_ids),
+                unpaid_after_delivery_clause(),
+                Order.status == OrderStatus.DELIVERED,
+            )
+            .all()
+        )
+        return self._to_decimal(sum((net_open_receivable_amount(p) for p in payments), Decimal("0.00")))
 
     def get_place_cod_context(self, address_id: Optional[int]) -> Dict[str, Any]:
         """Place-group COD context for one delivery address (spec 8).
@@ -499,7 +590,10 @@ class CashCollectionService:
             return False
         if self._cluster_has_grocery_member(customer_id):
             return False
-        return self.get_cluster_active_cod_debt_count(customer_id) >= self.COD_ACTIVE_DEBT_LIMIT
+        return cod_cap_reached(
+            self.get_cluster_active_cod_debt_count(customer_id),
+            self.get_cluster_net_open_cod_debt_total(customer_id),
+        )
 
     def get_cod_restricted_flags(self, user_ids: List[int]) -> Dict[int, bool]:
         """Cluster-aware ``cod_restricted`` for a batch of users.
@@ -550,23 +644,28 @@ class CashCollectionService:
             key = _cluster_key(member.id, member.canonical_customer_id)
             cluster_members.setdefault(key, []).append(member)
 
-        # (3) open delivered COD debts per member, one grouped count. Same debt
-        # definition as get_cluster_active_cod_debt_count.
-        debts_by_user: Dict[int, int] = {}
+        # (3) the cap's debt ROWS per member, in ONE query. Loaded rather than
+        # counted so the amount arm can be summed through the net SSOT.
+        #
+        # 🔴 THE CLAUSE IS THE FIX FOR A PRE-EXISTING DIVERGENCE. This used to be
+        # the narrower `open_receivable_clause()` while
+        # `get_cluster_active_cod_debt_count` used `unpaid_after_delivery_clause()`,
+        # so a customer holding a delivered-unpaid Click order was "restricted"
+        # to the checkout guard and "not restricted" to the batch surfaces
+        # (customer map, debtor list) at the same moment. One rule, one clause.
+        payments_by_user: Dict[int, List[Payment]] = {}
         member_ids = [m.id for m in members]
         if member_ids:
-            debts_by_user = {
-                int(row[0]): int(row[1] or 0)
-                for row in db.session.query(Payment.user_id, func.count(Payment.id))
-                .join(Order, Payment.order_id == Order.id)
+            for payment in (
+                Payment.query.join(Order, Payment.order_id == Order.id)
                 .filter(
                     Payment.user_id.in_(member_ids),
-                    open_receivable_clause(),
+                    unpaid_after_delivery_clause(),
                     Order.status == OrderStatus.DELIVERED,
                 )
-                .group_by(Payment.user_id)
                 .all()
-            }
+            ):
+                payments_by_user.setdefault(int(payment.user_id), []).append(payment)
 
         decisions: Dict[Tuple[str, int], bool] = {}
         for key, cluster in cluster_members.items():
@@ -576,8 +675,12 @@ class CashCollectionService:
             if any(bool(m.cod_debt_check_exempt) for m in cluster) or any(m.is_grocery_store for m in cluster):
                 decisions[key] = False
                 continue
-            cluster_debts = sum(debts_by_user.get(m.id, 0) for m in cluster)
-            decisions[key] = cluster_debts >= self.COD_ACTIVE_DEBT_LIMIT
+            cluster_payments = [p for m in cluster for p in payments_by_user.get(m.id, [])]
+            cluster_debts = len(cluster_payments)
+            cluster_total = self._to_decimal(
+                sum((net_open_receivable_amount(p) for p in cluster_payments), Decimal("0.00"))
+            )
+            decisions[key] = cod_cap_reached(cluster_debts, cluster_total)
 
         # Ids with no user row degrade to "not restricted" — the same answer the
         # single-user path gives for a missing/deleted account.
@@ -596,13 +699,29 @@ class CashCollectionService:
         Without ``delivery_address_id`` — or when the address is ungrouped — the
         place arm is simply not evaluated and the result is byte-identical to the
         person-only behaviour, so unlinked + ungrouped customers are unaffected.
+
+        The two NET totals (``get_cluster_net_open_cod_debt_total`` /
+        ``get_place_net_open_cod_debt_total``) each hydrate every open-debt row
+        in their scope — real queries, not counts. They are computed only once
+        the exemption checks below have decided this cluster can actually be
+        capped: an exempt or grocery-store cluster returns before either cap
+        check ever runs, so paying for that hydration on every one of their
+        checkouts would be pure waste. They are NOT further gated on the COUNT
+        arm, though — ``cluster_net_open_cod_debt_total`` is published even when
+        ``active_debt_count`` alone would already fail ``cod_cap_reached``,
+        because a caller projecting a future crossing (e.g. "one more delivered
+        debt tips this cluster over") needs today's real total regardless of
+        whether the cap fires today.
         """
         active_debt_count = self.get_cluster_active_cod_debt_count(customer_id)
         is_cod_exempt = self._cluster_has_cod_exempt_member(customer_id)
         is_grocery_store = self._cluster_has_grocery_member(customer_id)
 
-        # Place arm only applies when the delivery address is grouped.
+        # Place arm only applies when the delivery address is grouped. The
+        # COUNT is a cheap `func.count` query, so — unlike the NET total below
+        # — it costs nothing to keep computing before the exemption checks.
         place_debt_count: Optional[int] = None
+        group_id: Optional[int] = None
         if delivery_address_id is not None:
             group_id = (
                 db.session.query(UserAddress.address_group_id).filter(UserAddress.id == delivery_address_id).scalar()
@@ -613,22 +732,42 @@ class CashCollectionService:
         # Admin exemption first, then structural grocery-store exemption, then
         # the person cap, then the place cap (spec 5.5).
         restriction_scope: Optional[str] = None
+        cluster_net_debt_total: Optional[Decimal] = None
+        place_net_debt_total: Optional[Decimal] = None
         if is_cod_exempt:
             is_restricted, reason = False, "customer_is_cod_exempt"
         elif is_grocery_store:
             is_restricted, reason = False, None
-        elif active_debt_count >= self.COD_ACTIVE_DEBT_LIMIT:
-            is_restricted, reason = True, "customer_has_max_active_cod_debts"
-            restriction_scope = "person"
-        elif place_debt_count is not None and place_debt_count >= self.COD_ACTIVE_DEBT_LIMIT:
-            is_restricted, reason = True, "place_has_max_active_cod_debts"
-            restriction_scope = "place"
         else:
-            is_restricted, reason = False, None
+            cluster_net_debt_total = self.get_cluster_net_open_cod_debt_total(customer_id)
+            if group_id is not None:
+                place_net_debt_total = self.get_place_net_open_cod_debt_total(delivery_address_id)
+            if cod_cap_reached(active_debt_count, cluster_net_debt_total):
+                is_restricted, reason = True, "customer_has_max_active_cod_debts"
+                restriction_scope = "person"
+            elif place_debt_count is not None and cod_cap_reached(place_debt_count, place_net_debt_total):
+                is_restricted, reason = True, "place_has_max_active_cod_debts"
+                restriction_scope = "place"
+            else:
+                is_restricted, reason = False, None
 
         return {
             "active_cod_debt_count": active_debt_count,
             "place_active_cod_debt_count": place_debt_count,
+            # The NET figure the person arm actually gated on, published so no
+            # caller re-derives it (order_cash_edit_service projects from it).
+            # None — not 0.0 — when an exempt/grocery cluster short-circuited
+            # before this was ever computed; "exempt, never measured" and "not
+            # exempt, and owes nothing" are different answers.
+            "cluster_net_open_cod_debt_total": (
+                float(cluster_net_debt_total) if cluster_net_debt_total is not None else None
+            ),
+            # None — not 0.0 — when the place arm was not evaluated, mirroring
+            # `place_active_cod_debt_count`. "No place" and "a place that owes
+            # nothing" are different answers.
+            "place_net_open_cod_debt_total": (
+                float(place_net_debt_total) if place_net_debt_total is not None else None
+            ),
             "cod_restricted": is_restricted,
             "restriction_scope": restriction_scope,
             # Cluster-fungible since Phase 2b (spec 5.3).
@@ -1171,6 +1310,26 @@ class CashCollectionService:
         if effective_collected_at.tzinfo is None:
             effective_collected_at = effective_collected_at.replace(tzinfo=UTC)
 
+        # CAP TO THE LIVE RECEIVABLE FIRST, via the same single expression
+        # `trim_reserved_prepayment_to_capacity` uses for an edited-down unpaid
+        # order: shrink/release whatever no longer fits, refunding the overflow
+        # to each funding event's `unapplied_amount`. A reservation can outlive
+        # the balance it was parked against — the payment may have been settled
+        # from another source first (a card transfer recorded before delivery —
+        # prod order AD_000630_26) or the order edited down below the reserved
+        # amount. Adding it to `amount_collected` regardless used to look
+        # harmless because `sync_payment_projection` clamps to `payment.amount`
+        # — but the clamp DESTROYS money: the allocation is stamped applied
+        # while the payment cannot hold it and the funding event never gets it
+        # back, so the customer's credit silently disappears and live
+        # allocations no longer sum to `amount_collected`. Refunding the
+        # overflow up front is what keeps the ledger's conservation law (live
+        # allocations + unapplied == event amount) true through every ordering
+        # of settlement and delivery. After this call, every surviving
+        # prepaid_reservation row is — by construction — fully within capacity,
+        # so the loop below can simply consume each one whole.
+        self.trim_reserved_prepayment_to_capacity(payment, actor_user_id=collected_by)
+
         reservations = (
             CashCollectionAllocation.query.filter(
                 CashCollectionAllocation.payment_id == payment.id,
@@ -1182,59 +1341,16 @@ class CashCollectionService:
             .all()
         )
 
-        # CAPPED BY THE LIVE RECEIVABLE, and the overflow goes back to the
-        # customer. A reservation can outlive the balance it was parked against:
-        # the payment may have been settled from another source first (a card
-        # transfer recorded before delivery — prod order AD_000630_26) or the
-        # order edited down below the reserved amount. Adding it to
-        # `amount_collected` regardless used to look harmless because
-        # `sync_payment_projection` clamps to `payment.amount` — but the clamp
-        # DESTROYS money: the allocation is stamped applied while the payment
-        # cannot hold it and the funding event never gets it back, so the
-        # customer's credit silently disappears and live allocations no longer
-        # sum to `amount_collected`. Refunding the overflow is what keeps the
-        # ledger's conservation law (live allocations + unapplied == event
-        # amount) true through every ordering of settlement and delivery.
-        remaining_capacity = open_receivable_amount(payment)
         consumed_total = Decimal("0.00")
-        released_total = Decimal("0.00")
         collector_from_event: Optional[int] = None
         for allocation in reservations:
             amount = self._to_decimal(allocation.allocated_amount)
             if amount <= Decimal("0.00"):
                 continue
             event = allocation.cash_collection_event
-            consumable = min(amount, remaining_capacity)
 
-            if consumable <= Decimal("0.00"):
-                # Nothing left to settle — hand the whole reservation back.
-                # `allocated_amount` is left intact so the reversed row still
-                # records what had been held.
-                if event is not None:
-                    event.unapplied_amount = self._to_decimal(event.unapplied_amount) + amount
-                allocation.reversed_at = now
-                allocation.reversed_by_user_id = collected_by
-                allocation.reversal_reason = "Released: payment no longer owes the reserved amount"
-                metadata = dict(allocation.allocation_metadata or {})
-                metadata["reservation_state"] = "released"
-                metadata["reservation_released_at"] = now.isoformat()
-                metadata["affects_payment_projection"] = False
-                allocation.allocation_metadata = metadata
-                released_total += amount
-                continue
-
-            overflow = amount - consumable
-            if overflow > Decimal("0.00"):
-                # Partially fits: shrink the row to what settles and refund the
-                # rest, so the row keeps matching the money it moved.
-                if event is not None:
-                    event.unapplied_amount = self._to_decimal(event.unapplied_amount) + overflow
-                allocation.allocated_amount = consumable
-                released_total += overflow
-
-            payment.amount_collected = self._to_decimal(payment.amount_collected) + consumable
-            remaining_capacity -= consumable
-            consumed_total += consumable
+            payment.amount_collected = self._to_decimal(payment.amount_collected) + amount
+            consumed_total += amount
             # The cash was physically collected by the reservation's source
             # event collector (fall back to whoever recorded it).
             if collector_from_event is None and event is not None:
@@ -1255,13 +1371,91 @@ class CashCollectionService:
                 collected_by=collector_from_event or collected_by,
             )
 
+        self._sync_reserved_prepayment_projection(payment)
+        return self._to_decimal(consumed_total)
+
+    def trim_reserved_prepayment_to_capacity(
+        self,
+        payment: Payment,
+        *,
+        actor_user_id: Optional[int] = None,
+    ) -> Decimal:
+        """THE single expression of "live reservations on a payment may not
+        exceed its open receivable" — release/shrink whatever no longer fits.
+
+        A reservation can outlive the balance it was parked against (the
+        payment settles from another source first, or — the caller this
+        exists for — an admin edits the order's total DOWN). Oldest-first,
+        exactly like the trim-and-refund half of
+        ``consume_reserved_prepayment_for_payment``: rows that fully fit are
+        left untouched, the row that straddles the boundary is shrunk with the
+        overflow refunded to its funding event's ``unapplied_amount``, and
+        every row after it is released whole. Never touches
+        ``payment.amount_collected`` — nothing is being collected here, only
+        trimmed — so it is safe to call on an unpaid payment.
+
+        Runs in the caller's transaction (no commit); re-stamps the reserved
+        projection before returning. Returns the total refunded/released.
+        """
+        if not payment or payment.payment_method != PaymentMethod.CASH:
+            return Decimal("0.00")
+
+        reservations = (
+            CashCollectionAllocation.query.filter(
+                CashCollectionAllocation.payment_id == payment.id,
+                CashCollectionAllocation.reversed_at.is_(None),
+                CashCollectionAllocation.allocation_mode == "prepaid_reservation",
+            )
+            .order_by(CashCollectionAllocation.allocated_at.asc(), CashCollectionAllocation.id.asc())
+            .with_for_update(of=CashCollectionAllocation)
+            .all()
+        )
+        if not reservations:
+            return Decimal("0.00")
+
+        now = datetime.now(UTC)
+        remaining_capacity = open_receivable_amount(payment)
+        released_total = Decimal("0.00")
+        for allocation in reservations:
+            amount = self._to_decimal(allocation.allocated_amount)
+            if amount <= Decimal("0.00"):
+                continue
+            event = allocation.cash_collection_event
+            keep = min(amount, remaining_capacity)
+            overflow = amount - keep
+
+            if keep <= Decimal("0.00"):
+                # Nothing left to hold — release the whole reservation.
+                # `allocated_amount` is left intact so the reversed row still
+                # records what had been held.
+                if event is not None:
+                    event.unapplied_amount = self._to_decimal(event.unapplied_amount) + amount
+                allocation.reversed_at = now
+                allocation.reversed_by_user_id = actor_user_id
+                allocation.reversal_reason = "Released: payment no longer owes the reserved amount"
+                metadata = dict(allocation.allocation_metadata or {})
+                metadata["reservation_state"] = "released"
+                metadata["reservation_released_at"] = now.isoformat()
+                metadata["affects_payment_projection"] = False
+                allocation.allocation_metadata = metadata
+                released_total += amount
+            elif overflow > Decimal("0.00"):
+                # Partially fits: shrink the row to what it can still hold and
+                # refund the rest, so the row keeps matching the money it holds.
+                if event is not None:
+                    event.unapplied_amount = self._to_decimal(event.unapplied_amount) + overflow
+                allocation.allocated_amount = keep
+                released_total += overflow
+
+            remaining_capacity -= keep
+
         if released_total > Decimal("0.00"):
             # The reservation projection is a SQL SUM over live rows, so the
             # reversals/shrinks must be in the database before it is recomputed.
             db.session.flush()
 
         self._sync_reserved_prepayment_projection(payment)
-        return self._to_decimal(consumed_total)
+        return self._to_decimal(released_total)
 
     def settle_new_cod_order_from_prepaid(
         self,
@@ -2166,8 +2360,26 @@ class CashCollectionService:
     ) -> Dict[str, Any]:
         context = self.get_cod_restriction_context(customer_id, delivery_address_id=delivery_address_id)
         if context["cod_restricted"]:
+            if context["restriction_scope"] == "place":
+                # Spec §7 privacy boundary: only the place-scope COUNT may
+                # cross here — the NET total is a coworker's money at this
+                # shared address, never this customer's.
+                raise ValidationError(
+                    "Cash on delivery is unavailable: the workplace at this delivery "
+                    f"address has {context.get('place_active_cod_debt_count') or 0} "
+                    "outstanding COD debts. Please choose a card payment method.",
+                    error_code="COD_DEBT_LIMIT_REACHED",
+                )
+            # Person scope: this NET total is the customer's OWN money, so the
+            # actionable figure is safe — and useful — to state directly. Both
+            # numbers are read live (the context this call just computed, and
+            # the SSOT threshold), never hardcoded, so this can never claim a
+            # limit the engine does not actually enforce.
+            net_total = context["cluster_net_open_cod_debt_total"] or 0
             raise ValidationError(
-                "Customer has reached the maximum number of active cash on delivery debts.",
+                f"Cash on delivery is unavailable: your outstanding balance is {net_total:,.0f} "
+                f"UZS, over the {business_config.COD_DEBT_AMOUNT_THRESHOLD:,} UZS limit. Please "
+                "pay down your balance or choose a card payment method.",
                 error_code="COD_DEBT_LIMIT_REACHED",
             )
         return context
@@ -2294,16 +2506,9 @@ class CashCollectionService:
         # ever stored (plan 2c global constraint 1).
         from business_app.services.customer_link_service import CustomerLinkService
 
+        # `cluster_ids` is still needed below for the grouped-address lookup.
         cluster_ids = CustomerLinkService().get_cluster_user_ids(customer_id)
-        cluster_delivered_outstanding = db.session.query(
-            func.coalesce(func.sum(Payment.outstanding_amount), Decimal("0.00"))
-        ).join(Order, Payment.order_id == Order.id).filter(
-            Payment.user_id.in_(cluster_ids),
-            open_receivable_clause(),
-            Order.status == OrderStatus.DELIVERED,
-        ).scalar() or Decimal(
-            "0.00"
-        )
+        cluster_delivered_outstanding = self.get_cluster_open_cod_debt_total(customer_id)
 
         from business_app.models.customer_link import AddressGroup
 
@@ -4399,7 +4604,6 @@ class CashCollectionService:
         )
         db.session.add(allocation)
         event.unapplied_amount = self._to_decimal(event.unapplied_amount) - amount
-        previous_status = payment.status
 
         if affect_payment_projection:
             payment.amount_collected = self._to_decimal(payment.amount_collected) + amount
@@ -4415,16 +4619,52 @@ class CashCollectionService:
         else:
             self._sync_reserved_prepayment_projection(payment)
 
+        # Fire on every genuine door collection that moves money, not only the
+        # first one to complete the payment. A `previous_status != status`
+        # transition check (the original guard) fires exactly once ever —
+        # right for a payment that can only ever complete once, wrong now
+        # that a shortfall leaves the payment PARTIALLY_PAID and a SECOND,
+        # later collection against that same balance is just as real to the
+        # customer as the first, even though the status label never changes
+        # between the two calls.
+        #
+        # The signal used instead is simply "this call really moved real
+        # money onto this payment's projection": `amount <= 0` already
+        # returned at the top of this method, `affect_payment_projection`
+        # excludes prepaid-reservation bookkeeping (no money changed hands
+        # today), `trigger_completion_notification` is the caller's explicit
+        # opt-out (replay/remediation code, and the automatic prepaid-credit
+        # sweep in `apply_customer_prepaid_credit_to_payment`, which applies
+        # money the customer was already told about when it was originally
+        # collected as surplus), and restricting to COMPLETED/PARTIALLY_PAID
+        # excludes the one other outcome `sync_payment_projection` can leave
+        # behind here (a cancelled payment on a terminal order, projected but
+        # never "confirmed" in the customer-facing sense this notification
+        # exists for). Because `amount` can never exceed `outstanding_amount`
+        # (validated above), a payment that is already COMPLETED can never
+        # reach this point again with more money to allocate — so this does
+        # not re-fire on an already-settled payment; it fires once per
+        # PARTIALLY_PAID collection, plus once when the payment finally
+        # reaches COMPLETED, matching "one message per real collection".
         if (
             affect_payment_projection
             and trigger_completion_notification
-            and previous_status != PaymentStatus.COMPLETED
-            and payment.status == PaymentStatus.COMPLETED
+            and payment.status in (PaymentStatus.COMPLETED, PaymentStatus.PARTIALLY_PAID)
         ):
+            # PARKED, never published inline. The worker starts in milliseconds
+            # and reads under READ COMMITTED, so an inline publish lets its
+            # statements straddle this transaction's commit — it read a stale
+            # `Payment` (amount_collected 0) alongside committed allocations and
+            # billed a 35,000-on-34,920 surplus as a 34,920 shortfall
+            # (TG_000092_26). Draining after_commit also means a rolled-back
+            # settlement notifies no one, closing the hazard flagged at
+            # staff_service.py:1352.
             try:
-                from business_app.tasks.notification_tasks import send_payment_confirmation_task
+                from business_app.utils.payment_confirmation_dispatch import (
+                    queue_payment_confirmation,
+                )
 
-                send_payment_confirmation_task.delay(payment.id)
+                queue_payment_confirmation(db.session, payment.id, str(payment.amount_collected))
             except Exception:
                 pass
 

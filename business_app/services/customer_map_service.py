@@ -13,12 +13,13 @@ from business_app.models.order import Order
 from business_app.models.bottle import BottleBalance
 from business_app.models.payment import Payment
 from business_app.utils.payment_projection import open_receivable_clause
-from shared.enums import UserRole, UserType, EntitySubtype, OrderStatus
+from shared.enums import UserRole, UserType, OrderStatus
 
-# SSOT threshold used to flag COD-restricted customers (class attr, cash_collection_service.py:40).
+# The COD-restriction flag is asked of the service (batched, at :146). This
+# module deliberately holds NO copy of the cap rule and no copy of its
+# thresholds — the cap has two arms now, and a local count comparison could only
+# ever contradict it.
 from business_app.services.cash_collection_service import CashCollectionService
-
-_COD_LIMIT = CashCollectionService.COD_ACTIVE_DEBT_LIMIT
 
 
 class CustomerMapService:
@@ -100,7 +101,6 @@ class CustomerMapService:
                 User.phone,
                 User.user_type,
                 User.entity_subtype,
-                User.cod_debt_check_exempt,
                 last_order.c.last_order_date,
                 last_order.c.order_count,
                 func.coalesce(place_balance.balance, solo_balance.balance, Decimal("0.00")).label("bottle_balance"),
@@ -153,11 +153,6 @@ class CustomerMapService:
             count = len(urows)
             for idx, r in enumerate(urows, start=1):
                 active_count = int(r.active_cod_debt_count or 0)
-                # Mirrors User.is_grocery_store inline (row values from the aggregate
-                # query above) rather than loading ORM User objects per row, so this
-                # stays a single query instead of N+1 per-customer property access.
-                is_grocery = r.user_type == UserType.ENTITY and r.entity_subtype == EntitySubtype.GROCERY_STORE
-                exempt = bool(r.cod_debt_check_exempt) or is_grocery
                 pins.append(
                     {
                         "address_id": r.address_id,
@@ -179,12 +174,16 @@ class CustomerMapService:
                         "active_cod_debt_count": active_count,
                         "is_shared_place": r.address_group_id is not None,
                         "place_member_count": int(r.place_member_count) if r.address_group_id is not None else 1,
-                        # Cluster-aware (see `cod_restricted_flags` above); the
-                        # inline per-account rule is only the fallback for a user
-                        # the batch could not resolve.
-                        "cod_restricted": cod_restricted_flags.get(
-                            r.user_id, (active_count >= _COD_LIMIT) and not exempt
-                        ),
+                        # SSOT: `cod_restricted_flags` above, never a local
+                        # re-derivation. The old inline fallback
+                        # (`active_count >= _COD_LIMIT and not exempt`) was
+                        # UNREACHABLE — `get_cod_restricted_flags` returns a key
+                        # for every id it is given — and it knew nothing about the
+                        # cap's amount arm, so had it ever run it would have
+                        # contradicted the very rule it stood in for. Ids the batch
+                        # cannot resolve degrade to False, the same answer the
+                        # batch itself gives them.
+                        "cod_restricted": cod_restricted_flags.get(r.user_id, False),
                     }
                 )
         return pins

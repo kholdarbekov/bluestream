@@ -6,7 +6,7 @@ Handles shopping cart operations, price calculations, and order preparation
 import logging
 from datetime import datetime, timedelta, UTC
 from typing import List, Dict, Any, Optional, Tuple
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from flask import current_app
 from sqlalchemy import or_, func
 
@@ -16,11 +16,22 @@ from business_app.models.order import Order, OrderItem
 from business_app.models.cart import Cart, CartItem
 from business_app.models.analytics import PromotionalCampaign
 from business_app.utils.exceptions import ValidationError, NotFoundError
-from shared.enums import OrderStatus
+from business_app.utils.order_totals import compute_order_total
+from shared.enums import OrderStatus, PaymentMethod
+from shared.payment_methods import is_cod_rail
 from business_app.utils.service_logging import log_service_call, log_database_query
 from business_app import db
 
 logger = logging.getLogger(__name__)
+
+
+def _money(value: Any) -> Decimal:
+    """Decimal money, quantized the way order_service.py:168 quantizes.
+
+    ROUND_HALF_UP, not banker's rounding — a quote that rounds differently from
+    the order is a quote that disagrees with the charge by one tiyin.
+    """
+    return Decimal(str(value or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 class CartService:
@@ -148,6 +159,8 @@ class CartService:
         delivery_date: Optional[str] = None,
         loyalty_points_used: int = 0,
         promo_code: Optional[str] = None,
+        payment_method: Optional[str] = None,
+        reward_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Calculate comprehensive cart estimate with all costs and discounts
@@ -167,6 +180,14 @@ class CartService:
             ValidationError: If calculation fails
             NotFoundError: If user not found
         """
+        # A promo code and a redeemed loyalty reward are mutually exclusive on
+        # a single order (OrderService.create_order, order_service.py:118-119).
+        # Mirrored here so the quote refuses the same combination the write
+        # path refuses, rather than returning a stacked total `create_order`
+        # would reject outright.
+        if reward_id and promo_code:
+            raise ValidationError("A promo code and a loyalty reward cannot be used on the same order")
+
         # Get user
         user = User.query.get(user_id)
         if not user:
@@ -190,13 +211,70 @@ class CartService:
             promo_discount, promo_details = self._apply_promo_code(promo_code, items_subtotal, user_id)
 
         # Loyalty points are redeemed ONLY via rewards (LoyaltyReward.points_cost),
-        # never converted directly to a UZS discount. No cart-level points discount.
-        loyalty_discount = 0.0
+        # never converted directly to a UZS discount. No cart-level points
+        # discount. A reward the customer has ALREADY picked is priced here,
+        # through `LoyaltyService._compute_reward_discount` — the same function
+        # `apply_reward_to_order` charges with. Nothing below re-derives it: the
+        # two conditions are preview gates, and a reward that fails any of
+        # `apply_reward_to_order`'s remaining gates makes `create_order` refuse
+        # the order outright rather than charge a different number.
+        from business_app.models.loyalty import LoyaltyReward
+        from business_app.services.loyalty_service import clamp_tier_discount
+        from business_app.utils.service_factory import get_loyalty_service
 
-        # Calculate totals
-        total_discount = promo_discount + loyalty_discount
+        loyalty_service = get_loyalty_service()
+
+        subtotal_dec = _money(items_subtotal)
+        delivery_dec = _money(delivery_fee)
+        # In the estimate the promo campaign is the ONLY non-reward, non-tier
+        # discount bucket, so it is what fills the order-level `discount_amount`
+        # slot of the one total formula.
+        discount_dec = _money(promo_discount)
+
+        loyalty_dec = Decimal("0.00")
+        if reward_id:
+            reward = LoyaltyReward.query.get(reward_id)
+            if (
+                reward is not None
+                and reward.reward_type == "discount"
+                and (not reward.min_order_value or subtotal_dec >= _money(reward.min_order_value))
+            ):
+                loyalty_dec = loyalty_service._compute_reward_discount(reward, subtotal_dec)
+
+        # The ONE place that decides whether a tier discount applies.
+        quote = loyalty_service.quote_tier_discount(user, subtotal_dec, payment_method)
+        on_cod = is_cod_rail(payment_method)
+        cod_quote = quote if on_cod else loyalty_service.quote_tier_discount(user, subtotal_dec, PaymentMethod.CASH)
+
+        # Clamped LAST (design §4.4) through the SAME function `create_order`
+        # clamps with — not a re-derived expression — so the headroom bound
+        # (subtotal minus the other two discounts) can never drift between the
+        # quote and the charge, and `ck_orders_tier_discount_nonneg` can never
+        # be violated. tests/integration/test_cart_estimate_quote_surface.py::
+        # test_the_quote_equals_the_charge pins the quoted total against the
+        # charged one end to end.
+        tier_dec = clamp_tier_discount(
+            quote.amount,
+            subtotal=subtotal_dec,
+            discount_amount=discount_dec,
+            loyalty_discount=loyalty_dec,
+        )
+
+        total_dec = compute_order_total(
+            subtotal=subtotal_dec,
+            discount_amount=discount_dec,
+            delivery_fee=delivery_dec,
+            loyalty_discount=loyalty_dec,
+            tier_discount=tier_dec,
+        )
+        # What switching to COD would save; 0 when the customer is already there.
+        cod_savings_dec = Decimal("0.00") if on_cod else cod_quote.amount
+
+        loyalty_discount = float(loyalty_dec)
+        tier_discount = float(tier_dec)
+        total_discount = promo_discount + loyalty_discount + tier_discount
         total_before_discount = items_subtotal + delivery_fee
-        final_total = total_before_discount - total_discount
+        final_total = float(total_dec)
 
         # Ensure minimum order amount (before delivery and discounts)
         if items_subtotal < self.min_order_amount:
@@ -222,7 +300,13 @@ class CartService:
                 "items_subtotal": items_subtotal,
                 "delivery_fee": delivery_fee,
                 "promo_discount": promo_discount,
+                "discount_amount": promo_discount,
                 "loyalty_discount": loyalty_discount,
+                "tier_discount": tier_discount,
+                "tier_name": cod_quote.tier_name,
+                "tier_discount_percentage": float(cod_quote.percentage),
+                "cod_savings": float(cod_savings_dec),
+                "payment_method": payment_method,
                 "total_discount": total_discount,
                 "total_before_discount": total_before_discount,
                 "final_total": final_total,
@@ -678,7 +762,17 @@ class CartService:
 
         # Calculate delivery fee
         delivery_fee = self._calculate_delivery_fee(subtotal, None, None, user)
-        estimated_total = subtotal + delivery_fee
+        # No discount applies to a cart summary, but the total goes through the
+        # shared formula anyway so this screen cannot drift from checkout.
+        estimated_total = float(
+            compute_order_total(
+                subtotal=Decimal(str(subtotal)),
+                discount_amount=Decimal("0.00"),
+                delivery_fee=Decimal(str(delivery_fee)),
+                loyalty_discount=Decimal("0.00"),
+                tier_discount=Decimal("0.00"),
+            )
+        )
 
         return {
             "cart_id": cart.id,

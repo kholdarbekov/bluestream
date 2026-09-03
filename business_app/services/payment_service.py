@@ -305,6 +305,40 @@ class PaymentService:
             # receivable ledger. Re-classifying those is an admin operation.
             raise ValidationError("Payment method cannot be changed once the order has left delivery")
 
+        # THE TIER DISCOUNT FOLLOWS THE RAIL.
+        #
+        # It is a COD-only benefit and must never reach a Click fiscal receipt:
+        # build_click_fiscalization_payload asserts
+        # received_card == to_tiyin(order.total_amount) while filling per-item
+        # Discount from `loyalty_discount` ALONE, so a tier-discounted total on
+        # a fiscalized rail makes Sum(Price - Discount) != received_card — a
+        # tax-committee reconciliation failure, not a display bug.
+        #
+        # The two guards above have already confined this to a zero-collected,
+        # pre-delivery order: the only window in which re-pricing is safe.
+        if rail_moves:
+            from business_app.services.loyalty_service import apply_tier_discount_for_rail
+
+            previous_total = Decimal(str(order.total_amount or 0))
+            previous_tier_discount = Decimal(str(order.tier_discount or 0))
+
+            new_tier_discount = apply_tier_discount_for_rail(order, payment_method)
+
+            if new_tier_discount != previous_tier_discount:
+                # Every caller prices `amount` off the PRE-move total. Re-price
+                # it, and re-derive the idempotency key from the new amount —
+                # PAY-005: a stale key makes a later create_payment miss this
+                # row and mint a duplicate. A caller that asked for a partial
+                # amount keeps it.
+                if Decimal(str(amount)) == previous_total:
+                    amount = order.total_amount
+                    idempotency_key = Payment.compute_idempotency_key(
+                        order_id=order_id,
+                        user_id=order.user_id,
+                        amount=amount,
+                        payment_method=payment_method,
+                    )
+
         if payment:
             payment.user_id = order.user_id
             payment.payment_method = payment_method
@@ -950,7 +984,14 @@ class PaymentService:
 
         monthly_spending = {}
         for i in range(12):
-            month_start = (now.replace(day=1) - timedelta(days=32 * i)).replace(day=1)
+            # `.replace(day=1)` alone preserves `now`'s hour/minute/second/microsecond,
+            # so on the 1st of a month `month_start` lands AFTER any payment made
+            # earlier that same day (or even microseconds after one made this instant),
+            # silently excluding it from its own month's bucket. Zero the time
+            # component explicitly so `month_start` is always the month's first instant.
+            month_start = (now.replace(day=1) - timedelta(days=32 * i)).replace(
+                day=1, hour=0, minute=0, second=0, microsecond=0
+            )
             month_end = (
                 month_start.replace(month=month_start.month % 12 + 1)
                 if month_start.month < 12

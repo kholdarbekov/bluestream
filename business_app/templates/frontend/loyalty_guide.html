@@ -241,6 +241,9 @@
         <p class="lg-lede">{{ 'loyalty_guide.tiers.subtitle' | t }}</p>
       </header>
 
+      {# Tracks whether any active tier actually carries a rate, so the
+         footnote below renders only when the asterisk it explains does. #}
+      {% set tier_ns = namespace(has_discount=false) %}
       <div class="lg-tiers">
         {% for tier in handbook.tiers %}
         {# Tagline/benefit are keyed by the tier's display_order (a rename-proof
@@ -256,15 +259,25 @@
           </p>
           <ul class="lg-tier__stats">
             <li><strong>{{ tier.multiplier }}×</strong><span>{{ 'loyalty_guide.tier.label_multiplier' | t }}</span></li>
-            <li><strong>{{ tier.discount_percentage | int }}%</strong><span>{{ 'loyalty_guide.tier.label_discount' | t }}</span></li>
+            {# Omitted, not replaced, at 0% — mirrors the perk bullet below.
+               `.lg-tier__stats` is a plain flex row (no fixed two-column
+               grid), so one remaining stat never looks like a dangling gap.
+               The discount is a cash-on-delivery-only benefit (see checkout);
+               the `*` ties to the fine-print footnote below the tier grid via
+               aria-describedby, rather than a title-attribute tooltip that a
+               touch-device customer could never see. #}
+            {% if tier.discount_percentage > 0 %}
+            {% set tier_ns.has_discount = true %}
+            <li><strong>{{ tier.discount_percentage_display }}%<sup class="lg-stat__sup" aria-describedby="lg-tier-discount-note">*</sup></strong><span>{{ 'loyalty_guide.tier.label_discount' | t }}</span></li>
+            {% endif %}
           </ul>
           <ul class="lg-tier__perks">
             {# Multiplier + discount bullets are SHARED, config-driven keys (rendered
                per tier from live config); the discount bullet is hidden at 0%. #}
             {% set pm = 'loyalty_guide.tier.perk_multiplier' | t(mult=tier.multiplier) %}
             {% if not pm.startswith('loyalty_guide.') %}<li><i class="fas fa-check" aria-hidden="true"></i>{{ pm }}</li>{% endif %}
-            {% if (tier.discount_percentage | int) > 0 %}
-              {% set pd = 'loyalty_guide.tier.perk_discount' | t(pct=(tier.discount_percentage | int)) %}
+            {% if tier.discount_percentage > 0 %}
+              {% set pd = 'loyalty_guide.tier.perk_discount' | t(pct=tier.discount_percentage_display) %}
               {% if not pd.startswith('loyalty_guide.') %}<li><i class="fas fa-check" aria-hidden="true"></i>{{ pd }}</li>{% endif %}
             {% endif %}
             {% for i in [1, 2, 3] %}
@@ -275,6 +288,9 @@
         </article>
         {% endfor %}
       </div>
+      {% if tier_ns.has_discount %}
+      <p class="lg-fineprint" id="lg-tier-discount-note">{{ 'loyalty_guide.tier.discount_footnote' | t }}</p>
+      {% endif %}
 
       {# How promotion works #}
       <div class="lg-promo">

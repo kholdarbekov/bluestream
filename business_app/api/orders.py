@@ -471,11 +471,17 @@ def create_order():
 
         if (order.payment_method.value if hasattr(order.payment_method, "value") else order.payment_method) == "cash":
             from business_app.services.cash_collection_service import CashCollectionService
+            from business_app.utils.cod_cap import strip_place_scope_money_for_customer
 
             # Place-aware: report the cap against the address this order is
             # actually going to, not just the customer's own cluster (spec 5.5).
-            response_data["payment_restrictions"] = CashCollectionService().get_cod_restriction_context(
-                current_user_id, delivery_address_id=order.delivery_address_id
+            # Customer-facing response: the place-scope NET total is a
+            # coworker's money at a shared address, never this customer's —
+            # strip it before it leaves the server (spec §7).
+            response_data["payment_restrictions"] = strip_place_scope_money_for_customer(
+                CashCollectionService().get_cod_restriction_context(
+                    current_user_id, delivery_address_id=order.delivery_address_id
+                )
             )
 
         return created_response(data=response_data, message=get_translation("api.orders.created"))
@@ -633,11 +639,20 @@ def estimate_cart():
         cart_service = get_cart_service()
         estimate = cart_service.calculate_cart_estimate(
             user_id=current_user_id,
-            items=[item.dict() for item in cart_request.items],
+            # `cart_request.items` is `List[Dict[str, Any]]` per
+            # `CartEstimateRequest` — plain dicts, not Pydantic models. The
+            # previous `item.dict() for item in ...` raised `AttributeError`
+            # ('dict' object has no attribute 'dict') on every call; this route
+            # was unreachable by any client, so nothing surfaced it until this
+            # task's tests exercised it over HTTP.
+            items=cart_request.items,
             delivery_address_id=cart_request.delivery_address_id,
             delivery_date=cart_request.delivery_date,
             loyalty_points_used=cart_request.loyalty_points_used,
-            promo_code=cart_request.promo_code,
+            # promo_code deliberately not threaded (F3, 2026-08-27): removed
+            # from CartEstimateRequest -- see the field's comment there.
+            payment_method=cart_request.payment_method,
+            reward_id=cart_request.reward_id,
         )
 
         return success_response(data=estimate, message=get_translation("success.saved"))
@@ -754,12 +769,18 @@ def retry_order_with_cash(order_id):
 
         response_data = {"order": serialize_order(order, include_items=True, include_payment=True)}
         from business_app.services.cash_collection_service import CashCollectionService
+        from business_app.utils.cod_cap import strip_place_scope_money_for_customer
 
         # Place-aware (spec 5.5). The rescue itself deliberately bypasses the cap
         # (see rescue_order_after_psp_failure), but the payload must still report
-        # the real restriction state of the destination place.
-        response_data["payment_restrictions"] = CashCollectionService().get_cod_restriction_context(
-            current_user_id, delivery_address_id=order.delivery_address_id
+        # the real restriction state of the destination place. Customer-facing
+        # response: the place-scope NET total is a coworker's money at a shared
+        # address, never this customer's — strip it before it leaves the server
+        # (spec §7).
+        response_data["payment_restrictions"] = strip_place_scope_money_for_customer(
+            CashCollectionService().get_cod_restriction_context(
+                current_user_id, delivery_address_id=order.delivery_address_id
+            )
         )
         return created_response(data=response_data, message=get_translation("api.orders.created"))
     except NotFoundError:

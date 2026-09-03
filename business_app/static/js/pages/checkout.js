@@ -3,6 +3,8 @@
     var MIN_ORDER_AMOUNT = PAGE_DATA.min_order_amount;
 
     var cartItems = [];
+    var catalogue = [];               // products, for IMAGES only — never prices
+    var currentEstimate = null;       // the server's quote; the only money source
     var selectedAddress = null;
     var deliveryWindowStart = null;   // "HH:MM" or null (open)
     var deliveryWindowEnd = null;     // "HH:MM" or null (open)
@@ -42,95 +44,160 @@
         });
     }
 
-    function renderOrderSummary(products) {
-        var container = document.getElementById('summary-items');
-        var html = '';
-        var subtotal = 0;
-        var minQtyViolations = [];
+    // 🔴 THE PAGE PRICES NOTHING. Every figure below is read off
+    // `POST /api/v1/orders/cart/estimate`, which runs the same CartService the
+    // order is built from and already knows the rail, the reward and the tier.
+    // The basket sum this replaced was contract-blind (POST /products/bulk only
+    // personalises prices for an Authorization HEADER, and this page authenticates
+    // by cookie) and tier-blind.
+    function estimatePayload() {
+        return {
+            items: cartItems.map(function (item) {
+                return { product_id: item.product_id, quantity: item.quantity };
+            }),
+            delivery_address_id: selectedAddress,
+            delivery_date: deliveryDate,
+            payment_method: selectedPaymentMethod
+        };
+    }
 
+    async function refreshEstimate() {
+        document.getElementById('summary-total').textContent = PAGE_DATA.i18n.calculating;
+        try {
+            var response = await apiRequest('/orders/cart/estimate', {
+                method: 'POST',
+                body: JSON.stringify(estimatePayload())
+            });
+            var body = response.ok ? await response.json() : null;
+            currentEstimate = (body && body.success) ? body.data : null;
+        } catch (error) {
+            console.error('Error loading cart estimate:', error);
+            currentEstimate = null;
+        }
+        renderEstimate();
+    }
+
+    function minQtyViolations() {
+        var violations = [];
         cartItems.forEach(function (cartItem) {
-            var product = products.find(function (p) { return p.id === cartItem.product_id; });
+            var product = catalogue.find(function (p) { return p.id === cartItem.product_id; });
             if (!product) return;
-
-            var pricing = product.pricing || {};
-            var price = parseFloat(pricing.current_price || pricing.base_price || product.base_price || 0);
-            var itemTotal = price * cartItem.quantity;
-            subtotal += itemTotal;
-
             var minOrderQty = parseInt(
                 (product.inventory && product.inventory.min_order_quantity) ||
                 product.min_order_quantity || 1,
                 10
             ) || 1;
             if (cartItem.quantity < minOrderQty) {
-                minQtyViolations.push({
+                violations.push({
                     name: product.name,
                     min_qty: minOrderQty,
-                    remaining: minOrderQty - cartItem.quantity,
+                    remaining: minOrderQty - cartItem.quantity
                 });
             }
+        });
+        return violations;
+    }
 
+    function renderSummaryItems() {
+        var container = document.getElementById('summary-items');
+        var lines = (currentEstimate && currentEstimate.items) || [];
+        var html = '';
+
+        lines.forEach(function (line) {
+            var product = catalogue.find(function (p) { return p.id === line.product_id; }) || {};
             var productImages = (product.media && product.media.images) || product.images || [];
             var productImage = productImages.length > 0 ? productImages[0] : PAGE_DATA.default_image;
 
             html += '<div class="summary-item">' +
-                '<img src="' + escapeHtml(productImage) + '" alt="' + escapeHtml(product.name) + '" class="summary-item-image">' +
+                '<img src="' + escapeHtml(productImage) + '" alt="' + escapeHtml(line.product_name) + '" class="summary-item-image">' +
                 '<div class="summary-item-details">' +
-                '<div class="summary-item-name">' + escapeHtml(product.name) + '</div>' +
-                '<div class="summary-item-qty">' + escapeHtml(PAGE_DATA.i18n.qty) + ': ' + cartItem.quantity + '</div>' +
+                '<div class="summary-item-name">' + escapeHtml(line.product_name) + '</div>' +
+                '<div class="summary-item-qty">' + escapeHtml(PAGE_DATA.i18n.qty) + ': ' + line.quantity + '</div>' +
                 '</div>' +
-                '<div class="summary-item-price">' + formatPrice(itemTotal) + '</div>' +
+                '<div class="summary-item-price">' + formatPrice(line.subtotal) + '</div>' +
                 '</div>';
         });
 
         container.innerHTML = html;
-
-        window.currentSubtotal = subtotal;
-        window.currentMinQtyViolations = minQtyViolations;
-        updateSummaryTotals(subtotal, null);
     }
 
-    function updateSummaryTotals(subtotal, deliveryFee) {
-        document.getElementById('summary-subtotal').textContent = formatPrice(subtotal);
+    function renderDiscountRow(id, label, amount) {
+        var row = document.getElementById(id + '-row');
+        var value = Number(amount || 0);
+        row.style.display = value > 0 ? '' : 'none';
+        if (value > 0) {
+            document.getElementById(id + '-label').textContent = label;
+            document.getElementById(id).textContent = '-' + formatPrice(value);
+        }
+    }
+
+    function tierLabel(pricing) {
+        // The RATE is never held by this page — it is echoed from live config.
+        return PAGE_DATA.i18n.tier_discount_line
+            .replace('{tier}', pricing.tier_name || '')
+            .replace('{percent}', pricing.tier_discount_percentage);
+    }
+
+    function renderEstimate() {
+        renderSummaryItems();
+
+        var pricing = (currentEstimate && currentEstimate.pricing) || null;
+        var unknown = '—';
+
+        document.getElementById('summary-subtotal').textContent =
+            pricing ? formatPrice(pricing.items_subtotal) : unknown;
 
         var deliveryEl = document.getElementById('summary-delivery');
-        var totalEl = document.getElementById('summary-total');
-
-        if (deliveryFee === null) {
-            deliveryEl.textContent = PAGE_DATA.i18n.select_address;
+        if (!pricing) {
+            deliveryEl.textContent = unknown;
             deliveryEl.style.color = '#999';
-            totalEl.textContent = formatPrice(subtotal);
-        } else if (deliveryFee === 0) {
+        } else if (Number(pricing.delivery_fee) === 0) {
             deliveryEl.textContent = PAGE_DATA.i18n.free;
             deliveryEl.style.color = '#28a745';
-            totalEl.textContent = formatPrice(subtotal);
         } else {
-            deliveryEl.textContent = formatPrice(deliveryFee);
+            deliveryEl.textContent = formatPrice(pricing.delivery_fee);
             deliveryEl.style.color = '';
-            totalEl.textContent = formatPrice(subtotal + deliveryFee);
         }
 
-        window.currentDeliveryFee = deliveryFee;
+        renderDiscountRow('summary-discount', PAGE_DATA.i18n.discount, pricing && pricing.discount_amount);
+        renderDiscountRow('summary-reward', PAGE_DATA.i18n.reward_discount, pricing && pricing.loyalty_discount);
+        renderDiscountRow('summary-tier', pricing ? tierLabel(pricing) : '', pricing && pricing.tier_discount);
 
+        document.getElementById('summary-total').textContent =
+            pricing ? formatPrice(pricing.final_total) : unknown;
+
+        var savings = pricing ? Number(pricing.cod_savings || 0) : 0;
+        document.getElementById('summary-cod-savings-row').style.display = savings > 0 ? '' : 'none';
+        if (savings > 0) {
+            document.getElementById('summary-cod-savings').textContent =
+                PAGE_DATA.i18n.cod_savings.replace('{amount}', formatPrice(savings));
+        }
+
+        renderOrderGate(pricing);
+    }
+
+    function renderOrderGate(pricing) {
         var warningEl = document.getElementById('min-order-warning');
         var titleEl = document.getElementById('min-order-title');
         var textEl = document.getElementById('min-order-text');
         var placeOrderBtn = document.getElementById('place-order-btn');
-        var minQtyViolations = window.currentMinQtyViolations || [];
-        var amountMet = subtotal >= MIN_ORDER_AMOUNT;
-        var qtyMet = minQtyViolations.length === 0;
+        var violations = minQtyViolations();
+        // A quote IS the server accepting this basket: `calculate_cart_estimate`
+        // refuses anything under MIN_ORDER_AMOUNT. No client-side threshold
+        // comparison decides whether the order may be placed.
+        var amountMet = !!pricing;
+        var qtyMet = violations.length === 0;
 
         if (!amountMet) {
-            var remaining = MIN_ORDER_AMOUNT - subtotal;
-
             warningEl.style.display = 'flex';
             titleEl.textContent = PAGE_DATA.i18n.min_not_met;
-            textEl.textContent = PAGE_DATA.i18n.add + ' ' + formatPrice(remaining) + ' ' +
-                PAGE_DATA.i18n.more_to_place + '. ' + PAGE_DATA.i18n.min_order_amount + ': ' + formatPrice(MIN_ORDER_AMOUNT);
+            // No "add N more": with no quote the page does not know the subtotal,
+            // and inventing one is exactly the arithmetic this file removed.
+            textEl.textContent = PAGE_DATA.i18n.min_warning + ' ' + formatPrice(MIN_ORDER_AMOUNT);
         } else if (!qtyMet) {
             warningEl.style.display = 'flex';
             titleEl.textContent = PAGE_DATA.i18n.min_qty_warning_short || 'Minimum order quantity not met';
-            textEl.textContent = minQtyViolations.map(function (v) {
+            textEl.textContent = violations.map(function (v) {
                 var template = PAGE_DATA.i18n.min_qty_warning_line ||
                     '{name}: minimum {min}, add {remaining} more';
                 return template
@@ -177,46 +244,15 @@
             if (response.ok) {
                 var data = await response.json();
                 if (data.success && data.data.products) {
-                    renderOrderSummary(data.data.products);
+                    // Images and per-product minimums only. The prices in this
+                    // payload are contract-blind over cookie auth.
+                    catalogue = data.data.products;
                 }
             }
         } catch (error) {
             console.error('Error loading cart summary:', error);
         }
-    }
-
-    async function calculateDeliveryFee(addressId) {
-        if (!addressId || window.currentSubtotal === undefined) return;
-
-        var deliveryEl = document.getElementById('summary-delivery');
-        deliveryEl.textContent = PAGE_DATA.i18n.calculating;
-        deliveryEl.style.color = '#999';
-
-        try {
-            var response = await apiRequest('/delivery/calculate-fee', {
-                method: 'POST',
-                body: JSON.stringify({
-                    address_id: addressId,
-                    order_total: window.currentSubtotal
-                })
-            });
-
-            if (response.ok) {
-                var data = await response.json();
-                if (data.success) {
-                    var deliveryFee = data.data.delivery_fee || 0;
-                    updateSummaryTotals(window.currentSubtotal, deliveryFee);
-                } else {
-                    updateSummaryTotals(window.currentSubtotal, null);
-                    console.error('Delivery fee calculation failed:', data.message);
-                }
-            } else {
-                updateSummaryTotals(window.currentSubtotal, null);
-            }
-        } catch (error) {
-            console.error('Error calculating delivery fee:', error);
-            updateSummaryTotals(window.currentSubtotal, null);
-        }
+        await refreshEstimate();
     }
 
     async function selectAddress(addressId) {
@@ -229,7 +265,9 @@
             selectedCard.classList.add('selected');
             selectedCard.querySelector('input[type="radio"]').checked = true;
             selectedAddress = addressId;
-            await calculateDeliveryFee(addressId);
+            // The estimate computes the fee through CartService._calculate_delivery_fee.
+            // `/delivery/calculate-fee` was a second surface that could disagree.
+            await refreshEstimate();
         }
     }
 
@@ -283,6 +321,10 @@
 
         var cardContainer = document.getElementById('card-input-container');
         if (cardContainer) cardContainer.style.display = 'none';
+
+        // The tier discount attaches to the COD rail only, so the rail changes
+        // the price. Re-quote rather than adjust the number on screen.
+        refreshEstimate();
     }
 
     function formatCardNumber(input) {
@@ -655,6 +697,7 @@
 
         selectedPaymentMethod = methods.length ? methods[0].method : 'cash';
         document.getElementById('selected-payment-method').value = selectedPaymentMethod;
+        refreshEstimate();
     }
 
     document.addEventListener('DOMContentLoaded', async function () {
@@ -689,7 +732,8 @@
         var firstAddress = document.querySelector('.address-card[data-address-id]');
         if (firstAddress) {
             selectedAddress = parseInt(firstAddress.dataset.addressId, 10);
-            await calculateDeliveryFee(selectedAddress);
+            // Re-quote: the address changes the delivery fee the estimate returns.
+            await refreshEstimate();
         }
 
         if (dateInput) dateInput.addEventListener('change', renderDeliveryWindows);

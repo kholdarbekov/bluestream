@@ -134,39 +134,23 @@ _LEDGER: Dict[Tuple[str, str, str], str] = {
     (
         "telegram_bot/handlers/orders.py",
         "OrderHandlers._show_order_confirmation",
-        "cart_total_amount * discount_value / 100.0",
+        "payable_before_prepayment - potential_applied",
     ): (
-        "ONE-DECISION (accepted mirror). Sweep #29. The server's "
-        "LoyaltyService._compute_reward_discount is the same formula in Decimal/"
-        "ROUND_HALF_UP; measured delta 0.0000 across four subtotals. It stays a "
-        "second expression only because no order exists yet at confirm time, so "
-        "there is nothing to preview against. Closing it needs a server-side "
-        "order-preview endpoint (pricing-criticals-report.md, out-of-lane #1)."
-    ),
-    (
-        "telegram_bot/handlers/orders.py",
-        "OrderHandlers._show_order_confirmation",
-        "cart_total_amount * discount_value",
-    ): "ONE-DECISION (accepted mirror). Same expression as above, fixed-discount arm.",
-    (
-        "telegram_bot/handlers/orders.py",
-        "OrderHandlers._show_order_confirmation",
-        "float(cart_total_amount) - reward_discount",
-    ): (
-        "ONE-DECISION (accepted mirror). The grand total nets the mirrored "
-        "discount off the SERVER's `cart['subtotal']` -- `cart_total_amount` is "
-        "read, never summed, since the #7 fix. Do not reintroduce a fallback "
-        "sum here; a second client calculation IS the defect."
-    ),
-    (
-        "telegram_bot/handlers/orders.py",
-        "OrderHandlers._show_order_confirmation",
-        "float(cart_total_amount) - potential_applied",
-    ): (
-        "ONE-DECISION (fallback of a published figure). Sweep #30. Both operands "
-        "are server figures; this only runs when the server omitted "
-        "`estimated_payable_after_prepayment`. It is advisory copy, not an "
-        "amount anyone posts."
+        "ONE-DECISION (shared expression). Sweep #30, corrected by F1-F4 fix "
+        "wave item F2 (2026-08-27): both operands now derive from "
+        "`estimate['pricing']['final_total']`, the SAME server quote "
+        "`_build_estimate_block` renders as \"To pay\" immediately above -- "
+        "not `cart['cod_prepayment']`, whose `potential_applied_amount` / "
+        "`estimated_payable_after_prepayment` CartService.get_cart_summary "
+        "prices off `estimated_total` with every discount (including the "
+        "tier discount) zeroed. The old verdict called this 'a fallback of a "
+        "published figure' and 'advisory copy' -- true of the arithmetic, "
+        "but the figure it was a fallback OF was wrong: it showed an "
+        "undiscounted 'payable after prepayment' beneath a tier-discounted "
+        "'To pay' line, two numbers apart by exactly the tier discount. "
+        "Still advisory copy -- nothing is posted from this screen, the "
+        "actual auto-apply happens server-side at order creation -- but now "
+        "off the correct number."
     ),
     (
         "telegram_bot/handlers/orders.py",
@@ -643,6 +627,27 @@ def test_new_preview_surfaces_must_declare_their_write_half():
         "CashCollectionService.simulate_event_amount_change",
         # Internal Decimal helper on the allocation path, not a rendered figure.
         "CashCollectionService.estimate_settleable_credit_for_order",
+        # `_PREVIEW_SURFACES` cannot express this one: `write_method` must be an
+        # attribute of the SAME class (`getattr(cls, write_method)`), and none
+        # of quote_tier_discount's write halves are LoyaltyService methods.
+        # OrderService.create_order calls it directly; PaymentService's rail
+        # move and ClickPaymentProviderService's Click-rail restoration call it
+        # through the module-level apply_tier_discount_for_rail. All three call
+        # quote_tier_discount themselves and persist the result inside the same
+        # transaction -- SHOW and SETTLE are the same invocation, ONE-DECISION
+        # (re-run) at its strongest, not the split this file exists to catch.
+        # Residual seam, named rather than hidden: a later phase (Task 20)
+        # wires this same quote_tier_discount into /cart/estimate as the
+        # customer-facing figure shown at checkout (bot and web), and
+        # create_order re-runs the quote live rather than replaying that
+        # frozen number. Same reasoning as Sweep #6
+        # (StaffService.estimate_phone_order) below -- an order must be
+        # charged at the tier live at creation, not against a stale quote.
+        # Exposure is small: a tier can only move between quote and confirm
+        # via the rolling 365-day qualifying window
+        # (LoyaltyService.calculate_qualifying_points), not within the seconds
+        # of a checkout.
+        "LoyaltyService.quote_tier_discount",
     }
     declared = {q for _, q in _PREVIEW_SURFACES}
 

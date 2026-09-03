@@ -1,6 +1,7 @@
 """Service regression tests for notification API boundary migration."""
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -9,6 +10,8 @@ import pytest
 from business_app.models.audit import AuditEventType, AuditLog
 from business_app.models.delivery import Delivery, DeliveryStatusHistory
 from business_app.models.notification import Notification, NotificationPreference, NotificationTemplate
+from business_app.models.order import Order
+from business_app.models.payment import CashCollectionAllocation, CashCollectionEvent, Payment
 from business_app.models.translation import Translation
 from business_app.services.notification_service import DEFAULT_TEMPLATES, NotificationService
 from business_app.utils.constants import (
@@ -17,9 +20,11 @@ from business_app.utils.constants import (
     NotificationType,
 )
 from shared.enums import (
+    CashCollectionSource,
     DeliveryStatus,
     OrderStatus,
     PaymentMethod,
+    PaymentStatus,
 )
 from business_app.utils.exceptions import ForbiddenError, ValidationError
 
@@ -917,6 +922,7 @@ def test_send_telegram_payment_confirmation_fills_follow_up_placeholder_once(
                 'payment_amount': '18000',
                 'payment_method': 'cash',
                 'payment_follow_up_message': follow_up,
+                'payment_details': '',
             },
             language,
             template_override=_telegram_payment_confirmation_template(),
@@ -1114,3 +1120,441 @@ def test_set_delivery_telegram_setting_rejects_unknown_source(db, sample_user):
             enabled=True,
             source='system',
         )
+
+
+# ---------------------------------------------------------------------------
+# Payment-confirmation money/method rendering (case A-D + the reported
+# regression). Drives the REAL path: `send_payment_notification` ->
+# `send_notification` -> `_send_telegram_notification`, against real
+# `CashCollectionEvent`/`CashCollectionAllocation` rows — nothing about the
+# ledger classification is mocked. Only the outbound Telegram HTTP call is
+# stubbed (an external I/O boundary).
+# ---------------------------------------------------------------------------
+
+_PAYMENT_CASH_LABELS = {
+    'uz': "💰 Naqd pul",
+    'en': "💰 Cash on Delivery",
+    'ru': "💰 Наличными",
+}
+
+
+def _seed_cash_payment_method_label(db, language):
+    """Seed the SAME DB-backed translation row the customer bot's checkout
+    screens already read (`telegram.payment_cash`) — see
+    `scripts/seed_backend_translations.py`, "Telegram Payment Method Buttons".
+    """
+    _upsert_translation(db, 'telegram.payment_cash', language, _PAYMENT_CASH_LABELS[language])
+
+
+def _make_cod_order_and_payment(db, user, *, order_number, total_amount, status=OrderStatus.CONFIRMED):
+    """A minimal COD order + its Payment row, mirroring `sample_order`/
+    `sample_payment` but parameterized so a test can build a SECOND order for
+    the same customer (the cross-order debt/reservation target)."""
+    order = Order(
+        user_id=user.id,
+        order_number=order_number,
+        status=status,
+        subtotal=total_amount,
+        delivery_fee=Decimal('0.00'),
+        discount_amount=Decimal('0.00'),
+        total_amount=total_amount,
+        payment_method=PaymentMethod.CASH,
+        created_at=datetime.now(UTC),
+    )
+    db.session.add(order)
+    db.session.flush()
+
+    payment = Payment(
+        order_id=order.id,
+        user_id=user.id,
+        payment_method=PaymentMethod.CASH,
+        amount=total_amount,
+        currency='UZS',
+        status=PaymentStatus.PENDING,
+        payment_id=f'test_payment_{order_number}',
+        provider_transaction_id=f'test_tx_{order_number}',
+        created_at=datetime.now(UTC),
+    )
+    db.session.add(payment)
+    db.session.flush()
+    return order, payment
+
+
+def _mark_order_delivered(db, order, *, delivered_at):
+    """Deliver `order` — `Order` itself has no `delivered_at` column, the
+    timestamp lives on its `Delivery` row (`Delivery.delivered_at`)."""
+    order.status = OrderStatus.DELIVERED
+    delivery = Delivery(
+        order_id=order.id,
+        status=DeliveryStatus.DELIVERED,
+        scheduled_date=delivered_at,
+        scheduled_time_slot='09:00-12:00',
+        delivered_at=delivered_at,
+        actual_delivery_time=delivered_at,
+    )
+    db.session.add(delivery)
+    db.session.flush()
+
+
+def _send_and_capture_telegram_text(monkeypatch, service, payment_id):
+    """Drive the REAL `send_payment_notification` -> `send_notification` ->
+    `_send_telegram_notification` path and return the rendered message text.
+
+    conftest's autouse `block_external_side_effects` stubs `send_notification`
+    class-wide so no test accidentally fires a real Telegram call; put the
+    production implementation back here (the same technique
+    `test_customer_updates_never_go_out_over_sms` uses) so THIS call exercises
+    the real fan-out, with only the outbound HTTP POST stubbed.
+    """
+    monkeypatch.setattr(NotificationService, 'send_notification', _REAL_SEND_NOTIFICATION)
+    fake_response = Mock(status_code=200)
+    fake_response.json.return_value = {'ok': True, 'result': {'message_id': 1}}
+    with patch('business_app.services.notification_service.requests.post', return_value=fake_response) as post_mock:
+        result = service.send_payment_notification(payment_id)
+    assert result['telegram']['success'] is True
+    return post_mock.call_args.kwargs['json']['text']
+
+
+def test_payment_confirmation_case_a_exact_payment_states_amount_only(app, db, sample_user, monkeypatch):
+    """Case A: collected == order total. Say what was paid, no extra lines."""
+    sample_user.telegram_id = '810000001'
+    sample_user.preferred_language = 'en'
+    db.session.commit()
+    _seed_cash_payment_method_label(db, 'en')
+
+    order, payment = _make_cod_order_and_payment(
+        db, sample_user, order_number='TG_CASE_A_26', total_amount=Decimal('20000.00'),
+    )
+    payment.amount_collected = Decimal('20000.00')
+    payment.outstanding_amount = Decimal('0.00')
+    payment.status = PaymentStatus.COMPLETED
+    payment.collected_by = sample_user.id
+    db.session.commit()
+
+    event = CashCollectionEvent(
+        customer_id=sample_user.id,
+        order_id=order.id,
+        amount=Decimal('20000.00'),
+        currency='UZS',
+        source=CashCollectionSource.DELIVERY_COMPLETION,
+        occurred_at=datetime.now(UTC),
+        unapplied_amount=Decimal('0.00'),
+    )
+    db.session.add(event)
+    db.session.flush()
+    db.session.add(
+        CashCollectionAllocation(
+            cash_collection_event_id=event.id,
+            payment_id=payment.id,
+            order_id=order.id,
+            allocated_amount=Decimal('20000.00'),
+            allocation_order=1,
+            allocation_mode='auto',
+        )
+    )
+    db.session.commit()
+
+    service = NotificationService()
+    service.telegram_bot_token = 'test-token'
+    text = _send_and_capture_telegram_text(monkeypatch, service, payment.id)
+
+    assert 'Amount: 20,000 UZS' in text
+    assert 'Method: 💰 Cash on Delivery' in text
+    # No trailing-.0 float, no raw enum value.
+    assert '20000.0' not in text
+    assert 'Method: cash' not in text
+    # No extra case lines for the exact-payment case.
+    assert 'saved as credit' not in text
+    assert 'settle the outstanding' not in text
+    assert 'short of the order total' not in text
+    # Exact payment really is fully settled: "Confirmed" stays accurate and
+    # the header must not gain words just because other cases now vary it.
+    assert 'Payment Confirmed!' in text
+    assert 'Payment Received!' not in text
+
+
+def test_payment_confirmation_case_b_surplus_reserved_regression(app, db, sample_user, monkeypatch):
+    """Regression for order TG_000091_26 (id 184): subtotal 54,000, tier
+    discount 1,620, total 52,380. The driver collected 53,000 (rounded up —
+    52,380 isn't payable in Uzbek banknotes). `cash_collection_events` id 44
+    (amount 53,000) allocated 52,380 to THIS order (`auto`) and 620 to order
+    129 (`prepaid_reservation`) — order 129 was confirmed but NOT YET
+    delivered, so the 620 is a reservation, not debt.
+
+    The shipped bug rendered "Summa: 52380.0 so'm" / "Usul: cash": the order
+    total instead of what was handed over, an unformatted float, and the raw
+    enum. This asserts case B's fixed rendering: amount received, order
+    total, and the reservation — with neither defect surviving.
+    """
+    sample_user.telegram_id = '810000002'
+    sample_user.preferred_language = 'uz'
+    db.session.commit()
+    _seed_cash_payment_method_label(db, 'uz')
+
+    this_order, this_payment = _make_cod_order_and_payment(
+        db, sample_user, order_number='TG_000091_26', total_amount=Decimal('52380.00'),
+    )
+    this_payment.amount_collected = Decimal('52380.00')
+    this_payment.outstanding_amount = Decimal('0.00')
+    this_payment.status = PaymentStatus.COMPLETED
+    this_payment.collected_by = sample_user.id
+
+    other_order, other_payment = _make_cod_order_and_payment(
+        db, sample_user, order_number='TG_000064_26', total_amount=Decimal('90000.00'),
+        status=OrderStatus.CONFIRMED,
+    )
+    db.session.commit()
+
+    event = CashCollectionEvent(
+        customer_id=sample_user.id,
+        order_id=this_order.id,
+        amount=Decimal('53000.00'),
+        currency='UZS',
+        source=CashCollectionSource.DELIVERY_COMPLETION,
+        occurred_at=datetime.now(UTC),
+        unapplied_amount=Decimal('0.00'),
+    )
+    db.session.add(event)
+    db.session.flush()
+    db.session.add_all(
+        [
+            CashCollectionAllocation(
+                cash_collection_event_id=event.id,
+                payment_id=this_payment.id,
+                order_id=this_order.id,
+                allocated_amount=Decimal('52380.00'),
+                allocation_order=1,
+                allocation_mode='auto',
+            ),
+            CashCollectionAllocation(
+                cash_collection_event_id=event.id,
+                payment_id=other_payment.id,
+                order_id=other_order.id,
+                allocated_amount=Decimal('620.00'),
+                allocation_order=2,
+                allocation_mode='prepaid_reservation',
+            ),
+        ]
+    )
+    db.session.commit()
+
+    service = NotificationService()
+    service.telegram_bot_token = 'test-token'
+    text = _send_and_capture_telegram_text(monkeypatch, service, this_payment.id)
+
+    assert "Summa: 53,000 so'm" in text  # what the customer actually handed over
+    assert "Usul: 💰 Naqd pul" in text
+    assert '52,380' in text  # the order total, stated
+    assert '620' in text  # the reservation, stated
+    assert "saqlab qo'yildi" in text  # "...saved for your future orders" is present
+
+    # The exact defects reported: raw float and the untranslated enum value.
+    assert '52380.0' not in text
+    assert 'cash' not in text
+    # Surplus still means the payment reached COMPLETED — "confirmed" stays
+    # accurate here, unlike the shortfall case.
+    assert "To'lov tasdiqlandi!" in text
+    assert "To'lov qabul qilindi!" not in text
+
+
+def test_payment_confirmation_case_c_surplus_settles_named_debt(app, db, sample_user, monkeypatch):
+    """Case C: the surplus settled an outstanding debt on an ALREADY
+    DELIVERED order — must name that order's number and delivery date."""
+    sample_user.telegram_id = '810000003'
+    sample_user.preferred_language = 'en'
+    db.session.commit()
+    _seed_cash_payment_method_label(db, 'en')
+
+    this_order, this_payment = _make_cod_order_and_payment(
+        db, sample_user, order_number='TG_CASE_C_NEW_26', total_amount=Decimal('30000.00'),
+    )
+    this_payment.amount_collected = Decimal('30000.00')
+    this_payment.outstanding_amount = Decimal('0.00')
+    this_payment.status = PaymentStatus.COMPLETED
+    this_payment.collected_by = sample_user.id
+
+    debt_order, debt_payment = _make_cod_order_and_payment(
+        db, sample_user, order_number='TG_CASE_C_OLD_26', total_amount=Decimal('5000.00'),
+    )
+    db.session.commit()
+    delivered_at = datetime(2026, 8, 20, 14, 30, tzinfo=UTC)
+    _mark_order_delivered(db, debt_order, delivered_at=delivered_at)
+    db.session.commit()
+
+    event = CashCollectionEvent(
+        customer_id=sample_user.id,
+        order_id=this_order.id,
+        amount=Decimal('35000.00'),
+        currency='UZS',
+        source=CashCollectionSource.DELIVERY_COMPLETION,
+        occurred_at=datetime.now(UTC),
+        unapplied_amount=Decimal('0.00'),
+    )
+    db.session.add(event)
+    db.session.flush()
+    db.session.add_all(
+        [
+            CashCollectionAllocation(
+                cash_collection_event_id=event.id,
+                payment_id=this_payment.id,
+                order_id=this_order.id,
+                allocated_amount=Decimal('30000.00'),
+                allocation_order=1,
+                allocation_mode='auto',
+            ),
+            CashCollectionAllocation(
+                cash_collection_event_id=event.id,
+                payment_id=debt_payment.id,
+                order_id=debt_order.id,
+                allocated_amount=Decimal('5000.00'),
+                allocation_order=2,
+                allocation_mode='auto',
+            ),
+        ]
+    )
+    db.session.commit()
+
+    service = NotificationService()
+    service.telegram_bot_token = 'test-token'
+    text = _send_and_capture_telegram_text(monkeypatch, service, this_payment.id)
+
+    assert 'Amount: 35,000 UZS' in text
+    assert 'TG_CASE_C_OLD_26' in text
+    assert '5,000' in text
+    assert '08/20/2026' in text  # en date format (helpers.format_datetime)
+    assert 'saved as credit' not in text  # no remainder in this scenario
+
+
+def test_payment_confirmation_case_c_surplus_settles_debt_with_remainder_reserved(app, db, sample_user, monkeypatch):
+    """Case C variant: after clearing the named debt, money is STILL left
+    over — both facts must be stated (debt covered AND remainder reserved)."""
+    sample_user.telegram_id = '810000004'
+    sample_user.preferred_language = 'en'
+    db.session.commit()
+    _seed_cash_payment_method_label(db, 'en')
+
+    this_order, this_payment = _make_cod_order_and_payment(
+        db, sample_user, order_number='TG_CASE_C2_NEW_26', total_amount=Decimal('10000.00'),
+    )
+    this_payment.amount_collected = Decimal('10000.00')
+    this_payment.outstanding_amount = Decimal('0.00')
+    this_payment.status = PaymentStatus.COMPLETED
+    this_payment.collected_by = sample_user.id
+
+    debt_order, debt_payment = _make_cod_order_and_payment(
+        db, sample_user, order_number='TG_CASE_C2_OLD_26', total_amount=Decimal('2000.00'),
+    )
+    pending_order, pending_payment = _make_cod_order_and_payment(
+        db, sample_user, order_number='TG_CASE_C2_FUTURE_26', total_amount=Decimal('40000.00'),
+        status=OrderStatus.CONFIRMED,
+    )
+    db.session.commit()
+    delivered_at = datetime(2026, 8, 10, 9, 0, tzinfo=UTC)
+    _mark_order_delivered(db, debt_order, delivered_at=delivered_at)
+    db.session.commit()
+
+    event = CashCollectionEvent(
+        customer_id=sample_user.id,
+        order_id=this_order.id,
+        amount=Decimal('13000.00'),
+        currency='UZS',
+        source=CashCollectionSource.DELIVERY_COMPLETION,
+        occurred_at=datetime.now(UTC),
+        unapplied_amount=Decimal('0.00'),
+    )
+    db.session.add(event)
+    db.session.flush()
+    db.session.add_all(
+        [
+            CashCollectionAllocation(
+                cash_collection_event_id=event.id,
+                payment_id=this_payment.id,
+                order_id=this_order.id,
+                allocated_amount=Decimal('10000.00'),
+                allocation_order=1,
+                allocation_mode='auto',
+            ),
+            CashCollectionAllocation(
+                cash_collection_event_id=event.id,
+                payment_id=debt_payment.id,
+                order_id=debt_order.id,
+                allocated_amount=Decimal('2000.00'),
+                allocation_order=2,
+                allocation_mode='auto',
+            ),
+            CashCollectionAllocation(
+                cash_collection_event_id=event.id,
+                payment_id=pending_payment.id,
+                order_id=pending_order.id,
+                allocated_amount=Decimal('1000.00'),
+                allocation_order=3,
+                allocation_mode='prepaid_reservation',
+            ),
+        ]
+    )
+    db.session.commit()
+
+    service = NotificationService()
+    service.telegram_bot_token = 'test-token'
+    text = _send_and_capture_telegram_text(monkeypatch, service, this_payment.id)
+
+    assert 'Amount: 13,000 UZS' in text
+    assert 'TG_CASE_C2_OLD_26' in text
+    assert '2,000' in text
+    assert 'saved as credit' in text
+    assert '1,000' in text
+
+
+def test_payment_confirmation_case_d_shortfall_states_received_and_next_delivery(app, db, sample_user, monkeypatch):
+    """Case D: collected < order total. State what was received and that the
+    remainder is collected on the next delivery — the debt is disclosed NOW,
+    not silently deferred to the customer's next checkout."""
+    sample_user.telegram_id = '810000005'
+    sample_user.preferred_language = 'en'
+    db.session.commit()
+    _seed_cash_payment_method_label(db, 'en')
+
+    order, payment = _make_cod_order_and_payment(
+        db, sample_user, order_number='TG_CASE_D_26', total_amount=Decimal('25000.00'),
+    )
+    payment.amount_collected = Decimal('18000.00')
+    payment.outstanding_amount = Decimal('7000.00')
+    payment.status = PaymentStatus.COMPLETED
+    payment.collected_by = sample_user.id
+    db.session.commit()
+
+    event = CashCollectionEvent(
+        customer_id=sample_user.id,
+        order_id=order.id,
+        amount=Decimal('18000.00'),
+        currency='UZS',
+        source=CashCollectionSource.DELIVERY_COMPLETION,
+        occurred_at=datetime.now(UTC),
+        unapplied_amount=Decimal('0.00'),
+    )
+    db.session.add(event)
+    db.session.flush()
+    db.session.add(
+        CashCollectionAllocation(
+            cash_collection_event_id=event.id,
+            payment_id=payment.id,
+            order_id=order.id,
+            allocated_amount=Decimal('18000.00'),
+            allocation_order=1,
+            allocation_mode='auto',
+        )
+    )
+    db.session.commit()
+
+    service = NotificationService()
+    service.telegram_bot_token = 'test-token'
+    text = _send_and_capture_telegram_text(monkeypatch, service, payment.id)
+
+    assert 'Amount: 18,000 UZS' in text
+    assert '7,000' in text
+    assert 'next delivery' in text
+    # The payment is PARTIALLY_PAID, not COMPLETED — "Payment Confirmed!" would
+    # be false when a balance remains, so the shortfall case gets its own,
+    # equally short header instead.
+    assert 'Payment Received!' in text
+    assert 'Payment Confirmed!' not in text

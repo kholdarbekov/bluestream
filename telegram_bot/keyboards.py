@@ -695,24 +695,24 @@ class OrderKeyboards:
 
     @staticmethod
     def payment_methods(methods: List[Dict], language: str = 'en') -> InlineKeyboardMarkup:
-        """Payment method selection"""
-        buttons = []
+        """Payment method selection.
 
-        # Payment method icons
-        icons = {
-            'cash': '💵',
-            'card': '💳',
-            'click': '💳',
-            'payme': '💳',
-            'business_account': '🏦'
-        }
-
-        for method in methods:
-            icon = icons.get(method['type'], '💳')
-            buttons.append([{
-                'text': f"{icon} {method['name']}",
+        `method['name']` is already the full button label — icon included.
+        It comes from `payment_methods.build_payment_method_buttons`, which
+        reads `telegram.payment_cash` / `telegram.payment_card` /
+        `telegram.payment_business_account` (each seeded with its own emoji),
+        and `orders._show_payment_picker` may additionally append a discount
+        suffix (e.g. "−3% 🏷") onto the cash entry before calling this.
+        Prepending a SECOND icon here used to double it — 💵💰 Naqd pul,
+        💳💳 Karta — so the translation is now the single source of the icon.
+        """
+        buttons = [
+            [{
+                'text': method['name'],
                 'callback_data': f"payment_{method['type']}"
-            }])
+            }]
+            for method in methods
+        ]
 
         buttons.append([{
             'text': i18n.get('telegram.back', language),

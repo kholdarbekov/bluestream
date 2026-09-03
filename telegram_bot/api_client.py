@@ -778,6 +778,17 @@ class BusinessAPIClient:
                                         params=params,
                                         user_token=user_token)
 
+    async def estimate_cart(self, user_token: str, estimate_data: Dict) -> APIResponse:
+        """The server's price quote for a basket on a given payment rail.
+
+        The bot renders this VERBATIM — it is the only place checkout money
+        comes from. `/api/v1/orders/cart/estimate` and `/api/v1/cart/estimate`
+        reach the same `CartService.calculate_cart_estimate`; this is the one
+        the design names as the single quote surface.
+        """
+        return await self._make_request('POST', '/api/v1/orders/cart/estimate',
+                                        user_token=user_token, data=estimate_data)
+
     async def create_payment(self, user_token: str, payment_data: Dict) -> APIResponse:
         """Create payment for order"""
         return await self._make_request('POST', '/api/v1/payments/create',

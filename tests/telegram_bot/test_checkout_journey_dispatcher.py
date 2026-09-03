@@ -134,6 +134,15 @@ PRODUCTS = {
 # that does not exist.
 TRANSLATIONS = {
     "telegram.orders.grand_total": "Grand total: {amount} UZS",
+    "telegram.orders.estimate_tier_line": "{tier_name} discount -{percentage}%: -{amount} UZS",
+    # `{icon}` replaced `{method}` (owner screenshot review): the rail's name
+    # is already stated on the confirmation screen's "Payment method" line
+    # above, so the payable line carries only the icon that ties to it.
+    "telegram.orders.estimate_payable": "{icon} To pay: {amount} UZS",
+    # The payment-method PICKER's neutral total — basket plus the plain,
+    # undiscounted figure, shown before any rail (and its discount) is chosen.
+    "telegram.orders.estimate_neutral_total": "Total: {amount} UZS",
+    "telegram.orders.estimate_cod_savings": "Pay cash and save {amount} UZS",
     "telegram.orders.delivery_fee": "Delivery: {amount} UZS",
     "telegram.cart_min_order_warning": "Minimum {min_amount} UZS. Add {remaining} UZS more",
     "telegram.cart_min_qty_warning": "{product_name}: minimum {min_qty}, add {remaining}",
@@ -161,8 +170,12 @@ TRANSLATIONS = {
     # ones every other test reads, so a leak in either direction is visible.
     ("uz", "telegram.orders.select_payment"): "To'lov usulini tanlang",
     ("ru", "telegram.orders.select_payment"): "Выберите способ оплаты",
-    ("uz", "telegram.payment_cash"): "Naqd pul",
-    ("ru", "telegram.payment_cash"): "Наличные",
+    # Real production copy carries its own icon now (the keyboard no longer
+    # prepends a second one — the double-icon bug this task fixed).
+    ("uz", "telegram.payment_cash"): "💰 Naqd pul",
+    ("ru", "telegram.payment_cash"): "💰 Наличные",
+    ("uz", "telegram.payment_card"): "💳 Karta",
+    ("ru", "telegram.payment_card"): "💳 Карта",
     ("uz", "telegram.orders.confirmation_title"): "Buyurtmani tasdiqlang",
     ("ru", "telegram.orders.confirmation_title"): "Подтвердите заказ",
 }
@@ -192,6 +205,11 @@ class Shop:
         # comments in products.py / orders.py exist for.
         self.line_total_overrides: dict[int, float] = {}
         self.subtotal_override: float | None = None
+
+        # The server's quote. Overridable so a test can put a customer in a
+        # discounting tier without standing up the whole loyalty schema — the
+        # SHAPE is what the bot is being driven against here.
+        self.estimate_pricing: dict = {}
 
         self.available_methods = [
             {"method": "cash", "is_active": True},
@@ -242,6 +260,7 @@ class Shop:
         route("POST", "/api/v1/cart/clear", self._clear)
         route("GET", "/api/v1/payments/methods", self._payment_methods)
         route("POST", "/api/v1/orders", self._create_order)
+        route("POST", "/api/v1/orders/cart/estimate", self._estimate)
         route("POST", "/api/v1/payments/create", self._create_payment)
 
         for category in self.categories:
@@ -320,6 +339,43 @@ class Shop:
             "data": {
                 "available_methods": self.available_methods,
                 "payment_restrictions": self.payment_restrictions,
+            }
+        }
+
+    def _estimate(self, call):
+        """`CartService.calculate_cart_estimate`'s payload shape, priced by the
+        SERVER — the bot may only read these numbers, never compute them."""
+        cart = self.cart_envelope()["data"]["cart"]
+        subtotal = float(cart["subtotal"])
+        pricing = {
+            "items_subtotal": subtotal,
+            "delivery_fee": 0.0,
+            "promo_discount": 0.0,
+            "discount_amount": 0.0,
+            "loyalty_discount": 0.0,
+            "tier_discount": 0.0,
+            "tier_name": None,
+            "tier_discount_percentage": 0.0,
+            "cod_savings": 0.0,
+            "payment_method": (call.data or {}).get("payment_method"),
+            "total_discount": 0.0,
+            "total_before_discount": subtotal,
+            "final_total": subtotal,
+        }
+        pricing.update(self.estimate_pricing)
+        return {
+            "data": {
+                "items": [
+                    {
+                        "product_id": item["product_id"],
+                        "product_name": self.products[item["product_id"]]["name"],
+                        "quantity": item["quantity"],
+                        "unit_price": float(self.products[item["product_id"]]["pricing"]["current_price"]),
+                        "subtotal": float(item["total_price"]),
+                    }
+                    for item in cart["cart_items"]
+                ],
+                "pricing": pricing,
             }
         }
 
@@ -787,8 +843,14 @@ async def test_the_payment_picker_offers_exactly_the_rails_the_backend_enabled(
 
     picker = bot.telegram.last_shown()
     assert picker.callback_data() == ["payment_cash", "payment_card", "back_to_delivery"]
-    assert picker.button_labels() == ["💵 Naqd pul", "💳 Payment card", "Back"]
-    assert picker.text == "To'lov usulini tanlang"
+    assert picker.button_labels() == ["💰 Naqd pul", "💳 Karta", "Back"], (
+        "each button must carry exactly ONE icon — the translation's own, "
+        "never a second one the keyboard used to prepend"
+    )
+    # Owner screenshot review: the message body stays NEUTRAL now — basket
+    # plus the plain, undiscounted total, no rail assumed.
+    assert picker.text.startswith("To'lov usulini tanlang")
+    assert "Total: 45,000 UZS" in picker.text, picker.text
 
 
 async def test_a_cod_cap_explains_itself_without_leaking_an_unseeded_key_as_english(
@@ -821,6 +883,167 @@ async def test_a_cod_cap_explains_itself_without_leaking_an_unseeded_key_as_engl
         "an unseeded key leaked to the customer as English debug text"
     )
     assert picker.text.endswith("Cash is unavailable: 3 unpaid orders")
+
+
+async def test_the_cash_buttons_discount_suffix_comes_off_the_neutral_screens_own_quote(
+    bot, shop, user
+):
+    """Owner screenshot review: the discount now lives on the CASH BUTTON, not
+    the message body. The body must stay neutral — never quoting a discounted
+    total before the rail is even chosen — while the button names the percent
+    that makes cash cheaper, read off the SAME quote the neutral total used."""
+    add_address(bot, 900, "Uy", "Chilonzor 15")
+    shop.estimate_pricing = {
+        "tier_discount": 1800.0,
+        "tier_name": "Nimbus",
+        "tier_discount_percentage": 4.0,
+        "final_total": 43200.0,
+    }
+
+    await fill_cart(bot, user, BOTTLE_19L, quantity=3)
+    await reach_payment_picker(bot, user, 900)
+
+    picker = bot.telegram.last_shown()
+    assert "Nimbus" not in picker.text, picker.text
+    assert "To pay" not in picker.text, picker.text
+    assert "Total: 45,000 UZS" in picker.text, (
+        "the body must show the UNDISCOUNTED basket total, never the "
+        f"cash-discounted 43,200: {picker.text!r}"
+    )
+    assert "💰 Naqd pul −4% 🏷" in picker.button_labels(), picker.button_labels()
+    assert "payment_cash" in picker.callback_data()
+    assert_no_swallowed_crash(bot)
+
+
+async def test_the_cash_buttons_discount_suffix_renders_a_fractional_rate(
+    bot, shop, user
+):
+    """The percentage is never assumed to be a whole number — production
+    tiers are admin-configured and can land on a fractional rate."""
+    add_address(bot, 900, "Uy", "Chilonzor 15")
+    shop.estimate_pricing = {
+        "tier_discount": 900.0,
+        "tier_name": "Nimbus",
+        "tier_discount_percentage": 2.5,
+        "final_total": 44100.0,
+    }
+
+    await fill_cart(bot, user, BOTTLE_19L, quantity=3)
+    await reach_payment_picker(bot, user, 900)
+
+    picker = bot.telegram.last_shown()
+    assert "💰 Naqd pul −2.5% 🏷" in picker.button_labels(), picker.button_labels()
+
+
+async def test_the_cash_button_carries_no_suffix_when_the_tier_discount_is_zero(
+    bot, shop, user
+):
+    """Change 3 pin (surface: bot payment-picker button suffix,
+    telegram_bot/handlers/orders.py ~1117). A customer whose tier carries no
+    discount — a 0% tier, or a loyalty-ineligible entity — reaches this
+    screen with `tier_discount` and `tier_discount_percentage` already zeroed
+    by `LoyaltyService.quote_tier_discount` (both shapes are proven to zero
+    it in tests/integration/test_tier_discount_order_creation.py's
+    test_zero_percent_tier_grants_nothing and
+    test_ineligible_entity_gets_nothing_even_on_cash — this bot cannot see
+    WHY the number is zero, only that it is). The cash button must render
+    exactly its plain label: no "−", no "%", no "🏷", no stray trailing
+    space from an empty suffix."""
+    add_address(bot, 900, "Uy", "Chilonzor 15")
+    shop.estimate_pricing = {
+        "tier_discount": 0.0,
+        "tier_name": None,
+        "tier_discount_percentage": 0.0,
+        "final_total": 45000.0,
+    }
+
+    await fill_cart(bot, user, BOTTLE_19L, quantity=3)
+    await reach_payment_picker(bot, user, 900)
+
+    picker = bot.telegram.last_shown()
+    assert "💰 Naqd pul" in picker.button_labels(), picker.button_labels()
+    cash_label = next(label for label in picker.button_labels() if "Naqd" in label)
+    assert cash_label == "💰 Naqd pul", cash_label
+    assert_no_swallowed_crash(bot)
+
+
+async def test_the_cash_confirm_screen_shows_no_tier_line_when_the_tier_discount_is_zero(
+    bot, shop, user
+):
+    """Change 3 pin (surface: bot confirmation tier line,
+    telegram_bot/handlers/orders.py ~277, `_build_estimate_block`). Same
+    zeroed shape as the button-suffix pin above, but on the CASH rail's own
+    confirmation screen — the one screen where a tier line WOULD render if
+    the gate were missing. `telegram.orders.estimate_tier_line` is the only
+    seeded copy containing the word "discount" in this fake translation
+    table, so its absence is a direct proxy for the line never having
+    rendered."""
+    add_address(bot, 900, "Uy", "Chilonzor 15")
+    shop.estimate_pricing = {
+        "tier_discount": 0.0,
+        "tier_name": None,
+        "tier_discount_percentage": 0.0,
+        "final_total": 45000.0,
+    }
+
+    await fill_cart(bot, user, BOTTLE_19L, quantity=3)
+    await reach_confirmation(bot, user, 900, payment="cash")
+
+    screen = bot.telegram.last_shown()
+    assert "discount" not in screen.text.lower(), screen.text
+    assert_no_swallowed_crash(bot)
+
+
+async def test_the_picker_quotes_no_cash_price_when_cash_is_not_on_offer(
+    bot, shop, user
+):
+    """Quoting a rail the COD cap has already removed is a promise the write
+    path will refuse. When Cash is gone the block goes with it."""
+    add_address(bot, 900, "Uy", "Chilonzor 15")
+    shop.available_methods = [{"method": "click", "is_active": True}]
+    shop.payment_restrictions = {"cod_restricted": True, "active_cod_debt_count": 3}
+    shop.estimate_pricing = {
+        "tier_discount": 1800.0, "tier_name": "Nimbus",
+        "tier_discount_percentage": 4.0, "final_total": 43200.0,
+    }
+
+    await fill_cart(bot, user, BOTTLE_19L, quantity=3)
+    await reach_payment_picker(bot, user, 900)
+
+    picker = bot.telegram.last_shown()
+    assert "payment_cash" not in picker.callback_data()
+    assert "Nimbus" not in picker.text, (
+        "a cash price was quoted to a customer who cannot choose cash"
+    )
+    assert "Total:" not in picker.text, picker.text
+
+
+async def test_the_card_confirm_screen_no_longer_pitches_the_cash_saving(
+    bot, shop, user
+):
+    """Owner screenshot review: the card confirm screen used to ALSO name what
+    cash would have saved (`cod_savings`). That pitch now lives on the
+    picker's cash button, a screen earlier, where the choice is still open —
+    not here, after it is already made."""
+    add_address(bot, 900, "Uy", "Chilonzor 15")
+    shop.estimate_pricing = {
+        "tier_discount": 0.0,
+        "tier_name": "Nimbus",
+        "tier_discount_percentage": 4.0,
+        "cod_savings": 1800.0,
+        "final_total": 45000.0,
+    }
+
+    await fill_cart(bot, user, BOTTLE_19L, quantity=3)
+    await reach_confirmation(bot, user, 900, payment="card")
+
+    screen = bot.telegram.last_shown()
+    assert "💳 To pay: 45,000 UZS" in screen.text, screen.text
+    assert "Pay cash and save" not in screen.text, screen.text
+    assert "Nimbus discount" not in screen.text, (
+        "a fiscalized rail earns no discount; showing the line would be a lie"
+    )
+    assert_no_swallowed_crash(bot)
 
 
 @pytest.mark.parametrize("tapped, posted_method", [
@@ -1299,7 +1522,9 @@ async def test_editing_the_cart_from_the_confirmation_screen_returns_with_the_ne
     add_address(bot, 900, "Uy", "Chilonzor 15")
     await fill_cart(bot, user, BOTTLE_19L, quantity=3)
     await reach_confirmation(bot, user, 900, payment="cash")
-    assert "Grand total: 45,000 UZS" in bot.telegram.last_shown().text
+    # The confirm screen's money now comes from the quote block's payable
+    # line, not a separately-rendered "Grand total".
+    assert "💰 To pay: 45,000 UZS" in bot.telegram.last_shown().text
 
     await bot.send(user.tap("edit_order"))
     edit_screen = bot.telegram.last_shown()
@@ -1313,7 +1538,7 @@ async def test_editing_the_cart_from_the_confirmation_screen_returns_with_the_ne
 
     await bot.send(user.tap("back_to_order_confirm"))
     confirmation = bot.telegram.last_shown()
-    assert "Grand total: 60,000 UZS" in confirmation.text
+    assert "💰 To pay: 60,000 UZS" in confirmation.text
     assert "Uy" in confirmation.text, "the address chosen before the detour was lost"
 
     await bot.send(user.tap("confirm_order"))
@@ -1356,7 +1581,8 @@ async def test_switching_language_mid_checkout_renders_the_next_screen_in_the_ne
     add_address(bot, 900, "Uy", "Chilonzor 15")
     await fill_cart(bot, user, BOTTLE_19L, quantity=3)
     await reach_payment_picker(bot, user, 900)
-    assert bot.telegram.last_shown().text == "To'lov usulini tanlang"
+    # The picker legitimately says more now: cash is on offer, so it quotes it.
+    assert bot.telegram.last_shown().text.startswith("To'lov usulini tanlang")
 
     bot.database.user["preferred_language"] = "ru"
 

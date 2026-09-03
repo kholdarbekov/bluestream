@@ -148,6 +148,7 @@ def get_payment_methods():
         current_user_id = get_jwt_identity()
         from business_app.services.cash_collection_service import CashCollectionService
         from business_app.services.payment_service import PaymentContext
+        from business_app.utils.cod_cap import strip_place_scope_money_for_customer
 
         user = User.query.get(current_user_id)
         if not user:
@@ -192,7 +193,10 @@ def get_payment_methods():
         return success_response(
             data={
                 "available_methods": available_methods,
-                "payment_restrictions": cod_context,
+                # Customer-facing: the place-scope NET total is a coworker's
+                # money at a shared address, never this customer's — strip it
+                # before it leaves the server (spec §7).
+                "payment_restrictions": strip_place_scope_money_for_customer(cod_context),
                 "saved_cards": [serialize_credit_card(card) for card in saved_cards],
             }
         )

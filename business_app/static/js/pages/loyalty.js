@@ -37,7 +37,7 @@
             var result = await response.json();
 
             if (response.ok && result.success) {
-                renderMembershipTiers(result.data.tiers);
+                renderMembershipTiers(result.data.tiers, result.data.tier_discount_condition);
             } else {
                 container.innerHTML = '<div class="col-12 text-center py-4"><p class="text-muted">' + escapeHtml(PAGE_DATA.i18n.tiers_failed) + '</p></div>';
             }
@@ -47,7 +47,10 @@
         }
     }
 
-    function renderMembershipTiers(tiers) {
+    // `discountCondition` is a preformatted, already-translated sentence from
+    // GET /loyalty/tiers. The rate is a COD-rail benefit; the browser never
+    // holds its own copy of that rule.
+    function renderMembershipTiers(tiers, discountCondition) {
         var container = document.getElementById('membershipTiersContainer');
 
         if (!tiers || tiers.length === 0) {
@@ -72,7 +75,11 @@
 
             var discountBlock = tier.discount_percentage > 0
                 ? '<div class="tier-discount" style="color: ' + escapeHtml(color) + ';">' +
-                  '<i class="far fa-tag"></i> ' + escapeHtml(String(tier.discount_percentage)) + '% ' + escapeHtml(PAGE_DATA.i18n.discount) + '</div>'
+                  '<i class="far fa-tag"></i> ' + escapeHtml(String(tier.discount_percentage)) + '% ' + escapeHtml(PAGE_DATA.i18n.discount) +
+                  (discountCondition
+                      ? '<small class="d-block text-muted">' + escapeHtml(discountCondition) + '</small>'
+                      : '') +
+                  '</div>'
                 : '';
 
             return '<div class="col-md-3">' +

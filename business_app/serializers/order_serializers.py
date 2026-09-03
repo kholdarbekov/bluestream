@@ -110,8 +110,9 @@ class OrderSchema(BaseModel):
     subtotal_amount: MoneyFloat
     tax_amount: MoneyFloat = Field(default=0)
     delivery_fee: MoneyFloat = Field(default=0)
-    discount_amount: MoneyFloat = Field(default=0)
-    loyalty_discount: MoneyFloat = Field(default=0)
+    discount_amount: MoneyFloat = Field(default=0)  # subscription %
+    loyalty_discount: MoneyFloat = Field(default=0)  # redeemed reward
+    tier_discount: MoneyFloat = Field(default=0)  # loyalty tier, COD rail only
     total_amount: MoneyFloat
 
     # Order details
@@ -205,7 +206,17 @@ class CartEstimateRequest(BaseModel):
     delivery_date: Optional[date] = None
     delivery_window: Optional[Dict[str, Any]] = None
     loyalty_points_used: int = Field(default=0, ge=0)
-    promo_code: Optional[str] = None
+    # promo_code deliberately NOT accepted here (F3, 2026-08-27): this route is
+    # @jwt_required only, so any authenticated customer could set it, and
+    # OrderService.create_order never applies a promo code -- it only reads
+    # one for a reward/promo mutual-exclusion guard. A quote surface that
+    # priced a discount the charge path will not honour quoted lower than it
+    # charges. CreateOrderRequest.promo_code (below) is unaffected: it is not
+    # priced there either, so it carries no such risk.
+    # The RAIL is priced, not just recorded: the tier discount attaches to COD
+    # only, so a quote taken without one cannot answer "what will I pay".
+    payment_method: Optional[str] = None
+    reward_id: Optional[int] = None
 
 
 class CartEstimateResponse(BaseModel):
@@ -325,6 +336,7 @@ def serialize_order(order: Order, include_items=False, include_delivery=False, i
             "delivery_fee": float(getattr(order, "delivery_fee", 0)),
             "discount_amount": float(getattr(order, "discount_amount", 0)),
             "loyalty_discount": float(getattr(order, "loyalty_discount", 0)),
+            "tier_discount": float(getattr(order, "tier_discount", 0) or 0),
             "total_amount": float(order.total_amount),
             "is_urgent": getattr(order, "is_urgent", False),
             "order_source": getattr(order, "order_source", "web"),

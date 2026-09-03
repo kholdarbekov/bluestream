@@ -19,7 +19,7 @@ from api_client import api_client
 from database import db_manager, BotUserRepository
 from utils import user_middleware, format_price, MessageBuilder, get_auth_token, arm_location_request
 from shared.constants import ORDER_STATUS_ICONS, DEFAULT_STATUS_ICON, DISPLAY_TIMEZONE
-from shared.business_config import MIN_ORDER_AMOUNT
+from shared.business_config import COD_DEBT_AMOUNT_THRESHOLD, MIN_ORDER_AMOUNT
 from handlers.base import BaseHandler
 from handlers.products import product_handlers
 
@@ -30,6 +30,29 @@ logger = logging.getLogger('handlers')
 # keeps one shared workplace from pushing the orders menu past Telegram's
 # 4096-character message limit.
 _PLACE_ITEM_LIMIT = 10
+
+
+def _format_rate(value) -> str:
+    """Render an admin-configured rate without inventing precision.
+
+    4.0 -> '4', 2.5 -> '2.5'. Presentation only: the rate itself is never
+    computed here, it is echoed from LoyaltyTierConfig.discount_percentage.
+    """
+    return '%g' % float(value or 0)
+
+
+# The icon fronting the confirmation screen's payable line. Presentation
+# only, same class of constant as the emoji already baked into
+# telegram.payment_cash / _card / _business_account — never business data.
+# The rail name itself is stated two lines above (telegram.orders.payment_info)
+# so the payable line no longer repeats it in a parenthetical; the icon is
+# what ties the two lines together instead.
+_PAYABLE_ICONS = {
+    'cash': '💰',
+    'card': '💳',
+    'business_account': '🏦',
+    'payme': '💳',
+}
 
 
 def _cancel_confirmation_callback(order_id: int, decision: str) -> str:
@@ -180,6 +203,117 @@ class OrderHandlers(BaseHandler):
         return build_payment_method_buttons(available_methods, language)
 
     @staticmethod
+    def _order_items_from_cart(cart: Dict[str, Any]) -> List[Dict[str, int]]:
+        """The `items` payload — ONE expression, shared by the QUOTE and the ORDER.
+
+        A quote taken for a different basket than the one posted disagrees with
+        the charge by construction, so both callers read this.
+        """
+        return [
+            {'product_id': item['product']['id'], 'quantity': item['quantity']}
+            for item in (cart.get('cart_items') or [])
+        ]
+
+    @staticmethod
+    def _payment_method_label(payment_method: str, language: str) -> str:
+        """The customer-facing name of a rail. One map, two screens."""
+        labels = {
+            'cash': i18n.get('telegram.payment_cash', language),
+            'card': i18n.get('telegram.payment_card', language),
+            'payme': i18n.get('telegram.payment_payme', language),
+            'business_account': i18n.get('telegram.payment_business_account', language),
+        }
+        return labels.get(payment_method, i18n.get('telegram.common.unknown', language))
+
+    @staticmethod
+    def _build_estimate_block(
+        estimate: Dict[str, Any], payment_method: str, language: str, *, neutral: bool = False,
+    ) -> str:
+        """The one money block both checkout screens render.
+
+        🔴 NOTHING HERE ADDS, MULTIPLIES OR ROUNDS. Every figure is read out of
+        `CartService.calculate_cart_estimate`, which already knows the rail, the
+        reward and the tier. A second expression of the total is the defect this
+        block exists to prevent — see
+        tests/integration/test_checkout_total_is_server_authoritative.py.
+
+        Returns "" when there is no quote, so a screen goes QUIET rather than
+        showing a number no server stands behind.
+
+        ``neutral=True`` is the payment-method PICKER's shape (owner screenshot
+        review): item lines plus the plain, undiscounted total — no discount
+        lines and no per-method payable line. The discount is stated on the
+        cash BUTTON instead (`_show_payment_picker` decorates it there, off the
+        SAME quote), so restating it in the message body would be one fact
+        shown twice, and worse, pre-assumes the rail before it is chosen.
+        """
+        pricing = (estimate or {}).get('pricing') or {}
+        if not pricing:
+            return ""
+
+        lines = []
+        for line in (estimate.get('items') or []):
+            lines.append("• {name} × {qty} — {amount} UZS".format(
+                name=line.get('product_name', ''),
+                qty=line.get('quantity', 1),
+                amount=format_price(float(line.get('subtotal') or 0)),
+            ))
+
+        if not neutral:
+            # Subscription → reward → tier. Each is semantically distinct and
+            # the customer should see the tier line specifically.
+            discount_amount = float(pricing.get('discount_amount') or 0)
+            if discount_amount > 0:
+                lines.append(i18n.get(
+                    'telegram.orders.estimate_discount_line', language,
+                    amount=format_price(discount_amount),
+                ))
+            loyalty_discount = float(pricing.get('loyalty_discount') or 0)
+            if loyalty_discount > 0:
+                lines.append(i18n.get(
+                    'telegram.orders.estimate_reward_line', language,
+                    amount=format_price(loyalty_discount),
+                ))
+            tier_discount = float(pricing.get('tier_discount') or 0)
+            if tier_discount > 0:
+                lines.append(i18n.get(
+                    'telegram.orders.estimate_tier_line', language,
+                    tier_name=pricing.get('tier_name') or '',
+                    percentage=_format_rate(pricing.get('tier_discount_percentage')),
+                    amount=format_price(tier_discount),
+                ))
+
+        delivery_fee = float(pricing.get('delivery_fee') or 0)
+        if delivery_fee > 0:
+            lines.append(i18n.get(
+                'telegram.orders.delivery_fee', language,
+                amount=format_price(delivery_fee),
+            ))
+
+        lines.append("────────────────")
+        if neutral:
+            lines.append(i18n.get(
+                'telegram.orders.estimate_neutral_total', language,
+                amount=format_price(float(pricing.get('total_before_discount') or 0)),
+            ))
+        else:
+            lines.append(i18n.get(
+                'telegram.orders.estimate_payable', language,
+                icon=_PAYABLE_ICONS.get(payment_method, '💳'),
+                amount=format_price(float(pricing.get('final_total') or 0)),
+            ))
+            # The cash-savings motivator ("pay cash and save N") used to render
+            # here on the CARD confirm screen, off `pricing['cod_savings']`.
+            # Owner screenshot review: it now lives on the picker's cash
+            # BUTTON, one screen earlier where the rail choice is actually
+            # made — a screen after that choice is final is not where a "you
+            # could have saved" pitch belongs. `telegram.orders.
+            # estimate_cod_savings` is therefore unused by this file; its
+            # seed row is left in place.
+
+        return "\n".join(lines)
+
+    @staticmethod
     def _cod_restriction_notice(restrictions: Dict[str, Any], language: str) -> str:
         # The cap has two arms (spec 5.5): the orderer's own linked cluster is
         # at the limit ('person'), or the grouped WORKPLACE this order ships to
@@ -204,6 +338,28 @@ class OrderHandlers(BaseHandler):
             # that exists but is empty/blank-seeded.
             if place_notice and place_notice != i18n.humanised_missing_key(place_key):
                 return place_notice
+        elif restrictions.get('restriction_scope') == 'person':
+            # Task 30A: the COUNT is not actionable — a customer cannot
+            # "reduce" a count directly — the AMOUNT is, so a genuine
+            # person-arm block names the customer's OWN balance against the
+            # live threshold. Unlike the place arm above this is the
+            # customer's own money, so stating it never crosses the spec §7
+            # privacy boundary.
+            net_debt_total = restrictions.get('cluster_net_open_cod_debt_total')
+            if net_debt_total is not None:
+                person_key = 'telegram.orders.cod_restricted_person'
+                person_notice = i18n.get(
+                    person_key,
+                    language,
+                    net_debt_total=format_price(net_debt_total),
+                    threshold=format_price(COD_DEBT_AMOUNT_THRESHOLD),
+                )
+                # Same unseeded-key guard as the place key above: this key is
+                # NEW, so an environment where its seed has not run degrades
+                # to the always-seeded count-based copy below instead of
+                # leaking raw English.
+                if person_notice and person_notice != i18n.humanised_missing_key(person_key):
+                    return person_notice
         active_debt_count = restrictions.get('active_cod_debt_count') or 0
         if active_debt_count:
             return i18n.get(
@@ -896,11 +1052,27 @@ class OrderHandlers(BaseHandler):
                 await self._handle_api_error(update, response.error, language)
                 return
 
-        payment_payload = response.data.get('data', {})
-        payment_methods = self._build_checkout_payment_methods(
-            payment_payload.get('available_methods', []),
-            language,
-        )
+            payment_payload = response.data.get('data', {})
+            payment_methods = self._build_checkout_payment_methods(
+                payment_payload.get('available_methods', []),
+                language,
+            )
+
+            # What cash COSTS, shown where the rail is actually chosen. Quoted
+            # only when cash is on offer: pricing a rail the COD cap has already
+            # removed is a promise `create_order` would refuse.
+            cash_estimate = None
+            if any(button['type'] == 'cash' for button in payment_methods):
+                cart_resp = await client.get_cart(user_token)
+                cart_payload = (cart_resp.data or {}).get('data', {}).get('cart') if cart_resp.success else None
+                if cart_payload and cart_payload.get('cart_items'):
+                    estimate_resp = await client.estimate_cart(user_token, {
+                        'items': self._order_items_from_cart(cart_payload),
+                        'delivery_address_id': selected_address_id,
+                        'payment_method': 'cash',
+                    })
+                    if estimate_resp.success:
+                        cash_estimate = (estimate_resp.data or {}).get('data')
 
         # Pre-select the business-account default (Plan 3): if the API flags a
         # default method for this cart, seed it so the customer sees it chosen.
@@ -925,9 +1097,31 @@ class OrderHandlers(BaseHandler):
             return
 
         payment_text = i18n.get('telegram.orders.select_payment', language)
+        # Owner screenshot review: the message body stays NEUTRAL now (basket
+        # plus the plain total, no rail assumed) — the discount moved onto the
+        # cash BUTTON below, so this is `neutral=True`, never the confirm
+        # screen's discounted rendering.
+        cash_block = self._build_estimate_block(cash_estimate, 'cash', language, neutral=True)
+        if cash_block:
+            payment_text += "\n\n" + cash_block
         restrictions = payment_payload.get('payment_restrictions') or {}
         if restrictions.get('cod_restricted'):
             payment_text += "\n\n" + self._cod_restriction_notice(restrictions, language)
+
+        # The cash button carries the discount suffix ("−3% 🏷") off the SAME
+        # quote the neutral block above just rendered — never re-derived. A
+        # Bronze/ineligible customer or a failed estimate leaves `tier_discount`
+        # at 0, so the button stays plain with no suffix and no stray
+        # separator.
+        cash_pricing = (cash_estimate or {}).get('pricing') or {}
+        tier_discount = float(cash_pricing.get('tier_discount') or 0)
+        if tier_discount > 0:
+            percentage = _format_rate(cash_pricing.get('tier_discount_percentage'))
+            for method in payment_methods:
+                if method['type'] == 'cash':
+                    method['name'] = f"{method['name']} −{percentage}% 🏷"
+                    break
+
         keyboard = OrderKeyboards.payment_methods(payment_methods, language)
 
         query = update.callback_query
@@ -1024,12 +1218,10 @@ class OrderHandlers(BaseHandler):
                     'delivery_address_id': address_id,
                     'payment_method': payment_method,
                     'source': 'telegram',
-                    'items': [
-                        {
-                            'product_id': item['product']['id'],
-                            'quantity': item['quantity'],
-                        } for item in cart['cart_items']
-                    ]
+                    # Same expression the QUOTE was taken for. A basket that is
+                    # quoted one way and posted another is a quoted total that
+                    # disagrees with the charge by construction.
+                    'items': self._order_items_from_cart(cart),
                 }
 
                 # Apply a loyalty reward selected via the loyalty rewards menu
@@ -1388,13 +1580,12 @@ class OrderHandlers(BaseHandler):
             # by `CartService.get_cart_summary` — one calculation, the same one
             # the order is built from. Read them; never re-multiply.
             # tests/integration/test_checkout_total_is_server_authoritative.py
-            confirmation_text += f"{i18n.get('telegram.orders.items_header', language)}:\n"
+            # The item lines are part of the QUOTE BLOCK now (one compact
+            # rendering, shared with the payment picker). This loop survives
+            # only for the per-product minimum check below.
             for item in cart.get('cart_items', []):
                 product_payload = item.get('product') or {}
                 quantity = item.get('quantity', 1)
-                confirmation_text += f"• {product_payload.get('name', unknown_text)} x{quantity}\n"
-                item_subtotal_price = float(item.get('total_price') or 0)
-                confirmation_text += f"  💰 {format_price(item_subtotal_price)} UZS\n\n"
 
                 # Per-product purchase minimum (mirrors backend rule).
                 inventory = product_payload.get('inventory') or {}
@@ -1407,7 +1598,8 @@ class OrderHandlers(BaseHandler):
                     })
 
             # A loyalty reward chosen from the rewards menu is applied server-side
-            # at order creation; fetch it here to preview it on this screen.
+            # at order creation; fetch it here to NAME it on this screen. Its
+            # money comes from the quote below, never from here.
             selected_reward_id = context.user_data.get('selected_reward_id')
             if selected_reward_id:
                 rewards_resp = await client.get_loyalty_rewards(user_token)
@@ -1416,6 +1608,17 @@ class OrderHandlers(BaseHandler):
                     selected_reward = next(
                         (r for r in _all_rewards if r.get('id') == selected_reward_id), None
                     )
+
+            # 🔴 THE MONEY. One server call, for the SAME basket confirm_order
+            # posts, on the SAME rail, with the SAME reward. Anything this screen
+            # computes for itself is a second answer to "how much".
+            estimate_resp = await client.estimate_cart(user_token, {
+                'items': self._order_items_from_cart(cart),
+                'delivery_address_id': context.user_data.get('selected_address_id'),
+                'payment_method': context.user_data.get('selected_payment_method'),
+                'reward_id': selected_reward_id,
+            })
+            estimate = (estimate_resp.data or {}).get('data') if estimate_resp.success else None
 
         # Add address info
         address_id = context.user_data.get('selected_address_id')
@@ -1428,60 +1631,45 @@ class OrderHandlers(BaseHandler):
         # Add payment method
         payment_method = context.user_data.get('selected_payment_method')
         if payment_method:
-            payment_method_labels = {
-                'cash': i18n.get('telegram.payment_cash', language),
-                'card': i18n.get('telegram.payment_card', language),
-                'payme': i18n.get('telegram.payment_payme', language),
-                'business_account': i18n.get('telegram.payment_business_account', language),
-            }
-            payment_method_label = payment_method_labels.get(
-                payment_method,
-                i18n.get('telegram.common.unknown', language)
-            )
+            payment_method_label = self._payment_method_label(payment_method, language)
             confirmation_text += f"{i18n.get('telegram.orders.payment_info', language)}: {payment_method_label}\n\n"
 
-        # Selected reward preview + its effect on the grand total. The backend
-        # (LoyaltyService.apply_reward_to_order) is authoritative; this mirrors the
-        # simple discount rule so the confirm screen matches the placed order. A
-        # discount only applies once the order meets the reward's min order value.
-        reward_discount = 0.0
+        # Selected reward — NAMED here, PRICED by the server. The arithmetic that
+        # used to live here mirrored the backend rule with Python's banker's
+        # `round()` against the backend's ROUND_HALF_UP, and re-derived a total
+        # the server never charged. Its money is `pricing.loyalty_discount`.
         if selected_reward:
             reward_name = selected_reward.get('name') or i18n.get('telegram.loyalty.reward_fallback', language)
-            reward_type = selected_reward.get('reward_type')
-            min_order_value = float(selected_reward.get('min_order_value') or 0)
             reward_label = i18n.get('telegram.loyalty.reward_applied', language)
-            if reward_type == 'discount' and cart_total_amount >= min_order_value:
-                discount_type = selected_reward.get('discount_type') or 'fixed'
-                discount_value = float(selected_reward.get('discount_value') or 0)
-                raw = (cart_total_amount * discount_value / 100.0) if discount_type == 'percentage' else discount_value
-                reward_discount = min(round(raw, 2), float(cart_total_amount))
-                confirmation_text += f"🎁 {reward_label}: {reward_name}\n   −{format_price(reward_discount)} UZS\n\n"
-            elif reward_type == 'free_product':
+            if selected_reward.get('reward_type') == 'free_product':
                 free_qty = int(selected_reward.get('free_product_quantity') or 1)
                 free_suffix = i18n.get('telegram.loyalty.free_suffix', language)
                 confirmation_text += f"🎁 {reward_label}: {reward_name} ({free_qty}× {free_suffix})\n\n"
             else:
                 confirmation_text += f"🎁 {reward_label}: {reward_name}\n\n"
 
-        # Add total amount
-        grand_total_amount = max(0.0, float(cart_total_amount) - reward_discount)
-        confirmation_text += f"💰 {i18n.get('telegram.total', language)}: {format_price(cart_total_amount)} UZS\n"
-        confirmation_text += f"🚚 {i18n.get('telegram.orders.delivery_fee', language, amount=0)}\n"
-        confirmation_text += "────────────────\n"
-        confirmation_text += f"💳 {i18n.get('telegram.orders.grand_total', language, amount=format_price(grand_total_amount))}"
+        # The money. The delivery fee used to be hardcoded to 0 here; it is now
+        # whatever `_calculate_delivery_fee` said for THIS address and date.
+        confirmation_text += self._build_estimate_block(estimate, payment_method, language)
 
         if payment_method == 'cash':
             cod_prepayment = cart.get('cod_prepayment') or {}
             available_balance = float(cod_prepayment.get('available_balance') or 0)
             if available_balance > 0:
-                potential_applied = float(
-                    cod_prepayment.get('potential_applied_amount')
-                    or min(available_balance, float(cart_total_amount))
-                )
-                payable_after = float(
-                    cod_prepayment.get('estimated_payable_after_prepayment')
-                    or max(0.0, float(cart_total_amount) - potential_applied)
-                )
+                # THE SAME QUOTE THE "To pay" LINE JUST SHOWED. `cart['cod_
+                # prepayment']` is CartService.get_cart_summary's figure, priced
+                # off `estimated_total` with every discount -- INCLUDING the
+                # tier discount -- zeroed (that call has no rail/reward
+                # context). Falling back to it here rendered an undiscounted
+                # "payable after prepayment" directly beneath a
+                # tier-discounted "To pay", two numbers apart by exactly the
+                # tier discount. `estimate['pricing']['final_total']` is the
+                # SAME server quote `_build_estimate_block` just rendered
+                # above; deriving off it instead keeps both lines one number.
+                estimate_pricing = (estimate or {}).get('pricing') or {}
+                payable_before_prepayment = float(estimate_pricing.get('final_total') or cart_total_amount)
+                potential_applied = min(available_balance, payable_before_prepayment)
+                payable_after = max(0.0, payable_before_prepayment - potential_applied)
                 confirmation_text += "\n\n"
                 confirmation_text += i18n.get(
                     'telegram.orders.cod_prepaid_balance',

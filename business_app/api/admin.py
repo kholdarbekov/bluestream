@@ -2559,6 +2559,9 @@ def get_order_details(order_id):
             "subtotal": float(getattr(order, "subtotal", order.total_amount)),
             "tax_amount": float(getattr(order, "tax_amount", 0)),
             "discount_amount": float(getattr(order, "discount_amount", 0)),
+            # Tier discount: granted at creation on the COD rail only, and zeroed
+            # if the order is later re-railed onto Click/Payme/card.
+            "tier_discount": float(getattr(order, "tier_discount", 0) or 0),
             "delivery_fee": float(getattr(order, "delivery_fee", 0)),
             "payment_method": order.payment_method.value if order.payment_method else None,
             "payment_status": (
@@ -7541,7 +7544,7 @@ def create_loyalty_tier_config():
         # Invalidate tier cache
         from business_app.utils.decorators import invalidate_cache
 
-        invalidate_cache("loyalty:tiers")
+        invalidate_cache("response:*:/api/v1/loyalty/tiers*")
 
         current_app.logger.info(f"Loyalty tier created: {tier.name} (ID: {tier.id})")
 
@@ -7613,7 +7616,7 @@ def update_loyalty_tier_config(tier_id):
         # Invalidate tier cache
         from business_app.utils.decorators import invalidate_cache
 
-        invalidate_cache("loyalty:tiers")
+        invalidate_cache("response:*:/api/v1/loyalty/tiers*")
 
         current_app.logger.info(f"Loyalty tier updated: {tier.name} (ID: {tier.id})")
 
@@ -7656,7 +7659,7 @@ def delete_loyalty_tier_config(tier_id):
         # Invalidate tier cache
         from business_app.utils.decorators import invalidate_cache
 
-        invalidate_cache("loyalty:tiers")
+        invalidate_cache("response:*:/api/v1/loyalty/tiers*")
 
         current_app.logger.info(f"Loyalty tier deleted: {tier_name} (ID: {tier_id})")
 

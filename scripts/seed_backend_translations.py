@@ -1512,6 +1512,14 @@ BACKEND_TRANSLATIONS = {
     # ============================================================================
     # API - Loyalty (api.loyalty.*)
     # ============================================================================
+    # Published by GET /api/v1/loyalty/tiers alongside each tier's rate, and
+    # rendered by /my-loyalty. No literal percentage: the rate is per-tier and
+    # comes from LoyaltyTierConfig.
+    'api.loyalty.tier_discount_condition': {
+        'en': 'Tier discounts apply to cash-on-delivery orders only — cash or a card transfer to the driver at the door. They do not apply to Click, Payme or online card payments.',
+        'uz': "Daraja chegirmalari faqat yetkazib berishda to'lanadigan buyurtmalarga qo'llaniladi — haydovchiga naqd yoki eshik oldida uning kartasiga o'tkazma. Click, Payme yoki onlayn karta to'lovlariga qo'llanilmaydi.",
+        'ru': 'Скидки уровня применяются только к заказам с оплатой при доставке — наличными или переводом на карту курьера у двери. К оплате через Click, Payme или банковской картой онлайн они не применяются.'
+    },
     'api.loyalty.points_earned': {
         'en': 'AquaCoins earned',
         'uz': 'AquaCoins hisobingizga qo‘shildi',
@@ -4259,6 +4267,73 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Umumiy summa: {amount} UZS',
         'ru': 'Итого к оплате: {amount} UZS'
     },
+
+    # Checkout quote block. Every figure is the server's; the RATE is always a
+    # parameter, never literal copy — see docs/superpowers/specs/
+    # 2026-08-27-loyalty-tier-cod-discount-design.md §2.
+    'telegram.orders.estimate_discount_line': {
+        'en': 'Discount: −{amount} UZS',
+        'uz': 'Chegirma: −{amount} UZS',
+        'ru': 'Скидка: −{amount} UZS'
+    },
+    'telegram.orders.estimate_reward_line': {
+        'en': 'Reward: −{amount} UZS',
+        'uz': 'Mukofot: −{amount} UZS',
+        'ru': 'Награда: −{amount} UZS'
+    },
+    'telegram.orders.estimate_tier_line': {
+        'en': '{tier_name} discount −{percentage}% 🏷 — −{amount} UZS',
+        'uz': '{tier_name} chegirma −{percentage}% 🏷 — −{amount} UZS',
+        'ru': 'Скидка {tier_name} −{percentage}% 🏷 — −{amount} UZS'
+    },
+    # `{icon}` is presentation, chosen by the rail (💰 cash / 💳 card /
+    # 🏦 bank transfer) — never the rail's NAME. The name is already stated
+    # two lines above (telegram.orders.payment_info), so repeating it here in
+    # a parenthetical read as redundant on the confirmation screen; the owner's
+    # screenshot review asked for the icon alone to tie the two lines together.
+    'telegram.orders.estimate_payable': {
+        'en': '{icon} To pay: {amount} UZS',
+        'uz': '{icon} To\'lash: {amount} UZS',
+        'ru': '{icon} К оплате: {amount} UZS'
+    },
+    # The payment-method PICKER's neutral total (owner screenshot review): the
+    # basket's plain, undiscounted total, shown before any rail is chosen —
+    # never the discounted `estimate_payable` figure.
+    'telegram.orders.estimate_neutral_total': {
+        'en': 'Total: {amount} UZS',
+        'uz': 'Jami: {amount} UZS',
+        'ru': 'Итого: {amount} UZS'
+    },
+    # UNUSED as of the owner's screenshot review: the card confirm screen no
+    # longer renders this pitch (it read as confusing after the rail was
+    # already chosen). The motivator now lives on the picker's cash BUTTON
+    # instead. Row left in place — seeding is a deploy step, not a code
+    # change, and this key stays harmless if some future screen wants it.
+    'telegram.orders.estimate_cod_savings': {
+        'en': '💵 Pay cash on delivery and save {amount} UZS',
+        'uz': '💵 Yetkazib berishda naqd to\'lasangiz {amount} UZS tejaysiz',
+        'ru': '💵 Оплатите наличными при доставке и сэкономьте {amount} UZS'
+    },
+
+    # Web checkout summary. These are English SOURCE strings: the `| t` filter in
+    # checkout.html looks the key up verbatim, so the row is what gives uz/ru.
+    'Discount': {
+        'en': 'Discount', 'uz': 'Chegirma', 'ru': 'Скидка'
+    },
+    'Reward discount': {
+        'en': 'Reward discount', 'uz': 'Mukofot chegirmasi', 'ru': 'Скидка по награде'
+    },
+    '{tier} discount ({percent}%)': {
+        'en': '{tier} discount ({percent}%)',
+        'uz': '{tier} chegirmasi ({percent}%)',
+        'ru': 'Скидка {tier} ({percent}%)'
+    },
+    'Pay cash on delivery and save {amount}': {
+        'en': 'Pay cash on delivery and save {amount}',
+        'uz': 'Yetkazib berishda naqd to\'lasangiz {amount} tejaysiz',
+        'ru': 'Оплатите наличными при доставке и сэкономьте {amount}'
+    },
+
     'telegram.orders.selected_address': {
         'en': 'Selected address #{address_id}',
         'uz': 'Tanlangan manzil #{address_id}',
@@ -5681,9 +5756,9 @@ BACKEND_TRANSLATIONS = {
         'ru': '💰 Наличными'
     },
     'telegram.payment_business_account': {
-        'en': 'Bank Transfer',
-        'uz': "Bank o'tkazmasi",
-        'ru': 'Банковский перевод'
+        'en': '🏦 Bank Transfer',
+        'uz': "🏦 Bank o'tkazmasi",
+        'ru': '🏦 Банковский перевод'
     },
     'telegram.payment_payme': {
         'en': '📱 Payme',
@@ -6601,6 +6676,21 @@ ADMIN_UI_ORDER_TRANSLATIONS = {
     'ui.orders.payment_provider': _ui_tr('Payment Provider', "To'lov provayderi", 'Провайдер оплаты'),
     'ui.orders.payment_status': _ui_tr('Payment Status', "To'lov holati", 'Статус оплаты'),
     'ui.orders.payment_summary': _ui_tr('Payment Summary', "To'lov xulosasi", 'Сводка оплаты'),
+    # Order money breakdown (Orders.js detail modal). Every line is published by
+    # the backend; the tier discount is a cash-on-delivery benefit and its label
+    # says so, because the same order on Click carries 0.
+    'ui.orders.money_breakdown': _ui_tr('Money Breakdown', 'Summa tafsiloti', 'Расшифровка суммы'),
+    'ui.orders.subtotal': _ui_tr('Subtotal', 'Oraliq jami', 'Промежуточная сумма'),
+    'ui.orders.subscription_discount': _ui_tr(
+        'Subscription discount', 'Obuna chegirmasi', 'Скидка по подписке'
+    ),
+    'ui.orders.loyalty_discount': _ui_tr('Reward discount', 'Mukofot chegirmasi', 'Скидка по награде'),
+    'ui.orders.tier_discount': _ui_tr(
+        'Tier discount (cash on delivery)',
+        'Daraja chegirmasi (yetkazib berishda naqd)',
+        'Скидка уровня (оплата наличными при доставке)',
+    ),
+    'ui.orders.delivery_fee': _ui_tr('Delivery fee', 'Yetkazib berish narxi', 'Стоимость доставки'),
     'ui.orders.payment_timeline': _ui_tr('Payment Timeline', "To'lov tarixi", 'Лента оплаты'),
     'ui.orders.payment_transactions': _ui_tr('Payment Transactions', "To'lov tranzaksiyalari", 'Платежные транзакции'),
     'ui.orders.pending_orders': _ui_tr('Pending Orders', 'Kutilayotgan buyurtmalar', 'Ожидающие заказы'),
@@ -7779,7 +7869,12 @@ LOYALTY_GUIDE_TRANSLATIONS = {
     ),
     'loyalty_guide.tier.from': _ui_tr('From {pts} AquaCoins', '{pts} AquaCoinsdan', 'От {pts} AquaCoins'),
     'loyalty_guide.tier.label_multiplier': _ui_tr('AquaCoins rate', 'AquaCoins koeffitsiyenti', 'множитель'),
-    'loyalty_guide.tier.label_discount': _ui_tr('tier discount', 'daraja chegirmasi', 'скидка уровня'),
+    # The tier discount is granted on the cash-on-delivery rail only. The stat
+    # label and the perk bullet are the two places the card publishes the rate,
+    # so both name the condition. The rate itself is always the {pct} parameter.
+    'loyalty_guide.tier.label_discount': _ui_tr(
+        'cash-order discount', 'naqd buyurtma chegirmasi', 'скидка за оплату наличными'
+    ),
 
     # Tier NAMES are model-translatable (LoyaltyTierConfig.name entity translations,
     # editable in admin) — intentionally NOT seeded here as static keys.
@@ -7787,7 +7882,22 @@ LOYALTY_GUIDE_TRANSLATIONS = {
     # Multiplier & discount perks are SHARED, config-driven keys rendered per tier
     # from live LoyaltyTierConfig; the discount bullet is hidden at 0%.
     'loyalty_guide.tier.perk_multiplier': _ui_tr('{mult}× AquaCoins on every order', 'Har buyurtmada {mult}× AquaCoins', '{mult}× AquaCoins за каждый заказ'),
-    'loyalty_guide.tier.perk_discount': _ui_tr('{pct}% tier discount', '{pct}% daraja chegirmasi', 'Скидка уровня {pct}%'),
+    'loyalty_guide.tier.perk_discount': _ui_tr(
+        '{pct}% off when you pay cash on delivery',
+        "Yetkazib berishda naqd to'lasangiz {pct}% chegirma",
+        'Скидка {pct}% при оплате наличными при доставке',
+    ),
+    # Quiet fine-print footnote anchored to the tier stat's `*` marker (see
+    # loyalty_guide.html) — replaces the earlier dedicated COD section, which
+    # the owner found too loud for what is a small disclosure. Rendered once,
+    # beneath the tier grid, only when some active tier carries a rate. NO
+    # literal percentage — the rate itself is always the {pct} parameter
+    # elsewhere on the card.
+    'loyalty_guide.tier.discount_footnote': _ui_tr(
+        '* Tier discount applies to cash-on-delivery orders only.',
+        "* Daraja chegirmasi faqat yetkazib berishda naqd to'lanadigan buyurtmalarga taalluqli.",
+        '* Скидка уровня действует только при оплате наличными при доставке.',
+    ),
 
     # Tagline + qualitative benefit bullets are keyed by tier display_order (0=lowest
     # tier), a rename-proof identity — renaming a tier never drops its handbook copy.

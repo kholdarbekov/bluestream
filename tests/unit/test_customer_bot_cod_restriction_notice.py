@@ -26,6 +26,7 @@ from handlers.orders import OrderHandlers  # noqa: E402
 from i18n import Translation  # noqa: E402
 
 PLACE_KEY = "telegram.orders.cod_restricted_place"
+PERSON_KEY = "telegram.orders.cod_restricted_person"
 HAS_DEBTS_KEY = "telegram.orders.cod_restricted_has_debts"
 UNAVAILABLE_KEY = "telegram.orders.cod_restricted_unavailable"
 
@@ -176,6 +177,58 @@ def test_person_and_place_notices_differ(captured_i18n):
     # zero-count `cod_restricted_unavailable`, person -> `cod_restricted_has_debts`).
     assert place_notice == "telegram.orders.cod_restricted_place"
     assert person_notice == "telegram.orders.cod_restricted_has_debts"
+
+
+@pytest.mark.unit
+def test_person_scope_states_the_actionable_amount_when_seeded(monkeypatch):
+    """Task 30A: a genuine person-arm restriction is the customer's OWN
+    money, so — unlike the place arm, which must stay on the count — the
+    actionable balance is safe (and useful) to state directly. The count
+    alone is not actionable: a customer cannot "reduce" a count, only pay
+    down money."""
+    from shared.business_config import COD_DEBT_AMOUNT_THRESHOLD
+
+    catalog = {lang: dict(rows) for lang, rows in BASE_SEED.items()}
+    for lang, rows in catalog.items():
+        rows[PERSON_KEY] = f"[{lang}] balance {{net_debt_total}} over {{threshold}}"
+
+    _real_i18n(monkeypatch, catalog)
+
+    notice = OrderHandlers._cod_restriction_notice(
+        {
+            "cod_restricted": True,
+            "restriction_scope": "person",
+            "active_cod_debt_count": 2,
+            "cluster_net_open_cod_debt_total": 12000.0,
+        },
+        "en",
+    )
+
+    assert notice == "[en] balance {} over {}".format(
+        f"{12000.0:,.0f}", f"{COD_DEBT_AMOUNT_THRESHOLD:,.0f}"
+    )
+
+
+@pytest.mark.unit
+def test_an_unseeded_person_key_degrades_to_the_count_based_fallback(monkeypatch):
+    """Same unseeded-key guard as the place key above: `cod_restricted_person`
+    is NEW, so an environment where its seed has not run must never leak raw
+    English — degrade to the always-seeded count-based copy instead."""
+    _real_i18n(monkeypatch, BASE_SEED)
+
+    notice = OrderHandlers._cod_restriction_notice(
+        {
+            "cod_restricted": True,
+            "restriction_scope": "person",
+            "active_cod_debt_count": 2,
+            "cluster_net_open_cod_debt_total": 12000.0,
+        },
+        "en",
+    )
+
+    assert notice == BASE_SEED["en"][HAS_DEBTS_KEY].format(active_debt_count=2)
+    assert notice != Translation.humanised_missing_key(PERSON_KEY)
+    assert "cod_restricted_person" not in notice
 
 
 @pytest.mark.unit

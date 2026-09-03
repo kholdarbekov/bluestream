@@ -144,10 +144,29 @@ class TestLinkHeaderAfterRequest:
         assert 'rel="api-catalog"' in out.headers["Link"]
 
 
+@pytest.fixture
+def public_client(client):
+    """A cookie-jar-clean client for public-surface assertions.
+
+    The shared `client` fixture's jar persists across tests in an xdist
+    worker, and any earlier test that fetched a page with `?lang=` leaves a
+    language cookie behind. `before_request` then 302-redirects public pages
+    to their localized URL (business_app/__init__.py:287), so every status
+    and header assertion in this file fails with 302 != 200 — including
+    `/.well-known/api-catalog`, which is not a storefront page at all.
+
+    Which tests share a worker is distribution-dependent, so this failure
+    appears and disappears as unrelated tests are added elsewhere in the
+    suite. A fresh client starts with an empty jar; same convention as
+    tests/integration/test_loyalty_guide_cod_section.py.
+    """
+    return client.application.test_client()
+
+
 @pytest.mark.unit
 class TestApiCatalogEndpoint:
-    def test_serves_linkset_document(self, client):
-        resp = client.get("/.well-known/api-catalog")
+    def test_serves_linkset_document(self, public_client):
+        resp = public_client.get("/.well-known/api-catalog")
         assert resp.status_code == 200
         assert resp.mimetype == "application/linkset+json"
         assert resp.headers["Access-Control-Allow-Origin"] == "*"
@@ -158,35 +177,35 @@ class TestApiCatalogEndpoint:
         assert context["service-desc"][0]["href"].endswith("/api/public/products.json")
         assert context["service-doc"][0]["href"].endswith("/llms.txt")
 
-    def test_endpoint_does_not_leak_admin_surface(self, client):
-        blob = client.get("/.well-known/api-catalog").get_data(as_text=True)
+    def test_endpoint_does_not_leak_admin_surface(self, public_client):
+        blob = public_client.get("/.well-known/api-catalog").get_data(as_text=True)
         for token in FORBIDDEN_TOKENS:
             assert token not in blob
 
 
 @pytest.mark.unit
 class TestStorefrontLinkHeader:
-    def test_homepage_carries_link_header(self, client, db):
-        resp = client.get("/")
+    def test_homepage_carries_link_header(self, public_client, db):
+        resp = public_client.get("/")
         assert resp.status_code == 200
         assert resp.mimetype == "text/html"
         assert 'rel="api-catalog"' in resp.headers["Link"]
         assert "</.well-known/api-catalog>" in resp.headers["Link"]
 
-    def test_secondary_storefront_page_carries_link_header(self, client, db):
-        resp = client.get("/about")
+    def test_secondary_storefront_page_carries_link_header(self, public_client, db):
+        resp = public_client.get("/about")
         assert resp.status_code == 200
         assert resp.mimetype == "text/html"
         assert 'rel="api-catalog"' in resp.headers["Link"]
 
-    def test_cabinet_subdomain_does_not_advertise(self, client, db):
+    def test_cabinet_subdomain_does_not_advertise(self, public_client, db):
         # Authenticated cabinet pages share this blueprint but are not public.
-        resp = client.get("/", headers={"Host": "cabinet.aqua-element.uz"})
+        resp = public_client.get("/", headers={"Host": "cabinet.aqua-element.uz"})
         assert resp.status_code == 200
         assert "Link" not in resp.headers
 
-    def test_unknown_path_has_no_link_header(self, client):
-        resp = client.get("/this-path-does-not-exist-xyz")
+    def test_unknown_path_has_no_link_header(self, public_client):
+        resp = public_client.get("/this-path-does-not-exist-xyz")
         assert resp.status_code == 404
         assert "Link" not in resp.headers
 
@@ -195,9 +214,9 @@ class TestStorefrontLinkHeader:
 class TestAdvertisedLinksResolve:
     """Every advertised href must actually resolve (catches a route rename/desync)."""
 
-    def test_each_advertised_path_is_reachable(self, client, db):
+    def test_each_advertised_path_is_reachable(self, public_client, db):
         for _rel, path, _type, _title in PUBLIC_DISCOVERY_LINKS:
-            resp = client.get(path)
+            resp = public_client.get(path)
             assert resp.status_code == 200, f"advertised {path} returned {resp.status_code}"
 
 
@@ -205,8 +224,8 @@ class TestAdvertisedLinksResolve:
 class TestPublicApiFeedHeaders:
     """The advertised /api/public/ feed is carved out of the private /api/ no-store+noindex defaults."""
 
-    def test_products_feed_is_cacheable_and_indexable(self, client, db):
-        resp = client.get("/api/public/products.json")
+    def test_products_feed_is_cacheable_and_indexable(self, public_client, db):
+        resp = public_client.get("/api/public/products.json")
         assert resp.status_code == 200
         cache_control = resp.headers.get("Cache-Control", "")
         assert "public" in cache_control and "max-age=900" in cache_control

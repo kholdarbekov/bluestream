@@ -1414,6 +1414,43 @@ const Orders = () => {
               </Descriptions.Item>
             </Descriptions>
 
+            {/* Money breakdown. Every line is PUBLISHED by the backend — the modal
+                must never derive one figure by subtracting others, because the
+                three discounts are independent columns and the total is computed
+                once by compute_order_total. Discount rows render only when
+                non-zero so an ordinary order keeps a compact breakdown. */}
+            <Divider>{t('ui.orders.money_breakdown', 'Money Breakdown')}</Divider>
+            <Descriptions column={2} bordered size="small">
+              <Descriptions.Item label={t('ui.orders.subtotal', 'Subtotal')}>
+                {formatMoney(selectedOrder.subtotal)} UZS
+              </Descriptions.Item>
+              {Number(selectedOrder.discount_amount) > 0 ? (
+                <Descriptions.Item
+                  label={t('ui.orders.subscription_discount', 'Subscription discount')}
+                >
+                  −{formatMoney(selectedOrder.discount_amount)} UZS
+                </Descriptions.Item>
+              ) : null}
+              {Number(selectedOrder.loyalty_discount) > 0 ? (
+                <Descriptions.Item label={t('ui.orders.loyalty_discount', 'Reward discount')}>
+                  −{formatMoney(selectedOrder.loyalty_discount)} UZS
+                </Descriptions.Item>
+              ) : null}
+              {Number(selectedOrder.tier_discount) > 0 ? (
+                <Descriptions.Item
+                  label={t('ui.orders.tier_discount', 'Tier discount (cash on delivery)')}
+                >
+                  −{formatMoney(selectedOrder.tier_discount)} UZS
+                </Descriptions.Item>
+              ) : null}
+              <Descriptions.Item label={t('ui.orders.delivery_fee', 'Delivery fee')}>
+                {formatMoney(selectedOrder.delivery_fee)} UZS
+              </Descriptions.Item>
+              <Descriptions.Item label={t('ui.orders.order_total', 'Order Total')}>
+                <strong>{formatMoney(selectedOrder.total_amount)} UZS</strong>
+              </Descriptions.Item>
+            </Descriptions>
+
             <Divider>{t('ui.orders.payment_summary', 'Payment Summary')}</Divider>
             <Descriptions column={3} bordered size="small">
               <Descriptions.Item label={t('ui.orders.total_amount', 'Total Amount')}>

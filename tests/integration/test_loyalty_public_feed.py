@@ -70,6 +70,39 @@ class TestPublicLoyaltyFeed:
         for token in ("cashValue", "cash_value", "redemptionValue", "uzsPerRedeemedPoint"):
             assert token not in blob
 
+    def test_feed_does_not_qualify_the_tier_discount_by_payment_rail(
+        self, client, loyalty_program, tiers
+    ):
+        """The feed publishes `tierDiscountPercent` as a plain benefit, with no
+        payment-rail caveat attached. See the comment in the body for why — this
+        is a deliberate acquisition-stage decision, not an omission."""
+        resp = client.application.test_client().get("/api/public/loyalty.json")
+        assert resp.status_code == 200
+        data = json.loads(resp.get_data(as_text=True))
+
+        # OWNER DECISION (2026-09-03), deliberate — do not "fix" this by adding
+        # the condition back. This feed is what an AI assistant ingests for
+        # someone who is not a customer yet, and the owner's call is that a lead
+        # researching Aqua Element should read the loyalty programme as a plain
+        # benefit. Qualifying it by payment rail at the research stage
+        # disappoints the lead before they ever place an order.
+        #
+        # The condition IS disclosed where it changes a decision someone is
+        # actually making: the /loyalty-guide tier-card footnote, the bot's
+        # payment picker (the discount only appears on the cash button), the bot
+        # confirmation screen, and the web checkout line. This feed sits earlier
+        # than all of them. The trade-off was raised and reaffirmed: an assistant
+        # may state the discount unconditionally, and a customer who then picks
+        # Click sees no tier discount at checkout. That is accepted.
+        assert "tierDiscountCondition" not in data
+        for rail_term in ("cash-on-delivery", "cash on delivery", "Click", "Payme"):
+            assert rail_term not in data["description"], (
+                f"the feed description names {rail_term!r}, re-qualifying the tier "
+                "discount by payment rail — see the comment above before changing it"
+            )
+        # The per-tier rate is still published, unchanged.
+        assert data["tiers"][1]["tierDiscountPercent"] == 6
+
 
 @pytest.mark.integration
 class TestLoyaltyDiscoveryWiring:

@@ -104,6 +104,24 @@ CASH_EDIT_WINDOW_HOURS = _int("CASH_EDIT_WINDOW_HOURS", 72)
 COD_CASH_WARNING_THRESHOLD_UZS = _int("COD_CASH_WARNING_THRESHOLD_UZS", 200000)
 COD_CASH_ESCALATION_THRESHOLD_UZS = _int("COD_CASH_ESCALATION_THRESHOLD_UZS", 400000)
 
+# ─── COD debt cap ───────────────────────────────────────────────────────
+# Cash-on-delivery is refused only when BOTH arms fire: the scope (a customer's
+# linked cluster, or a grouped place) holds at least COD_ACTIVE_DEBT_LIMIT open
+# delivered COD debts AND those debts together exceed COD_DEBT_AMOUNT_THRESHOLD
+# of NET open receivable.
+#
+# The amount arm exists because a tier discount can leave a total of 35 280: a
+# customer handing over 35 000 leaves a 280-sum shortfall, and two of those used
+# to be enough to take cash off their menu — pushing exactly the customers the
+# discount rewards back onto the fiscalized rail.
+#
+# COD_ACTIVE_DEBT_LIMIT lived as a literal on CashCollectionService until this
+# change. It moved here so business_app/utils/cod_cap.py (a pure module) can read
+# it without importing a service, which would be a circular import. The class
+# attribute is kept as a re-export for the readers that already use it.
+COD_ACTIVE_DEBT_LIMIT = _int("COD_ACTIVE_DEBT_LIMIT", 2)
+COD_DEBT_AMOUNT_THRESHOLD = _int("COD_DEBT_AMOUNT_THRESHOLD", 10000)  # UZS
+
 # ─── Customer segmentation thresholds (monthly UZS spend) ───────────────
 CUSTOMER_SEGMENT_HIGH_VALUE_UZS = _int("CUSTOMER_SEGMENT_HIGH_VALUE_UZS", 100000)
 CUSTOMER_SEGMENT_MEDIUM_VALUE_UZS = _int("CUSTOMER_SEGMENT_MEDIUM_VALUE_UZS", 25000)

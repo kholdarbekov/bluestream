@@ -598,3 +598,46 @@ def test_the_estimate_rejects_an_empty_basket(app, db, client, operator, sample_
     """An empty quote has no honest number to state."""
     response = _post_estimate(client, app, operator, sample_user.id, [])
     assert response.status_code == 400, response.get_data(as_text=True)
+
+
+@pytest.mark.integration
+def test_the_operator_quote_publishes_every_discount_term(
+    app, db, client, operator, sample_user, priced_product, client_address
+):
+    """🔴 `price_phone_order` used to compute `subtotal + delivery_fee` — NO
+    discount term at all (design spec §4.6). An operator-placed order for a
+    customer entitled to a discount was quoted, and charged, the full price.
+
+    It now goes through `compute_order_total` and publishes all three discount
+    terms. They are zero for a plain basket; what is pinned here is that the
+    FIELDS EXIST and that the total is the formula's output, so the loyalty-tier
+    work has exactly one place to fill in and cannot ship a quote that omits it.
+    """
+    response = _post_estimate(
+        client, app, operator, sample_user.id,
+        [{"product_id": priced_product.id, "quantity": QUANTITY}],
+    )
+    assert response.status_code == 200, response.get_data(as_text=True)
+    estimate = response.get_json()["data"]
+
+    for field in ("discount_amount", "loyalty_discount", "tier_discount"):
+        assert field in estimate, (
+            f"the operator quote omits `{field}`. A payload that does not "
+            "publish the number the screen needs forces the client to compute "
+            "it, and a second expression is born."
+        )
+        assert estimate[field] == 0.0
+
+    assert estimate["total_amount"] == (
+        estimate["subtotal"]
+        - estimate["discount_amount"]
+        + estimate["delivery_fee"]
+        - estimate["loyalty_discount"]
+        - estimate["tier_discount"]
+    )
+
+    # And the ORDER the quote describes carries the same terms on its row.
+    order = _charge(operator, sample_user, priced_product, QUANTITY, client_address)
+    assert float(order.discount_amount) == estimate["discount_amount"]
+    assert float(order.loyalty_discount) == estimate["loyalty_discount"]
+    assert float(order.total_amount) == estimate["total_amount"]

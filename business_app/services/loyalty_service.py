@@ -3,8 +3,10 @@ Loyalty service for the Water Business Platform
 Handles loyalty points, rewards, referrals, and customer retention programs
 """
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Any, Optional
+from decimal import Decimal, ROUND_HALF_UP
+from typing import List, Dict, Any, Optional, Union
 from flask import current_app
 from sqlalchemy import func, and_, or_
 
@@ -21,6 +23,7 @@ from business_app.models.loyalty import (
 from business_app.models.user import User
 from business_app.models.order import Order
 from business_app.utils.exceptions import ValidationError, NotFoundError, ConflictError
+from business_app.utils.order_totals import compute_order_total
 from business_app.utils.timezone_utils import ensure_utc
 from business_app.utils.translations import get_translation
 from business_app.utils.validators import normalize_phone_number
@@ -31,9 +34,106 @@ from business_app.utils.constants import (
 )
 from shared.enums import (
     OrderStatus,
+    PaymentMethod,
     UserType,
 )
+from shared.payment_methods import is_cod_rail
 from business_app import db
+
+
+@dataclass(frozen=True)
+class TierDiscountQuote:
+    """What a member's loyalty tier is worth on THIS basket, on THIS rail.
+
+    ``amount`` is ``Decimal("0.00")`` and ``percentage`` ``Decimal("0")``
+    whenever the discount does not apply; ``tier_name`` is then None. Callers
+    render the percentage rather than holding a rate of their own — production
+    and dev disagree on every number in ``loyalty_tier_configs``.
+    """
+
+    amount: Decimal
+    percentage: Decimal
+    tier_name: Optional[str]
+
+
+NO_TIER_DISCOUNT = TierDiscountQuote(amount=Decimal("0.00"), percentage=Decimal("0"), tier_name=None)
+
+
+def clamp_tier_discount(
+    amount: Decimal,
+    *,
+    subtotal: Decimal,
+    discount_amount: Decimal,
+    loyalty_discount: Decimal,
+) -> Decimal:
+    """Hold the tier discount to whatever the other two discounts left.
+
+    The subscription rate, the reward value and the tier rate are three
+    independently admin-configurable numbers; nothing stops them summing past
+    100%. The tier discount is the one that yields, so ``total_amount`` can
+    never go negative and ``ck_orders_tier_discount_nonneg`` can never be
+    violated.
+
+    ONE expression, three call sites: order creation, reward redemption (which
+    learns ``loyalty_discount`` only after the order was priced) and the rail
+    move in ``PaymentService.create_payment``. Import it; never re-type it.
+    """
+    headroom = max(
+        Decimal("0.00"),
+        Decimal(str(subtotal or 0)) - Decimal(str(discount_amount or 0)) - Decimal(str(loyalty_discount or 0)),
+    )
+    return min(max(Decimal("0.00"), Decimal(str(amount or 0))), headroom)
+
+
+def apply_tier_discount_for_rail(order: Order, payment_method: Union[str, PaymentMethod, None]) -> Decimal:
+    """THE one expression of "the tier discount follows the rail".
+
+    Quotes and clamps a tier discount for ``order`` on ``payment_method`` when
+    that rail is COD, or ``Decimal("0.00")`` on any other rail, then writes
+    both ``order.tier_discount`` and ``order.total_amount`` (via
+    ``compute_order_total``) when the discount actually changed. Returns the
+    new tier discount so callers can tell whether anything moved by comparing
+    it against whatever ``order.tier_discount`` held before the call.
+
+    Four call sites: the rail move in ``PaymentService.create_payment``;
+    Case C's Click-rail restoration in
+    ``ClickPaymentProviderService._restore_click_rail_after_offline_settlement``;
+    and the admin payment-method edit's two rail-off-cash paths in
+    ``OrderPaymentMethodEditService`` (``_settle_as_business_account`` and
+    ``_unwind_to_click``) — a tier discount is a COD-only benefit and must
+    never reach a Click fiscal receipt (``build_click_fiscalization_payload``
+    prices ``received_card`` off ``order.total_amount`` while filling
+    per-item ``Discount`` from ``loyalty_discount`` ALONE), and must not
+    survive onto business_account either (revenue correctness: the corporate
+    account must be billed the undiscounted amount). Import it; never
+    re-type it.
+    """
+    subtotal = Decimal(str(order.subtotal or 0))
+    order_discount = Decimal(str(order.discount_amount or 0))
+    reward_discount = Decimal(str(order.loyalty_discount or 0))
+    previous_tier_discount = Decimal(str(order.tier_discount or 0))
+
+    if is_cod_rail(payment_method):
+        new_tier_discount = clamp_tier_discount(
+            LoyaltyService().quote_tier_discount(order.user, subtotal, payment_method).amount,
+            subtotal=subtotal,
+            discount_amount=order_discount,
+            loyalty_discount=reward_discount,
+        )
+    else:
+        new_tier_discount = Decimal("0.00")
+
+    if new_tier_discount != previous_tier_discount:
+        order.tier_discount = new_tier_discount
+        order.total_amount = compute_order_total(
+            subtotal=subtotal,
+            discount_amount=order_discount,
+            delivery_fee=Decimal(str(order.delivery_fee or 0)),
+            loyalty_discount=reward_discount,
+            tier_discount=new_tier_discount,
+        )
+
+    return new_tier_discount
 
 
 class LoyaltyService:
@@ -54,6 +154,55 @@ class LoyaltyService:
         if not getattr(user, "is_entity_user", False):
             return True
         return any(c.is_currently_active and c.is_loyalty_points_eligible for c in user.corporate_contracts)
+
+    def quote_tier_discount(
+        self,
+        user,
+        basis: Decimal,
+        payment_method: Union[str, PaymentMethod, None],
+    ) -> TierDiscountQuote:
+        """The ONE place that decides whether a tier discount applies.
+
+        Four gates, all of which must pass:
+
+        1. The rail is COD. The discount exists to move volume off the
+           fiscalized gateways, so it attaches to ``PaymentMethod.CASH`` and
+           nothing else — compared via ``is_cod_rail``/``canonical_rail`` so
+           the legacy ``card`` value and a NULL rail can never match.
+        2. The user is loyalty-eligible (entity users without an active
+           loyalty-eligible contract are excluded by the pre-existing SSOT).
+        3. A tier resolves for their qualifying points.
+        4. That tier's ``discount_percentage`` is above zero.
+
+        The rate is read LIVE from ``LoyaltyTierConfig.discount_percentage``.
+        No percentage is ever hardcoded here, in copy, or in a test — dev,
+        production and an older migration all hold different numbers.
+
+        ``basis`` is the order SUBTOTAL (see design §4.3). The result is NOT
+        clamped against the other discounts; that is ``clamp_tier_discount``'s
+        job, applied last by the caller.
+        """
+        if not is_cod_rail(payment_method):
+            return NO_TIER_DISCOUNT
+        if not self.is_user_loyalty_eligible(user):
+            return NO_TIER_DISCOUNT
+
+        account = LoyaltyPoints.query.filter_by(user_id=user.id).first()
+        program_id = account.program_id if account else None
+        tier = LoyaltyTierConfig.get_tier_for_points(
+            self.calculate_qualifying_points(user.id),
+            program_id,
+        )
+        if tier is None:
+            return NO_TIER_DISCOUNT
+
+        percentage = Decimal(str(tier.discount_percentage or 0))
+        if percentage <= 0:
+            return NO_TIER_DISCOUNT
+
+        safe_basis = max(Decimal("0.00"), Decimal(str(basis or 0)))
+        amount = (safe_basis * percentage / Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        return TierDiscountQuote(amount=amount, percentage=percentage, tier_name=tier.name)
 
     def __init__(self):
         # All economics are DB-driven via LoyaltyProgram (uzs_per_point,
@@ -1245,12 +1394,30 @@ class LoyaltyService:
         if reward.reward_type == "discount":
             discount_amount = self._compute_reward_discount(reward, subtotal)
             order.loyalty_discount = discount_amount
+            # The tier discount was priced at order creation, before this
+            # reward existed. It is the term that yields (design §4.4), so
+            # re-clamp it now that loyalty_discount is finally known —
+            # otherwise a large reward drives the total negative and the
+            # ck_orders_*_nonneg CHECKs reject the flush.
+            order.tier_discount = clamp_tier_discount(
+                Decimal(str(order.tier_discount or 0)),
+                subtotal=subtotal,
+                discount_amount=Decimal(str(order.discount_amount or 0)),
+                loyalty_discount=discount_amount,
+            )
+            # The formula is `compute_order_total`. The max() is THIS call
+            # site's own policy — a redeemed reward must never produce a
+            # negative charge — and it stays outside the shared function so
+            # `create_order`'s `total_amount <= 0` rejection still fires.
             order.total_amount = max(
                 Decimal("0.00"),
-                subtotal
-                - Decimal(str(order.discount_amount or 0))
-                - discount_amount
-                + Decimal(str(order.delivery_fee or 0)),
+                compute_order_total(
+                    subtotal=subtotal,
+                    discount_amount=Decimal(str(order.discount_amount or 0)),
+                    delivery_fee=Decimal(str(order.delivery_fee or 0)),
+                    loyalty_discount=discount_amount,
+                    tier_discount=Decimal(str(order.tier_discount)),
+                ),
             )
         else:  # free_product
             if not self.is_reward_configured(reward):

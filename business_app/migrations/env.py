@@ -11,7 +11,26 @@ config = context.config
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
-fileConfig(config.config_file_name)
+#
+# `disable_existing_loggers=False` is load-bearing, not cosmetic. The default is
+# True, and alembic.ini's `[loggers] keys` names only root/sqlalchemy/alembic/
+# flask_migrate — so the default sets `disabled = True` on every OTHER logger
+# already created in this process (all of `business_app.*`, `bot`, `handlers.*`).
+# `Logger.handle()` and `Logger.isEnabledFor()` short-circuit on `.disabled`
+# before levels, filters, handlers and propagation are consulted, so a silenced
+# logger cannot be rescued downstream — its records die at the source.
+#
+# In the `migrate` container FLASK_APP=business_app:create_app builds the whole
+# app (and its loggers) before this module is imported, so the default would
+# silence application logging for the duration of every `flask db upgrade`.
+# No migration logs today, which is the only reason that was never noticed.
+#
+# This does not change log ROUTING: the flag governs only whether pre-existing
+# loggers are muted. Root still gets alembic.ini's stderr StreamHandler at WARN
+# and the four named loggers are configured exactly as before.
+#
+# Pinned by tests/unit/test_migrations_logging_isolation.py.
+fileConfig(config.config_file_name, disable_existing_loggers=False)
 logger = logging.getLogger("alembic.env")
 
 

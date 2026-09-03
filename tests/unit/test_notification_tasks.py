@@ -182,3 +182,82 @@ class TestNotificationTasks:
             channels = mock_service.send_notification.call_args.args[2]
             assert NotificationChannel.SMS not in channels
             assert NotificationChannel.TELEGRAM in channels
+
+
+@pytest.mark.unit
+class TestSendPaymentConfirmationTaskIdempotency:
+    """``_allocate_to_payment`` now fires this task on every real cash
+    collection, not just once ever per payment (a shortfall's second, later
+    partial collection is just as real as the first — see
+    cash_collection_service.py). The 24h Redis key below predates that: it
+    assumed a payment could reach COMPLETED at most once, so a flat
+    per-payment key was safe. These tests pin that a genuinely different
+    collection (a different ``collection_state_token``) is not swallowed by
+    an earlier collection's key, while a bare retry of the SAME send (same
+    token, e.g. after a transient Celery failure) still is — and that callers
+    which omit the token (online-rail payments, which only ever complete
+    once) keep the original payment-only key unchanged.
+    """
+
+    def test_different_token_is_not_swallowed_by_an_earlier_send(self, app):
+        with (
+            app.app_context(),
+            patch("business_app.tasks.notification_tasks.NotificationService") as mock_service_cls,
+        ):
+            mock_service_cls.return_value.send_payment_notification.return_value = {"success": True}
+            fake_redis = MagicMock()
+            fake_redis.get.return_value = None
+
+            with patch("business_app.redis_client", fake_redis):
+                notification_tasks.send_payment_confirmation_task.run(
+                    501, collection_state_token="5000.00"
+                )
+                notification_tasks.send_payment_confirmation_task.run(
+                    501, collection_state_token="8000.00"
+                )
+
+        assert mock_service_cls.return_value.send_payment_notification.call_count == 2
+        get_keys = [call.args[0] for call in fake_redis.get.call_args_list]
+        assert get_keys[0] != get_keys[1]
+        assert get_keys[0] == "notif:payment_confirm:501:5000.00"
+        assert get_keys[1] == "notif:payment_confirm:501:8000.00"
+
+    def test_retry_with_the_same_token_is_swallowed(self, app):
+        with (
+            app.app_context(),
+            patch("business_app.tasks.notification_tasks.NotificationService") as mock_service_cls,
+        ):
+            mock_service_cls.return_value.send_payment_notification.return_value = {"success": True}
+            store = {}
+            fake_redis = MagicMock()
+            fake_redis.get.side_effect = lambda key: store.get(key)
+            fake_redis.setex.side_effect = lambda key, ttl, value: store.__setitem__(key, value)
+
+            with patch("business_app.redis_client", fake_redis):
+                first = notification_tasks.send_payment_confirmation_task.run(
+                    502, collection_state_token="5000.00"
+                )
+                second = notification_tasks.send_payment_confirmation_task.run(
+                    502, collection_state_token="5000.00"
+                )
+
+        assert mock_service_cls.return_value.send_payment_notification.call_count == 1
+        assert first == {"success": True}
+        assert second == {"success": True, "skipped": True, "reason": "already_sent"}
+
+    def test_omitted_token_keeps_the_legacy_payment_only_key(self, app):
+        """Online-rail payments (PaymentService) never pass a token and can
+        only ever complete once — the key they get must be byte-identical to
+        before this change."""
+        with (
+            app.app_context(),
+            patch("business_app.tasks.notification_tasks.NotificationService") as mock_service_cls,
+        ):
+            mock_service_cls.return_value.send_payment_notification.return_value = {"success": True}
+            fake_redis = MagicMock()
+            fake_redis.get.return_value = None
+
+            with patch("business_app.redis_client", fake_redis):
+                notification_tasks.send_payment_confirmation_task.run(503)
+
+        fake_redis.get.assert_called_once_with("notif:payment_confirm:503")

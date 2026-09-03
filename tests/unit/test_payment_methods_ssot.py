@@ -12,6 +12,7 @@ from shared.payment_methods import (
     UnknownPaymentMethodError,
     UnsupportedPaymentMethodError,
     assert_customer_selectable,
+    is_cod_rail,
     normalize_payment_method,
 )
 
@@ -138,6 +139,46 @@ class TestRepeatablePaymentMethod:
 
         with pytest.raises(UnknownPaymentMethodError):
             resolve_repeatable_payment_method(PaymentMethod.LOYALTY_POINTS)
+
+
+class TestIsCodRail:
+    """The COD rail is the ONE rail a loyalty tier discount attaches to.
+
+    Compared through ``canonical_rail``, never a raw ``==``: the legacy
+    ``card`` value folds into CLICK, and the dev rows with a NULL
+    ``orders.payment_method`` must read as not-COD rather than silently
+    matching. Personal card transfer needs no special case here — it is a
+    ``CashCollectionSource``, not a ``PaymentMethod``, and a PCT collection
+    only ever happens against an order already railed to CASH.
+    """
+
+    def test_cash_enum_is_the_cod_rail(self):
+        assert is_cod_rail(PaymentMethod.CASH) is True
+
+    def test_cash_string_is_the_cod_rail(self):
+        assert is_cod_rail("cash") is True
+
+    @pytest.mark.parametrize(
+        "method",
+        [
+            PaymentMethod.CLICK,
+            PaymentMethod.PAYME,
+            PaymentMethod.CARD,
+            PaymentMethod.BUSINESS_ACCOUNT,
+            PaymentMethod.LOYALTY_POINTS,
+            "click",
+            "card",
+            "business_account",
+        ],
+    )
+    def test_every_other_rail_is_not_cod(self, method):
+        assert is_cod_rail(method) is False
+
+    @pytest.mark.parametrize("value", [None, "", "  ", "bitcoin"])
+    def test_unrecognised_values_are_not_cod_and_do_not_raise(self, value):
+        # canonical_rail is TOTAL. A guard that raises on unfamiliar input
+        # fails the request instead of guarding it.
+        assert is_cod_rail(value) is False
 
 
 def test_shared_module_does_not_import_business_app():

@@ -20,6 +20,16 @@ def _i18n_get(key, language, *args, **kwargs):
     return f"{key}:{language}"
 
 
+def _i18n_get_interpolated(key, language, *args, **kwargs):
+    """Like `_i18n_get`, but also renders kwargs — needed wherever a test
+    asserts on a MONEY VALUE that only reaches the screen through an i18n
+    placeholder (e.g. the quote block's `estimate_reward_line`)."""
+    rendered = f"{key}:{language}"
+    if kwargs:
+        rendered += "(" + ",".join(f"{k}={v}" for k, v in sorted(kwargs.items())) + ")"
+    return rendered
+
+
 def served_cart(*lines, **cart_extra):
     """A ``GET /api/v1/cart`` payload shaped like ``CartService.get_cart_details``.
 
@@ -35,15 +45,17 @@ def served_cart(*lines, **cart_extra):
     ``tests/integration/test_checkout_total_is_server_authoritative.py`` for the
     parity pin over the REAL service.
 
-    ``lines`` are ``(product_dict, quantity)`` pairs.
+    ``lines`` are ``(product_dict, quantity)`` pairs. A product missing ``id``
+    (most callers only care about name/price) gets a sequential one, since the
+    checkout screen now reads it to build the estimate-quote payload.
     """
     items = [
         {
-            "product": product,
+            "product": {"id": index + 1, **product},
             "quantity": quantity,
             "total_price": product["current_price"] * quantity,
         }
-        for product, quantity in lines
+        for index, (product, quantity) in enumerate(lines)
     ]
     cart = {
         "cart_items": items,
@@ -51,6 +63,44 @@ def served_cart(*lines, **cart_extra):
     }
     cart.update(cart_extra)
     return {"data": {"cart": cart}}
+
+
+def served_estimate(cart_payload, payment_method="cash", **pricing_overrides):
+    """A `POST cart/estimate` payload shaped like `CartService.
+    calculate_cart_estimate`, over a cart already built by `served_cart` above
+    — so the item lines and subtotal are not a second fabrication, they are
+    read straight back out of the cart payload the test already built.
+    """
+    cart = cart_payload["data"]["cart"]
+    subtotal = float(cart["subtotal"])
+    pricing = {
+        "items_subtotal": subtotal,
+        "delivery_fee": 0.0,
+        "discount_amount": 0.0,
+        "loyalty_discount": 0.0,
+        "tier_discount": 0.0,
+        "tier_name": None,
+        "tier_discount_percentage": 0.0,
+        "cod_savings": 0.0,
+        "payment_method": payment_method,
+        "final_total": subtotal,
+    }
+    pricing.update(pricing_overrides)
+    return {
+        "data": {
+            "items": [
+                {
+                    "product_id": item["product"]["id"],
+                    "product_name": item["product"].get("name", ""),
+                    "quantity": item["quantity"],
+                    "unit_price": item["product"].get("current_price", 0),
+                    "subtotal": item["total_price"],
+                }
+                for item in cart["cart_items"]
+            ],
+            "pricing": pricing,
+        }
+    }
 
 
 @pytest.mark.unit
@@ -517,14 +567,17 @@ class TestOrderHandlerWave2:
         monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(orders_module, "get_auth_token", AsyncMock(return_value="jwt"))
         monkeypatch.setattr(orders_module.OrderKeyboards, "order_confirmation", lambda *_a, **_k: "confirm-kbd")
-        monkeypatch.setattr(orders_module, "api_client", FakeAPIClientContext(get_cart=_resp(success=True, data=cart_data)))
+        monkeypatch.setattr(orders_module, "api_client", FakeAPIClientContext(
+            get_cart=_resp(success=True, data=cart_data),
+            estimate_cart=_resp(success=True, data=served_estimate(cart_data, payment_method="card")),
+        ))
 
         await handler._show_order_confirmation(update, context)
 
         update.callback_query.edit_message_text.assert_awaited_once()
         text = update.callback_query.edit_message_text.await_args.kwargs["text"]
         assert "telegram.orders.confirmation_title:en" in text
-        assert "telegram.orders.items_header:en" in text
+        # The item lines now live in the quote block (no separate header).
         assert "telegram.orders.payment_info:en" in text
         # The money on screen is the server's, both per line and in total.
         assert "24,000" in text
@@ -551,7 +604,10 @@ class TestOrderHandlerWave2:
         monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(orders_module, "get_auth_token", AsyncMock(return_value="jwt"))
         monkeypatch.setattr(orders_module.OrderKeyboards, "order_confirmation", lambda *_a, **_k: "confirm-kbd")
-        monkeypatch.setattr(orders_module, "api_client", FakeAPIClientContext(get_cart=_resp(success=True, data=cart_data)))
+        monkeypatch.setattr(orders_module, "api_client", FakeAPIClientContext(
+            get_cart=_resp(success=True, data=cart_data),
+            estimate_cart=_resp(success=True, data=served_estimate(cart_data, payment_method="cash")),
+        ))
 
         await handler._show_order_confirmation(update, context)
 
@@ -577,14 +633,21 @@ class TestOrderHandlerWave2:
             {"id": 7, "name": "10k Off", "reward_type": "discount",
              "discount_type": "fixed", "discount_value": 10000, "min_order_value": 0},
         ]}}
+        # This test asserts on the DISCOUNT AMOUNT, which now reaches the
+        # screen only through the quote block's `estimate_reward_line`
+        # placeholder — the shared `_i18n_get` deliberately drops kwargs, so
+        # this one test needs the interpolating stub to see the money.
         monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(eligibility, "is_loyalty_eligible", AsyncMock(return_value=True))
-        monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)
+        monkeypatch.setattr(orders_module.i18n, "get", _i18n_get_interpolated)
         monkeypatch.setattr(orders_module, "get_auth_token", AsyncMock(return_value="jwt"))
         monkeypatch.setattr(orders_module.OrderKeyboards, "order_confirmation", lambda *_a, **_k: "confirm-kbd")
         monkeypatch.setattr(orders_module, "api_client", FakeAPIClientContext(
             get_cart=_resp(success=True, data=cart_data),
             get_loyalty_rewards=_resp(success=True, data=rewards_data),
+            estimate_cart=_resp(success=True, data=served_estimate(
+                cart_data, payment_method="card", loyalty_discount=10000.0,
+            )),
         ))
 
         await handler._show_order_confirmation(update, context)
@@ -618,6 +681,7 @@ class TestOrderHandlerWave2:
         monkeypatch.setattr(orders_module, "api_client", FakeAPIClientContext(
             get_cart=_resp(success=True, data=cart_data),
             get_loyalty_rewards=_resp(success=True, data=rewards_data),
+            estimate_cart=_resp(success=True, data=served_estimate(cart_data, payment_method="card")),
         ))
 
         await handler._show_order_confirmation(update, context)

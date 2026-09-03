@@ -985,6 +985,13 @@ def get_loyalty_handbook_context():
             "max_points": t["max_points"],
             "multiplier": t["multiplier"],
             "discount_percentage": t["discount_percentage"],
+            # `:g` trims a Float column's trailing zeros — same idiom as the
+            # bot's `_format_rate` (telegram_bot/handlers/orders.py):
+            # 20.0 -> "20", 2.5 -> "2.5".
+            # The tier card's discount stat used to floor this with `| int`
+            # in the template (2.5% -> "2%"); formatted once here instead so
+            # the two worked-example/card call sites can't drift again.
+            "discount_percentage_display": f"{float(t['discount_percentage'] or 0):g}",
         }
         for t in facts["tiers"]
     ]

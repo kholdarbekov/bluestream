@@ -25,6 +25,7 @@ from business_app.services.cod_collect_ceiling import (
 )
 from business_app.utils.delivery_window import window_slot_label
 from business_app.utils.exceptions import ValidationError, NotFoundError, ForbiddenError, ConflictError
+from business_app.utils.order_totals import compute_order_total
 from business_app.utils.geo_validation import ensure_within_delivery_zone
 from business_app.utils.user_search import build_name_match_clause
 from business_app.utils.payment_projection import (
@@ -1149,7 +1150,7 @@ class StaffService:
             raise NotFoundError("Delivery not found", error_code="STAFF_DELIVERY_NOT_FOUND")
 
         cash_collection_service = None
-        pre_cod_debt_count = None
+        pre_cod_restricted = None
         is_cash_order = bool(delivery.order and delivery.order.payment_method == PaymentMethod.CASH)
 
         # Detect unsettled electronic orders: driver may collect cash at the door
@@ -1214,12 +1215,18 @@ class StaffService:
 
             cash_collection_service = CashCollectionService()
             if is_cash_order:
-                # Pre-count only for true CASH orders; we use it for the debt-limit
-                # breach notification below (which must not fire for just-converted orders).
-                # Cluster-wide (spec 5.5) so the warning fires exactly when the cap
-                # the engine enforces is actually crossed — one person's linked
-                # phones share a single credit line.
-                pre_cod_debt_count = cash_collection_service.get_cluster_active_cod_debt_count(delivery.order.user_id)
+                # Pre-STATE only for true CASH orders; used for the debt-limit
+                # breach notification below (which must not fire for
+                # just-converted orders).
+                #
+                # `is_customer_cod_restricted`, NOT a raw debt count: the message
+                # tells a customer their cash rail has closed, so it must ask the
+                # exact question the engine answers — the cluster-wide cap, BOTH
+                # its arms, and the admin/grocery exemptions. The old raw-count
+                # form skipped the exemption check the other five cap sites
+                # apply, so an exempt or grocery-store customer was told their
+                # COD was restricted when it never was.
+                pre_cod_restricted = cash_collection_service.is_customer_cod_restricted(delivery.order.user_id)
 
         old_status_value = delivery.status.value if hasattr(delivery.status, "value") else delivery.status
 
@@ -1430,15 +1437,12 @@ class StaffService:
                 )
 
                 # Debt-limit breach notification only applies to true CASH orders
-                # (pre_cod_debt_count was captured only for those).
+                # (pre_cod_restricted was captured only for those). It is an EDGE
+                # — not-restricted becoming restricted — so an already-capped
+                # customer is not warned a second time.
                 if is_cash_order:
-                    post_cod_debt_count = cash_collection_service.get_cluster_active_cod_debt_count(
-                        delivery.order.user_id
-                    )
-                    limit = cash_collection_service.COD_ACTIVE_DEBT_LIMIT
-                    cod_debt_limit_breached = (
-                        pre_cod_debt_count is not None and pre_cod_debt_count < limit and post_cod_debt_count >= limit
-                    )
+                    post_cod_restricted = cash_collection_service.is_customer_cod_restricted(delivery.order.user_id)
+                    cod_debt_limit_breached = pre_cod_restricted is False and post_cod_restricted is True
 
             # A stop that has reached a terminal status is no longer part of
             # the driver's active set, so it must leave their planned sequence
@@ -1526,17 +1530,28 @@ class StaffService:
             from business_app.services.cash_collection_service import CashCollectionService
             from business_app.services.notification_service import NotificationService
             from business_app.utils.constants import NotificationChannel, NotificationType
+            from shared.business_config import COD_DEBT_AMOUNT_THRESHOLD
 
             # The cap is configuration, not copy — read it from the SSOT so the
             # message can never claim a threshold the engine does not enforce.
-            # "or more" because the crossing count is cluster-wide and a single
-            # delivery can take the cluster past the cap.
-            limit = CashCollectionService.COD_ACTIVE_DEBT_LIMIT
+            # The caller only tracked the COUNT crossing the cluster-wide limit
+            # (a single delivery can take the whole cluster past it), but the
+            # cap has a second arm: the NET total must also clear
+            # COD_DEBT_AMOUNT_THRESHOLD. Re-read the live restriction context
+            # here rather than trust that flag — a count crossing with the
+            # amount still under the floor is not an actual restriction, and
+            # this message must never claim one that isn't real.
+            context = CashCollectionService().get_cod_restriction_context(user_id)
+            if not context["cod_restricted"] or context["restriction_scope"] != "person":
+                return
+
+            net_total = context["cluster_net_open_cod_debt_total"]
             subject = "Cash on delivery is restricted"
             body = (
-                f"You have {limit} or more outstanding cash on delivery debts. "
-                "Cash on delivery is now unavailable for new orders. "
-                "Please use card payment methods until your outstanding COD debts are settled."
+                f"Your outstanding cash-on-delivery balance is {net_total:,.0f} UZS, over the "
+                f"{COD_DEBT_AMOUNT_THRESHOLD:,} UZS limit. Cash on delivery is unavailable for new "
+                f"orders until your balance drops back under {COD_DEBT_AMOUNT_THRESHOLD:,} UZS. "
+                "Please use a card payment method, or pay down your balance, until then."
             )
             template = SimpleNamespace(
                 subject=subject,
@@ -1997,10 +2012,11 @@ class StaffService:
         the operator therefore read the GENERIC price down the phone while this
         loop charged the CONTRACT price — measured 45 000 shown against 27 000
         charged (``tests/integration/test_operator_order_price_parity.py``).
-        The catalogue payload also carries the caller's VIP / loyalty-tier
-        discount (``product_serializers.calculate_product_price``), which this
-        loop does not apply at all — a discounted operator leaked their own
-        rate into every quote.
+        (``product_serializers.calculate_product_price`` also once applied a
+        hardcoded VIP / loyalty-tier discount to the CALLER — a discounted
+        operator would have leaked their own rate into every quote. That table
+        has been deleted: tier rates come from ``LoyaltyTierConfig``, are read
+        live, and reduce the ORDER TOTAL, never a catalogue price.)
 
         The estimate endpoint
         (``POST /staff/operator/users/<id>/order-estimate`` ->
@@ -2060,11 +2076,30 @@ class StaffService:
 
         delivery_fee = Decimal(str(order_data.get("delivery_fee", 0)))
 
+        # Phone orders carried NO discount term at all until the total was
+        # collapsed onto `compute_order_total` (design spec §4.6). The three
+        # discount fields are published as explicit zeros rather than omitted so
+        # the operator quote, `create_phone_order` and a self-service order all
+        # describe a basket with the SAME set of fields — and so the loyalty-tier
+        # discount has one place to be filled in, not three.
+        discount_amount = Decimal("0.00")
+        loyalty_discount = Decimal("0.00")
+        tier_discount = Decimal("0.00")
+
         return {
             "items": order_items,
             "subtotal": subtotal,
             "delivery_fee": delivery_fee,
-            "total_amount": subtotal + delivery_fee,
+            "discount_amount": discount_amount,
+            "loyalty_discount": loyalty_discount,
+            "tier_discount": tier_discount,
+            "total_amount": compute_order_total(
+                subtotal=subtotal,
+                discount_amount=discount_amount,
+                delivery_fee=delivery_fee,
+                loyalty_discount=loyalty_discount,
+                tier_discount=tier_discount,
+            ),
         }
 
     @staticmethod
@@ -2108,6 +2143,9 @@ class StaffService:
             ],
             "subtotal": float(pricing["subtotal"]),
             "delivery_fee": float(pricing["delivery_fee"]),
+            "discount_amount": float(pricing["discount_amount"]),
+            "loyalty_discount": float(pricing["loyalty_discount"]),
+            "tier_discount": float(pricing["tier_discount"]),
             "total_amount": float(pricing["total_amount"]),
         }
 
@@ -2173,6 +2211,10 @@ class StaffService:
         subtotal = pricing["subtotal"]
         delivery_fee = pricing["delivery_fee"]
         total_amount = pricing["total_amount"]
+        # Written onto the row rather than left to the column default, so the
+        # order states the same breakdown the operator was quoted.
+        discount_amount = pricing["discount_amount"]
+        loyalty_discount = pricing["loyalty_discount"]
 
         # Map payment method
         payment_method = None
@@ -2217,6 +2259,8 @@ class StaffService:
             status=OrderStatus.CONFIRMED,
             subtotal=subtotal,
             delivery_fee=delivery_fee,
+            discount_amount=discount_amount,
+            loyalty_discount=loyalty_discount,
             total_amount=total_amount,
             delivery_address_id=delivery_address_id,
             payment_method=payment_method,

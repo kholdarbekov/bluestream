@@ -10,6 +10,11 @@ from handlers import loyalty as loyalty_module
 from handlers import orders as orders_module
 from handlers import products as products_module
 from tests.telegram_bot.helpers import DummyCallbackQuery, DummyUpdate, FakeAPIClientContext, make_context
+# `served_cart`/`served_estimate` are the SINGLE fabrication point for a
+# `GET /cart` + `POST cart/estimate` pair shaped like the real
+# `CartService` (see their docstrings in wave2). Reused here rather than
+# re-invented so the checkout quote fixtures never drift between test files.
+from tests.telegram_bot.test_handlers_products_loyalty_orders_wave2 import served_cart, served_estimate
 
 
 def _resp(success=True, data=None, error=None, status_code=200):
@@ -439,7 +444,12 @@ class TestOrderHandlerDeepFlows:
                             },
                         }
                     },
-                )
+                ),
+                # Cash is on offer, so `_show_payment_picker` quotes it — it
+                # needs a `GET /cart` response to build that quote from. An
+                # empty cart (this test doesn't care about pricing) makes the
+                # quote step a no-op, matching the exact text asserted below.
+                get_cart=_resp(success=True, data={"data": {"cart": {"cart_items": []}}}),
             ),
         )
 
@@ -555,7 +565,14 @@ class TestOrderHandlerDeepFlows:
                 _resp(success=True, data=_PAYMENT_METHODS_OK),
             ]
         )
-        fake = FakeAPIClientContext()
+        # `_PAYMENT_METHODS_OK` offers cash, so the retry's payment screen
+        # quotes it — real `get_cart` + `estimate_cart` responses so that
+        # quote step is exercised for real rather than left to fail.
+        cart_data = served_cart(({"name": "Bottle", "current_price": 12000}, 2))
+        fake = FakeAPIClientContext(
+            get_cart=_resp(success=True, data=cart_data),
+            estimate_cart=_resp(success=True, data=served_estimate(cart_data, payment_method="cash")),
+        )
         fake.get_payment_methods = methods
         monkeypatch.setattr(orders_module, "api_client", fake)
 

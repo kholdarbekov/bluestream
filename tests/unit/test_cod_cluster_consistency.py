@@ -394,11 +394,24 @@ class TestBreachNotification:
         # 0 -> 1 open debts: below the cap, so no warning.
         notify.assert_not_called()
 
-    def test_notification_copy_uses_the_configured_limit(self, db, sample_user):
+    def test_notification_copy_states_the_actionable_balance_not_a_bare_count(
+        self, db, sample_user
+    ):
+        """Task 30A: the count alone is not actionable — the customer cannot
+        reduce "2 debts" directly, only the money. The message must now name
+        the actual NET total and the live threshold, both read from the SSOT
+        / the real restriction context, never a hardcoded figure. A debt this
+        far over the floor clears it regardless of the configured value."""
         from business_app.services.staff_service import StaffService
+        from shared.business_config import COD_DEBT_AMOUNT_THRESHOLD
 
         sample_user.telegram_id = 424242
         db.session.commit()
+
+        each = Decimal(COD_DEBT_AMOUNT_THRESHOLD) + Decimal("1000.00")
+        for _ in range(_LIMIT):
+            delivered_cod_order(db, sample_user, total=each)
+        expected_total = each * _LIMIT
 
         with patch(
             "business_app.services.notification_service.NotificationService.send_notification"
@@ -406,10 +419,31 @@ class TestBreachNotification:
             StaffService._notify_customer_cod_debt_limit(sample_user.id)
 
         template = send.call_args.kwargs["template_override"]
-        expected = f"You have {_LIMIT} or more outstanding cash on delivery debts."
-        assert expected in template.content
-        assert expected in template.get_translated("content", "en")
+        assert f"{expected_total:,.0f}" in template.content
+        assert f"{COD_DEBT_AMOUNT_THRESHOLD:,}" in template.content
+        assert template.content == template.get_translated("content", "en")
         assert "You have 2 outstanding cash on delivery debts." not in template.content
+        assert f"You have {_LIMIT} or more outstanding cash on delivery debts." not in template.content
+
+    def test_notification_says_nothing_when_the_amount_arm_is_not_met(self, db, sample_user):
+        """A count-only breach (Uzbek-banknote shortfalls under the floor) must
+        never fire this notification — the engine does not restrict it, so
+        claiming a restriction here would be exactly the false threshold the
+        comment above this method warns against."""
+        from business_app.services.staff_service import StaffService
+
+        sample_user.telegram_id = 424242
+        db.session.commit()
+
+        for _ in range(_LIMIT):
+            delivered_cod_order(db, sample_user, total=Decimal("280.00"))
+
+        with patch(
+            "business_app.services.notification_service.NotificationService.send_notification"
+        ) as send:
+            StaffService._notify_customer_cod_debt_limit(sample_user.id)
+
+        send.assert_not_called()
 
 
 @pytest.mark.unit

@@ -547,6 +547,100 @@ def test_apply_rejects_short_reason(db, workplace_user, sample_product, covered_
 
 
 # --------------------------------------------------------------------------- #
+# BUG 1: a prepaid_reservation funded by a NON-DELIVERY_COMPLETION event must
+# not be stranded when the order flips to business_account. Live dev repro:
+# allocation 39, 82 000.00 on payment 138 / order 152 (AD_000032_26,
+# `confirmed`), funded by event 29 (source=standalone_meeting). Every release
+# path (reserve/consume/release_reserved_prepayment_for_order) is CASH-gated,
+# so once the flip lands the reservation is unreachable forever and the
+# customer's real cash stays locked while the funding event's
+# unapplied_amount stays decremented.
+# --------------------------------------------------------------------------- #
+
+
+def _seed_cash_order_with_standalone_reservation(
+    db, user, product, contract, price_row, driver, *, order_total="90000.00", credit="82000.00"
+):
+    """A CONFIRMED (not yet delivered) cash order carrying a live
+    prepaid_reservation funded by a standalone_meeting cash-collection event —
+    the shape of the dev bug (order 152 / AD_000032_26)."""
+    order = _make_order(user, OrderStatus.CONFIRMED, PaymentMethod.CASH, total=Decimal(order_total))
+    _add_contract_item(order, product, contract, price_row, quantity=5, unit_price=Decimal("18000.00"))
+
+    event = CashCollectionEvent(
+        customer_id=user.id,
+        collector_user_id=driver.id,
+        recorded_by_user_id=driver.id,
+        amount=Decimal(credit),
+        currency="UZS",
+        source=CashCollectionSource.STANDALONE_MEETING,
+        occurred_at=datetime.now(timezone.utc),
+        notes="Seeded standalone-meeting prepayment surplus",
+        unapplied_amount=Decimal(credit),
+    )
+    db.session.add(event)
+    db.session.flush()
+
+    cash_service = CashCollectionService()
+    payment = cash_service.ensure_cod_payment_for_order(order)
+    db.session.flush()
+    reserved = cash_service.reserve_customer_prepaid_credit_for_payment(payment, actor_user_id=user.id)
+    db.session.commit()
+    assert reserved == Decimal(credit), "test setup must fully reserve the seeded credit"
+    db.session.expire(order)
+    return order, payment, event
+
+
+def test_apply_t1_flip_releases_reservation_funded_by_standalone_meeting(
+    db, workplace_user, sample_product, covered_contract, delivery_driver
+):
+    contract, price_row, account, balance = covered_contract
+    order, payment, event = _seed_cash_order_with_standalone_reservation(
+        db, workplace_user, sample_product, contract, price_row, delivery_driver
+    )
+
+    result = OrderPaymentMethodEditService().apply_edit(
+        order_id=order.id,
+        new_method="business_account",
+        reason="reclassify confirmed cash order to business account",
+        actor_user_id=delivery_driver.id,
+    )
+
+    db.session.expire_all()
+    order = Order.query.get(order.id)
+    assert order.payment_method == PaymentMethod.BUSINESS_ACCOUNT
+    assert order.payment.payment_method == PaymentMethod.BUSINESS_ACCOUNT
+
+    # The funding event's unapplied_amount is restored in full — the money is
+    # not stranded, it is back in the customer's available balance.
+    refreshed_event = CashCollectionEvent.query.get(event.id)
+    assert refreshed_event.unapplied_amount == Decimal("82000.00")
+
+    # No live reservation remains on this payment (business_account or not,
+    # every release path is CASH-gated, so this must happen BEFORE the flip).
+    live_reservations = CashCollectionAllocation.query.filter_by(
+        payment_id=payment.id, allocation_mode="prepaid_reservation", reversed_at=None
+    ).all()
+    assert live_reservations == []
+
+    # Conservation law: live allocations + unapplied_amount == event.amount.
+    live_total = sum(
+        (
+            Decimal(str(a.allocated_amount))
+            for a in CashCollectionAllocation.query.filter_by(
+                cash_collection_event_id=refreshed_event.id, reversed_at=None
+            ).all()
+        ),
+        Decimal("0.00"),
+    )
+    assert live_total + refreshed_event.unapplied_amount == refreshed_event.amount
+
+    # _reverse_collected_cash still ran (it just found nothing to reverse: the
+    # reservation was standalone_meeting-funded, not DELIVERY_COMPLETION).
+    assert result.money_action == "cod_cancelled"
+
+
+# --------------------------------------------------------------------------- #
 # apply_edit — out of business_account (T3 cash, T4 click)
 # --------------------------------------------------------------------------- #
 

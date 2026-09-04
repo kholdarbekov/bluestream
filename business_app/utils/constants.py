@@ -60,6 +60,7 @@ class NotificationType(Enum):
     # Distinct types so a tier change / expiry never borrows the "AquaCoins
     # earned" template and leaks its unfilled {points}/{balance} placeholders.
     LOYALTY_TIER_UPGRADE = "loyalty_tier_upgrade"
+    LOYALTY_TIER_DOWNGRADE = "loyalty_tier_downgrade"
     LOYALTY_POINTS_EXPIRED = "loyalty_points_expired"
 
 

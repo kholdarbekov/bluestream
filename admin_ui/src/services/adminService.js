@@ -899,8 +899,11 @@ class AdminService {
     return response.data?.data?.tier || response.data;
   }
 
-  async deleteLoyaltyTier(tierId) {
-    const response = await api.delete(`/admin/loyalty/tiers/${tierId}`);
+  async deleteLoyaltyTier(tierId, payload) {
+    // Axios sends a DELETE body via the `data` config key, not a positional
+    // argument. Omitting it (the common case) keeps sending a bodyless
+    // DELETE exactly as before — the backend reads it defensively.
+    const response = await api.delete(`/admin/loyalty/tiers/${tierId}`, payload ? { data: payload } : undefined);
     return response.data;
   }
 

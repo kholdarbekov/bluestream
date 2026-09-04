@@ -3,11 +3,12 @@
 ``LoyaltyService.award_points`` parks a pending notification dict on
 ``db.session.info["pending_loyalty_award_notifications"]`` for EVERY award
 (commit=True or commit=False), and ``_check_tier_upgrade`` parks one for every
-tier promotion. These listeners fire exactly once, only after the real
-transaction commits, so a ``commit=False`` award buried inside an outer
-order/delivery transaction still notifies — and a rolled-back award or tier
-change notifies no one. Dispatch is best-effort: a failure here must never
-bubble into the committing request.
+real tier upgrade or downgrade (never for a downgrade the guarantee blocks,
+nor a same-tier requalification). These listeners fire exactly once, only
+after the real transaction commits, so a ``commit=False`` award buried inside
+an outer order/delivery transaction still notifies — and a rolled-back award
+or tier change notifies no one. Dispatch is best-effort: a failure here must
+never bubble into the committing request.
 """
 
 import logging
@@ -21,6 +22,7 @@ PENDING_KEY = "pending_loyalty_award_notifications"
 # Entry kinds parked on the session under PENDING_KEY.
 KIND_AWARD = "award"
 KIND_TIER_UPGRADE = "tier_upgrade"
+KIND_TIER_DOWNGRADE = "tier_downgrade"
 
 # Guard so repeated create_app() calls (tests) don't stack duplicate listeners.
 _REGISTERED = False
@@ -55,6 +57,14 @@ def register_loyalty_award_dispatch(db) -> None:
                         tier=entry.get("tier"),
                         tier_config_id=entry.get("tier_config_id"),
                         balance=entry.get("balance"),
+                    )
+                elif entry.get("kind") == KIND_TIER_DOWNGRADE:
+                    service._send_tier_downgrade_notification(
+                        entry["user_id"],
+                        tier=entry.get("tier"),
+                        tier_config_id=entry.get("tier_config_id"),
+                        qualifying_points=entry.get("qualifying_points") or 0,
+                        required_points=entry.get("required_points") or 0,
                     )
                 else:
                     service._send_points_notification(

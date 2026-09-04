@@ -15,6 +15,10 @@ from api_client import api_client
 from utils import user_middleware, format_price, get_auth_token
 from handlers.base import BaseHandler
 
+# Tier medal shown beside the level name. Tier names come from the database
+# (admin-editable) and are not guaranteed to be one of these four, so an
+# unrecognised name falls back to a neutral medal rather than assuming Silver.
+_TIER_EMOJI = {"Bronze": "🥉", "Silver": "🥈", "Gold": "🥇", "Platinum": "👑"}
 
 
 class LoyaltyHandlers(BaseHandler):
@@ -239,9 +243,10 @@ class LoyaltyHandlers(BaseHandler):
                 if points_response.success:
                     points_data = self._unwrap_response_data(points_response)
                     current_points = points_data.get('current_balance', points_data.get('points_balance', 0))
-                    lifetime_points = points_data.get('lifetime_earned', points_data.get('lifetime_points', 0))
+                    qualifying_points = points_data.get('qualifying_points', 0)
                 else:
-                    current_points = lifetime_points = 0
+                    points_data = {}
+                    current_points = qualifying_points = 0
 
                 if rewards_response.success:
                     rewards = self._unwrap_response_data(rewards_response).get('rewards', [])
@@ -251,8 +256,29 @@ class LoyaltyHandlers(BaseHandler):
             # Build loyalty message
             points_unit = i18n.get('telegram.loyalty.points_unit', language)
             loyalty_text = f"{i18n.get('telegram.menu.loyalty', language)}\n\n"
+            # Level first: it is what the customer's benefits follow. No date —
+            # a tier does not expire, and any date here reads as one.
+            tier_name = points_data.get('tier')
+            if tier_name:
+                tier_emoji = _TIER_EMOJI.get(tier_name, "🏅")
+                loyalty_text += f"{tier_emoji} {i18n.get('telegram.loyalty.tier_line', language, tier=tier_name)}\n"
+                tier_pct = float(points_data.get('tier_discount_percentage') or 0)
+                if tier_pct > 0:
+                    loyalty_text += f"   {i18n.get('telegram.loyalty.tier_cod_perk', language, pct=('%g' % tier_pct))}\n"
+                needed_to_keep = int(points_data.get('points_needed_to_keep') or 0)
+                if needed_to_keep > 0:
+                    loyalty_text += f"   ⚠️ {i18n.get('telegram.loyalty.tier_keep_hint', language, points=needed_to_keep)}\n"
+                else:
+                    loyalty_text += f"   ✅ {i18n.get('telegram.loyalty.tier_secured', language)}\n"
+                loyalty_text += "\n"
+
             loyalty_text += f"🏆 {i18n.get('telegram.loyalty.current_balance', language)}: {current_points} {points_unit}\n"
-            loyalty_text += f"📈 {i18n.get('telegram.loyalty.lifetime_earned', language)}: {lifetime_points} {points_unit}\n\n"
+            loyalty_text += f"📈 {i18n.get('telegram.loyalty.qualifying_12m', language)}: {qualifying_points} {points_unit}\n"
+            next_tier = points_data.get('next_tier')
+            if next_tier and next_tier != tier_name:
+                to_next = int(points_data.get('points_to_next_tier') or 0)
+                loyalty_text += f"   {i18n.get('telegram.loyalty.to_next_tier', language, tier=next_tier, points=to_next)}\n"
+            loyalty_text += "\n"
 
             if rewards:
                 loyalty_text += f"🎁 {i18n.get('telegram.loyalty.available_rewards', language)} ({len(rewards)}):\n"

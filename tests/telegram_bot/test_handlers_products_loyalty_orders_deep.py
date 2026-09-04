@@ -686,7 +686,7 @@ class TestLoyaltyHandlerDeepFlows:
             FakeAPIClientContext(
                 get_loyalty_points=_resp(
                     success=True,
-                    data={"data": {"points_balance": 120, "lifetime_points": 999}},
+                    data={"data": {"points_balance": 120, "qualifying_points": 999}},
                 ),
                 get_loyalty_rewards=_resp(
                     success=True,

@@ -154,6 +154,81 @@ const LoyaltyPrograms = () => {
     },
   });
 
+  // createTierMutation, updateTierMutation and deleteTierMutation all submit
+  // a tier-shaped edit and can hit either guard the server enforces:
+  // - impact_confirmation_required (409): the edit strands members who
+  //   already hold this tier's badge. stranded_members is a documented LOWER
+  //   BOUND — it counts only accounts wearing THIS tier's badge, never the
+  //   total affected — so never describe it as an exhaustive total.
+  // - threshold_gap (422): the edit leaves a points range no tier covers.
+  //   This changes no pricing (get_tier_for_points reads min_points alone),
+  //   so unlike threshold_overlap/threshold_invalid it is also waivable.
+  // Both are resolved the same way: confirm with the admin, then retry() the
+  // identical request plus confirm_impact: true. Anything else just reports.
+  const confirmTierGuardOrReport = (error, retry, fallbackKey, fallbackDefault) => {
+    const responseData = error?.response?.data;
+    const payload = responseData?.data;
+    const code = payload?.error_code;
+
+    if (code === 'impact_confirmation_required') {
+      // The server's own message is authoritative (localized, and already
+      // correct for either case). Compose locally only if it is missing.
+      const fallbackBody = payload.new_min_points != null
+        ? t('ui.loyalty.tier_impact_body_raise', {
+            count: payload.stranded_members,
+            tier: payload.tier,
+            minPoints: payload.new_min_points,
+            defaultValue: `${payload.stranded_members} member(s) hold the ${payload.tier} badge with fewer points than the new threshold of ${payload.new_min_points}. They keep their current benefits, but will no longer qualify by points alone. Proceed?`,
+          })
+        : t('ui.loyalty.tier_impact_body_deactivate', {
+            count: payload.stranded_members,
+            tier: payload.tier,
+            defaultValue: `${payload.stranded_members} member(s) currently hold the ${payload.tier} badge. Deactivating this tier will affect them, though they keep their current benefits. Proceed?`,
+          });
+      Modal.confirm({
+        title: t('ui.loyalty.tier_impact_title', { defaultValue: 'Confirm tier change' }),
+        content: responseData?.message || fallbackBody,
+        okText: t('ui.loyalty.tier_impact_ok', { defaultValue: 'Proceed' }),
+        cancelText: t('ui.common.cancel', { defaultValue: 'Cancel' }),
+        onOk: retry,
+      });
+      return;
+    }
+
+    if (code === 'threshold_gap') {
+      // The server's detail explains WHERE the gap falls; it does not say
+      // that a gap is display-only, so that reassurance is always added,
+      // never swapped in only when the server message is missing.
+      Modal.confirm({
+        title: t('ui.loyalty.tier_gap_title', { defaultValue: 'Confirm tier bands' }),
+        content: (
+          <>
+            <p>
+              {responseData?.message ||
+                t('ui.loyalty.tier_gap_body', {
+                  defaultValue: 'This change leaves a range of AquaCoins that no tier covers.',
+                })}
+            </p>
+            <p>
+              {t('ui.loyalty.tier_gap_reassurance', {
+                defaultValue:
+                  'This only affects how the tier table is displayed — it changes no pricing. Proceed?',
+              })}
+            </p>
+          </>
+        ),
+        okText: t('ui.loyalty.tier_impact_ok', { defaultValue: 'Proceed' }),
+        cancelText: t('ui.common.cancel', { defaultValue: 'Cancel' }),
+        onOk: retry,
+      });
+      return;
+    }
+
+    // threshold_overlap, threshold_invalid, and anything unrecognized: not
+    // waivable, just report it.
+    message.error(responseData?.message || t(fallbackKey, { defaultValue: fallbackDefault }));
+  };
+
   const createTierMutation = useMutation({
     mutationFn: (values) => adminService.createLoyaltyTier(values),
 
@@ -163,6 +238,14 @@ const LoyaltyPrograms = () => {
       tierForm.resetFields();
       invalidateLoyaltyQueries();
     },
+
+    onError: (error, values) =>
+      confirmTierGuardOrReport(
+        error,
+        () => createTierMutation.mutate({ ...values, confirm_impact: true }),
+        'ui.loyalty.tier_create_failed',
+        'Tier creation failed',
+      ),
   });
 
   const updateTierMutation = useMutation({
@@ -174,15 +257,44 @@ const LoyaltyPrograms = () => {
       tierForm.resetFields();
       invalidateLoyaltyQueries();
     },
+
+    // A min_points raise or a deactivation can strand members who already hold
+    // this tier's badge. The server refuses once with a lower-bound count on
+    // that badge; re-submit with confirm_impact only after the admin agrees.
+    onError: (error, variables) =>
+      confirmTierGuardOrReport(
+        error,
+        () =>
+          updateTierMutation.mutate({
+            tierId: variables.tierId,
+            values: { ...variables.values, confirm_impact: true },
+          }),
+        'ui.loyalty.tier_update_failed',
+        'Tier update failed',
+      ),
   });
 
   const deleteTierMutation = useMutation({
-    mutationFn: (tierId) => adminService.deleteLoyaltyTier(tierId),
+    // payload is optional: {confirm_impact: true} on a retry, undefined on
+    // the first attempt (a bodyless DELETE must keep working unchanged).
+    mutationFn: ({ tierId, payload }) => adminService.deleteLoyaltyTier(tierId, payload),
 
     onSuccess: () => {
       message.success(t('ui.loyalty.tier_delete_success', { defaultValue: 'Tier removed successfully' }));
       invalidateLoyaltyQueries();
     },
+
+    onError: (error, variables) =>
+      confirmTierGuardOrReport(
+        error,
+        () =>
+          deleteTierMutation.mutate({
+            tierId: variables.tierId,
+            payload: { confirm_impact: true },
+          }),
+        'ui.loyalty.tier_delete_failed',
+        'Tier deletion failed',
+      ),
   });
 
   const createStreakRuleMutation = useMutation({
@@ -394,7 +506,7 @@ const LoyaltyPrograms = () => {
               Modal.confirm({
                 title: t('ui.loyalty.delete_tier_confirm_title', { defaultValue: 'Delete tier?' }),
                 content: t('ui.loyalty.delete_tier_confirm_message', { defaultValue: `Delete ${record.name}?` }),
-                onOk: () => deleteTierMutation.mutate(record.id),
+                onOk: () => deleteTierMutation.mutate({ tierId: record.id }),
               });
             }}
           />

@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from typing import List, Dict, Any, Optional, Union
-from flask import current_app
-from sqlalchemy import func, and_, or_
+from flask import current_app, g, has_app_context
+from sqlalchemy import func, and_, or_, event
 
 from business_app.models.loyalty import (
     LoyaltyPoints,
@@ -136,6 +136,152 @@ def apply_tier_discount_for_rail(order: Order, payment_method: Union[str, Paymen
     return new_tier_discount
 
 
+def _request_memo(key: str) -> Optional[dict]:
+    """Per-request cache dict stored on ``flask.g`` under ``key``.
+
+    Outside an app context (Celery tasks, scripts, some tests) this returns
+    None and callers must skip caching — it never raises for a missing
+    context.
+    """
+    if not has_app_context():
+        return None
+    memo = g.get(key)
+    if memo is None:
+        memo = {}
+        setattr(g, key, memo)
+    return memo
+
+
+_TIER_LADDER_MEMO_KEY = "_loyalty_tier_ladder_memo"
+_QUALIFYING_POINTS_MEMO_KEY = "_loyalty_qualifying_points_memo"
+_LOYALTY_ACCOUNT_MEMO_KEY = "_loyalty_account_memo"
+
+
+def _get_tier_ladder(program_id: int) -> List[LoyaltyTierConfig]:
+    """All active ``LoyaltyTierConfig`` rows for one program, ONE query,
+    ordered by ``min_points`` DESC — the same order
+    ``LoyaltyTierConfig.get_tier_for_points`` scans in. Memoized per
+    request/program_id.
+    """
+    memo = _request_memo(_TIER_LADDER_MEMO_KEY)
+    if memo is not None and program_id in memo:
+        return memo[program_id]
+    ladder = (
+        LoyaltyTierConfig.query.filter_by(program_id=program_id, is_active=True)
+        .order_by(LoyaltyTierConfig.min_points.desc())
+        .all()
+    )
+    if memo is not None:
+        memo[program_id] = ladder
+    return ladder
+
+
+def _resolve_tier_from_ladder(points: int, ladder: List[LoyaltyTierConfig]) -> Optional[LoyaltyTierConfig]:
+    """Same semantics as ``LoyaltyTierConfig.get_tier_for_points``: the
+    highest tier whose ``min_points <= points``, falling back to the lowest
+    tier when nothing matches (or None when ``ladder`` is empty). ``ladder``
+    must be ordered by ``min_points`` DESC, as ``_get_tier_ladder`` returns it.
+    """
+    for tier in ladder:
+        if points >= tier.min_points:
+            return tier
+    if not ladder:
+        return None
+    return min(ladder, key=lambda tier: tier.min_points)
+
+
+def _calculate_qualifying_points_cached(user_id: int) -> int:
+    """Memoized read of ``calculate_qualifying_points`` for read/pricing
+    paths ONLY. ``_check_tier_upgrade`` (the only writer of
+    ``loyalty_points.current_tier``) calls the uncached method directly so it
+    can never act on a stale total.
+    """
+    memo = _request_memo(_QUALIFYING_POINTS_MEMO_KEY)
+    if memo is not None and user_id in memo:
+        return memo[user_id]
+    points = LoyaltyService().calculate_qualifying_points(user_id)
+    if memo is not None:
+        memo[user_id] = points
+    return points
+
+
+def _invalidate_qualifying_points_memo(user_id: int) -> None:
+    """Drop a stale qualifying-points memo entry after a LoyaltyTransaction write."""
+    memo = _request_memo(_QUALIFYING_POINTS_MEMO_KEY)
+    if memo is not None:
+        memo.pop(user_id, None)
+
+
+def _get_cached_loyalty_account(user_id: int) -> Optional[LoyaltyPoints]:
+    """Read-only ``LoyaltyPoints`` lookup, memoized per request. Only
+    non-None results are cached, so an account created later in the same
+    request (by ``get_or_create_loyalty_account``) is never shadowed by a
+    cached miss.
+    """
+    memo = _request_memo(_LOYALTY_ACCOUNT_MEMO_KEY)
+    if memo is not None and user_id in memo:
+        return memo[user_id]
+    account = LoyaltyPoints.query.filter_by(user_id=user_id).first()
+    if memo is not None and account is not None:
+        memo[user_id] = account
+    return account
+
+
+def _invalidate_qualifying_points_on_write(mapper, connection, target):
+    """Qualifying points depend on the LoyaltyTransaction ledger; any write
+    can change the sum for ``target.user_id``, so the memo is dropped
+    unconditionally. Fires on flush — ``award_points`` ALSO invalidates
+    explicitly right after ``add()`` for callers that read before flushing.
+    """
+    _invalidate_qualifying_points_memo(target.user_id)
+
+
+event.listen(LoyaltyTransaction, "after_insert", _invalidate_qualifying_points_on_write)
+event.listen(LoyaltyTransaction, "after_update", _invalidate_qualifying_points_on_write)
+event.listen(LoyaltyTransaction, "after_delete", _invalidate_qualifying_points_on_write)
+
+
+def _clear_request_memos_on_rollback(session):  # noqa: ANN001
+    """A rollback un-writes whatever a flush made durable: both the
+    qualifying-points memo and the loyalty-account memo must be dropped, or a
+    later read in the same request could return a value computed against
+    state the database no longer has — including a rolled-back account
+    creation in ``get_or_create_loyalty_account``.
+    """
+    for key in (_QUALIFYING_POINTS_MEMO_KEY, _LOYALTY_ACCOUNT_MEMO_KEY):
+        memo = _request_memo(key)
+        if memo is not None:
+            memo.clear()
+
+
+event.listen(db.session, "after_rollback", _clear_request_memos_on_rollback)
+
+
+def effective_tier(account: LoyaltyPoints) -> Optional[LoyaltyTierConfig]:
+    """The tier whose benefits ``account`` is entitled to right now.
+
+    The stored badge counts, so a threshold edit can never reprice a member
+    without also visibly demoting them. The live tier counts too, so a badge
+    that has not caught up with a lowered threshold can only help. The higher
+    of the two wins.
+
+    ``tier_valid_until`` is deliberately not read here: it is a downgrade
+    guarantee owned by ``_check_tier_upgrade``, not an expiry, and consulting
+    it would drop a benefit before the badge the customer sees changed.
+
+    Both lookups come from ONE ladder query (``_get_tier_ladder``) instead of
+    two separate ``LoyaltyTierConfig`` queries.
+    """
+    if account is None:
+        return None
+
+    ladder = _get_tier_ladder(account.program_id)
+    stored = next((tier for tier in ladder if tier.name == account.current_tier), None)
+    live = _resolve_tier_from_ladder(_calculate_qualifying_points_cached(account.user_id), ladder)
+    candidates = [tier for tier in (stored, live) if tier is not None]
+    return max(candidates, key=lambda tier: (tier.display_order or 0), default=None)
+
+
 class LoyaltyService:
     """Service for managing loyalty programs"""
 
@@ -171,7 +317,8 @@ class LoyaltyService:
            the legacy ``card`` value and a NULL rail can never match.
         2. The user is loyalty-eligible (entity users without an active
            loyalty-eligible contract are excluded by the pre-existing SSOT).
-        3. A tier resolves for their qualifying points.
+        3. A tier resolves for them — the higher of their badge and their
+           live qualifying points (``effective_tier``).
         4. That tier's ``discount_percentage`` is above zero.
 
         The rate is read LIVE from ``LoyaltyTierConfig.discount_percentage``.
@@ -187,12 +334,15 @@ class LoyaltyService:
         if not self.is_user_loyalty_eligible(user):
             return NO_TIER_DISCOUNT
 
-        account = LoyaltyPoints.query.filter_by(user_id=user.id).first()
-        program_id = account.program_id if account else None
-        tier = LoyaltyTierConfig.get_tier_for_points(
-            self.calculate_qualifying_points(user.id),
-            program_id,
-        )
+        account = _get_cached_loyalty_account(user.id)
+        if account is not None:
+            tier = effective_tier(account)
+        else:
+            # No loyalty account yet: fall back to the live lookup on the default
+            # program, exactly as before effective_tier existed. Excluding these
+            # users would price them differently the moment the lowest tier's
+            # rate rises above zero.
+            tier = LoyaltyTierConfig.get_tier_for_points(_calculate_qualifying_points_cached(user.id), None)
         if tier is None:
             return NO_TIER_DISCOUNT
 
@@ -240,6 +390,14 @@ class LoyaltyService:
         if amount <= 0:
             return 0
 
+        # An entity user without an active loyalty-eligible contract gets no
+        # loyalty in any form. Checked BEFORE get_or_create_loyalty_account so
+        # no account row is brought into existence on their behalf, and so the
+        # estimate never advertises AquaCoins the award path refuses to grant
+        # (order_service.py's own gate).
+        if not self.is_user_loyalty_eligible(User.query.get(user_id)):
+            return 0
+
         # Get user's loyalty account and program
         account = self.get_or_create_loyalty_account(user_id)
 
@@ -252,8 +410,9 @@ class LoyaltyService:
         # Calculate base points (Floor division)
         base_points = amount // uzs_per_point
 
-        # Get tier-based multiplier from database (preferred) or constants (fallback)
-        current_tier = account.current_tier or "Bronze"
+        # Same tier the discount uses, so the two benefits cannot disagree.
+        tier = effective_tier(account)
+        current_tier = tier.name if tier else (account.current_tier or "Bronze")
         multiplier = self._get_tier_multiplier(current_tier, account.program_id)
 
         from decimal import Decimal
@@ -266,14 +425,15 @@ class LoyaltyService:
         """
         Get points multiplier for a tier.
 
-        Queries LoyaltyTierConfig from database.
+        Reads the cached ladder when program_id is given (the common, hot-path
+        case). The rare program_id=None call still queries directly, unfiltered
+        by program — same as before.
         """
-        # Try database first
         try:
-            tier = LoyaltyTierConfig.query.filter_by(name=tier_name, is_active=True)
             if program_id:
-                tier = tier.filter_by(program_id=program_id)
-            tier = tier.first()
+                tier = next((t for t in _get_tier_ladder(program_id) if t.name == tier_name), None)
+            else:
+                tier = LoyaltyTierConfig.query.filter_by(name=tier_name, is_active=True).first()
 
             if tier:
                 return tier.points_multiplier or 1.0
@@ -300,13 +460,36 @@ class LoyaltyService:
         return []
 
     def get_or_create_loyalty_account(self, user_id: int, commit: bool = True) -> LoyaltyPoints:
-        """Get or create loyalty account for user"""
-        account = LoyaltyPoints.query.filter_by(user_id=user_id).first()
+        """Get or create loyalty account for user.
+
+        A loyalty-ineligible user (entity with no active loyalty-eligible
+        contract) gets a TRANSIENT account that is never added to the session, so
+        read surfaces render a zero state while no row is brought into existence
+        on their behalf. Callers keep the same object shape either way; award
+        paths never reach this because ``award_points`` gates first.
+        """
+        account = _get_cached_loyalty_account(user_id)
 
         if not account:
             user = User.query.get(user_id)
             if not user:
                 raise NotFoundError("User not found")
+
+            if not self.is_user_loyalty_eligible(user):
+                program = (
+                    LoyaltyProgram.query.filter_by(is_default=True).first()
+                    or LoyaltyProgram.query.filter_by(is_active=True).first()
+                )
+                starting_tier = LoyaltyTierConfig.get_tier_for_points(0, program.id if program else None)
+                return LoyaltyPoints(
+                    user_id=user_id,
+                    program_id=program.id if program else None,
+                    total_earned=0,
+                    total_redeemed=0,
+                    current_balance=0,
+                    current_tier=starting_tier.name if starting_tier else "Bronze",
+                    points_to_next_tier=0,
+                )
 
             # Get default loyalty program
             program = LoyaltyProgram.query.filter_by(is_default=True).first()
@@ -362,6 +545,10 @@ class LoyaltyService:
         (0 if none). Kept OUT of get_or_create_loyalty_account so read/GET paths
         never mutate the ledger.
         """
+        # No welcome bonus, and no account row, for a loyalty-ineligible user.
+        if not self.is_user_loyalty_eligible(User.query.get(user_id)):
+            return 0
+
         account = self.get_or_create_loyalty_account(user_id)
         signup_bonus = (account.program.signup_bonus if account.program else 0) or 0
         if signup_bonus <= 0:
@@ -378,14 +565,29 @@ class LoyaltyService:
         return signup_bonus
 
     def get_points_summary_for_user(self, user_id: int) -> Dict[str, Any]:
-        """Get points summary payload for API."""
+        """Get points summary payload for API.
+
+        ``qualifying_points`` is the trailing-365-day figure that actually
+        decides the tier; ``lifetime_earned`` is retained for the surfaces that
+        still publish it. ``points_needed_to_keep`` is what a member must earn
+        to clear their own tier's current floor.
+        """
         account = self.get_or_create_loyalty_account(user_id)
+        qualifying_points = self.calculate_qualifying_points(user_id)
+        tier = effective_tier(account)
+        next_tier = self._get_next_tier_info(account)
+        requalification = self.get_requalification_info(user_id)
         return {
             "points_balance": account.current_balance or 0,
             "lifetime_points": account.total_earned or 0,
             "current_balance": account.current_balance or 0,
             "lifetime_earned": account.total_earned or 0,
-            "tier": account.current_tier,
+            "qualifying_points": qualifying_points,
+            "tier": tier.name if tier else account.current_tier,
+            "tier_discount_percentage": float(tier.discount_percentage or 0) if tier else 0.0,
+            "next_tier": next_tier["tier"] if next_tier else None,
+            "points_to_next_tier": next_tier["points_needed"] if next_tier else 0,
+            "points_needed_to_keep": requalification["points_needed_to_keep"],
             "next_tier_threshold": account.points_to_next_tier or 0,
         }
 
@@ -453,9 +655,11 @@ class LoyaltyService:
             "current_tier": current_tier,
             "points_this_month": points_this_month,
             "tier_progress": {
-                "current": current_progress,
+                # A member below their own badge's floor would otherwise render
+                # a negative bar width on the customer loyalty page.
+                "current": max(0, current_progress),
                 "next_tier_points": next_tier_progress_target,
-                "points_needed": points_needed,
+                "points_needed": max(0, points_needed),
             },
             "available_rewards_count": available_rewards_count,
             "total_earned": account.total_earned or 0,
@@ -879,7 +1083,7 @@ class LoyaltyService:
         expires_at: datetime = None,
         extra_data: dict = None,
         commit: bool = True,
-    ) -> LoyaltyTransaction:
+    ) -> Optional[LoyaltyTransaction]:
         """
         Award loyalty points to user
 
@@ -896,6 +1100,24 @@ class LoyaltyService:
         """
         if points <= 0:
             raise ValidationError("Points must be positive")
+
+        # THE choke point for every positive-point write. An entity user without
+        # an active loyalty-eligible contract earns nothing from any source —
+        # welcome, referral, birthday, gift, order-edit re-award, or anything
+        # added later. Checked BEFORE get_or_create_loyalty_account so no account
+        # row is created on their behalf either. Returns None rather than raising:
+        # ineligibility is a normal state, not a failure of the calling flow.
+        user = User.query.get(user_id)
+        if not user:
+            raise NotFoundError("User not found")
+        if not self.is_user_loyalty_eligible(user):
+            current_app.logger.info(
+                "Skipping AquaCoins award for loyalty-ineligible user %s (%s points, %s)",
+                user_id,
+                points,
+                description,
+            )
+            return None
 
         account = self.get_or_create_loyalty_account(user_id, commit=commit)
 
@@ -935,6 +1157,10 @@ class LoyaltyService:
         )
 
         db.session.add(transaction)
+        # The after_insert listener below fires on flush; invalidate explicitly
+        # here too so a cached read between add() and the next flush/commit
+        # can never see the pre-award total.
+        _invalidate_qualifying_points_memo(user_id)
 
         # Update account balance
         account.current_balance += points
@@ -997,6 +1223,12 @@ class LoyaltyService:
         """
         if old_points_earned < 0 or new_points_earned < 0:
             raise ValidationError("AquaCoins totals must be non-negative")
+
+        # A loyalty-ineligible user has no earnings to reverse and must not gain
+        # an account row from an order edit. Checked before the account lookup,
+        # which would otherwise create one even when diff == 0.
+        if not self.is_user_loyalty_eligible(User.query.get(user_id)):
+            return {"diff": 0, "clawback": 0, "uncollectible": 0, "award": 0, "transaction_id": None}
 
         account = self.get_or_create_loyalty_account(user_id)
         result: Dict[str, Any] = {
@@ -1730,12 +1962,31 @@ class LoyaltyService:
         # tzinfo on read) so this comparison never raises offset-naive/aware errors.
         elif target_weight < current_weight:
             if not account.tier_valid_until or ensure_utc(account.tier_valid_until) < now:
-                # Lock expired, and points support lower tier -> Downgrade
+                # Guarantee lapsed and points support the lower tier -> downgrade
                 account.current_tier = target_tier_name
                 account.tier_valid_until = None
 
                 # Recalculate next tier target
                 self._update_points_to_next_tier(account, target_tier_config)
+
+                # SSOT: park post-commit (same listener as awards/upgrades) so a
+                # rolled-back transaction never notifies a downgrade that didn't stick.
+                from business_app.utils.loyalty_award_dispatch import KIND_TIER_DOWNGRADE, PENDING_KEY
+
+                db.session.info.setdefault(PENDING_KEY, []).append(
+                    {
+                        "kind": KIND_TIER_DOWNGRADE,
+                        "user_id": account.user_id,
+                        "tier": target_tier_name,
+                        "tier_config_id": target_tier_config.id,
+                        "qualifying_points": qualifying_points,
+                        "required_points": current_tier_config.min_points if current_tier_config else 0,
+                    }
+                )
+            elif current_tier_config:
+                # Guarantee holds the badge; the next-tier target must still
+                # track the member's real qualifying points.
+                self._update_points_to_next_tier(account, current_tier_config)
 
         # CASE 3: Same tier - the user still qualifies, so refresh the lock and
         # recompute points_to_next_tier (qualifying_points may have changed).
@@ -2323,6 +2574,33 @@ class LoyaltyService:
             {"tier": tier, "tier_config_id": tier_config_id, "balance": balance},
         )
 
+    def _send_tier_downgrade_notification(
+        self,
+        user_id: int,
+        *,
+        tier: str,
+        tier_config_id: int = None,
+        qualifying_points: int = 0,
+        required_points: int = 0,
+    ):
+        """Tell a member their tier changed, and why.
+
+        A downgrade removes a cash discount, so it states the trailing-365-day
+        figure alongside the threshold it fell short of.
+        """
+        from ..tasks.notification_tasks import send_loyalty_notification_task
+
+        send_loyalty_notification_task.delay(
+            user_id,
+            "tier_downgrade",
+            {
+                "tier": tier,
+                "tier_config_id": tier_config_id,
+                "qualifying_points": qualifying_points,
+                "required_points": required_points,
+            },
+        )
+
     def _send_points_expiry_notification(self, user_id: int, points: int = 0, balance: int = 0):
         """Send points expiry notification.
 
@@ -2559,6 +2837,12 @@ class LoyaltyService:
         self, sender_id: int, recipient_id: int, points_amount: int, message: str = ""
     ) -> LoyaltyTransaction:
         """Gift points from one user to another"""
+        # Refuse BEFORE debiting: award_points drops the credit for a
+        # loyalty-ineligible recipient, so debiting first would destroy the
+        # sender's points with nothing landing on the other side.
+        if not self.is_user_loyalty_eligible(User.query.get(recipient_id)):
+            raise ValidationError("Recipient is not eligible for the loyalty program")
+
         # Check sender's balance
         sender_points = self.get_available_points(sender_id)
         if sender_points < points_amount:
@@ -2610,14 +2894,17 @@ class LoyaltyService:
             referrer_points = referral.referrer_bonus_points or self.get_referrer_bonus_points()
             referee_points = referral.referee_bonus_points or self.get_referee_bonus_points()
 
-            self.award_points(
+            # award_points returns None for a loyalty-ineligible party; record only
+            # what actually landed so the referral row and the run summary never
+            # claim points nobody received.
+            referrer_awarded = self.award_points(
                 referral.referrer_id,
                 referrer_points,
                 f"Referral bonus for user #{referral.referee_id}",
                 LoyaltyActionType.REFERRAL,
                 referral.first_order_id,
             )
-            self.award_points(
+            referee_awarded = self.award_points(
                 referral.referee_id,
                 referee_points,
                 "Referral signup bonus",
@@ -2625,10 +2912,10 @@ class LoyaltyService:
                 referral.first_order_id,
             )
 
-            referral.referrer_bonus_points = referrer_points
-            referral.referee_bonus_points = referee_points
+            referral.referrer_bonus_points = referrer_points if referrer_awarded else 0
+            referral.referee_bonus_points = referee_points if referee_awarded else 0
             processed_count += 1
-            total_points_awarded += referrer_points + referee_points
+            total_points_awarded += referral.referrer_bonus_points + referral.referee_bonus_points
 
         if pending_referrals:
             db.session.commit()
@@ -2684,8 +2971,13 @@ class LoyaltyService:
             if already:
                 continue
             try:
-                self.award_points(user.id, bonus, "Birthday bonus", action_type=LoyaltyActionType.BIRTHDAY_BONUS)
-                granted += 1
+                awarded = self.award_points(
+                    user.id, bonus, "Birthday bonus", action_type=LoyaltyActionType.BIRTHDAY_BONUS
+                )
+                # award_points returns None for a loyalty-ineligible user; counting
+                # it would over-report the sweep.
+                if awarded is not None:
+                    granted += 1
             except Exception as exc:
                 db.session.rollback()
                 current_app.logger.error(f"Failed to grant birthday bonus to user {user.id}: {exc}")
@@ -2739,6 +3031,11 @@ class LoyaltyService:
 
         accounts = LoyaltyPoints.query.all()
         for account in accounts:
+            # Historical rows exist for ineligible entity users; recomputing their
+            # tier would push them an upgrade/downgrade message for a programme
+            # they are not in.
+            if not self.is_user_loyalty_eligible(User.query.get(account.user_id)):
+                continue
             old_tier = account.current_tier
             previous_points_to_next = account.points_to_next_tier
             self._check_tier_upgrade(account)

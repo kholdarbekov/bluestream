@@ -778,3 +778,31 @@ def test_admin_analytics_returns_summary(
     assert summary["points_redeemed"] == 100
     assert "tier_distribution" in data
     assert "redemption_metrics" in data
+
+
+def test_points_summary_reports_the_qualifying_figure(db, sample_user):
+    """The bot screen must show what decides the tier, not the lifetime total."""
+    from decimal import Decimal
+
+    from business_app.models.loyalty import LoyaltyPoints
+    from business_app.services.loyalty_service import LoyaltyService
+    from tests.integration.tier_discount_factory import seed_account, seed_program, seed_tier
+
+    program = seed_program(db)
+    seed_tier(db, program, name="Bronze", rate=Decimal("0"), min_points=0, display_order=0)
+    seed_tier(db, program, name="Silver", rate=Decimal("1.5"), min_points=4000, display_order=1)
+    seed_tier(db, program, name="Gold", rate=Decimal("2"), min_points=15000, display_order=2)
+    seed_account(db, sample_user, program, qualifying_points=3488, balance=988)
+    account = LoyaltyPoints.query.filter_by(user_id=sample_user.id).first()
+    account.current_tier = "Silver"
+    db.session.commit()
+
+    summary = LoyaltyService().get_points_summary_for_user(sample_user.id)
+
+    assert summary["qualifying_points"] == 3488
+    assert summary["lifetime_earned"] == 3488
+    assert summary["tier"] == "Silver"
+    assert summary["tier_discount_percentage"] == 1.5
+    assert summary["next_tier"] == "Gold"
+    assert summary["points_to_next_tier"] == 15000 - 3488
+    assert summary["points_needed_to_keep"] == 4000 - 3488

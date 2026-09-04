@@ -800,12 +800,43 @@ class MessageBuilder:
 
     @staticmethod
     def build_order_summary(order: Dict[str, Any], language: str = 'en') -> str:
-        """Build order summary message"""
+        """Build order summary message.
+
+        Every discount that moved the total is stated. Without it the total
+        sits below the sum of the item lines this screen prints beneath it,
+        with nothing accounting for the difference.
+        """
         lines = [
             f"📋 {i18n.get('telegram.order.number', language, order.get('order_number', 'N/A'))}",
             f"📅 Date: {order.get('created_at', 'N/A')[:10]}",
-            f"💰 {i18n.get('telegram.order.total', language, format_price(order.get('total_amount', 0)))}"
         ]
+
+        discount_amount = float(order.get('discount_amount') or 0)
+        if discount_amount > 0:
+            lines.append(i18n.get(
+                'telegram.orders.estimate_discount_line', language,
+                amount=format_price(discount_amount),
+            ))
+        loyalty_discount = float(order.get('loyalty_discount') or 0)
+        if loyalty_discount > 0:
+            lines.append(i18n.get(
+                'telegram.orders.estimate_reward_line', language,
+                amount=format_price(loyalty_discount),
+            ))
+        tier_discount = float(order.get('tier_discount') or 0)
+        if tier_discount > 0:
+            lines.append(i18n.get(
+                'telegram.orders.order_tier_discount_line', language,
+                amount=format_price(tier_discount),
+            ))
+        delivery_fee = float(order.get('delivery_fee') or 0)
+        if delivery_fee > 0:
+            lines.append(i18n.get(
+                'telegram.orders.delivery_fee', language,
+                amount=format_price(delivery_fee),
+            ))
+
+        lines.append(f"💰 {i18n.get('telegram.order.total', language, format_price(order.get('total_amount', 0)))}")
 
         if order.get('status'):
             from shared.constants import ORDER_STATUS_ICONS, DEFAULT_STATUS_ICON

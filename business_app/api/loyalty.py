@@ -408,6 +408,7 @@ def get_loyalty_statistics():
 
 @loyalty_bp.route("/tier-benefits", methods=["GET"])
 @jwt_required()
+@require_loyalty_eligible
 def get_tier_benefits():
     """Get benefits for user's current tier and upgrade requirements."""
     try:

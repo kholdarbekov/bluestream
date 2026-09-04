@@ -78,8 +78,17 @@ class TestLoyaltyServiceBusinessRules:
         assert loyalty_service.calculate_points_for_purchase(user_id=1, amount=0) == 0
         assert loyalty_service.calculate_points_for_purchase(user_id=1, amount=-50) == 0
 
-    def test_calculate_points_for_purchase_uses_program_ratio_and_tier_multiplier(self, loyalty_service, monkeypatch):
+    def test_calculate_points_for_purchase_uses_program_ratio_and_tier_multiplier(
+        self, loyalty_service, monkeypatch, db, sample_user
+    ):
+        # A REAL user is required: calculate_points_for_purchase checks loyalty
+        # eligibility before touching the account, so an id with no user row
+        # resolves to ineligible and earns 0. effective_tier() also queries
+        # LoyaltyTierConfig/LoyaltyTransaction directly. No tier is seeded for
+        # program 42, so effective_tier() returns None and the badge "Gold" falls
+        # through unchanged to _get_tier_multiplier, which this test still mocks.
         fake_account = SimpleNamespace(
+            user_id=sample_user.id,
             program=SimpleNamespace(uzs_per_point=200),
             current_tier="Gold",
             program_id=42,
@@ -87,7 +96,7 @@ class TestLoyaltyServiceBusinessRules:
         monkeypatch.setattr(loyalty_service, "get_or_create_loyalty_account", lambda _uid: fake_account)
         monkeypatch.setattr(loyalty_service, "_get_tier_multiplier", lambda _tier, _pid: 1.5)
 
-        points = loyalty_service.calculate_points_for_purchase(user_id=10, amount=1000)
+        points = loyalty_service.calculate_points_for_purchase(user_id=sample_user.id, amount=1000)
 
         assert points == 7  # floor(1000/200)=5, multiplier=1.5 => 7.5 -> int(7)
 

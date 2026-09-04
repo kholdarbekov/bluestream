@@ -1710,6 +1710,14 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Sodiqlik dasturi hisobingiz uchun mavjud emas.',
         'ru': 'Программа лояльности недоступна для вашего аккаунта.'
     },
+    'api.loyalty.tier_impact_confirmation': {
+        'en': '{count} members hold this tier\'s badge and no longer meet its requirements under this change. '
+              'They keep their current benefits. Confirm to proceed.',
+        'uz': "Ushbu daraja nishoniga ega {count} a'zo ushbu o'zgarishdan so'ng uning shartlariga javob bermaydi. "
+              "Ularning joriy imtiyozlari saqlanib qoladi. Davom etish uchun tasdiqlang.",
+        'ru': '{count} участников имеют бейдж этого уровня и больше не соответствуют его условиям после '
+              'этого изменения. Их текущие привилегии сохраняются. Подтвердите, чтобы продолжить.'
+    },
 
     # ============================================================================
     # API - Admin/Notifications Success Messages
@@ -4286,6 +4294,15 @@ BACKEND_TRANSLATIONS = {
         'uz': '{tier_name} chegirma −{percentage}% 🏷 — −{amount} UZS',
         'ru': 'Скидка {tier_name} −{percentage}% 🏷 — −{amount} UZS'
     },
+    # Order-details / order-placed screens (MessageBuilder.build_order_summary).
+    # The order payload carries tier_discount but not tier_name or
+    # tier_discount_percentage (see business_app/serializers/order_serializers.py),
+    # so — unlike estimate_tier_line above — this line needs only the amount.
+    'telegram.orders.order_tier_discount_line': {
+        'en': '🏷 Cash-payment discount — −{amount} UZS',
+        'uz': '🏷 Naqd to\'lov uchun chegirma — −{amount} UZS',
+        'ru': '🏷 Скидка за оплату наличными — −{amount} UZS'
+    },
     # `{icon}` is presentation, chosen by the rail (💰 cash / 💳 card /
     # 🏦 bank transfer) — never the rail's NAME. The name is already stated
     # two lines above (telegram.orders.payment_info), so repeating it here in
@@ -5935,6 +5952,36 @@ BACKEND_TRANSLATIONS = {
         'en': 'Total earned',
         'uz': 'Jami yig\'ilgan',
         'ru': 'Всего заработано'
+    },
+    'telegram.loyalty.qualifying_12m': {
+        'en': 'Last 12 months',
+        'uz': "So'nggi 12 oy",
+        'ru': 'За последние 12 месяцев'
+    },
+    'telegram.loyalty.tier_line': {
+        'en': 'Level: {tier}',
+        'uz': 'Daraja: {tier}',
+        'ru': 'Уровень: {tier}'
+    },
+    'telegram.loyalty.tier_cod_perk': {
+        'en': '{pct}% off when you pay cash on delivery',
+        'uz': "Yetkazib berishda naqd to'lasangiz {pct}% chegirma",
+        'ru': 'Скидка {pct}% при оплате наличными при доставке'
+    },
+    'telegram.loyalty.tier_secured': {
+        'en': 'Status secured',
+        'uz': 'Daraja mustahkamlangan',
+        'ru': 'Статус закреплён'
+    },
+    'telegram.loyalty.tier_keep_hint': {
+        'en': '{points} more AquaCoins to keep this level',
+        'uz': "Darajani saqlash uchun yana {points} AquaCoins",
+        'ru': 'Ещё {points} AquaCoins, чтобы сохранить уровень'
+    },
+    'telegram.loyalty.to_next_tier': {
+        'en': 'To {tier}: {points} more',
+        'uz': '{tier} gacha: yana {points}',
+        'ru': 'До {tier}: ещё {points}'
     },
     'telegram.loyalty.no_history': {
         'en': 'You have no AquaCoins transactions yet.',

@@ -4,7 +4,8 @@ Verifies that:
 - Ineligible ENTITY users (no corporate contract) get 403 with code "loyalty_not_available"
   on all guarded loyalty endpoints.
 - INDIVIDUAL users are not blocked (status != 403).
-- The three open config endpoints (/tiers, /programs, /tier-benefits) are not guarded.
+- The open catalogue endpoints (/tiers, /programs) are not guarded. /tier-benefits IS
+  guarded: it returns the caller's own current_tier and upgrade_info.
 """
 
 from uuid import uuid4
@@ -26,12 +27,15 @@ GUARDED_GET = [
     "/api/v1/loyalty/rewards/history",
     "/api/v1/loyalty/referral",
     "/api/v1/loyalty/statistics",
+    "/api/v1/loyalty/tier-benefits",
 ]
 
+# Catalogue endpoints only: they publish the tier/program tables and read
+# nothing about the caller. /tier-benefits is NOT one of them — it returns the
+# caller's own current_tier and upgrade_info, so it is guarded.
 OPEN_CONFIG = [
     "/api/v1/loyalty/tiers",
     "/api/v1/loyalty/programs",
-    "/api/v1/loyalty/tier-benefits",
 ]
 
 GUARDED_POST = [

@@ -166,6 +166,14 @@ api.interceptors.response.use(
       toast.error('Access denied. Insufficient permissions.');
     } else if (error.response?.status >= 500) {
       toast.error('Server error. Please try again later.');
+    } else if (
+      error.response?.data?.data?.error_code === 'impact_confirmation_required' ||
+      error.response?.data?.data?.error_code === 'threshold_gap'
+    ) {
+      // Invariant: a response the caller resolves interactively (e.g. a confirm
+      // dialog) must not also self-announce as a toast error. Scoped to these
+      // two error_codes only — do not widen to all 409s/422s or all error_codes.
+      // The promise still rejects below so each mutation's onError still runs.
     } else {
       toast.error(message);
     }

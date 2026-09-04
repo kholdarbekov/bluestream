@@ -73,6 +73,7 @@ LOYALTY_EVENT_NOTIFICATION_TYPES = {
     "earned": NotificationType.LOYALTY_REWARD,
     "redeemed": NotificationType.REWARD_REDEEMED,
     "tier_upgrade": NotificationType.LOYALTY_TIER_UPGRADE,
+    "tier_downgrade": NotificationType.LOYALTY_TIER_DOWNGRADE,
     "points_expired": NotificationType.LOYALTY_POINTS_EXPIRED,
 }
 
@@ -82,6 +83,7 @@ _LOYALTY_SINGLE_CHANNEL_TYPES = frozenset(
     {
         NotificationType.LOYALTY_REWARD,
         NotificationType.LOYALTY_TIER_UPGRADE,
+        NotificationType.LOYALTY_TIER_DOWNGRADE,
         NotificationType.LOYALTY_POINTS_EXPIRED,
     }
 )
@@ -95,6 +97,7 @@ _PLACEHOLDER_STRICT_TYPES = frozenset(
         NotificationType.LOYALTY_REWARD.value,
         NotificationType.REWARD_REDEEMED.value,
         NotificationType.LOYALTY_TIER_UPGRADE.value,
+        NotificationType.LOYALTY_TIER_DOWNGRADE.value,
         NotificationType.LOYALTY_POINTS_EXPIRED.value,
     }
 )
@@ -194,6 +197,7 @@ class NotificationService:
             NotificationType.LOYALTY_REWARD.value,
             NotificationType.REWARD_REDEEMED.value,
             NotificationType.LOYALTY_TIER_UPGRADE.value,
+            NotificationType.LOYALTY_TIER_DOWNGRADE.value,
             NotificationType.LOYALTY_POINTS_EXPIRED.value,
         ],
         "security": [NotificationType.SECURITY.value],
@@ -845,7 +849,10 @@ class NotificationService:
         # placeholder can leak as a literal.
         if notif_type == NotificationType.LOYALTY_REWARD and "reason_label" not in template_data:
             template_data["reason_label"] = self._loyalty_reason_label(template_data.get("reason") or "", language)
-        if notif_type == NotificationType.LOYALTY_TIER_UPGRADE and "tier_label" not in template_data:
+        if (
+            notif_type in (NotificationType.LOYALTY_TIER_UPGRADE, NotificationType.LOYALTY_TIER_DOWNGRADE)
+            and "tier_label" not in template_data
+        ):
             template_data["tier_label"] = self._loyalty_tier_label(
                 template_data.get("tier_config_id"), template_data.get("tier") or "", language
             )
@@ -2471,8 +2478,18 @@ class NotificationService:
             return sorted({row.id for row in rows})
 
         if campaign.target_audience == "loyalty_members":
+            # A loyalty_points row is not membership: ineligible entity users
+            # hold historical rows and must not be marketed loyalty.
+            from business_app.services.loyalty_service import LoyaltyService
+
             rows = db.session.query(LoyaltyPoints.user_id).distinct().all()
-            return sorted({row.user_id for row in rows})
+            candidate_ids = {row.user_id for row in rows}
+            eligible = {
+                user.id
+                for user in User.query.filter(User.id.in_(candidate_ids)).all()
+                if LoyaltyService.is_user_loyalty_eligible(user)
+            } if candidate_ids else set()
+            return sorted(eligible)
 
         if campaign.target_audience == "custom_segment":
             explicit_ids = {int(user_id) for user_id in (campaign.specific_user_ids or [])}
@@ -2864,6 +2881,7 @@ class NotificationService:
             NotificationType.LOYALTY_REWARD.value: [NotificationChannel.EMAIL, NotificationChannel.TELEGRAM],
             NotificationType.REWARD_REDEEMED.value: [NotificationChannel.EMAIL],
             NotificationType.LOYALTY_TIER_UPGRADE.value: [NotificationChannel.EMAIL, NotificationChannel.TELEGRAM],
+            NotificationType.LOYALTY_TIER_DOWNGRADE.value: [NotificationChannel.EMAIL, NotificationChannel.TELEGRAM],
             NotificationType.LOYALTY_POINTS_EXPIRED.value: [
                 NotificationChannel.EMAIL,
                 NotificationChannel.TELEGRAM,
@@ -4053,6 +4071,7 @@ class NotificationService:
             NotificationType.LOYALTY_REWARD: [NotificationChannel.EMAIL, NotificationChannel.TELEGRAM],
             NotificationType.REWARD_REDEEMED: [NotificationChannel.EMAIL],
             NotificationType.LOYALTY_TIER_UPGRADE: [NotificationChannel.EMAIL, NotificationChannel.TELEGRAM],
+            NotificationType.LOYALTY_TIER_DOWNGRADE: [NotificationChannel.EMAIL, NotificationChannel.TELEGRAM],
             NotificationType.LOYALTY_POINTS_EXPIRED: [NotificationChannel.EMAIL, NotificationChannel.TELEGRAM],
         }
 
@@ -4589,6 +4608,55 @@ Current balance: {balance} AquaCoins""",
                 "content": """<h2>Congratulations!</h2>
 <p>You've reached the {tier_label} tier.</p>
 <p>Current balance: <strong>{balance} AquaCoins</strong></p>""",
+            },
+        },
+    },
+    # Loyalty tier downgrade - Telegram. States the reason and both numbers so
+    # a lost cash discount is never a silent surprise.
+    ("loyalty_tier_downgrade", "telegram"): {
+        "name": "loyalty_tier_downgrade_telegram",
+        "translations": {
+            "uz": {
+                "content": """ℹ️ <b>Darajangiz o'zgardi</b>
+
+Yangi daraja: {tier_label}
+So'nggi 12 oy: {qualifying_points} AquaCoins ({required_points} talab qilinadi)""",
+            },
+            "ru": {
+                "content": """ℹ️ <b>Ваш уровень изменился</b>
+
+Новый уровень: {tier_label}
+За последние 12 месяцев: {qualifying_points} AquaCoins (нужно {required_points})""",
+            },
+            "en": {
+                "content": """ℹ️ <b>Your level has changed</b>
+
+New level: {tier_label}
+Last 12 months: {qualifying_points} AquaCoins ({required_points} required)""",
+            },
+        },
+    },
+    # Loyalty tier downgrade - Email
+    ("loyalty_tier_downgrade", "email"): {
+        "name": "loyalty_tier_downgrade_email",
+        "translations": {
+            "uz": {
+                "subject": "Darajangiz o'zgardi: {tier_label} - {{company_name}}",
+                "content": """<h2>Darajangiz o'zgardi</h2>
+<p>Yangi daraja: <strong>{tier_label}</strong></p>
+<p>So'nggi 12 oy: {qualifying_points} AquaCoins ({required_points} talab qilinadi)</p>""",
+            },
+            "ru": {
+                "subject": "Ваш уровень изменился: {tier_label} - {{company_name}}",
+                "content": """<h2>Ваш уровень изменился</h2>
+<p>Новый уровень: <strong>{tier_label}</strong></p>
+<p>За последние 12 месяцев: {qualifying_points} AquaCoins (нужно {required_points})</p>""",
+            },
+            "en": {
+                "subject": "Your level has changed: {tier_label} - {{company_name}}",
+                "content": """<h2>Your level has changed</h2>
+<p>New level: <strong>{tier_label}</strong></p>
+<p>Last 12 months: {qualifying_points} AquaCoins ({required_points} required)</p>""",
             },
         },
     },

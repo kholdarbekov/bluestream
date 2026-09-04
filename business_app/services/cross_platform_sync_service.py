@@ -11,6 +11,7 @@ from business_app import db
 from business_app.models.user import User
 from shared.enums import UserStatus
 from business_app.services.token_service import TokenService
+from business_app.services.loyalty_service import _invalidate_qualifying_points_memo
 
 logger = logging.getLogger(__name__)
 
@@ -270,6 +271,10 @@ class CrossPlatformSyncService:
         # the secondary user's lots onto the primary so none are orphaned when
         # the secondary user is deleted.
         LoyaltyTransaction.query.filter_by(user_id=secondary_id).update({"user_id": primary_id})
+        # A Core bulk UPDATE fires no ORM events, so the qualifying-points memo
+        # for both users would otherwise go stale for the rest of the request.
+        _invalidate_qualifying_points_memo(primary_id)
+        _invalidate_qualifying_points_memo(secondary_id)
 
         if primary_points:
             # Roll up the lifetime aggregates (cumulative counters, not balances).

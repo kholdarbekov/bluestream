@@ -530,6 +530,35 @@ class LoyaltyHandlers(BaseHandler):
 
             # Persist the selection in per-user conversation state so order
             # creation can pass it through to the backend.
+            # ASK BEFORE PROMISING. This card stays tappable forever, so by the
+            # time it is tapped the reward may be one the customer can no longer
+            # have: coins spent elsewhere, deactivated by an admin, expired, or
+            # `max_uses_per_user` reached. Storing it and popping "applied"
+            # anyway moved the refusal to order creation — the last possible
+            # moment, on a screen that cannot explain it.
+            #
+            # `can_redeem` is the backend's own answer, and the same field
+            # `checkout_choose_reward` already uses to decide which rewards it
+            # makes tappable. A failed lookup does NOT block the tap: this is a
+            # pre-flight courtesy, and order creation remains the authority.
+            # tests/telegram_bot/test_stale_reward_card.py
+            async with api_client as client:
+                user_token = await get_auth_token(update, context, client)
+                rewards_response = (
+                    await client.get_loyalty_rewards(user_token) if user_token else None
+                )
+            if rewards_response is not None and rewards_response.success:
+                offered = self._unwrap_response_data(rewards_response).get('rewards', [])
+                chosen = next((r for r in offered if r.get('id') == reward_id), None)
+                if chosen is None or not chosen.get('can_redeem', True):
+                    await self._ack(
+                        query,
+                        i18n.get('telegram.loyalty.reward_not_available', language),
+                        show_alert=True,
+                    )
+                    await self.loyalty_menu(update, context)
+                    return
+
             context.user_data['selected_reward_id'] = reward_id
 
             confirmation = i18n.get('telegram.loyalty.reward_selected', language)

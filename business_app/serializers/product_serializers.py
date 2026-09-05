@@ -75,6 +75,7 @@ class ProductInventorySchema(BaseModel):
     is_tryout_eligible: bool = Field(default=True)
     tracks_returnable_bottles: bool = Field(default=False)
     returnable_bottles_per_unit: float = Field(default=0.0)
+    is_returnable_bottle: bool = Field(default=False)
     min_order_quantity: int = Field(default=1, ge=1)
 
 
@@ -411,6 +412,8 @@ def serialize_product(product: Product, language: str = "uz", user=None, quantit
                 "is_tryout_eligible": bool(getattr(product, "is_tryout_eligible", True)),
                 "tracks_returnable_bottles": bool(getattr(product, "tracks_returnable_bottles", False)),
                 "returnable_bottles_per_unit": float(getattr(product, "returnable_bottles_per_unit", 0) or 0),
+                # The SSOT answer, so no client re-derives it from the pair above.
+                "is_returnable_bottle": bool(getattr(product, "is_returnable_bottle", False)),
                 "min_order_quantity": int(getattr(product, "min_order_quantity", 1) or 1),
                 # 'restock_date': product.restock_date.isoformat() if product.restock_date else None
             },

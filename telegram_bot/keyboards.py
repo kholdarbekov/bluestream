@@ -270,16 +270,40 @@ class MenuKeyboards:
 class LanguageKeyboards:
     """Language selection keyboards"""
     @staticmethod
-    def select_language() -> InlineKeyboardMarkup:
-        """Language selection keyboard on start"""
+    def select_language(referral_code: str = None) -> InlineKeyboardMarkup:
+        """Language selection keyboard on start.
+
+        ``set_language_<lang>``, optionally ``set_language_<lang>_ref<code>``.
+
+        The referral rides the BUTTON because it has nowhere durable to live
+        before the account exists. `_capture_referral_arg` puts it in
+        `context.user_data` at /start, and it is not read until the registration
+        POST several screens later — but the customer has no `users` row yet, so
+        there is no `bot_state` to dual-write it to, and a deploy in that window
+        dropped it silently AND unrecoverably: their natural recovery is to
+        re-send /start, which arrives with no args. The referrer is never
+        credited and the acquisition channel is misattributed.
+
+        The language stays at index 2 (`split('_')[2]`) precisely so appending
+        this suffix cannot move it — the parsers used to read `[-1]`.
+
+        Omitted rather than truncated when it would push callback_data past
+        Telegram's 64-byte limit: a rejected keyboard would cost the customer
+        the whole signup, which is strictly worse than losing an attribution.
+        """
         buttons = []
 
         for lang_code in config.localization.supported_languages:
             flag = i18n.get_language_flag(lang_code)
             name = i18n.get_language_name(lang_code, lang_code)
+            callback = f'set_language_{lang_code}'
+            if referral_code:
+                with_referral = f'{callback}_ref{referral_code}'
+                if len(with_referral.encode('utf-8')) <= 64:
+                    callback = with_referral
             buttons.append([{
                 'text': f"{flag} {name}",
-                'callback_data': f'set_language_{lang_code}'
+                'callback_data': callback
             }])
 
         return KeyboardBuilder.build_inline_keyboard(buttons)
@@ -724,7 +748,7 @@ class OrderKeyboards:
     @staticmethod
     def order_confirmation(
         language: str = 'en', meets_minimum: bool = True, has_reward: bool = False,
-        show_reward: bool = True,
+        show_reward: bool = True, address_id: int = None,
     ) -> InlineKeyboardMarkup:
         """Order confirmation buttons.
 
@@ -768,7 +792,16 @@ class OrderKeyboards:
                 ])
 
         buttons.append([{'text': i18n.get('telegram.order.edit', language), 'callback_data': 'edit_order'}])
-        buttons.append([{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_payment'}])
+        # The address travels WITH the Back button. Without it the handler has
+        # to read `selected_address_id` out of `context.user_data`, which a
+        # deploy empties while this card stays tappable forever — the
+        # 2026-09-03 `KeyError: 'selected_address_id'`. `None` keeps the legacy
+        # shape for any caller that has no address to name; the handler answers
+        # that honestly instead of raising.
+        back_callback = (
+            'back_to_payment' if address_id is None else f'back_to_payment_{address_id}'
+        )
+        buttons.append([{'text': i18n.get('telegram.back', language), 'callback_data': back_callback}])
 
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
@@ -902,16 +935,37 @@ class SubscriptionKeyboards:
     """Subscription-related keyboards"""
 
     @staticmethod
-    def subscription_frequency(language: str = 'en') -> InlineKeyboardMarkup:
-        """Subscription frequency selection"""
+    def subscription_frequency(
+        language: str = 'en',
+        subscription_id: int = None,
+    ) -> InlineKeyboardMarkup:
+        """Subscription frequency selection.
+
+        Two screens render this, and they must not share a callback namespace.
+
+        * CREATION (`subscription_id=None`) keeps `subscription_freq_<freq>`,
+          which the creation conversation claims in its SELECT_ADDRESS state.
+        * EDIT (an id given) emits `subfreq_<freq>_<id>`, claimed TOP LEVEL.
+
+        Reusing the creation namespace for the edit screen is what left the edit
+        buttons dead: the only handler for `^subscription_freq_` lives inside the
+        creation conversation, so with no creation flow open the tap reached
+        nothing at all. Carrying the id also means the screen survives the
+        restart that empties `user_data`.
+        """
+        def freq_callback(frequency: str) -> str:
+            if subscription_id is None:
+                return f'subscription_freq_{frequency}'
+            return f'subfreq_{frequency}_{subscription_id}'
+
         buttons = [
             [
-                {'text': i18n.get('telegram.subscription.frequency_daily', language), 'callback_data': 'subscription_freq_daily'},
-                {'text': i18n.get('telegram.subscription.frequency_weekly', language), 'callback_data': 'subscription_freq_weekly'}
+                {'text': i18n.get('telegram.subscription.frequency_daily', language), 'callback_data': freq_callback('daily')},
+                {'text': i18n.get('telegram.subscription.frequency_weekly', language), 'callback_data': freq_callback('weekly')}
             ],
             [
-                {'text': i18n.get('telegram.subscription.frequency_biweekly', language), 'callback_data': 'subscription_freq_biweekly'},
-                {'text': i18n.get('telegram.subscription.frequency_monthly', language), 'callback_data': 'subscription_freq_monthly'}
+                {'text': i18n.get('telegram.subscription.frequency_biweekly', language), 'callback_data': freq_callback('biweekly')},
+                {'text': i18n.get('telegram.subscription.frequency_monthly', language), 'callback_data': freq_callback('monthly')}
             ],
             [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_subscriptions'}]
         ]
@@ -1018,13 +1072,20 @@ class SubscriptionKeyboards:
         available_methods: List[Dict[str, Any]],
         language: str = 'en',
         back_callback: str = 'back_to_address_selection',
+        subscription_id: int = None,
     ) -> InlineKeyboardMarkup:
         """Payment method selection for subscription.
 
         Buttons are derived from GET /payments/methods so the subscription menu
-        can never diverge from checkout. Callback data is `sub_payment_<type>`;
-        handlers MUST parse it with split('_', 2)[2] because `business_account`
-        contains an underscore.
+        can never diverge from checkout.
+
+        Callback data depends on which screen asked, for the same reason
+        `subscription_frequency` splits its namespace: CREATION
+        (`subscription_id=None`) keeps `sub_payment_<type>`, claimed inside the
+        creation conversation's CONFIRM_SUBSCRIPTION state; EDIT emits
+        `subpay_<type>_<id>`, claimed top level. `business_account` contains an
+        underscore, so the type is everything between the prefix and the
+        trailing id — never a fixed index.
 
         Two screens render this: the creation flow, whose previous step was the
         address list (the default Back), and the "change payment method" screen
@@ -1034,8 +1095,13 @@ class SubscriptionKeyboards:
         """
         from payment_methods import build_payment_method_buttons
 
+        def pay_callback(method_type: str) -> str:
+            if subscription_id is None:
+                return f'sub_payment_{method_type}'
+            return f'subpay_{method_type}_{subscription_id}'
+
         buttons = [
-            [{'text': option['name'], 'callback_data': f"sub_payment_{option['type']}"}]
+            [{'text': option['name'], 'callback_data': pay_callback(option['type'])}]
             for option in build_payment_method_buttons(available_methods, language)
         ]
         buttons.append([{'text': i18n.get('telegram.back', language), 'callback_data': back_callback}])

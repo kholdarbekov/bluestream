@@ -137,7 +137,13 @@ class BotUserRepository:
     # flow is being armed or torn down. Defined once so a future preserved key
     # (the address flow is the first, and the plan for it names only one) is
     # added in exactly one place rather than copy-pasted into both methods.
-    _PRESERVED_KEYS = ('address_draft',)
+    # `awaiting_location_at` joins `address_draft` here because it is NOT a
+    # prompt that owns the customer's next TEXT — it is a routing hint for the
+    # next LOCATION update, a different update type entirely. Putting it in the
+    # single `awaiting_input` slot would silently disarm whatever prompt was
+    # already armed (a "Report an issue" waiting for its message, say), which is
+    # the very clobbering this preserved set exists to prevent.
+    _PRESERVED_KEYS = ('address_draft', 'awaiting_location_at')
 
     async def clear_awaiting_input(self, telegram_id: int, *awaiting_inputs: str) -> bool:
         """Disarm ONLY the named prompts. Thin alias for `disarm` (see its
@@ -186,6 +192,28 @@ class BotUserRepository:
         await self.update_user_state(
             telegram_id, {**preserved, 'awaiting_input': awaiting_input, **companions}
         )
+
+    async def remember_pin_prompt(self, telegram_id: int, armed_at: str) -> None:
+        """Record durably that the bot asked THIS customer for a pin.
+
+        A MERGE, not a replace: the reply keyboard that answers this prompt is
+        client-side and outlives a restart, but it coexists with whatever else
+        the customer had armed, so this must not disturb `awaiting_input`.
+
+        Paired with :meth:`forget_pin_prompt`. `utils.is_awaiting_location_stale`
+        bounds it either way, so a marker that never gets cleared cannot reopen
+        address creation for an unrelated pin later.
+        """
+        state = await self.get_user_state(telegram_id)
+        state['awaiting_location_at'] = armed_at
+        await self.update_user_state(telegram_id, state)
+
+    async def forget_pin_prompt(self, telegram_id: int) -> None:
+        """Drop the durable pin hint, leaving every other key untouched."""
+        state = await self.get_user_state(telegram_id)
+        if state.pop('awaiting_location_at', None) is None:
+            return
+        await self.update_user_state(telegram_id, state, touch_activity=False)
 
     async def disarm(self, telegram_id: int, *owned: str) -> bool:
         """Disarm ONLY the named prompts, preserving `_PRESERVED_KEYS`.

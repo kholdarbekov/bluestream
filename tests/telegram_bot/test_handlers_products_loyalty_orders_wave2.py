@@ -544,6 +544,12 @@ class TestOrderHandlerWave2:
         update = DummyUpdate()
         update.callback_query = DummyCallbackQuery(data="payment_card")
         context = make_context()
+        # A LIVE checkout: `_show_order_confirmation` now refuses to draw the
+        # card at all without both keys, because a card missing them offers a
+        # Confirm button whose only possible answer is "missing information".
+        # tests/telegram_bot/test_checkout_screens_after_state_loss.py
+        context.user_data["selected_address_id"] = 1
+        context.user_data["selected_payment_method"] = "cash"
 
         monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)

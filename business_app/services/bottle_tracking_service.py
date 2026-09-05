@@ -2076,27 +2076,30 @@ class BottleTrackingService:
         )
         for item in items:
             product = item.product
-            if product and product.tracks_returnable_bottles:
-                bottles_per_unit = Decimal(str(product.returnable_bottles_per_unit or 0))
-                line_qty = bottles_per_unit * Decimal(str(item.quantity or 0))
+            # `Product.returnable_bottles_for` is the SSOT for the item->bottle
+            # conversion (see its docstring for why both product columns are
+            # read). A mixed order — 3x19L returnable + 4x10L not — must total
+            # 3, not 7 (TG_000095_26).
+            line_qty = product.returnable_bottles_for(item.quantity) if product else Decimal("0.00")
+            if line_qty:
                 total += line_qty
                 logger.debug(
-                    "[BOTTLE] order=%s item=%s product=%s tracks_bottles=True "
+                    "[BOTTLE] order=%s item=%s product=%s returnable=True "
                     "bottles_per_unit=%s item_qty=%s line_bottles=%s",
                     order.id,
                     item.id,
                     product.id,
-                    bottles_per_unit,
+                    product.returnable_bottles_per_unit,
                     item.quantity,
                     line_qty,
                 )
             else:
                 logger.debug(
-                    "[BOTTLE] order=%s item=%s product=%s tracks_bottles=%s — skipped",
+                    "[BOTTLE] order=%s item=%s product=%s returnable=%s — skipped",
                     order.id,
                     item.id,
                     product.id if product else None,
-                    product.tracks_returnable_bottles if product else "no product",
+                    product.is_returnable_bottle if product else "no product",
                 )
         logger.debug("[BOTTLE] calculate_bottles_for_order order=%s total=%s", order.id, total)
         return total

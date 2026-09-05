@@ -190,4 +190,62 @@ describe('Products edit modal', () => {
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByLabelText('Stock Quantity')).toBeDisabled();
   });
+
+  // The two returnable-bottle columns are two halves of ONE fact, and the API
+  // now resolves them together (_resolve_returnable_bottle_config): the flag
+  // off forces the number to 0, the flag on with a zero number is a 400. The
+  // form must not be able to express what the API will reject -- an order of
+  // 3x19L + 4x10L booked SEVEN bottles onto a customer because the 10 L SKU
+  // carried tracks=true/per_unit=1.
+  describe('returnable-bottle controls are one coupled fact', () => {
+    it('disables the per-unit number while the product does not track bottles', async () => {
+      const user = userEvent.setup();
+      mockProducts({ tracks_returnable_bottles: false, returnable_bottles_per_unit: 0 });
+
+      const dialog = await openEditModal(user);
+
+      expect(within(dialog).getByLabelText('Returnable Bottles Per Unit')).toBeDisabled();
+    });
+
+    it('enables the per-unit number while the product does track bottles', async () => {
+      const user = userEvent.setup();
+
+      const dialog = await openEditModal(user);
+
+      expect(within(dialog).getByLabelText('Returnable Bottles Per Unit')).toBeEnabled();
+    });
+
+    it('zeroes the per-unit number when the admin switches tracking off', async () => {
+      const user = userEvent.setup();
+
+      const dialog = await openEditModal(user);
+      const perUnit = within(dialog).getByLabelText('Returnable Bottles Per Unit');
+      expect(perUnit).toHaveValue('1.00');
+
+      await user.click(within(dialog).getByLabelText('Tracks Returnable Bottles'));
+
+      // No live number left behind an off switch -- that stale value is what
+      // OrderEditService's cascade used to multiply.
+      await waitFor(() => expect(perUnit).toHaveValue('0.00'));
+      expect(perUnit).toBeDisabled();
+    });
+
+    it('submits the cleared pair so the product stops booking bottles', async () => {
+      const user = userEvent.setup();
+
+      const dialog = await openEditModal(user);
+      await user.click(within(dialog).getByLabelText('Tracks Returnable Bottles'));
+      await user.click(within(dialog).getByRole('button', { name: 'Update Product' }));
+
+      await waitFor(() => {
+        expect(adminService.updateProduct).toHaveBeenCalledWith(
+          44,
+          expect.objectContaining({
+            tracks_returnable_bottles: false,
+            returnable_bottles_per_unit: 0,
+          }),
+        );
+      });
+    });
+  });
 });

@@ -711,7 +711,8 @@ async def maybe_remove_stale_reply_keyboard(
         return False
 
 
-def arm_location_request(context: ContextTypes.DEFAULT_TYPE) -> None:
+async def arm_location_request(context: ContextTypes.DEFAULT_TYPE,
+                               user_id: int = None) -> None:
     """Record that the BOT asked for a pin, so the next location update is
     routed to the address flow rather than filed as a spontaneous support
     message.
@@ -742,6 +743,27 @@ def arm_location_request(context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     context.user_data['awaiting_location'] = True
     context.user_data['awaiting_location_at'] = datetime.now(timezone.utc).isoformat()
+
+    # DURABLE TWIN. The keyboard that answers this prompt is a
+    # `request_location` REPLY keyboard — client-side state that outlives any
+    # restart — while `user_data` dies with the process. Without this, a deploy
+    # between the prompt and the pin left `armed` False, and
+    # `_route_address_location_entry` filed the customer's HOME COORDINATES into
+    # the admin Support Inbox (silent by design) instead of creating their
+    # address, leaving checkout stuck behind an address they thought they had
+    # just added.
+    #
+    # Best-effort: this is a routing HINT, and failing to record it must never
+    # take down the prompt itself. The in-memory marker above is still the fast
+    # path; `is_awaiting_location_stale` bounds both.
+    # tests/telegram_bot/test_armed_prompts_survive_a_restart.py
+    if user_id is not None:
+        try:
+            await BotUserRepository(db_manager).remember_pin_prompt(
+                user_id, context.user_data['awaiting_location_at'],
+            )
+        except Exception as arm_error:
+            logger.warning("Could not record the pin prompt for %s: %s", user_id, arm_error)
 
 
 # Mirrors `handlers/support.py::_SUPPORT_STALE_MINUTES` — same 30-minute

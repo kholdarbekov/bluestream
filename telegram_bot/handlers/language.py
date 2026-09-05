@@ -77,7 +77,45 @@ class LanguageHandler:
             user_id = update.effective_user.id
 
             # Extract language code from callback data
-            language_code = query.data.split('_')[-1]
+            # Index 2 for the same reason as profile.language_selection: the
+            # signup keyboard may append a `_ref<code>` suffix.
+            language_code = query.data.split('_')[2]
+
+            # A LANGUAGE TAP FROM SOMEONE WITH NO ACCOUNT IS A SIGNUP, NOT A
+            # CHANGE. `^set_language_` is registered twice: here in group 0 for
+            # Profile -> Language, and inside the registration conversation's
+            # SELECT_LANGUAGE state, where `language_selection` is what actually
+            # calls `register_telegram_user`. The conversation state map dies
+            # with the process, so after any deploy a brand-new customer's very
+            # first tap fell through to THIS handler — which went on to
+            # `update_user_language`, an UPDATE matching zero rows, and then
+            # showed a full main menu for an account that does not exist.
+            # Signup dead-ended at step one with nothing said.
+            #
+            # Delegated rather than reimplemented: registration also caches the
+            # fresh tokens and consumes the referral, and a second copy of that
+            # is how the two would drift. Imported locally to keep this module
+            # free of a package-level cycle with handlers.profile.
+            # tests/telegram_bot/test_signup_journey_after_restart.py
+            # Fail SAFE, and deliberately asymmetric: only a lookup that
+            # positively says "no such account" delegates. If the lookup itself
+            # cannot answer — a transient DB error, a repo that does not
+            # implement it — we must assume the account exists, because the cost
+            # of guessing wrong in that direction is re-running registration for
+            # somebody who already has a row.
+            try:
+                existing_user = await self.user_repo.get_user_by_telegram_id(user_id)
+            except Exception as lookup_error:
+                logger.warning(
+                    "Could not establish whether %s has an account (%s); treating "
+                    "the tap as a language change, not a signup.",
+                    user_id, lookup_error,
+                )
+                existing_user = True
+            if not existing_user:
+                from handlers.profile import profile_handlers
+                await profile_handlers.language_selection(update, context)
+                return
 
             # Get current language before change
             current_language = await i18n.get_user_language(user_id)

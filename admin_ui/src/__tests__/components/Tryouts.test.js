@@ -209,6 +209,8 @@ describe('Tryouts Page', () => {
             name: 'Pure Water 19L',
             is_tryout_eligible: true,
             tracks_returnable_bottles: true,
+            returnable_bottles_per_unit: 1,
+            is_returnable_bottle: true,
           },
         ],
       },

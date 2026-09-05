@@ -747,7 +747,9 @@ const Tryouts = () => {
                           disabled={Boolean(tryoutFormTarget?.handoff_completed_at)}
                           options={products.map((product) => ({
                             value: product.id,
-                            label: `${product.name} ${product.tracks_returnable_bottles ? '(returnable)' : ''}`,
+                            // The backend's own answer, not the raw flag — see
+                            // Product.is_returnable_bottle.
+                            label: `${product.name} ${product.is_returnable_bottle ? '(returnable)' : ''}`,
                           }))}
                         />
                       </Form.Item>

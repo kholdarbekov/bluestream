@@ -1288,9 +1288,9 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
     },
     # Warehouse accountability flows
     "staff.menu.log_bottles_loaded": {
-        "en": "Log Bottles Loaded (18.9 l)",
-        "uz": "Yuklangan (18.9 l) idishlarni kiritish",
-        "ru": "Внести загруженные бутылки (18.9 l)",
+        "en": "Log Bottles Loaded (18.9 L)",
+        "uz": "Yuklangan (18,9 l) idishlarni kiritish",
+        "ru": "Внести загруженные бутылки (18,9 л)",
     },
     "staff.menu.return_to_warehouse": {
         "en": "Return to Warehouse",
@@ -1298,40 +1298,40 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "ru": "Возврат на склад",
     },
     "staff.menu.my_bottle_accountability": {
-        "en": "My Bottle Accountability (18.9 l)",
-        "uz": "Mening (18.9 l) idish hisobotim",
-        "ru": "Мой учёт тары (18.9 l)",
+        "en": "My Bottle Accountability (18.9 L)",
+        "uz": "Mening (18,9 l) idish hisobotim",
+        "ru": "Мой учёт тары (18,9 л)",
     },
     "staff.delivery.enter_bottles_loaded_qty": {
-        "en": "Enter the number of bottles (18.9 l) you loaded from the warehouse:",
-        "uz": "Ombordan nechta (18.9 l) idish yuklab olganingizni kiriting:",
-        "ru": "Введите количество бутылок (18.9 l), загруженных со склада:",
+        "en": "Enter the number of bottles (18.9 L) you loaded from the warehouse:",
+        "uz": "Ombordan nechta (18,9 l) idish yuklab olganingizni kiriting:",
+        "ru": "Введите количество бутылок (18,9 л), загруженных со склада:",
     },
     "staff.delivery.bottles_loaded_recorded": {
-        "en": "\u2705 Recorded: {quantity} (18.9 l) bottle(s) loaded from warehouse.",
-        "uz": "\u2705 Qayd etildi: ombordan {quantity} ta (18.9 l) idish yuklandi.",
-        "ru": "\u2705 Записано: {quantity} ед. тары (18.9 l) загружено со склада.",
+        "en": "\u2705 Recorded: {quantity} (18.9 L) bottle(s) loaded from warehouse.",
+        "uz": "\u2705 Qayd etildi: ombordan {quantity} ta (18,9 l) idish yuklandi.",
+        "ru": "\u2705 Записано: {quantity} ед. тары (18,9 л) загружено со склада.",
     },
     "staff.delivery.enter_bottles_returned_qty": {
-        "en": "Enter the number of bottles (18.9 l) you returned to the warehouse:",
-        "uz": "Omborga nechta (18.9 l) idish qaytarganingizni kiriting:",
-        "ru": "Введите количество бутылок (18.9 l), возвращённых на склад:",
+        "en": "Enter the number of bottles (18.9 L) you returned to the warehouse:",
+        "uz": "Omborga nechta (18,9 l) idish qaytarganingizni kiriting:",
+        "ru": "Введите количество бутылок (18,9 л), возвращённых на склад:",
     },
     "staff.delivery.bottles_returned_wh_recorded": {
-        "en": "\u2705 Recorded: {quantity} (18.9 l) bottle(s) returned to warehouse.",
-        "uz": "\u2705 Qayd etildi: {quantity} ta (18.9 l) idish omborga qaytarildi.",
-        "ru": "\u2705 Записано: {quantity} ед. тары (18.9 l) возвращено на склад.",
+        "en": "\u2705 Recorded: {quantity} (18.9 L) bottle(s) returned to warehouse.",
+        "uz": "\u2705 Qayd etildi: {quantity} ta (18,9 l) idish omborga qaytarildi.",
+        "ru": "\u2705 Записано: {quantity} ед. тары (18,9 л) возвращено на склад.",
     },
     "staff.delivery.bottle_accountability_no_data": {
-        "en": "No (18.9 l) bottle accountability data yet.",
-        "uz": "(18.9 l) Idish hisobi yo'q.",
-        "ru": "Данных по учёту тары (18.9 l) нет.",
+        "en": "No (18.9 L) bottle accountability data yet.",
+        "uz": "(18,9 l) Idish hisobi yo'q.",
+        "ru": "Данных по учёту тары (18,9 л) нет.",
     },
     # Bottle session menu buttons
     "staff.menu.transfer_bottles_to_driver": {
-        "en": "Transfer (18.9 l) bottles to other driver",
-        "uz": "Boshqa haydovchiga (18.9 l) idish o'tkazish",
-        "ru": "Передать (18.9 l) бутылки другому водителю",
+        "en": "Transfer (18.9 L) bottles to other driver",
+        "uz": "Boshqa haydovchiga (18,9 l) idish o'tkazish",
+        "ru": "Передать (18,9 л) бутылки другому водителю",
     },
     "staff.menu.incoming_transfers": {
         "en": "Incoming transfers",
@@ -1340,19 +1340,19 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
     },
     # Bottle session state messages
     "staff.delivery.bottle_session_already_open": {
-        "en": "🚫 <b>Cannot start a new load.</b>\n\nYou already have an active session started at <b>{started}</b> with <b>{loaded}</b> (18.9 l) bottles loaded.\n\nReturn to the warehouse and close your current session first.",
-        "uz": "🚫 <b>Yangi yuklash boshlash mumkin emas.</b>\n\nSizda allaqachon <b>{started}</b> da boshlangan va <b>{loaded}</b> ta (18.9 l) idish yuklangan faol sessiya mavjud.\n\nAvval omborga qayting va joriy sessiyangizni yoping.",
-        "ru": "🚫 <b>Нельзя начать новую загрузку.</b>\n\nУ вас уже есть активная сессия, начатая в <b>{started}</b> с <b>{loaded}</b> (18.9 l) бутылками.\n\nВернитесь на склад и закройте текущую сессию.",
+        "en": "🚫 <b>Cannot start a new load.</b>\n\nYou already have an active session started at <b>{started}</b> with <b>{loaded}</b> (18.9 L) bottles loaded.\n\nReturn to the warehouse and close your current session first.",
+        "uz": "🚫 <b>Yangi yuklash boshlash mumkin emas.</b>\n\nSizda allaqachon <b>{started}</b> da boshlangan va <b>{loaded}</b> ta (18,9 l) idish yuklangan faol sessiya mavjud.\n\nAvval omborga qayting va joriy sessiyangizni yoping.",
+        "ru": "🚫 <b>Нельзя начать новую загрузку.</b>\n\nУ вас уже есть активная сессия, начатая в <b>{started}</b> с <b>{loaded}</b> (18,9 л) бутылками.\n\nВернитесь на склад и закройте текущую сессию.",
     },
     "staff.delivery.bottle_session_already_open_short": {
-        "en": "🚫 You already have an open session. Close it before loading new (18.9 l) bottles.",
-        "uz": "🚫 Sizda allaqachon ochiq sessiya bor. Yangi (18.9 l) idish yuklashdan oldin uni yoping.",
-        "ru": "🚫 У вас уже есть открытая сессия. Закройте её перед загрузкой новых (18.9 l) бутылок.",
+        "en": "🚫 You already have an open session. Close it before loading new (18.9 L) bottles.",
+        "uz": "🚫 Sizda allaqachon ochiq sessiya bor. Yangi (18,9 l) idish yuklashdan oldin uni yoping.",
+        "ru": "🚫 У вас уже есть открытая сессия. Закройте её перед загрузкой новых (18,9 л) бутылок.",
     },
     "staff.delivery.bottle_session_opened": {
-        "en": "✅ <b>Session opened!</b>\n\n📦 Loaded: <b>{count}</b> (18.9 l) bottles\nSession ref: <code>{ref}</code>\n\nDeliver your orders and return to WH when done.",
-        "uz": "✅ <b>Sessiya ochildi!</b>\n\n📦 Yuklandi: <b>{count}</b> ta (18.9 l) idish\nSessiya raqami: <code>{ref}</code>\n\nBuyurtmalaringizni yetkazing va tugagach omborga qayting.",
-        "ru": "✅ <b>Сессия открыта!</b>\n\n📦 Загружено: <b>{count}</b> (18.9 l) бутылок\nНомер сессии: <code>{ref}</code>\n\nВыполняйте заказы и возвращайтесь на склад по завершении.",
+        "en": "✅ <b>Session opened!</b>\n\n📦 Loaded: <b>{count}</b> (18.9 L) bottles\nSession ref: <code>{ref}</code>\n\nDeliver your orders and return to WH when done.",
+        "uz": "✅ <b>Sessiya ochildi!</b>\n\n📦 Yuklandi: <b>{count}</b> ta (18,9 l) idish\nSessiya raqami: <code>{ref}</code>\n\nBuyurtmalaringizni yetkazing va tugagach omborga qayting.",
+        "ru": "✅ <b>Сессия открыта!</b>\n\n📦 Загружено: <b>{count}</b> (18,9 л) бутылок\nНомер сессии: <code>{ref}</code>\n\nВыполняйте заказы и возвращайтесь на склад по завершении.",
     },
     "staff.delivery.no_active_bottle_session": {
         "en": "ℹ️ You have no active bottle session. Nothing to close.",
@@ -1370,9 +1370,9 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "ru": "✅ Расхождение: <b>0</b>  🎯",
     },
     "staff.delivery.discrepancy_nonzero": {
-        "en": "⚠️ Discrepancy: <b>{discrepancy}</b> (18.9 l) bottles unaccounted",
-        "uz": "⚠️ Farq: <b>{discrepancy}</b> ta (18.9 l) idish hisoblanmagan",
-        "ru": "⚠️ Расхождение: <b>{discrepancy}</b> (18.9 l) бутылок не учтено",
+        "en": "⚠️ Discrepancy: <b>{discrepancy}</b> (18.9 L) bottles unaccounted",
+        "uz": "⚠️ Farq: <b>{discrepancy}</b> ta (18,9 l) idish hisoblanmagan",
+        "ru": "⚠️ Расхождение: <b>{discrepancy}</b> (18,9 л) бутылок не учтено",
     },
     # Bottle transfer messages
     "staff.delivery.no_bottles_to_transfer": {
@@ -1684,16 +1684,16 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
     # currently holds" made that read like an accusation; anchor it on the door.
     "staff.delivery.bottles_return_prompt": {
         "en": "How many bottles (18.9 L) did the customer return? At this address: {balance}",
-        "uz": "Mijoz nechta idish (18.9 L) qaytardi? Ushbu manzilda: {balance} ta",
-        "ru": "Сколько бутылок (18.9 L) вернул клиент? По этому адресу: {balance}",
+        "uz": "Mijoz nechta idish (18,9 l) qaytardi? Ushbu manzilda: {balance} ta",
+        "ru": "Сколько бутылок (18,9 л) вернул клиент? По этому адресу: {balance}",
     },
     # TRUE ZERO only — the over-returned arm has its own key
     # (staff.delivery.bottles_return_prompt_over_returned), because there the
     # record exists and is negative.
     "staff.delivery.bottles_return_prompt_no_balance": {
         "en": "How many bottles (18.9 L) did the customer return? No empties are on record at this address yet.",
-        "uz": "Mijoz nechta idish (18.9 L) qaytardi? Ushbu manzilda hozircha qayd etilgan bo'sh idish yo'q.",
-        "ru": "Сколько бутылок (18.9 L) вернул клиент? По этому адресу пока нет учтённой тары.",
+        "uz": "Mijoz nechta idish (18,9 l) qaytardi? Ushbu manzilda hozircha qayd etilgan bo'sh idish yo'q.",
+        "ru": "Сколько бутылок (18,9 л) вернул клиент? По этому адресу пока нет учтённой тары.",
     },
     "staff.delivery.cash_already_collected": {
         "en": "Cash already collected in full",

@@ -31,12 +31,12 @@ KEYS = {
     },
     "telegram.delivery_summary.bottles_delivered": {
         "en": "🍶 Bottles delivered: {count}",
-        "uz": "🍶 Yetkazilgan 18.9 litrli idishlar: {count}",
+        "uz": "🍶 Yetkazilgan idishlar: {count}",
         "ru": "🍶 Доставлено бутылей: {count}",
     },
     "telegram.delivery_summary.bottles_collected": {
         "en": "♻️ Empty bottles collected: {count}",
-        "uz": "♻️ Qaytarib olingan bo'sh 18.9 litrli idishlar: {count}",
+        "uz": "♻️ Qaytarib olingan bo'sh idishlar: {count}",
         "ru": "♻️ Пустых бутылей забрано: {count}",
     },
     # PLACE-scoped, not address-scoped: `get_order_bottle_summary` reports the
@@ -48,7 +48,7 @@ KEYS = {
     # PARAM_KEYS in tests/unit/test_bottle_translation_keys.py.
     "telegram.delivery_summary.balance": {
         "en": "📊 Bottles at this place: {count}",
-        "uz": "📊 Ushbu joydagi 18.9 litrli idishlar: {count}",
+        "uz": "📊 Ushbu joydagi idishlar: {count}",
         "ru": "📊 Бутылей в этом месте: {count}",
     },
     "telegram.delivery_summary.report_button": {
@@ -90,12 +90,12 @@ KEYS = {
     },
     "telegram.bottles.history_title": {
         "en": "📜 Bottle history",
-        "uz": "📜 18.9 litrli idishlar harakatlari",
+        "uz": "📜 Idishlar harakatlari",
         "ru": "📜 История бутылей",
     },
     "telegram.bottles.history_empty": {
         "en": "No bottle movements recorded yet.",
-        "uz": "Hozircha 18.9 litrli idishlar harakatlari qayd etilmagan.",
+        "uz": "Hozircha idishlar harakatlari qayd etilmagan.",
         "ru": "Пока нет записей о движении бутылей.",
     },
     # --- Ledger event labels: one per BottleLedgerEventType value (all 8) ---
@@ -111,7 +111,7 @@ KEYS = {
     },
     "telegram.bottles.event.standalone_collection": {
         "en": "Bottles collected",
-        "uz": "18.9 litrli idishlar olindi",
+        "uz": "Idishlar olindi",
         "ru": "Бутыли забраны",
     },
     "telegram.bottles.event.admin_adjustment": {

@@ -1032,7 +1032,7 @@ const Products = () => {
   // scrollToFirstError: a failed required rule otherwise renders off-screen below
   // the Tabs, so the submit button reads as simply doing nothing.
   const buildProductForm = (form, onFinish, fileList, setFileList, loading) => (
-    <Form form={form} layout="vertical" onFinish={onFinish} scrollToFirstError initialValues={{ is_tryout_eligible: true, min_order_quantity: 1 }}>
+    <Form form={form} layout="vertical" onFinish={onFinish} scrollToFirstError initialValues={{ is_tryout_eligible: true, min_order_quantity: 1, tracks_returnable_bottles: false, returnable_bottles_per_unit: 0 }}>
       <Tabs
         defaultActiveKey="uz"
         items={[
@@ -1169,13 +1169,60 @@ const Products = () => {
           </Form.Item>
         </Col>
         <Col span={8}>
-          <Form.Item name="tracks_returnable_bottles" label={t('ui.products.tracks_returnable_bottles', 'Tracks Returnable Bottles')} valuePropName="checked">
-            <Switch />
+          <Form.Item
+            name="tracks_returnable_bottles"
+            label={t('ui.products.tracks_returnable_bottles', 'Tracks Returnable Bottles')}
+            valuePropName="checked"
+            tooltip={t(
+              'ui.products.tracks_returnable_bottles_help',
+              'On = every unit sold leaves an empty bottle the customer owes back, and delivering it moves their bottle balance. Off = the customer keeps the container (e.g. the 10 L bottle).'
+            )}
+            extra={t(
+              'ui.products.tracks_returnable_bottles_help',
+              'On = every unit sold leaves an empty bottle the customer owes back, and delivering it moves their bottle balance. Off = the customer keeps the container (e.g. the 10 L bottle).'
+            )}
+          >
+            <Switch
+              onChange={(checked) => {
+                // Clearing the flag zeroes the number with it — mirrors the
+                // backend guard so the off switch leaves nothing live behind it.
+                form.setFieldsValue({ returnable_bottles_per_unit: checked ? 1 : 0 });
+              }}
+            />
           </Form.Item>
         </Col>
         <Col span={8}>
-          <Form.Item name="returnable_bottles_per_unit" label={t('ui.products.returnable_bottles_per_unit', 'Returnable Bottles Per Unit')}>
-            <InputNumber style={{ width: '100%' }} min={0} precision={2} />
+          <Form.Item
+            noStyle
+            shouldUpdate={(prev, next) =>
+              prev.tracks_returnable_bottles !== next.tracks_returnable_bottles
+            }
+          >
+            {({ getFieldValue }) => {
+              const tracks = Boolean(getFieldValue('tracks_returnable_bottles'));
+              return (
+                <Form.Item
+                  name="returnable_bottles_per_unit"
+                  label={t('ui.products.returnable_bottles_per_unit', 'Returnable Bottles Per Unit')}
+                  rules={
+                    tracks
+                      ? [
+                          {
+                            type: 'number',
+                            min: 0.01,
+                            message: t(
+                              'ui.products.returnable_bottles_per_unit_required',
+                              'Must be greater than 0 while this product tracks returnable bottles'
+                            ),
+                          },
+                        ]
+                      : []
+                  }
+                >
+                  <InputNumber style={{ width: '100%' }} min={0} precision={2} disabled={!tracks} />
+                </Form.Item>
+              );
+            }}
           </Form.Item>
         </Col>
       </Row>

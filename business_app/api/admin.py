@@ -11,7 +11,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy import and_, or_, desc, func, text, cast, String
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime, UTC, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from shared.constants import DISPLAY_TIMEZONE, is_within_tashkent
 from shared.redis_keyspace import RedisKeyspace
 
@@ -49,6 +49,7 @@ from business_app.services.admin_report_service import AdminReportService
 from business_app.services.admin_bulk_action_service import AdminBulkActionService
 from business_app.services.admin_delivery_service import AdminDeliveryService
 from business_app.services.admin_loyalty_service import AdminLoyaltyService
+from business_app.services.loyalty_service import LoyaltyService
 from business_app.services.product_fiscal_service import ProductFiscalService
 from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
 from business_app.services.customer_map_service import CustomerMapService
@@ -2854,6 +2855,46 @@ def get_products_admin():
         return internal_error_response("Failed to get products")
 
 
+def _resolve_returnable_bottle_config(data, *, current_tracks=False, current_per_unit=0):
+    """Normalise the two returnable-bottle columns into ONE coherent pair.
+
+    They are two halves of a single fact — "is this SKU in the swap pool, and at
+    what rate" — and the routes below write them from independent `if key in
+    data` blocks, so without this every incoherent combination was storable.
+    That is not academic: a 10 L SKU carrying `tracks=True, per_unit=1.00` is
+    what booked seven bottles onto a customer for an order of three
+    (TG_000095_26), and the mirror state (`tracks=False, per_unit=1.00`) kept
+    `OrderEditService._cascade_bottle` writing ledger rows for a product an
+    admin believed they had switched off.
+
+    Returns ``(tracks, per_unit)`` to write, or raises ``ValueError`` with an
+    operator-readable message. Turning the flag off zeroes the number with it,
+    so the off switch leaves nothing live behind it.
+    """
+    tracks = data["tracks_returnable_bottles"] if "tracks_returnable_bottles" in data else current_tracks
+    tracks = tracks in (True, "true", "True", 1, "1")
+
+    if "returnable_bottles_per_unit" in data:
+        raw = data["returnable_bottles_per_unit"]
+        try:
+            per_unit = Decimal(str(raw if raw is not None else 0))
+        except (InvalidOperation, TypeError, ValueError):
+            raise ValueError("returnable_bottles_per_unit must be a number")
+    else:
+        per_unit = Decimal(str(current_per_unit or 0))
+
+    if per_unit < 0:
+        raise ValueError("returnable_bottles_per_unit cannot be negative")
+    if tracks and per_unit <= 0:
+        raise ValueError(
+            "returnable_bottles_per_unit must be greater than 0 when " "tracks_returnable_bottles is enabled"
+        )
+    if not tracks:
+        # No live number behind an off switch.
+        per_unit = Decimal("0.00")
+    return tracks, per_unit
+
+
 @admin_bp.route("/products", methods=["POST"])
 @jwt_required()
 @validate_admin_action(["manage_products"])
@@ -2907,6 +2948,12 @@ def create_product():
         if "status" in data:
             is_active = data["status"] in ["active", True, "true", 1]
 
+        # Both returnable columns resolved together, before anything is built.
+        try:
+            returnable_tracks, returnable_per_unit = _resolve_returnable_bottle_config(data)
+        except ValueError as exc:
+            return validation_error_response(errors={"returnable_bottles_per_unit": str(exc)})
+
         current_app.logger.info(f"/admin/products POST data.volume: {data.get('volume')}")
         # Create new product
         product = Product(
@@ -2927,8 +2974,8 @@ def create_product():
             requires_prescription=data.get("requires_prescription", False),
             track_inventory=data.get("track_inventory", True),
             is_tryout_eligible=data.get("is_tryout_eligible", True),
-            tracks_returnable_bottles=data.get("tracks_returnable_bottles", False),
-            returnable_bottles_per_unit=data.get("returnable_bottles_per_unit", 0),
+            tracks_returnable_bottles=returnable_tracks,
+            returnable_bottles_per_unit=returnable_per_unit,
             stock_quantity=data.get("stock_quantity", 0),
             min_stock_level=data.get("min_stock_level", 0),
             max_stock_level=data.get("max_stock_level", 1000),
@@ -3094,10 +3141,20 @@ def update_product(product_id):
             product.track_inventory = data["track_inventory"]
         if "is_tryout_eligible" in data:
             product.is_tryout_eligible = data["is_tryout_eligible"]
-        if "tracks_returnable_bottles" in data:
-            product.tracks_returnable_bottles = data["tracks_returnable_bottles"]
-        if "returnable_bottles_per_unit" in data:
-            product.returnable_bottles_per_unit = data["returnable_bottles_per_unit"]
+        # Resolved as a PAIR even when only one key was sent: clearing the flag
+        # has to zero the number with it, and raising the number on a product
+        # whose flag is off must not quietly re-arm the bottle cascade.
+        if "tracks_returnable_bottles" in data or "returnable_bottles_per_unit" in data:
+            try:
+                product.tracks_returnable_bottles, product.returnable_bottles_per_unit = (
+                    _resolve_returnable_bottle_config(
+                        data,
+                        current_tracks=product.tracks_returnable_bottles,
+                        current_per_unit=product.returnable_bottles_per_unit,
+                    )
+                )
+            except ValueError as exc:
+                return validation_error_response(errors={"returnable_bottles_per_unit": str(exc)})
         # The marking-code pool owns the column for a derived product; this
         # endpoint must not write it even with an echoed value. Same
         # `stock_is_derived` the guard above used, so the two cannot disagree.
@@ -7479,82 +7536,18 @@ def get_loyalty_tier_configs():
         return internal_error_response("Failed to get loyalty tier configurations")
 
 
-def _validate_tier_ladder(program_id, tier_id, proposed):
-    """Reject a tier ladder with an overlap or a hole in it.
-
-    ``proposed`` is the {field: value} patch about to be applied to ``tier_id``
-    (or None for a new tier), including the tier's effective ``is_active``
-    state after the edit. Returns (error_code, detail) or None.
-
-    A proposed tier that ends up inactive is left out of the ladder entirely:
-    get_tier_for_points filters on is_active, so an inactive tier prices no
-    one and must not be validated as if it still occupied its band.
-
-    get_tier_for_points selects on min_points alone, so a hole does not change
-    pricing — but it is published in the customer-facing tier table and in the
-    admin UI as a band, where it reads as a range no one can occupy.
-    """
-    from business_app.models.loyalty import LoyaltyTierConfig
-
-    rows = LoyaltyTierConfig.query.filter_by(program_id=program_id, is_active=True).all()
-    ladder = []
-    for row in rows:
-        if tier_id is not None and row.id == tier_id:
-            continue
-        ladder.append({"name": row.name, "order": row.display_order, "min": row.min_points, "max": row.max_points})
-    if proposed.get("is_active", True):
-        ladder.append(
-            {
-                "name": proposed.get("name", "(edited)"),
-                "order": proposed.get("display_order", 0),
-                "min": proposed.get("min_points", 0),
-                "max": proposed.get("max_points"),
-            }
-        )
-
-    if not ladder:
-        return None
-
-    seen_orders = {}
-    for entry in ladder:
-        if entry["order"] in seen_orders:
-            return (
-                "threshold_overlap",
-                f"{entry['name']} and {seen_orders[entry['order']]} both use display_order {entry['order']}.",
-            )
-        seen_orders[entry["order"]] = entry["name"]
-
-    ladder.sort(key=lambda entry: entry["order"])
-
-    for lower, upper in zip(ladder, ladder[1:]):
-        if upper["min"] <= lower["min"]:
-            return (
-                "threshold_overlap",
-                f"{upper['name']} starts at {upper['min']}, not above {lower['name']}'s {lower['min']}.",
-            )
-        if lower["max"] is not None and lower["max"] != upper["min"]:
-            return (
-                "threshold_gap",
-                f"{lower['name']} ends at {lower['max']} and {upper['name']} starts at {upper['min']} — "
-                f"points between map to no tier.",
-            )
-    if ladder[-1]["max"] is not None:
-        return ("threshold_gap", f"{ladder[-1]['name']} is the top tier and must have no upper bound.")
-    return None
-
-
 def _ladder_check_response(program_id, tier_id, proposed, confirm_impact):
-    """Run _validate_tier_ladder and turn a hard error into a 422 response.
+    """Run LoyaltyService.validate_tier_ladder and turn a hard error into a 422 response.
 
     confirm_impact waives threshold_gap only: a gap does not change pricing
-    (get_tier_for_points reads min_points alone, per _validate_tier_ladder's
+    (get_tier_for_points reads min_points alone, per validate_tier_ladder's
     docstring) and is the guaranteed transient state of any legitimate
     multi-step ladder edit — there is no call sequence that inserts a tier
     mid-ladder without one. threshold_overlap and threshold_invalid stay hard
     failures: an overlap changes which tier resolves, and a null min_points
     is malformed input.
     """
-    ladder_error = _validate_tier_ladder(program_id, tier_id, proposed)
+    ladder_error = LoyaltyService().validate_tier_ladder(program_id, tier_id, proposed)
     if not ladder_error:
         return None
     code, detail = ladder_error
@@ -7563,41 +7556,6 @@ def _ladder_check_response(program_id, tier_id, proposed, confirm_impact):
     # NOT validation_error_response: it hard-codes 400 and ignores any
     # status_code passed to it (api_responses.py:265-270).
     return error_response(message=detail, status_code=422, data={"error_code": code})
-
-
-def _count_stranded_members(tier, new_min_points):
-    """Accounts holding THIS tier's badge whose points fall below a raised floor.
-
-    Counts only ``current_tier == tier.name``: an account badged into a
-    DIFFERENT tier that also loses live qualification for this one (e.g. a
-    Gold-badged member whose points drop below Silver's new floor) is not
-    counted. This is a lower bound on everyone the edit affects, not an exact
-    count. Their badge itself keeps their benefits (effective_tier), so this
-    is not a breakage — it is what an admin should see before committing.
-    """
-    from business_app.models.loyalty import LoyaltyPoints
-    from business_app.services.loyalty_service import LoyaltyService
-
-    if new_min_points is None or new_min_points <= (tier.min_points or 0):
-        return 0
-    service = LoyaltyService()
-    stranded = 0
-    for account in LoyaltyPoints.query.filter_by(current_tier=tier.name, program_id=tier.program_id).all():
-        if service.calculate_qualifying_points(account.user_id) < new_min_points:
-            stranded += 1
-    return stranded
-
-
-def _count_badge_holders(tier):
-    """Accounts currently tagged with this tier's badge, regardless of points.
-
-    Used when a tier is being deactivated: every current holder loses live
-    qualification (the tier no longer exists to qualify for), not just those
-    below some new floor.
-    """
-    from business_app.models.loyalty import LoyaltyPoints
-
-    return LoyaltyPoints.query.filter_by(current_tier=tier.name, program_id=tier.program_id).count()
 
 
 @admin_bp.route("/loyalty/tiers", methods=["POST"])
@@ -7735,7 +7693,11 @@ def update_loyalty_tier_config(tier_id):
 
         if not confirm_impact:
             deactivating = bool(tier.is_active) and not effective_is_active
-            affected = _count_badge_holders(tier) if deactivating else _count_stranded_members(tier, data.get("min_points"))
+            affected = (
+                LoyaltyService().count_badge_holders(tier)
+                if deactivating
+                else LoyaltyService().count_stranded_members(tier, data.get("min_points"))
+            )
             if affected:
                 return error_response(
                     message=get_translation("api.loyalty.tier_impact_confirmation", count=affected),
@@ -7873,7 +7835,7 @@ def delete_loyalty_tier_config(tier_id):
         if ladder_response:
             return ladder_response
 
-        affected = _count_badge_holders(tier)
+        affected = LoyaltyService().count_badge_holders(tier)
         if affected and not confirm_impact:
             return error_response(
                 message=get_translation("api.loyalty.tier_impact_confirmation", count=affected),

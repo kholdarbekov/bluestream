@@ -44,6 +44,8 @@ def two_skus(db):
         is_active=True,
         slug="aqua-element-18-9l",
         sku="AE-19",
+        tracks_returnable_bottles=True,
+        returnable_bottles_per_unit=Decimal("1.00"),
         created_at=datetime.now(UTC),
     )
     p10 = Product(
@@ -58,6 +60,8 @@ def two_skus(db):
         is_active=True,
         slug="aqua-element-10l",
         sku="AE-10",
+        tracks_returnable_bottles=False,
+        returnable_bottles_per_unit=Decimal("0.00"),
         created_at=datetime.now(UTC),
     )
     db.session.add_all([p19, p10])
@@ -125,6 +129,23 @@ class TestDualSkuProductGroup:
         assert big["Requires a cooler/dispenser"] is True
         assert small["Returnable bottle"] is False
         assert small["Requires a cooler/dispenser"] is False
+
+    def test_returnability_follows_the_ledger_rule_not_the_size(self, client, two_skus, db):
+        """Publishing "Returnable bottle" off `size == 19L` let the public claim
+        drift from what the bottle ledger actually books. It now reads
+        `Product.is_returnable_bottle`, so taking the 18.9 L SKU out of the swap
+        pool takes it out of the JSON-LD too — while its SIZE facts stay put."""
+        p19, _ = two_skus
+        p19.tracks_returnable_bottles = False
+        p19.returnable_bottles_per_unit = Decimal("0.00")
+        db.session.commit()
+
+        pg = _find_product_group(client.get("/").get_data(as_text=True))
+        big = next(v for v in pg["hasVariant"] if "18.9" in v["size"])
+        props = {p["name"]: p["value"] for p in big["additionalProperty"]}
+        assert props["Returnable bottle"] is False
+        assert props["Requires a cooler/dispenser"] is True
+        assert props["Bottle size (litres)"] == 18.9
 
     def test_shop_emits_product_group(self, client, two_skus, db):
         r = client.get("/shop")

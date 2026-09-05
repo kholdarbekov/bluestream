@@ -184,7 +184,9 @@ class FakeDatabase:
     codebase means "unknown user", and unknown users get bounced to /start.
     """
 
-    user: dict = field(
+    # `None` = not registered yet. Typed loosely on purpose: every other
+    # consumer treats this as a row-or-nothing.
+    user: object = field(
         default_factory=lambda: {
             "id": 398,
             "telegram_id": str(DEFAULT_USER_ID),
@@ -208,13 +210,17 @@ class FakeDatabase:
 
     async def execute(self, query, *args):
         self.executed.append(query)
-        if "bot_state" in query and args:
+        if "bot_state" in query and args and self.user is not None:
             self.user["bot_state"] = args[0]
         return "UPDATE 1"
 
     async def fetchone(self, query, *args):
         if "FROM users" in query:
-            return dict(self.user)
+            # `user=None` is a customer who has not registered yet — the state
+            # every brand-new /start begins in, and the one this harness could
+            # not express until the signup-after-restart defects were found
+            # (tests/telegram_bot/test_signup_journey_after_restart.py).
+            return dict(self.user) if self.user is not None else None
         return None
 
     async def fetchall(self, query, *args):
@@ -224,7 +230,7 @@ class FakeDatabase:
 
     async def fetchval(self, query, *args):
         if "preferred_language" in query:
-            return self.user.get("preferred_language")
+            return (self.user or {}).get("preferred_language")
         if "loyalty" in query.lower():
             return self.loyalty_eligible
         if "bot_state" in query:
@@ -234,7 +240,7 @@ class FakeDatabase:
             # arms a flow (concern report, OTP, address-title prompt, ...)
             # and then sends a follow-up update sees the state it just wrote,
             # instead of every customer silently looking permanently unarmed.
-            return self.user.get("bot_state")
+            return (self.user or {}).get("bot_state")
         return None
 
 

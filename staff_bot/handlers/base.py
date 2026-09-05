@@ -299,13 +299,31 @@ class BaseHandler:
 
         Returns the snapshot to act on, or ``None`` when the tapped delivery can
         no longer be found — the caller MUST refuse to act on that.
-        A snapshot without a ``delivery_id`` (pre-deploy card, cleared
-        user_data) is left exactly as it is: there is nothing to compare, and
-        refusing there would strand drivers mid-trip on a deploy.
+
+        A MISSING snapshot re-reads, it does not pass. This used to return the
+        empty dict on the stated grounds that "there is nothing to compare, and
+        refusing there would strand drivers mid-trip on a deploy". Both halves
+        were right; the conclusion was not. ``{}`` is not a neutral answer to
+        the questions the callers then ask it — ``get_cod_cash_projection({})``
+        is ``0.0`` and ``has_cash_due({})`` is ``False`` — so a button reading
+        "✅ Cash collected: 150 000" filed a 0.00 collection, and the
+        "Delivered" confirm dropped the cash and bottle steps entirely, on an
+        order that then has no redo (``DELIVERY_STATUS_TRANSITIONS['delivered']``
+        is empty). Re-reading from ``/delivery/active`` strands nobody: it
+        REBUILDS the snapshot the deploy lost, and only returns ``None`` — the
+        refusal — when the delivery genuinely is not on the driver's list any
+        more, which is exactly when acting on it would be wrong.
+
+        Reachable in two steps rather than one, which is why it survived: a bare
+        post-restart callback is refused by ``@require_auth`` first. The driver
+        taps a reply-keyboard menu button (the only path wired to
+        ``StaffBot._recover_session``), which restores ``authenticated`` but not
+        ``current_delivery``, and THEN taps the card still sitting in the chat.
+        tests/staff_bot/test_at_door_money_after_state_loss.py
         """
         info = context.user_data.get('current_delivery') or {}
         current_id = info.get('delivery_id')
-        if delivery_id is None or current_id is None or current_id == delivery_id:
+        if delivery_id is None or current_id == delivery_id:
             return info
 
         logger.info(
@@ -338,6 +356,56 @@ class BaseHandler:
             snapshot.setdefault('destination_lng', row.get('destination_longitude'))
             context.user_data['current_delivery'] = snapshot
             return snapshot
+        return None
+
+    async def _require_flow(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
+                            key: str):
+        """The named flow's working dict, or ``None`` when it is gone.
+
+        THE guard for every multi-step staff flow. Each keeps its half-built
+        record under one ``user_data`` key — ``new_client``, ``new_order``,
+        ``new_address``, ``new_tryout`` — and every step wrote into it as
+        ``context.user_data['new_address']['title'] = label``. That looks like a
+        write; it is a READ of the parent followed by a write into whatever came
+        back, so a missing parent raises ``KeyError``.
+
+        It is reachable without any deploy, and it takes TWO conversations —
+        a menu tap on its own ends the conversation and clears the keys
+        together, which strands nothing. ``staff_add_address`` is entered by a
+        CALLBACK, so it never passes through the text router's
+        menu-detect-and-clear: an operator can be inside *Create client* AND
+        *Add address* at once, and one menu tap then ends only the former while
+        ``flow_state.clear_pending_flows`` drops the GLOBAL key set —
+        ``new_address`` included. The address conversation is left parked at
+        ENTER_LABEL with its dict gone.
+
+        What made that unrecoverable rather than merely annoying: the exception
+        escaped the handler, so PTB neither advanced the state nor re-armed the
+        timeout job it pops at the top of ``handle_update``. The operator was
+        pinned to the prompt permanently — every retype failed identically and
+        the flow could not even expire itself. So callers must END on ``None``,
+        not simply return.
+
+        ``staff.flow_timed_out`` is reused verbatim rather than seeded anew:
+        "Nothing was saved — start again when you are ready" is precisely what
+        happened, and a new key would be one more thing to seed at deploy.
+        tests/staff_bot/test_operator_flows_after_state_loss.py
+        """
+        flow = (context.user_data or {}).get(key)
+        if isinstance(flow, dict):
+            return flow
+
+        logger.info(
+            "Flow %r is gone for user %s; ending it rather than raising.",
+            key, update.effective_user.id if update.effective_user else None,
+        )
+        language = await self._get_language(update, context)
+        text = i18n.get('staff.flow_timed_out', language)
+        if update.callback_query:
+            await update.callback_query.answer()
+            await update.callback_query.edit_message_text(text, parse_mode='HTML')
+        elif update.message:
+            await update.message.reply_text(text, parse_mode='HTML')
         return None
 
     async def _refuse_stale_card(self, update: Update, language: str):

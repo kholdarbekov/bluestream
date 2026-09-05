@@ -69,6 +69,10 @@ class CreateUserHandler(BaseHandler):
     async def receive_phone(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Receive and validate phone number"""
         language = await self._get_language(update, context)
+        flow = await self._require_flow(update, context, 'new_client')
+        if flow is None:
+            return ConversationHandler.END
+
         token = await self._get_auth_token(update, context)
         if not token:
             await self._handle_auth_error(update, language)
@@ -111,7 +115,7 @@ class CreateUserHandler(BaseHandler):
             logger.error(f"Error checking existing user: {e}")
 
         # Store phone and continue
-        context.user_data['new_client']['phone'] = normalized_phone
+        flow['phone'] = normalized_phone
 
         await update.message.reply_text(
             i18n.get('staff.operator.enter_first_name', language),
@@ -124,6 +128,10 @@ class CreateUserHandler(BaseHandler):
     async def receive_first_name(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Receive first name"""
         language = await self._get_language(update, context)
+        flow = await self._require_flow(update, context, 'new_client')
+        if flow is None:
+            return ConversationHandler.END
+
         name = update.message.text.strip()
 
         is_valid, error = validate_name(name)
@@ -134,7 +142,7 @@ class CreateUserHandler(BaseHandler):
             )
             return ENTER_FIRST_NAME
 
-        context.user_data['new_client']['first_name'] = name
+        flow['first_name'] = name
 
         await update.message.reply_text(
             i18n.get('staff.operator.enter_last_name', language),
@@ -147,10 +155,14 @@ class CreateUserHandler(BaseHandler):
     async def receive_last_name(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Receive last name (or skip)"""
         language = await self._get_language(update, context)
+        flow = await self._require_flow(update, context, 'new_client')
+        if flow is None:
+            return ConversationHandler.END
+
         text = update.message.text.strip()
 
         if text.lower() in ('-', 'skip', 'пропустить', "o'tkazish"):
-            context.user_data['new_client']['last_name'] = None
+            flow['last_name'] = None
         else:
             is_valid, error = validate_name(text)
             if not is_valid:
@@ -159,7 +171,7 @@ class CreateUserHandler(BaseHandler):
                     parse_mode='HTML'
                 )
                 return ENTER_LAST_NAME
-            context.user_data['new_client']['last_name'] = text
+            flow['last_name'] = text
 
         # Language selection
         keyboard = InlineKeyboardMarkup([
@@ -184,13 +196,17 @@ class CreateUserHandler(BaseHandler):
         query = update.callback_query
         await query.answer()
         language = await self._get_language(update, context)
+        flow = await self._require_flow(update, context, 'new_client')
+        if flow is None:
+            return ConversationHandler.END
+
 
         # Parse: staff_op_lang_{lang}
         client_lang = query.data.split('_')[-1]
-        context.user_data['new_client']['preferred_language'] = client_lang
+        flow['preferred_language'] = client_lang
 
         # Show confirmation
-        client_data = context.user_data['new_client']
+        client_data = flow
         lang_name = i18n.get_language_name(client_lang, language)
 
         text = (
@@ -222,7 +238,9 @@ class CreateUserHandler(BaseHandler):
             return ConversationHandler.END
 
         try:
-            client_data = context.user_data.get('new_client', {})
+            client_data = await self._require_flow(update, context, 'new_client')
+            if client_data is None:
+                return ConversationHandler.END
 
             async with api_client as client:
                 response = await client.create_client_user(token, client_data)

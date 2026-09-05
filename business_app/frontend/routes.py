@@ -246,8 +246,17 @@ def _build_dual_sku_product_group(language="en"):
         if size_value not in ("10L", "19L"):
             continue  # only the two canonical bottle SKUs form the group
 
-        is_returnable = size_value == "19L"
-        size_label = "18.9 L" if is_returnable else "10 L"
+        # TWO independent facts, and they used to share one variable.
+        #   `is_large_format` is physical: an 18.9 L bottle needs a cooler, a
+        #   10 L one does not. That is what `size` records.
+        #   `is_returnable` is operational: is this SKU in the swap pool the
+        #   bottle ledger tracks? That is `Product.is_returnable_bottle`.
+        # Deriving the second from the first published "Returnable bottle" to
+        # crawlers straight off the size, so the public claim silently
+        # disagreed with what the ledger actually booked.
+        is_large_format = size_value == "19L"
+        is_returnable = product.is_returnable_bottle
+        size_label = "18.9 L" if is_large_format else "10 L"
         effective_price = float(product.discount_price or product.base_price or 0)
         if effective_price > 0:
             prices.append(effective_price)
@@ -272,16 +281,24 @@ def _build_dual_sku_product_group(language="en"):
                 "url": product_url,
                 "size": size_label,
                 "additionalProperty": [
-                    {"@type": "PropertyValue", "name": "Bottle size (litres)", "value": 18.9 if is_returnable else 10},
+                    {
+                        "@type": "PropertyValue",
+                        "name": "Bottle size (litres)",
+                        "value": 18.9 if is_large_format else 10,
+                    },
                     {"@type": "PropertyValue", "name": "Returnable bottle", "value": is_returnable},
-                    {"@type": "PropertyValue", "name": "Requires a cooler/dispenser", "value": is_returnable},
+                    {
+                        "@type": "PropertyValue",
+                        "name": "Requires a cooler/dispenser",
+                        "value": is_large_format,
+                    },
                     {
                         "@type": "PropertyValue",
                         "name": "Best for",
                         "value": (
                             "Offices, classrooms, clinic waiting areas, gym floors, and homes with a water "
                             "cooler/dispenser"
-                            if is_returnable
+                            if is_large_format
                             else "Kitchens, individuals, and households without a cooler"
                         ),
                     },
@@ -2094,7 +2111,10 @@ def public_products_feed():
                     "label": size_str if size_label else None,
                     "litres": size_litres,
                 },
-                "returnable": (size_str == "18.9L") if size_label else None,
+                # From the ledger's own rule, not from the size string — see
+                # `_build_dual_sku_product_group` for why the two questions are
+                # kept apart.
+                "returnable": product.is_returnable_bottle,
                 "url": product_url,
                 "images": absolute_images,
                 "offers": {

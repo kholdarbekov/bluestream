@@ -315,6 +315,32 @@ class WaterBusinessBot:
 
             armed = context.user_data.pop('awaiting_location', False)
             armed_at = context.user_data.pop('awaiting_location_at', None)
+
+            # The durable half, for the pin that arrives after the process that
+            # asked for it died. `arm_location_request` dual-writes this to
+            # `users.bot_state`; without it a deploy in the gap made `armed`
+            # False and this handler filed the customer's home coordinates as an
+            # unsolicited support message — silently — while checkout stayed
+            # stuck behind the address they thought they had just added.
+            #
+            # Same staleness window either way, so a durable marker cannot
+            # reopen address creation for an unrelated pin weeks later.
+            # tests/telegram_bot/test_armed_prompts_survive_a_restart.py
+            if not armed:
+                try:
+                    durable = await bot.user_repository.get_user_state(
+                        update.effective_user.id
+                    )
+                except Exception as state_error:
+                    logger.warning("Could not read the pin arming: %s", state_error)
+                    durable = {}
+                if durable.get('awaiting_location_at'):
+                    armed = True
+                    armed_at = durable.get('awaiting_location_at')
+                    await bot.user_repository.forget_pin_prompt(
+                        update.effective_user.id
+                    )
+
             if armed and is_awaiting_location_stale(armed_at):
                 armed = False
             mid_flow = 'temp_address_data' in context.user_data
@@ -661,7 +687,7 @@ class WaterBusinessBot:
             CallbackQueryHandler(order_handlers.checkout_apply_reward, pattern="^checkout_apply_reward_\\d+$"),
             CallbackQueryHandler(order_handlers.checkout_remove_reward, pattern="^checkout_remove_reward$"),
             CallbackQueryHandler(order_handlers.checkout_change_address, pattern="^checkout_change_address$"),
-            CallbackQueryHandler(order_handlers.back_to_payment, pattern="^back_to_payment$"),
+            CallbackQueryHandler(order_handlers.back_to_payment, pattern=r"^back_to_payment(_\d+)?$"),
             CallbackQueryHandler(order_handlers.checkout_handler, pattern="^checkout"),
             CallbackQueryHandler(order_handlers.address_handler, pattern="^address_"),
             CallbackQueryHandler(order_handlers.payment_handler, pattern="^payment_(cash|card|payme|click|uzcard|humo|business_account)$"),
@@ -686,22 +712,22 @@ class WaterBusinessBot:
             CallbackQueryHandler(subscription_handlers.subscriptions_menu, pattern="^back_to_subscriptions$"),
             CallbackQueryHandler(subscription_handlers.subscription_details, pattern="^subscription_\\d+$"),
             CallbackQueryHandler(subscription_handlers.subscription_actions, pattern="^(pause|resume|cancel)_sub_"),
-            CallbackQueryHandler(subscription_handlers.skip_delivery, pattern="^skip_sub_"),
-            CallbackQueryHandler(subscription_handlers.view_billing_history, pattern="^billing_history_"),
+            CallbackQueryHandler(subscription_handlers.skip_delivery, pattern=r"^skip_sub_\d+$"),
+            CallbackQueryHandler(subscription_handlers.view_billing_history, pattern=r"^billing_history_\d+$"),
 
             # Subscription item management
-            CallbackQueryHandler(subscription_handlers.manage_subscription_items, pattern="^manage_items_"),
+            CallbackQueryHandler(subscription_handlers.manage_subscription_items, pattern=r"^manage_items_\d+$"),
             CallbackQueryHandler(subscription_handlers.remove_item_confirm, pattern="^remove_item_"),
 
             # Subscription editing
-            CallbackQueryHandler(subscription_handlers.edit_subscription_menu, pattern="^edit_sub_"),
-            CallbackQueryHandler(subscription_handlers.change_frequency, pattern="^change_frequency_"),
-            CallbackQueryHandler(subscription_handlers.change_payment_method_menu, pattern="^change_payment_"),
+            CallbackQueryHandler(subscription_handlers.edit_subscription_menu, pattern=r"^edit_sub_\d+$"),
+            CallbackQueryHandler(subscription_handlers.change_frequency, pattern=r"^change_frequency_\d+$"),
+            CallbackQueryHandler(subscription_handlers.change_payment_method_menu, pattern=r"^change_payment_\d+$"),
 
             # Statistics and logs
             CallbackQueryHandler(subscription_handlers.view_subscription_statistics, pattern="^subscription_statistics$"),
-            CallbackQueryHandler(subscription_handlers.view_subscription_logs, pattern="^view_logs_"),
-            CallbackQueryHandler(subscription_handlers.retry_failed_billing, pattern="^retry_billing_"),
+            CallbackQueryHandler(subscription_handlers.view_subscription_logs, pattern=r"^view_logs_\d+$"),
+            CallbackQueryHandler(subscription_handlers.retry_failed_billing, pattern=r"^retry_billing_\d+$"),
 
             # Profile callbacks
             CallbackQueryHandler(profile_handlers.profile_menu, pattern="^menu_profile$"),
@@ -813,7 +839,10 @@ class WaterBusinessBot:
                     )
                 ],
                 PHONE: [
-                    MessageHandler(filters.CONTACT, profile_handlers.phone_received),
+                    MessageHandler(
+                        filters.CONTACT,
+                        self._consumes(profile_handlers.phone_received),
+                    ),
                     MessageHandler(
                         filters.TEXT & ~filters.COMMAND,
                         self._consumes(profile_handlers.phone_text_received),
@@ -821,7 +850,10 @@ class WaterBusinessBot:
                 ],
                 # Account linking states
                 LINK_ACCOUNT_CONFIRM: [
-                    CallbackQueryHandler(profile_handlers.link_account_confirm, pattern="^link_")
+                    CallbackQueryHandler(
+                        self._consumes(profile_handlers.link_account_confirm),
+                        pattern="^link_",
+                    )
                 ],
                 LINK_ACCOUNT_OTP: [
                     MessageHandler(
@@ -864,7 +896,10 @@ class WaterBusinessBot:
         # Address input conversation - Enhanced flow with manual entry support
         address_handler = ConversationHandler(
             entry_points=[
-                CallbackQueryHandler(profile_handlers.add_address, pattern="^add_new_address(_checkout)?$"),
+                CallbackQueryHandler(
+                        self._consumes(profile_handlers.add_address),
+                        pattern="^add_new_address(_checkout)?$",
+                    ),
                 # A pin can arrive BEFORE the flow has "started" in the
                 # ConversationHandler sense, because zero-address checkout
                 # shows the pin keyboard without ever entering this
@@ -928,7 +963,10 @@ class WaterBusinessBot:
                 ],
                 # Address title input
                 ADDRESS_TITLE: [
-                    CallbackQueryHandler(profile_handlers.address_title_callback, pattern="^addr_title_"),
+                    CallbackQueryHandler(
+                        self._consumes(profile_handlers.address_title_callback),
+                        pattern="^addr_title_",
+                    ),
                     MessageHandler(
                         filters.TEXT & ~filters.COMMAND,
                         self._consumes(profile_handlers.address_title_received),
@@ -936,18 +974,36 @@ class WaterBusinessBot:
                 ],
                 # Manual entry flow - Region selection
                 ADDRESS_REGION: [
-                    CallbackQueryHandler(profile_handlers.region_selected, pattern="^region_"),
-                    CallbackQueryHandler(profile_handlers.cancel_address, pattern="^cancel_address_creation$"),
+                    CallbackQueryHandler(
+                        self._consumes(profile_handlers.region_selected),
+                        pattern="^region_",
+                    ),
+                    CallbackQueryHandler(
+                        self._consumes(profile_handlers.cancel_address),
+                        pattern="^cancel_address_creation$",
+                    ),
                 ],
                 # Manual entry flow - District selection
                 ADDRESS_DISTRICT: [
-                    CallbackQueryHandler(profile_handlers.district_selected, pattern="^district_"),
-                    CallbackQueryHandler(profile_handlers.cancel_address, pattern="^cancel_address_creation$"),
-                    CallbackQueryHandler(profile_handlers.back_to_region, pattern="^back_to_region$"),
+                    CallbackQueryHandler(
+                        self._consumes(profile_handlers.district_selected),
+                        pattern="^district_",
+                    ),
+                    CallbackQueryHandler(
+                        self._consumes(profile_handlers.cancel_address),
+                        pattern="^cancel_address_creation$",
+                    ),
+                    CallbackQueryHandler(
+                        self._consumes(profile_handlers.back_to_region),
+                        pattern="^back_to_region$",
+                    ),
                 ],
                 # Manual entry flow - Street input
                 ADDRESS_STREET: [
-                    CallbackQueryHandler(profile_handlers.skip_field_handler, pattern="^skip_street$"),
+                    CallbackQueryHandler(
+                        self._consumes(profile_handlers.skip_field_handler),
+                        pattern="^skip_street$",
+                    ),
                     MessageHandler(
                         filters.TEXT & ~filters.COMMAND,
                         self._consumes(profile_handlers.street_received),
@@ -955,7 +1011,10 @@ class WaterBusinessBot:
                 ],
                 # Manual entry flow - Building input
                 ADDRESS_BUILDING: [
-                    CallbackQueryHandler(profile_handlers.skip_field_handler, pattern="^skip_building$"),
+                    CallbackQueryHandler(
+                        self._consumes(profile_handlers.skip_field_handler),
+                        pattern="^skip_building$",
+                    ),
                     MessageHandler(
                         filters.TEXT & ~filters.COMMAND,
                         self._consumes(profile_handlers.building_received),
@@ -963,7 +1022,10 @@ class WaterBusinessBot:
                 ],
                 # Manual entry flow - Apartment input
                 ADDRESS_APARTMENT: [
-                    CallbackQueryHandler(profile_handlers.skip_field_handler, pattern="^skip_apartment$"),
+                    CallbackQueryHandler(
+                        self._consumes(profile_handlers.skip_field_handler),
+                        pattern="^skip_apartment$",
+                    ),
                     MessageHandler(
                         filters.TEXT & ~filters.COMMAND,
                         self._consumes(profile_handlers.apartment_received),
@@ -971,7 +1033,10 @@ class WaterBusinessBot:
                 ],
                 # Manual entry flow - Floor input
                 ADDRESS_FLOOR: [
-                    CallbackQueryHandler(profile_handlers.skip_field_handler, pattern="^skip_floor$"),
+                    CallbackQueryHandler(
+                        self._consumes(profile_handlers.skip_field_handler),
+                        pattern="^skip_floor$",
+                    ),
                     MessageHandler(
                         filters.TEXT & ~filters.COMMAND,
                         self._consumes(profile_handlers.floor_received),
@@ -979,7 +1044,10 @@ class WaterBusinessBot:
                 ],
                 # Delivery instructions input
                 ADDRESS_DELIVERY_INSTRUCTIONS: [
-                    CallbackQueryHandler(profile_handlers.skip_field_handler, pattern="^skip_delivery_instructions$"),
+                    CallbackQueryHandler(
+                        self._consumes(profile_handlers.skip_field_handler),
+                        pattern="^skip_delivery_instructions$",
+                    ),
                     MessageHandler(
                         filters.TEXT & ~filters.COMMAND,
                         self._consumes(profile_handlers.delivery_instructions_received),
@@ -987,9 +1055,18 @@ class WaterBusinessBot:
                 ],
                 # Geocode confirmation
                 ADDRESS_GEOCODE_CONFIRM: [
-                    CallbackQueryHandler(profile_handlers.confirm_geocode, pattern="^confirm_geocode$"),
-                    CallbackQueryHandler(profile_handlers.retry_geocode, pattern="^retry_geocode$"),
-                    CallbackQueryHandler(profile_handlers.cancel_address, pattern="^cancel_address_creation$"),
+                    CallbackQueryHandler(
+                        self._consumes(profile_handlers.confirm_geocode),
+                        pattern="^confirm_geocode$",
+                    ),
+                    CallbackQueryHandler(
+                        self._consumes(profile_handlers.retry_geocode),
+                        pattern="^retry_geocode$",
+                    ),
+                    CallbackQueryHandler(
+                        self._consumes(profile_handlers.cancel_address),
+                        pattern="^cancel_address_creation$",
+                    ),
                 ],
                 # `conversation_timeout` below is not self-announcing: PTB looks
                 # for handlers under this key when the timer fires and, finding
@@ -1005,7 +1082,10 @@ class WaterBusinessBot:
             },
             fallbacks=[
                 CommandHandler("cancel", profile_handlers.cancel_address),
-                CallbackQueryHandler(profile_handlers.cancel_address, pattern="^cancel_address_creation$"),
+                CallbackQueryHandler(
+                        self._consumes(profile_handlers.cancel_address),
+                        pattern="^cancel_address_creation$",
+                    ),
             ],
             per_chat=True,
             per_user=True,
@@ -1050,7 +1130,10 @@ class WaterBusinessBot:
             ],
             states={
                 profile_handlers.PHONE_VERIFY_PHONE: [
-                    MessageHandler(filters.CONTACT, profile_handlers.phone_verify_contact_received),
+                    MessageHandler(
+                        filters.CONTACT,
+                        self._consumes(profile_handlers.phone_verify_contact_received),
+                    ),
                     MessageHandler(
                         filters.TEXT & ~filters.COMMAND,
                         self._consumes(profile_handlers.phone_verify_text_received),
@@ -1183,37 +1266,34 @@ class WaterBusinessBot:
         self.application.add_handler(item_management_handler, group=-2)
         logger.info(f"Item management conversation handler registered")
 
-        # Subscription frequency update conversation
-        frequency_update_handler = ConversationHandler(
-            entry_points=[CallbackQueryHandler(subscription_handlers.change_frequency, pattern="^change_frequency_")],
-            states={
-                0: [CallbackQueryHandler(subscription_handlers.update_frequency_confirm, pattern="^subscription_freq_")],
-            },
-            fallbacks=[],
-            per_chat=True,
-            per_user=True,
-            name="frequency_update",
-            conversation_timeout=300,
-            allow_reentry=True,
-            map_to_parent={}
-        )
-        # Note: This is handled inline, no need for separate conversation handler
-
-        # Subscription payment method update conversation
-        payment_update_handler = ConversationHandler(
-            entry_points=[CallbackQueryHandler(subscription_handlers.change_payment_method_menu, pattern="^change_payment_")],
-            states={
-                0: [CallbackQueryHandler(subscription_handlers.change_payment_method_confirm, pattern="^sub_payment_")],
-            },
-            fallbacks=[],
-            per_chat=True,
-            per_user=True,
-            name="payment_update",
-            conversation_timeout=300,
-            allow_reentry=True,
-            map_to_parent={}
-        )
-        # Note: This is handled inline, no need for separate conversation handler
+        # The two follow-up steps of the "edit an existing subscription" branch.
+        #
+        # These used to be two ConversationHandlers built right here and never
+        # passed to `add_handler` — the "# handled inline" comment beneath each
+        # was simply false, and nothing in any group claimed `^subscription_freq_`
+        # or `^sub_payment_` outside the CREATION conversation. Changing a
+        # subscription's frequency or payment rail from the bot had never once
+        # worked: the keyboard rendered, the tap matched nothing, the button
+        # spun to Telegram's client timeout.
+        #
+        # Registered TOP LEVEL rather than rebuilt as conversations, in their own
+        # `subfreq_` / `subpay_` namespaces (keyboards.py). Both properties are
+        # load-bearing:
+        #   * top level + id on the callback = the screen still works after the
+        #     deploy that empties `user_data`, and two open cards can never edit
+        #     each other's subscription.
+        #   * a separate namespace = no competition with the creation flow, which
+        #     legitimately owns `^subscription_freq_` and `^sub_payment_` in its
+        #     SELECT_ADDRESS / CONFIRM_SUBSCRIPTION states.
+        # tests/telegram_bot/test_subscription_edit_journeys.py
+        self.application.add_handler(CallbackQueryHandler(
+            subscription_handlers.update_frequency_confirm,
+            pattern=r"^subfreq_[a-z]+_\d+$",
+        ))
+        self.application.add_handler(CallbackQueryHandler(
+            subscription_handlers.change_payment_method_confirm,
+            pattern=r"^subpay_[a-z_]+_\d+$",
+        ))
 
         # Item quantity update conversation
         update_item_timeout = self._flow_timeout(
@@ -1246,8 +1326,24 @@ class WaterBusinessBot:
         # support message and must reach `_capture_support_message`, while text
         # a conversation asked for never gets here because that step's callback
         # is wrapped in `_consumes` and raises ApplicationHandlerStop.
+        #
+        # `~filters.UpdateType.EDITED_MESSAGE` is load-bearing, not decoration.
+        # `filters.TEXT` MATCHES an edit — PTB tests `update.effective_message`,
+        # which resolves to `edited_message` — while `update.message` is None on
+        # one, so `_handle_text_message` raised AttributeError and its own except
+        # branch raised a second one from `update.message.reply_text(...)`,
+        # escaping to the global handler with the customer shown nothing. A
+        # customer fixing a typo was enough; no restart or open flow needed.
+        #
+        # Excluded rather than accommodated: an edit is not new input. Re-running
+        # this catch-all over one would file a second Support Inbox row for a
+        # message already captured, and re-consume an OTP already spent.
+        # tests/telegram_bot/test_edited_message_router.py
         self.application.add_handler(
-            MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_text_message)
+            MessageHandler(
+                filters.TEXT & ~filters.COMMAND & ~filters.UpdateType.EDITED_MESSAGE,
+                self._handle_text_message,
+            )
         )
 
         # Contact messages are handled by ConversationHandlers in higher priority groups
@@ -1261,6 +1357,40 @@ class WaterBusinessBot:
         # ever see a location/venue update AFTER that entry point already
         # claimed and stopped it, so including them here would be dead code
         # that could only double-handle.
+
+        # A shared CONTACT with no conversation open.
+        #
+        # `filters.CONTACT` is otherwise registered ONLY inside two conversation
+        # states (registration PHONE, phone-verification PHONE_VERIFY_PHONE),
+        # both in group -2. But the keyboard that asks for it is a
+        # `ReplyKeyboardMarkup` with `request_contact=True` — CLIENT-side state
+        # that survives every restart — so after a deploy the contact arrived
+        # and matched nothing in any group. Nothing ran, nothing was said, and
+        # `one_time_keyboard=True` then took the keyboard away: no message, no
+        # error, and no way to finish signing up short of knowing to re-send
+        # /start.
+        #
+        # DEFAULT group, so the two conversations still claim it first whenever
+        # one is genuinely open (they are in group -2 and stop propagation).
+        # This only ever sees the contact nobody else wanted.
+        # tests/telegram_bot/test_signup_journey_after_restart.py
+        self.application.add_handler(
+            MessageHandler(filters.CONTACT, self._handle_contact)
+        )
+
+        # See ADDRESS_FLOW_BUTTONS above.
+        self.application.add_handler(
+            CallbackQueryHandler(
+                self._address_form_expired, pattern=self.ADDRESS_FLOW_BUTTONS
+            )
+        )
+
+        # The account-link answers, for the same reason and in the same shape.
+        self.application.add_handler(
+            CallbackQueryHandler(
+                self._signup_step_expired, pattern=r"^(link_yes|link_no)$"
+            )
+        )
 
         # Other attachments with no flow open are support messages. DEFAULT
         # group and registered AFTER the text catch-all on purpose:
@@ -1345,23 +1475,64 @@ class WaterBusinessBot:
 
             language = await i18n.get_user_language(user_id)
 
-            # Check if user is awaiting OTP verification (stored in context)
-            if context.user_data.get('awaiting_otp'):
+            # The durable half is read FIRST, because the in-memory half does
+            # not survive the deploy this branch exists to survive.
+            user_state = await self.user_repository.get_user_state(user_id)
+
+            # Awaiting the phone-verification code? `awaiting_otp` is the live
+            # marker; `bot_state.awaiting_input == 'phone_otp'` is the same fact
+            # written somewhere a restart cannot reach. Either one means the next
+            # 6 digits are an OTP and NOT a support message — which is what they
+            # silently became, unredacted, whenever a deploy landed while the SMS
+            # was in flight.
+            # tests/telegram_bot/test_armed_prompts_survive_a_restart.py
+            if context.user_data.get('awaiting_otp') or user_state.get('awaiting_input') == 'phone_otp':
                 prompted_update_id = context.user_data.get('otp_prompted_update_id')
                 if prompted_update_id == update.update_id:
                     # OTP was just prompted from this same update (e.g. phone text).
                     # Skip immediate re-processing of the same text as OTP.
                     context.user_data.pop('otp_prompted_update_id', None)
                     return
+                # Rehydrate what the dead process was holding, so the verifier
+                # knows which number this code belongs to.
+                if not context.user_data.get('pending_phone_verification'):
+                    pending = user_state.get('pending_phone_verification')
+                    if pending:
+                        context.user_data['pending_phone_verification'] = pending
+                context.user_data['awaiting_otp'] = True
                 await self._handle_otp_verification(update, context, text, language)
                 return
-
-            # Check if user is in a conversation state
-            user_state = await self.user_repository.get_user_state(user_id)
 
             if user_state.get('awaiting_input'):
                 # Handle contextual input
                 await self._handle_contextual_input(update, context, user_state, language)
+            elif user_state.get('address_draft'):
+                # They are ANSWERING the address form, not writing to support.
+                #
+                # Manual entry is seven typed prompts and the conversation that
+                # asks them dies with the process, so after a deploy the customer
+                # is left on "Enter the street" with nothing listening. Their
+                # street name, building number and delivery instructions were
+                # then filed one by one into the admin Support Inbox as
+                # unsolicited messages — silently, so nothing on screen changed
+                # and they kept typing.
+                #
+                # `address_draft` is the durable evidence they were mid-form
+                # (every step dual-writes it to `users.bot_state`, SDD
+                # 2026-08-26-address-flow-bot-state). Cleared as we answer, so
+                # the next thing they send is an ordinary support message rather
+                # than this reply again.
+                # tests/telegram_bot/test_address_text_after_restart.py
+                await update.message.reply_text(
+                    i18n.get('telegram.address.flow_timed_out', language)
+                )
+                try:
+                    await self.user_repository.clear_address_draft(user_id)
+                except Exception as clear_error:
+                    logger.warning(
+                        "Could not clear the stranded address draft for %s: %s",
+                        user_id, clear_error,
+                    )
             else:
                 # General free text with no active flow (not OTP, not a conversation
                 # state): silently capture it as a support message so an admin can
@@ -1456,6 +1627,7 @@ class WaterBusinessBot:
                     context.user_data.pop('awaiting_otp', None)
                     context.user_data.pop('pending_phone_verification', None)
                     context.user_data.pop('otp_prompted_update_id', None)
+                    await self._disarm_otp(user_id)
                     return
 
                 response = await client.verify_phone_otp(user_token, text)
@@ -1470,6 +1642,7 @@ class WaterBusinessBot:
                     context.user_data.pop('awaiting_otp', None)
                     context.user_data.pop('pending_phone_verification', None)
                     context.user_data.pop('otp_prompted_update_id', None)
+                    await self._disarm_otp(user_id)
 
                     logger.info(f"Phone verification successful for user {user_id}")
                 else:
@@ -1489,6 +1662,23 @@ class WaterBusinessBot:
             context.user_data.pop('awaiting_otp', None)
             context.user_data.pop('pending_phone_verification', None)
             context.user_data.pop('otp_prompted_update_id', None)
+            await self._disarm_otp(user_id)
+
+    async def _disarm_otp(self, user_id: int) -> None:
+        """Drop the DURABLE half of the OTP arming.
+
+        Its twin in `user_data` is popped beside every call to this. Leaving the
+        `bot_state` row armed would be worse than the bug it fixes: every later
+        message the customer sent would be read as another verification code
+        instead of reaching the Support Inbox, and nothing would ever clear it.
+
+        Named prompts only (`disarm` preserves `_PRESERVED_KEYS`), so a
+        half-finished `address_draft` sitting alongside is not collateral.
+        """
+        try:
+            await self.user_repository.disarm(user_id, 'phone_otp')
+        except Exception as disarm_error:
+            logger.warning("Could not disarm the OTP prompt for %s: %s", user_id, disarm_error)
 
     async def _handle_contextual_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
                                      user_state: Dict, language: str):
@@ -1539,6 +1729,78 @@ class WaterBusinessBot:
             logger.info(f"General text input from user {update.effective_user.id}: {text}")
             await main_menu_handler(update, context)
 
+    # Every button the seven address-entry screens can render, claimed at TOP
+    # LEVEL so it still lands once the conversation that owned it is gone.
+    #
+    # `conversation_timeout` is 86400s and manual entry is seven prompts, so a
+    # customer parked mid-form across a deploy is the ordinary case. The state
+    # map dies with the process; the inline keyboard does not. Every one of
+    # these used to match nothing in any group afterwards — no handler ran,
+    # nothing answered the callback query, and Telegram spun the button to its
+    # own client timeout and gave up in silence. Cancel was the cruellest: the
+    # one button whose entire job is "get me out of here" was the one button
+    # that could not.
+    #
+    # Plain `(a|b|c)` alternation and `\w+` rather than non-capturing groups,
+    # so `test_callback_contract_customer`'s collision sampler can still read
+    # it — an unreadable pattern makes that whole check go blind one handler at
+    # a time.
+    #
+    # Safe to sit in group 0 beside the live conversation in group -2 because
+    # those state handlers are wrapped in `_consumes`: when the flow really IS
+    # open it claims the tap and stops dispatch before this ever sees it.
+    # tests/telegram_bot/test_address_buttons_after_restart.py
+    ADDRESS_FLOW_BUTTONS = (
+        r"^(cancel_address_creation|back_to_region|confirm_geocode|retry_geocode"
+        r"|skip_street|skip_building|skip_apartment|skip_floor"
+        r"|skip_delivery_instructions|region_\w+|district_\w+|addr_title_\w+)$"
+    )
+
+    async def _signup_step_expired(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Answer a registration button whose conversation is gone.
+
+        `link_yes` / `link_no` are the two answers to the account-link prompt,
+        which appears at the most delicate moment in signup: the phone the
+        customer just shared already belongs to a web account. Both were
+        registered ONLY inside the registration conversation's
+        LINK_ACCOUNT_CONFIRM state, so after a deploy neither answer landed
+        anywhere — the customer is left mid-signup, in front of a question about
+        their own account, and both buttons do nothing at all.
+
+        Reuses the seeded `telegram.registration.flow_timed_out`, and points
+        them at /start, which is the only thing that can restart signup.
+        tests/telegram_bot/test_menu_and_link_buttons_after_restart.py
+        """
+        query = update.callback_query
+        try:
+            language = await i18n.get_user_language(update.effective_user.id)
+            await query.answer(
+                i18n.get('telegram.registration.flow_timed_out', language),
+                show_alert=True,
+            )
+            if query.message is not None:
+                await query.edit_message_reply_markup(reply_markup=None)
+        except Exception as e:
+            logger.warning("Could not answer an expired signup button: %s", e)
+
+    async def _address_form_expired(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Answer a button from an address form whose conversation is gone.
+
+        Reuses the already-seeded `telegram.address.flow_timed_out` — "the
+        address form timed out and was closed. Nothing was saved — you can start
+        again any time" — which is exactly what happened, and means this fix
+        ships without a translation seed.
+        """
+        query = update.callback_query
+        try:
+            language = await i18n.get_user_language(update.effective_user.id)
+            text = i18n.get('telegram.address.flow_timed_out', language)
+            await query.answer(text, show_alert=True)
+            if query.message is not None:
+                await query.edit_message_reply_markup(reply_markup=None)
+        except Exception as e:
+            logger.warning("Could not answer an expired address button: %s", e)
+
     async def _handle_contact(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle contact sharing"""
         try:
@@ -1546,6 +1808,22 @@ class WaterBusinessBot:
             contact = update.message.contact
 
             if contact.user_id == user_id:
+                # IDEMPOTENT, because this now runs as a group-0 FALLBACK for a
+                # contact no conversation claimed — and a reply-keyboard tap has
+                # no dedup middleware behind it (that guards inline buttons
+                # only). Somebody on a slow connection taps Share again after
+                # the flow has already finished; without this the second tap
+                # re-ran the whole tail of registration and re-asked for a name
+                # the customer had already given.
+                # tests/telegram_bot/test_registration_journey_dispatcher.py
+                existing = await self.user_repository.get_user_by_telegram_id(user_id)
+                if existing and existing.get('phone'):
+                    logger.info(
+                        "Ignoring a duplicate shared contact for %s; the phone "
+                        "is already recorded.", user_id,
+                    )
+                    return
+
                 # User shared their own contact
                 phone = contact.phone_number
                 await self.user_repository.set_user_phone(user_id, phone)

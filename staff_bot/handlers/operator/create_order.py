@@ -329,6 +329,10 @@ class CreateOrderHandler(BaseHandler):
         query = update.callback_query
         await query.answer()
         language = await self._get_language(update, context)
+        flow = await self._require_flow(update, context, 'new_order')
+        if flow is None:
+            return ConversationHandler.END
+
         token = await self._get_auth_token(update, context)
         if not token:
             await self._handle_auth_error(update, language)
@@ -337,7 +341,7 @@ class CreateOrderHandler(BaseHandler):
         try:
             # Parse: staff_op_addr_{address_id}
             address_id = int(query.data.split('_')[-1])
-            context.user_data['new_order']['delivery_address_id'] = address_id
+            flow['delivery_address_id'] = address_id
 
             # Fetch products
             async with api_client as client:
@@ -485,6 +489,10 @@ class CreateOrderHandler(BaseHandler):
         query = update.callback_query
         await query.answer()
         language = await self._get_language(update, context)
+        flow = await self._require_flow(update, context, 'new_order')
+        if flow is None:
+            return ConversationHandler.END
+
         token = await self._get_auth_token(update, context)
         if not token:
             await self._handle_auth_error(update, language)
@@ -518,8 +526,8 @@ class CreateOrderHandler(BaseHandler):
         payment_payload = response.data or {}
         available_methods = payment_payload.get('available_methods', [])
         restrictions = payment_payload.get('payment_restrictions', {})
-        context.user_data['new_order']['payment_restrictions'] = restrictions
-        context.user_data['new_order']['available_payment_methods'] = [
+        flow['payment_restrictions'] = restrictions
+        flow['available_payment_methods'] = [
             method.get('method') for method in available_methods if method.get('method')
         ]
 
@@ -528,7 +536,7 @@ class CreateOrderHandler(BaseHandler):
             None,
         )
         if default_method:
-            context.user_data['new_order']['payment_method'] = default_method
+            flow['payment_method'] = default_method
 
         text = self._format_cart_summary(context, language)
         if restrictions.get('cod_restricted'):
@@ -554,6 +562,10 @@ class CreateOrderHandler(BaseHandler):
         query = update.callback_query
         await query.answer()
         language = await self._get_language(update, context)
+        flow = await self._require_flow(update, context, 'new_order')
+        if flow is None:
+            return ConversationHandler.END
+
 
         try:
             # Parse: staff_op_pay_{method}
@@ -570,7 +582,7 @@ class CreateOrderHandler(BaseHandler):
                     show_alert=True,
                 )
                 return SELECT_PAYMENT
-            context.user_data['new_order']['payment_method'] = method
+            flow['payment_method'] = method
 
             # Ask for delivery notes
             text = i18n.get('staff.operator.enter_notes', language)
@@ -593,8 +605,12 @@ class CreateOrderHandler(BaseHandler):
     async def receive_notes(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Receive delivery notes"""
         language = await self._get_language(update, context)
+        flow = await self._require_flow(update, context, 'new_order')
+        if flow is None:
+            return ConversationHandler.END
+
         notes = update.message.text.strip()
-        context.user_data['new_order']['delivery_notes'] = notes
+        flow['delivery_notes'] = notes
 
         await self._show_order_summary(update, context, language)
         return CONFIRM_ORDER
@@ -606,8 +622,12 @@ class CreateOrderHandler(BaseHandler):
         query = update.callback_query
         await query.answer()
         language = await self._get_language(update, context)
+        flow = await self._require_flow(update, context, 'new_order')
+        if flow is None:
+            return ConversationHandler.END
 
-        context.user_data['new_order']['delivery_notes'] = None
+
+        flow['delivery_notes'] = None
         await self._show_order_summary(update, context, language)
         return CONFIRM_ORDER
 
@@ -654,7 +674,9 @@ class CreateOrderHandler(BaseHandler):
             return ConversationHandler.END
 
         try:
-            order_data = context.user_data.get('new_order', {})
+            order_data = await self._require_flow(update, context, 'new_order')
+            if order_data is None:
+                return ConversationHandler.END
 
             # Build API request
             api_items = [

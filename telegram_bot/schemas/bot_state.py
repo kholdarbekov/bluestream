@@ -30,6 +30,14 @@ class BotState(BaseModel):
         'edit_address_instructions',  # Editing delivery instructions
         'search_products',        # Product search query
         'support_message',        # Support message content
+        # Answered by something CLIENT-side that outlives any restart: a code
+        # the customer reads off an SMS. While this lived only in `user_data`, a
+        # deploy in the gap sent their live OTP to the admin Support Inbox.
+        # (The pin prompt's durable twin is `awaiting_location_at`, a PRESERVED
+        # companion key — it routes a location update, not the next text, so it
+        # must not occupy this single slot.)
+        # tests/telegram_bot/test_armed_prompts_survive_a_restart.py
+        'phone_otp',              # Awaiting the 6-digit phone-verification code
     ]] = None
 
     # Address-related state

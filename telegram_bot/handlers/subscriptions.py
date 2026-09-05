@@ -26,6 +26,33 @@ from handlers.base import BaseHandler
 (ITEM_ACTION, ITEM_SELECT_PRODUCT, ITEM_SELECT_QUANTITY) = range(7, 10)
 
 
+def _subscription_id(query_data) -> int | None:
+    """The subscription id trailing a subscription callback; ``None`` when absent.
+
+    ONE parser for every shape these screens emit — ``subscription_7``,
+    ``edit_sub_7``, ``skip_sub_7``, ``billing_history_7``, ``change_payment_7``,
+    ``retry_billing_7``, ``manage_items_7``, ``view_logs_7``,
+    ``subfreq_weekly_7``, ``subpay_business_account_7`` — the same way
+    ``handlers/orders.py`` keeps exactly one ``_cancelling_order_id``.
+
+    It exists because the hand-written indices drifted. ``billing_history``,
+    ``change_payment`` and ``retry_billing`` all read ``split('_')[3]`` from a
+    THREE-segment callback and raised ``IndexError`` on every tap, while their
+    six siblings correctly used ``[2]``. Worse, ``retry_billing`` and
+    ``skip_sub`` finish by delegating to :meth:`subscription_details`, which
+    re-parsed the very same string at ``[1]`` — so even the corrected index left
+    ``int('billing')`` behind it. One question, one answer.
+
+    Scans from the RIGHT: the id is always last, and the parts before it may
+    themselves hold underscores (``business_account``). ``0`` is treated as
+    absent — it is not a real subscription id.
+    """
+    for part in reversed(str(query_data or '').split('_')):
+        if part.isdigit() and int(part):
+            return int(part)
+    return None
+
+
 class SubscriptionHandlers(BaseHandler):
     """Subscription-related handlers with full functionality"""
 
@@ -82,7 +109,7 @@ class SubscriptionHandlers(BaseHandler):
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            subscription_id = int(query.data.split('_')[1])
+            subscription_id = _subscription_id(query.data)
 
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
@@ -324,7 +351,7 @@ class SubscriptionHandlers(BaseHandler):
                 text = i18n.get('telegram.subscription.no_addresses', language)
                 keyboard = [[InlineKeyboardButton(
                     i18n.get('telegram.subscription.add_address', language),
-                    callback_data='add_address'
+                    callback_data='add_new_address'
                 )]]
                 await self._edit_or_replace_callback_message(query, text=text, reply_markup=InlineKeyboardMarkup(keyboard))
                 await self._ack(query)
@@ -500,7 +527,7 @@ class SubscriptionHandlers(BaseHandler):
                 ),
                 InlineKeyboardButton(
                     i18n.get('telegram.back_to_menu', language),
-                    callback_data='menu_main'
+                    callback_data='back_to_main'
                 )
             ]]
 
@@ -636,7 +663,7 @@ class SubscriptionHandlers(BaseHandler):
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            sub_id = int(query.data.split('_')[2])
+            sub_id = _subscription_id(query.data)
 
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
@@ -666,7 +693,7 @@ class SubscriptionHandlers(BaseHandler):
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            sub_id = int(query.data.split('_')[3])
+            sub_id = _subscription_id(query.data)
 
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
@@ -714,7 +741,7 @@ class SubscriptionHandlers(BaseHandler):
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            sub_id = int(query.data.split('_')[2])
+            sub_id = _subscription_id(query.data)
 
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
@@ -773,6 +800,21 @@ class SubscriptionHandlers(BaseHandler):
         try:
             language = await i18n.get_user_language(update.effective_user.id)
             sub_id = context.user_data.get('editing_subscription_id')
+            if not sub_id:
+                # The flow's SUBJECT is gone. Reading on would post to
+                # `/api/v1/subscriptions/None/items` — a URL the backend can
+                # only refuse, shown to the customer as though their
+                # subscription were at fault — or mint a `manage_items_None`
+                # Back button onto the screen they are looking at, which no
+                # pattern claims. Say the flow expired instead; the copy is
+                # already seeded for this conversation's own timeout.
+                # tests/telegram_bot/test_subscription_item_flows_after_state_loss.py
+                await self._ack(
+                    update.callback_query,
+                    i18n.get('telegram.subscription.flow_timed_out', language),
+                    show_alert=True,
+                )
+                return ConversationHandler.END
 
             products = await self._fetch_and_display_products(
                 update, context, language,
@@ -811,6 +853,21 @@ class SubscriptionHandlers(BaseHandler):
 
             quantity = int(query.data.split('_')[2])
             sub_id = context.user_data.get('editing_subscription_id')
+            if not sub_id:
+                # The flow's SUBJECT is gone. Reading on would post to
+                # `/api/v1/subscriptions/None/items` — a URL the backend can
+                # only refuse, shown to the customer as though their
+                # subscription were at fault — or mint a `manage_items_None`
+                # Back button onto the screen they are looking at, which no
+                # pattern claims. Say the flow expired instead; the copy is
+                # already seeded for this conversation's own timeout.
+                # tests/telegram_bot/test_subscription_item_flows_after_state_loss.py
+                await self._ack(
+                    update.callback_query,
+                    i18n.get('telegram.subscription.flow_timed_out', language),
+                    show_alert=True,
+                )
+                return ConversationHandler.END
             product_id = context.user_data.get('adding_product_id')
 
             async with api_client as client:
@@ -888,6 +945,21 @@ class SubscriptionHandlers(BaseHandler):
 
             quantity = int(query.data.split('_')[2])
             sub_id = context.user_data.get('editing_subscription_id')
+            if not sub_id:
+                # The flow's SUBJECT is gone. Reading on would post to
+                # `/api/v1/subscriptions/None/items` — a URL the backend can
+                # only refuse, shown to the customer as though their
+                # subscription were at fault — or mint a `manage_items_None`
+                # Back button onto the screen they are looking at, which no
+                # pattern claims. Say the flow expired instead; the copy is
+                # already seeded for this conversation's own timeout.
+                # tests/telegram_bot/test_subscription_item_flows_after_state_loss.py
+                await self._ack(
+                    update.callback_query,
+                    i18n.get('telegram.subscription.flow_timed_out', language),
+                    show_alert=True,
+                )
+                return ConversationHandler.END
             item_id = context.user_data.get('editing_item_id')
 
             async with api_client as client:
@@ -968,7 +1040,7 @@ class SubscriptionHandlers(BaseHandler):
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            sub_id = int(query.data.split('_')[2])
+            sub_id = _subscription_id(query.data)
 
             text = i18n.get('telegram.subscription.edit_menu', language)
             keyboard = SubscriptionKeyboards.edit_subscription_menu(sub_id, language)
@@ -986,11 +1058,13 @@ class SubscriptionHandlers(BaseHandler):
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            sub_id = int(query.data.split('_')[2])
+            sub_id = _subscription_id(query.data)
             context.user_data['editing_subscription_id'] = sub_id
 
             text = i18n.get('telegram.subscription.select_new_frequency', language)
-            keyboard = SubscriptionKeyboards.subscription_frequency(language)
+            keyboard = SubscriptionKeyboards.subscription_frequency(
+                language, subscription_id=sub_id
+            )
 
             await self._edit_or_replace_callback_message(query, text=text, reply_markup=keyboard)
             await self._ack(query)
@@ -1005,8 +1079,13 @@ class SubscriptionHandlers(BaseHandler):
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
+            # `subfreq_<frequency>_<sub_id>`. The subject rides the callback, not
+            # `editing_subscription_id`: the Application has no `persistence`, so
+            # a deploy empties user_data while this card stays tappable forever,
+            # and a single user_data slot meant two open cards edited whichever
+            # subscription was stored last.
             frequency = query.data.split('_')[1]
-            sub_id = context.user_data.get('editing_subscription_id')
+            sub_id = _subscription_id(query.data)
 
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
@@ -1046,7 +1125,7 @@ class SubscriptionHandlers(BaseHandler):
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            sub_id = int(query.data.split('_')[3])
+            sub_id = _subscription_id(query.data)
             context.user_data['editing_subscription_id'] = sub_id
 
             async with api_client as client:
@@ -1066,7 +1145,8 @@ class SubscriptionHandlers(BaseHandler):
             # Reached from the subscription's edit menu, not from the creation
             # flow's address step, so Back goes back there.
             keyboard = SubscriptionKeyboards.payment_methods(
-                available_methods, language, back_callback=f'edit_sub_{sub_id}'
+                available_methods, language, back_callback=f'edit_sub_{sub_id}',
+                subscription_id=sub_id,
             )
 
             await self._edit_or_replace_callback_message(query, text=text, reply_markup=keyboard)
@@ -1082,8 +1162,12 @@ class SubscriptionHandlers(BaseHandler):
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            payment_method = query.data.split('_', 2)[2]
-            sub_id = context.user_data.get('editing_subscription_id')
+            # `subpay_<payment_method>_<sub_id>`, same reasoning as
+            # `update_frequency_confirm`. The rail is everything BETWEEN the
+            # prefix and the trailing id, because `business_account` contains an
+            # underscore of its own.
+            payment_method = '_'.join(query.data.split('_')[1:-1])
+            sub_id = _subscription_id(query.data)
 
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
@@ -1167,7 +1251,7 @@ class SubscriptionHandlers(BaseHandler):
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            sub_id = int(query.data.split('_')[2])
+            sub_id = _subscription_id(query.data)
 
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
@@ -1221,7 +1305,7 @@ class SubscriptionHandlers(BaseHandler):
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            sub_id = int(query.data.split('_')[3])
+            sub_id = _subscription_id(query.data)
 
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
@@ -1334,7 +1418,7 @@ class SubscriptionHandlers(BaseHandler):
 
         keyboard.append([InlineKeyboardButton(
             i18n.get('telegram.subscription.add_new_address', language),
-            callback_data='add_address'
+            callback_data='add_new_address'
         )])
 
         return InlineKeyboardMarkup(keyboard)

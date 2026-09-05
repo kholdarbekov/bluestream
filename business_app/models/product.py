@@ -118,6 +118,47 @@ class Product(db.Model, TimestampMixin, TranslatableMixin):
         return bool(self.fiscal_profile and self.fiscal_profile.fiscalization_enabled)
 
     @property
+    def is_returnable_bottle(self) -> bool:
+        """SSOT: does a unit of this product leave a returnable bottle behind?
+
+        BOTH columns have to agree, and that is the whole point. They are two
+        halves of one fact written by two independent `if "..." in data` blocks
+        in the admin update route, so every incoherent combination is reachable
+        state — and before this predicate existed, different surfaces resolved
+        those combinations differently:
+
+          * `tracks=True, per_unit=0`  — the delivery path multiplied by zero and
+            booked nothing, while anything testing the flag alone (try-out
+            eligibility, the admin picker) rendered the product as returnable.
+          * `tracks=False, per_unit>0` — `OrderEditService._cascade_bottle` keyed
+            on the NUMBER alone, so a product switched off via the flag kept
+            writing ADMIN_ADJUSTMENT ledger rows on every post-delivery edit.
+
+        Reading both means "switch it off" works from either column and cannot
+        leave a live number behind the off switch.
+
+        Deliberately NOT derived from `size`. The public JSON-LD used to answer
+        this question with `size == "19L"`, which silently disagreed with the
+        ledger the moment a SKU was flagged otherwise. Size is a physical fact
+        about the container; returnability is an operational policy about the
+        swap pool. They correlate today (only the 18.9 L SKU circulates) and
+        they are still not the same question.
+        """
+        return bool(self.tracks_returnable_bottles) and (self.returnable_bottles_per_unit or 0) > 0
+
+    def returnable_bottles_for(self, quantity) -> Decimal:
+        """How many returnable bottles `quantity` units of this product represent.
+
+        The single conversion from an order/try-out line to a bottle count.
+        Returns an exact ``Decimal`` — `returnable_bottles_per_unit` is
+        ``Numeric(12, 2)`` and the ledger stores Decimals, so a float here would
+        reintroduce rounding at the one place the balance must be exact.
+        """
+        if not self.is_returnable_bottle:
+            return Decimal("0.00")
+        return Decimal(str(self.returnable_bottles_per_unit or 0)) * Decimal(str(quantity or 0))
+
+    @property
     def requires_marking_codes(self) -> bool:
         return bool(self.fiscal_profile and self.fiscal_profile.requires_marking_codes)
 
@@ -161,6 +202,7 @@ class Product(db.Model, TimestampMixin, TranslatableMixin):
                 "is_tryout_eligible": bool(self.is_tryout_eligible),
                 "tracks_returnable_bottles": bool(self.tracks_returnable_bottles),
                 "returnable_bottles_per_unit": float(self.returnable_bottles_per_unit or 0),
+                "is_returnable_bottle": self.is_returnable_bottle,
                 "expire_days": self.expire_days,
                 "min_order_quantity": int(self.min_order_quantity or 1),
                 "fiscal_profile": self.fiscal_profile.to_dict() if self.fiscal_profile else None,

@@ -825,7 +825,15 @@ class CashCollectionHandler(BaseHandler):
         await query.answer()
         language = await self._get_language(update, context)
 
-        flow = context.user_data.get('pending_cod_collection_flow') or {}
+        # The flow has to EXIST to be reset. Falling back to `{}` re-armed an
+        # empty one and drew the amount prompt with no debtor banner, inviting
+        # the driver to type a cash figure against no order and no customer.
+        # `pending_cod_collection_flow` is in `flow_state.PENDING_FLOW_USER_DATA_KEYS`,
+        # so any menu tap clears it — no deploy required.
+        # tests/staff_bot/test_driver_flows_after_state_loss.py
+        flow = await self._require_flow(update, context, 'pending_cod_collection_flow')
+        if flow is None:
+            return
         flow.pop('pending_overpayment_amount', None)
         flow.pop('amount', None)
         context.user_data['pending_cod_collection_flow'] = flow

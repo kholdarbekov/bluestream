@@ -86,6 +86,19 @@ def _cancelling_order_id(query_data) -> int | None:
     return None
 
 
+def _checkout_address_id(query_data) -> int | None:
+    """The address id carried by a checkout Back callback; ``None`` when absent.
+
+    ``back_to_payment_<address_id>``. Absent means a confirmation card rendered
+    by a release older than this one (bare ``back_to_payment``), which the
+    handler answers rather than raising on — the same treatment
+    :func:`_cancelling_order_id` gives a pre-id cancel card. ``0`` is treated as
+    absent; it is not a real address id.
+    """
+    tail = str(query_data or '').rsplit('_', 1)[-1]
+    return int(tail) if tail.isdigit() and int(tail) else None
+
+
 def _money(value) -> str:
     """Format an API money value for display, never raising.
 
@@ -849,7 +862,7 @@ class OrderHandlers(BaseHandler):
                         i18n.get('telegram.cancel', language),
                     ),
                 )
-                arm_location_request(context)
+                await arm_location_request(context, update.effective_user.id)
 
                 # Read by the address flow on save to route back into checkout
                 # instead of dumping the customer on the main menu with a full
@@ -1001,6 +1014,30 @@ class OrderHandlers(BaseHandler):
                 parse_mode='Markdown',
             )
 
+    async def _lookup_address(self, update, context, address_id) -> dict:
+        """One address, by id, from the customer's own list.
+
+        Best-effort by design: this only supplies the NAME shown on screen, and
+        a lookup failure must not take down a checkout that is otherwise
+        perfectly able to proceed on the id alone.
+        """
+        try:
+            async with api_client as client:
+                token = await get_auth_token(update, context, client)
+                if not token:
+                    return {}
+                response = await client.get_user_addresses(token)
+            if not response.success:
+                return {}
+            payload = response.data or {}
+            addresses = (payload.get('data') or payload).get('addresses') or []
+            for address in addresses:
+                if address.get('id') == address_id:
+                    return address
+        except Exception as e:
+            logger.warning("Could not re-read address %s: %s", address_id, e)
+        return {}
+
     async def _show_payment_picker(
         self,
         update: Update,
@@ -1020,6 +1057,14 @@ class OrderHandlers(BaseHandler):
         context.user_data['selected_address_id'] = address_id
         address_map = context.user_data.get('checkout_addresses', {})
         address_info = address_map.get(address_id, {})
+        # The ID rides the callback and survives anything; this MAP does not, and
+        # it is the only thing that names the address. Empty strings here make
+        # the confirmation screen print "Delivery address:" and then nothing, so
+        # the customer is asked to confirm an order without being shown where it
+        # is going. Re-read the one address instead of carrying a blank forward.
+        # tests/telegram_bot/test_checkout_address_and_rescue.py
+        if not address_info:
+            address_info = await self._lookup_address(update, context, address_id)
         context.user_data['selected_address_title'] = address_info.get('title', '')
         context.user_data['selected_address_full'] = address_info.get('full_address', '')
 
@@ -1531,6 +1576,41 @@ class OrderHandlers(BaseHandler):
         language = await i18n.get_user_language(user_id)
         unknown_text = i18n.get('telegram.common.unknown', language)
 
+        # REFUSE RATHER THAN DRAW A CARD THIS SCREEN CANNOT HONOUR.
+        #
+        # Everything below reads with `.get()`, so a lost checkout never raised
+        # here — it rendered a complete-looking "Confirm your order" with the
+        # address line and the rail line simply ABSENT (`if address_id:` and
+        # `if payment_method:` are both False), the tier discount silently
+        # dropped from the payable figure, and a live Confirm button whose only
+        # possible answer is `confirm_order`'s own "missing information, please
+        # try again" — advice that cannot succeed on that card.
+        #
+        # Reachable four ways (payment_*, back_to_order_confirm,
+        # checkout_apply_reward_*, checkout_remove_reward) and, for the card
+        # rail, with no deploy at all: `confirm_order` calls
+        # `context.user_data.clear()` and then edits this message into the
+        # payment card, whose Back returns here — so the ghost confirmation is
+        # drawn for an order that has already been placed.
+        #
+        # Same two keys and the same seeded copy `confirm_order` already guards
+        # with, so there is one answer to "is this checkout still live", not two.
+        # tests/telegram_bot/test_checkout_screens_after_state_loss.py
+        if not (context.user_data.get('selected_address_id')
+                and context.user_data.get('selected_payment_method')):
+            query = update.callback_query
+            if query is not None:
+                await self._ack(
+                    query,
+                    i18n.get('telegram.orders.missing_info', language),
+                    show_alert=True,
+                )
+            logger.info(
+                "Refused to draw the confirmation screen for %s: the checkout "
+                "state is gone.", user_id,
+            )
+            return
+
         # Build confirmation message
         confirmation_text = i18n.get('telegram.orders.confirmation_title', language) + "\n\n"
 
@@ -1718,6 +1798,7 @@ class OrderHandlers(BaseHandler):
             meets_minimum=meets_minimum,
             has_reward=bool(context.user_data.get('selected_reward_id')),
             show_reward=show_reward,
+            address_id=address_id,
         )
 
         await self._edit_or_replace_callback_message(
@@ -1757,11 +1838,40 @@ class OrderHandlers(BaseHandler):
         Re-renders the payment picker for the address already chosen this
         checkout. The selected reward (selected_reward_id) is intentionally left
         untouched so the user keeps it when they return to confirmation.
+
+        THE ADDRESS RIDES THE CALLBACK. This used to be a bare
+        ``context.user_data['selected_address_id']``, which is a promise that
+        the process which drew the card is the process handling the tap. It
+        isn't: the Application has no ``persistence``, so a deploy empties
+        ``user_data`` while every confirmation card ever sent stays live on its
+        customer's phone. Production, 2026-09-03 14:26:31 — six seconds after a
+        restart, one tap, ``KeyError: 'selected_address_id'``, and because
+        ``_handle_error`` never edits the card the button stayed dead for good.
+
+        No deploy is needed either: ``confirm_order`` runs
+        ``context.user_data.clear()`` and then edits the same message into the
+        payment card, whose Back re-renders this confirmation screen — so the
+        card rail reaches a live Back button on empty ``user_data`` on its own.
+
+        ``user_data`` stays as the fallback for a card minted before this
+        release, and an id from neither source is answered rather than raised —
+        the same shape ``confirm_order`` already uses for the same two keys.
         """
         try:
-            await self._show_payment_picker(
-                update, context, context.user_data['selected_address_id']
+            query = update.callback_query
+            address_id = (
+                _checkout_address_id(query.data)
+                or context.user_data.get('selected_address_id')
             )
+            if not address_id:
+                language = await i18n.get_user_language(update.effective_user.id)
+                await self._ack(
+                    query,
+                    i18n.get('telegram.orders.missing_info', language),
+                    show_alert=True,
+                )
+                return
+            await self._show_payment_picker(update, context, address_id)
         except Exception as e:
             await self._handle_error(update, exc=e, operation="back_to_payment")
 

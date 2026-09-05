@@ -278,9 +278,9 @@ class TryoutService:
             if quantity < 1:
                 raise ValidationError("Try-out item quantity must be positive")
 
-            returnable_due = Decimal("0.00")
-            if getattr(product, "tracks_returnable_bottles", False):
-                returnable_due = TryoutService._as_decimal(product.returnable_bottles_per_unit) * Decimal(str(quantity))
+            # Same SSOT as the order path — a try-out of a non-returnable SKU
+            # owes no bottles back.
+            returnable_due = product.returnable_bottles_for(quantity)
 
             built_items.append(
                 {

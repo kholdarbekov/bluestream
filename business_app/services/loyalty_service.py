@@ -3024,6 +3024,106 @@ class LoyaltyService:
             if expiring_points
         ]
 
+    # ------------------------------------------------------------------
+    # Tier-ladder administration.
+    #
+    # These three lived in `business_app/api/admin.py` as module-level
+    # privates. They are loyalty domain rules — which ladders are coherent,
+    # and who an edit strands — and every one of them reached past the API
+    # boundary into `LoyaltyTierConfig` / `LoyaltyPoints` to answer. That is
+    # what `tests/unit/test_structure_boundary_regressions.py` measures and
+    # what CLAUDE.md's "Service Layer First" forbids; the API module now
+    # asks these questions instead of answering them itself.
+    # ------------------------------------------------------------------
+
+    def validate_tier_ladder(self, program_id, tier_id, proposed):
+        """Reject a tier ladder with an overlap or a hole in it.
+
+        ``proposed`` is the {field: value} patch about to be applied to ``tier_id``
+        (or None for a new tier), including the tier's effective ``is_active``
+        state after the edit. Returns (error_code, detail) or None.
+
+        A proposed tier that ends up inactive is left out of the ladder entirely:
+        get_tier_for_points filters on is_active, so an inactive tier prices no
+        one and must not be validated as if it still occupied its band.
+
+        get_tier_for_points selects on min_points alone, so a hole does not change
+        pricing — but it is published in the customer-facing tier table and in the
+        admin UI as a band, where it reads as a range no one can occupy.
+        """
+        rows = LoyaltyTierConfig.query.filter_by(program_id=program_id, is_active=True).all()
+        ladder = []
+        for row in rows:
+            if tier_id is not None and row.id == tier_id:
+                continue
+            ladder.append({"name": row.name, "order": row.display_order, "min": row.min_points, "max": row.max_points})
+        if proposed.get("is_active", True):
+            ladder.append(
+                {
+                    "name": proposed.get("name", "(edited)"),
+                    "order": proposed.get("display_order", 0),
+                    "min": proposed.get("min_points", 0),
+                    "max": proposed.get("max_points"),
+                }
+            )
+
+        if not ladder:
+            return None
+
+        seen_orders = {}
+        for entry in ladder:
+            if entry["order"] in seen_orders:
+                return (
+                    "threshold_overlap",
+                    f"{entry['name']} and {seen_orders[entry['order']]} both use display_order {entry['order']}.",
+                )
+            seen_orders[entry["order"]] = entry["name"]
+
+        ladder.sort(key=lambda entry: entry["order"])
+
+        for lower, upper in zip(ladder, ladder[1:]):
+            if upper["min"] <= lower["min"]:
+                return (
+                    "threshold_overlap",
+                    f"{upper['name']} starts at {upper['min']}, not above {lower['name']}'s {lower['min']}.",
+                )
+            if lower["max"] is not None and lower["max"] != upper["min"]:
+                return (
+                    "threshold_gap",
+                    f"{lower['name']} ends at {lower['max']} and {upper['name']} starts at {upper['min']} — "
+                    f"points between map to no tier.",
+                )
+        if ladder[-1]["max"] is not None:
+            return ("threshold_gap", f"{ladder[-1]['name']} is the top tier and must have no upper bound.")
+        return None
+
+    def count_stranded_members(self, tier, new_min_points):
+        """Accounts holding THIS tier's badge whose points fall below a raised floor.
+
+        Counts only ``current_tier == tier.name``: an account badged into a
+        DIFFERENT tier that also loses live qualification for this one (e.g. a
+        Gold-badged member whose points drop below Silver's new floor) is not
+        counted. This is a lower bound on everyone the edit affects, not an exact
+        count. Their badge itself keeps their benefits (effective_tier), so this
+        is not a breakage — it is what an admin should see before committing.
+        """
+        if new_min_points is None or new_min_points <= (tier.min_points or 0):
+            return 0
+        stranded = 0
+        for account in LoyaltyPoints.query.filter_by(current_tier=tier.name, program_id=tier.program_id).all():
+            if self.calculate_qualifying_points(account.user_id) < new_min_points:
+                stranded += 1
+        return stranded
+
+    def count_badge_holders(self, tier):
+        """Accounts currently tagged with this tier's badge, regardless of points.
+
+        Used when a tier is being deactivated: every current holder loses live
+        qualification (the tier no longer exists to qualify for), not just those
+        below some new floor.
+        """
+        return LoyaltyPoints.query.filter_by(current_tier=tier.name, program_id=tier.program_id).count()
+
     def update_all_tiers(self) -> Dict[str, List[Dict[str, Any]]]:
         """Recompute all loyalty tiers and report upgrades/downgrades."""
         upgrades: List[Dict[str, Any]] = []

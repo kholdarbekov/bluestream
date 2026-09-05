@@ -248,15 +248,43 @@ class UpdateFactory:
             "message": self._message_envelope(text=text),
         })
 
+    def edited_text(self, text: str) -> Update:
+        """A message the customer went back and EDITED.
+
+        Worth having because `filters.TEXT` MATCHES one of these: PTB's
+        `MessageFilter.check_update` tests `update.effective_message`, which
+        resolves to `edited_message` — and `allowed_updates=None` (bot.py) means
+        both bots actually receive them. But `update.message` is `None` on an
+        edit, so any handler reaching through `update.message` raises
+        AttributeError on an entirely ordinary customer action.
+        """
+        return self._build({
+            "update_id": self._next_update_id(),
+            "edited_message": self._message_envelope(
+                text=text, edit_date=1_700_000_100,
+            ),
+        })
+
     def command(self, command: str) -> Update:
         """A slash command. Without the bot_command entity PTB's CommandHandler
         does not match, so a hand-rolled text update silently tests nothing."""
         body = command if command.startswith("/") else f"/{command}"
+        # The entity covers the COMMAND TOKEN ONLY, never the whole text.
+        # PTB reads the command as `text[1:entity.length]`, so spanning the
+        # arguments too made "/start ref_ABC123" parse as the command
+        # "start ref_ABC123" — matching no CommandHandler at all. Deep links
+        # were therefore inexpressible here, which is part of why the dropped
+        # referral (tests/telegram_bot/test_signup_journey_after_restart.py)
+        # had no test. Unchanged for an argument-less command.
         return self._build({
             "update_id": self._next_update_id(),
             "message": self._message_envelope(
                 text=body,
-                entities=[{"type": "bot_command", "offset": 0, "length": len(body)}],
+                entities=[{
+                    "type": "bot_command",
+                    "offset": 0,
+                    "length": len(body.split(" ", 1)[0]),
+                }],
             ),
         })
 

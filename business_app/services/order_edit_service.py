@@ -711,13 +711,20 @@ class OrderEditService:
         affected_session_id: Optional[int] = None
         if order.status == OrderStatus.DELIVERED:
             for change in plan.item_changes:
-                bottles_per_unit = Decimal(str(getattr(change.product, "returnable_bottles_per_unit", 0) or 0))
-                if bottles_per_unit == 0 or change.delta == 0:
+                # Through the SSOT, not `returnable_bottles_per_unit` alone.
+                # Reading the number by itself meant a product turned off via
+                # `tracks_returnable_bottles` (the flag an admin actually
+                # toggles) kept cascading here, so correcting a mis-flagged SKU
+                # in the products table did not stop the bleeding on edits.
+                if change.delta == 0 or change.product is None:
+                    continue
+                delta_bottles = change.product.returnable_bottles_for(change.delta)
+                if delta_bottles == 0:
                     continue
                 bottle_changes.append(
                     {
                         "product_id": change.product_id,
-                        "delta_bottles": float(bottles_per_unit * Decimal(change.delta)),
+                        "delta_bottles": float(delta_bottles),
                     }
                 )
         if bottle_changes:
@@ -1039,10 +1046,14 @@ class OrderEditService:
                 reopened_driver_user_id = session.driver_user_id
 
         for change in plan.item_changes:
-            bottles_per_unit = Decimal(str(getattr(change.product, "returnable_bottles_per_unit", 0) or 0))
-            if bottles_per_unit == 0 or change.delta == 0:
+            # Same SSOT as the preview above and as the delivery-time booking,
+            # so a line that previewed "no bottle impact" cannot write a ledger
+            # row on apply.
+            if change.delta == 0 or change.product is None:
                 continue
-            bottle_delta = bottles_per_unit * Decimal(change.delta)
+            bottle_delta = change.product.returnable_bottles_for(change.delta)
+            if bottle_delta == 0:
+                continue
             # The customer's balance moves by +bottle_delta when we deliver
             # more bottles (they now hold more bottles), and -bottle_delta
             # when we deliver fewer. We write the ADMIN_ADJUSTMENT entry via

@@ -731,6 +731,16 @@ class ProfileHandlers(BaseHandler):
                         context.user_data['awaiting_otp'] = True
                         context.user_data['pending_phone_verification'] = phone
                         context.user_data['otp_prompted_update_id'] = update.update_id
+                        # DURABLE TWIN. `user_data` dies with the process, and the
+                        # customer is reading this code off an SMS that does not.
+                        # Without this the digits they type after a deploy fall
+                        # through the router to `capture_support_message` — silent
+                        # by design — and a live one-time password lands
+                        # unredacted in the admin Support Inbox while the phone
+                        # stays unverified.
+                        await self.user_repo.arm_awaiting_input(
+                            user_id, 'phone_otp', pending_phone_verification=phone,
+                        )
 
                         logger.info(f"Verification SMS sent to {phone} for user {user_id}")
                     else:
@@ -818,7 +828,9 @@ class ProfileHandlers(BaseHandler):
 
                 await update.message.reply_text(
                     welcome_text,
-                    reply_markup=LanguageKeyboards.select_language()
+                    reply_markup=LanguageKeyboards.select_language(
+                        (context.user_data or {}).get('referral_code')
+                    )
                 )
 
                 return SELECT_LANGUAGE
@@ -861,7 +873,11 @@ class ProfileHandlers(BaseHandler):
             query = update.callback_query
             user = update.effective_user
             user_id = user.id
-            language_code = query.data.split('_')[-1]
+            # Index 2, never [-1]: `set_language_<lang>` may carry a
+            # `_ref<code>` suffix (keyboards.LanguageKeyboards.select_language),
+            # which is what lets a deep-link referral survive the deploy that
+            # empties user_data before this row exists.
+            language_code = query.data.split('_')[2]
             logger.info(f"User {user_id} (@{user.username}) register started with language: {language_code}")
 
             # Validate language code
@@ -885,6 +901,8 @@ class ProfileHandlers(BaseHandler):
                         }
                         # Apply a referral code captured from a /start deep link.
                         referral_code = (context.user_data or {}).get('referral_code')
+                        if not referral_code and '_ref' in query.data:
+                            referral_code = query.data.split('_ref', 1)[1] or None
                         if referral_code:
                             registration_data['referral_code'] = referral_code
                         # Attach an AI/profile acquisition marker captured from a
@@ -1870,7 +1888,7 @@ class ProfileHandlers(BaseHandler):
                 language,
                 extra_rows=(i18n.get('telegram.address.enter_manually_button', language),),
             )
-            arm_location_request(context)
+            await arm_location_request(context, update.effective_user.id)
 
             if update.callback_query:
                 logger.info(f"Editing message via callback query")
@@ -1936,7 +1954,7 @@ class ProfileHandlers(BaseHandler):
                     f"User {user_id} shared out-of-zone location: "
                     f"{location.latitude}, {location.longitude}"
                 )
-                arm_location_request(context)
+                await arm_location_request(context, update.effective_user.id)
                 await update.message.reply_text(
                     i18n.get('telegram.address.outside_delivery_area', language),
                     reply_markup=ProfileKeyboards.location_request(
@@ -2085,6 +2103,17 @@ class ProfileHandlers(BaseHandler):
             await self.user_repo.clear_address_draft(telegram_id, touch_activity=touch_activity)
         except Exception as e:
             logger.warning(f"Could not clear address draft for {telegram_id}: {e}")
+        # The pin arming now has a DURABLE twin as well, so this teardown has
+        # two halves too. Clearing only the `user_data` pop above would
+        # reintroduce the exact 2026-08-26 regression through the new channel:
+        # a customer who armed the checkout pin prompt and then cancelled would
+        # have every later, unrelated pin swept back into address creation —
+        # this time for as long as the row lives, not just the process.
+        # tests/telegram_bot/test_support_attachment_dispatch.py
+        try:
+            await self.user_repo.forget_pin_prompt(telegram_id)
+        except Exception as e:
+            logger.warning(f"Could not clear the pin prompt for {telegram_id}: {e}")
 
     async def cancel_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Cancel address adding process"""
@@ -2612,7 +2641,7 @@ class ProfileHandlers(BaseHandler):
             await message.reply_location(latitude=latitude, longitude=longitude)
 
         async def request_location(text, keyboard):
-            arm_location_request(context)
+            await arm_location_request(context, update.effective_user.id)
             if query is not None:
                 await self._ack(query)
                 if query.message:
@@ -2930,7 +2959,7 @@ class ProfileHandlers(BaseHandler):
             final_lng = addr_data.get('longitude')
             if final_lat is not None and final_lng is not None and not is_within_tashkent(final_lat, final_lng):
                 logger.info(f"User {user_id} geocoded to out-of-zone point: {final_lat}, {final_lng}")
-                arm_location_request(context)
+                await arm_location_request(context, update.effective_user.id)
                 await self._persist_address_draft(update, context, 'location')
                 await target.reply_text(
                     i18n.get('telegram.address.outside_delivery_area', language),
@@ -3017,7 +3046,7 @@ class ProfileHandlers(BaseHandler):
             # Offer location sharing or manual re-entry
             retry_text = i18n.get('telegram.address.retry_location', language)
 
-            arm_location_request(context)
+            await arm_location_request(context, update.effective_user.id)
             keyboard = ProfileKeyboards.location_request(
                 language,
                 extra_rows=(

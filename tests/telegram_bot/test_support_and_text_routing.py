@@ -334,6 +334,12 @@ async def test_starting_the_address_flow_leaves_a_pending_concern_report_armed(
     await walk_to_delivery_instructions(bot, user)
     state = json.loads(bot.database.user["bot_state"])
     address_draft = state.pop("address_draft", None)
+    # Popped for the same reason as `address_draft`: both are PRESERVED
+    # companion keys the address flow legitimately writes alongside another
+    # flow's arming. `awaiting_location_at` is the durable twin of the pin
+    # prompt (tests/telegram_bot/test_armed_prompts_survive_a_restart.py); this
+    # test is about the CONCERN keys surviving, not about the set being empty.
+    state.pop("awaiting_location_at", None)
     assert state == {
         "awaiting_input": "support_message",
         "support_order_id": ORDER_ID,
@@ -459,14 +465,21 @@ def test_the_conversations_stop_dispatch_before_the_default_group_catch_all():
     ).read_text(encoding="utf-8")
 
     registration = source.split(
-        "MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_text_message)", 1
+        "filters.TEXT & ~filters.COMMAND & ~filters.UpdateType.EDITED_MESSAGE", 1
     )
     assert len(registration) == 2, "the free-text catch-all is no longer registered"
-    tail = registration[1][:60]
+    tail = registration[1][:120]
+    assert "self._handle_text_message" in tail, (
+        "the catch-all filter is no longer attached to _handle_text_message"
+    )
     assert "group=" not in tail, (
         "the catch-all now names a group; it is supposed to stay in the "
         "default group, behind the conversations"
     )
+    # `~EDITED_MESSAGE` is part of this contract, not incidental formatting:
+    # `filters.TEXT` matches an edit, `update.message` is None on one, and
+    # `_handle_text_message` dereferences it twice — once in the body and again
+    # in its own except branch. tests/telegram_bot/test_edited_message_router.py
     assert "address_handler, group=-2" in source, (
         "the conversations moved out of group -2; re-check this whole file"
     )

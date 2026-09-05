@@ -709,6 +709,82 @@ class StaffBot:
             conversation_timeout=300,
             allow_reentry=True
         )
+        # Session recovery, where it can see the WHOLE update.
+        #
+        # `_recover_session` was wired into exactly one place: the group-0
+        # text catch-all. Anything claimed before that never reached it —
+        # the entry-point MessageHandlers of `staff_create_user`,
+        # `staff_search_user` and `staff_create_order` (they live in
+        # ConversationHandlers, which run first), and every inline
+        # CallbackQueryHandler (refused by `@require_auth` before any
+        # handler body runs).
+        #
+        # The visible symptom was three dead buttons and three live ones on
+        # the SAME reply keyboard after every deploy: *Create Client*,
+        # *Search Client* and *Create Order* answered "session expired" for
+        # good, while *New Orders*, *Profile* and *Settings* silently
+        # recovered. Nothing explained the difference.
+        #
+        # Group -9, so it runs after the logger and before everything that
+        # reads `authenticated`. Only fires when the session is genuinely
+        # gone, and `_recover_session` is itself rate-bounded on failure, so
+        # a replayed tap cannot sustain signed-login load.
+        # tests/staff_bot/test_session_recovery_covers_every_tap.py
+        def conversation_entry_claims(update: Update) -> bool:
+            """Would a ConversationHandler's ENTRY POINT claim this update?
+
+            Those run before the group-0 text router, which is why they never
+            reached recovery. Everything the router itself handles is left to
+            the router: it gates on "text that IS a menu label" (recovery costs
+            an unrate-limited signed login, so arbitrary text must not buy one)
+            and owns the once-only explanation for a FAILED recovery, which
+            depends on reading the cooldown before the attempt.
+            """
+            for group in self.application.handlers.values():
+                for handler in group:
+                    if not isinstance(handler, ConversationHandler):
+                        continue
+                    for entry in handler.entry_points:
+                        try:
+                            if entry.check_update(update):
+                                return True
+                        except Exception:
+                            continue
+            return False
+
+        async def recover_session_if_lost(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if context.user_data is None or context.user_data.get('authenticated'):
+                return
+            if update.effective_user is None:
+                return
+            # A COMMAND is never recovered before it runs. `/start` is the login
+            # path itself and is an entry point of `staff_auth`, so recovering
+            # first both duplicates the work and, for someone not yet linked,
+            # replaces the language picker they are supposed to be parked on.
+            message = update.effective_message
+            if message is not None and (message.text or '').startswith('/'):
+                return
+            # An inline tap always: `callback_data` is bot-minted, so it can only
+            # come from a card this bot drew for this person. A LOCATION share
+            # always, because a Live Location stream outlives the process that
+            # authorised it and keeps emitting `edited_message` ticks — after a
+            # deploy every one was refused by `@require_auth`, silently, so
+            # dispatch's view of that driver went stale with nothing on anyone's
+            # screen to say so. Text only when a conversation entry point would
+            # take it — see above.
+            has_location = message is not None and message.location is not None
+            if (update.callback_query is None and not has_location
+                    and not conversation_entry_claims(update)):
+                return
+            try:
+                await self._recover_session(update, context)
+            except Exception as recovery_error:
+                logger.warning("Session recovery failed: %s", recovery_error)
+
+        self.application.add_handler(
+            TypeHandler(Update, recover_session_if_lost), group=-9
+        )
+
         self.application.add_handler(auth_handler, group=-2)
 
         # Command handlers

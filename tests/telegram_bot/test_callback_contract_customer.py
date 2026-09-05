@@ -214,7 +214,15 @@ def _samples_matching(pattern_source: str) -> list[str]:
     if body.endswith("$"):
         body = body[:-1]
 
-    body = body.replace(r"\d+", "7").replace(r"\d*", "7").replace(r"\w+", "x")
+    # `[a-z_]+` before `[a-z]+` only for readability — neither is a substring of
+    # the other. Both come from the subscription EDIT registrations
+    # (`^subfreq_[a-z]+_\d+$`, `^subpay_[a-z_]+_\d+$`), where the middle segment
+    # is a frequency or a payment rail and the trailing id is what makes the
+    # screen survive a restart.
+    body = (
+        body.replace(r"\d+", "7").replace(r"\d*", "7").replace(r"\w+", "x")
+        .replace("[a-z_]+", "x").replace("[a-z]+", "x")
+    )
 
     # An escaped paren or pipe would be misread as a group boundary below, and
     # a sample built from that misreading is a fabricated one.
@@ -1236,10 +1244,31 @@ async def test_the_free_text_catch_all_is_the_last_handler_in_group_zero(bot):
     # VOICE — LOCATION/VENUE are routed entirely by the address conversation's
     # entry point instead) cannot match a text update, so sitting behind the
     # text catch-all costs it nothing.
+    # `_handle_contact` is exempt on the SAME ground: `filters.CONTACT` cannot
+    # match a text update either, so it costs nothing behind the text catch-all.
+    # It has to sit in group 0 (not earlier) so the registration and
+    # phone-verification conversations still claim a contact whenever one of
+    # them is genuinely open.
+    # tests/telegram_bot/test_signup_journey_after_restart.py
+    # Two kinds of handler are exempt, and for the same single reason: they
+    # cannot match a TEXT update at all, so sitting behind the text catch-all
+    # costs them nothing.
+    #
+    #  * every CallbackQueryHandler — a callback_query is not a message
+    #    (`_address_form_expired` is the one registered here);
+    #  * the MessageHandlers whose filters exclude text: attachments
+    #    (PHOTO/Document/VIDEO/VIDEO_NOTE/AUDIO/VOICE — LOCATION/VENUE are
+    #    routed by the address conversation's entry point instead) and CONTACT.
+    #
+    # Expressed by TYPE where a type says it, rather than by adding another name
+    # to a list: a name list has to be remembered, and this contract is about
+    # what a handler can match, not what it is called.
     non_attachment = [
         handler
         for handler in trailing
-        if getattr(handler.callback, "__name__", "") != "_handle_attachment_message"
+        if not isinstance(handler, CallbackQueryHandler)
+        and getattr(handler.callback, "__name__", "")
+        not in {"_handle_attachment_message", "_handle_contact"}
     ]
     assert not non_attachment, (
         "handlers registered after the group-0 text catch-all can never run for "

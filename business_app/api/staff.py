@@ -3,6 +3,8 @@ Staff API endpoints for the Water Business Platform.
 Handles staff authentication, delivery operations, and operator actions.
 """
 
+from decimal import Decimal
+
 from flask import Blueprint, request, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
@@ -434,11 +436,23 @@ def get_active_deliveries():
                 "current_location_lat": delivery.current_location_lat,
                 "current_location_lng": delivery.current_location_lng,
                 # Returnable bottle info
+                # WRITE-GUARD INPUT, not decoration: staff_bot's
+                # `_get_expected_bottles` gates the whole at-door bottle-return
+                # step on this number. It used to be an inline re-derivation of
+                # the returnable rule, which meant any change to the rule left
+                # the driver's gate on the old one. It now goes through the same
+                # `Product.returnable_bottles_for` SSOT as the ledger write, so
+                # the gate and the booking can never disagree.
                 "expected_returnable_bottles": (
-                    sum(
-                        float(oi.product.returnable_bottles_per_unit or 0) * (oi.quantity or 0)
-                        for oi in (order.order_items or [])
-                        if oi.product and oi.product.tracks_returnable_bottles
+                    float(
+                        sum(
+                            (
+                                oi.product.returnable_bottles_for(oi.quantity)
+                                for oi in (order.order_items or [])
+                                if oi.product
+                            ),
+                            Decimal("0.00"),
+                        )
                     )
                     if order
                     else 0

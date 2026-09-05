@@ -441,13 +441,24 @@ def test_handle_input_raises_a_named_error_for_title_instead_of_a_bare_keyerror(
 # ---------------------------------------------------------------------------
 
 
+def _record_arm(order):
+    """An awaitable stand-in for the now-async `arm_location_request`."""
+    async def _arm(_context, _user_id=None):
+        order.append("armed")
+    return _arm
+
+
 async def test_send_for_request_location_arms_before_replying_on_the_callback_message(monkeypatch):
     """The common case: a Skip/Back tap landed on the location step, and the
     tap's own message is still there to reply on."""
     order = []
     monkeypatch.setattr(
         "handlers.profile.arm_location_request",
-        lambda context: order.append("armed"),
+        # Awaitable and two-arg: the arming is durable now (it dual-writes the
+        # prompt to `users.bot_state`, so a pin that arrives after a deploy is
+        # still routed to the address flow instead of the Support Inbox).
+        # tests/telegram_bot/test_armed_prompts_survive_a_restart.py
+        _record_arm(order),
     )
 
     handler = ProfileHandlers()
@@ -479,7 +490,11 @@ async def test_send_for_request_location_arms_before_falling_back_when_the_callb
     order = []
     monkeypatch.setattr(
         "handlers.profile.arm_location_request",
-        lambda context: order.append("armed"),
+        # Awaitable and two-arg: the arming is durable now (it dual-writes the
+        # prompt to `users.bot_state`, so a pin that arrives after a deploy is
+        # still routed to the address flow instead of the Support Inbox).
+        # tests/telegram_bot/test_armed_prompts_survive_a_restart.py
+        _record_arm(order),
     )
 
     handler = ProfileHandlers()
@@ -512,7 +527,11 @@ async def test_send_for_request_location_arms_before_sending_with_no_callback_qu
     order = []
     monkeypatch.setattr(
         "handlers.profile.arm_location_request",
-        lambda context: order.append("armed"),
+        # Awaitable and two-arg: the arming is durable now (it dual-writes the
+        # prompt to `users.bot_state`, so a pin that arrives after a deploy is
+        # still routed to the address flow instead of the Support Inbox).
+        # tests/telegram_bot/test_armed_prompts_survive_a_restart.py
+        _record_arm(order),
     )
 
     handler = ProfileHandlers()

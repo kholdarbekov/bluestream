@@ -228,6 +228,51 @@ class StatusUpdateHandler(BaseHandler):
             )
         return '\n'.join(lines)
 
+    async def _show_cash_collection_step(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        *,
+        delivery_id: int,
+        delivery_info: dict,
+        language: str,
+    ):
+        """Draw the at-door cash screen for ``delivery_info``.
+
+        One expression, because two callers need the identical screen: the
+        "Delivered" confirm that opens the money step, and
+        :meth:`_submit_delivery_completion` when a tap arrives carrying no
+        figure for a door that still owes. A second hand-written copy of this
+        block is how the two would drift apart on the amount they name.
+        """
+        cash_due_amount = self._get_expected_cash_to_collect(delivery_info)
+        reserved_prepayment = float(delivery_info.get('cod_reserved_prepayment_amount') or 0)
+
+        keyboard = DeliveryKeyboards.cash_collection_options(
+            language, delivery_id, cash_due_amount
+        )
+        message_text = self._order_brief(context, language) + i18n.get(
+            'staff.delivery.cash_collection',
+            language,
+            amount=format_currency(cash_due_amount, language=language),
+        )
+        if reserved_prepayment > 0:
+            message_text += (
+                f"\n💳 {i18n.get('staff.delivery.cod_prepaid_deduction', language)}: "
+                f"{format_currency(reserved_prepayment, language=language)}"
+            )
+        # Grouped workplace: show the WHOLE place's open COD total so
+        # the driver knows what is collectable at this door (spec 8).
+        place_lines = format_place_cod_lines(delivery_info, language)
+        if place_lines:
+            message_text += "\n" + "\n".join(place_lines)
+
+        await update.callback_query.edit_message_text(
+            message_text,
+            reply_markup=keyboard,
+            parse_mode='HTML'
+        )
+
     async def _submit_delivery_completion(
         self,
         update: Update,
@@ -238,6 +283,44 @@ class StatusUpdateHandler(BaseHandler):
         notes: str = None,
     ):
         language = await self._get_language(update, context)
+
+        # NEVER FILE AN AMOUNT NOBODY DECIDED. `submit_reconciliation_all`
+        # already states this rule for the handoff screen — "an empty payload is
+        # not 'no amount', it is 'server, decide the amount'... if a tap arrives
+        # without a figure, redraw the screen" — and the door is the surface
+        # where it actually costs money.
+        #
+        # A falsy `cash_amount` here means one of two very different things:
+        #   * the driver deliberately collected nothing — the no-cash branch,
+        #     which always carries the written reason it demands, so `notes` is
+        #     set and this guard stands aside; or
+        #   * the flow holding their CONFIRMED figure was cleared between the
+        #     cash screen and this tap. `pending_delivery_cash_flow` is listed in
+        #     `flow_state.PENDING_FLOW_USER_DATA_KEYS`, so any menu tap,
+        #     `/start` or conversation escape drops it while the bottle prompt
+        #     stays live on the driver's phone — no deploy required. The bottle
+        #     buttons then read `flow.get('cash_amount', 0)` and filed 0 against
+        #     a door that owed, with the "no cash due after COD" note attached
+        #     below as if that were the finding.
+        # Redraw the money step rather than guess in either direction: guessing
+        # the expected amount over-credits a partial payment, and guessing 0
+        # holds the driver short and erases the customer's debt.
+        # tests/staff_bot/test_at_door_money_after_state_loss.py
+        if not cash_amount and not notes:
+            delivery_info = context.user_data.get('current_delivery') or {}
+            if has_cash_due(delivery_info) and getattr(update, 'callback_query', None):
+                logger.warning(
+                    "Delivery %s reached completion with no cash figure while %s "
+                    "is still due; redrawing the cash step instead of filing 0.",
+                    delivery_id, self._get_expected_cash_to_collect(delivery_info),
+                )
+                await self._show_cash_collection_step(
+                    update, context,
+                    delivery_id=delivery_id,
+                    delivery_info=delivery_info,
+                    language=language,
+                )
+                return ConversationHandler.END
         token = await self._get_auth_token(update, context)
         if not token:
             await self._handle_auth_error(update, language)
@@ -370,28 +453,11 @@ class StatusUpdateHandler(BaseHandler):
                 # `cash_collected` in `_complete_delivery_with_cash`. One call,
                 # so what the driver is shown and what is recorded cannot diverge.
                 if has_cash_due(delivery_info):
-                    keyboard = DeliveryKeyboards.cash_collection_options(
-                        language, delivery_id, cash_due_amount
-                    )
-                    message_text = self._order_brief(context, language) + i18n.get(
-                        'staff.delivery.cash_collection',
-                        language,
-                        amount=format_currency(cash_due_amount, language=language),
-                    )
-                    if reserved_prepayment > 0:
-                        message_text += (
-                            f"\n💳 {i18n.get('staff.delivery.cod_prepaid_deduction', language)}: "
-                            f"{format_currency(reserved_prepayment, language=language)}"
-                        )
-                    # Grouped workplace: show the WHOLE place's open COD total so
-                    # the driver knows what is collectable at this door (spec 8).
-                    place_lines = format_place_cod_lines(delivery_info, language)
-                    if place_lines:
-                        message_text += "\n" + "\n".join(place_lines)
-                    await query.edit_message_text(
-                        message_text,
-                        reply_markup=keyboard,
-                        parse_mode='HTML'
+                    await self._show_cash_collection_step(
+                        update, context,
+                        delivery_id=delivery_id,
+                        delivery_info=delivery_info,
+                        language=language,
                     )
                     return
 

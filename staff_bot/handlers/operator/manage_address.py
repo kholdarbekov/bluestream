@@ -126,6 +126,10 @@ class ManageAddressHandler(BaseHandler):
     async def receive_label(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Receive address label (Home, Office, etc.)"""
         language = await self._get_language(update, context)
+        flow = await self._require_flow(update, context, 'new_address')
+        if flow is None:
+            return ConversationHandler.END
+
         label = update.message.text.strip()
 
         if len(label) < 1 or len(label) > 100:
@@ -139,7 +143,7 @@ class ManageAddressHandler(BaseHandler):
         # (and the GET serializer exposes). Storing under 'label' made the backend
         # default every operator-created address to 'Home' and left the confirm
         # screen's title blank.
-        context.user_data['new_address']['title'] = label
+        flow['title'] = label
 
         await update.message.reply_text(
             i18n.get('staff.operator.enter_full_address', language),
@@ -376,12 +380,16 @@ class ManageAddressHandler(BaseHandler):
     async def receive_district(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Receive district"""
         language = await self._get_language(update, context)
+        flow = await self._require_flow(update, context, 'new_address')
+        if flow is None:
+            return ConversationHandler.END
+
         district = update.message.text.strip()
 
         if district.lower() in ('-', 'skip', 'пропустить', "o'tkazish"):
-            context.user_data['new_address']['district'] = None
+            flow['district'] = None
         else:
-            context.user_data['new_address']['district'] = district
+            flow['district'] = district
 
         await update.message.reply_text(
             i18n.get('staff.operator.enter_delivery_notes', language),
@@ -394,15 +402,19 @@ class ManageAddressHandler(BaseHandler):
     async def receive_address_notes(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Receive delivery notes for address"""
         language = await self._get_language(update, context)
+        flow = await self._require_flow(update, context, 'new_address')
+        if flow is None:
+            return ConversationHandler.END
+
         notes = update.message.text.strip()
 
         if notes.lower() in ('-', 'skip', 'пропустить', "o'tkazish"):
-            context.user_data['new_address']['delivery_notes'] = None
+            flow['delivery_notes'] = None
         else:
-            context.user_data['new_address']['delivery_notes'] = notes
+            flow['delivery_notes'] = notes
 
         # Show confirmation
-        addr = context.user_data['new_address']
+        addr = flow
         lines = [
             f"📍 <b>{i18n.get('staff.operator.confirm_address', language)}</b>\n",
             f"🏷 {escape_html(addr.get('title', ''))}",

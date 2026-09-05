@@ -69,12 +69,16 @@ class TryoutHandler(BaseHandler):
     @require_delivery_driver
     async def receive_create_phone(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         language = await self._get_language(update, context)
+        flow = await self._require_flow(update, context, 'new_tryout')
+        if flow is None:
+            return ConversationHandler.END
+
         valid, result = validate_phone((update.message.text or '').strip())
         if not valid:
             await update.message.reply_text(i18n.get('staff.operator.invalid_phone', language))
             return ENTER_TRYOUT_PHONE
 
-        context.user_data['new_tryout']['phone'] = result
+        flow['phone'] = result
         await update.message.reply_text(i18n.get('staff.tryout.enter_name', language))
         return ENTER_TRYOUT_NAME
 
@@ -82,13 +86,17 @@ class TryoutHandler(BaseHandler):
     @require_delivery_driver
     async def receive_create_name(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         language = await self._get_language(update, context)
+        flow = await self._require_flow(update, context, 'new_tryout')
+        if flow is None:
+            return ConversationHandler.END
+
         name = (update.message.text or '').strip()
         valid, _ = validate_name(name)
         if not valid:
             await update.message.reply_text(i18n.get('staff.operator.invalid_name', language))
             return ENTER_TRYOUT_NAME
 
-        context.user_data['new_tryout']['first_name'] = name
+        flow['first_name'] = name
         await update.message.reply_text(
             i18n.get('staff.tryout.enter_address_or_location', language),
             reply_markup=CommonKeyboards.location_request(
@@ -102,6 +110,10 @@ class TryoutHandler(BaseHandler):
     @require_delivery_driver
     async def receive_create_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         language = await self._get_language(update, context)
+        flow = await self._require_flow(update, context, 'new_tryout')
+        if flow is None:
+            return ConversationHandler.END
+
         address = (update.message.text or '').strip()
         if address == i18n.get('staff.cancel', language):
             return await self.cancel_create_tryout(update, context)
@@ -109,7 +121,7 @@ class TryoutHandler(BaseHandler):
             await update.message.reply_text(i18n.get('staff.tryout.invalid_address', language))
             return ENTER_TRYOUT_ADDRESS
 
-        context.user_data['new_tryout']['full_address'] = address
+        flow['full_address'] = address
         await update.message.reply_text(
             i18n.get('staff.tryout.address_received', language),
             reply_markup=MenuKeyboards.main_menu(language, context.user_data.get('staff_roles', [])),
@@ -121,6 +133,10 @@ class TryoutHandler(BaseHandler):
     @require_delivery_driver
     async def receive_create_location(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         language = await self._get_language(update, context)
+        flow = await self._require_flow(update, context, 'new_tryout')
+        if flow is None:
+            return ConversationHandler.END
+
         token = await self._get_auth_token(update, context)
         if not token:
             await self._handle_auth_error(update, language)
@@ -139,8 +155,8 @@ class TryoutHandler(BaseHandler):
             )
             return ENTER_TRYOUT_ADDRESS
 
-        context.user_data['new_tryout']['latitude'] = location.latitude
-        context.user_data['new_tryout']['longitude'] = location.longitude
+        flow['latitude'] = location.latitude
+        flow['longitude'] = location.longitude
 
         async with api_client as client:
             response = await client.reverse_geocode_address(token, location.latitude, location.longitude)
@@ -154,9 +170,9 @@ class TryoutHandler(BaseHandler):
             )
             return ENTER_TRYOUT_ADDRESS
 
-        context.user_data['new_tryout']['full_address'] = response.data['formatted_address']
-        context.user_data['new_tryout']['district'] = response.data.get('district')
-        context.user_data['new_tryout']['city'] = response.data.get('city') or 'Tashkent'
+        flow['full_address'] = response.data['formatted_address']
+        flow['district'] = response.data.get('district')
+        flow['city'] = response.data.get('city') or 'Tashkent'
         await update.message.reply_text(
             i18n.get('staff.tryout.location_received', language, address=response.data['formatted_address']),
             reply_markup=MenuKeyboards.main_menu(language, context.user_data.get('staff_roles', [])),
@@ -358,6 +374,10 @@ class TryoutHandler(BaseHandler):
         query = update.callback_query
         await query.answer()
         language = await self._get_language(update, context)
+        flow = await self._require_flow(update, context, 'new_tryout')
+        if flow is None:
+            return ConversationHandler.END
+
 
         _, _, _, product_id_raw, quantity_raw = query.data.split('_')
         product_id = int(product_id_raw)
@@ -373,7 +393,7 @@ class TryoutHandler(BaseHandler):
             )
             return
 
-        items = context.user_data['new_tryout'].setdefault('items', [])
+        items = flow.setdefault('items', [])
         existing = next((item for item in items if int(item['product_id']) == product_id), None)
         if existing:
             existing['quantity'] += quantity
@@ -385,7 +405,7 @@ class TryoutHandler(BaseHandler):
             })
 
         await query.edit_message_text(
-            self._build_create_summary(language, context.user_data['new_tryout']),
+            self._build_create_summary(language, flow),
             parse_mode='HTML',
             reply_markup=TryoutKeyboards.create_summary(language),
         )
@@ -397,7 +417,9 @@ class TryoutHandler(BaseHandler):
         language = await self._get_language(update, context)
 
         product_id = int(query.data.split('_')[-1])
-        payload = context.user_data.get('new_tryout', {})
+        payload = await self._require_flow(update, context, 'new_tryout')
+        if payload is None:
+            return ConversationHandler.END
         items = payload.get('items', [])
         remaining_items = [item for item in items if int(item.get('product_id')) != product_id]
         payload['items'] = remaining_items
@@ -462,7 +484,9 @@ class TryoutHandler(BaseHandler):
             await self._handle_auth_error(update, language)
             return ConversationHandler.END
 
-        payload = context.user_data.get('new_tryout', {})
+        payload = await self._require_flow(update, context, 'new_tryout')
+        if payload is None:
+            return ConversationHandler.END
         request_payload = {
             'trial_contact': {
                 'first_name': payload.get('first_name'),
@@ -698,8 +722,20 @@ class TryoutHandler(BaseHandler):
         query = update.callback_query
         await query.answer()
         language = await self._get_language(update, context)
+        # The callback NAMES its subject (`staff_tryout_pickup_back_<task_id>`),
+        # and it has to be honoured. `tryout_pickup_state` is ONE slot for a
+        # driver who can have two try-out cards on screen, so rendering whatever
+        # it happens to hold showed try-out A's product list and outstanding
+        # counts under try-out B's card — and the buttons redrawn there carry
+        # A's ids, so the quantities the driver then records go to A. Those
+        # quantities are bottles.
+        #
+        # Same check `edit_pickup_product` below already makes; this is the one
+        # screen in the flow that was not making it.
+        # tests/staff_bot/test_pickup_overview_is_callback_anchored.py
+        task_id = int(query.data.split('_')[-1])
         state = context.user_data.get('tryout_pickup_state')
-        if not state:
+        if not state or int(state.get('task_id') or 0) != task_id:
             await query.edit_message_text(
                 i18n.get('staff.tryout.task_not_found', language),
                 reply_markup=CommonKeyboards.back_button(language, "staff_tryout_tasks"),

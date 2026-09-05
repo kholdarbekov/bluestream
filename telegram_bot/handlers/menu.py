@@ -3,6 +3,7 @@ Main menu handler
 """
 import logging
 from telegram import Update
+from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from eligibility import main_menu_for
@@ -34,11 +35,30 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = await main_menu_for(update.effective_user.id, language)
 
         if update.callback_query:
-            # Edit existing message
-            await update.callback_query.edit_message_text(
-                text=menu_text,
-                reply_markup=keyboard
-            )
+            # Edit when the tapped message HAS text; otherwise replace it.
+            #
+            # A one-category shop sends its product list as a PHOTO
+            # (`products.py` deletes the message and `send_photo`s the list), and
+            # a photo has no text to edit — Telegram answers 400 "there is no
+            # text in the message to edit". The `except` below only answers a
+            # generic error toast and sends nothing, so Back from that screen
+            # left the customer stranded on the one screen whose only way out
+            # had just failed.
+            #
+            # `BaseHandler._edit_or_replace_callback_message` is the same rule
+            # for handlers that have a `self`; this is a module-level function,
+            # so the fallback is spelled out here rather than reached for.
+            # tests/telegram_bot/test_menu_and_link_buttons_after_restart.py
+            try:
+                await update.callback_query.edit_message_text(
+                    text=menu_text,
+                    reply_markup=keyboard
+                )
+            except BadRequest:
+                await update.callback_query.message.reply_text(
+                    text=menu_text,
+                    reply_markup=keyboard
+                )
             await update.callback_query.answer()
         else:
             # Send new message

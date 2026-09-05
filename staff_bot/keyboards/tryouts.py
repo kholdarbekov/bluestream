@@ -17,7 +17,20 @@ class TryoutKeyboards:
         selected_quantities = selected_quantities or {}
         keyboard = []
         for product in products:
-            suffix = " ♻️" if product.get('tracks_returnable_bottles') else ""
+            # The backend's own answer (`Product.is_returnable_bottle`), not the
+            # raw flag: a product carrying tracks=True with a zero per-unit rate
+            # books no bottles, and must not be badged as if it did.
+            #
+            # Read from the `inventory` block, which is where `serialize_product`
+            # actually puts it. The previous top-level `product.get(
+            # 'tracks_returnable_bottles')` matched no key in that payload, so
+            # this badge silently never rendered. The top-level fallback keeps a
+            # flattened payload working if another endpoint ever feeds this.
+            inventory = product.get('inventory') or {}
+            is_returnable = inventory.get(
+                'is_returnable_bottle', product.get('is_returnable_bottle')
+            )
+            suffix = " ♻️" if is_returnable else ""
             selected = selected_quantities.get(int(product['id']), 0)
             selected_suffix = f" · x{selected}" if selected else ""
             keyboard.append([

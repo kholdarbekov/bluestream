@@ -377,8 +377,16 @@ class TestDoneAndBelowMinimum:
 
         captured = {}
 
-        def _fake_order_confirmation(language, meets_minimum=True, has_reward=False, show_reward=True):
+        # Signature tracks OrderKeyboards.order_confirmation. A stub that has
+        # fallen behind raises TypeError into the mocked `_handle_error` and the
+        # assertion below then reads an empty `captured` — a green-looking test
+        # that stopped exercising anything. `address_id` is what the Back button
+        # carries so the payment picker survives a deploy
+        # (tests/telegram_bot/test_checkout_back_after_state_loss.py).
+        def _fake_order_confirmation(language, meets_minimum=True, has_reward=False,
+                                     show_reward=True, address_id=None):
             captured["meets_minimum"] = meets_minimum
+            captured["address_id"] = address_id
             from keyboards import KeyboardBuilder
             return KeyboardBuilder.build_inline_keyboard(
                 [[{"text": "x", "callback_data": "noop"}]]
@@ -389,6 +397,12 @@ class TestDoneAndBelowMinimum:
         update = DummyUpdate()
         update.callback_query = DummyCallbackQuery(data="back_to_order_confirm")
         context = make_context()
+        # A LIVE checkout: `_show_order_confirmation` now refuses to draw the
+        # card at all without both keys, because a card missing them offers a
+        # Confirm button whose only possible answer is "missing information".
+        # tests/telegram_bot/test_checkout_screens_after_state_loss.py
+        context.user_data["selected_address_id"] = 1
+        context.user_data["selected_payment_method"] = "cash"
 
         monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)

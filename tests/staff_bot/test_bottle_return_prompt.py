@@ -103,7 +103,16 @@ class TestConfirmFullBottleReturnSubmitsBalance:
         ctx.user_data = {
             "authenticated": True,
             "staff_roles": ["delivery_driver"],
-            "current_delivery": {"customer_bottle_balance": 7,
+            # `delivery_id` is not decoration: a real snapshot always carries the
+            # one `view_active_delivery` stamped on it, and `_anchor_current_
+            # delivery` now RE-READS a snapshot that lacks it rather than
+            # passing the bare dict through (an empty snapshot answers "no cash
+            # due" and "no bottles expected", which is how a 150 000 door closed
+            # at 0.00 — tests/staff_bot/test_at_door_money_after_state_loss.py).
+            # Matching the flow's id keeps this test on the anchored path it is
+            # actually about: which bottle count gets submitted.
+            "current_delivery": {"delivery_id": 99,
+                                 "customer_bottle_balance": 7,
                                  "expected_returnable_bottles": 3},
             "pending_delivery_cash_flow": {"delivery_id": 99, "cash_amount": 0},
         }

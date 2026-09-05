@@ -187,6 +187,7 @@ class ProductAdminSchema(BaseModel):
     is_tryout_eligible: bool = Field(default=True)
     tracks_returnable_bottles: bool = Field(default=False)
     returnable_bottles_per_unit: float = Field(default=0.0)
+    is_returnable_bottle: bool = Field(default=False)
 
     # Performance metrics
     total_sold: int = Field(default=0)
@@ -871,6 +872,8 @@ def serialize_product_admin(product: Product) -> Dict[str, Any]:
             "is_tryout_eligible": bool(getattr(product, "is_tryout_eligible", True)),
             "tracks_returnable_bottles": bool(getattr(product, "tracks_returnable_bottles", False)),
             "returnable_bottles_per_unit": float(getattr(product, "returnable_bottles_per_unit", 0) or 0),
+            # The SSOT answer, so no client re-derives it from the pair above.
+            "is_returnable_bottle": bool(getattr(product, "is_returnable_bottle", False)),
             "images": images,
             "image_url": image_url,  # First image for display convenience
             "created_at": product.created_at.isoformat() if product.created_at else None,

@@ -6103,6 +6103,16 @@ BACKEND_TRANSLATIONS = {
         'uz': 'bepul',
         'ru': 'бесплатно'
     },
+    # Shown when a reward is tapped on a card that has been sitting in the chat
+    # and is no longer redeemable — coins spent elsewhere, deactivated by an
+    # admin, expired, or max_uses_per_user reached. Deliberately reason-neutral:
+    # the bot knows only `can_redeem`, and `lock_need_coins` would claim a
+    # shortfall that may not be why.
+    'telegram.loyalty.reward_not_available': {
+        'en': "🎁 That reward isn't available any more. Open Aqua Club to see what you can claim now.",
+        'uz': "🎁 Bu sovg'a endi mavjud emas. Hozir nima olishingiz mumkinligini ko'rish uchun Aqua Club'ni oching.",
+        'ru': "🎁 Эта награда больше недоступна. Откройте Aqua Club, чтобы увидеть, что можно получить сейчас."
+    },
     'telegram.loyalty.not_available': {
         'en': "🎁 The loyalty program isn't available for your account.",
         'uz': "🎁 Sodiqlik dasturi hisobingiz uchun mavjud emas.",
@@ -7039,6 +7049,11 @@ ADMIN_UI_PRODUCT_TRANSLATIONS = {
     'ui.products.reserved': _ui_tr('Reserved', 'Band qilingan', 'Зарезервировано'),
     'ui.products.restore': _ui_tr('Restore', 'Qayta tiklash', 'Восстановить'),
     'ui.products.returnable_bottles_per_unit': _ui_tr('Returnable Bottles Per Unit'),
+    'ui.products.returnable_bottles_per_unit_required': _ui_tr(
+        'Must be greater than 0 while this product tracks returnable bottles',
+        'Ushbu mahsulot qaytariladigan idishlarni hisobga olar ekan, 0 dan katta bo\'lishi kerak',
+        'Должно быть больше 0, пока товар учитывает возвратную тару',
+    ),
     'ui.products.search_marking_codes': _ui_tr('Search marking codes'),
     'ui.products.search_placeholder': _ui_tr('Search products'),
     'ui.products.select_csv': _ui_tr('Select CSV'),
@@ -7073,6 +7088,15 @@ ADMIN_UI_PRODUCT_TRANSLATIONS = {
     'ui.products.total_inventory_value': _ui_tr('Total Inventory Value', 'Jami ombor qiymati', 'Общая стоимость запасов'),
     'ui.products.total_products': _ui_tr('Total Products', 'Jami mahsulotlar', 'Всего товаров'),
     'ui.products.tracks_returnable_bottles': _ui_tr('Tracks Returnable Bottles'),
+    'ui.products.tracks_returnable_bottles_help': _ui_tr(
+        'On = every unit sold leaves an empty bottle the customer owes back, and delivering it '
+        'moves their bottle balance. Off = the customer keeps the container (e.g. the 10 L bottle).',
+        'Yoqilgan = sotilgan har bir dona mijoz qaytarishi lozim bo\'lgan bo\'sh idish qoldiradi va '
+        'yetkazib berish uning idish balansini o\'zgartiradi. O\'chirilgan = idish mijozda qoladi '
+        '(masalan, 10 l butilka).',
+        'Вкл = каждая проданная единица оставляет пустую тару, которую клиент должен вернуть, и '
+        'доставка меняет его баланс тары. Выкл = тара остаётся у клиента (например, бутыль 10 л).',
+    ),
     'ui.products.units': _ui_tr('Units', "O'lchov birligi", 'Единицы'),
     'ui.products.update_failed': _ui_tr('Failed to update product'),
     'ui.products.update_product': _ui_tr('Update Product', 'Mahsulotni yangilash', 'Обновить товар'),

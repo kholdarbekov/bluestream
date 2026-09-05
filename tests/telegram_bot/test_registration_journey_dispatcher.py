@@ -1106,16 +1106,18 @@ async def test_a_stale_link_yes_tap_after_the_merge_cannot_send_another_code(bot
         {"telegram_id": DEFAULT_USER_ID, "otp": "123456"}
     ], "the merge must not be re-run by a tap on a message left in the history"
 
-    # Worth knowing rather than celebrating: the tap is claimed by nothing but
-    # the debug logger, so Telegram never gets an answerCallbackQuery and the
-    # button keeps spinning until the client gives up. Safe, but not silent.
-    claimed = bot.handlers_matching(user.tap("link_yes"), include_catch_alls=True)
-    assert [group for group, _ in claimed] == [-10, -5, -1], (
-        "only the two middlewares and the log-only debug handler claim it"
-    )
-    assert bot.handlers_matching(user.tap("link_yes")) == [], (
-        "no handler ACTS on the stale tap"
-    )
+    # The tap used to be claimed by nothing but the debug logger — safe, in that
+    # it bought no SMS, but the button then spun to the client timeout with
+    # nothing said. `WaterBusinessBot._signup_step_expired` now answers it
+    # honestly at group 0, and the live conversation still wins because
+    # `link_account_confirm` is wrapped in `_consumes`.
+    # tests/telegram_bot/test_menu_and_link_buttons_after_restart.py
+    acting = [
+        handler for _group, handler in bot.handlers_matching(user.tap("link_yes"))
+    ]
+    assert [getattr(h.callback, "__name__", "") for h in acting] == [
+        "_signup_step_expired"
+    ], "the stale tap must be answered, and by the expiry fallback alone"
 
 
 async def test_a_telegram_rejection_while_answering_link_no_still_delivers_the_keyboard(

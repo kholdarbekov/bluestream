@@ -12,13 +12,16 @@ from datetime import datetime, timezone
 from typing import Optional, Tuple
 from aiohttp import web
 import redis.asyncio as redis
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from staff_bot.config import config
 from staff_bot.database import db_manager
 from staff_bot.i18n import i18n
+from staff_bot.keyboards.sales import LABEL_MAX, reject_reason_key
 from staff_bot.utils import flow_state
-from staff_bot.utils.formatters import escape_html, format_delivery_window_line
+from staff_bot.utils.formatters import escape_html, format_delivery_window_line, format_local_date
 from shared.redis_failure import report_redis_failure
+from shared.staff_constants import SALES_EVENTS
 from shared.redis_keyspace import RedisKeyspace
 
 logger = logging.getLogger(__name__)
@@ -64,6 +67,171 @@ def _log_notify_failure(description: str, exc: Exception) -> None:
         logger.warning("%s (recipient unreachable): %s", description, exc)
     else:
         logger.error("%s: %s", description, exc)
+
+
+# Telegram's own ceiling for one `sendMessage`. Past it the send raises a 400,
+# `push_sales_event` retries three times and every retry raises identically.
+DIGEST_TEXT_LIMIT = 4096
+
+
+# The morning digest (D21/R6) is the one sales event that is a LIST. The
+# backend publishes the day already decided -- which outlets are due, how late
+# each is, which five unvisited ones made the cut, whether a visit is still
+# open -- and everything below renders it. Nothing here queries, sorts, counts
+# or compares a date.
+def _digest_name(name) -> str:
+    """The name as this digest may print it, in the TEXT as well as on the button.
+
+    `LABEL_MAX` is the one ceiling: `outlets.name` is 200 characters, all of
+    which an agent can type at the new-outlet step and all of which the backend
+    publishes, and the backend's cap (Task 3) bounds ROWS, not characters. 26
+    rows of 200 compose ~5.6k characters -- past Telegram's 4096, a
+    `sendMessage` that raises, three retries that raise identically, and an
+    agent with no digest at all. Cut BEFORE escaping, so the cap counts the
+    characters the agent typed and can never halve an HTML entity.
+    """
+    return str(name or '')[:LABEL_MAX]
+
+
+def _digest_button(name, outlet_id) -> InlineKeyboardButton:
+    """One row, one way into its outlet card.
+
+    Labelled with the OUTLET, not "Open outlet" four times over: the label is
+    the only thing that says which row the button belongs to.
+    """
+    # Hoisted before the f-string like every other outlet button: the routing
+    # scraper cannot read a callback literal containing an inner quote.
+    outlet_id = int(outlet_id)
+    label = _digest_name(name) or str(outlet_id)
+    return InlineKeyboardButton(label, callback_data=f"staff_sales_outlet_{outlet_id}")
+
+
+def _digest_row_suffix(row: dict, language: str, mode: Optional[str]) -> str:
+    """The lateness or age tail a row earns, or ''.
+
+    Three different facts, three renderings. `overdue_days` is lateness and
+    reuses the DUE LIST's own suffix, so "how late" keeps one expression in
+    this bot; `days` on an unvisited row is only an age; and `days is None`
+    is NEVER VISITED, which is a word rather than a number. That last case is
+    the one a falsy check silently eats: `days` of None and `days` of 0 both
+    read as "no suffix", so a shop nobody has ever walked into would render
+    identically to one visited this morning, under a heading that says
+    otherwise. An overdue ZERO still earns nothing -- a call that became due
+    this morning is not late, the same reason `SalesKeyboards.outlet_list`
+    refuses to print a zero-day tail.
+    """
+    if mode == 'overdue' and row.get('overdue_days'):
+        label = i18n.get('staff.sales.list.overdue_suffix', language, days=row['overdue_days'])
+        return f" · {escape_html(label)}"
+    if mode == 'age':
+        if row.get('days'):
+            label = i18n.get('staff.sales.notify.digest_days', language, days=row['days'])
+            return f" · {escape_html(label)}"
+        if row.get('days') is None:
+            label = i18n.get('staff.sales.notify.digest_never', language)
+            return f" · {escape_html(label)}"
+    return ''
+
+
+def _render_morning_digest(payload: dict, language: str, recipient=None) -> Tuple[str, list]:
+    """The agent's day: the text, and one button per row in reading order."""
+    # The header row carries its own <b> (it lives in STAFF_TRANSLATIONS with
+    # its five siblings), so it is the one line not escaped here; `{date}` is
+    # a formatted day, not a name.
+    head_lines = [i18n.get(
+        'staff.sales.notify.morning_digest', language,
+        date=format_local_date(payload.get('date')),
+    )]
+    head_buttons = []
+
+    open_visit = payload.get('open_visit') or {}
+    if open_visit.get('outlet_id'):
+        label = i18n.get('staff.sales.notify.digest_open_visit', language)
+        name = escape_html(_digest_name(open_visit.get('outlet_name')))
+        head_lines.append(f"⏯ {escape_html(label)} — {name}")
+        head_buttons.append(_digest_button(open_visit.get('outlet_name'), open_visit['outlet_id']))
+
+    sections = (
+        ('due_today', '📅', i18n.get('staff.sales.notify.digest_due_today', language), None),
+        ('overdue', '⏰', i18n.get('staff.sales.notify.digest_overdue', language), 'overdue'),
+        ('unvisited', '🕘', i18n.get('staff.sales.notify.digest_unvisited', language), 'age'),
+    )
+    blocks = {}
+    for section, emoji, heading, mode in sections:
+        rows = [
+            row for row in (payload.get(section) or [])
+            if isinstance(row, dict) and row.get('outlet_id')
+        ]
+        if not rows:
+            # An empty section is an ANSWER, not a gap: R6 sends no digest at
+            # all to an agent with nothing to report, so a heading with
+            # nothing under it could only ever mislead.
+            continue
+        block_lines = [f"{emoji} <b>{escape_html(heading)}</b>"]
+        block_buttons = []
+        for row in rows:
+            name = escape_html(_digest_name(row.get('outlet_name')))
+            block_lines.append(f"  • {name}{_digest_row_suffix(row, language, mode)}")
+            block_buttons.append(_digest_button(row.get('outlet_name'), row['outlet_id']))
+        blocks[section] = (block_lines, block_buttons, len(rows))
+
+    # What the BACKEND cut (Task 3 caps each due section at ten, because an
+    # uncapped digest is a message and a keyboard past Telegram's limits, a
+    # `send_message` that raises, and three retries that deliver nothing at
+    # all). Printed, never computed: the bot does not know what it was not
+    # sent, and must not imply the short list is the whole list.
+    more_count = int(payload.get('more_count') or 0)
+
+    def _compose(shed):
+        lines = list(head_lines)
+        buttons = list(head_buttons)
+        counted = more_count
+        for section, _emoji, _heading, _mode in sections:
+            block = blocks.get(section)
+            if block is None:
+                continue
+            if section in shed:
+                # Shed rows are COUNTED, never silently dropped -- into the same
+                # line the backend's own cut is printed on.
+                counted += block[2]
+                continue
+            lines.extend(block[0])
+            buttons.extend(block[1])
+        if counted:
+            lines.append(escape_html(
+                i18n.get('staff.sales.notify.digest_more', language, count=counted)
+            ))
+        return '\n'.join(lines), buttons
+
+    text, buttons = _compose(())
+    # Belt and braces. Capped names plus the backend's row caps fit with room to
+    # spare, but a payload shape nobody has thought of yet must not cost an agent
+    # the whole morning: Telegram refuses a message past DIGEST_TEXT_LIMIT and
+    # every retry fails identically. The lowest-priority sections go first --
+    # what is LATE is what the agent has to act on today.
+    shed = []
+    for section in ('unvisited', 'due_today'):
+        if len(text) <= DIGEST_TEXT_LIMIT or section not in blocks:
+            continue
+        shed.append(section)
+        logger.warning(
+            "Morning digest for %s is %s characters; dropping the %s section",
+            recipient, len(text), section,
+        )
+        text, buttons = _compose(tuple(shed))
+    if len(text) > DIGEST_TEXT_LIMIT:
+        # Shedding could not get under it: only `unvisited` and `due_today` are
+        # droppable (what is LATE is today's work), so an overdue-only payload past
+        # the limit still reaches `send_message` and raises. NOT truncated -- a cut
+        # through an HTML tag turns a long message into a parse-mode 400, which is
+        # the same lost morning by another route. Unreachable under today's caps
+        # (26 rows of at most LABEL_MAX characters); the line exists so a future cap
+        # change is visible before an agent loses a digest to it.
+        logger.warning(
+            "Morning digest for %s is %s characters after shedding, past the %s limit",
+            recipient, len(text), DIGEST_TEXT_LIMIT,
+        )
+    return text, buttons
 
 
 class _TokenBucket:
@@ -327,6 +495,7 @@ class StaffWebhookServer:
             '/internal/order-reassigned': _TokenBucket(rate_per_sec=20, burst=60),
             '/internal/order-cancelled': _TokenBucket(rate_per_sec=20, burst=60),
             '/internal/order-unassigned': _TokenBucket(rate_per_sec=20, burst=60),
+            '/internal/sales-event': _TokenBucket(rate_per_sec=20, burst=60),
             '/internal/route-updated': _TokenBucket(rate_per_sec=50, burst=120),
             '/internal/pool-insertion-suggestion': _TokenBucket(rate_per_sec=50, burst=120),
             '/internal/reload-translations': _TokenBucket(rate_per_sec=1, burst=5),
@@ -364,6 +533,7 @@ class StaffWebhookServer:
         self.app.router.add_post('/internal/order-reassigned', self.order_reassigned_handler)
         self.app.router.add_post('/internal/order-cancelled', self.order_cancelled_handler)
         self.app.router.add_post('/internal/order-unassigned', self.order_unassigned_handler)
+        self.app.router.add_post('/internal/sales-event', self.sales_event_handler)
         self.app.router.add_post('/internal/reload-translations', reload_translations_handler)
         self.app.router.add_post('/internal/route-updated', self.route_updated_handler)
         self.app.router.add_post('/internal/pool-insertion-suggestion', self.pool_insertion_suggestion_handler)
@@ -579,6 +749,103 @@ class StaffWebhookServer:
             return web.json_response({'success': True, 'message': 'Notification sent'})
         except Exception as e:
             logger.error(f"Error handling order assigned notification: {e}", exc_info=True)
+            return web.json_response({'success': False, 'message': 'Internal server error'}, status=500)
+
+    async def sales_event_handler(self, request):
+        """Push one sales-module event to a staff chat.
+
+        Outlet events (approved / rejected / activation requested) go to the
+        agent or the approvers; the two agent-order events are the store's
+        answer to an order the agent placed on their behalf.
+
+        POST /internal/sales-event
+          {telegram_id, event,
+           payload{outlet_id, outlet_name, reason, order_id, order_number}}
+        """
+        try:
+            if not await verify_webhook_signature(request):
+                return web.json_response({'success': False, 'message': 'Invalid signature'}, status=401)
+            limited = await self._check_rate_limit(request)
+            if limited:
+                return limited
+            if not self.bot_app:
+                return web.json_response({'success': False, 'message': 'Bot not initialized'}, status=503)
+
+            data, parse_error = await _parse_json_body(request)
+            if parse_error:
+                return parse_error
+            telegram_id = data.get('telegram_id')
+            event = data.get('event')
+            payload = data.get('payload') or {}
+            if not telegram_id or event not in SALES_EVENTS:
+                return web.json_response(
+                    {'success': False, 'message': 'Missing telegram_id or unknown event'}, status=400
+                )
+            # The fallback dedup key (used when the producer sent no event_id)
+            # keys on the ORDER for the agent-order events: two orders for one
+            # outlet on one day are two events, and keying on the outlet alone
+            # would swallow the second as a duplicate of the first. Outlet
+            # events carry no order_id, so they fall back to outlet_id exactly
+            # as before.
+            # The digest carries neither an order nor an outlet, so it keys on
+            # its DAY. With a constant key and a 24-hour dedup TTL, a producer
+            # that sent no `event_id` would have tomorrow's digest swallowed
+            # as a duplicate of today's.
+            entity_id = payload.get('order_id') or payload.get('outlet_id') or payload.get('date')
+            if await self._is_duplicate_event(
+                data.get('event_id'), f"sales:{event}:{telegram_id}:{entity_id}"
+            ):
+                return web.json_response({'success': True, 'message': 'Already processed'})
+
+            language = await i18n.get_user_language(int(telegram_id))
+            if event == 'morning_digest':
+                # The one push that makes a sound: it starts the agent's day,
+                # and a silent 08:30 message is a digest nobody reads. Every
+                # other sales event arrives while the phone is already in
+                # hand and stays silent.
+                text, digest_buttons = _render_morning_digest(payload, language, telegram_id)
+                await self.bot_app.bot.send_message(
+                    chat_id=telegram_id, text=text, parse_mode='HTML',
+                    reply_markup=InlineKeyboardMarkup([[button] for button in digest_buttons])
+                    if digest_buttons else None,
+                    disable_notification=False,
+                )
+                return web.json_response({'success': True, 'message': 'Notification sent'})
+            # The backend stores `Outlet.rejected_reason` as the plain ENGLISH
+            # text the operator's button carried (SSOT: `REJECT_REASONS`), so
+            # injecting it verbatim put an English phrase inside an otherwise
+            # localized sentence on the agent's phone. Map it back to its key
+            # and render the label in the AGENT's language. `reject_reason_key`
+            # is the one place that reversal lives; a miss is expected (the
+            # admin UI rejects with free text) and the raw string is echoed.
+            raw_reason = str(payload.get('reason') or '')
+            reason_key = reject_reason_key(raw_reason)
+            reason = (
+                i18n.get(f'staff.sales.approvals.reason.{reason_key}', language)
+                if reason_key else raw_reason
+            )
+            text = i18n.get(
+                f'staff.sales.notify.{event}', language,
+                outlet_name=escape_html(str(payload.get('outlet_name') or '')),
+                reason=escape_html(reason),
+                order_number=escape_html(str(payload.get('order_number') or '')),
+            )
+            if event == 'activation_requested':
+                button = InlineKeyboardButton(
+                    i18n.get('staff.sales.notify.open_requests', language), callback_data='staff_sales_approvals'
+                )
+            else:
+                button = InlineKeyboardButton(
+                    i18n.get('staff.sales.notify.open_outlet', language),
+                    callback_data=f"staff_sales_outlet_{payload.get('outlet_id')}",
+                )
+            await self.bot_app.bot.send_message(
+                chat_id=telegram_id, text=text, parse_mode='HTML',
+                reply_markup=InlineKeyboardMarkup([[button]]), disable_notification=True,
+            )
+            return web.json_response({'success': True, 'message': 'Notification sent'})
+        except Exception as e:
+            logger.error(f"Error handling sales event: {e}", exc_info=True)
             return web.json_response({'success': False, 'message': 'Internal server error'}, status=500)
 
     async def order_reassigned_handler(self, request):

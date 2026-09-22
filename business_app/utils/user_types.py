@@ -18,6 +18,7 @@ STAFF_ROLE_VALUES = {
     UserRole.MANAGER.value,
     UserRole.OPERATOR.value,
     UserRole.DELIVERY_DRIVER.value,
+    UserRole.SALES_AGENT.value,
 }
 
 VALID_USER_TYPE_VALUES = (

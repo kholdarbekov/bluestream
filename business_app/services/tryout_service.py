@@ -22,6 +22,7 @@ from business_app.models.tryout import (
 from business_app.models.user import User, UserAddress
 from business_app.services.auth_service import AuthService
 from business_app.services.maps_service import MapsService
+from business_app.services.sales.replenishment_service import effective_line_qty_max
 from shared.enums import (
     TryoutBottleLedgerEventType,
     TryoutOutcome,
@@ -264,6 +265,10 @@ class TryoutService:
 
     @staticmethod
     def _validate_and_build_items(items_payload: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        # The ceiling is the ORDER line's own -- `effective_line_qty_max()`, never restated here --
+        # applied in the one validator all three try-out doors already share (admin, driver,
+        # agent) so no door can be the unbounded one.
+        qty_max = effective_line_qty_max()
         built_items: List[Dict[str, Any]] = []
         for item_payload in items_payload:
             product = Product.query.get(int(item_payload["product_id"]))
@@ -277,6 +282,15 @@ class TryoutService:
             quantity = int(item_payload["quantity"])
             if quantity < 1:
                 raise ValidationError("Try-out item quantity must be positive")
+            if quantity > qty_max:
+                raise ValidationError(
+                    f"Try-out item quantity must be at most {qty_max}",
+                    details={
+                        "product_id": product.id,
+                        "quantity": quantity,
+                        "max_quantity": qty_max,
+                    },
+                )
 
             # Same SSOT as the order path — a try-out of a non-returnable SKU
             # owes no bottles back.

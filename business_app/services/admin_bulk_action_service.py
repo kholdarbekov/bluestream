@@ -91,6 +91,11 @@ class AdminBulkActionService:
                     user.is_active = False
                 elif action == "assign_role":
                     new_role = parameters.get("role")
+                    # Deliberately WITHOUT sales_agent: this writes `users.role` and nothing
+                    # else, so it would mint an agent with no `SalesAgentProfile` behind it -- no
+                    # districts, no cadence -- and every agent-scoped path would then refuse the
+                    # person it just promoted. Agents are created only through
+                    # POST /admin/staff/sales-agents, which creates the profile in the same call.
                     valid_roles = [
                         UserRole.CUSTOMER.value,
                         UserRole.ADMIN.value,

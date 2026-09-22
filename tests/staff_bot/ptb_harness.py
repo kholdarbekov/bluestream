@@ -49,6 +49,12 @@ class StaffBackendCall:
     endpoint: str
     data: Optional[dict] = None
     params: Optional[dict] = None
+    # Multipart parts exactly as the client hands them to httpx:
+    # {field: (filename, bytes, content_type)}. Recorded rather than swallowed
+    # by **_kwargs because the one call that uses it -- the visit photo -- is
+    # the only place the BYTES are the payload, and a test that could not see
+    # them could prove only that some request was made.
+    files: Optional[dict] = None
 
 
 class FakeStaffBackend:
@@ -62,16 +68,30 @@ class FakeStaffBackend:
     def route(self, method: str, endpoint: str, responder):
         self.routes[(method.upper(), endpoint)] = responder
 
-    async def handle(self, method, endpoint, token=None, data=None, params=None, **_kwargs):
-        call = StaffBackendCall(method.upper(), endpoint, data, params)
+    async def handle(self, method, endpoint, token=None, data=None, params=None, files=None, **_kwargs):
+        call = StaffBackendCall(method.upper(), endpoint, data, params, files)
         self.calls.append(call)
 
         responder = self.routes.get((call.method, endpoint))
         body = responder(call) if responder is not None else self._default(call)
 
         if isinstance(body, _StaffFailure):
+            # 409s (and only 409s) keep the backend's error body on `data` in
+            # the real client (staff_bot/api_client.py:415-431), which is how
+            # a conflict can name the row it is about. A harness that could
+            # only produce a bare message made that branch untestable, so the
+            # bot's "which order already exists?" path had no test at all.
+            #
+            # The gate is the point: every OTHER status returns `data=None`
+            # there (the 404 branch and the catch-all `else` both omit it), so
+            # forwarding a body on a 400 would let a test pin a payload
+            # production never delivers -- a green test for a screen that would
+            # render blank against the real backend.
             return _staff_response(
-                False, error=body.error, status_code=body.status_code, error_code=body.error_code
+                False,
+                data=body.data if body.status_code == 409 else None,
+                error=body.error,
+                status_code=body.status_code, error_code=body.error_code,
             )
         return _staff_response(True, data=body)
 
@@ -94,10 +114,38 @@ class _StaffFailure:
     error: str
     status_code: int = 500
     error_code: Optional[str] = None
+    data: Optional[dict] = None
 
 
-def staff_backend_failure(error: str, status_code: int = 500, error_code: str = None):
-    return _StaffFailure(error=error, status_code=status_code, error_code=error_code)
+def staff_backend_failure(error: str, status_code: int = 500, error_code: str = None, data: dict = None):
+    """A refusal, optionally carrying the backend's error BODY.
+
+    `data` is accepted on a 409 and REFUSED on anything else, because 409 is
+    the only status the real client puts an error body on
+    (staff_bot/api_client.py:415-431): the 404 branch and the catch-all `else`
+    both return `data=None`. This used to drop the argument silently, which
+    made a mis-written test green rather than loud -- the author believed they
+    were driving a details-carrying branch, the handler saw nothing, and the
+    screen they thought they had pinned would render blank against the real
+    backend.
+
+    `status_code=None` is a transport failure, not an HTTP answer. It comes in
+    two shapes and the CLIENT distinguishes them, so this must too: a
+    connect-phase exhaustion carries no `error_code` and provably never reached
+    the backend, while a read/write-phase failure carries
+    `TRANSPORT_AMBIGUOUS_ERROR_CODE` and may already have been applied
+    (`staff_bot/api_client.py::_make_request`, NEVER_DELIVERED_ERRORS vs
+    AMBIGUOUS_PHASE_ERRORS). Plan ruling 30's "the order may have been placed"
+    branch is driven with the second; the first is an ordinary refusal.
+    """
+    if data is not None and status_code != 409:
+        raise ValueError(
+            f"staff_backend_failure(data=...) is reachable on a 409 only, not on {status_code!r}: "
+            "the real client attaches the response body to APIResponse.data for 409 alone "
+            "(staff_bot/api_client.py:415-431). Drive this branch with a 409, or assert the copy "
+            "the bot renders from `error`/`error_code` without a body."
+        )
+    return _StaffFailure(error=error, status_code=status_code, error_code=error_code, data=data)
 
 
 def _staff_response(success, data=None, error=None, status_code=200, error_code=None):

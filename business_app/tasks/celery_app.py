@@ -15,6 +15,28 @@ from shared.constants import DISPLAY_TIMEZONE
 logger = logging.getLogger(__name__)
 
 
+def _digest_crontab(raw):
+    """`SALES_DIGEST_LOCAL_TIME` ("HH:MM") as a beat crontab.
+
+    Beat runs in `DISPLAY_TIMEZONE` (`celery.conf.timezone` below), so the LOCAL time the
+    owner configured is the crontab, unconverted — the same fact the nightly backup entry
+    relies on.
+
+    Deliberately strict. `crontab()` itself refuses an out-of-range hour or minute, and a
+    malformed string raises from `make_celery(app)` — at app/worker/beat START-UP, not at
+    module import, because that is where `beat_schedule` is built — which is where a
+    deploy sees it. A silent fallback would be indistinguishable from a working
+    configuration while the digest never fired, and it would put a second copy of the
+    shipped default beside the one `shared/business_config.py` owns. The cost is real and
+    deliberate: a malformed value stops the whole `beat_schedule` being built, backups
+    included.
+    """
+    parts = str(raw).split(":")
+    if len(parts) != 2 or not all(part.strip().isdigit() for part in parts):
+        raise ValueError(f"SALES_DIGEST_LOCAL_TIME must be 'HH:MM', got {raw!r}")
+    return crontab(hour=int(parts[0]), minute=int(parts[1]))
+
+
 _flask_app = None
 
 
@@ -48,6 +70,7 @@ def make_celery(app=None):
             "business_app.tasks.staff_tasks",
             "business_app.tasks.inventory_tasks",
             "business_app.tasks.customer_link_tasks",
+            "business_app.tasks.sales_agent_tasks",
         ],
     )
 
@@ -172,6 +195,55 @@ def make_celery(app=None):
             "task": "business_app.tasks.order_tasks.auto_confirm_pending_orders",
             "schedule": crontab(minute="*/10"),
         },
+        # Expire confirmation requests the store never answered and confirm those
+        # orders — the driver's delivery is then the acceptance (spec D5). Same
+        # cadence as auto-confirm-orders, which deliberately leaves these alone.
+        "expire-agent-order-confirmations": {
+            "task": "sales.expire_agent_order_confirmations",
+            "schedule": crontab(minute="*/10"),
+        },
+        # Close sales visits left open past SALES_VISIT_AUTO_ABANDON_HOURS so the
+        # agent's next tap can start a fresh one.
+        "abandon-stale-sales-visits": {
+            "task": "sales.abandon_stale_visits",
+            "schedule": crontab(minute=25),
+        },
+        # 01:00 Tashkent — celery.conf.timezone is DISPLAY_TIMEZONE, so these hours are
+        # LOCAL, exactly like backup-database below. Republishes next_visit_due_at for
+        # every non-lost outlet so the agent's due list is current before the morning.
+        "recompute-sales-outlets": {
+            "task": "sales.recompute_all_outlets",
+            "schedule": crontab(hour=1, minute=0),
+        },
+        # 01:10 Tashkent, ten minutes behind the recompute. A stage move republishes the
+        # due date itself, so running it second leaves both columns agreeing.
+        "update-sales-outlet-stages": {
+            "task": "sales.update_outlet_stages",
+            "schedule": crontab(hour=1, minute=10),
+        },
+        # 01:20 Tashkent, ten minutes behind the stage sweep. Stores each active
+        # agent's due/overdue count for the local day as plan-vs-fact's denominator:
+        # next_visit_due_at has no history, so a day not snapshotted is a day whose
+        # plan can never be reconstructed.
+        "snapshot-sales-agent-day-plans": {
+            "task": "sales.snapshot_agent_day_plans",
+            "schedule": crontab(hour=1, minute=20),
+        },
+        # The agent's day in one message, at the local time the owner configured
+        # (SALES_DIGEST_LOCAL_TIME, default 08:30). Skipped for any agent with nothing to
+        # report — this is the only sales push that arrives with a sound.
+        "send-agent-morning-digest": {
+            "task": "sales.send_agent_morning_digest",
+            "schedule": _digest_crontab(app.config["SALES_DIGEST_LOCAL_TIME"]),
+        },
+        # 08:00 Tashkent — LOCAL, like every sales entry above (celery.conf.timezone is
+        # DISPLAY_TIMEZONE). Half an hour ahead of the agents' digest and the morning after
+        # the day it reports on: ONE in-app line per admin/manager counting the PREVIOUS
+        # local day's DATED exceptions, and nothing at all when there were none.
+        "notify-sales-exception-summary": {
+            "task": "sales.notify_managers_exception_summary",
+            "schedule": crontab(hour=8, minute=0),
+        },
         # Cancel orders left PENDING and unpaid for 24h. Hourly, offset from
         # the :00 tasks. See the design spec §5.2 — this task had never run.
         "cancel-abandoned-orders": {
@@ -220,6 +292,14 @@ def make_celery(app=None):
         "weekly-business-report": {
             "task": "business_app.tasks.analytics_tasks.generate_weekly_business_report",
             "schedule": crontab(hour=8, minute=0, day_of_week=1),  # Monday at 8 AM
+        },
+        # Weekly sales-agent KPI report emailed to admins/managers: one row per
+        # active agent for the PREVIOUS local Mon-Sun week. 08:10 keeps it behind
+        # weekly-business-report (08:00) so one slow run cannot delay the other.
+        "weekly-agent-performance-report": {
+            "task": "business_app.tasks.analytics_tasks.generate_weekly_agent_performance_report",
+            "schedule": crontab(hour=8, minute=10, day_of_week=1),  # Monday at 8:10 AM
+            "options": {"time_limit": 3600},
         },
         # Weekly demand forecast (sklearn linear-regression over historical
         # order counts) emailed to admins/ops for inventory planning.

@@ -285,6 +285,7 @@ class TestRecoverSessionRealBody:
             "tryouts": MagicMock(),
         }
         bot._common_handlers = {"profile": MagicMock(), "help": MagicMock()}
+        bot._sales_handlers = {"hub": MagicMock()}
 
         update = _update()
         context = MagicMock()

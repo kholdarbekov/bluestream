@@ -82,7 +82,7 @@ LOCATION_MAX_ACCURACY_DEFAULT_METERS = 500
 HELDKARP_MAX_DELIVERIES = 12
 
 
-def _driver_day_start_utc() -> datetime:
+def _driver_day_start_utc(now: Optional[datetime] = None) -> datetime:
     """Start of the driver's working day, normalized to UTC.
 
     SSOT for "today" across this module. The business day is LOCAL
@@ -96,9 +96,16 @@ def _driver_day_start_utc() -> datetime:
 
     Timestamps are stored in UTC, so the local midnight is converted back
     before being compared against a column.
+
+    `now` defaults to the wall clock. It is passed explicitly by callers that
+    must answer for a specific instant rather than for "right now" — the sales
+    due list (`ReplenishmentService.local_day_end_utc`) and its frozen-time
+    tests. Keeping that an argument here, instead of a second local-midnight
+    expression in the caller, keeps the boundary defined exactly once.
     """
     local_tz = ZoneInfo(current_app.config.get("DISPLAY_TIMEZONE", DISPLAY_TIMEZONE))
-    local_midnight = datetime.now(local_tz).replace(hour=0, minute=0, second=0, microsecond=0)
+    reference = _ensure_aware(now).astimezone(local_tz) if now is not None else datetime.now(local_tz)
+    local_midnight = reference.replace(hour=0, minute=0, second=0, microsecond=0)
     return local_midnight.astimezone(timezone.utc)
 
 

@@ -61,6 +61,15 @@ const StaffManagement = () => {
         ),
     });
 
+    const { data: salesAgentsData } = useQuery({
+        queryKey: ['staffInviteSalesAgents'],
+        queryFn: () => fetchAllPages(
+            (page) => staffService.getSalesAgents({ page, per_page: BULK_LOAD_PAGE_SIZE }),
+            (resp) => resp?.data?.data?.items || [],
+            BULK_LOAD_PAGE_SIZE,
+        ),
+    });
+
     // Mutations
     const inviteMutation = useMutation({
         mutationFn: (payload) => staffService.generateInviteLink(payload),
@@ -91,6 +100,9 @@ const StaffManagement = () => {
                 queryKey: ['staffInviteOperators'],
             });
             queryClient.invalidateQueries({
+                queryKey: ['staffInviteSalesAgents'],
+            });
+            queryClient.invalidateQueries({
                 queryKey: ['staffOverview'],
             });
         },
@@ -108,6 +120,7 @@ const StaffManagement = () => {
     const cashGrandTotal = cashData?.data?.data?.grand_total_cash || 0;
     const deliveryPersons = deliveryPersonsData || [];
     const operators = operatorsData || [];
+    const salesAgents = salesAgentsData || [];
 
     const inviteCandidates = useMemo(() => {
         const byUserId = new Map();
@@ -151,13 +164,35 @@ const StaffManagement = () => {
             byUserId.set(userId, existing);
         }
 
+        for (const agent of salesAgents) {
+            const userId = agent.user_id;
+            if (!userId) {
+                continue;
+            }
+            const existing = byUserId.get(userId) || {
+                user_id: userId,
+                full_name: agent.full_name || agent.phone || `#${userId}`,
+                phone: agent.phone,
+                roles: [],
+            };
+            if (!existing.roles.includes('sales_agent')) {
+                existing.roles.push('sales_agent');
+            }
+            for (const role of (agent.staff_roles || [])) {
+                if (!existing.roles.includes(role)) {
+                    existing.roles.push(role);
+                }
+            }
+            byUserId.set(userId, existing);
+        }
+
         return Array.from(byUserId.values()).sort((a, b) => a.full_name.localeCompare(b.full_name));
-    }, [deliveryPersons, operators]);
+    }, [deliveryPersons, operators, salesAgents]);
 
     const selectedInviteCandidate = inviteCandidates.find((c) => c.user_id === inviteUserId);
     const inviteRoleOptions = selectedInviteCandidate?.roles?.length
         ? selectedInviteCandidate.roles
-        : ['delivery_driver', 'operator'];
+        : ['delivery_driver', 'operator', 'sales_agent'];
 
     const handleInviteUserChange = (userId) => {
         setInviteUserId(userId);
@@ -311,6 +346,7 @@ const StaffManagement = () => {
                 >
                     <Option value="delivery_driver">{t('staff:delivery_driver')}</Option>
                     <Option value="operator">{t('staff:operator')}</Option>
+                    <Option value="sales_agent">{t('staff:sales_agent')}</Option>
                 </Select>
             ),
         },

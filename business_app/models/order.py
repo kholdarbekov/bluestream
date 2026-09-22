@@ -48,6 +48,18 @@ class Order(db.Model, TimestampMixin):
         # correction replay. Without this the cap check seq-scans orders while
         # holding a row lock. Created in migration f7c3b9e1d5a2.
         Index("idx_orders_delivery_address_status", "delivery_address_id", "status"),
+        # At most one order per sales visit (migration d4e7f9a2b6c1). Mirrored here --
+        # `sqlite_where` alongside `postgresql_where`, the same way
+        # `uq_visits_one_open_per_agent` is -- because this index is not a backstop: it is
+        # THE guard that turns two overlapping "Place order" taps into one order, and the
+        # SQLite test schema (db.create_all) has to carry it or that guard is unprovable.
+        Index(
+            "uq_orders_visit_id",
+            "visit_id",
+            unique=True,
+            postgresql_where=text("visit_id IS NOT NULL"),
+            sqlite_where=text("visit_id IS NOT NULL"),
+        ),
     )
 
     id = Column(Integer, primary_key=True)
@@ -108,6 +120,10 @@ class Order(db.Model, TimestampMixin):
 
     # Staff tracking (which operator/staff created the order, null for self-service)
     created_by_staff_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    # Sales-agent visit that produced this order (phase 2a). Partial unique
+    # uq_orders_visit_id in migration d4e7f9a2b6c1: at most one order per visit.
+    visit_id = Column(Integer, ForeignKey("visits.id", name="fk_orders_visit_id"), nullable=True)
 
     # Relationships
     user = relationship("User", foreign_keys=[user_id], back_populates="orders")
@@ -279,6 +295,15 @@ class OrderStatusHistory(db.Model, TimestampMixin):
     """Track order status changes"""
 
     __tablename__ = "order_status_history"
+    __table_args__ = (
+        # `orders` has no `delivered_at` column, so "when did this land" is the
+        # DELIVERED row here: the sales-agent D7 rate windows, the stock-out
+        # projection and `last_delivered_qty` all filter `new_status` and read
+        # `changed_at` (business_app/services/sales/replenishment_service.py).
+        # Created in migration f1a2b3c4d5e6; mirrored here so the SQLite test
+        # schema carries it and autogenerate does not propose dropping it.
+        Index("idx_order_status_history_new_status_changed_at", "new_status", "changed_at"),
+    )
 
     id = Column(Integer, primary_key=True)
     order_id = Column(Integer, ForeignKey("orders.id"), nullable=False, index=True)

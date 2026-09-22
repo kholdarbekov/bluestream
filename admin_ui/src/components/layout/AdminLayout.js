@@ -30,6 +30,7 @@ import {
   BankOutlined,
   BarcodeOutlined,
   MessageOutlined,
+  ShopOutlined,
   SyncOutlined
 } from '@ant-design/icons';
 import { useAuthStore } from '../../stores/authStore';
@@ -56,7 +57,7 @@ const AdminLayout = ({ children }) => {
     enableWebSocket: true,
     enablePolling: true,
     pollingInterval: 30000,
-    queries: ['dashboard', 'orders', 'users', 'products', 'deliveries', 'translations', 'loyalty-members', 'loyalty-programs', 'loyalty-rewards', 'analytics-loyalty'],
+    queries: ['dashboard', 'orders', 'users', 'products', 'deliveries', 'translations', 'loyalty-members', 'loyalty-programs', 'loyalty-rewards', 'analytics-loyalty', 'salesAgents', 'outlets', 'visits', 'salesExceptions', 'salesPlanVsFact', 'agentMetrics', 'agentsMetrics'],
     onConnect: () => console.log('Real-time updates connected'),
     onDisconnect: () => console.log('Real-time updates disconnected'),
     onError: (error) => console.error('Real-time updates error:', error)
@@ -179,6 +180,25 @@ const AdminLayout = ({ children }) => {
       key: '/translations',
       icon: <TranslationOutlined />,
       label: t('ui.nav.translations')
+    },
+    {
+      key: '/sales',
+      icon: <ShopOutlined />,
+      label: t('ui.nav.sales', 'Sales'),
+      children: [
+        {
+          key: '/sales/agents',
+          label: t('ui.nav.sales_agents', 'Sales Agents')
+        },
+        {
+          key: '/sales/outlets',
+          label: t('ui.nav.outlets', 'Outlets')
+        },
+        {
+          key: '/sales/visits',
+          label: t('ui.nav.visits', 'Visits')
+        }
+      ]
     },
     {
       key: '/staff',

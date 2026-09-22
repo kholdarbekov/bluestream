@@ -21,6 +21,16 @@ STAFF_ACTIONS = {
     'USER_CREATED': 'user_created',
     'ORDER_PREPARING': 'order_preparing',
     'STAFF_LOGIN': 'staff_login',
+    'OUTLET_CREATED': 'outlet_created',
+    'OUTLET_ACTIVATION_REQUESTED': 'outlet_activation_requested',
+    'OUTLET_APPROVED': 'outlet_approved',
+    'OUTLET_REJECTED': 'outlet_rejected',
+    'VISIT_STARTED': 'visit_started',
+    'VISIT_CLOSED': 'visit_closed',
+    'VISIT_ABANDONED': 'visit_abandoned',
+    'AGENT_ORDER_CREATED': 'agent_order_created',
+    'AGENT_TRYOUT_CREATED': 'agent_tryout_created',
+    'VISIT_PHOTO_ADDED': 'visit_photo_added',
 }
 
 # Delivery status transitions allowed from staff bot.
@@ -44,7 +54,42 @@ FAILED_DELIVERY_REASONS = [
 ]
 
 # Staff roles that can access the staff bot
-STAFF_BOT_ROLES = ['delivery_driver', 'operator']
+STAFF_BOT_ROLES = ['delivery_driver', 'operator', 'sales_agent']
+
+# The sales-agent event vocabulary: one definition for THREE consumers.
+#
+# `staff_bot/webhook_server.py::sales_event_handler` refuses anything outside
+# this tuple; `staff_bot/i18n.py::_add_dynamic_family_keys` and
+# `scripts/seed_staff_translations.py::_add_dynamic_keys` build
+# `staff.sales.notify.<event>` from it. The key is an f-string, so the literal
+# scraper behind /health cannot see it — a seventh event added in one place and
+# forgotten in another either ships a humanised key tail to an agent or is
+# refused at the door for a message the backend believes it delivered.
+#
+# Produced by `business_app/services/sales/notifications.py` (outlet events and
+# the store's answer to an agent order) and by
+# `business_app/tasks/sales_agent_tasks.py` (the managers' activation ping and
+# the agent's morning digest).
+#
+# Each event is NAMED, and the tuple is built from the names (ruling 66):
+# producers pass a member, and a bare-string tuple has no member to pass. A
+# literal spelled at a producer is how a message gets minted, delivered and
+# then refused at the door by the same tuple.
+SALES_EVENT_OUTLET_APPROVED = 'outlet_approved'
+SALES_EVENT_OUTLET_REJECTED = 'outlet_rejected'
+SALES_EVENT_ACTIVATION_REQUESTED = 'activation_requested'
+SALES_EVENT_AGENT_ORDER_CONFIRMED = 'agent_order_confirmed'
+SALES_EVENT_AGENT_ORDER_DECLINED = 'agent_order_declined'
+SALES_EVENT_MORNING_DIGEST = 'morning_digest'
+
+SALES_EVENTS = (
+    SALES_EVENT_OUTLET_APPROVED,
+    SALES_EVENT_OUTLET_REJECTED,
+    SALES_EVENT_ACTIVATION_REQUESTED,
+    SALES_EVENT_AGENT_ORDER_CONFIRMED,
+    SALES_EVENT_AGENT_ORDER_DECLINED,
+    SALES_EVENT_MORNING_DIGEST,
+)
 
 # Risk flags a driver cash-reconciliation session can carry.
 #

@@ -167,58 +167,6 @@ class OrderListAdminSchema(BaseModel):
     filters_applied: Dict[str, Any] = Field(default_factory=dict)
 
 
-class ProductAdminSchema(BaseModel):
-    """Product admin schema"""
-
-    model_config = ConfigDict(from_attributes=True, alias_generator=to_camel)
-
-    id: int
-    name: str
-    sku: str
-    barcode: Optional[str] = None
-    category_name: Optional[str] = None
-    base_price: MoneyFloat
-    current_price: MoneyFloat
-    stock_quantity: Optional[int] = None
-    min_stock_level: Optional[int] = None
-    is_active: bool = Field(default=True)
-    is_featured: bool = Field(default=False)
-    track_inventory: bool = Field(default=True)
-    is_tryout_eligible: bool = Field(default=True)
-    tracks_returnable_bottles: bool = Field(default=False)
-    returnable_bottles_per_unit: float = Field(default=0.0)
-    is_returnable_bottle: bool = Field(default=False)
-
-    # Performance metrics
-    total_sold: int = Field(default=0)
-    total_revenue: MoneyFloat = Field(default=0)
-    view_count: int = Field(default=0)
-    average_rating: float = Field(default=0.0)
-    review_count: int = Field(default=0)
-
-    # Stock status
-    stock_status: str = Field(default="in_stock")  # in_stock, low_stock, out_of_stock
-    days_of_stock: Optional[int] = None
-
-    # Dates
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    last_sold_at: Optional[datetime] = None
-
-
-class ProductListAdminSchema(BaseModel):
-    """Product list admin schema"""
-
-    products: List[ProductAdminSchema]
-    total: int
-    page: int
-    per_page: int
-    pages: int
-    low_stock_count: int = Field(default=0)
-    out_of_stock_count: int = Field(default=0)
-    filters_applied: Dict[str, Any] = Field(default_factory=dict)
-
-
 class DeliveryPersonAdminSchema(BaseModel):
     """Delivery person admin schema"""
 
@@ -542,8 +490,6 @@ __all__ = [
     "UserListAdminSchema",
     "OrderAdminSchema",
     "OrderListAdminSchema",
-    "ProductAdminSchema",
-    "ProductListAdminSchema",
     "DeliveryPersonAdminSchema",
     "SystemSettingSchema",
     "AuditLogSchema",
@@ -842,6 +788,7 @@ def serialize_product_admin(product: Product) -> Dict[str, Any]:
         # the marking_code_counts merged in later read from this SAME dict,
         # so the AVAILABLE count is one query, not two.
         from business_app.services.product_fiscal_service import ProductFiscalService
+        from business_app.services.sales.replenishment_service import ReplenishmentService
 
         fiscal_snapshot = ProductFiscalService().build_product_fiscal_snapshot(product)
 
@@ -874,6 +821,14 @@ def serialize_product_admin(product: Product) -> Dict[str, Any]:
             "returnable_bottles_per_unit": float(getattr(product, "returnable_bottles_per_unit", 0) or 0),
             # The SSOT answer, so no client re-derives it from the pair above.
             "is_returnable_bottle": bool(getattr(product, "is_returnable_bottle", False)),
+            # D22: whether an agent counts this SKU at a sales visit.
+            "in_sales_stock_check": bool(getattr(product, "in_sales_stock_check", False)),
+            # ...and whether it is actually ON that list, which is the flag AND `is_active`
+            # (`ReplenishmentService.stock_check_products`). Published rather than left to
+            # the client: the admin table used to read the column alone and tagged a
+            # switched-off SKU as one the agent counts (M13). Same shape as
+            # `is_returnable_bottle` above — the SSOT answer, so nothing re-derives it.
+            "in_agent_stock_list": ReplenishmentService.in_stock_check_list(product),
             "images": images,
             "image_url": image_url,  # First image for display convenience
             "created_at": product.created_at.isoformat() if product.created_at else None,

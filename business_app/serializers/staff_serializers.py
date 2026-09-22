@@ -90,6 +90,7 @@ class StaffUserResponse(BaseModel):
     staff_roles: List[str] = []
     preferred_language: str = "en"
     delivery_person_id: Optional[int] = None
+    sales_agent_profile_id: Optional[int] = None
 
 
 class StaffLoginResponse(BaseModel):

@@ -7,6 +7,7 @@ from shared.enums import MarkingCodeStatus
 from business_app.models import TimestampMixin
 from business_app.models.translatable import TranslatableMixin, translatable
 import enum
+import sqlalchemy as sa
 
 
 class ProductCategoryEnum(enum.Enum):
@@ -81,6 +82,10 @@ class Product(db.Model, TimestampMixin, TranslatableMixin):
     is_tryout_eligible = Column(Boolean, nullable=False, default=True, index=True)
     tracks_returnable_bottles = Column(Boolean, nullable=False, default=False, index=True)
     returnable_bottles_per_unit = Column(Numeric(precision=12, scale=2), nullable=False, default=Decimal("0.00"))
+    # D22: the admin-chosen list of SKUs a sales agent counts at a visit.
+    # Read by ReplenishmentService.stock_check_products(); toggled on the admin
+    # Products page. server_default so the backfill on the existing rows is false.
+    in_sales_stock_check = Column(Boolean, nullable=False, default=False, server_default=sa.false(), index=True)
     expire_days = Column(Integer, nullable=True, default=180)
     # Per-product purchase minimum (cart/order rule). Distinct from PriceRule.min_quantity,
     # which is for bulk-discount tiers, and from min_stock_level, which is a restock threshold.
@@ -203,6 +208,7 @@ class Product(db.Model, TimestampMixin, TranslatableMixin):
                 "tracks_returnable_bottles": bool(self.tracks_returnable_bottles),
                 "returnable_bottles_per_unit": float(self.returnable_bottles_per_unit or 0),
                 "is_returnable_bottle": self.is_returnable_bottle,
+                "in_sales_stock_check": bool(self.in_sales_stock_check),
                 "expire_days": self.expire_days,
                 "min_order_quantity": int(self.min_order_quantity or 1),
                 "fiscal_profile": self.fiscal_profile.to_dict() if self.fiscal_profile else None,

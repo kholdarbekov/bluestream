@@ -30,6 +30,8 @@ class HelpHandler(BaseHandler):
                 help_text += "\n\n" + i18n.get('staff.help.delivery', language)
             if 'operator' in staff_roles:
                 help_text += "\n\n" + i18n.get('staff.help.operator', language)
+            if 'sales_agent' in staff_roles:
+                help_text += "\n\n" + i18n.get('staff.help.sales_agent', language)
 
             keyboard = CommonKeyboards.back_button(language)
 

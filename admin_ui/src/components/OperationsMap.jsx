@@ -22,6 +22,17 @@ const ORDER_STATUS_COLOR = {
   out_for_delivery: '#fa8c16',
 };
 
+// Field check-in colours. `in_radius` is the SERVER's verdict (VisitService.checkin compares
+// `distance_m` against SALES_GEOFENCE_RADIUS_M) — this layer renders it and never re-measures.
+// NULL is "not measurable", which is a different fact from "out of range": a skipped check-in,
+// a phone that sent no coordinates, or an outlet that has no pin yet. Grey, never red.
+const CHECKIN_COLORS = { in_radius: '#52c41a', out_of_range: '#ff4d4f', unmeasured: '#8c8c8c' };
+const checkinColor = (inRadius) => {
+  if (inRadius === true) return CHECKIN_COLORS.in_radius;
+  if (inRadius === false) return CHECKIN_COLORS.out_of_range;
+  return CHECKIN_COLORS.unmeasured;
+};
+
 /** Numbered route-stop badge. A route is only readable if you can see the order. */
 const stopIcon = (position, color, pinned) => L.divIcon({
   className: '',
@@ -83,9 +94,14 @@ const FocusController = ({ point }) => {
  * `geometry` maps driverId -> { geometry: [[lat,lng],...] | null, approximate }.
  * A driver with no real geometry falls back to straight dashed legs so the map
  * never goes blank — and the dashes make it obvious it isn't a road path.
+ *
+ * `checkins` is the sales *Visits* page's band: one circle per field check-in on the CURRENT
+ * table page, coloured by the published `in_radius` verdict. Its own layer rather than a
+ * `customers` reshape, because that branch recolours every point by `lastOrderDate`.
  */
 const OperationsMap = ({
   customers = [],
+  checkins = [],
   orders = [],
   drivers = [],
   routes = [],
@@ -134,6 +150,31 @@ const OperationsMap = ({
           </CircleMarker>
         );
       })}
+
+      {visibleLayers.checkins && checkins
+        .filter((c) => c.lat !== null && c.lat !== undefined && c.lng !== null && c.lng !== undefined)
+        .map((c) => {
+          const color = checkinColor(c.in_radius);
+          return (
+            <CircleMarker
+              key={`v-${c.visit_id}`}
+              data-key={`v-${c.visit_id}`}
+              center={[c.lat, c.lng]}
+              radius={7}
+              pathOptions={{ color, fillColor: color, fillOpacity: 0.85, weight: 1 }}
+            >
+              <Popup>
+                <Space direction="vertical" size={2}>
+                  <Text strong>{c.outlet_name}</Text>
+                  <Text>{c.agent_name}</Text>
+                  <Text type="secondary" style={{ fontSize: 11 }}>
+                    {c.distance_m == null ? '—' : `${Math.round(c.distance_m)} m`}
+                  </Text>
+                </Space>
+              </Popup>
+            </CircleMarker>
+          );
+        })}
 
       {/* Gated on `heatPoints` alone, not `visibleLayers.customers`: the caller
           (CustomerMap) decides when to hand over points — heat mode renders

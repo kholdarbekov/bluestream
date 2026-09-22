@@ -11,8 +11,6 @@ from sqlalchemy import (
     ForeignKey,
     Enum,
     JSON,
-    event,
-    inspect as sa_inspect,
 )
 from sqlalchemy.orm import relationship
 from business_app import db
@@ -372,33 +370,12 @@ class UserAddress(db.Model, TimestampMixin):
         }
 
 
-def _enforce_address_delivery_zone(target: "UserAddress") -> None:
-    """SSOT backstop: never persist a coordinate outside ``TASHKENT_POLYGON``.
+# SSOT backstop: never persist a coordinate outside TASHKENT_POLYGON. The rule
+# and its listener wiring live in geo_validation (shared with Outlet); imported
+# here at the call site because geo_validation must not import models.
+from business_app.utils.geo_validation import register_delivery_zone_listeners  # noqa: E402
 
-    Service / API layers already reject out-of-zone coordinates early with a
-    localized 400; this last-line guard makes the invariant impossible to bypass
-    from any present or future write path. Imported lazily to keep the models
-    package import-safe. Skips text-only addresses (no coordinates).
-    """
-    if target.latitude is None or target.longitude is None:
-        return
-    from business_app.utils.geo_validation import ensure_within_delivery_zone
-
-    ensure_within_delivery_zone(target.latitude, target.longitude)
-
-
-@event.listens_for(UserAddress, "before_insert")
-def _user_address_zone_before_insert(mapper, connection, target):
-    _enforce_address_delivery_zone(target)
-
-
-@event.listens_for(UserAddress, "before_update")
-def _user_address_zone_before_update(mapper, connection, target):
-    # Only re-validate when coordinates actually changed, so legacy out-of-zone
-    # rows can still be edited for unrelated fields (title, is_default, ...).
-    state = sa_inspect(target)
-    if state.attrs.latitude.history.has_changes() or state.attrs.longitude.history.has_changes():
-        _enforce_address_delivery_zone(target)
+register_delivery_zone_listeners(UserAddress)
 
 
 class UserSession(db.Model, TimestampMixin):

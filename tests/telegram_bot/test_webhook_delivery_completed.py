@@ -304,3 +304,73 @@ async def test_send_failure_releases_order_dedup_so_retry_succeeds(ws):
     # First send raised, second send delivered — the retry got through instead
     # of being deduplicated away.
     assert ws.bot_app.bot.send_message.await_count == 2
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_a_render_failure_releases_both_dedup_layers_so_the_retry_gets_through(
+    ws, monkeypatch
+):
+    """The claims must not outlive a failure BEFORE the send, either.
+
+    Both keys are claimed before the language read — a Postgres round-trip —
+    and before the rendering that runs on backend-supplied strings. A 500 out
+    of that window with the keys still held costs the summary the retry that
+    would have delivered it: the backend's Celery retry mints a FRESH
+    X-Request-ID, so only layer 2 could catch it, and layer 2 is exactly the
+    key still held. One transient DB blip must cost one attempt, not the
+    summary. The agent-order route already wraps this window
+    (tests/telegram_bot/test_webhook_agent_order_proposed.py, same test name).
+    """
+    payload = {
+        "order_id": 5150,
+        "order_number": "5150",
+        "telegram_id": 5,
+        "bottles_delivered": "1",
+        "bottles_collected": "1",
+        "balance": "4",
+    }
+    monkeypatch.setattr(
+        ws_module.i18n,
+        "get_user_language",
+        AsyncMock(side_effect=[RuntimeError("postgres blip"), "en"]),
+    )
+
+    r1 = await ws.delivery_completed_handler(_make_request(payload, request_id="retry-A"))
+    assert r1.status == 500
+    assert ws.bot_app.bot.send_message.await_count == 0
+
+    r2 = await ws.delivery_completed_handler(_make_request(payload, request_id="retry-B"))
+    assert r2.status == 200
+    assert json.loads(r2.body)["message"] == "Notification sent"
+    assert ws.bot_app.bot.send_message.await_count == 1
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_send_failure_also_releases_the_request_id_layer(ws):
+    """An exact HTTP replay of the attempt that FAILED is the one delivery
+    nobody else retries — the backend has already recorded its own failure and
+    the transport simply re-POSTs the same id. Layer 1 must not answer that
+    replay "already processed" with nothing ever sent. Releasing only the
+    order-id key (the state before this test) leaves that hole open.
+    """
+    payload = {
+        "order_id": 5151,
+        "order_number": "5151",
+        "telegram_id": 5,
+        "bottles_delivered": "1",
+        "bottles_collected": "1",
+        "balance": "4",
+    }
+    ws.bot_app.bot.send_message = AsyncMock(
+        side_effect=[RuntimeError("telegram down"), None]
+    )
+
+    r1 = await ws.delivery_completed_handler(_make_request(payload, request_id="same-id"))
+    assert r1.status == 500
+
+    r2 = await ws.delivery_completed_handler(_make_request(payload, request_id="same-id"))
+    assert r2.status == 200
+    assert json.loads(r2.body)["message"] == "Notification sent"
+    assert ws.bot_app.bot.send_message.await_count == 2

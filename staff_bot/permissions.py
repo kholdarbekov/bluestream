@@ -7,6 +7,7 @@ SEC-002 convention (audit-required):
     @require_auth                    — base auth check (token still valid)
     @require_delivery_driver         — driver-only flows
     @require_operator                — operator-only flows
+    @require_sales_agent             — sales-agent-only flows
     @require_any_staff_role          — any staff role (default fallback)
     @require_role('role1', 'role2')  — explicit multi-role allowlist
 
@@ -129,8 +130,13 @@ def require_operator(func):
     return require_role('operator')(func)
 
 
+def require_sales_agent(func):
+    """Shorthand: require sales_agent role."""
+    return require_role('sales_agent')(func)
+
+
 def require_any_staff_role(func):
-    """Shorthand: any staff role (delivery_driver, operator)."""
+    """Shorthand: any staff role (delivery_driver, operator, sales_agent)."""
     return require_role(*STAFF_BOT_ROLES)(func)
 
 
@@ -147,3 +153,8 @@ def is_delivery_driver(context: ContextTypes.DEFAULT_TYPE) -> bool:
 def is_operator(context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Check if user is an operator."""
     return has_role(context, 'operator')
+
+
+def is_sales_agent(context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Check if user is a sales agent."""
+    return has_role(context, 'sales_agent')

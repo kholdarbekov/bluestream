@@ -21,7 +21,7 @@ from shared.enums import (
 from business_app.utils.exceptions import InvalidStateTransition
 
 
-STAFF_ORDER_SOURCES: FrozenSet[str] = frozenset({"phone", "admin"})
+STAFF_ORDER_SOURCES: FrozenSet[str] = frozenset({"phone", "admin", "sales_agent"})
 
 
 # Order: from CONFIRMED onward the customer-facing flow needs an address.

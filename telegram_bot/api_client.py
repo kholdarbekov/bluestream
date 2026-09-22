@@ -728,6 +728,21 @@ class BusinessAPIClient:
         return await self._make_request('POST', f'/api/v1/orders/{order_id}/cancel',
                                        user_token=user_token)
 
+    async def respond_agent_order(self, user_token: str, order_id: int,
+                                  action: str, reason: str = None) -> APIResponse:
+        """Answer a sales-agent order proposal: 'confirm' or 'decline'.
+
+        The backend owns the rules (which request is still pending, what a
+        decline does to the order); this only carries the store's answer.
+        `reason` is omitted entirely when empty so the body the backend
+        validates is exactly `{"action": ...}`.
+        """
+        data = {'action': action}
+        if reason:
+            data['reason'] = reason
+        return await self._make_request('POST', f'/api/v1/orders/{order_id}/agent-confirmation',
+                                       user_token=user_token, data=data)
+
     async def track_order(self, user_token: str, order_id: int) -> APIResponse:
         """Get order tracking information with status timeline"""
         return await self._make_request('GET', f'/api/v1/orders/{order_id}/track',

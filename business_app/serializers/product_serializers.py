@@ -76,6 +76,7 @@ class ProductInventorySchema(BaseModel):
     tracks_returnable_bottles: bool = Field(default=False)
     returnable_bottles_per_unit: float = Field(default=0.0)
     is_returnable_bottle: bool = Field(default=False)
+    in_sales_stock_check: bool = Field(default=False)
     min_order_quantity: int = Field(default=1, ge=1)
 
 
@@ -236,62 +237,6 @@ class ProductComparisonSchema(BaseModel):
     highest_rated: Optional[int] = None  # Product ID with highest rating
 
 
-class CreateProductRequest(BaseModel):
-    """Create product request schema"""
-
-    name: str = Field(..., min_length=3, max_length=255)
-    description: Optional[str] = Field(None, max_length=2000)
-    short_description: Optional[str] = Field(None, max_length=500)
-    sku: str = Field(..., min_length=3, max_length=50)
-    barcode: Optional[str] = Field(None, max_length=50)
-    category_id: Optional[int] = None
-    base_price: MoneyFloat = Field(..., gt=0)
-    volume: Optional[float] = Field(None, gt=0)
-    volume_unit: Optional[str] = None
-    weight: Optional[float] = Field(None, gt=0)
-    weight_unit: Optional[str] = None
-    material: Optional[str] = None
-    color: Optional[str] = None
-    brand: Optional[str] = None
-    stock_quantity: Optional[int] = Field(None, ge=0)
-    track_inventory: bool = Field(default=True)
-    min_stock_level: Optional[int] = Field(None, ge=0)
-    is_active: bool = Field(default=True)
-    is_featured: bool = Field(default=False)
-    is_tryout_eligible: bool = Field(default=True)
-    tracks_returnable_bottles: bool = Field(default=False)
-    returnable_bottles_per_unit: Decimal = Field(default=Decimal("0.00"), ge=0)
-    expire_days: Optional[int] = Field(None, ge=1)
-    min_order_quantity: int = Field(default=1, ge=1)
-
-
-class UpdateProductRequest(BaseModel):
-    """Update product request schema"""
-
-    name: Optional[str] = Field(None, min_length=3, max_length=255)
-    description: Optional[str] = Field(None, max_length=2000)
-    short_description: Optional[str] = Field(None, max_length=500)
-    base_price: Optional[MoneyFloat] = Field(None, gt=0)
-    category_id: Optional[int] = None
-    volume: Optional[float] = Field(None, gt=0)
-    volume_unit: Optional[str] = None
-    weight: Optional[float] = Field(None, gt=0)
-    weight_unit: Optional[str] = None
-    material: Optional[str] = None
-    color: Optional[str] = None
-    brand: Optional[str] = None
-    stock_quantity: Optional[int] = Field(None, ge=0)
-    track_inventory: Optional[bool] = None
-    min_stock_level: Optional[int] = Field(None, ge=0)
-    is_active: Optional[bool] = None
-    is_featured: Optional[bool] = None
-    is_tryout_eligible: Optional[bool] = None
-    tracks_returnable_bottles: Optional[bool] = None
-    returnable_bottles_per_unit: Optional[Decimal] = Field(None, ge=0)
-    expire_days: Optional[int] = Field(None, ge=1)
-    min_order_quantity: Optional[int] = Field(None, ge=1)
-
-
 class ProductResponseSchema(BaseModel):
     """Standard product response schema"""
 
@@ -323,8 +268,6 @@ __all__ = [
     "ProductCategoryFullSchema",
     "ProductSearchResultSchema",
     "ProductComparisonSchema",
-    "CreateProductRequest",
-    "UpdateProductRequest",
     "ProductResponseSchema",
     "ProductBulkUpdateRequest",
     "ProductPricingSchema",
@@ -414,6 +357,7 @@ def serialize_product(product: Product, language: str = "uz", user=None, quantit
                 "returnable_bottles_per_unit": float(getattr(product, "returnable_bottles_per_unit", 0) or 0),
                 # The SSOT answer, so no client re-derives it from the pair above.
                 "is_returnable_bottle": bool(getattr(product, "is_returnable_bottle", False)),
+                "in_sales_stock_check": bool(getattr(product, "in_sales_stock_check", False)),
                 "min_order_quantity": int(getattr(product, "min_order_quantity", 1) or 1),
                 # 'restock_date': product.restock_date.isoformat() if product.restock_date else None
             },

@@ -12,7 +12,7 @@ localized string from `start`/`end` instead of reading `label` or the legacy
 import pytest
 
 from staff_bot.i18n import i18n
-from staff_bot.utils.formatters import format_delivery_window_line, format_order_card
+from staff_bot.utils.formatters import format_delivery_window_line, format_local_date, format_order_card
 
 
 def _seed_window_translations(monkeypatch, language="en"):
@@ -101,3 +101,49 @@ def test_format_delivery_window_line_anytime_is_empty():
         "en",
     )
     assert line == ""
+
+
+# ---------------------------------------------------------------------------
+# `format_local_date` — the sales card's visit dates (phase 2a, Task 10)
+# ---------------------------------------------------------------------------
+
+
+def test_format_local_date_reads_a_utc_stamp_as_the_local_calendar_day():
+    """A visit closed at 00:30 Tashkent is stamped 19:30Z the day BEFORE.
+
+    The backend publishes `last_visit.ended_at` / `next_visit_due_at` as UTC
+    ISO strings, and the agent reads them as calendar days ("I was there on
+    the 31st"). Slicing the ISO string, or formatting it without converting,
+    is off by a day for every evening visit — five hours of every day.
+    """
+    assert format_local_date("2026-08-30T19:30:00+00:00") == "31.08.2026"
+    assert format_local_date("2026-08-30T11:20:00+00:00") == "30.08.2026"
+
+
+def test_format_local_date_handles_a_bare_date_a_zulu_stamp_and_junk():
+    """`agent_next_visit_at` is a DATE column and serializes as `YYYY-MM-DD`;
+    the same field on other payloads is a tz-aware datetime, and a gateway or
+    a hand-edited row can send neither. One helper takes all three, and
+    answers `''` — not a crash and not a half-rendered line — for the last,
+    so every caller can gate its whole line on the returned string.
+    """
+    assert format_local_date("2026-09-10") == "10.09.2026"
+    assert format_local_date("2026-09-10T00:00:00Z") == "10.09.2026"
+    assert format_local_date(None) == ""
+    assert format_local_date("") == ""
+    assert format_local_date("not a date") == ""
+
+
+def test_format_local_date_does_not_move_a_bare_date_behind_a_negative_offset(monkeypatch):
+    """`YYYY-MM-DD` is a DATE, and a date has no timezone to convert.
+
+    Read as midnight UTC it survives only because Tashkent is AHEAD of UTC:
+    under any display timezone BEHIND it, `agent_next_visit_at` renders as the
+    day before — the visit the agent planned for the 10th shows as the 9th.
+    """
+    monkeypatch.setattr("shared.constants.DISPLAY_TIMEZONE", "America/New_York")
+
+    assert format_local_date("2026-09-10") == "10.09.2026"
+    # The datetime path still converts — and the patched zone is really in play:
+    # 02:00Z is 22:00 on the 9th in New York.
+    assert format_local_date("2026-09-10T02:00:00+00:00") == "09.09.2026"

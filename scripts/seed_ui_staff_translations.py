@@ -12,6 +12,9 @@ them through the `staff:` namespace (`t('staff:scope', …)`), which is served
 from category 'ui_staff' with BARE keys. Seeding them as dotted `ui.*` rows
 would leave both column headers permanently English.
 
+`sales_agent` (the Phase-1 sales-agent role label) belongs here for the same
+reason: StaffManagement.js reads every role as `t('staff:' + role)`.
+
 Run inside the business_app container (scripts/ is not mounted, so pipe it in):
     docker compose exec -T business_app python - < scripts/seed_ui_staff_translations.py
 """
@@ -32,6 +35,11 @@ UI_STAFF_TRANSLATIONS = {
         # Phase 2c: place/cluster money attribution in the session-detail modal.
         "scope": "Scope",
         "attribution": "Paid by → settles",
+        # Phase-1 sales-agent role: StaffManagement renders every staff role as
+        # `t('staff:' + role)` with NO inline default, so without this row the
+        # roles column and the invite-role Select show the literal
+        # "staff:sales_agent".
+        "sales_agent": "Sales agent",
     },
     "uz": {
         "customer_phone": "Telefon",
@@ -42,6 +50,7 @@ UI_STAFF_TRANSLATIONS = {
         "reversed": "Bekor qilingan",
         "scope": "Qamrov",
         "attribution": "To'lovchi → yopiladi",
+        "sales_agent": "Savdo agenti",
     },
     "ru": {
         "customer_phone": "Телефон",
@@ -52,6 +61,7 @@ UI_STAFF_TRANSLATIONS = {
         "reversed": "Отменено",
         "scope": "Область",
         "attribution": "Платит → погашает",
+        "sales_agent": "Торговый агент",
     },
 }
 

@@ -1407,6 +1407,104 @@
     "rule": "/api/v1/admin/reviews/bulk-approve"
   },
   {
+    "endpoint": "admin_sales.get_agent_metrics",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/sales/agents/<int:user_id>/metrics"
+  },
+  {
+    "endpoint": "admin_sales.list_agent_metrics",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/sales/agents/metrics"
+  },
+  {
+    "endpoint": "admin_sales.list_sales_exceptions",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/sales/exceptions"
+  },
+  {
+    "endpoint": "admin_sales.list_outlets",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/sales/outlets"
+  },
+  {
+    "endpoint": "admin_sales.get_outlet_admin",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/sales/outlets/<int:outlet_id>"
+  },
+  {
+    "endpoint": "admin_sales.update_outlet_admin",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/sales/outlets/<int:outlet_id>"
+  },
+  {
+    "endpoint": "admin_sales.approve_outlet_admin",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/sales/outlets/<int:outlet_id>/approve"
+  },
+  {
+    "endpoint": "admin_sales.assign_outlet_admin",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/sales/outlets/<int:outlet_id>/assign"
+  },
+  {
+    "endpoint": "admin_sales.mark_outlet_lost_admin",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/sales/outlets/<int:outlet_id>/mark-lost"
+  },
+  {
+    "endpoint": "admin_sales.reject_outlet_admin",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/sales/outlets/<int:outlet_id>/reject"
+  },
+  {
+    "endpoint": "admin_sales.bulk_assign_outlets_admin",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/sales/outlets/bulk-assign"
+  },
+  {
+    "endpoint": "admin_sales.import_existing_customers_admin",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/sales/outlets/import-existing-customers"
+  },
+  {
+    "endpoint": "admin_sales.plan_vs_fact_admin",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/sales/plan-vs-fact"
+  },
+  {
+    "endpoint": "admin_sales.list_visits_admin",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/sales/visits"
+  },
+  {
     "endpoint": "admin.send_announcement",
     "methods": [
       "POST"
@@ -1587,6 +1685,41 @@
       "GET"
     ],
     "rule": "/api/v1/admin/staff/overview"
+  },
+  {
+    "endpoint": "admin_sales.create_sales_agent",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/staff/sales-agents"
+  },
+  {
+    "endpoint": "admin_sales.list_sales_agents",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/staff/sales-agents"
+  },
+  {
+    "endpoint": "admin_sales.get_sales_agent",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/staff/sales-agents/<int:user_id>"
+  },
+  {
+    "endpoint": "admin_sales.update_sales_agent",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/staff/sales-agents/<int:user_id>"
+  },
+  {
+    "endpoint": "admin_sales.set_sales_agent_active",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/staff/sales-agents/<int:user_id>/active"
   },
   {
     "endpoint": "admin.update_staff_user_roles",
@@ -2997,6 +3130,13 @@
     "rule": "/api/v1/orders/<int:order_id>"
   },
   {
+    "endpoint": "orders.agent_order_confirmation",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/orders/<int:order_id>/agent-confirmation"
+  },
+  {
     "endpoint": "orders.cancel_order",
     "methods": [
       "POST"
@@ -3751,6 +3891,167 @@
       "POST"
     ],
     "rule": "/api/v1/staff/reconciliation/session/submit"
+  },
+  {
+    "endpoint": "staff_sales.list_activation_requests",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/sales/activation-requests"
+  },
+  {
+    "endpoint": "staff_sales.my_stats",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/sales/me/stats"
+  },
+  {
+    "endpoint": "staff_sales.create_outlet",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/sales/outlets"
+  },
+  {
+    "endpoint": "staff_sales.list_outlets",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/sales/outlets"
+  },
+  {
+    "endpoint": "staff_sales.get_outlet",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/sales/outlets/<int:outlet_id>"
+  },
+  {
+    "endpoint": "staff_sales.update_outlet",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/staff/sales/outlets/<int:outlet_id>"
+  },
+  {
+    "endpoint": "staff_sales.approve_outlet",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/sales/outlets/<int:outlet_id>/approve"
+  },
+  {
+    "endpoint": "staff_sales.add_outlet_contact",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/sales/outlets/<int:outlet_id>/contacts"
+  },
+  {
+    "endpoint": "staff_sales.outlet_order_estimate",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/sales/outlets/<int:outlet_id>/order-estimate"
+  },
+  {
+    "endpoint": "staff_sales.outlet_payment_methods",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/sales/outlets/<int:outlet_id>/payment-methods"
+  },
+  {
+    "endpoint": "staff_sales.reject_outlet",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/sales/outlets/<int:outlet_id>/reject"
+  },
+  {
+    "endpoint": "staff_sales.request_outlet_activation",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/sales/outlets/<int:outlet_id>/request-activation"
+  },
+  {
+    "endpoint": "staff_sales.create_outlet_tryout",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/sales/outlets/<int:outlet_id>/tryouts"
+  },
+  {
+    "endpoint": "staff_sales.start_visit",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/sales/outlets/<int:outlet_id>/visits"
+  },
+  {
+    "endpoint": "staff_sales.dedupe_outlet",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/sales/outlets/dedupe"
+  },
+  {
+    "endpoint": "staff_sales.stock_check_products",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/sales/stock-check-products"
+  },
+  {
+    "endpoint": "staff_sales.abandon_visit",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/sales/visits/<int:visit_id>/abandon"
+  },
+  {
+    "endpoint": "staff_sales.checkin_visit",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/sales/visits/<int:visit_id>/checkin"
+  },
+  {
+    "endpoint": "staff_sales.close_visit",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/sales/visits/<int:visit_id>/close"
+  },
+  {
+    "endpoint": "staff_sales.place_visit_order",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/sales/visits/<int:visit_id>/order"
+  },
+  {
+    "endpoint": "staff_sales.add_visit_photo",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/sales/visits/<int:visit_id>/photos"
+  },
+  {
+    "endpoint": "staff_sales.stock_check_visit",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/sales/visits/<int:visit_id>/stock-check"
+  },
+  {
+    "endpoint": "staff_sales.current_visit",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/sales/visits/current"
   },
   {
     "endpoint": "staff_tryouts.accept_tryout_task",

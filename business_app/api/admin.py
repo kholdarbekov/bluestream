@@ -8,7 +8,7 @@ from typing import List
 from flask import Blueprint, request, current_app, g, Response
 from werkzeug.exceptions import HTTPException
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from sqlalchemy import and_, or_, desc, func, text, cast, String
+from sqlalchemy import and_, or_, desc, func, text
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime, UTC, timedelta
 from decimal import Decimal, InvalidOperation
@@ -141,7 +141,9 @@ admin_bp = Blueprint("admin", __name__)
 
 def _is_operator_staff_member():
     """Return SQL filter for users that can operate via role or staff_roles."""
-    return or_(User.role == UserRole.OPERATOR, cast(User.staff_roles, String).ilike('%"operator"%'))
+    from business_app.services.staff_service import StaffService
+
+    return StaffService.staff_role_member_filter(UserRole.OPERATOR.value)
 
 
 def _serialize_corporate_contract(contract):
@@ -2974,6 +2976,10 @@ def create_product():
             requires_prescription=data.get("requires_prescription", False),
             track_inventory=data.get("track_inventory", True),
             is_tryout_eligible=data.get("is_tryout_eligible", True),
+            # ReplenishmentService.stock_check_products() reads this column, so it
+            # IS the sales agent's visit stock list. Off by default: a new product
+            # joins the agent's count only when an admin says so.
+            in_sales_stock_check=bool(data.get("in_sales_stock_check", False)),
             tracks_returnable_bottles=returnable_tracks,
             returnable_bottles_per_unit=returnable_per_unit,
             stock_quantity=data.get("stock_quantity", 0),
@@ -3141,6 +3147,12 @@ def update_product(product_id):
             product.track_inventory = data["track_inventory"]
         if "is_tryout_eligible" in data:
             product.is_tryout_eligible = data["is_tryout_eligible"]
+        # Presence test, not truthiness: False is a real value the admin saves, and
+        # `data.get(...)` would make the switch one-way. bool() because the edit
+        # modal echoes the listing row back verbatim and older payloads may carry
+        # 0/1 or null for a column that is NOT NULL.
+        if "in_sales_stock_check" in data:
+            product.in_sales_stock_check = bool(data["in_sales_stock_check"])
         # Resolved as a PAIR even when only one key was sent: clearing the flag
         # has to zero the number with it, and raising the number on a product
         # whose flag is off must not quietly re-arm the bottle cascade.

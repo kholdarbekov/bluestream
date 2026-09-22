@@ -10,6 +10,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 from shared.constants import is_within_tashkent
 from staff_bot.api_client import api_client
 from staff_bot.handlers.base import BaseHandler
+from staff_bot.handlers.sales.tryout import tryout_eligible
 from staff_bot.i18n import i18n
 from staff_bot.keyboards.common import CommonKeyboards
 from staff_bot.keyboards.menu import MenuKeyboards
@@ -187,10 +188,13 @@ class TryoutHandler(BaseHandler):
             return response, []
 
         items = response.data.get('items', []) if isinstance(response.data, dict) else []
-        eligible = [
-            product for product in items
-            if product.get('is_active') is not False and product.get('is_tryout_eligible', True)
-        ]
+        # ONE bot-side expression of "which SKU may be lent", shared with the
+        # sales agent's try-out flow. The line above read `is_active` /
+        # `is_tryout_eligible` at the TOP level, where `serialize_product` never
+        # puts them (`flags` / `inventory`): both reads missed, the defaults won,
+        # and this filter passed the whole catalogue -- so a driver was offered
+        # SKUs `TryoutService._validate_and_build_items` then refuses.
+        eligible = [product for product in items if tryout_eligible(product)]
         return response, eligible
 
     @staticmethod

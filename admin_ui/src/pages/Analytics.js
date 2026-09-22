@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
+  Alert,
   Card,
   Row,
   Col,
@@ -37,10 +38,12 @@ import { useTranslation } from 'react-i18next';
 import dayjs from 'dayjs';
 import { formatDate } from '../utils/dateUtils';
 import { formatMoneyUZS } from '../utils/formatMoney';
+import { extractApiErrorMessage } from '../utils/apiError';
 import LineChart from '../components/charts/LineChart';
 import BarChart from '../components/charts/BarChart';
 import PieChart from '../components/charts/PieChart';
 import adminService from '../services/adminService';
+import salesService from '../services/salesService';
 import exportUtils from '../utils/exportUtils';
 
 const { Option } = Select;
@@ -62,6 +65,81 @@ const getTimeframeDateRange = (timeframe) => {
 
   return [start.subtract(30, 'day'), end];
 };
+
+// The agent KPI columns, in the backend's METRIC_KEYS order, split into the four groups the card
+// is read in. Concatenated they ARE METRIC_KEYS — pinned by
+// tests/unit/test_admin_ui_payload_fixture_contracts.py against
+// business_app/services/sales/agent_metrics_service.py.
+const AGENT_METRICS_VISITS = ['planned_visits', 'completed_visits', 'plan_vs_fact_pct', 'unplanned_visits', 'visits_per_day', 'strike_rate_pct'];
+const AGENT_METRICS_OUTLETS = ['assigned_outlets', 'active_outlets', 'active_share_pct', 'new_outlets_registered', 'new_outlets_activated'];
+const AGENT_METRICS_ORDERS = ['orders_placed', 'orders_delivered_paid', 'bottles_delivered_paid', 'revenue_delivered_paid', 'agent_orders_cancelled', 'suggested_vs_accepted_pct'];
+const AGENT_METRICS_DISCIPLINE = ['out_of_range_checkins', 'skipped_checkins', 'avg_visit_minutes'];
+
+// The four group keys are the backend's METRIC_GROUPS keys, in its order — pinned by
+// tests/unit/test_admin_ui_payload_fixture_contracts.py. The labels are presentation.
+const AGENT_METRIC_GROUPS = [
+  { key: 'visits', label: 'Visits', metrics: AGENT_METRICS_VISITS },
+  { key: 'outlets', label: 'Outlets', metrics: AGENT_METRICS_OUTLETS },
+  { key: 'orders', label: 'Orders', metrics: AGENT_METRICS_ORDERS },
+  { key: 'discipline', label: 'Discipline', metrics: AGENT_METRICS_DISCIPLINE }
+];
+
+const AGENT_METRIC_KEYS = AGENT_METRIC_GROUPS.flatMap((group) => group.metrics);
+
+// English fallbacks for `sales_agents:metrics.<key>`: i18n's parseMissingKeyHandler renders the
+// call-site default, so an unseeded key reads as English rather than as a raw key. A Map, not an
+// object, because eslint's security/detect-object-injection is an error in this project.
+const AGENT_METRIC_LABELS = new Map([
+  ['planned_visits', 'Planned visits'],
+  ['completed_visits', 'Completed visits'],
+  ['plan_vs_fact_pct', 'Plan vs fact %'],
+  ['unplanned_visits', 'Unplanned visits'],
+  ['visits_per_day', 'Visits / day'],
+  ['strike_rate_pct', 'Strike rate %'],
+  ['assigned_outlets', 'Assigned outlets'],
+  ['active_outlets', 'Active outlets'],
+  ['active_share_pct', 'Active share %'],
+  ['new_outlets_registered', 'New outlets registered'],
+  ['new_outlets_activated', 'New outlets activated'],
+  ['orders_placed', 'Orders placed'],
+  ['orders_delivered_paid', 'Orders delivered & paid'],
+  ['bottles_delivered_paid', 'Bottles delivered & paid'],
+  ['revenue_delivered_paid', 'Revenue delivered & paid'],
+  ['agent_orders_cancelled', 'Orders cancelled'],
+  ['suggested_vs_accepted_pct', 'Suggested vs accepted %'],
+  ['out_of_range_checkins', 'Out-of-range check-ins'],
+  ['skipped_checkins', 'Skipped check-ins'],
+  ['avg_visit_minutes', 'Avg visit minutes']
+]);
+
+// Derived, not copied: every ratio METRIC_KEYS publishes ends in `_pct`, so a 21st one added on
+// the backend gets its `%` for free. A hand-listed set would be pinned by nothing — unlike the
+// four group arrays above — and would silently drop the suffix while every gate stayed green.
+const isPercentMetric = (key) => key.endsWith('_pct');
+
+// The service publishes null for "no denominator" (a week with nothing due, an agent with no
+// completed visit). Render the em dash the rest of the admin UI uses — never 0, which would read
+// as a real, bad number.
+const formatAgentMetric = (key, value) => {
+  if (value === null || value === undefined) return '—';
+  if (key === 'revenue_delivered_paid') return formatMoneyUZS(value);
+  if (isPercentMetric(key)) return `${value}%`;
+  return String(value);
+};
+
+// CSV rows carry the RAW numbers under translated headers: a spreadsheet must be able to sum the
+// column, and `escapeCsvCell` already writes null as an empty cell. The table's agent cell holds
+// the name over the phone; the CSV splits that into two columns.
+const buildAgentPerformanceExportRows = (agents, labels) =>
+  (agents || []).map((agent) => {
+    const row = { [labels.agent]: agent.agent_name, [labels.phone]: agent.phone };
+    AGENT_METRIC_KEYS.forEach((key) => {
+      // eslint-disable-next-line security/detect-object-injection
+      row[labels.metrics.get(key)] = agent[key];
+    });
+    return row;
+  });
+
 
 const buildExportRows = (activeTab, overviewData, salesTrends, churnData, deliveryHeatmap, revenueForecast, loyaltyAnalytics, inactiveData) => {
   if (activeTab === 'sales') {
@@ -143,7 +221,7 @@ const buildExportRows = (activeTab, overviewData, salesTrends, churnData, delive
 };
 
 const Analytics = () => {
-  const { t } = useTranslation('analytics');
+  const { t } = useTranslation(['analytics', 'sales_agents']);
   const [activeTab, setActiveTab] = useState('overview');
   const [timeframe, setTimeframe] = useState('30d');
   const [dateRange, setDateRange] = useState(getTimeframeDateRange('30d'));
@@ -226,6 +304,22 @@ const Analytics = () => {
     placeholderData: keepPreviousData,
     enabled: activeTab === 'inactive',
   });
+
+  // Every active agent in ONE pass (R17): a 20-row table must never fan out into 20 calls. The
+  // window is the page's own period controls — this tab adds no picker of its own.
+  const {
+    data: agentsMetrics,
+    isLoading: agentsMetricsLoading,
+    isError: agentsMetricsFailed,
+    error: agentsMetricsError,
+  } = useQuery({
+    queryKey: ['agentsMetrics', startDate, endDate],
+    queryFn: () => salesService.getAgentsMetrics({ start_date: startDate, end_date: endDate }),
+    placeholderData: keepPreviousData,
+    enabled: activeTab === 'agent_performance',
+  });
+
+  const agentMetricLabel = (key) => t(`sales_agents:metrics.${key}`, { defaultValue: AGENT_METRIC_LABELS.get(key) });
 
   const overviewTrendChartData = {
     labels: analyticsData.revenue_trend?.map((item) => item.label) || [],
@@ -350,6 +444,30 @@ const Analytics = () => {
   };
 
   const handleExport = () => {
+    // The agent KPIs export as real CSV with translated headers; every other tab keeps the
+    // page's existing xlsx export.
+    if (activeTab === 'agent_performance') {
+      const rows = buildAgentPerformanceExportRows(agentsMetrics?.agents, {
+        agent: t('sales_agents:agent', 'Agent'),
+        phone: t('sales_agents:phone', 'Phone'),
+        metrics: new Map(AGENT_METRIC_KEYS.map((key) => [key, agentMetricLabel(key)])),
+      });
+      if (!rows.length) {
+        // `exportToCSV([])` saves a 0-byte file and still answers `{ success: true }`, so the
+        // guard below can never fire. Refusing is the honest answer — this is the button an owner
+        // presses right after a refused range. The key is the estate's only seeded
+        // "No data to export" row (shared `ui` category, so every page resolves it through
+        // i18n.js's `fallbackNS: ['common']`); a neutral prefix for it is a backlog line.
+        message.warning(t('ui.delivery.no_data_to_export', 'No data to export'));
+        return;
+      }
+      const csvResult = exportUtils.exportToCSV(rows, `agent_performance_${startDate}_${endDate}`);
+      if (!csvResult.success) {
+        message.error(csvResult.message);
+      }
+      return;
+    }
+
     const rows = buildExportRows(
       activeTab,
       analyticsData,
@@ -530,6 +648,43 @@ const Analytics = () => {
         </Tag>
       )
     }
+  ];
+
+  // R47: both halves of plan-vs-fact come from the snapshotted days only, so a night the 01:20
+  // job missed costs the ratio precision rather than truth. The header says so, because
+  // "Plan vs fact %" on its own reads as a promise about the whole period. A `title` attribute
+  // rather than an antd Tooltip: one column needs it, and the native hint needs no portal.
+  const planVsFactHint = t('sales_agents:analytics.agent_performance.plan_vs_fact_hint', {
+    defaultValue: 'Measured only on days that had a plan',
+  });
+
+  const agentPerformanceColumns = [
+    {
+      title: t('sales_agents:agent', 'Agent'),
+      dataIndex: 'agent_name',
+      key: 'agent_name',
+      width: 200,
+      render: (name, record) => (
+        <div>
+          <div style={{ fontWeight: 'bold' }}>{name}</div>
+          <small style={{ color: '#666' }}>{record.phone}</small>
+        </div>
+      )
+    },
+    ...AGENT_METRIC_GROUPS.map((group) => ({
+      title: t(`sales_agents:analytics.agent_performance.group_${group.key}`, { defaultValue: group.label }),
+      key: group.key,
+      children: group.metrics.map((metricKey) => ({
+        title: metricKey === 'plan_vs_fact_pct'
+          ? <span title={planVsFactHint}>{agentMetricLabel(metricKey)}</span>
+          : agentMetricLabel(metricKey),
+        dataIndex: metricKey,
+        key: metricKey,
+        width: 150,
+        align: 'right',
+        render: (value) => formatAgentMetric(metricKey, value)
+      }))
+    }))
   ];
 
   const tabItems = [
@@ -1026,6 +1181,42 @@ const Analytics = () => {
           </Card>
         </div>
       )
+    },
+    {
+      key: 'agent_performance',
+      label: t('sales_agents:analytics.agent_performance.title', { defaultValue: 'Agent Performance' }),
+      children: (
+        <Card
+          title={t('sales_agents:analytics.agent_performance.title', { defaultValue: 'Agent Performance' })}
+          extra={<span style={{ color: '#666', fontSize: 12 }}>{`${agentsMetrics?.start_date || startDate} — ${agentsMetrics?.end_date || endDate}`}</span>}
+        >
+          {/* R12 caps the range server-side and this tab shares the page's own picker, whose
+              "Last year" option is a 365-day span. The tab does not re-check the cap (one
+              expression of the rule, server-side), so the 400's own message is the only honest
+              thing to show: an empty table under a header still naming the refused window reads
+              as "no agent did anything all year". Same pattern as pages/Visits.js:212. */}
+          {agentsMetricsFailed && (
+            <Alert
+              type="error"
+              showIcon
+              style={{ marginBottom: 12 }}
+              message={extractApiErrorMessage(agentsMetricsError, t('ui.common.error_occurred', 'An error occurred'))}
+            />
+          )}
+          <Table
+            loading={agentsMetricsLoading}
+            columns={agentPerformanceColumns}
+            dataSource={agentsMetrics?.agents || []}
+            rowKey="agent_user_id"
+            pagination={false}
+            size="small"
+            scroll={{ x: 2400 }}
+          />
+          <div style={{ marginTop: 12, color: '#666', fontSize: 12 }}>
+            {t('sales_agents:analytics.agent_performance.as_of_note', { defaultValue: 'Delivered-and-paid figures count the orders this agent placed in the period, as of now — a late delivery moves a past period.' })}
+          </div>
+        </Card>
+      )
     }
   ];
 
@@ -1039,6 +1230,7 @@ const Analytics = () => {
                 value={timeframe}
                 onChange={handleTimeframeChange}
                 style={{ width: 150 }}
+                data-testid="analytics-timeframe"
               >
                 <Option value="7d">{t('ui.analytics.last_7_days')}</Option>
                 <Option value="30d">{t('ui.analytics.last_30_days')}</Option>

@@ -73,3 +73,30 @@ def test_seed_script_includes_the_tier_discount_condition_key():
     text = SEED_SCRIPT.read_text(encoding="utf-8")
 
     assert "'api.loyalty.tier_discount_condition': {" in text
+
+
+def test_seed_script_includes_the_sales_stock_check_product_keys():
+    """The product switch, its table tag and the help text under the switch are
+    the flag's only human-readable surface. An unseeded key renders as the raw
+    dotted string in all three languages, so the admin sees
+    `ui.products.in_sales_stock_check` next to a toggle that decides what the
+    sales agent counts — and, for the help text, loses the only statement that
+    membership of the agent's list is `flag AND active`."""
+    text = SEED_SCRIPT.read_text(encoding="utf-8")
+
+    assert "'ui.products.in_sales_stock_check': _ui_tr(" in text
+    assert "'ui.products.sales_stock_check_tag': _ui_tr(" in text
+    assert "'ui.products.sales_stock_check_help': _ui_tr(" in text
+
+
+def test_seed_script_includes_the_sales_nav_group_keys():
+    """The `/sales` group's own labels (D24).
+
+    `ui.nav.outlets` and `ui.nav.sales_agents` moved under a parent that has no seed of its own,
+    and the group gained a third child. An unseeded key renders as the literal `ui.nav.sales` in
+    every non-English sidebar: i18next only falls back to the English default the call site
+    passed, which is exactly the language an admin working in uz/ru does not want."""
+    text = SEED_SCRIPT.read_text(encoding="utf-8")
+
+    assert "'ui.nav.sales': {" in text
+    assert "'ui.nav.visits': {" in text

@@ -10,9 +10,11 @@ can never be stored.
 Enforcement is layered:
 - Service / API layers call :func:`ensure_within_delivery_zone` (or
   ``is_within_tashkent`` directly) to reject early with a clean, localized 400.
-- The ``UserAddress`` model wires this in as a ``before_insert`` /
-  ``before_update`` backstop (see [business_app/models/user.py](../models/user.py))
-  so no write path — present or future — can bypass the zone check.
+- Coordinate-bearing models register :func:`register_delivery_zone_listeners`
+  as a ``before_insert`` / ``before_update`` backstop — ``UserAddress`` (see
+  [business_app/models/user.py](../models/user.py)) and ``Outlet`` (see
+  [business_app/models/sales.py](../models/sales.py)) — so no write path,
+  present or future, can bypass the zone check.
 """
 
 from typing import Optional
@@ -56,6 +58,39 @@ def ensure_within_delivery_zone(latitude: Optional[float], longitude: Optional[f
 
     if not is_within_tashkent(lat, lng):
         raise ValidationError(_outside_area_message())
+
+
+def register_delivery_zone_listeners(model_cls) -> None:
+    """Attach the SSOT backstop to any model carrying ``latitude``/``longitude``.
+
+    Never persist a coordinate outside ``TASHKENT_POLYGON``: refuse on insert,
+    and on update whenever either coordinate actually changed — so legacy
+    out-of-zone rows can still be edited for unrelated fields (title,
+    is_default, ...). Service / API layers already reject out-of-zone
+    coordinates early with a localized 400; this last-line guard makes the
+    invariant impossible to bypass from any present or future write path.
+    Coordinate-less rows (text-only addresses, un-pinned outlets) are skipped.
+
+    One rule, one implementation: ``UserAddress`` and ``Outlet`` both register
+    through here rather than restating the listener trio per model.
+    """
+    from sqlalchemy import event
+    from sqlalchemy import inspect as sa_inspect
+
+    def _enforce(target) -> None:
+        if target.latitude is None or target.longitude is None:
+            return
+        ensure_within_delivery_zone(target.latitude, target.longitude)
+
+    @event.listens_for(model_cls, "before_insert")
+    def _zone_before_insert(mapper, connection, target):
+        _enforce(target)
+
+    @event.listens_for(model_cls, "before_update")
+    def _zone_before_update(mapper, connection, target):
+        state = sa_inspect(target)
+        if state.attrs.latitude.history.has_changes() or state.attrs.longitude.history.has_changes():
+            _enforce(target)
 
 
 def _outside_area_message() -> str:

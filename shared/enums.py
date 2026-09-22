@@ -145,6 +145,7 @@ class UserRole(Enum):
     MANAGER = 'manager'
     DELIVERY_DRIVER = 'delivery_driver'
     OPERATOR = 'operator'
+    SALES_AGENT = 'sales_agent'
 
 
 class UserType(Enum):

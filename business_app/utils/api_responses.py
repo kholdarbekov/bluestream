@@ -98,6 +98,22 @@ def error_response(
     return jsonify(response.model_dump(exclude_none=True)), status_code
 
 
+def pagination_meta(page: int, per_page: int, total: int) -> Dict[str, Any]:
+    """The pagination block as a plain dict.
+
+    `paginated_response` publishes it as the response's TOP-LEVEL `meta`. A route whose data
+    envelope carries its own `meta` — the sales Visits feed, which publishes the resolved date
+    window beside the rows so the page never re-derives the period it asked for — builds it from
+    HERE instead of restating `pages`/`has_next`, so every list in the estate pages the same way.
+    """
+    import math
+
+    pages = math.ceil(total / per_page) if per_page > 0 else 0
+    return PaginationMeta(
+        page=page, per_page=per_page, total=total, pages=pages, has_next=page < pages, has_prev=page > 1
+    ).model_dump()
+
+
 def paginated_response(
     items: List[Any], page: int, per_page: int, total: int, message: str = None, additional_meta: Dict[str, Any] = None
 ):
@@ -124,15 +140,7 @@ def paginated_response(
             message='Orders retrieved successfully'
         )
     """
-    import math
-
-    pages = math.ceil(total / per_page) if per_page > 0 else 0
-
-    pagination = PaginationMeta(
-        page=page, per_page=per_page, total=total, pages=pages, has_next=page < pages, has_prev=page > 1
-    )
-
-    meta = pagination.model_dump()
+    meta = pagination_meta(page=page, per_page=per_page, total=total)
 
     # Add any additional metadata
     if additional_meta:
@@ -308,6 +316,7 @@ __all__ = [
     "success_response",
     "error_response",
     "paginated_response",
+    "pagination_meta",
     "created_response",
     "no_content_response",
     "not_found_response",

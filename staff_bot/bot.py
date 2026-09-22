@@ -94,9 +94,48 @@ from staff_bot.handlers.operator.manage_address import (
 from staff_bot.handlers.operator.recent_orders import RecentOrdersHandler
 from staff_bot.handlers.operator.orders_pool_view import OperatorOrdersPoolViewHandler
 from staff_bot.handlers.operator.redispatch import RedispatchHandler
+from staff_bot.handlers.sales.approvals import SalesApprovalsHandler
+from staff_bot.handlers.sales.hub import SalesHubHandler
+from staff_bot.handlers.sales.nearby import NearbyHandler, NB_LIST, NB_PIN
+from staff_bot.handlers.sales.new_outlet import (
+    NewOutletHandler,
+    NO_TYPE,
+    NO_NAME,
+    NO_CONTACT_NAME,
+    NO_CONTACT_PHONE,
+    NO_PIN,
+    NO_CLASS,
+    NO_NOTES,
+    NO_CONFIRM,
+)
+from staff_bot.handlers.sales.stats import SalesStatsHandler
+from staff_bot.handlers.sales.visit import (
+    VisitHandler,
+    V_CHECKIN,
+    V_STOCK,
+    V_STOCK_QTY,
+    V_ORDER,
+    V_ORDER_EDIT,
+    V_PAYMENT,
+    V_DAY,
+    V_NOTES,
+    V_CONFIRM,
+    V_CLOSE,
+)
+from staff_bot.handlers.sales.tryout import (
+    TryoutFromFieldHandler,
+    T_PRODUCTS,
+    T_QTY,
+    T_NOTES,
+    T_CONFIRM,
+)
 from staff_bot.handlers.common.profile import ProfileHandler
 from staff_bot.handlers.common.help import HelpHandler
 from staff_bot.permissions import require_auth
+from staff_bot.utils.flow_state import (
+    SALES_NEARBY_FLOW_KEY as NEARBY_FLOW_KEY,
+    SALES_TRYOUT_FLOW_KEY as TRYOUT_FLOW_KEY,
+)
 
 logger = logging.getLogger('staff_bot')
 
@@ -519,6 +558,15 @@ class StaffBot:
         operator_orders_pool_view_handler = OperatorOrdersPoolViewHandler()
         redispatch_handler = RedispatchHandler()
 
+        # Sales handlers
+        sales_hub_handler = SalesHubHandler()
+        new_outlet_handler = NewOutletHandler()
+        visit_handler = VisitHandler()
+        nearby_handler = NearbyHandler()
+        sales_approvals_handler = SalesApprovalsHandler()
+        sales_tryout_handler = TryoutFromFieldHandler()
+        sales_stats_handler = SalesStatsHandler()
+
         # Common handlers
         profile_handler = ProfileHandler()
         help_handler_instance = HelpHandler()
@@ -604,7 +652,7 @@ class StaffBot:
 
         start_reset = CommandHandler("start", _start_is_a_hard_reset)
 
-        def _flow_timeout(*, offer_menu: bool = True):
+        def _flow_timeout(*, offer_menu: bool = True, own_key: Optional[str] = None):
             """The `ConversationHandler.TIMEOUT` state for one staff flow.
 
             `conversation_timeout` is not self-announcing: when the timer fires
@@ -631,11 +679,26 @@ class StaffBot:
 
             Deliberately NOT raising ApplicationHandlerStop: PTB dispatches
             TIMEOUT handlers itself and documents that it has no effect there.
+
+            `own_key` is for the conversations that can be DISPLACED: PTB checks
+            an inactive conversation's entry points on every update, so a sales
+            agent can arm Nearby or a try-out and then walk into a visit, leaving
+            the loser armed with a timer nobody cancels. Such a timeout clears
+            only the key its own conversation owns -- never the whole flow set,
+            which would take the live flow's draft with it -- and says nothing at
+            all when that key is already gone, because the person it would be
+            talking to left this conversation minutes ago and is standing in
+            another one.
             """
             async def _announce_timeout(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 try:
+                    if own_key is not None and own_key not in (context.user_data or {}):
+                        return ConversationHandler.END
                     language = await self._language_handler._get_language(update, context)
-                    await self._clear_all_pending_flows(context, update)
+                    if own_key is None:
+                        await self._clear_all_pending_flows(context, update)
+                    else:
+                        context.user_data.pop(own_key, None)
                     text = i18n.get('staff.flow_timed_out', language)
                     keyboard = (
                         MenuKeyboards.main_menu(
@@ -686,6 +749,14 @@ class StaffBot:
             'manage_address': manage_address_handler,
             'recent_orders': recent_orders_handler,
             'redispatch': redispatch_handler,
+        }
+        self._sales_handlers = {
+            'hub': sales_hub_handler,
+            'new_outlet': new_outlet_handler,
+            'visit': visit_handler,
+            'nearby': nearby_handler,
+            'approvals': sales_approvals_handler,
+            'tryout': sales_tryout_handler,
         }
         self._common_handlers = {
             'profile': profile_handler,
@@ -924,6 +995,10 @@ class StaffBot:
         create_client_tap = self._menu_label_tap_filter('staff.menu.create_client')
         search_client_tap = self._menu_label_tap_filter('staff.menu.search_client')
         create_order_tap = self._menu_label_tap_filter('staff.menu.create_order')
+        # The sales agent's own entry-point label, same decider: "New outlet"
+        # opens a conversation rather than routing, so it is deliberately
+        # absent from `_menu_action_map`.
+        new_outlet_tap = self._menu_label_tap_filter('staff.menu.new_outlet')
 
         # Reply-keyboard MAIN-MENU escape, registered on EVERY state of every
         # conversation below. A menu tap while typing (phone/name/address/note/
@@ -1387,6 +1462,562 @@ class StaffBot:
             CallbackQueryHandler(_handle_flow_cancel, pattern="^staff_flow_cancel$")
         )
 
+        # ------------------------------------------------------------------
+        # Sales agent: "New outlet" field onboarding
+        # ------------------------------------------------------------------
+        # Registered BEFORE the `staff_sales_*` callbacks below and before the
+        # global LOCATION handler, both of which it has to outrank while an
+        # agent is mid-walk-in: the pin they share at the shop door is this
+        # flow's answer, not a driver position update, and the "open the
+        # duplicate we already have" button reuses `staff_sales_outlet_<id>`.
+        #
+        # The step patterns are `\w+` rather than the narrower alternations the
+        # keyboards actually draw, for the same reason the hub's list pattern
+        # is (see the note below): an alternation is a shape
+        # `test_every_registered_pattern_is_readable_by_the_collision_check`
+        # cannot sample, so it would silently stop checking these buttons for
+        # theft. Nothing widens as a result -- `callback_data` is bot-minted,
+        # and `select_type` re-checks the value against `OUTLET_TYPES` rather
+        # than trusting the pattern.
+        new_outlet_conv = ConversationHandler(
+            entry_points=[
+                CallbackQueryHandler(new_outlet_handler.start_new_outlet, pattern="^staff_sales_new_outlet$"),
+                MessageHandler(new_outlet_tap & ~filters.COMMAND, new_outlet_handler.start_new_outlet),
+            ],
+            states={
+                NO_TYPE: [
+                    menu_escape,
+                    CallbackQueryHandler(new_outlet_handler.select_type, pattern=r"^staff_sales_no_type_\w+$"),
+                ],
+                NO_NAME: [
+                    menu_escape,
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, new_outlet_handler.receive_name),
+                ],
+                NO_CONTACT_NAME: [
+                    menu_escape,
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, new_outlet_handler.receive_contact_name),
+                    CallbackQueryHandler(new_outlet_handler.skip_contact_name, pattern=r"^staff_sales_no_skip_\w+$"),
+                ],
+                NO_CONTACT_PHONE: [
+                    menu_escape,
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, new_outlet_handler.receive_contact_phone),
+                    CallbackQueryHandler(new_outlet_handler.skip_contact_phone, pattern=r"^staff_sales_no_skip_\w+$"),
+                ],
+                NO_PIN: [
+                    menu_escape,
+                    MessageHandler(filters.LOCATION, new_outlet_handler.receive_pin),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, new_outlet_handler.receive_typed_address),
+                ],
+                NO_CLASS: [
+                    menu_escape,
+                    CallbackQueryHandler(new_outlet_handler.select_class, pattern=r"^staff_sales_no_class_\w+$"),
+                ],
+                NO_NOTES: [
+                    menu_escape,
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, new_outlet_handler.receive_notes),
+                    CallbackQueryHandler(new_outlet_handler.skip_notes, pattern=r"^staff_sales_no_skip_\w+$"),
+                ],
+                NO_CONFIRM: [
+                    menu_escape,
+                    CallbackQueryHandler(new_outlet_handler.confirm, pattern="^staff_sales_no_confirm$"),
+                    CallbackQueryHandler(new_outlet_handler.create_anyway, pattern="^staff_sales_no_force$"),
+                    CallbackQueryHandler(new_outlet_handler.link_existing, pattern=r"^staff_sales_no_link_\d+$"),
+                    CallbackQueryHandler(new_outlet_handler.open_existing, pattern=r"^staff_sales_outlet_\d+$"),
+                ],
+                ConversationHandler.TIMEOUT: _flow_timeout(),
+            },
+            fallbacks=[
+                CommandHandler("cancel", new_outlet_handler.cancel),
+                start_reset,
+                CallbackQueryHandler(new_outlet_handler.cancel, pattern="^staff_back_to_main$"),
+                CallbackQueryHandler(_leave_conversation, pattern="^staff_cash_hub$"),
+                # An INLINE "My outlets" tapped mid-walk-in. Without this the
+                # hub rendered and the conversation stayed armed behind it for
+                # the rest of its five minutes, ready to swallow whatever the
+                # agent typed next -- the reply-keyboard label escapes through
+                # `menu_escape`, but an inline button reaches no state handler
+                # at all. Renders nothing, for the same reason the cash-hub
+                # fallback renders nothing: `show_hub` is registered in GROUP 1
+                # below and draws the destination exactly once, flow or no flow.
+                CallbackQueryHandler(_leave_conversation, pattern="^staff_sales_hub$"),
+            ],
+            per_chat=True,
+            per_user=True,
+            name="staff_sales_new_outlet",
+            conversation_timeout=300,
+            allow_reentry=True,
+        )
+        self.application.add_handler(new_outlet_conv)
+
+        # ------------------------------------------------------------------
+        # Sales agent: the visit loop
+        # ------------------------------------------------------------------
+        # Registered here for the same two reasons the new-outlet flow above
+        # is: it has a LOCATION state (the pin an agent shares at the shop
+        # door is this visit's check-in, NOT a driver position update, so it
+        # has to outrank the global LOCATION handler further down), and its
+        # buttons share the `staff_sales_` prefix with the group-0 callbacks
+        # that follow.
+        #
+        # Step patterns are `\d+` shapes rather than the exact grids the
+        # keyboards draw, because an alternation is a shape
+        # `test_every_registered_pattern_is_readable_by_the_collision_check`
+        # cannot sample -- it would quietly stop checking these buttons for
+        # theft. Nothing widens as a result: every handler re-checks its
+        # suffix against the product list and the quantity grids.
+        #
+        # V_ORDER..V_CLOSE are declared with the menu escape alone. A state
+        # that is absent from `states` makes PTB log "returned state X which
+        # is unknown" and drop the agent's place, so the states this task's
+        # screens RETURN have to exist before Task 12 fills them in. Their
+        # keyboards already draw Abandon (Task 9); until Task 12 registers the
+        # handler that button is inert on those screens, which is why
+        # `tests/unit/test_staff_bot_routing_regressions.py` stays red until
+        # then rather than being quieted with a placeholder pattern.
+        #
+        # Task 12 replaces these seven lines verbatim, comments included --
+        # keep them exactly as written here.
+
+        class _StaleFlowTap(CallbackQueryHandler):
+            """A conversation's LAST entry point: the taps nobody else claims.
+
+            PTB keeps conversation state in memory, so a bot RESTART empties it
+            while every screen an agent is looking at keeps its buttons. Those
+            taps used to match no handler at all -- the button spun and nothing
+            happened, on a visit still open on the server. The fix has to be an
+            ENTRY POINT (the `staff_transfer_driver_\\d+` precedent above), not a
+            second global handler: only an entry point's return value can ARM
+            the conversation, and without that the next tap lands here again.
+
+            Parameterised by prefix and handler because the try-out basket has the
+            same hole and must answer it the same way (its own handler says so:
+            nothing is written until Confirm).
+
+            The subclass exists because `allow_reentry=True` makes PTB search
+            entry points BEFORE the current state's handlers
+            (`ConversationHandler.check_update`, PTB 22.3: "Search entry points
+            for a match" runs `if state is None or self.allow_reentry`). A plain
+            catch-all `^staff_sales_v_\\w+$` entry point therefore swallows the
+            LIVE flow whole -- measured, not reasoned: 28 of the 35 visit
+            journeys failed, every screen answering with a re-render instead of
+            the button's own handler.
+
+            So it claims a tap only when the live conversation would not: no
+            conversation at all (the restart), or a conversation in a state that
+            does not register this button (a tap from an OLDER screen, which
+            before this fell through to nothing). Anything the state does claim
+            is left to the state, which is where the per-screen `_stay` guards
+            live.
+            """
+
+            conversation = None  # set to the owning conversation immediately after it is built
+
+            def check_update(self, update):
+                check = super().check_update(update)
+                conversation = self.conversation
+                if check is None or check is False or conversation is None:
+                    return check
+                state = conversation._conversations.get(conversation._get_key(update))
+                if state is None:
+                    return check
+                for candidate in conversation.states.get(state, []):
+                    claimed = candidate.check_update(update)
+                    if claimed is not None and claimed is not False:
+                        return None
+                return check
+
+        stale_visit_tap = _StaleFlowTap(visit_handler.stale_tap, pattern=r"^staff_sales_v_\w+$")
+
+        visit_conv = ConversationHandler(
+            entry_points=[
+                CallbackQueryHandler(visit_handler.start_visit, pattern=r"^staff_sales_visit_start_\d+$"),
+                CallbackQueryHandler(visit_handler.resume_visit, pattern="^staff_sales_visit_resume$"),
+                # LAST: only the taps no live state claims (see _StaleFlowTap).
+                stale_visit_tap,
+            ],
+            states={
+                # 📷 A photo is accepted at EVERY step (D17), so both handlers
+                # are registered in every state rather than at the top level:
+                # only a state handler can keep the agent where they are, and
+                # both return None, which PTB reads as "state unchanged". The
+                # pair sits directly under `menu_escape` in each state -- a
+                # photo is neither text nor a location, so it collides with
+                # nothing below it.
+                V_CHECKIN: [
+                    menu_escape,
+                    MessageHandler(filters.PHOTO, visit_handler.receive_photo),
+                    CallbackQueryHandler(visit_handler.choose_photo_kind, pattern=r"^staff_sales_v_photo_\w+$"),
+                    MessageHandler(filters.LOCATION, visit_handler.receive_checkin),
+                    CallbackQueryHandler(visit_handler.skip_checkin, pattern="^staff_sales_v_skipcheckin$"),
+                    CallbackQueryHandler(visit_handler.resume_from_conflict, pattern="^staff_sales_v_resume$"),
+                    CallbackQueryHandler(visit_handler.abandon, pattern="^staff_sales_v_abandon$"),
+                ],
+                V_STOCK: [
+                    menu_escape,
+                    MessageHandler(filters.PHOTO, visit_handler.receive_photo),
+                    CallbackQueryHandler(visit_handler.choose_photo_kind, pattern=r"^staff_sales_v_photo_\w+$"),
+                    CallbackQueryHandler(visit_handler.open_product, pattern=r"^staff_sales_v_stock_\d+$"),
+                    CallbackQueryHandler(visit_handler.stock_done, pattern="^staff_sales_v_stockdone$"),
+                    CallbackQueryHandler(visit_handler.stock_retry, pattern="^staff_sales_v_stockretry$"),
+                    CallbackQueryHandler(visit_handler.abandon, pattern="^staff_sales_v_abandon$"),
+                ],
+                V_STOCK_QTY: [
+                    menu_escape,
+                    MessageHandler(filters.PHOTO, visit_handler.receive_photo),
+                    CallbackQueryHandler(visit_handler.choose_photo_kind, pattern=r"^staff_sales_v_photo_\w+$"),
+                    CallbackQueryHandler(visit_handler.set_quantity, pattern=r"^staff_sales_v_qty_\d+_\d+$"),
+                    CallbackQueryHandler(visit_handler.set_empties, pattern=r"^staff_sales_v_empt_\d+_\d+$"),
+                    CallbackQueryHandler(visit_handler.toggle_sold_out, pattern=r"^staff_sales_v_soldout_\d+$"),
+                    CallbackQueryHandler(visit_handler.toggle_low, pattern=r"^staff_sales_v_low_\d+$"),
+                    CallbackQueryHandler(visit_handler.stock_back, pattern="^staff_sales_v_stockback$"),
+                    # Drawn on this screen now, so registered in this state: an
+                    # unregistered button falls through to `_StaleFlowTap`, which
+                    # re-renders the server's step instead of ending the visit.
+                    CallbackQueryHandler(visit_handler.abandon, pattern="^staff_sales_v_abandon$"),
+                ],
+                # `menu_escape` stays FIRST in every state: it is a
+                # MessageHandler behind MenuTapFilter, and in the three states
+                # that also take free text it is the only thing standing
+                # between a main-menu tap and being filed as a delivery note.
+                V_ORDER: [
+                    menu_escape,
+                    MessageHandler(filters.PHOTO, visit_handler.receive_photo),
+                    CallbackQueryHandler(visit_handler.choose_photo_kind, pattern=r"^staff_sales_v_photo_\w+$"),
+                    CallbackQueryHandler(visit_handler.take_suggestion, pattern="^staff_sales_v_ordersugg$"),
+                    CallbackQueryHandler(visit_handler.edit_order, pattern="^staff_sales_v_orderedit$"),
+                    CallbackQueryHandler(visit_handler.take_last_order, pattern="^staff_sales_v_orderlast$"),
+                    CallbackQueryHandler(visit_handler.no_order, pattern="^staff_sales_v_noorder$"),
+                    CallbackQueryHandler(visit_handler.choose_no_reason, pattern=r"^staff_sales_v_noreason_\w+$"),
+                    CallbackQueryHandler(visit_handler.abandon, pattern="^staff_sales_v_abandon$"),
+                ],
+                V_ORDER_EDIT: [
+                    menu_escape,
+                    MessageHandler(filters.PHOTO, visit_handler.receive_photo),
+                    CallbackQueryHandler(visit_handler.choose_photo_kind, pattern=r"^staff_sales_v_photo_\w+$"),
+                    CallbackQueryHandler(visit_handler.open_order_line, pattern=r"^staff_sales_v_oqty_\d+$"),
+                    CallbackQueryHandler(visit_handler.set_order_quantity, pattern=r"^staff_sales_v_oqtyset_\d+_\d+$"),
+                    CallbackQueryHandler(visit_handler.order_lines_done, pattern="^staff_sales_v_orderdone$"),
+                    # The same button, the same handler, one state further
+                    # back: the basket's Back is the order options.
+                    CallbackQueryHandler(visit_handler.order_back, pattern="^staff_sales_v_orderback$"),
+                    CallbackQueryHandler(visit_handler.abandon, pattern="^staff_sales_v_abandon$"),
+                ],
+                V_PAYMENT: [
+                    menu_escape,
+                    MessageHandler(filters.PHOTO, visit_handler.receive_photo),
+                    CallbackQueryHandler(visit_handler.choose_photo_kind, pattern=r"^staff_sales_v_photo_\w+$"),
+                    CallbackQueryHandler(visit_handler.choose_payment, pattern=r"^staff_sales_v_pay_\w+$"),
+                    CallbackQueryHandler(visit_handler.abandon, pattern="^staff_sales_v_abandon$"),
+                ],
+                V_DAY: [
+                    menu_escape,
+                    MessageHandler(filters.PHOTO, visit_handler.receive_photo),
+                    CallbackQueryHandler(visit_handler.choose_photo_kind, pattern=r"^staff_sales_v_photo_\w+$"),
+                    CallbackQueryHandler(visit_handler.choose_day, pattern=r"^staff_sales_v_day_\w+$"),
+                    CallbackQueryHandler(visit_handler.day_back, pattern="^staff_sales_v_dayback$"),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, visit_handler.receive_delivery_date),
+                    CallbackQueryHandler(visit_handler.abandon, pattern="^staff_sales_v_abandon$"),
+                ],
+                V_NOTES: [
+                    menu_escape,
+                    MessageHandler(filters.PHOTO, visit_handler.receive_photo),
+                    CallbackQueryHandler(visit_handler.choose_photo_kind, pattern=r"^staff_sales_v_photo_\w+$"),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, visit_handler.receive_order_notes),
+                    CallbackQueryHandler(visit_handler.skip_order_notes, pattern=r"^staff_sales_v_skip_\w+$"),
+                    CallbackQueryHandler(visit_handler.abandon, pattern="^staff_sales_v_abandon$"),
+                ],
+                V_CONFIRM: [
+                    menu_escape,
+                    MessageHandler(filters.PHOTO, visit_handler.receive_photo),
+                    CallbackQueryHandler(visit_handler.choose_photo_kind, pattern=r"^staff_sales_v_photo_\w+$"),
+                    CallbackQueryHandler(visit_handler.confirm_order, pattern="^staff_sales_v_orderconfirm$"),
+                    CallbackQueryHandler(visit_handler.order_back, pattern="^staff_sales_v_orderback$"),
+                    CallbackQueryHandler(visit_handler.abandon, pattern="^staff_sales_v_abandon$"),
+                ],
+                # One state for the whole close: the outcome, the reason it
+                # sometimes needs, the note and the next date are four
+                # questions on one screen's worth of flow, and `close['step']`
+                # (not a PTB state) is what says which one is showing.
+                V_CLOSE: [
+                    menu_escape,
+                    MessageHandler(filters.PHOTO, visit_handler.receive_photo),
+                    CallbackQueryHandler(visit_handler.choose_photo_kind, pattern=r"^staff_sales_v_photo_\w+$"),
+                    CallbackQueryHandler(visit_handler.choose_outcome, pattern=r"^staff_sales_v_outcome_\w+$"),
+                    CallbackQueryHandler(visit_handler.choose_no_reason, pattern=r"^staff_sales_v_noreason_\w+$"),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, visit_handler.receive_close_notes),
+                    CallbackQueryHandler(visit_handler.skip_close_notes, pattern=r"^staff_sales_v_skip_\w+$"),
+                    CallbackQueryHandler(visit_handler.choose_next_visit, pattern=r"^staff_sales_v_next_\w+$"),
+                    CallbackQueryHandler(visit_handler.abandon, pattern="^staff_sales_v_abandon$"),
+                ],
+                # NOT the shared `_flow_timeout()`: its copy says the flow was
+                # closed and nothing was saved, and for a visit both halves are
+                # false -- the server keeps it open and Resume walks back in.
+                ConversationHandler.TIMEOUT: [
+                    MessageHandler(filters.ALL, visit_handler._timed_out),
+                    CallbackQueryHandler(visit_handler._timed_out),
+                ],
+            },
+            fallbacks=[
+                CommandHandler("cancel", visit_handler.cancel),
+                start_reset,
+                # Back to main LEAVES the visit open on the server. Only the
+                # explicit Abandon button ends one -- an agent who steps out
+                # must be able to walk back in on the same check-in.
+                CallbackQueryHandler(visit_handler.cancel, pattern="^staff_back_to_main$"),
+                CallbackQueryHandler(_leave_conversation, pattern="^staff_cash_hub$"),
+                CallbackQueryHandler(_leave_conversation, pattern="^staff_sales_hub$"),
+            ],
+            per_chat=True,
+            per_user=True,
+            name="staff_sales_visit",
+            conversation_timeout=300,
+            allow_reentry=True,
+        )
+        stale_visit_tap.conversation = visit_conv
+        self.application.add_handler(visit_conv)
+
+        # ------------------------------------------------------------------
+        # Sales agent: Nearby
+        # ------------------------------------------------------------------
+        # AFTER the visit conversation and before the global LOCATION handler,
+        # for both halves of the same reason. It has a LOCATION state, so it
+        # must outrank the global handler (a pin shared here is a search, not
+        # a driver position); and it must NOT outrank the visit, whose
+        # check-in is the pin that money hangs off — an agent can only reach
+        # this screen through the hub, which ends the visit conversation on
+        # the way past, so the two are never armed at once.
+        #
+        # `staff_sales_nb_\w+` is registered as an ENTRY POINT as well as in
+        # NB_LIST: PTB keeps conversation state in memory, so a restart leaves
+        # 📍 New pin live on a screen with no conversation behind it, and only
+        # an entry point's return value can re-arm one. The same handler serves
+        # both registrations, so the live path and the stale path cannot answer
+        # differently. The pattern is wider than the single literal the list
+        # draws for the same reason the hub's list pattern is `\w+` (see the
+        # note below): an alternation is a shape
+        # `test_every_registered_pattern_is_readable_by_the_collision_check`
+        # cannot sample. Nothing widens as a result — every
+        # `staff_sales_nb_*` tap means "ask me for a pin", and asking writes
+        # nothing.
+        nearby_conv = ConversationHandler(
+            entry_points=[
+                CallbackQueryHandler(nearby_handler.start_nearby, pattern="^staff_sales_nearby$"),
+                CallbackQueryHandler(nearby_handler.start_nearby, pattern=r"^staff_sales_nb_\w+$"),
+            ],
+            states={
+                NB_PIN: [
+                    menu_escape,
+                    MessageHandler(filters.LOCATION, nearby_handler.receive_pin),
+                ],
+                NB_LIST: [
+                    menu_escape,
+                    CallbackQueryHandler(nearby_handler.start_nearby, pattern=r"^staff_sales_nb_\w+$"),
+                    # Drawn by THIS screen, so registered in it: the hub's
+                    # group-0 handler would draw the same card and leave this
+                    # conversation armed behind it.
+                    CallbackQueryHandler(nearby_handler.open_outlet, pattern=r"^staff_sales_outlet_\d+$"),
+                ],
+                ConversationHandler.TIMEOUT: _flow_timeout(own_key=NEARBY_FLOW_KEY),
+            },
+            fallbacks=[
+                CommandHandler("cancel", nearby_handler.cancel),
+                start_reset,
+                CallbackQueryHandler(nearby_handler.cancel, pattern="^staff_back_to_main$"),
+                CallbackQueryHandler(_leave_conversation, pattern="^staff_cash_hub$"),
+                # The ⬅️ on the pin prompt and on the list. Renders nothing
+                # here: `show_hub` is registered in GROUP 1 and draws the
+                # destination exactly once, flow or no flow.
+                CallbackQueryHandler(_leave_conversation, pattern="^staff_sales_hub$"),
+            ],
+            per_chat=True,
+            per_user=True,
+            name="staff_sales_nearby",
+            conversation_timeout=300,
+            allow_reentry=True,
+        )
+        self.application.add_handler(nearby_conv)
+
+        # ------------------------------------------------------------------
+        # Sales agent: a try-out from the field
+        # ------------------------------------------------------------------
+        # Group 0, ahead of the "My outlets" callbacks below, for the same
+        # reason the flows above are: its entry button is drawn on the outlet
+        # CARD, whose other buttons are those group-0 handlers, and PTB runs the
+        # FIRST handler that claims an update.
+        #
+        # It borrows `staff_sales_outlet_<id>` rather than registering a copy:
+        # the receipt and the no-phone screen both END the conversation before
+        # drawing that button, so the hub's handler is the one that answers it.
+        #
+        # Step patterns are `\d+` shapes rather than the grid the keyboard
+        # draws, because an alternation is a shape
+        # `test_every_registered_pattern_is_readable_by_the_collision_check`
+        # cannot sample -- it would quietly stop checking these buttons for
+        # theft. Nothing widens as a result: `set_quantity` re-checks the value
+        # against TRYOUT_QTY_CHOICES and the product against the fetched list.
+        # The basket's own stale-tap entry point, the visit's shape: after a
+        # restart every `staff_sales_t_*` button on the agent's screen matched
+        # nothing at all and spun.
+        stale_tryout_tap = _StaleFlowTap(sales_tryout_handler.stale_tap, pattern=r"^staff_sales_t_\w+$")
+
+        tryout_conv = ConversationHandler(
+            entry_points=[
+                CallbackQueryHandler(sales_tryout_handler.start_tryout, pattern=r"^staff_sales_tryout_\d+$"),
+                # LAST: only the taps no live state claims (see _StaleFlowTap).
+                stale_tryout_tap,
+            ],
+            states={
+                # `menu_escape` stays FIRST in every state: it is a
+                # MessageHandler behind MenuTapFilter, and in T_NOTES it is the
+                # only thing standing between a main-menu tap and being filed
+                # as a try-out note.
+                #
+                # Every registration below keeps `CallbackQueryHandler(` and its
+                # `pattern=` on ONE line: `test_staff_callback_literals_have
+                # _registered_handlers` scrapes bot.py with a line-bounded regex,
+                # and a wrapped call is a pattern it cannot see — which makes
+                # every literal in this conversation read as unregistered.
+                T_PRODUCTS: [
+                    menu_escape,
+                    CallbackQueryHandler(sales_tryout_handler.open_product, pattern=r"^staff_sales_t_p_\d+$"),
+                    CallbackQueryHandler(sales_tryout_handler.products_done, pattern="^staff_sales_t_done$"),
+                ],
+                T_QTY: [
+                    menu_escape,
+                    CallbackQueryHandler(sales_tryout_handler.set_quantity, pattern=r"^staff_sales_t_qty_\d+_\d+$"),
+                    CallbackQueryHandler(sales_tryout_handler.back_to_products, pattern="^staff_sales_t_back$"),
+                ],
+                T_NOTES: [
+                    menu_escape,
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, sales_tryout_handler.receive_notes),
+                    CallbackQueryHandler(sales_tryout_handler.skip_notes, pattern="^staff_sales_t_skip$"),
+                ],
+                T_CONFIRM: [
+                    menu_escape,
+                    CallbackQueryHandler(sales_tryout_handler.confirm, pattern="^staff_sales_t_confirm$"),
+                    # The same button and the same handler, one state further
+                    # back: the confirm card's Back is the basket.
+                    CallbackQueryHandler(sales_tryout_handler.back_to_products, pattern="^staff_sales_t_back$"),
+                ],
+                # The SHARED timeout copy, unlike the visit's: "nothing was
+                # saved" is simply true here -- a try-out exists only after
+                # Confirm. Scoped to its OWN key, because this conversation can
+                # be displaced by a visit and must not clear that visit's draft.
+                ConversationHandler.TIMEOUT: _flow_timeout(own_key=TRYOUT_FLOW_KEY),
+            },
+            fallbacks=[
+                CommandHandler("cancel", sales_tryout_handler.cancel),
+                start_reset,
+                CallbackQueryHandler(sales_tryout_handler.cancel, pattern="^staff_back_to_main$"),
+                CallbackQueryHandler(_leave_conversation, pattern="^staff_cash_hub$"),
+                # An INLINE "My outlets" tapped mid-basket, exactly as the
+                # new-outlet flow handles it: renders nothing, because
+                # `show_hub` is registered in GROUP 1 and draws the destination
+                # once, flow or no flow.
+                CallbackQueryHandler(_leave_conversation, pattern="^staff_sales_hub$"),
+            ],
+            per_chat=True,
+            per_user=True,
+            name="staff_sales_tryout",
+            conversation_timeout=300,
+            allow_reentry=True,
+        )
+        stale_tryout_tap.conversation = tryout_conv
+        self.application.add_handler(tryout_conv)
+
+        # ------------------------------------------------------------------
+        # Sales agent: "My outlets"
+        # ------------------------------------------------------------------
+        # Group 0, registered AFTER the operator conversations and BEFORE the
+        # global LOCATION handler. Order matters because PTB consults group-0
+        # handlers in registration order and runs the FIRST that claims the
+        # update: the conversations therefore get first refusal on every
+        # `staff_sales_*` tap. None of them carries a pattern matching one, so
+        # the tap falls through to these handlers — while a conversation's own
+        # callbacks keep winning over anything registered here, which is what
+        # an agent who is also an operator needs mid-flow.
+        #
+        # The list pattern is `\w+` rather than the narrower
+        # `^staff_sales_list_(prospects|all)(_\d+)?$` because BOTH static
+        # wiring tests have to be able to read it, and an alternation defeats
+        # them in different ways: `test_every_registered_pattern_is_readable_by
+        # _the_collision_check` can only sample a concrete callback_data out of
+        # a GROUP-FREE pattern (a pattern it cannot sample is a handler nobody
+        # checks for theft), and `test_staff_callback_literals_have_registered
+        # _handlers` materialises `staff_sales_list_{scope}_{page + 1}` — the
+        # pagination button `SalesKeyboards.outlet_list` draws — into
+        # `staff_sales_list_1_1`, which only `\w+` accepts. Nothing widens as a
+        # result: `callback_data` is bot-minted, and the only two scopes drawn
+        # are `SalesKeyboards.hub`'s.
+        #
+        # The hub itself is the one exception: it is a NAVIGATION DESTINATION,
+        # so it lives in group 1 with the main menu and the cash hub. The new
+        # outlet conversation lists `^staff_sales_hub$` as a fallback, and a
+        # group-0 registration here would shadow that fallback for the same
+        # callback data -- the hub would render while the flow stayed armed,
+        # which is exactly the bug the group-1 note above records. Group 1 ends
+        # the flow in group 0 and draws the hub once, whether or not one was open.
+        self.application.add_handler(
+            CallbackQueryHandler(sales_hub_handler.show_hub, pattern="^staff_sales_hub$"),
+            group=1,
+        )
+        self.application.add_handler(
+            CallbackQueryHandler(sales_hub_handler.show_list, pattern=r"^staff_sales_list_\w+$")
+        )
+        self.application.add_handler(
+            CallbackQueryHandler(sales_hub_handler.show_outlet, pattern=r"^staff_sales_outlet_\d+$")
+        )
+        self.application.add_handler(
+            CallbackQueryHandler(sales_hub_handler.request_activation, pattern=r"^staff_sales_activate_\d+$")
+        )
+
+        # The agent's own KPI card. Group 0 beside the hub's callbacks and for
+        # the same reason: it is not a conversation destination, so an open
+        # flow keeps first refusal on the tap. Read-only, so unlike Nearby and
+        # the try-out it is not refused while a visit is live -- it arms
+        # nothing and writes nothing.
+        self.application.add_handler(
+            CallbackQueryHandler(sales_stats_handler.show_stats, pattern="^staff_sales_stats$")
+        )
+        self.application.add_handler(
+            CallbackQueryHandler(sales_stats_handler.change_period, pattern=r"^staff_sales_stats_\w+$")
+        )
+
+        # ------------------------------------------------------------------
+        # Operator: the activation-request queue
+        # ------------------------------------------------------------------
+        # Group 0 beside the hub's callbacks, and for the same reasons: none of
+        # these is a conversation destination, so a flow that is open must keep
+        # first refusal on the tap. `staff_sales_approvals` is also the
+        # callback_data on the push button the backend sends an operator when
+        # an agent requests activation (webhook_server.sales_event_handler), so
+        # it has to answer from a cold chat as well as from the profile hub.
+        #
+        # The reject pattern is `\d+_\w+` rather than the four-way alternation
+        # `SalesKeyboards.approval_actions` draws, for the same reason the list
+        # pattern above is `\w+`: `_sample_matching` cannot turn an alternation
+        # into a concrete callback_data, so the theft check
+        # (test_no_callback_button_is_stolen_by_an_earlier_handler) would skip
+        # this handler. That skip is not silent --
+        # `test_every_registered_pattern_is_readable_by_the_collision_check`
+        # fails loudly on any unreadable pattern -- but the only way to quiet it
+        # is to allowlist the pattern, and THAT is what would leave these
+        # buttons permanently unchecked for theft. Nothing widens as a result:
+        # `SalesApprovalsHandler.reject` re-checks the reason against
+        # `REJECT_REASONS` rather than trusting the pattern.
+        self.application.add_handler(
+            CallbackQueryHandler(sales_approvals_handler.show_requests, pattern="^staff_sales_approvals$")
+        )
+        self.application.add_handler(
+            CallbackQueryHandler(sales_approvals_handler.review, pattern=r"^staff_sales_review_\d+$")
+        )
+        self.application.add_handler(
+            CallbackQueryHandler(sales_approvals_handler.approve, pattern=r"^staff_sales_approve_\d+$")
+        )
+        self.application.add_handler(
+            CallbackQueryHandler(sales_approvals_handler.reject, pattern=r"^staff_sales_reject_\d+_\w+$")
+        )
+
         # Location handler for live location updates. Private chats only:
         # request_location buttons are inert in groups, and a group member's
         # stray pin must never be written as a driver's position.
@@ -1454,6 +2085,7 @@ class StaffBot:
             i18n.get('staff.menu.active_deliveries', language): 'staff_active_deliveries',
             i18n.get('staff.menu.tryouts', language): 'staff_tryouts_hub',
             i18n.get('staff.menu.cash', language): 'staff_cash_hub',
+            i18n.get('staff.menu.my_outlets', language): 'staff_sales_hub',
             i18n.get('staff.menu.profile', language): 'staff_profile',
             i18n.get('staff.menu.settings', language): 'staff_settings',
             i18n.get('staff.menu.help', language): 'staff_help',
@@ -1659,6 +2291,7 @@ class StaffBot:
             'staff_new_orders_unified': self._route_new_orders,
             'staff_tryouts_hub': self._delivery_handlers['tryouts'].show_hub,
             'staff_cash_hub': self._delivery_handlers['status_update'].show_cash_hub,
+            'staff_sales_hub': self._sales_handlers['hub'].show_hub,
             'staff_active_deliveries': self._delivery_handlers['active_delivery'].show_active_deliveries,
             'staff_profile': self._common_handlers['profile'].show_profile,
             'staff_settings': None,  # Handled by language_handler menu below.
@@ -1974,8 +2607,14 @@ class StaffBot:
             help_text += "\n\n" + i18n.get('staff.help.delivery', language)
         if 'operator' in staff_roles:
             help_text += "\n\n" + i18n.get('staff.help.operator', language)
+        if 'sales_agent' in staff_roles:
+            help_text += "\n\n" + i18n.get('staff.help.sales_agent', language)
 
-        await update.message.reply_text(help_text)
+        # parse_mode, because `staff.help.sales_agent` carries <b> markup — as
+        # `HelpHandler.show_help` already renders it. Without this the /help
+        # command prints the tags. No other help row contains <, > or &, so
+        # nothing else changes shape.
+        await update.message.reply_text(help_text, parse_mode='HTML')
 
     def run(self):
         """Run the bot"""

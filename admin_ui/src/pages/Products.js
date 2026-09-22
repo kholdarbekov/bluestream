@@ -429,6 +429,7 @@ const Products = () => {
       status: product.status,
       is_featured: product.is_featured,
       is_tryout_eligible: product.is_tryout_eligible !== false,
+      in_sales_stock_check: Boolean(product.in_sales_stock_check),
       tracks_returnable_bottles: Boolean(product.tracks_returnable_bottles),
       returnable_bottles_per_unit: product.returnable_bottles_per_unit || 0,
       barcode: product.barcode,
@@ -658,6 +659,16 @@ const Products = () => {
         <div>
           <div style={{ fontWeight: 600 }}>{text}</div>
           <small style={{ color: '#666' }}>{t('ui.products.sku', 'SKU')}: {record.sku || '—'}</small>
+          {/* The backend's own answer (serialize_product_admin ->
+              ReplenishmentService.in_stock_check_list), never `flag && is_active`
+              re-derived here: membership of the agent's stock list is the query's
+              rule, and a copy of it in JSX is the copy that drifts. The column is
+              what the SWITCH writes and shows; this is what the LIST contains. */}
+          {record.in_agent_stock_list ? (
+            <div style={{ marginTop: 4 }}>
+              <Tag color="geekblue">{t('ui.products.sales_stock_check_tag', 'Stock check')}</Tag>
+            </div>
+          ) : null}
         </div>
       ),
     },
@@ -1032,7 +1043,7 @@ const Products = () => {
   // scrollToFirstError: a failed required rule otherwise renders off-screen below
   // the Tabs, so the submit button reads as simply doing nothing.
   const buildProductForm = (form, onFinish, fileList, setFileList, loading) => (
-    <Form form={form} layout="vertical" onFinish={onFinish} scrollToFirstError initialValues={{ is_tryout_eligible: true, min_order_quantity: 1, tracks_returnable_bottles: false, returnable_bottles_per_unit: 0 }}>
+    <Form form={form} layout="vertical" onFinish={onFinish} scrollToFirstError initialValues={{ is_tryout_eligible: true, min_order_quantity: 1, tracks_returnable_bottles: false, returnable_bottles_per_unit: 0, in_sales_stock_check: false }}>
       <Tabs
         defaultActiveKey="uz"
         items={[
@@ -1223,6 +1234,19 @@ const Products = () => {
                 </Form.Item>
               );
             }}
+          </Form.Item>
+        </Col>
+      </Row>
+
+      <Row gutter={16}>
+        <Col span={8}>
+          <Form.Item
+            name="in_sales_stock_check"
+            label={t('ui.products.in_sales_stock_check', 'Sales stock check')}
+            valuePropName="checked"
+            extra={t('ui.products.sales_stock_check_help', 'Agents count this SKU at a visit only while the product is also Active.')}
+          >
+            <Switch />
           </Form.Item>
         </Col>
       </Row>

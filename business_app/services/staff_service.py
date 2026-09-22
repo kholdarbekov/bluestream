@@ -121,6 +121,19 @@ class StaffService:
         return normalized
 
     @staticmethod
+    def staff_role_member_filter(role: str):
+        """SQL predicate: users holding ``role`` via users.role or the staff_roles JSON list.
+
+        The single definition of "holds staff role X" for queries. Admin's operator
+        listings, the sales-agent roster and the sales notification fan-out all read
+        this one predicate; a hand-rolled copy is how a staff_roles-only operator
+        disappears from one surface while still appearing on another.
+        """
+        from sqlalchemy import String, cast
+
+        return or_(User.role == UserRole(role), cast(User.staff_roles, String).ilike(f'%"{role}"%'))
+
+    @staticmethod
     def assert_delivery_person_active(user: User) -> None:
         """Raise if the user is a delivery person an admin has deactivated.
 
@@ -148,6 +161,31 @@ class StaffService:
         user = User.query.get(user_id)
         if user is not None:
             StaffService.assert_delivery_person_active(user)
+
+    @staticmethod
+    def assert_staff_active(user: User) -> None:
+        """Block staff-bot access for any deactivated staff profile.
+
+        DeliveryPerson.is_active (drivers) and SalesAgentProfile.is_active (sales
+        agents) are the role-specific switches; User.status is deliberately NOT
+        consulted here so a deactivated agent keeps their customer-bot account.
+        No-op for staff with no profile row (operators).
+        """
+        from business_app.models.sales import SalesAgentProfile
+
+        StaffService.assert_delivery_person_active(user)
+        profile = SalesAgentProfile.query.filter_by(user_id=user.id).first()
+        if profile is not None and not profile.is_active:
+            raise ForbiddenError(
+                "Your sales agent account has been deactivated",
+                error_code="STAFF_ACCOUNT_DEACTIVATED",
+            )
+
+    @staticmethod
+    def assert_staff_active_by_user_id(user_id) -> None:
+        user = User.query.get(user_id)
+        if user is not None:
+            StaffService.assert_staff_active(user)
 
     @staticmethod
     def get_active_delivery_statuses() -> Tuple[DeliveryStatus, ...]:
@@ -485,9 +523,12 @@ class StaffService:
         return delivery_person
 
     @staticmethod
-    def create_operator(staff_data: Dict[str, Any], created_by: Optional[int] = None) -> User:
-        """
-        Create operator account (or grant operator role to an existing user).
+    def _create_or_attach_staff_user(staff_data: Dict[str, Any], role: UserRole) -> Tuple[User, bool]:
+        """Find (by user_id or phone) or create the User behind a non-driver staff member,
+        then apply the profile fields every staff kind shares. Returns (user, created).
+
+        Shared by create_operator / create_sales_agent / update_sales_agent so the
+        phone/email uniqueness and name rules exist once. Does NOT commit.
         """
         from business_app.utils.helpers import format_phone_number
         from business_app.utils.password_security import hash_password
@@ -496,13 +537,11 @@ class StaffService:
         staff_data = staff_data or {}
         user_id = staff_data.get("user_id")
         phone = staff_data.get("phone")
-
         if not user_id and not phone:
             raise ValidationError("phone is required when user_id is not provided", error_code="STAFF_PHONE_REQUIRED")
 
         user: Optional[User] = None
         creating_new_user = False
-
         if user_id:
             user = User.query.get(user_id)
             if not user:
@@ -518,7 +557,7 @@ class StaffService:
                     phone=formatted_phone,
                     password_hash=hash_password(secrets.token_urlsafe(32)),
                     user_type=UserType.STAFF,
-                    role=UserRole.OPERATOR,
+                    role=role,
                     status=UserStatus.ACTIVE,
                     registration_source="admin",
                     preferred_language=staff_data.get("preferred_language", "uz") or "uz",
@@ -526,41 +565,47 @@ class StaffService:
                 db.session.add(user)
                 db.session.flush()
 
-        if "phone" in staff_data and staff_data.get("phone"):
+        if "phone" in staff_data and staff_data.get("phone") and not creating_new_user:
             formatted_phone = format_phone_number(staff_data.get("phone"))
             if not formatted_phone:
                 raise ValidationError("Invalid phone number format", error_code="STAFF_PHONE_INVALID")
-            duplicate_phone = User.query.filter(
-                User.phone == formatted_phone,
-                User.id != user.id,
-            ).first()
-            if duplicate_phone:
-                raise ConflictError("Phone is already used by another user", error_code="STAFF_PHONE_EXISTS")
-            user.phone = formatted_phone
-
-        if "first_name" in staff_data and staff_data.get("first_name") is not None:
+            if formatted_phone != user.phone:
+                if User.query.filter(User.phone == formatted_phone, User.id != user.id).first():
+                    raise ConflictError("Phone is already used by another user", error_code="STAFF_PHONE_EXISTS")
+                user.phone = formatted_phone
+        if staff_data.get("first_name") is not None:
             user.first_name = (staff_data.get("first_name") or "").strip() or None
-        if "last_name" in staff_data and staff_data.get("last_name") is not None:
+        if staff_data.get("last_name") is not None:
             user.last_name = (staff_data.get("last_name") or "").strip() or None
-        if "full_name" in staff_data and staff_data.get("full_name"):
+        if staff_data.get("full_name"):
             StaffService._set_name_from_full_name(user, staff_data.get("full_name"))
         if "email" in staff_data:
             email_value = (staff_data.get("email") or "").strip() or None
-            if email_value:
-                duplicate_email = User.query.filter(
-                    User.email == email_value,
-                    User.id != user.id,
-                ).first()
-                if duplicate_email:
+            # An explicit null CLEARS the column (the `_validated_payload` ruling), but only when
+            # the caller named this person: `user_id` from the edit door, or an account this call
+            # just created. When a phone typed into a CREATE form matched somebody who already
+            # existed, we silently attached to their account -- blanking an email they never saw
+            # locked an admin out of the panel, because `login_user` resolves the account by email
+            # before it ever reaches `_verify_password`.
+            attached_to_a_stranger = not user_id and not creating_new_user
+            if email_value is not None or not attached_to_a_stranger:
+                if email_value and User.query.filter(User.email == email_value, User.id != user.id).first():
                     raise ConflictError("Email is already used by another user", error_code="STAFF_EMAIL_EXISTS")
-            user.email = email_value
-        if "status" in staff_data and staff_data.get("status"):
+                user.email = email_value
+        if staff_data.get("status"):
             status_value = str(staff_data.get("status")).lower()
             if status_value not in [UserStatus.ACTIVE.value, UserStatus.INACTIVE.value, UserStatus.BANNED.value]:
                 raise ValidationError("Invalid status value", error_code="STAFF_INVALID_STATUS")
             user.status = UserStatus(status_value)
-        elif creating_new_user:
-            user.status = UserStatus.ACTIVE
+        return user, creating_new_user
+
+    @staticmethod
+    def create_operator(staff_data: Dict[str, Any], created_by: Optional[int] = None) -> User:
+        """
+        Create operator account (or grant operator role to an existing user).
+        """
+        staff_data = staff_data or {}
+        user, creating_new_user = StaffService._create_or_attach_staff_user(staff_data, UserRole.OPERATOR)
 
         roles = StaffService._extract_staff_roles(user)
         if UserRole.OPERATOR.value not in roles:
@@ -587,6 +632,28 @@ class StaffService:
         )
 
         return user
+
+    @staticmethod
+    def _keep_profile_backed_roles(user: User, roles: List[str]) -> List[str]:
+        """Append every staff role whose backing profile row still exists.
+
+        An omitted role normally means "remove it", but not while a `DeliveryPerson` or
+        `SalesAgentProfile` row is still live for this user: dropping the role there strands the
+        profile and locks the person out of the staff bot that reads it, silently, from an edit
+        that was only ever about a phone number. Both write paths onto ``staff_roles``
+        (``update_operator`` and ``update_staff_roles``) call this, so the rule cannot drift into
+        two answers.
+        """
+        from business_app.models.sales import SalesAgentProfile
+
+        kept = list(roles)
+        if UserRole.DELIVERY_DRIVER.value not in kept:
+            if DeliveryPerson.query.filter_by(user_id=user.id).first() is not None:
+                kept.append(UserRole.DELIVERY_DRIVER.value)
+        if UserRole.SALES_AGENT.value not in kept:
+            if SalesAgentProfile.query.filter_by(user_id=user.id).first() is not None:
+                kept.append(UserRole.SALES_AGENT.value)
+        return kept
 
     @staticmethod
     def update_operator(user_id: int, updates: Dict[str, Any], updated_by: Optional[int] = None) -> User:
@@ -642,11 +709,11 @@ class StaffService:
             normalized_roles = StaffService._normalize_staff_roles_input(provided_roles)
             if UserRole.OPERATOR.value not in normalized_roles:
                 normalized_roles.append(UserRole.OPERATOR.value)
-            user.staff_roles = normalized_roles
+            user.staff_roles = StaffService._keep_profile_backed_roles(user, normalized_roles)
         else:
             if UserRole.OPERATOR.value not in roles:
                 roles.append(UserRole.OPERATOR.value)
-            user.staff_roles = roles
+            user.staff_roles = StaffService._keep_profile_backed_roles(user, roles)
         user.user_type = UserType.STAFF
 
         db.session.commit()
@@ -657,6 +724,121 @@ class StaffService:
             entity_type="user",
             entity_id=user.id,
             metadata_={"operation": "admin_update_operator"},
+        )
+
+        return user
+
+    @staticmethod
+    def _validate_districts(raw: Any) -> List[str]:
+        """Normalize a district list, preserving the order the admin chose.
+
+        Deduplicates but does NOT sort: the list is shown back to the admin as
+        entered, and re-ordering it on save reads as data loss.
+        """
+        from shared.constants import TASHKENT_DISTRICTS
+
+        districts: List[str] = []
+        for value in raw or []:
+            if not value:
+                continue
+            district = str(value)
+            if district not in districts:
+                districts.append(district)
+        unknown = [d for d in districts if d not in TASHKENT_DISTRICTS]
+        if unknown:
+            raise ValidationError(f"Unknown district(s): {', '.join(unknown)}", error_code="SALES_DISTRICT_INVALID")
+        return districts
+
+    @staticmethod
+    def _validate_employment_type(raw: Any) -> Optional[str]:
+        from business_app.models.sales import EMPLOYMENT_TYPES
+
+        if raw in (None, ""):
+            return None
+        if raw not in EMPLOYMENT_TYPES:
+            raise ValidationError("Invalid employment_type", error_code="STAFF_INVALID_EMPLOYMENT_TYPE")
+        return raw
+
+    @staticmethod
+    def create_sales_agent(staff_data: Dict[str, Any], created_by: Optional[int] = None) -> User:
+        """Create a sales agent (User + SalesAgentProfile), or grant the role to an existing user."""
+        from business_app.models.sales import SalesAgentProfile
+
+        staff_data = staff_data or {}
+        user, creating_new_user = StaffService._create_or_attach_staff_user(staff_data, UserRole.SALES_AGENT)
+        if SalesAgentProfile.query.filter_by(user_id=user.id).first():
+            raise ConflictError(
+                "Sales agent profile already exists for this user", error_code="STAFF_SALES_AGENT_EXISTS"
+            )
+
+        profile = SalesAgentProfile(
+            user_id=user.id,
+            is_active=True,
+            districts=StaffService._validate_districts(staff_data.get("districts")),
+            weekly_new_outlet_target=staff_data.get("weekly_new_outlet_target"),
+            employment_type=StaffService._validate_employment_type(staff_data.get("employment_type")),
+            notes=(staff_data.get("notes") or "").strip() or None,
+            created_by_user_id=created_by,
+        )
+        db.session.add(profile)
+
+        roles = StaffService._extract_staff_roles(user)
+        if UserRole.SALES_AGENT.value not in roles:
+            roles.append(UserRole.SALES_AGENT.value)
+        user.staff_roles = roles
+        user.user_type = UserType.STAFF
+        if creating_new_user:
+            user.role = UserRole.SALES_AGENT
+
+        db.session.commit()
+
+        StaffService._log_activity(
+            user_id=created_by or user.id,
+            action=STAFF_ACTIONS["USER_CREATED"],
+            entity_type="user",
+            entity_id=user.id,
+            metadata_={"staff_role": UserRole.SALES_AGENT.value},
+        )
+
+        return user
+
+    @staticmethod
+    def update_sales_agent(user_id: int, updates: Dict[str, Any], updated_by: Optional[int] = None) -> User:
+        """Edit a sales agent's user fields and profile (districts, target, employment, notes, is_active)."""
+        from business_app.models.sales import SalesAgentProfile
+
+        updates = dict(updates or {})
+        profile = SalesAgentProfile.query.filter_by(user_id=user_id).first()
+        if profile is None:
+            raise ValidationError("User is not a sales agent", error_code="SALES_AGENT_PROFILE_REQUIRED")
+
+        updates["user_id"] = user_id
+        user, _ = StaffService._create_or_attach_staff_user(updates, UserRole.SALES_AGENT)
+        if "districts" in updates:
+            profile.districts = StaffService._validate_districts(updates.get("districts"))
+        if "weekly_new_outlet_target" in updates:
+            profile.weekly_new_outlet_target = updates.get("weekly_new_outlet_target")
+        if "employment_type" in updates:
+            profile.employment_type = StaffService._validate_employment_type(updates.get("employment_type"))
+        if "notes" in updates:
+            profile.notes = (updates.get("notes") or "").strip() or None
+        if "is_active" in updates:
+            profile.is_active = bool(updates.get("is_active"))
+
+        roles = StaffService._extract_staff_roles(user)
+        if UserRole.SALES_AGENT.value not in roles:
+            roles.append(UserRole.SALES_AGENT.value)
+        user.staff_roles = roles
+        user.user_type = UserType.STAFF
+
+        db.session.commit()
+
+        StaffService._log_activity(
+            user_id=updated_by or user.id,
+            action=STAFF_ACTIONS["DELIVERY_STATUS_UPDATED"],
+            entity_type="user",
+            entity_id=user.id,
+            metadata_={"operation": "admin_update_sales_agent"},
         )
 
         return user
@@ -674,9 +856,7 @@ class StaffService:
         if not normalized_roles:
             raise ValidationError("At least one staff role is required", error_code="STAFF_ROLE_REQUIRED")
 
-        has_delivery_profile = DeliveryPerson.query.filter_by(user_id=user.id).first() is not None
-        if has_delivery_profile and UserRole.DELIVERY_DRIVER.value not in normalized_roles:
-            normalized_roles.append(UserRole.DELIVERY_DRIVER.value)
+        normalized_roles = StaffService._keep_profile_backed_roles(user, normalized_roles)
 
         user.staff_roles = normalized_roles
         user.user_type = UserType.STAFF
@@ -799,8 +979,8 @@ class StaffService:
         if not staff_roles_list:
             raise ForbiddenError("User does not have a staff role", error_code="STAFF_NO_ROLE")
 
-        # Block staff-bot access for delivery persons an admin has deactivated.
-        StaffService.assert_delivery_person_active(user)
+        # Block staff-bot access for staff an admin has deactivated.
+        StaffService.assert_staff_active(user)
 
         # Keep normalized staff_roles persisted so staff bot can use it as role source.
         if user.staff_roles != staff_roles_list:
@@ -835,6 +1015,10 @@ class StaffService:
         role_value = user.role.value if hasattr(user.role, "value") else user.role
         delivery_person = DeliveryPerson.query.filter_by(user_id=user.id).first()
 
+        from business_app.models.sales import SalesAgentProfile
+
+        sales_agent_profile = SalesAgentProfile.query.filter_by(user_id=user.id).first()
+
         return {
             "user": {
                 "id": user.id,
@@ -846,6 +1030,7 @@ class StaffService:
                 "staff_roles": staff_roles_list,
                 "preferred_language": user.preferred_language,
                 "delivery_person_id": delivery_person.id if delivery_person else None,
+                "sales_agent_profile_id": sales_agent_profile.id if sales_agent_profile else None,
             },
             "access_token": tokens["access_token"],
             "refresh_token": tokens.get("refresh_token"),
@@ -1998,7 +2183,9 @@ class StaffService:
         return user
 
     @staticmethod
-    def price_phone_order(client_id: int, order_data: Dict[str, Any]) -> Dict[str, Any]:
+    def price_phone_order(
+        client_id: int, order_data: Dict[str, Any], *, payment_method: Optional[str] = None
+    ) -> Dict[str, Any]:
         """🔴 THE ONE PLACE A PHONE ORDER IS PRICED. Do not grow a second one.
 
         Prices for the **CLIENT**, never for the caller. That distinction is the
@@ -2027,6 +2214,12 @@ class StaffService:
 
         Returns a dict of ``items`` (the exact rows ``OrderItem`` is built from),
         ``subtotal``, ``delivery_fee`` and ``total_amount``, all ``Decimal``.
+
+        ``payment_method`` is OPTIONAL because not every caller knows the rail yet: the
+        operator's order screen quotes a basket before the rail is picked, so it passes
+        nothing and gets today's answer unchanged. A caller that DOES know it (the sales
+        agent's confirm screen, where the rail was chosen a screen earlier) gets the same
+        live COD tier discount ``create_order`` will charge — see below.
 
         Raises:
             NotFoundError: a requested product does not exist.
@@ -2085,6 +2278,21 @@ class StaffService:
         discount_amount = Decimal("0.00")
         loyalty_discount = Decimal("0.00")
         tier_discount = Decimal("0.00")
+        if payment_method is not None:
+            # The SAME expression `create_order` charges with (order_service.py, the
+            # `quote_tier_discount` + `clamp_tier_discount` pair), not a second one: the tier
+            # rate is admin-configurable and read live, so a quote that hard-coded zero told the
+            # customer one total while the order took another. Only reached when the caller
+            # named the rail, so every existing caller's numbers are untouched.
+            from business_app.services.loyalty_service import LoyaltyService, clamp_tier_discount
+
+            client = User.query.get(client_id)
+            tier_discount = clamp_tier_discount(
+                LoyaltyService().quote_tier_discount(client, subtotal, payment_method).amount,
+                subtotal=subtotal,
+                discount_amount=discount_amount,
+                loyalty_discount=loyalty_discount,
+            )
 
         return {
             "items": order_items,
@@ -2103,7 +2311,9 @@ class StaffService:
         }
 
     @staticmethod
-    def estimate_phone_order(client_id: int, order_data: Dict[str, Any]) -> Dict[str, Any]:
+    def estimate_phone_order(
+        client_id: int, order_data: Dict[str, Any], *, payment_method: Optional[str] = None
+    ) -> Dict[str, Any]:
         """READ-ONLY client-scoped quote for a phone-order basket.
 
         The operator screen's money surface. It writes NOTHING — no order, no
@@ -2125,7 +2335,7 @@ class StaffService:
         if not items_data:
             raise ValidationError("Order must contain at least one item", error_code="STAFF_ORDER_ITEMS_REQUIRED")
 
-        pricing = StaffService.price_phone_order(client_id, order_data)
+        pricing = StaffService.price_phone_order(client_id, order_data, payment_method=payment_method)
 
         return {
             "client_id": client_id,

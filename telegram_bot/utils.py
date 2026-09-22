@@ -501,6 +501,35 @@ def format_price(price: float) -> str:
     return f"{price:,.0f}"
 
 
+def format_date(value) -> str:
+    """Format an ISO date or timestamp as 'dd.mm.yyyy' in the DISPLAY timezone;
+    '' when absent/unparseable.
+
+    ONE date-shaping rule for the customer bot. The bottle ledger's row dates
+    and the agent-order proposal's delivery date both come through here, so a
+    change to the display format cannot land on one screen and miss the other.
+    Accepts a bare date ('2026-09-10') and a timestamp with or without the
+    trailing 'Z' the backend serialises UTC with.
+
+    The timezone conversion is `format_datetime`'s below, for the same reason
+    and by the same rule (naive means UTC): a bottle collected at 20:30 UTC was
+    collected on the NEXT day in Asia/Tashkent, and printing the UTC day denies
+    the customer the one fact the ledger exists to settle. A bare date carries
+    no time, so it lands on midnight UTC = 05:00 the same local day — the
+    calendar date the backend chose survives the conversion untouched.
+    """
+    if not value:
+        return ''
+    try:
+        dt = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+    except (ValueError, TypeError):
+        return ''
+    if dt.tzinfo is None:
+        # Assume naive datetimes are UTC, exactly as format_datetime does.
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(ZoneInfo(DISPLAY_TIMEZONE)).strftime('%d.%m.%Y')
+
+
 def format_datetime(dt: datetime, language: str = 'en') -> str:
     """Format datetime for display in the configured display timezone.
 

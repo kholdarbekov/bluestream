@@ -59,6 +59,14 @@ class MenuKeyboards:
                 f"🔍 {i18n.get('staff.menu.search_client', language)}",
             ])
 
+        # Sales agent: the outlets hub and field onboarding are this role's
+        # whole control surface.
+        if 'sales_agent' in staff_roles:
+            keyboard.append([
+                f"📍 {i18n.get('staff.menu.my_outlets', language)}",
+                f"🏪 {i18n.get('staff.menu.new_outlet', language)}",
+            ])
+
         # Common items (all staff)
         keyboard.append([
             f"👤 {i18n.get('staff.menu.profile', language)}",
@@ -158,6 +166,18 @@ class MenuKeyboards:
                 ),
             ])
 
+        if 'sales_agent' in staff_roles:
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"📍 {i18n.get('staff.menu.my_outlets', language)}",
+                    callback_data="staff_sales_hub",
+                ),
+                InlineKeyboardButton(
+                    f"🏪 {i18n.get('staff.menu.new_outlet', language)}",
+                    callback_data="staff_sales_new_outlet",
+                ),
+            ])
+
         # Common items
         keyboard.append([
             InlineKeyboardButton(
@@ -242,6 +262,7 @@ class MenuKeyboards:
 
         is_driver = 'delivery_driver' in staff_roles
         is_operator = 'operator' in staff_roles
+        is_sales_agent = 'sales_agent' in staff_roles
 
         rows = []
         if is_driver:
@@ -257,6 +278,21 @@ class MenuKeyboards:
             rows.append([InlineKeyboardButton(
                 f"📄 {i18n.get('staff.profile.view_recent_orders', language)}",
                 callback_data="staff_recent_orders",
+            )])
+            rows.append([InlineKeyboardButton(
+                f"⏳ {i18n.get('staff.sales.approvals.button', language)}",
+                callback_data="staff_sales_approvals",
+            )])
+        if is_sales_agent:
+            # Not "My stats": the driver's own row above says exactly that,
+            # word for word in uz and ru, and a staff member who drives AND
+            # sells would read the same button twice on one keyboard. The
+            # LABEL is what differs (R26) -- the glyph stays 📊, the house
+            # prefix for a stats row (`keyboards/menu.py:269`), because a
+            # second glyph for the same idea is its own small confusion.
+            rows.append([InlineKeyboardButton(
+                f"📊 {i18n.get('staff.sales.stats.button', language)}",
+                callback_data="staff_sales_stats",
             )])
 
         rows.append([InlineKeyboardButton(

@@ -63,7 +63,18 @@ def auto_confirm_pending_orders():
         # Get orders pending for more than 15 minutes
         cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=15)
 
-        pending_orders = Order.query.filter(Order.status == OrderStatus.PENDING, Order.created_at < cutoff_time).all()
+        # Local import: the service imports the tasks package for its push hook.
+        from business_app.services.sales.agent_order_confirmation_service import AgentOrderConfirmationService
+
+        pending_orders = Order.query.filter(
+            Order.status == OrderStatus.PENDING,
+            Order.created_at < cutoff_time,
+            # D5: an order a sales agent placed on a store's behalf belongs to the
+            # store until it answers or the request expires. Confirming it here would
+            # make the Confirm/Decline buttons already sitting in the store's chat a
+            # lie, and `sales.expire_agent_order_confirmations` owns the fallback.
+            AgentOrderConfirmationService.pending_request_filter(),
+        ).all()
 
         order_service = OrderService()
         confirmed_count = 0
@@ -142,6 +153,9 @@ def cancel_abandoned_orders():
         # Get orders pending for more than 24 hours without payment
         cutoff_time = datetime.now(timezone.utc) - timedelta(hours=24)
 
+        # Local import: the service imports the tasks package for its push hook.
+        from business_app.services.sales.agent_order_confirmation_service import AgentOrderConfirmationService
+
         # Use FOR UPDATE SKIP LOCKED to prevent concurrent workers from processing same orders.
         # Order.payment is a relationship(uselist=False) — it has no .is_() and no
         # .status. Use the relationship's EXISTS comparator instead.
@@ -153,6 +167,13 @@ def cancel_abandoned_orders():
                     ~Order.payment.has(),
                     Order.payment.has(Payment.status != PaymentStatus.COMPLETED),
                 ),
+                # D5, the SAME clause `auto_confirm_pending_orders` applies: an order a sales
+                # agent placed on a store's behalf belongs to the store until it answers or the
+                # request expires. A cash agent order's Payment row is PENDING by construction,
+                # so without this every such order matched — and this sweep does not confirm, it
+                # CANCELS, releasing the prepayment and telling the shop "no payment received
+                # within 24 hours" about an order it was never asked to pay online.
+                AgentOrderConfirmationService.pending_request_filter(),
             )
             .with_for_update(skip_locked=True)
             .all()

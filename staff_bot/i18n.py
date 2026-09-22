@@ -12,6 +12,7 @@ from staff_bot.database import db_manager
 from shared.staff_constants import (
     FAILED_DELIVERY_REASONS,
     RECONCILIATION_RISK_FLAGS,
+    SALES_EVENTS,
     STAFF_BOT_ROLES,
 )
 from shared.i18n_rendering import humanise_key, render_translation
@@ -191,6 +192,98 @@ class Translation:
         """
         for role in STAFF_BOT_ROLES:
             keys.add(f"staff.role.{role}")
+
+        # The error map's TARGETS. `BaseHandler._resolve_api_error_message`
+        # resolves these at runtime out of a dict VALUE, so the literal
+        # extractor's regex over literal `staff.*` arguments cannot see a
+        # single one of them (and note that extractor scans COMMENTS too, so
+        # this one must not spell the call out) -- twelve of the fifteen
+        # `staff.sales.error.*` keys are addressed only that way. DERIVED
+        # from the map for the same reason the delivery statuses are derived
+        # from the enum: a hand-written subset here would not merely miss a
+        # translation, it would make the gap undetectable. Imported inside the
+        # function because `handlers/base.py` imports this module at import
+        # time.
+        from staff_bot.handlers.base import BaseHandler
+
+        keys.update(BaseHandler.API_ERROR_CODE_KEY_MAP.values())
+
+        # Sales events: webhook_server.sales_event_handler builds the key with
+        # f'staff.sales.notify.{event}' from the backend-supplied event name,
+        # and refuses any event outside this same tuple. ONE vocabulary in
+        # `shared/` rather than three copies (this loop, the allowlist and the
+        # seed script's twin) — `shared/` is the only tree all three can import.
+        for event in SALES_EVENTS:
+            keys.add(f"staff.sales.notify.{event}")
+
+        # The outlet card and its lists build these three families with
+        # f-strings from BACKEND-supplied values: `keyboards/sales.py`
+        # (stage_label) and `handlers/sales/hub.py` (the type label and the
+        # per-scope list title). The stage/type tuples mirror
+        # `business_app/models/sales.py::OUTLET_STAGES / OUTLET_TYPES`, which is
+        # the SSOT — a value added there and not here renders the humanised key
+        # tail to a sales agent while /health stays green.
+        for stage in ("prospect", "trial", "activation_requested", "active", "at_risk", "dormant", "lost"):
+            keys.add(f"staff.sales.stage.{stage}")
+
+        for outlet_type in ("grocery_store", "workplace", "individual"):
+            keys.add(f"staff.sales.type.{outlet_type}")
+
+        for scope in ("due", "prospects", "all"):
+            keys.add(f"staff.sales.list.title_{scope}")
+
+        # The operator's rejection-reason buttons build their key with
+        # f'staff.sales.approvals.reason.{reason}'. Derived from
+        # `REJECT_REASONS`, which is the SSOT for which buttons
+        # `SalesKeyboards.approval_actions` draws — a fifth reason added there
+        # and hand-forgotten here would ship an English key tail to an operator
+        # while /health stayed green. Imported inside the function because
+        # `keyboards/sales.py` imports this module at import time.
+        from staff_bot.keyboards.sales import (
+            NEXT_VISIT_CHOICES,
+            NO_ORDER_REASONS,
+            PAY_METHODS,
+            PHOTO_KINDS,
+            REJECT_REASONS,
+            STATS_PERIODS,
+            VISIT_OUTCOMES,
+        )
+
+        for reason in REJECT_REASONS:
+            keys.add(f"staff.sales.approvals.reason.{reason}")
+
+        # The visit conversation's four picker families, from the SAME tuples
+        # `SalesKeyboards.close_outcome` / `.no_order_reasons` /
+        # `.payment_methods` / `.next_visit` draw their buttons from. The full
+        # VISIT_OUTCOMES tuple is registered, not CLOSE_OUTCOMES: the outlet
+        # card renders `order_placed` for the last visit even though it is
+        # never a button.
+        for outcome in VISIT_OUTCOMES:
+            keys.add(f"staff.sales.visit.outcome.{outcome}")
+
+        for reason in NO_ORDER_REASONS:
+            keys.add(f"staff.sales.visit.reason.{reason}")
+
+        for method in PAY_METHODS:
+            keys.add(f"staff.sales.visit.pay.{method}")
+
+        for choice in NEXT_VISIT_CHOICES:
+            keys.add(f"staff.sales.visit.next.{choice}")
+
+        # The photo picker's own family, from the tuple `SalesKeyboards.
+        # photo_kind` draws its buttons from -- the same arrangement as the
+        # four above, and the same reason: an f-string key is invisible to
+        # the literal extractor, so only this loop makes a gap visible.
+        for kind in PHOTO_KINDS:
+            keys.add(f"staff.sales.visit.photo_kind.{kind}")
+
+        # The period switch on the sales agent's KPI card, from the same tuple
+        # `SalesKeyboards.stats` draws its three buttons from. An f-string key
+        # again, so this loop is the only thing that makes a missing row
+        # visible to /health -- the card's other twenty-seven keys are
+        # literals the extractor finds on its own.
+        for period in STATS_PERIODS:
+            keys.add(f"staff.sales.stats.period_{period}")
 
         for status in DeliveryStatus:
             keys.add(f"staff.delivery.status.{status.value}")

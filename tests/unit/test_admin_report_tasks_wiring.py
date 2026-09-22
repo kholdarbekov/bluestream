@@ -319,6 +319,9 @@ class TestNewBeatScheduleEntries:
         "auto-reorder-products",
         "generate-demand-forecast",
         "generate-churn-prediction-report",
+        # Weekly sales-agent KPI email (plan Task 6 / ruling R14): Monday 08:10
+        # LOCAL, after weekly-business-report at 08:00.
+        "weekly-agent-performance-report",
     )
 
     def test_new_keys_present_with_crontab_schedule(self, celery_app_module):

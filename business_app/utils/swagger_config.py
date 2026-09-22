@@ -135,7 +135,7 @@ For API support, contact: support@aqua-element.uz
                     },
                     "role": {
                         "type": "string",
-                        "enum": ["customer", "admin", "delivery_driver", "support"],
+                        "enum": ["customer", "admin", "delivery_driver", "support", "sales_agent"],
                         "example": "customer",
                         "description": "User's role in the system",
                     },

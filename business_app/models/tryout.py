@@ -119,6 +119,13 @@ class ProductTryout(db.Model, TimestampMixin):
     trial_contact_id = Column(Integer, ForeignKey("trial_contacts.id"), nullable=False, index=True)
     converted_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    # The outlet a field try-out was left at (phase 2b). NULL for every
+    # operator- and admin-created try-out, which is the majority: try-outs
+    # existed long before outlets did. `index=True` yields
+    # ix_product_tryouts_outlet_id, the name migration b7c8d9e0f1a2 writes.
+    outlet_id = Column(
+        Integer, ForeignKey("outlets.id", name="fk_product_tryouts_outlet_id"), nullable=True, index=True
+    )
     status = Column(
         SqlEnum(
             TryoutStatus,
@@ -166,6 +173,7 @@ class ProductTryout(db.Model, TimestampMixin):
             "trial_contact_id": self.trial_contact_id,
             "converted_user_id": self.converted_user_id,
             "created_by_user_id": self.created_by_user_id,
+            "outlet_id": self.outlet_id,
             "status": self.status.value if hasattr(self.status, "value") else self.status,
             "outcome": self.outcome.value if hasattr(self.outcome, "value") else self.outcome,
             "source": self.source,

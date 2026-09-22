@@ -40,6 +40,7 @@ class EmailTemplateService:
         "subscription_renewal": "subscription_renewal",
         "subscription_cancelled": "subscription_cancelled",
         "reward_redeemed": "reward_redeemed",
+        "agent_performance": "agent_performance",
     }
 
     # Email subjects by template and language
@@ -119,6 +120,11 @@ class EmailTemplateService:
             "uz": "Haftalik biznes hisoboti ({week_ending}) - {company_name}",
             "en": "Weekly Business Report ({week_ending}) - {company_name}",
             "ru": "Еженедельный бизнес-отчёт ({week_ending}) - {company_name}",
+        },
+        "agent_performance": {
+            "uz": "Agentlar samaradorligi ({week_start} haftasi) - {company_name}",
+            "en": "Agent Performance (week of {week_start}) - {company_name}",
+            "ru": "Эффективность агентов (неделя от {week_start}) - {company_name}",
         },
         "churn_alert": {
             "uz": "Mijozlar ketishi xavfi: {high_risk_count} ta yuqori xavf - {company_name}",

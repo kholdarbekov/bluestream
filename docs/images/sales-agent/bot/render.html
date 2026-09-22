@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=390, initial-scale=1">
+<title>BlueStream staff bot screen</title>
+<style>
+  :root{
+    --chat-bg:#cfd9e3;
+    --bubble:#ffffff;
+    --bubble-border:rgba(16,32,48,.08);
+    --ink:#0f1720;
+    --muted:#63707d;
+    --tg-blue:#3390ec;
+    --kb-bg:#ffffff;
+    --kb-ink:#3390ec;
+    --reply-bg:#f1f3f6;
+    --reply-key:#ffffff;
+    --header:#ffffff;
+  }
+  *{box-sizing:border-box;-webkit-font-smoothing:antialiased}
+  html,body{margin:0;padding:0;height:100%;background:#cbd7e3}
+  body{display:flex;align-items:stretch}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,
+      "Helvetica Neue",Arial,"Apple Color Emoji","Segoe UI Emoji",sans-serif;
+    color:var(--ink);
+  }
+  .phone{
+    width:390px;min-height:100%;display:flex;flex-direction:column;
+    background:
+      radial-gradient(circle at 18% 12%, rgba(255,255,255,.55) 0, rgba(255,255,255,0) 38%),
+      radial-gradient(circle at 82% 68%, rgba(255,255,255,.35) 0, rgba(255,255,255,0) 42%),
+      linear-gradient(160deg,#dfe7ef 0%,#cbd7e3 100%);
+  }
+  .tg-header{
+    flex:0 0 auto;display:flex;align-items:center;gap:10px;
+    padding:10px 14px;background:var(--header);
+    border-bottom:1px solid rgba(16,32,48,.10);
+  }
+  .avatar{
+    width:34px;height:34px;border-radius:50%;flex:0 0 auto;
+    background:linear-gradient(145deg,#4aa3f0,#2b7fd4);
+    color:#fff;font-size:15px;font-weight:600;
+    display:flex;align-items:center;justify-content:center;letter-spacing:.2px;
+  }
+  .who{display:flex;flex-direction:column;line-height:1.15;min-width:0}
+  .who b{font-size:14.5px;font-weight:600}
+  .who span{font-size:11.5px;color:var(--muted);margin-top:2px}
+  .badge{
+    margin-left:auto;font-size:10px;font-weight:600;letter-spacing:.06em;
+    text-transform:uppercase;color:var(--muted);
+    border:1px solid rgba(16,32,48,.16);border-radius:999px;padding:3px 7px;
+  }
+  .chat{flex:1 1 auto;padding:12px 12px 8px;display:flex;flex-direction:column;gap:8px}
+  .msg{max-width:322px;align-self:flex-start;position:relative}
+  .bubble{
+    background:var(--bubble);border:1px solid var(--bubble-border);
+    border-radius:14px;border-bottom-left-radius:5px;
+    padding:8px 11px 9px;font-size:14.5px;line-height:1.38;
+    box-shadow:0 1px 1px rgba(16,32,48,.07);
+    word-wrap:break-word;overflow-wrap:anywhere;
+  }
+  .bubble b{font-weight:650}
+  .bubble code{
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;
+    background:rgba(16,32,48,.06);padding:1px 4px;border-radius:4px;
+  }
+  .bubble a{color:var(--tg-blue);text-decoration:none}
+  .meta{
+    display:block;text-align:right;font-size:10.5px;color:#9aa6b2;margin-top:3px;
+  }
+  .kb{display:flex;flex-direction:column;gap:3px;margin-top:4px}
+  .kb-row{display:flex;gap:3px}
+  .kb-btn{
+    flex:1 1 0;min-width:0;background:var(--kb-bg);color:var(--kb-ink);
+    border:1px solid rgba(51,144,236,.18);border-radius:9px;
+    padding:8px 6px;font-size:13px;font-weight:500;text-align:center;
+    line-height:1.25;box-shadow:0 1px 1px rgba(16,32,48,.05);
+  }
+  .toast{
+    align-self:center;max-width:300px;background:rgba(18,26,34,.88);color:#fff;
+    border-radius:12px;padding:10px 14px;font-size:13.5px;line-height:1.35;
+    text-align:center;box-shadow:0 6px 18px rgba(16,32,48,.25);
+  }
+  .toast .tag{
+    display:block;font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+    opacity:.6;margin-bottom:4px;
+  }
+  .push-tag{
+    align-self:flex-start;font-size:10px;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--muted);margin:0 0 -4px 4px;
+  }
+  .reply{
+    flex:0 0 auto;background:var(--reply-bg);border-top:1px solid rgba(16,32,48,.10);
+    padding:7px 6px;display:flex;flex-direction:column;gap:5px;
+  }
+  .reply-row{display:flex;gap:5px}
+  .reply-key{
+    flex:1 1 0;min-width:0;background:var(--reply-key);border-radius:8px;
+    padding:10px 6px;font-size:13.5px;text-align:center;color:var(--ink);
+    box-shadow:0 1px 1px rgba(16,32,48,.10);line-height:1.2;
+  }
+  .composer{
+    flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:9px 12px;
+    background:#fff;border-top:1px solid rgba(16,32,48,.10);color:#9aa6b2;font-size:14px;
+  }
+  .composer .field{
+    flex:1;background:#f1f3f6;border-radius:16px;padding:8px 12px;
+  }
+  .caption{
+    flex:0 0 auto;padding:7px 14px 9px;background:#fff;
+    border-top:1px solid rgba(16,32,48,.10);
+    font-size:11px;line-height:1.35;color:var(--muted);
+  }
+  .caption b{color:var(--ink);font-weight:600}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const SCREEN = /*__SCREEN__*/ {
+  "screen": "demo",
+  "title": "Template preview — a real screen is inlined by the generator",
+  "language": "en",
+  "messages": [
+    {"kind":"message","text":"📍 <b>My outlets</b>\nTap any outlet to open its card.",
+     "inline":[["⏰ Due today & overdue"],["🧭 Nearby"],["🆕 Prospects","🏪 All outlets"]],
+     "reply":[]}
+  ]
+};
+
+const NAMES = {uz:"Tilni",ru:"Язык",en:"Language"};
+
+function el(tag, cls, html){
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (html !== undefined) node.innerHTML = html;
+  return node;
+}
+
+function body(text){
+  // The bot already sends Telegram-flavoured HTML (<b>, <i>, <code>, <a>) with
+  // every dynamic value escaped, so only the line breaks need translating.
+  return String(text || "").replace(/\n/g, "<br>");
+}
+
+function render(screen){
+  const app = document.getElementById("app");
+  const phone = el("div", "phone");
+
+  const header = el("div", "tg-header");
+  header.appendChild(el("div", "avatar", "BS"));
+  const who = el("div", "who");
+  who.appendChild(el("b", null, "BlueStream Staff"));
+  who.appendChild(el("span", null, "bot"));
+  header.appendChild(who);
+  header.appendChild(el("div", "badge", (screen.language || "en").toUpperCase()));
+  phone.appendChild(header);
+
+  const chat = el("div", "chat");
+  let replyRows = null;
+
+  (screen.messages || []).forEach(function(message){
+    if (message.kind === "alert") {
+      const toast = el("div", "toast");
+      toast.appendChild(el("span", "tag", "pop-up answer"));
+      toast.appendChild(el("div", null, body(message.text)));
+      chat.appendChild(toast);
+      return;
+    }
+    if (message.kind === "push") {
+      chat.appendChild(el("div", "push-tag", "push notification"));
+    }
+    const wrap = el("div", "msg");
+    const bubble = el("div", "bubble");
+    bubble.appendChild(el("div", null, body(message.text)));
+    bubble.appendChild(el("span", "meta", "08:42"));
+    wrap.appendChild(bubble);
+
+    const rows = message.inline || [];
+    if (rows.length) {
+      const kb = el("div", "kb");
+      rows.forEach(function(row){
+        const line = el("div", "kb-row");
+        row.forEach(function(label){ line.appendChild(el("div", "kb-btn", body(label))); });
+        kb.appendChild(line);
+      });
+      wrap.appendChild(kb);
+    }
+    chat.appendChild(wrap);
+
+    if ((message.reply || []).length) replyRows = message.reply;
+  });
+
+  phone.appendChild(chat);
+
+  if (replyRows) {
+    const reply = el("div", "reply");
+    replyRows.forEach(function(row){
+      const line = el("div", "reply-row");
+      row.forEach(function(label){ line.appendChild(el("div", "reply-key", body(label))); });
+      reply.appendChild(line);
+    });
+    phone.appendChild(reply);
+  } else {
+    const composer = el("div", "composer");
+    composer.appendChild(el("div", "field", "Message"));
+    composer.appendChild(el("div", null, "🎤"));
+    phone.appendChild(composer);
+  }
+
+  const caption = el("div", "caption");
+  caption.innerHTML = "<b>" + screen.screen + "</b> · " + body(screen.title);
+  phone.appendChild(caption);
+
+  app.appendChild(phone);
+}
+
+render(SCREEN);
+</script>
+</body>
+</html>

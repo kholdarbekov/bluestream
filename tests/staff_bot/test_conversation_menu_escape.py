@@ -68,6 +68,7 @@ def _make_bot():
     bot._delivery_handlers = {"status_update": status_update, "tryouts": tryouts,
                               "active_delivery": active}
     bot._common_handlers = {"profile": profile, "help": help_h}
+    bot._sales_handlers = {"hub": MagicMock(show_hub=AsyncMock())}
     bot._route_new_orders = AsyncMock()
     return bot
 

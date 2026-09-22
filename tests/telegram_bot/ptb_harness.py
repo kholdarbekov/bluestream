@@ -71,6 +71,11 @@ class BackendCall:
     endpoint: str
     data: Optional[dict] = None
     params: Optional[dict] = None
+    # The token the real wrapper passed to `_make_request`. Recorded because
+    # `_make_request` — the seam — is the code that would have turned it into an
+    # `Authorization: Bearer …` header, so a test cannot read the header and
+    # would otherwise have no way to prove an authed call was authed.
+    user_token: Optional[str] = None
 
 
 class FakeBackend:
@@ -94,7 +99,7 @@ class FakeBackend:
         self.routes[(method.upper(), endpoint)] = responder
 
     async def handle(self, method, endpoint, data=None, params=None, **_kwargs):
-        call = BackendCall(method.upper(), endpoint, data, params)
+        call = BackendCall(method.upper(), endpoint, data, params, _kwargs.get("user_token"))
         self.calls.append(call)
 
         responder = self.routes.get((call.method, endpoint))
@@ -104,7 +109,9 @@ class FakeBackend:
             body = self._default(call)
 
         if isinstance(body, _Failure):
-            return _api_response(False, error=body.error, status_code=body.status_code)
+            return _api_response(
+                False, error=body.error, status_code=body.status_code, data=body.data
+            )
         return _api_response(True, data=body)
 
     def _default(self, call: BackendCall) -> Any:
@@ -157,11 +164,16 @@ class FakeBackend:
 class _Failure:
     error: str
     status_code: int = 500
+    # The full error BODY. `_make_request` surfaces it as `APIResponse.data` on
+    # failure (api_client.py "Surface the full error body so callers can read
+    # structured fields"), which is how a handler reads `data.error_code`.
+    # Without it, no test here can drive an error-code branch.
+    data: Optional[dict] = None
 
 
-def backend_failure(error: str, status_code: int = 500) -> _Failure:
+def backend_failure(error: str, status_code: int = 500, data: dict = None) -> _Failure:
     """Return this from a :meth:`FakeBackend.route` responder to fail the call."""
-    return _Failure(error=error, status_code=status_code)
+    return _Failure(error=error, status_code=status_code, data=data)
 
 
 def _api_response(success, data=None, error=None, status_code=200):

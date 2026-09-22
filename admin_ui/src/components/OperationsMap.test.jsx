@@ -7,7 +7,7 @@ vi.mock('react-leaflet', () => ({
   MapContainer: ({ children }) => <div data-testid="map">{children}</div>,
   TileLayer: () => null,
   CircleMarker: ({ children, ...props }) => (
-    <div data-testid="circle-marker" data-key={props['data-key']}>{children}</div>
+    <div data-testid="circle-marker" data-key={props['data-key']} data-color={props.pathOptions?.color}>{children}</div>
   ),
   Marker: ({ children, ...props }) => (
     <div data-testid="marker" data-kind={props['data-kind']}>{children}</div>
@@ -128,5 +128,47 @@ describe('OperationsMap layers', () => {
         visibleLayers={{ customers: true, orders: false, drivers: false }} />,
     );
     expect(screen.getAllByTestId('circle-marker')).toHaveLength(1);
+  });
+});
+
+describe('OperationsMap check-in layer', () => {
+  // Field check-ins as `GET /admin/sales/visits` publishes them: `in_radius` is TRI-state and
+  // `null` is a different fact from `false` — the check-in was not measurable (skipped, no
+  // coordinates, or an outlet that has no pin yet), which must never be drawn as a violation.
+  const CHECKINS = [
+    { visit_id: 501, lat: 41.3111, lng: 69.2797, in_radius: true, distance_m: 12.4, outlet_name: 'Bahor market', agent_name: 'Sardor Alimov' },
+    { visit_id: 502, lat: 41.2555, lng: 69.1888, in_radius: false, distance_m: 640, outlet_name: 'Yunus shop', agent_name: 'Nodira Karimova' },
+    { visit_id: 503, lat: 41.3333, lng: 69.2999, in_radius: null, distance_m: null, outlet_name: 'Chorsu kiosk', agent_name: 'Sardor Alimov' },
+  ];
+  const checkinProps = {
+    customers: [], orders: [], drivers: [], routes: [], geometry: {}, checkins: CHECKINS,
+    visibleLayers: { customers: false, orders: false, drivers: false, checkins: true },
+  };
+
+  it('colours every check-in by the published verdict, and an unmeasured one grey', () => {
+    render(<OperationsMap {...checkinProps} />);
+    const markers = screen.getAllByTestId('circle-marker');
+    // Three distinct colours, in the order the page handed the points over. Routing these
+    // points through the `customers` layer instead would recolour them by `lastOrderDate`
+    // (OperationsMap.jsx:116-136) and silently paint an out-of-range check-in green.
+    expect(markers.map((n) => [n.dataset.key, n.dataset.color])).toEqual([
+      ['v-501', '#52c41a'],
+      ['v-502', '#ff4d4f'],
+      ['v-503', '#8c8c8c'],
+    ]);
+  });
+
+  it('names the outlet, the agent and the measured distance in each popup', () => {
+    render(<OperationsMap {...checkinProps} />);
+    expect(screen.getByText('Yunus shop')).toBeInTheDocument();
+    expect(screen.getByText('Nodira Karimova')).toBeInTheDocument();
+    expect(screen.getByText('640 m')).toBeInTheDocument();
+    // No distance was measured for the third one — a dash, not a fabricated 0 m.
+    expect(screen.getByText('—')).toBeInTheDocument();
+  });
+
+  it('draws nothing when the check-ins layer is off', () => {
+    render(<OperationsMap {...checkinProps} visibleLayers={{ customers: false, orders: false, drivers: false }} />);
+    expect(screen.queryAllByTestId('circle-marker')).toHaveLength(0);
   });
 });

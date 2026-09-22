@@ -82,6 +82,68 @@ class BaseHandler:
         'STAFF_ORDER_ITEMS_REQUIRED': 'staff.error.api.validation',
         'BOTTLE_SESSION_REQUIRED': 'staff.error.api.bottle_session_required',
         'BOTTLE_SESSION_CAPACITY_EXCEEDED': 'staff.error.api.bottle_session_capacity_exceeded',
+        # Sales-agent outlet flows (business_app/api/staff_sales.py).
+        'SALES_OUTLET_NOT_FOUND': 'staff.error.api.not_found',
+        'SALES_OUTLET_NOT_ASSIGNED': 'staff.error.api.forbidden',
+        'SALES_OUTLET_DUPLICATE': 'staff.sales.error.duplicate',
+        'SALES_OUTLET_OUTSIDE_ZONE': 'staff.operator.outside_delivery_area',
+        'SALES_OUTLET_PIN_REQUIRED': 'staff.sales.error.pin_required',
+        'SALES_ACTIVATION_PIN_REQUIRED': 'staff.sales.error.pin_required',
+        # Nearby without a usable pin (phase 2b). The bot only ever sends a
+        # real Telegram location, so this is the backend refusing something
+        # the bot did not do — but the generic 400 copy ("Check the data and
+        # try again") would send the agent back to a form they never filled
+        # in. Reuses the existing seeded key: no new `/health` requirement.
+        'SALES_NEARBY_PIN_REQUIRED': 'staff.sales.error.pin_required',
+        'SALES_ACTIVATION_PHONE_REQUIRED': 'staff.sales.error.phone_required',
+        'SALES_OUTLET_STAGE_INVALID': 'staff.sales.error.stage_invalid',
+        'SALES_APPROVAL_STEP_FAILED': 'staff.sales.error.approval_failed',
+        'SALES_APPROVAL_PHONE_TAKEN': 'staff.sales.error.phone_taken',
+        'SALES_OUTLET_USER_LINKED': 'staff.sales.error.phone_taken',
+        'SALES_CONTACT_PHONE_INVALID': 'staff.operator.invalid_phone',
+        'SALES_DISTRICT_INVALID': 'staff.sales.error.district_invalid',
+        # Sales-agent visit loop (business_app/api/staff_sales.py, phase 2a).
+        # `SALES_STOCK_PRODUCT_INVALID` has its OWN copy (M14): an admin
+        # un-ticking `products.in_sales_stock_check` mid-visit is not a bad
+        # number, and the quantity sentence sends the agent back to re-type a
+        # count that was never the problem. Same screen, different sentence.
+        'SALES_VISIT_ALREADY_OPEN': 'staff.sales.error.visit_open',
+        'SALES_VISIT_NOT_OPEN': 'staff.sales.error.visit_not_open',
+        'SALES_VISIT_NOT_FOUND': 'staff.error.api.not_found',
+        'SALES_VISIT_NOT_OWNED': 'staff.error.api.forbidden',
+        'SALES_VISIT_STEP_INVALID': 'staff.sales.error.visit_step',
+        'SALES_STOCK_QTY_INVALID': 'staff.sales.error.stock_qty',
+        'SALES_STOCK_PRODUCT_INVALID': 'staff.sales.error.stock_product',
+        'SALES_OUTLET_NOT_ACTIVE': 'staff.sales.error.outlet_not_active',
+        'SALES_VISIT_ORDER_EXISTS': 'staff.sales.error.order_exists',
+        # A 400, so the staff client keeps no error body (`data` survives on
+        # 409s only): the copy is generic on purpose, and the screen it lands
+        # back on is the basket, where each line prints its own floor.
+        'SALES_ORDER_MIN_QTY': 'staff.sales.error.order_min_qty',
+        # M30's ceiling, the mirror of SALES_ORDER_MIN_QTY and generic for the
+        # same reason (a 400 leaves the bot the code alone).
+        'SALES_ORDER_QTY_INVALID': 'staff.sales.error.order_qty',
+        # L47(4): the schedule branch of `place_order`. No NEW copy -- the day
+        # screen already owns the sentence for an unusable date, and the
+        # handler re-shows that screen rather than leaving the agent on the
+        # confirm card reading the generic 400 sentence.
+        'SALES_DELIVERY_DATE_INVALID': 'staff.sales.visit.day_invalid',
+        'SALES_PAYMENT_METHOD_INVALID': 'staff.error.api.validation',
+        'SALES_VISIT_OUTCOME_REQUIRED': 'staff.sales.error.outcome_required',
+        'SALES_VISIT_OUTCOME_INVALID': 'staff.error.api.validation',
+        # D17. The bot refuses a FORWARD client-side (a photo taken somewhere
+        # else is not evidence about this shop, and a hash can only catch a
+        # repeat); this code is everything the backend refuses -- a non-image,
+        # or a file past the storage service's own ceiling, which is not a
+        # number the bot knows.
+        'SALES_PHOTO_INVALID': 'staff.sales.error.photo_invalid',
+        # Try-out from the field (phase 2b). `SALES_TRYOUT_PHONE_REQUIRED`
+        # reuses the activation path's sentence rather than seeding a second
+        # one: both refusals have the same cause (a try-out upserts its trial
+        # contact BY PHONE) and the same remedy (add a contact on the card),
+        # and the handler follows the alert with the screen that points there.
+        'SALES_TRYOUT_PHONE_REQUIRED': 'staff.sales.error.phone_required',
+        'SALES_TRYOUT_ITEMS_INVALID': 'staff.sales.error.tryout_items',
     }
     API_ERROR_MESSAGE_KEY_MAP = {
         'telegram_id is required': 'staff.error.api.validation',

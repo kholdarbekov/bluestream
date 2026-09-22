@@ -1,0 +1,45 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Эффективность агентов - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Эффективность агентов</h1>
+{% endblock %}
+
+{% block content %}
+{% macro cell(value) %}{% if value is none %}—{% else %}{{ value }}{% endif %}{% endmacro %}
+<h2>Еженедельные показатели торговых агентов</h2>
+
+<div class="info-box">
+    <p>Неделя: <strong>{{ week_start }}</strong> — <strong>{{ week_end }}</strong></p>
+    <p>Агентов: <strong>{{ agent_count }}</strong></p>
+    <p>Лучший агент по выручке: <strong>{{ cell(top_agent_name) }}</strong></p>
+</div>
+
+{% for agent in agents %}
+<hr class="divider">
+<h2>{{ agent.agent_name }}</h2>
+<table class="details-table">
+    <tr><th>Запланированные визиты</th><td>{{ cell(agent.planned_visits) }}</td></tr>
+    <tr><th>Завершённые визиты</th><td>{{ cell(agent.completed_visits) }}</td></tr>
+    <tr><th>План/факт, %</th><td>{{ cell(agent.plan_vs_fact_pct) }}</td></tr>
+    <tr><th>Внеплановые визиты</th><td>{{ cell(agent.unplanned_visits) }}</td></tr>
+    <tr><th>Визитов в день</th><td>{{ cell(agent.visits_per_day) }}</td></tr>
+    <tr><th>Визиты с заказом, %</th><td>{{ cell(agent.strike_rate_pct) }}</td></tr>
+    <tr><th>Закреплённые точки</th><td>{{ cell(agent.assigned_outlets) }}</td></tr>
+    <tr><th>Активные точки</th><td>{{ cell(agent.active_outlets) }}</td></tr>
+    <tr><th>Доля активных, %</th><td>{{ cell(agent.active_share_pct) }}</td></tr>
+    <tr><th>Новые точки (регистрация)</th><td>{{ cell(agent.new_outlets_registered) }}</td></tr>
+    <tr><th>Новые точки (активация)</th><td>{{ cell(agent.new_outlets_activated) }}</td></tr>
+    <tr><th>Создано заказов</th><td>{{ cell(agent.orders_placed) }}</td></tr>
+    <tr><th>Заказы доставлены и оплачены</th><td>{{ cell(agent.orders_delivered_paid) }}</td></tr>
+    <tr><th>Бутыли доставлены и оплачены</th><td>{{ cell(agent.bottles_delivered_paid) }}</td></tr>
+    <tr class="total-row"><th>Выручка доставлено и оплачено</th><td>{{ cell(agent.revenue_delivered_paid) }} сум</td></tr>
+    <tr><th>Отменённые заказы</th><td>{{ cell(agent.agent_orders_cancelled) }}</td></tr>
+    <tr><th>Предложено/принято, %</th><td>{{ cell(agent.suggested_vs_accepted_pct) }}</td></tr>
+    <tr><th>Чек-ины вне радиуса</th><td>{{ cell(agent.out_of_range_checkins) }}</td></tr>
+    <tr><th>Пропущенные чек-ины</th><td>{{ cell(agent.skipped_checkins) }}</td></tr>
+    <tr><th>Средний визит, минут</th><td>{{ cell(agent.avg_visit_minutes) }}</td></tr>
+</table>
+{% endfor %}
+{% endblock %}

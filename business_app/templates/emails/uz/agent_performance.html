@@ -1,0 +1,45 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Agentlar samaradorligi - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Agentlar samaradorligi</h1>
+{% endblock %}
+
+{% block content %}
+{% macro cell(value) %}{% if value is none %}—{% else %}{{ value }}{% endif %}{% endmacro %}
+<h2>Savdo agentlarining haftalik ko'rsatkichlari</h2>
+
+<div class="info-box">
+    <p>Hafta: <strong>{{ week_start }}</strong> — <strong>{{ week_end }}</strong></p>
+    <p>Agentlar: <strong>{{ agent_count }}</strong></p>
+    <p>Tushum bo'yicha eng yaxshi agent: <strong>{{ cell(top_agent_name) }}</strong></p>
+</div>
+
+{% for agent in agents %}
+<hr class="divider">
+<h2>{{ agent.agent_name }}</h2>
+<table class="details-table">
+    <tr><th>Rejalashtirilgan tashriflar</th><td>{{ cell(agent.planned_visits) }}</td></tr>
+    <tr><th>Yakunlangan tashriflar</th><td>{{ cell(agent.completed_visits) }}</td></tr>
+    <tr><th>Reja/fakt, %</th><td>{{ cell(agent.plan_vs_fact_pct) }}</td></tr>
+    <tr><th>Rejasiz tashriflar</th><td>{{ cell(agent.unplanned_visits) }}</td></tr>
+    <tr><th>Kuniga tashriflar</th><td>{{ cell(agent.visits_per_day) }}</td></tr>
+    <tr><th>Buyurtmali tashriflar, %</th><td>{{ cell(agent.strike_rate_pct) }}</td></tr>
+    <tr><th>Biriktirilgan nuqtalar</th><td>{{ cell(agent.assigned_outlets) }}</td></tr>
+    <tr><th>Faol nuqtalar</th><td>{{ cell(agent.active_outlets) }}</td></tr>
+    <tr><th>Faol ulushi, %</th><td>{{ cell(agent.active_share_pct) }}</td></tr>
+    <tr><th>Yangi nuqtalar (ro'yxatdan o'tgan)</th><td>{{ cell(agent.new_outlets_registered) }}</td></tr>
+    <tr><th>Yangi nuqtalar (faollashtirilgan)</th><td>{{ cell(agent.new_outlets_activated) }}</td></tr>
+    <tr><th>Berilgan buyurtmalar</th><td>{{ cell(agent.orders_placed) }}</td></tr>
+    <tr><th>Yetkazilgan va to'langan buyurtmalar</th><td>{{ cell(agent.orders_delivered_paid) }}</td></tr>
+    <tr><th>Yetkazilgan va to'langan ballonlar</th><td>{{ cell(agent.bottles_delivered_paid) }}</td></tr>
+    <tr class="total-row"><th>Yetkazilgan va to'langan tushum</th><td>{{ cell(agent.revenue_delivered_paid) }} so'm</td></tr>
+    <tr><th>Bekor qilingan buyurtmalar</th><td>{{ cell(agent.agent_orders_cancelled) }}</td></tr>
+    <tr><th>Taklif/qabul, %</th><td>{{ cell(agent.suggested_vs_accepted_pct) }}</td></tr>
+    <tr><th>Radiusdan tashqari chek-inlar</th><td>{{ cell(agent.out_of_range_checkins) }}</td></tr>
+    <tr><th>O'tkazib yuborilgan chek-inlar</th><td>{{ cell(agent.skipped_checkins) }}</td></tr>
+    <tr><th>O'rtacha tashrif, daqiqa</th><td>{{ cell(agent.avg_visit_minutes) }}</td></tr>
+</table>
+{% endfor %}
+{% endblock %}

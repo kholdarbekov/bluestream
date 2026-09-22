@@ -14,6 +14,16 @@ from business_app.models.order import Order
 from business_app.models.delivery import Delivery
 from business_app.services.analytics_service import AnalyticsService
 from business_app.services.notification_service import NotificationService
+
+# This import adds no boot-path weight: create_app() already pulls both sales services
+# (via the admin_sales blueprint) before analytics_tasks is imported at all. What it does
+# depend on is a LIVE cycle -- agent_account_service.py imports AgentMetricsService at
+# module scope, and agent_metrics_service.py::rows_for_period holds the other half open by
+# importing SalesAgentAccountService INSIDE the function. Hoist that one to module level
+# and create_app() itself fails (web app AND worker), naming agent_account_service rather
+# than this file; the Celery wiring test goes red along with most of the suite.
+from business_app.services.sales.agent_metrics_service import AgentMetricsService
+from business_app.utils.local_windows import previous_local_week, window_bounds
 from shared.enums import UserRole, UserStatus
 from shared import business_config
 from business_app import db
@@ -129,6 +139,109 @@ def generate_weekly_business_report():
 
     except Exception as e:
         logger.error(f"Failed to generate weekly business report: {e}")
+        return {"error": str(e)}
+
+
+@shared_task(time_limit=3600, soft_time_limit=3300)
+def generate_weekly_agent_performance_report():
+    """Email admins/managers one KPI row per active sales agent for the PREVIOUS local week.
+
+    The window is the previous LOCAL Monday..Sunday, not "now minus 7 days":
+    beat fires in DISPLAY_TIMEZONE, so the owner reads a week that starts where
+    their own calendar starts.
+
+    The spec puts this report "in AdminReportService"; it ships here instead
+    (ruling R14) because AdminReportService.generate is never emailed and has
+    no admin-UI consumer, while this module is where the weekly emails live.
+    """
+    try:
+        logger.info("Generating weekly agent performance report")
+
+        week_start, week_end = previous_local_week()
+        agents = AgentMetricsService.rows_for_period(week_start, week_end)
+
+        # SILENT when there is nobody to report on (R25). Not an error and not an empty
+        # email: a weekly report exists to be read, and the one an admin has learned to
+        # delete unread is worse than no report at all. The log line is the evidence the
+        # beat entry fired. The managers' daily exception summary is silent at zero for
+        # the same reason (R9); the two zero-states agree on purpose.
+        if not agents:
+            logger.info(
+                "No active sales agents for %s..%s - agent performance report skipped",
+                week_start.isoformat(),
+                week_end.isoformat(),
+            )
+            return {
+                "success": True,
+                "report_id": None,
+                "agent_count": 0,
+                "week_start": week_start.isoformat(),
+                "week_end": week_end.isoformat(),
+            }
+
+        # end is the EXCLUSIVE UTC bound of the last local day -- metadata only.
+        start_dt, end_dt = window_bounds(week_start, week_end)
+
+        # Ranked BEFORE the report row is written: nothing that can raise on a row may
+        # run after the commit. rows_for_period sorts by agent_name and max() keeps the
+        # FIRST maximal row, so a revenue tie resolves to the alphabetically first agent
+        # -- deterministic, never insertion order. `agents` is non-empty past the guard
+        # above, but the day `revenue_delivered_paid` goes nullable this raises, and a
+        # commit placed first would leave an AnalyticsReport nobody was emailed.
+        top_agent = max(agents, key=lambda row: row["revenue_delivered_paid"])
+
+        report = AnalyticsReport(
+            report_type="agent_performance",
+            title=f"Agent Performance Report — week {week_start.isoformat()} to {week_end.isoformat()}",
+            start_date=start_dt,
+            end_date=end_dt,
+            report_data={
+                "week_start": week_start.isoformat(),
+                "week_end": week_end.isoformat(),
+                "agents": agents,
+            },
+        )
+
+        db.session.add(report)
+        db.session.commit()
+
+        template_data = {
+            "week_start": week_start.isoformat(),
+            "week_end": week_end.isoformat(),
+            "agents": agents,
+            "agent_count": len(agents),
+            "top_agent_name": top_agent["agent_name"],
+        }
+
+        admin_users = User.query.filter(
+            User.role.in_([UserRole.ADMIN, UserRole.MANAGER]), User.status == UserStatus.ACTIVE
+        ).all()
+
+        notification_service = NotificationService()
+
+        for admin in admin_users:
+            notification_service.send_notification(
+                admin.id,
+                "agent_performance",
+                template_data=template_data,
+            )
+
+        logger.info(
+            "Agent performance report generated for %s..%s (%d agents)",
+            week_start.isoformat(),
+            week_end.isoformat(),
+            len(agents),
+        )
+        return {
+            "success": True,
+            "report_id": report.id,
+            "agent_count": len(agents),
+            "week_start": week_start.isoformat(),
+            "week_end": week_end.isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to generate weekly agent performance report: {e}")
         return {"error": str(e)}
 
 

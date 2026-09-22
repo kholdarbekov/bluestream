@@ -286,6 +286,7 @@ class TestEchoCounterEndToEnd:
             "tryouts": MagicMock(),
         }
         bot._common_handlers = {"profile": MagicMock(), "help": MagicMock()}
+        bot._sales_handlers = {"hub": MagicMock()}
         return bot
 
     def _ctx(self, telegram_bot):

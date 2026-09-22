@@ -465,7 +465,7 @@ class OrderInputValidator:
             self._add_error("order_source", "order_source must be a string")
             return
 
-        valid_sources = ["web", "mobile", "telegram", "admin", "api", "phone"]
+        valid_sources = ["web", "mobile", "telegram", "admin", "api", "phone", "sales_agent"]
         if source not in valid_sources:
             self._add_error("order_source", f'order_source must be one of: {", ".join(valid_sources)}')
 

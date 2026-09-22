@@ -115,14 +115,22 @@ const Operators = () => {
     };
 
     const handleSubmit = (values) => {
+        const email = values.email?.trim() || null;
         const payload = {
             ...values,
             first_name: values.first_name?.trim() || null,
             last_name: values.last_name?.trim() || null,
             phone: values.phone?.trim() || null,
-            email: values.email?.trim() || null,
+            email,
             staff_roles: values.staff_roles || ['operator'],
         };
+        // Editing names the operator by id, so an emptied input there still clears the column.
+        // Creating does not: the backend resolves an existing account by phone and attaches the
+        // role to its owner, so a blank input means "I have none to add". Omit the key and let
+        // `exclude_unset` drop it rather than blanking an email the admin never saw.
+        if (email === null && !editingOperator) {
+            delete payload.email;
+        }
         saveMutation.mutate(payload);
     };
 
@@ -410,6 +418,7 @@ const Operators = () => {
                         <Select mode="multiple">
                             <Option value="operator">{t('staff:operator')}</Option>
                             <Option value="delivery_driver">{t('staff:delivery_driver')}</Option>
+                            <Option value="sales_agent">{t('staff:sales_agent')}</Option>
                         </Select>
                     </Form.Item>
                     <Space style={{ width: '100%', justifyContent: 'flex-end' }}>

@@ -21,6 +21,7 @@ from business_app.models.translation import Translation  # noqa: E402
 from shared.staff_constants import (  # noqa: E402
     FAILED_DELIVERY_REASONS,
     RECONCILIATION_RISK_FLAGS,
+    SALES_EVENTS,
     STAFF_BOT_ROLES,
 )
 from shared.enums import (  # noqa: E402
@@ -47,6 +48,16 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "New Orders",
         "uz": "Yangi buyurtmalar",
         "ru": "Новые заказы",
+    },
+    "staff.menu.my_outlets": {
+        "en": "My outlets",
+        "uz": "Mening savdo nuqtalarim",
+        "ru": "Мои точки",
+    },
+    "staff.menu.new_outlet": {
+        "en": "New outlet",
+        "uz": "Yangi savdo nuqtasi",
+        "ru": "Новая точка",
     },
     "staff.menu.redispatch_failed": {
         "en": "Re-dispatch Failed",
@@ -347,6 +358,91 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "Order #{number} was cancelled.",
         "uz": "#{number} buyurtma bekor qilindi.",
         "ru": "Заказ #{number} отменен.",
+    },
+    # Sales module (Task 10): the agent's approval outcome, the operators'
+    # "new outlet waiting" ping, and the two deep-link buttons. The
+    # `staff.sales.notify.{event}` family is built by f-string in
+    # webhook_server.sales_event_handler, so it is also registered in
+    # _add_dynamic_keys below (and its twin in staff_bot/i18n.py): a literal
+    # regex cannot see it, and /health would otherwise never notice a gap.
+    "staff.sales.notify.outlet_approved": {
+        "en": "✅ Outlet <b>{outlet_name}</b> has been activated. You can now place orders for it.",
+        "uz": "✅ <b>{outlet_name}</b> savdo nuqtasi faollashtirildi. Endi unga buyurtma bera olasiz.",
+        "ru": "✅ Торговая точка <b>{outlet_name}</b> активирована. Теперь можно оформлять для неё заказы.",
+    },
+    "staff.sales.notify.outlet_rejected": {
+        "en": "❌ Activation of <b>{outlet_name}</b> was declined: {reason}",
+        "uz": "❌ <b>{outlet_name}</b> faollashtirish rad etildi: {reason}",
+        "ru": "❌ Активация <b>{outlet_name}</b> отклонена: {reason}",
+    },
+    "staff.sales.notify.activation_requested": {
+        "en": "🆕 New outlet awaiting activation: <b>{outlet_name}</b>",
+        "uz": "🆕 Faollashtirishni kutayotgan yangi savdo nuqtasi: <b>{outlet_name}</b>",
+        "ru": "🆕 Новая торговая точка ждёт активации: <b>{outlet_name}</b>",
+    },
+    "staff.sales.notify.open_outlet": {
+        "en": "Open outlet",
+        "uz": "Savdo nuqtasini ochish",
+        "ru": "Открыть точку",
+    },
+    "staff.sales.notify.open_requests": {
+        "en": "Activation requests",
+        "uz": "Faollashtirish so'rovlari",
+        "ru": "Заявки на активацию",
+    },
+    # The store's answer to an agent order (phase 2a). Explicit rows rather
+    # than SALES_TEXT_TRANSLATIONS suffixes for the same reason as the four
+    # above: `_curated_value` consults STAFF_TRANSLATIONS first, and these
+    # carry HTML the suffix catalog does not.
+    #
+    # Ruling 19's carve-out lives here: the webhook passes `outlet_name`,
+    # `order_number` and `reason` to BOTH events, and the copy is what decides
+    # which of them an agent reads. A confirmation has no reason, so it must
+    # not carry `{reason}` -- it would print "None" on the happy path.
+    "staff.sales.notify.agent_order_confirmed": {
+        "en": "✅ <b>{outlet_name}</b> confirmed order {order_number}.",
+        "uz": "✅ <b>{outlet_name}</b> {order_number} buyurtmasini tasdiqladi.",
+        "ru": "✅ <b>{outlet_name}</b> подтвердила заказ {order_number}.",
+    },
+    # A separate SENTENCE for the reason, not a `: {reason}` clause. The
+    # customer bot's Decline button posts no reason at all
+    # (`respond_agent_order` omits the field), so `AgentOrderConfirmationService
+    # .respond` pushes `reason: None` on EVERY real decline and the handler
+    # renders `{reason}` as ''. A colon form would therefore end every single
+    # one of these messages on a dangling ":" -- the empty case is the normal
+    # case here, not the edge.
+    "staff.sales.notify.agent_order_declined": {
+        "en": "❌ <b>{outlet_name}</b> declined order {order_number}. {reason}",
+        "uz": "❌ <b>{outlet_name}</b> {order_number} buyurtmasini rad etdi. {reason}",
+        "ru": "❌ <b>{outlet_name}</b> отклонила заказ {order_number}. {reason}",
+    },
+    # The morning digest's header line (phase 2b), seeded in its FINAL copy so
+    # this row has exactly one owner: Task 8 renders it and does not reseed it.
+    # It carries `<b>` like its two order siblings, and exactly ONE replacement
+    # field — `{date}`, the agent's own local day, already formatted by the bot.
+    # No outlet name and no reason: the sections beneath it (due / overdue /
+    # unvisited / open visit) are the bot's own keys, built from the backend's
+    # structured payload.
+    #
+    # A second field here would be an English leak nothing else can see:
+    # `render_translation` degrades a template with an unfilled field to the
+    # humanised English key, in every language. For the same reason, Task 8's
+    # dedicated digest branch must land before beat is ever restarted — the
+    # generic `sales_event_handler` fills only `outlet_name`/`reason`/
+    # `order_number` and would degrade this row too -- the deploy ordering
+    # Task 9's runbook states.
+    "staff.sales.notify.morning_digest": {
+        "en": "📋 <b>Your day — {date}</b>",
+        "uz": "📋 <b>Bugungi ishingiz — {date}</b>",
+        "ru": "📋 <b>Ваш день — {date}</b>",
+    },
+    # Rendered by the BACKEND (NotificationService in-app subject), not the bot;
+    # seeded here too because both seeders upsert the same `translations` table
+    # by key and backend get_translation reads it regardless of category.
+    "staff.notification.subject.outlet_activation_requested": {
+        "en": "Outlet activation requested",
+        "uz": "Savdo nuqtasini faollashtirish so'rovi",
+        "ru": "Заявка на активацию точки",
     },
     "staff.notification.order_unassigned": {
         "uz": "➖ {number}-buyurtma dispetcher tomonidan marshrutingizdan olib tashlandi. U yana umumiy ro'yxatga qaytdi.",
@@ -1801,6 +1897,7 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
 ROLE_TRANSLATIONS = {
     "delivery_driver": {"en": "Delivery Driver", "uz": "Kuryer", "ru": "Курьер"},
     "operator": {"en": "Operator", "uz": "Operator", "ru": "Оператор"},
+    "sales_agent": {"en": "Sales Agent", "uz": "Savdo agenti", "ru": "Торговый агент"},
 }
 
 # MUST cover every `shared.enums.DeliveryStatus` value, not just the ones a
@@ -1983,6 +2080,11 @@ EXTRA_TRANSLATIONS = {
         "uz": "Operator: mijoz yarating, manzillarni boshqaring va telefon buyurtmalarini yarating.",
         "ru": "Оператор: создавайте клиентов, управляйте адресами и оформляйте заказы по телефону.",
     },
+    "staff.help.sales_agent": {
+        "en": "🏪 <b>Sales agent</b>\n• My outlets — your stores, prospects and their cards\n• New outlet — register a store you found in the field\n• Request activation once the contact phone and pin are in place; an operator or admin approves it",
+        "uz": "🏪 <b>Savdo agenti</b>\n• Mening savdo nuqtalarim — do'konlaringiz, nomzodlar va ularning kartalari\n• Yangi savdo nuqtasi — dalada topgan do'koningizni ro'yxatga oling\n• Telefon va joylashuv kiritilgach faollashtirishni so'rang; operator yoki admin tasdiqlaydi",
+        "ru": "🏪 <b>Торговый агент</b>\n• Мои точки — ваши магазины, кандидаты и их карточки\n• Новая точка — зарегистрируйте магазин, найденный на маршруте\n• Запросите активацию, когда указаны телефон и геометка; оператор или админ подтвердит",
+    },
     "staff.profile.title": {"en": "Profile", "uz": "Profil", "ru": "Профиль"},
     "staff.profile.name": {"en": "Name", "uz": "Ism", "ru": "Имя"},
     "staff.profile.phone": {"en": "Phone", "uz": "Telefon", "ru": "Телефон"},
@@ -2132,6 +2234,365 @@ OPERATOR_TEXT_TRANSLATIONS = {
     "user_exists": {"en": "Client already exists.", "uz": "Mijoz allaqachon mavjud.", "ru": "Клиент уже существует."},
 }
 
+# Suffix-keyed, seeded under the `staff.sales.` prefix (see
+# `_add_curated_keys` / `_auto_family_translation`). The explicit
+# `staff.sales.notify.*` rows live in STAFF_TRANSLATIONS and keep winning,
+# because `_curated_value` consults that map before the families.
+SALES_TEXT_TRANSLATIONS = {
+    "error.duplicate": {"en": "A similar outlet or customer already exists nearby.", "uz": "Yaqin atrofda shunga o'xshash savdo nuqtasi yoki mijoz allaqachon bor.", "ru": "Похожая торговая точка или клиент уже есть поблизости."},
+    "error.pin_required": {"en": "A location pin is required.", "uz": "Joylashuv belgisi kerak.", "ru": "Нужна геометка."},
+    "error.phone_required": {"en": "A contact phone is required.", "uz": "Aloqa telefoni kerak.", "ru": "Нужен контактный телефон."},
+    "error.stage_invalid": {"en": "This action is not possible at the outlet's current stage.", "uz": "Bu amal savdo nuqtasining hozirgi bosqichida mumkin emas.", "ru": "Действие невозможно на текущем этапе точки."},
+    "error.approval_failed": {"en": "Activation failed at one step. Try again or ask an admin.", "uz": "Faollashtirish bir bosqichda to'xtadi. Qayta urinib ko'ring yoki adminga murojaat qiling.", "ru": "Активация прервалась на одном из шагов. Повторите или обратитесь к администратору."},
+    "error.phone_taken": {"en": "This phone already belongs to another customer.", "uz": "Bu telefon boshqa mijozga tegishli.", "ru": "Этот телефон уже принадлежит другому клиенту."},
+    "error.district_invalid": {"en": "Unknown district.", "uz": "Noma'lum tuman.", "ru": "Неизвестный район."},
+    "hub.title": {"en": "My outlets", "uz": "Mening savdo nuqtalarim", "ru": "Мои точки"},
+    # Names the due list first, because that row is the agent's day (L95: the
+    # hint used to describe Prospects only, under a keyboard whose first and
+    # primary button is the due list).
+    "hub.hint": {"en": "Start with the due list — that is today's work. Prospects are outlets not yet activated. Tap any outlet to open its card.", "uz": "Bugungi va kechikkan ro'yxatidan boshlang — bu bugungi ish. Nomzodlar — hali faollashtirilmagan nuqtalar. Kartani ochish uchun istalgan nuqtani bosing.", "ru": "Начните со списка «На сегодня и просроченные» — это и есть работа на день. Кандидаты — ещё не активированные точки. Нажмите на любую точку, чтобы открыть карточку."},
+    "hub.prospects": {"en": "Prospects", "uz": "Nomzodlar", "ru": "Кандидаты"},
+    "hub.all": {"en": "All outlets", "uz": "Barcha nuqtalar", "ru": "Все точки"},
+    "hub.nearby": {"en": "Nearby", "uz": "Yaqin atrofda", "ru": "Рядом"},
+    "list.title_prospects": {"en": "Prospects", "uz": "Nomzodlar", "ru": "Кандидаты"},
+    "list.title_all": {"en": "All my outlets", "uz": "Barcha savdo nuqtalarim", "ru": "Все мои точки"},
+    "list.empty": {"en": "Nothing here yet.", "uz": "Hozircha hech narsa yo'q.", "ru": "Пока пусто."},
+    "list.next": {"en": "Next", "uz": "Keyingi", "ru": "Далее"},
+    "list.prev": {"en": "Back", "uz": "Oldingi", "ru": "Назад"},
+    "card.stage": {"en": "Stage", "uz": "Bosqich", "ru": "Этап"},
+    "card.class": {"en": "Class", "uz": "Toifa", "ru": "Класс"},
+    "card.contact": {"en": "Contact", "uz": "Aloqa", "ru": "Контакт"},
+    "card.address": {"en": "Address", "uz": "Manzil", "ru": "Адрес"},
+    "card.receivable": {"en": "Owes", "uz": "Qarzdorlik", "ru": "Долг"},
+    "card.bottles": {"en": "Bottles at outlet", "uz": "Nuqtadagi idishlar", "ru": "Бутылей на точке"},
+    "card.notes": {"en": "Notes", "uz": "Izohlar", "ru": "Заметки"},
+    "card.last_orders": {"en": "Last orders", "uz": "So'nggi buyurtmalar", "ru": "Последние заказы"},
+    "card.request_activation": {"en": "Request activation", "uz": "Faollashtirishni so'rash", "ru": "Запросить активацию"},
+    "card.navigate": {"en": "Navigate", "uz": "Yo'l ko'rsatish", "ru": "Маршрут"},
+    "card.back_to_hub": {"en": "My outlets", "uz": "Mening nuqtalarim", "ru": "Мои точки"},
+    "card.activation_requested": {"en": "Activation requested. An operator or admin will review it.", "uz": "Faollashtirish so'raldi. Operator yoki admin ko'rib chiqadi.", "ru": "Активация запрошена. Оператор или админ рассмотрит заявку."},
+    # Stages and types mirror `business_app/models/sales.py` — see the loops in
+    # `_add_dynamic_keys`, which is what puts these in front of /health.
+    "stage.prospect": {"en": "Prospect", "uz": "Nomzod", "ru": "Кандидат"},
+    "stage.trial": {"en": "Trial", "uz": "Sinov", "ru": "Пробный"},
+    "stage.activation_requested": {"en": "Awaiting activation", "uz": "Faollashtirish kutilmoqda", "ru": "Ожидает активации"},
+    "stage.active": {"en": "Active", "uz": "Faol", "ru": "Активна"},
+    "stage.at_risk": {"en": "At risk", "uz": "Xavf ostida", "ru": "Под риском"},
+    "stage.dormant": {"en": "Dormant", "uz": "Uxlab yotgan", "ru": "Спящая"},
+    "stage.lost": {"en": "Lost", "uz": "Yo'qotilgan", "ru": "Потеряна"},
+    "type.grocery_store": {"en": "Grocery store", "uz": "Oziq-ovqat do'koni", "ru": "Продуктовый магазин"},
+    "type.workplace": {"en": "Workplace", "uz": "Ish joyi", "ru": "Офис"},
+    "type.individual": {"en": "Individual", "uz": "Jismoniy shaxs", "ru": "Частное лицо"},
+    # Field onboarding ("New outlet"), step by step.
+    "new.choose_type": {"en": "What kind of outlet is this?", "uz": "Bu qanday savdo nuqtasi?", "ru": "Какой это тип точки?"},
+    "new.enter_name": {"en": "Enter the outlet name (as on the sign):", "uz": "Savdo nuqtasi nomini kiriting (peshlavhadagidek):", "ru": "Введите название точки (как на вывеске):"},
+    "new.enter_contact_name": {"en": "Contact person's name (or skip):", "uz": "Aloqa uchun shaxs ismi (yoki o'tkazib yuboring):", "ru": "Имя контактного лица (или пропустите):"},
+    "new.enter_contact_phone": {"en": "Contact phone, e.g. 90 123 45 67 (or skip — needed before activation):", "uz": "Aloqa telefoni, masalan 90 123 45 67 (yoki o'tkazing — faollashtirishdan oldin kerak bo'ladi):", "ru": "Контактный телефон, напр. 90 123 45 67 (или пропустите — понадобится до активации):"},
+    "new.share_pin": {"en": "Share the outlet location: tap the button while standing at the door, or type the address.", "uz": "Savdo nuqtasi joylashuvini yuboring: eshik oldida turib tugmani bosing yoki manzilni yozing.", "ru": "Отправьте геолокацию точки: нажмите кнопку у входа или введите адрес."},
+    "new.share_pin_hint": {"en": "Use the button below or type the address.", "uz": "Quyidagi tugmadan foydalaning yoki manzilni yozing.", "ru": "Используйте кнопку ниже или введите адрес."},
+    "new.share_pin_button": {"en": "📍 Share outlet location", "uz": "📍 Nuqta joylashuvini yuborish", "ru": "📍 Отправить геолокацию точки"},
+    "new.pin_received": {"en": "Location saved: {address}", "uz": "Joylashuv saqlandi: {address}", "ru": "Геолокация сохранена: {address}"},
+    "new.choose_class": {"en": "Estimated class (A = high volume, C = low) — or skip:", "uz": "Taxminiy toifa (A = yuqori hajm, C = past) — yoki o'tkazing:", "ru": "Предполагаемый класс (A — большой объём, C — малый) — или пропустите:"},
+    "new.enter_notes": {"en": "Notes for the next visit (or skip):", "uz": "Keyingi tashrif uchun izohlar (yoki o'tkazing):", "ru": "Заметки для следующего визита (или пропустите):"},
+    "new.skip": {"en": "Skip", "uz": "O'tkazib yuborish", "ru": "Пропустить"},
+    "new.summary_title": {"en": "New outlet", "uz": "Yangi savdo nuqtasi", "ru": "Новая точка"},
+    "new.confirm_hint": {"en": "Save this outlet?", "uz": "Bu nuqtani saqlaymizmi?", "ru": "Сохранить точку?"},
+    "new.duplicates_title": {"en": "Similar records found nearby", "uz": "Yaqin atrofda o'xshash yozuvlar topildi", "ru": "Поблизости найдены похожие записи"},
+    "new.link_existing": {"en": "Link", "uz": "Bog'lash", "ru": "Привязать"},
+    "new.open_existing": {"en": "Open", "uz": "Ochish", "ru": "Открыть"},
+    "new.create_anyway": {"en": "Create anyway", "uz": "Baribir yaratish", "ru": "Всё равно создать"},
+    "new.created": {"en": "Outlet saved", "uz": "Savdo nuqtasi saqlandi", "ru": "Точка сохранена"},
+    # The operator's approval queue. `approvals.reason.*` is also a dynamic
+    # family — `SalesKeyboards.approval_actions` builds the key from
+    # `REJECT_REASONS`, and the twin loop in
+    # `staff_bot/i18n.py::_add_dynamic_family_keys` is what puts it in front of
+    # /health. A fifth reason needs a row here as well as an entry there.
+    "approvals.button": {"en": "Activation requests", "uz": "Faollashtirish so'rovlari", "ru": "Заявки на активацию"},
+    "approvals.title": {"en": "Outlets awaiting activation", "uz": "Faollashtirishni kutayotgan nuqtalar", "ru": "Точки, ожидающие активации"},
+    "approvals.empty": {"en": "No requests right now.", "uz": "Hozircha so'rovlar yo'q.", "ru": "Заявок пока нет."},
+    "approvals.approve": {"en": "Approve", "uz": "Tasdiqlash", "ru": "Одобрить"},
+    "approvals.reject": {"en": "Reject", "uz": "Rad etish", "ru": "Отклонить"},
+    "approvals.approved": {"en": "Outlet activated. The agent has been notified.", "uz": "Nuqta faollashtirildi. Agentga xabar berildi.", "ru": "Точка активирована. Агент уведомлён."},
+    "approvals.rejected": {"en": "Request rejected. The agent has been notified.", "uz": "So'rov rad etildi. Agentga xabar berildi.", "ru": "Заявка отклонена. Агент уведомлён."},
+    "approvals.reason.duplicate": {"en": "Duplicate", "uz": "Takroriy", "ru": "Дубликат"},
+    "approvals.reason.incomplete": {"en": "Incomplete", "uz": "To'liq emas", "ru": "Неполные данные"},
+    "approvals.reason.not_customer": {"en": "Not a customer", "uz": "Mijoz emas", "ru": "Не клиент"},
+    "approvals.reason.other": {"en": "Other", "uz": "Boshqa", "ru": "Другое"},
+    "approvals.back": {"en": "Back to requests", "uz": "So'rovlarga qaytish", "ru": "К заявкам"},
+    # ---- phase 2a: the due list, the card's visit lines and the visit loop ----
+    # Only `card.overdue`, `list.overdue_suffix`, `visit.checkin_ok`,
+    # `visit.checkin_far`, `visit.order_created` and `visit.closed`
+    # interpolate (plan ruling 19); every other row here is a bare LABEL and
+    # the handler composes the product name, the count and the quantity around
+    # it -- e.g. the shelf line reads "• Pure Water 19L — On shelf: 3", built
+    # by `VisitHandler`, not by a template. That is deliberate: the bot's
+    # renderer drops a kwarg a template has no field for WITHOUT raising, so a
+    # placeholder added on one side and not the other is a silently blank
+    # screen. A `{placeholder}` present in one language only is a KeyError on
+    # that agent's phone alone, which is why
+    # `tests/unit/test_staff_translation_catalog_complete.py` compares the
+    # sets across all three.
+    "hub.due": {"en": "Due today & overdue", "uz": "Bugungi va kechikkan", "ru": "На сегодня и просроченные"},
+    "list.title_due": {"en": "Due today & overdue", "uz": "Bugungi va kechikkan", "ru": "На сегодня и просроченные"},
+    "list.overdue_suffix": {"en": "+{days}d", "uz": "+{days} kun", "ru": "+{days} дн."},
+    "card.next_due": {"en": "Next visit due", "uz": "Keyingi tashrif", "ru": "Следующий визит"},
+    "card.overdue": {"en": "overdue by {days} d", "uz": "{days} kun kechikdi", "ru": "просрочено на {days} дн."},
+    "card.rate": {"en": "Consumption", "uz": "Sarfi", "ru": "Расход"},
+    "card.suggested": {"en": "Suggested order", "uz": "Tavsiya etilgan buyurtma", "ru": "Рекомендуемый заказ"},
+    "card.last_visit": {"en": "Last visit", "uz": "So'nggi tashrif", "ru": "Последний визит"},
+    "card.start_visit": {"en": "Start visit", "uz": "Tashrifni boshlash", "ru": "Начать визит"},
+    "card.resume_visit": {"en": "Resume visit", "uz": "Tashrifni davom ettirish", "ru": "Продолжить визит"},
+    "visit.started": {"en": "Visit started.", "uz": "Tashrif boshlandi.", "ru": "Визит начат."},
+    "visit.resume_or_abandon": {"en": "You already have an open visit. Resume it or abandon it.", "uz": "Sizda ochiq tashrif bor. Uni davom ettiring yoki bekor qiling.", "ru": "У вас уже есть открытый визит. Продолжите или отмените его."},
+    "visit.checkin_prompt": {"en": "Share your location at the outlet's door, or skip.", "uz": "Savdo nuqtasi eshigi oldida joylashuvingizni yuboring yoki o'tkazib yuboring.", "ru": "Отправьте геолокацию у входа в точку или пропустите."},
+    "visit.checkin_button": {"en": "📍 I'm at the outlet", "uz": "📍 Men nuqtadaman", "ru": "📍 Я на точке"},
+    "visit.checkin_skip": {"en": "Skip check-in", "uz": "Belgilashni o'tkazish", "ru": "Пропустить отметку"},
+    # No leading glyph on these two: `VisitHandler.receive_checkin` prefixes
+    # its own `mark` (`✅` / `⚠️`, chosen from `in_radius`), so a glyph seeded
+    # here as well would double it on the agent's screen.
+    "visit.checkin_ok": {"en": "At the outlet ({distance} m)", "uz": "Nuqtada ({distance} m)", "ru": "На точке ({distance} м)"},
+    "visit.checkin_far": {"en": "{distance} m from the pin — recorded", "uz": "Belgidan {distance} m uzoqda — qayd etildi", "ru": "{distance} м от метки — записано"},
+    "visit.checkin_skipped": {"en": "Check-in skipped.", "uz": "Belgilash o'tkazib yuborildi.", "ru": "Отметка пропущена."},
+    "visit.stock_title": {"en": "Stock check", "uz": "Qoldiqni tekshirish", "ru": "Проверка остатков"},
+    "visit.stock_hint": {"en": "Tap a product and set what is on the shelf.", "uz": "Mahsulotni bosing va javondagi miqdorni belgilang.", "ru": "Нажмите на товар и укажите остаток на полке."},
+    "visit.stock_row": {"en": "On shelf", "uz": "Javonda", "ru": "На полке"},
+    # The shelf screen's two dead ends (review #01/#49/#23). An empty
+    # catalogue is the state of every install until an admin ticks
+    # `products.in_sales_stock_check`, and it is not an error: the visit
+    # continues to the order step with an empty count. A FAILED fetch is not
+    # the same thing and gets the API error plus a retry, never the empty POST.
+    "visit.stock_no_products": {"en": "No products are set for the stock check. Continue to the order.", "uz": "Qoldiq tekshiruvi uchun mahsulot belgilanmagan. Buyurtmaga o'ting.", "ru": "Для проверки остатков не выбрано ни одного товара. Перейдите к заказу."},
+    "visit.stock_retry": {"en": "Try again", "uz": "Qayta urinish", "ru": "Повторить"},
+    "visit.stock_qty_prompt": {"en": "How many are on the shelf?", "uz": "Javonda nechta bor?", "ru": "Сколько на полке?"},
+    "visit.stock_empties_prompt": {"en": "How many empties are waiting?", "uz": "Nechta bo'sh idish tayyor?", "ru": "Сколько пустой тары готово?"},
+    "visit.sold_out": {"en": "Sold out", "uz": "Tugagan", "ru": "Закончился"},
+    "visit.low": {"en": "Running low", "uz": "Kam qoldi", "ru": "Заканчивается"},
+    "visit.stock_done": {"en": "Done", "uz": "Tayyor", "ru": "Готово"},
+    "visit.stock_back": {"en": "Back to products", "uz": "Mahsulotlarga qaytish", "ru": "К товарам"},
+    "visit.order_title": {"en": "Order", "uz": "Buyurtma", "ru": "Заказ"},
+    "visit.order_suggested_line": {"en": "Suggested", "uz": "Tavsiya", "ru": "Рекомендуем"},
+    "visit.order_last_line": {"en": "Last order", "uz": "So'nggi buyurtma", "ru": "Прошлый заказ"},
+    "visit.order_none_line": {"en": "No suggestion — the shelf is full.", "uz": "Tavsiya yo'q — javon to'la.", "ru": "Рекомендации нет — полка полная."},
+    "visit.order_suggested": {"en": "Order suggested", "uz": "Tavsiyani buyurtma qilish", "ru": "Заказать рекомендуемое"},
+    "visit.order_edit": {"en": "Edit quantities", "uz": "Miqdorlarni o'zgartirish", "ru": "Изменить количество"},
+    "visit.order_last": {"en": "Same as last order", "uz": "So'nggi buyurtmadek", "ru": "Как в прошлый раз"},
+    "visit.no_order": {"en": "No order", "uz": "Buyurtmasiz", "ru": "Без заказа"},
+    "visit.no_order_reason_prompt": {"en": "Why is there no order?", "uz": "Nega buyurtma yo'q?", "ru": "Почему нет заказа?"},
+    "visit.order_edit_title": {"en": "Tap a line to change its quantity.", "uz": "Miqdorni o'zgartirish uchun qatorni bosing.", "ru": "Нажмите на строку, чтобы изменить количество."},
+    "visit.order_done": {"en": "Continue", "uz": "Davom etish", "ru": "Продолжить"},
+    # Composed onto the basket line by `open_order_line` when the product
+    # carries a real floor: "• Pure Water 19L × 20 · min 2". A BARE label
+    # (ruling 19) -- the number is the backend's published
+    # `min_order_quantity`, printed beside it, never interpolated into it.
+    "visit.order_min": {"en": "min", "uz": "kamida", "ru": "мин."},
+    "visit.payment_prompt": {"en": "How will the outlet pay?", "uz": "Savdo nuqtasi qanday to'laydi?", "ru": "Как точка будет платить?"},
+    # The rails screen's dead end (L105). Deliberately NOT
+    # `error.outlet_not_active`: an outlet can be fully active and still be
+    # offered no rail -- its COD headroom is used up, or its business account
+    # is not billable -- and "activate it first" then sends the agent to an
+    # operator with the wrong question. The basket is untouched and the screen
+    # does not move (controller ruling 24), so this says what is blocked, not
+    # what to redo.
+    "visit.no_rails": {"en": "This outlet has no usable payment method right now. Ask an operator to check its account.", "uz": "Bu nuqtada hozir ishlatib bo'ladigan to'lov usuli yo'q. Hisobni tekshirishni operatordan so'rang.", "ru": "У этой точки сейчас нет доступного способа оплаты. Попросите оператора проверить её счёт."},
+    "visit.day_prompt": {"en": "When should we deliver?", "uz": "Qachon yetkazamiz?", "ru": "Когда доставить?"},
+    "visit.day_tomorrow": {"en": "Tomorrow", "uz": "Ertaga", "ru": "Завтра"},
+    "visit.day_today": {"en": "Today", "uz": "Bugun", "ru": "Сегодня"},
+    "visit.day_pick": {"en": "Pick a date", "uz": "Sanani tanlash", "ru": "Выбрать дату"},
+    "visit.day_pick_prompt": {"en": "Send the delivery date as YYYY-MM-DD.", "uz": "Yetkazish sanasini YYYY-MM-DD ko'rinishida yuboring.", "ru": "Отправьте дату доставки в формате ГГГГ-ММ-ДД."},
+    "visit.day_invalid": {"en": "That date is not usable. Send it as YYYY-MM-DD.", "uz": "Bu sana yaramaydi. YYYY-MM-DD ko'rinishida yuboring.", "ru": "Такая дата не подходит. Отправьте в формате ГГГГ-ММ-ДД."},
+    # L106: the 🕘 line of the order receipt and the confirm card. The glyph is
+    # the HANDLER's -- seeding one here would double it, the same trap
+    # `visit.checkin_ok` documents -- and both ends interpolate so the window
+    # can be written in either order per language.
+    "visit.window_line": {"en": "Delivery window {start}–{end}", "uz": "Yetkazish oralig'i {start}–{end}", "ru": "Окно доставки {start}–{end}"},
+    "visit.notes_prompt": {"en": "Notes for the driver (or skip):", "uz": "Haydovchi uchun izoh (yoki o'tkazing):", "ru": "Заметка для водителя (или пропустите):"},
+    "visit.confirm_title": {"en": "Check the order before sending it.", "uz": "Yuborishdan oldin buyurtmani tekshiring.", "ru": "Проверьте заказ перед отправкой."},
+    "visit.confirm": {"en": "Place order", "uz": "Buyurtma berish", "ru": "Оформить заказ"},
+    "visit.back": {"en": "Back", "uz": "Orqaga", "ru": "Назад"},
+    "visit.order_created": {"en": "Order {order_number} created.", "uz": "{order_number} buyurtmasi yaratildi.", "ru": "Заказ {order_number} создан."},
+    "visit.order_pending_confirmation": {"en": "Waiting for the store to confirm it in their bot.", "uz": "Do'kon o'z botida tasdiqlashini kutmoqdamiz.", "ru": "Ждём подтверждения от магазина в его боте."},
+    "visit.order_confirmed": {"en": "Confirmed — it is in the delivery queue.", "uz": "Tasdiqlandi — yetkazish navbatida.", "ru": "Подтверждён — в очереди на доставку."},
+    "visit.order_auto_confirmed": {"en": "Confirmed automatically — it is in the delivery queue.", "uz": "Avtomatik tasdiqlandi — yetkazish navbatida.", "ru": "Подтверждён автоматически — в очереди на доставку."},
+    "visit.close_outcome_prompt": {"en": "How did the visit end?", "uz": "Tashrif qanday yakunlandi?", "ru": "Чем закончился визит?"},
+    "visit.close_notes_prompt": {"en": "Notes for the next visit (or skip):", "uz": "Keyingi tashrif uchun izoh (yoki o'tkazing):", "ru": "Заметка для следующего визита (или пропустите):"},
+    "visit.next_visit_prompt": {"en": "When is the next visit?", "uz": "Keyingi tashrif qachon?", "ru": "Когда следующий визит?"},
+    "visit.closed": {"en": "Visit closed. Next visit: {next_due}", "uz": "Tashrif yakunlandi. Keyingi tashrif: {next_due}", "ru": "Визит завершён. Следующий визит: {next_due}"},
+    # Plan ruling 30: a `POST /visits/<id>/order` that never came back. POSTs
+    # are not auto-retried, so the bot cannot know whether the store was just
+    # billed -- and saying "failed" would be a guess in the direction that
+    # produces a duplicate order. The only honest sentence is "open it and
+    # look", with the Resume button beside it.
+    "visit.order_maybe_landed": {"en": "The order may have been placed — open the visit to check.", "uz": "Buyurtma yuborilgan bo'lishi mumkin — tekshirish uchun tashrifni oching.", "ru": "Заказ мог быть оформлен — откройте визит и проверьте."},
+    # The visit conversation's OWN timeout copy. The shared `staff.flow_timed_out`
+    # says the flow was closed and "nothing was saved", which is false here: a
+    # timeout does not touch the visit, the server keeps it open, the check-in
+    # and the counts are already recorded, and Resume walks back into it.
+    "visit.timeout": {"en": "This step timed out. The visit is still open — resume it when you are ready.", "uz": "Bu bosqich vaqti tugadi. Tashrif hali ochiq — tayyor bo'lganingizda davom ettiring.", "ru": "Время этого шага истекло. Визит всё ещё открыт — продолжите, когда будете готовы."},
+    "visit.abandoned": {"en": "Visit abandoned.", "uz": "Tashrif bekor qilindi.", "ru": "Визит отменён."},
+    "visit.abandon": {"en": "Abandon visit", "uz": "Tashrifni bekor qilish", "ru": "Отменить визит"},
+    "visit.resume": {"en": "Resume visit", "uz": "Davom ettirish", "ru": "Продолжить визит"},
+    # The four picker families. `SalesKeyboards` builds these keys with
+    # f-strings from VISIT_OUTCOMES / NO_ORDER_REASONS / PAY_METHODS /
+    # NEXT_VISIT_CHOICES, so they are ALSO registered in `_add_dynamic_keys`
+    # below and in its twin `staff_bot/i18n.py::_add_dynamic_family_keys` —
+    # the rows here are what gives them a value, the loops are what makes a
+    # gap visible to /health.
+    "visit.outcome.order_placed": {"en": "Order placed", "uz": "Buyurtma berildi", "ru": "Заказ оформлен"},
+    "visit.outcome.no_order": {"en": "No order", "uz": "Buyurtmasiz", "ru": "Без заказа"},
+    "visit.outcome.closed": {"en": "Outlet closed", "uz": "Nuqta yopiq edi", "ru": "Точка была закрыта"},
+    "visit.outcome.owner_absent": {"en": "Owner absent", "uz": "Egasi yo'q edi", "ru": "Владельца не было"},
+    "visit.outcome.refused": {"en": "Refused", "uz": "Rad etdi", "ru": "Отказ"},
+    "visit.reason.sufficient_stock": {"en": "Enough stock", "uz": "Qoldiq yetarli", "ru": "Хватает остатка"},
+    "visit.reason.cash_issue": {"en": "No money now", "uz": "Hozir puli yo'q", "ru": "Сейчас нет денег"},
+    "visit.reason.price": {"en": "Price", "uz": "Narx", "ru": "Цена"},
+    "visit.reason.competitor": {"en": "Competitor", "uz": "Raqobatchi", "ru": "Конкурент"},
+    "visit.reason.other": {"en": "Other", "uz": "Boshqa", "ru": "Другое"},
+    "visit.pay.cash": {"en": "Cash", "uz": "Naqd pul", "ru": "Наличные"},
+    "visit.pay.business_account": {"en": "Business account", "uz": "Hisob raqam", "ru": "Расчётный счёт"},
+    "visit.next.3": {"en": "In 3 days", "uz": "3 kundan keyin", "ru": "Через 3 дня"},
+    "visit.next.7": {"en": "In 7 days", "uz": "7 kundan keyin", "ru": "Через 7 дней"},
+    "visit.next.14": {"en": "In 14 days", "uz": "14 kundan keyin", "ru": "Через 14 дней"},
+    "visit.next.30": {"en": "In 30 days", "uz": "30 kundan keyin", "ru": "Через 30 дней"},
+    "visit.next.none": {"en": "No date", "uz": "Sanasiz", "ru": "Без даты"},
+    # Photo, available at every step (D17). The kind family is drawn by
+    # `SalesKeyboards.photo_kind` with an f-string, so it is ALSO registered
+    # in `_add_dynamic_keys` below and in its twin in `staff_bot/i18n.py`.
+    "visit.photo_kind_prompt": {"en": "What is on this photo?", "uz": "Suratda nima tasvirlangan?", "ru": "Что на этом фото?"},
+    "visit.photo_kind.storefront": {"en": "Storefront", "uz": "Do'kon peshtoqi", "ru": "Витрина"},
+    "visit.photo_kind.shelf": {"en": "Shelf", "uz": "Javon", "ru": "Полка"},
+    "visit.photo_kind.other": {"en": "Other", "uz": "Boshqa", "ru": "Другое"},
+    "visit.photo_saved": {"en": "Photo saved.", "uz": "Surat saqlandi.", "ru": "Фото сохранено."},
+    # The backend's verdict, never the bot's: a SHA-256 match against this
+    # agent's earlier photos. Bare, because the duplicate is still stored.
+    "visit.photo_duplicate": {"en": "You have already sent this photo.", "uz": "Bu suratni allaqachon yuborgansiz.", "ru": "Вы уже отправляли это фото."},
+    "visit.photo_failed": {"en": "The photo could not be saved. Send it again.", "uz": "Suratni saqlab bo'lmadi. Qaytadan yuboring.", "ru": "Фото не удалось сохранить. Отправьте ещё раз."},
+    "visit.photo_forwarded": {"en": "Forwarded photos are not accepted — take the photo here.", "uz": "Uzatilgan suratlar qabul qilinmaydi — suratni shu yerda oling.", "ru": "Пересланные фото не принимаются — сделайте снимок здесь."},
+    # The morning digest's section labels. Plain text: the handler wraps them
+    # in <b> and escapes them, so the HTML lives in exactly one place.
+    "notify.digest_due_today": {"en": "Due today", "uz": "Bugunga rejalashtirilgan", "ru": "На сегодня"},
+    "notify.digest_overdue": {"en": "Overdue", "uz": "Kechikkan", "ru": "Просроченные"},
+    "notify.digest_unvisited": {"en": "Not visited for a while", "uz": "Ancha vaqtdan beri tashrif buyurilmagan", "ru": "Давно без визита"},
+    "notify.digest_open_visit": {"en": "You have a visit still open", "uz": "Sizda ochiq tashrif bor", "ru": "У вас есть незакрытый визит"},
+    # The AGE of an unvisited row. Overdue rows reuse
+    # `list.overdue_suffix` -- "how late" already has one expression, drawn
+    # on the due list -- and these are two different facts.
+    "notify.digest_days": {"en": "{days} d", "uz": "{days} kun", "ru": "{days} дн."},
+    # `days: null` -- a shop NOBODY has ever walked into. Its own word, not a
+    # zero: the backend refuses to invent an age from `created_at`, and
+    # "0 d" under a 21-day heading would read as "visited today", the exact
+    # opposite of what the row means.
+    "notify.digest_never": {"en": "never visited", "uz": "hech qachon tashrif bo'lmagan", "ru": "ни одного визита"},
+    # `more_count` -- how many due rows the BACKEND cut (Task 3 caps each due
+    # section at ten, because an uncapped digest is a `send_message` that
+    # raises and three retries that deliver nothing). The figure is rendered,
+    # never computed here.
+    "notify.digest_more": {"en": "+{count} more", "uz": "yana {count} ta", "ru": "ещё {count}"},
+    "error.visit_open": {"en": "You already have an open visit.", "uz": "Sizda allaqachon ochiq tashrif bor.", "ru": "У вас уже есть открытый визит."},
+    "error.visit_not_open": {"en": "This visit is already closed.", "uz": "Bu tashrif allaqachon yopilgan.", "ru": "Этот визит уже закрыт."},
+    "error.visit_step": {"en": "That step is already done. The visit reopens at its current step.", "uz": "Bu bosqich allaqachon bajarilgan. Tashrif joriy bosqichdan ochiladi.", "ru": "Этот шаг уже пройден. Визит откроется на текущем шаге."},
+    "error.stock_qty": {"en": "That quantity is not usable.", "uz": "Bu miqdor yaramaydi.", "ru": "Такое количество не подходит."},
+    # M14: an admin un-ticking `products.in_sales_stock_check` mid-visit makes
+    # the backend refuse a product the agent is standing in front of. That is
+    # not a bad number, and telling them the QUANTITY is unusable sends them
+    # to re-type a count that was never the problem. Placeholder-free for the
+    # same reason as `error.order_min_qty` -- a 400 carries no body to the
+    # staff client -- but it names the real cause and the real remedy.
+    "error.stock_product": {"en": "That product is no longer on the stock-check list. Reload the products and count again.", "uz": "Bu mahsulot endi qoldiq tekshiruvi ro'yxatida yo'q. Mahsulotlarni qayta yuklang va yana sanang.", "ru": "Этот товар больше не входит в список проверки остатков. Перезагрузите товары и пересчитайте."},
+    "error.outlet_not_active": {"en": "This outlet cannot take orders yet — activate it first.", "uz": "Bu nuqta hali buyurtma qabul qila olmaydi — avval faollashtiring.", "ru": "Эта точка пока не может принимать заказы — сначала активируйте её."},
+    "error.order_exists": {"en": "This visit already has an order.", "uz": "Bu tashrifda buyurtma allaqachon bor.", "ru": "В этом визите заказ уже есть."},
+    "error.outcome_required": {"en": "Pick how the visit ended.", "uz": "Tashrif qanday yakunlanganini tanlang.", "ru": "Выберите, чем закончился визит."},
+    # SALES_ORDER_MIN_QTY. Deliberately GENERIC and placeholder-free: the
+    # staff client keeps an error body on `data` for 409s only, so on this 400
+    # the bot has the CODE and nothing else -- no product name, no numbers. The
+    # screen it lands back on is the basket, where the floor is printed per
+    # line (`visit.order_min`), which is where the agent can act on it.
+    "error.order_min_qty": {"en": "One line is below this product's minimum order quantity. Raise it and try again.", "uz": "Bir qator ushbu mahsulotning eng kam buyurtma miqdoridan past. Miqdorni oshiring va qayta urinib ko'ring.", "ru": "Одна из строк ниже минимального количества заказа для этого товара. Увеличьте количество и повторите."},
+    # M30's ceiling (SALES_STOCK_QTY_MAX), the exact mirror of
+    # `error.order_min_qty` and generic for the same reason: on a 400 the bot
+    # holds the CODE and nothing else -- no product name, no numbers. The
+    # screen it lands back on is the basket, where the line can be lowered.
+    "error.order_qty": {"en": "One line is above the maximum quantity allowed. Lower it and try again.", "uz": "Bir qator ruxsat etilgan eng ko'p miqdordan yuqori. Miqdorni kamaytiring va qayta urinib ko'ring.", "ru": "Одна из строк превышает максимально допустимое количество. Уменьшите его и повторите."},
+    # SALES_PHOTO_INVALID. Placeholder-free like its neighbours (a 400 leaves
+    # the staff client the CODE and nothing else) and it names the remedy,
+    # because the cause is almost always a file picked from the gallery.
+    "error.photo_invalid": {"en": "That file is not a usable photo. Send a picture taken with the camera.", "uz": "Bu fayl yaroqli surat emas. Kamerada olingan rasmni yuboring.", "ru": "Этот файл не подходит как фото. Отправьте снимок с камеры."},
+    # ---- phase 2b: Nearby ----
+    # `nearby.distance` is the only row here that interpolates; everything
+    # else is a whole sentence or a bare label, and the glyphs (🧭 / 📍) are
+    # the handler's — seeding one here would double it, the trap
+    # `visit.checkin_ok` documents. The ru unit is Cyrillic `м`: a Latin `m`
+    # is exactly the one-letter transliteration a human reader skims past,
+    # and it is the seed's own Latin gate that catches it.
+    "nearby.title": {"en": "Nearby outlets", "uz": "Yaqin atrofdagi nuqtalar", "ru": "Точки рядом"},
+    "nearby.pin_prompt": {"en": "Share your location and I'll list the outlets nearest to you.", "uz": "Joylashuvingizni yuboring — sizga eng yaqin nuqtalarni ko'rsataman.", "ru": "Отправьте геолокацию — покажу ближайшие к вам точки."},
+    "nearby.pin_button": {"en": "📍 Share my location", "uz": "📍 Joylashuvimni yuborish", "ru": "📍 Отправить мою геолокацию"},
+    "nearby.found": {"en": "Location received.", "uz": "Joylashuv qabul qilindi.", "ru": "Геолокация получена."},
+    "nearby.distance": {"en": "{distance} m", "uz": "{distance} m", "ru": "{distance} м"},
+    "nearby.again": {"en": "New pin", "uz": "Yangi joylashuv", "ru": "Новая геометка"},
+    # ---- phase 2b: try-out from the field ----
+    # Every row is a BARE label except `tryout.created` (ruling 19) -- the
+    # handler composes the product name and the quantity around them, so a
+    # placeholder added here would be dropped silently by `render_translation`.
+    "tryout.button": {"en": "Try-out", "uz": "Sinov uchun berish", "ru": "Пробная выдача"},
+    "tryout.choose_products": {"en": "Which products go out on try-out?", "uz": "Qaysi mahsulotlar sinov uchun beriladi?", "ru": "Какие товары выдать на пробу?"},
+    "tryout.quantity_prompt": {"en": "How many?", "uz": "Nechta?", "ru": "Сколько штук?"},
+    "tryout.done": {"en": "Continue", "uz": "Davom etish", "ru": "Продолжить"},
+    "tryout.notes_prompt": {"en": "Notes for the driver (or skip):", "uz": "Haydovchi uchun izoh (yoki o'tkazing):", "ru": "Заметка для водителя (или пропустите):"},
+    "tryout.confirm_title": {"en": "Check the try-out before creating it.", "uz": "Yaratishdan oldin sinov berishni tekshiring.", "ru": "Проверьте пробную выдачу перед созданием."},
+    "tryout.confirm": {"en": "Create try-out", "uz": "Sinov berishni yaratish", "ru": "Создать пробную выдачу"},
+    "tryout.created": {"en": "Try-out {tryout_number} created.", "uz": "{tryout_number} sinov berish yaratildi.", "ru": "Пробная выдача {tryout_number} создана."},
+    "tryout.handoff_queued": {"en": "The hand-off task is in the driver pool.", "uz": "Yetkazish topshirig'i haydovchilar navbatida.", "ru": "Задача на передачу — в очереди водителей."},
+    "tryout.no_products": {"en": "No products are available for a try-out.", "uz": "Sinov uchun mahsulot yo'q.", "ru": "Нет товаров, доступных для пробной выдачи."},
+    "tryout.no_phone": {"en": "This outlet has no contact phone. Add one on the outlet card, then create the try-out.", "uz": "Bu nuqtada aloqa telefoni yo'q. Uni nuqta kartasida qo'shing, so'ng sinov berishni yarating.", "ru": "У этой точки нет контактного телефона. Добавьте его в карточке точки, затем создайте пробную выдачу."},
+    "tryout.open_outlet": {"en": "Open outlet", "uz": "Nuqtani ochish", "ru": "Открыть точку"},
+    # SALES_TRYOUT_ITEMS_INVALID. Placeholder-free for the same reason
+    # `error.order_min_qty` is: the staff client keeps an error body on `data`
+    # for 409s only, so on this 400 the bot holds the CODE and nothing else.
+    # The screen it lands back on is the basket, which is where a quantity can
+    # be changed.
+    "error.tryout_items": {"en": "Pick at least one product that can go out on try-out.", "uz": "Sinov uchun berish mumkin bo'lgan kamida bitta mahsulotni tanlang.", "ru": "Выберите хотя бы один товар, доступный для пробной выдачи."},
+    # ---- phase 3: "My stats" ----
+    # Every row is a BARE label: the handler composes the figure, the "%" and
+    # the currency around it, so a placeholder here would be dropped silently
+    # by `render_translation`. The BUTTON is deliberately not called "My
+    # stats": `staff.profile.view_stats` (the driver's row, three lines above
+    # it on the same keyboard) already is, word for word in uz and ru, and a
+    # staff member who drives AND sells would read the same button twice.
+    # Copy fixed by R26; the 📊 glyph is added by the keyboard, house-style.
+    "stats.button": {"en": "Sales stats", "uz": "Savdo statistikasi", "ru": "Статистика продаж"},
+    "stats.title": {"en": "My sales stats", "uz": "Savdo statistikam", "ru": "Моя статистика продаж"},
+    # "not computable for this window" -- printed where the service answered
+    # NULL, never where it answered 0.
+    "stats.na": {"en": "—", "uz": "—", "ru": "—"},
+    "stats.period_today": {"en": "Today", "uz": "Bugun", "ru": "Сегодня"},
+    "stats.period_week": {"en": "Week", "uz": "Hafta", "ru": "Неделя"},
+    "stats.period_month": {"en": "Month", "uz": "Oy", "ru": "Месяц"},
+    "stats.section_visits": {"en": "Visits", "uz": "Tashriflar", "ru": "Визиты"},
+    "stats.section_outlets": {"en": "Outlets", "uz": "Savdo nuqtalari", "ru": "Точки"},
+    "stats.section_orders": {"en": "Orders", "uz": "Buyurtmalar", "ru": "Заказы"},
+    "stats.section_discipline": {"en": "Discipline", "uz": "Intizom", "ru": "Дисциплина"},
+    "stats.metric_planned_visits": {"en": "Planned", "uz": "Rejalashtirilgan", "ru": "Запланировано"},
+    "stats.metric_completed_visits": {"en": "Completed", "uz": "Yakunlangan", "ru": "Завершено"},
+    "stats.metric_plan_vs_fact_pct": {"en": "Plan vs fact", "uz": "Reja va fakt", "ru": "План и факт"},
+    "stats.metric_unplanned_visits": {"en": "Unplanned", "uz": "Rejadan tashqari", "ru": "Вне плана"},
+    "stats.metric_visits_per_day": {"en": "Visits per day", "uz": "Kuniga tashrif", "ru": "Визитов в день"},
+    "stats.metric_strike_rate_pct": {"en": "Visits with an order", "uz": "Buyurtmali tashriflar", "ru": "Визиты с заказом"},
+    "stats.metric_assigned_outlets": {"en": "Assigned", "uz": "Biriktirilgan", "ru": "Закреплено"},
+    "stats.metric_active_outlets": {"en": "Active", "uz": "Faol", "ru": "Активные"},
+    "stats.metric_active_share_pct": {"en": "Active share", "uz": "Faollar ulushi", "ru": "Доля активных"},
+    "stats.metric_new_outlets_registered": {"en": "New registered", "uz": "Yangi qo'shilgan", "ru": "Новых добавлено"},
+    "stats.metric_new_outlets_activated": {"en": "New activated", "uz": "Yangi faollashgan", "ru": "Новых активировано"},
+    "stats.metric_orders_placed": {"en": "Placed", "uz": "Berilgan", "ru": "Оформлено"},
+    "stats.metric_orders_delivered_paid": {"en": "Delivered and paid", "uz": "Yetkazilgan va to'langan", "ru": "Доставлено и оплачено"},
+    "stats.metric_bottles_delivered_paid": {"en": "Bottles delivered", "uz": "Yetkazilgan idishlar", "ru": "Бутылей доставлено"},
+    "stats.metric_revenue_delivered_paid": {"en": "Revenue", "uz": "Tushum", "ru": "Выручка"},
+    "stats.metric_agent_orders_cancelled": {"en": "Cancelled", "uz": "Bekor qilingan", "ru": "Отменено"},
+    "stats.metric_suggested_vs_accepted_pct": {"en": "Suggested accepted", "uz": "Tavsiyadan qabul qilingan", "ru": "Принято из рекомендованного"},
+    "stats.metric_out_of_range_checkins": {"en": "Check-ins out of range", "uz": "Radiusdan tashqari belgilanishlar", "ru": "Отметки вне радиуса"},
+    "stats.metric_skipped_checkins": {"en": "Check-ins skipped", "uz": "O'tkazib yuborilgan belgilanishlar", "ru": "Пропущенные отметки"},
+    "stats.metric_avg_visit_minutes": {"en": "Average visit, minutes", "uz": "O'rtacha tashrif, daqiqa", "ru": "Средний визит, минут"},
+}
+
 
 TOKEN_TRANSLATIONS = {
     "uz": {
@@ -2273,6 +2734,52 @@ def _add_dynamic_keys(keys: Set[str]) -> None:
     for role in STAFF_BOT_ROLES:
         keys.add(f"staff.role.{role}")
 
+    # Sales events — the family webhook_server.sales_event_handler builds with
+    # f'staff.sales.notify.{event}', from the SAME tuple that decides which
+    # events the bot accepts (shared/staff_constants.py::SALES_EVENTS).
+    for event in SALES_EVENTS:
+        keys.add(f"staff.sales.notify.{event}")
+
+    # The outlet card families — the twin of
+    # `staff_bot/i18n.py::_add_dynamic_family_keys`. The stage/type tuples
+    # mirror `business_app/models/sales.py::OUTLET_STAGES / OUTLET_TYPES`;
+    # keep the two sides in step, exactly as the delivery statuses above.
+    for stage in ("prospect", "trial", "activation_requested", "active", "at_risk", "dormant", "lost"):
+        keys.add(f"staff.sales.stage.{stage}")
+
+    for outlet_type in ("grocery_store", "workplace", "individual"):
+        keys.add(f"staff.sales.type.{outlet_type}")
+
+    for scope in ("due", "prospects", "all"):
+        keys.add(f"staff.sales.list.title_{scope}")
+
+    # The visit conversation's four picker families. These tuples are a COPY
+    # of `staff_bot/keyboards/sales.py`'s VISIT_OUTCOMES / NO_ORDER_REASONS /
+    # PAY_METHODS / NEXT_VISIT_CHOICES, because this script must keep running
+    # inside the business_app container, which has no `staff_bot/` tree to
+    # import from (see `_add_curated_keys`). The copy is pinned by
+    # `tests/unit/test_sales_visit_bot_plumbing.py::
+    # test_the_seed_scripts_hand_written_tuples_match_the_keyboard_constants`,
+    # so a value added there and forgotten here fails a test instead of
+    # shipping a key tail to an agent.
+    for outcome in ("order_placed", "no_order", "closed", "owner_absent", "refused"):
+        keys.add(f"staff.sales.visit.outcome.{outcome}")
+
+    for reason in ("sufficient_stock", "cash_issue", "price", "competitor", "other"):
+        keys.add(f"staff.sales.visit.reason.{reason}")
+
+    for method in ("cash", "business_account"):
+        keys.add(f"staff.sales.visit.pay.{method}")
+
+    for choice in ("3", "7", "14", "30", "none"):
+        keys.add(f"staff.sales.visit.next.{choice}")
+
+    for kind in ("storefront", "shelf", "other"):
+        keys.add(f"staff.sales.visit.photo_kind.{kind}")
+
+    for period in ("today", "week", "month"):
+        keys.add(f"staff.sales.stats.period_{period}")
+
     # Delivery statuses — derived from the ENUM, never a hand-written tuple.
     # A hardcoded six-status list here (and the twin in
     # staff_bot/i18n.py::_add_dynamic_family_keys) is what hid
@@ -2321,6 +2828,9 @@ def _add_curated_keys(keys: Set[str]) -> None:
     for suffix in OPERATOR_TEXT_TRANSLATIONS.keys():
         keys.add(f"staff.operator.{suffix}")
 
+    for suffix in SALES_TEXT_TRANSLATIONS.keys():
+        keys.add(f"staff.sales.{suffix}")
+
 
 def _auto_family_translation(key: str, language: str) -> Optional[str]:
     """Resolve known dynamic key families."""
@@ -2343,6 +2853,15 @@ def _auto_family_translation(key: str, language: str) -> Optional[str]:
         suffix = key.split("staff.operator.", 1)[1]
         if suffix in OPERATOR_TEXT_TRANSLATIONS:
             scoped = OPERATOR_TEXT_TRANSLATIONS[suffix]
+            if language in scoped:
+                return scoped[language]
+            if "en" in scoped:
+                return scoped["en"]
+
+    if key.startswith("staff.sales."):
+        suffix = key.split("staff.sales.", 1)[1]
+        if suffix in SALES_TEXT_TRANSLATIONS:
+            scoped = SALES_TEXT_TRANSLATIONS[suffix]
             if language in scoped:
                 return scoped[language]
             if "en" in scoped:
@@ -2443,7 +2962,12 @@ def _validate_russian_translations(keys: Set[str]) -> None:
 
     for key in sorted(keys):
         value = _resolve_value(key, "ru")
-        normalized = re.sub(r"\{[^{}]+\}", "", value)
+        # HTML is markup, not copy. `<b>` used to contribute two Latin letters to
+        # every value that carried it, which is why the notify rows that ship HTML
+        # were kept outside every caller of this validator — a gap, not a licence.
+        # Placeholders are already stripped below for the same reason.
+        countable = re.sub(r"<[^>]+>", "", value)
+        normalized = re.sub(r"\{[^{}]+\}", "", countable)
         for token in RU_ALLOWED_LATIN_TOKENS:
             normalized = re.sub(re.escape(token), "", normalized, flags=re.IGNORECASE)
 

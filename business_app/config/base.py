@@ -528,6 +528,35 @@ class BaseConfig:
     MAX_CART_ITEMS = business_config.MAX_CART_ITEMS
     MAX_QUANTITY_PER_ITEM = business_config.MAX_QUANTITY_PER_ITEM
     LARGE_ORDER_THRESHOLD_UZS = business_config.LARGE_ORDER_THRESHOLD_UZS
+    SALES_DEDUPE_RADIUS_M = business_config.SALES_DEDUPE_RADIUS_M
+    # Sales agents — phase 2a (visit loop). One derivation line each, per the
+    # single-default rule in shared/business_config.py's docstring: the literals
+    # live there, never here. Services read current_app.config[...] so a test can
+    # monkeypatch.setitem one value for one app without reloading a module every
+    # bot has already imported.
+    SALES_GEOFENCE_RADIUS_M = business_config.SALES_GEOFENCE_RADIUS_M
+    SALES_SUGGEST_SAFETY_FACTOR = business_config.SALES_SUGGEST_SAFETY_FACTOR
+    SALES_DELIVERY_LEAD_DAYS = business_config.SALES_DELIVERY_LEAD_DAYS
+    SALES_CADENCE_DAYS_A = business_config.SALES_CADENCE_DAYS_A
+    SALES_CADENCE_DAYS_B = business_config.SALES_CADENCE_DAYS_B
+    SALES_CADENCE_DAYS_C = business_config.SALES_CADENCE_DAYS_C
+    SALES_VISIT_AUTO_ABANDON_HOURS = business_config.SALES_VISIT_AUTO_ABANDON_HOURS
+    SALES_CONFIRMATION_TTL_HOURS = business_config.SALES_CONFIRMATION_TTL_HOURS
+    SALES_STOCK_QTY_MAX = business_config.SALES_STOCK_QTY_MAX
+    SALES_RATE_HISTORY_DAYS = business_config.SALES_RATE_HISTORY_DAYS
+
+    # Sales agents — phase 2b (nightly jobs, morning digest, nearby). Same
+    # single-default rule: one derivation line each, no literal here.
+    SALES_AT_RISK_RATIO = business_config.SALES_AT_RISK_RATIO
+    SALES_DORMANT_DAYS = business_config.SALES_DORMANT_DAYS
+    SALES_UNVISITED_ALERT_DAYS = business_config.SALES_UNVISITED_ALERT_DAYS
+    SALES_DIGEST_LOCAL_TIME = business_config.SALES_DIGEST_LOCAL_TIME
+    SALES_NEARBY_LIMIT = business_config.SALES_NEARBY_LIMIT
+
+    # Sales agents — phase 3 (KPIs, plan-vs-fact, the exceptions feed). Same
+    # single-default rule: one derivation line each, no literal here.
+    SALES_SHORT_VISIT_SECONDS = business_config.SALES_SHORT_VISIT_SECONDS
+    SALES_METRICS_MAX_RANGE_DAYS = business_config.SALES_METRICS_MAX_RANGE_DAYS
 
     # Loyalty Program Configuration
     # Earning is DB-driven (LoyaltyProgram.uzs_per_point); this is the legacy

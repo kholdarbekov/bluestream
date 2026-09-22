@@ -123,7 +123,7 @@ from business_app.models.product import Product, ProductCategory
 from business_app.models.order import Order
 from business_app.models.payment import Payment
 from business_app.models.delivery import DeliveryPerson
-from shared.enums import UserRole, UserType, OrderStatus, PaymentStatus, PaymentMethod
+from shared.enums import UserRole, UserStatus, UserType, OrderStatus, PaymentStatus, PaymentMethod
 from business_app.utils.password_security import hash_password
 
 
@@ -148,10 +148,20 @@ def app():
         yield app
 
 
+# Every client handed out by the session-scoped `client` fixture, so the
+# autouse `reset_test_client_cookies` fixture below can empty their shared
+# cookie jars between tests without taking a fixture dependency (which would
+# force `app` to be built — and blow up with ScopeMismatch in the files that
+# override `app` as function-scoped).
+_SHARED_TEST_CLIENTS = []
+
+
 @pytest.fixture(scope='session')
 def client(app):
     """Create test client"""
-    return app.test_client()
+    test_client = app.test_client()
+    _SHARED_TEST_CLIENTS.append(test_client)
+    return test_client
 
 
 @pytest.fixture(scope='session')
@@ -239,6 +249,51 @@ def reset_redis_state(app):
 
 
 @pytest.fixture(autouse=True)
+def reset_test_client_cookies():
+    """Keep the SESSION-scoped test client's cookie jar isolated between tests.
+
+    `client` is `scope='session'`, so ONE werkzeug cookie jar is shared by
+    every test on the worker. Any request to a `frontend.*` page makes the app
+    persist the resolved language into the Flask session cookie
+    (`business_app/__init__.py`: `session['language'] = lang`), and that cookie
+    then outranks the JWT user's `preferred_language` in the `before_request`
+    language chain (Session is priority 2, User DB preference is priority 3)
+    for EVERY later request on the worker.
+
+    One `client.get('/loyalty-guide?lang=ru')` therefore rendered every
+    subsequent API response in Russian whatever the caller's language — a
+    cross-FILE failure that only appears when xdist happens to schedule the two
+    files onto the same worker (2026-09-14: 7 failures in
+    tests/integration/test_place_i18n_render_e2e.py). JWT/auth cookies leak the
+    same way, and `test_coverage_page.py` / `test_dual_sku_schema.py` already
+    carry per-file function-scoped `client` overrides to dodge this.
+
+    Same contract as `reset_redis_state`: clearing is the **pre-test
+    invariant** — every test starts with an empty jar regardless of what the
+    previous test left behind — and the post-yield clear is belt-and-suspenders
+    for the next test if this one crashed mid-fixture. Ordering must not
+    matter. Deliberately takes NO fixture argument: requesting `client` here
+    would force the session-scoped `app` to be built for every test and raise
+    ScopeMismatch in files that override `app` as function-scoped.
+    """
+
+    def _clear():
+        for test_client in _SHARED_TEST_CLIENTS:
+            # werkzeug >= 2.3 stores cookies in `_cookies`; older releases used
+            # `cookie_jar`. Support both so a dependency bump cannot silently
+            # restore the leak.
+            jar = getattr(test_client, "_cookies", None)
+            if jar is None:
+                jar = getattr(test_client, "cookie_jar", None)
+            if jar is not None:
+                jar.clear()
+
+    _clear()
+    yield
+    _clear()
+
+
+@pytest.fixture(autouse=True)
 def block_external_side_effects(monkeypatch):
     """
     Prevent any real-world side effects during tests.
@@ -264,8 +319,14 @@ def block_external_side_effects(monkeypatch):
         result.status = "MOCKED"
         return result
 
+    # Signature MUST mirror NotificationService.send_notification exactly. It had
+    # drifted (no template_override / campaign_id) while three production callers
+    # -- campaign sends, driver reconciliation, staff alerts -- pass them, so every
+    # one of those raised TypeError inside the service's per-channel try/except and
+    # was silently swallowed under test.
     def _mock_send_notification(_self, user_id, notification_type, channels=None,
-                                template_data=None, priority='normal'):
+                                template_data=None, priority='normal',
+                                template_override=None, campaign_id=None):
         if channels:
             response = {}
             for channel in channels:
@@ -630,6 +691,19 @@ def admin_auth_headers(admin_token):
 
 
 @pytest.fixture
+def admin_claim_headers(app, admin_user, db):
+    """Headers for routes behind ``manager_or_higher_required``, which reads the role
+    CLAIM and cross-checks the DB row — the plain ``admin_auth_headers`` are a 403 there."""
+    from flask_jwt_extended import create_access_token
+
+    admin_user.status = UserStatus.ACTIVE.value
+    db.session.commit()
+    with app.app_context():
+        token = create_access_token(identity=str(admin_user.id), additional_claims={"role": "admin"})
+    return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+
+@pytest.fixture
 def operator_user(db):
     """Create an operator user for testing.
 
@@ -690,6 +764,45 @@ def driver_auth_headers(driver_token):
         'Authorization': f'Bearer {driver_token}',
         'Content-Type': 'application/json'
     }
+
+
+@pytest.fixture
+def sales_agent_user(db):
+    """A sales agent with an active profile. Phone +998901234577 follows the fixture
+    phone sequence (573-576 are used by the sales test modules)."""
+    from business_app.models.sales import SalesAgentProfile
+
+    user = User(
+        phone='+998901234577',
+        password_hash=hash_password('AgentPassword123!'),
+        first_name='Sardor',
+        last_name='Agent',
+        user_type=UserType.STAFF,
+        role=UserRole.SALES_AGENT,
+        is_verified=True,
+        created_at=datetime.now(UTC),
+    )
+    user.staff_roles = ['sales_agent']
+    db.session.add(user)
+    db.session.flush()
+    db.session.add(SalesAgentProfile(user_id=user.id, districts=['chilanzar']))
+    db.session.commit()
+    return user
+
+
+@pytest.fixture
+def sales_agent_token(app, sales_agent_user):
+    """Create a valid JWT access token for a sales-agent user."""
+    from flask_jwt_extended import create_access_token
+
+    with app.app_context():
+        return create_access_token(identity=str(sales_agent_user.id))
+
+
+@pytest.fixture
+def sales_agent_auth_headers(sales_agent_token):
+    """Create sales-agent authentication headers for API testing"""
+    return {'Authorization': f'Bearer {sales_agent_token}', 'Content-Type': 'application/json'}
 
 
 # Mock services for testing

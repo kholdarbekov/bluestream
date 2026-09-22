@@ -69,11 +69,35 @@ class TestReaderAndWriterAgree:
     without moving this would have opened exactly that 5-hour gap.
     """
 
-    def test_dispatch_route_window_matches_the_optimizer(self, app):
+    def test_dispatch_route_window_matches_the_optimizer(self, app, monkeypatch):
+        """The dispatch map's reader and the optimizer's writer, on ONE instant.
+
+        `DispatchService._route_window_start_utc` delegates to
+        `ros._driver_day_start_utc` (dispatch_service.py:485), and BOTH sides of this
+        equality reached the wall clock through it —
+        `datetime.now(local_tz)` in `_driver_day_start_utc`, twice, microseconds apart.
+        The two agree at every hour except the one where they straddle local midnight, so
+        the assertion was a once-a-year flake and otherwise proved nothing about the
+        DELEGATION it exists to protect. Frozen, the equality is the delegation: one clock
+        read, quoted back by both names, against the calendar literal the module docstring's
+        example uses (2026-09-08 19:00 UTC = 2026-09-09 00:00 Tashkent).
+        """
+        frozen = datetime(2026, 9, 9, 3, 30, tzinfo=timezone.utc)
+
+        class _FrozenDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return frozen.astimezone(tz) if tz else frozen.replace(tzinfo=None)
+
+        monkeypatch.setattr(ros, "datetime", _FrozenDatetime)
+
         from business_app.services.dispatch_service import DispatchService
 
         with app.app_context():
             assert DispatchService._route_window_start_utc() == ros._driver_day_start_utc()
+            assert DispatchService._route_window_start_utc() == datetime(
+                2026, 9, 8, 19, 0, tzinfo=timezone.utc
+            )
 
 
 @pytest.mark.unit

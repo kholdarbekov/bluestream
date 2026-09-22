@@ -91,6 +91,12 @@ class ScriptedTelegramError(Exception):
     """Marker for a failure scripted onto the transport."""
 
 
+# Two-byte JPEG magic plus filler: enough that a test can assert the exact
+# bytes reached the backend, and recognisable as an image if anything ever
+# sniffs it.
+DEFAULT_FILE_BYTES = b"\xff\xd8\xff\xe0JPEGBYTES"
+
+
 class FakeTelegramTransport(BaseRequest):
     """The Bot API, answered from memory.
 
@@ -106,6 +112,16 @@ class FakeTelegramTransport(BaseRequest):
         self._next_message_id = 5000
         # method -> callable(params) -> (status_code, payload_dict)
         self.failures: dict[str, Callable[[dict], tuple[int, dict]]] = {}
+        # File DOWNLOADS, keyed by the name `getFile` handed out
+        # (`<file_id>.jpg`). The Bot API answers these with raw bytes rather
+        # than a JSON envelope, which is why `do_request` branches on the
+        # HTTP verb below.
+        self.downloads: dict[str, bytes] = {}
+        # ...and every download the bot really MADE, in order. A burst of three
+        # photos is three fetches, and without this record a test cannot tell
+        # that from one picture downloaded and filed three times -- which is the
+        # exact bug the burst queue exists to prevent.
+        self.downloaded: list[str] = []
 
     # -- BaseRequest contract -------------------------------------------------
 
@@ -123,6 +139,14 @@ class FakeTelegramTransport(BaseRequest):
         endpoint = url.rsplit("/", 1)[-1]
         params = dict(request_data.parameters) if request_data is not None else {}
         self.calls.append(TelegramCall(endpoint, params))
+
+        if method == "GET":
+            # `File.download_as_bytearray` -> `BaseRequest.retrieve` is the ONE
+            # call that is not a Bot API method: it GETs the file URL and the
+            # body is the file itself. Every Bot API method goes out as POST
+            # (`BaseRequest.post`), so the verb separates them exactly.
+            self.downloaded.append(endpoint)
+            return 200, self.downloads.get(endpoint, DEFAULT_FILE_BYTES)
 
         failure = self.failures.get(endpoint)
         if failure is not None:
@@ -165,6 +189,14 @@ class FakeTelegramTransport(BaseRequest):
                 "first_name": "BlueStream",
                 "username": "bluestream_test_bot",
             }
+        if endpoint == "getFile":
+            file_id = str(params.get("file_id", ""))
+            return {
+                "file_id": file_id,
+                "file_unique_id": f"u-{file_id}",
+                "file_size": len(self.downloads.get(f"{file_id}.jpg", DEFAULT_FILE_BYTES)),
+                "file_path": f"photos/{file_id}.jpg",
+            }
         if endpoint in {"sendMessage", "sendPhoto", "sendInvoice", "sendDocument"}:
             return self._message(params)
         if endpoint in {"editMessageText", "editMessageCaption", "editMessageReplyMarkup"}:
@@ -191,6 +223,7 @@ class FakeTelegramTransport(BaseRequest):
 
     def reset(self):
         self.calls.clear()
+        self.downloaded.clear()
 
 
 class UpdateFactory:
@@ -309,18 +342,32 @@ class UpdateFactory:
             ),
         })
 
-    def photo(self, caption: str = None, file_id: str = "photo-file-id") -> Update:
-        """A photo, in Telegram's real ascending-size form."""
+    def photo(self, caption: str = None, file_id: str = "photo-file-id",
+              file_unique_id: str = "u-l", forwarded: bool = False) -> Update:
+        """A photo, in Telegram's real ascending-size form.
+
+        `file_unique_id` is a parameter because a BURST is three photos with
+        three different ones, and the sales visit files every one of them --
+        a fixed id would let a test pass while the bot uploaded the same
+        picture three times. `forwarded` adds the Bot API 7.0 marker the
+        staff bot refuses on.
+        """
         extra = {
             "photo": [
-                {"file_id": f"{file_id}-s", "file_unique_id": "u-s",
+                {"file_id": f"{file_id}-s", "file_unique_id": f"{file_unique_id}-s",
                  "width": 90, "height": 90, "file_size": 1234},
-                {"file_id": file_id, "file_unique_id": "u-l",
+                {"file_id": file_id, "file_unique_id": file_unique_id,
                  "width": 1280, "height": 1280, "file_size": 98765},
             ]
         }
         if caption is not None:
             extra["caption"] = caption
+        if forwarded:
+            extra["forward_origin"] = {
+                "type": "user",
+                "date": 1_699_000_000,
+                "sender_user": {"id": 55_001, "is_bot": False, "first_name": "Dilnoza K"},
+            }
         return self._build({
             "update_id": self._next_update_id(),
             "message": self._message_envelope(**extra),

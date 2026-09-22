@@ -375,6 +375,28 @@ async def test_delivery_only_order_renders_single_fragment(monkeypatch):
 
 @pytest.mark.unit
 @pytest.mark.anyio
+async def test_a_late_utc_row_is_dated_in_the_display_timezone(monkeypatch):
+    """`occurred_at` is UTC; the customer reads Tashkent (UTC+5). Bottles handed
+    over at 20:30 UTC changed hands on the NEXT day locally, and a ledger that
+    prints the UTC day tells the customer the delivery happened on a day they
+    know it did not — the one fact this screen exists to settle. `format_datetime`
+    has converted since it was written; `format_date` (telegram_bot/utils.py) is
+    the same rule for dates and must follow it.
+    """
+    items = [
+        {"event_type": "delivery", "quantity": 4, "balance_after": 5,
+         "order_id": 42, "order_number": "88",
+         "occurred_at": "2026-07-12T20:30:00+00:00"},
+    ]
+    query = await _run_history(monkeypatch, _ledger_response(items, total=1, page=1))
+    order_lines = [
+        line for line in _last_edit_kwargs(query)["text"].splitlines() if line.startswith("#88")
+    ]
+    assert order_lines == ["#88 (13.07.2026): telegram.bottles.event.delivery: 4"]
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
 async def test_return_only_order_renders_single_fragment(monkeypatch):
     items = [
         {"event_type": "return_on_delivery", "quantity": -3, "balance_after": 2,

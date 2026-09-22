@@ -86,6 +86,19 @@ _redis: Optional[redis_async.Redis] = None
 # Consumed by `StaffBot._clear_all_pending_flows` (which serves both the
 # conversation escape and the catch-all router), `_handle_flow_cancel`, `/start`
 # and every navigation landing handler (main menu / cash hub).
+# Named because THREE modules read it, not two: `handlers/sales/visit.py` owns
+# the draft, and `handlers/sales/hub.py::_refused_by_open_visit` tests it to
+# decide whether a stale sales tap may open a new flow on top of a live visit.
+# A second spelling of it is a guard that silently stops guarding.
+SALES_VISIT_FLOW_KEY = 'sales_visit'
+# The other two sales drafts. Named for the same reason the visit's is: entering
+# ANY sales conversation drops the others' drafts
+# (`handlers/sales/hub.py::_drop_other_sales_drafts`) and each of those
+# conversations' timeout clears only its OWN key, so both spellings are read
+# outside the module that stamps them.
+SALES_NEARBY_FLOW_KEY = 'sales_nearby'
+SALES_TRYOUT_FLOW_KEY = 'sales_tryout'
+
 PENDING_FLOW_USER_DATA_KEYS = (
     # -- Text-router flows: while present, the catch-all router feeds the next
     #    text update to the flow instead of to the menu. --
@@ -109,6 +122,23 @@ PENDING_FLOW_USER_DATA_KEYS = (
     #    consumed, which is precisely how one gesture came to mean two things. --
     'new_client',
     'new_order',
+    'new_outlet',
+    # The visit conversation's working record (states 310-319). The WRITE-side
+    # rule applies: `handlers/sales/visit.py` stamps it, so a menu tap must
+    # drop it. The VISIT itself stays open server-side — abandoning is an
+    # explicit button, never a side effect of walking away.
+    SALES_VISIT_FLOW_KEY,
+    # Nearby (states 320-321). The dict is EMPTY by design — the pin is
+    # answered in one round trip, so there is no half-built record — but the
+    # key is what `_require_flow` reads to tell "still in the conversation"
+    # from "a menu tap cleared it", and it must be dropped by the same one
+    # gesture as every other flow.
+    SALES_NEARBY_FLOW_KEY,
+    # The try-out basket (states 322-325). Same WRITE-side rule as the visit
+    # draft above -- `handlers/sales/tryout.py` stamps it, so a menu tap must
+    # drop it. Nothing is written server-side until Confirm, so dropping it
+    # costs the agent only the taps.
+    SALES_TRYOUT_FLOW_KEY,
     'new_address',
     'new_tryout',
     'new_tryout_products',

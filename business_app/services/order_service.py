@@ -8,6 +8,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import List, Dict, Any, Optional, Tuple
 from flask import current_app
 from sqlalchemy import desc, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 
 from business_app.utils.service_logging import log_service_call, log_business_event
@@ -252,6 +253,13 @@ class OrderService:
             loyalty_points_used=0,
             order_source=order_source,
             created_by_staff_id=created_by_staff_id,
+            # The sales visit this order belongs to, when the caller has one. Set HERE and
+            # not by the caller afterwards, because `uq_orders_visit_id` is only a real
+            # one-order-per-visit guard while the INSERT that trips it happens inside the
+            # transaction below: an assignment made after this method returns lands after
+            # that commit released the caller's visit lock, and by then the duplicate order
+            # is already real (and paid for).
+            visit_id=order_data.get("visit_id"),
         )
 
         # ARCH-008: explicit transaction boundary covering the entire order
@@ -381,7 +389,7 @@ class OrderService:
             )
             logger.info("CREATE ORDER: FINISHED")
 
-        except ValidationError:
+        except (ValidationError, IntegrityError) as exc:
             # DB already rolled back by atomic_transaction. Release Redis
             # reservation if we got past inventory step.
             if reservation_result and reservation_result.get("success"):
@@ -389,6 +397,16 @@ class OrderService:
                     self.inventory_service.release_reservations(order.id)
                 except Exception:
                     logger.exception("Failed to release inventory after rollback for order %s", order.id)
+            if isinstance(exc, IntegrityError) and not order_data.get("visit_id"):
+                # An IntegrityError escapes ONLY to a caller that handed us a visit. For that
+                # caller (`VisitService.place_order`) the unique index that fired inside this
+                # transaction — `uq_orders_visit_id`, the one-order-per-visit guard — is a
+                # CONFLICT it answers with 409 and the winning order's number, and a
+                # message-only ValidationError leaves it nothing to branch on. Every OTHER
+                # caller is written against the historical wrap and must keep it: subscription
+                # billing catches ValidationError alone (it would crash the nightly run), and
+                # the three order routes would turn a former 400 into a 500.
+                raise ValidationError(f"Failed to create order: {str(exc)}")
             raise
         except Exception as e:
             logger.exception("Order creation failed for user %s", user_id)

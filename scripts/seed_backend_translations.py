@@ -1807,6 +1807,22 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Bekor qilish',
         'ru': 'Отмена'
     },
+    # `close` and `error_occurred` are the two shared words the admin UI needed
+    # that had no dotted row yet. They belong here, in the shared `ui` category,
+    # NOT as bare keys in a feature's ui_* seed: `translations` is unique on
+    # (key, language) only, so a bare generic word is a single row two seeds
+    # fight over. (`ui.close` exists in some databases but is seeded by nothing;
+    # this is the managed row.)
+    'ui.common.close': {
+        'en': 'Close',
+        'uz': 'Yopish',
+        'ru': 'Закрыть'
+    },
+    'ui.common.error_occurred': {
+        'en': 'An error occurred',
+        'uz': 'Xatolik yuz berdi',
+        'ru': 'Произошла ошибка'
+    },
     'ui.common.edit': {
         'en': 'Edit',
         'uz': 'Tahrirlash',
@@ -1851,6 +1867,26 @@ BACKEND_TRANSLATIONS = {
         'en': 'Rewards',
         'uz': 'Mukofotlar',
         'ru': 'Награды'
+    },
+    'ui.nav.outlets': {
+        'en': 'Outlets',
+        'uz': 'Savdo nuqtalari',
+        'ru': 'Торговые точки'
+    },
+    'ui.nav.sales_agents': {
+        'en': 'Sales Agents',
+        'uz': 'Savdo agentlari',
+        'ru': 'Торговые агенты'
+    },
+    'ui.nav.sales': {
+        'en': 'Sales',
+        'uz': 'Savdo',
+        'ru': 'Продажи'
+    },
+    'ui.nav.visits': {
+        'en': 'Visits',
+        'uz': 'Tashriflar',
+        'ru': 'Визиты'
     },
     'ui.analytics.avg_redemption_value': {
         'en': 'Average Redemption Value',
@@ -6513,6 +6549,115 @@ BACKEND_TRANSLATIONS = {
         'ru': '👋 Добро пожаловать в Aqua Element! Регистрация завершена. Используйте меню ниже, чтобы оформить заказ.'
     },
 
+    # ============================================================================
+    # Sales module - manager in-app alert for a new outlet activation request
+    # (business_app/tasks/sales_agent_tasks.py renders these through
+    # get_translation). Twins of the staff-bot copies in
+    # scripts/seed_staff_translations.py: both seeders upsert the same
+    # `translations` table by key, and staff_bot/i18n.py accepts any row whose
+    # key starts with 'staff.', so seeding from either side is enough and
+    # seeding from both is harmless.
+    # ============================================================================
+    'staff.sales.notify.activation_requested': {
+        'en': '🆕 New outlet awaiting activation: <b>{outlet_name}</b>',
+        'uz': '🆕 Faollashtirishni kutayotgan yangi savdo nuqtasi: <b>{outlet_name}</b>',
+        'ru': '🆕 Новая торговая точка ждёт активации: <b>{outlet_name}</b>'
+    },
+    'staff.notification.subject.outlet_activation_requested': {
+        'en': 'Outlet activation requested',
+        'uz': 'Savdo nuqtasini faollashtirish so\'rovi',
+        'ru': 'Заявка на активацию точки'
+    },
+    # The IN_APP body. Deliberately a markup-FREE twin of
+    # 'staff.sales.notify.activation_requested': the admin UI prints notification
+    # `content` as plain text, so the <b>...</b> the staff-bot push needs
+    # (parse_mode='HTML') would ship to a manager as literal tags.
+    'staff.notification.content.outlet_activation_requested': {
+        'en': '🆕 New outlet awaiting activation: {outlet_name}',
+        'uz': '🆕 Faollashtirishni kutayotgan yangi savdo nuqtasi: {outlet_name}',
+        'ru': '🆕 Новая торговая точка ждёт активации: {outlet_name}'
+    },
+    # The managers' daily exception summary (08:00 local,
+    # business_app/tasks/sales_agent_tasks.py::notify_managers_exception_summary). Seeded
+    # HERE only: the runtime reader is `get_translation`, and a second copy in
+    # scripts/seed_staff_translations.py would silently re-file the row's category on
+    # whichever seed ran last (`translations` is unique on (key, language) alone).
+    # Markup-free for the same reason as the twin above — the admin UI prints `content` as
+    # plain text — and `{path}` carries the feed's own URL rather than a literal typed
+    # three times.
+    'staff.notification.subject.sales_exception_summary': {
+        'en': 'Sales exceptions yesterday',
+        'uz': 'Kechagi savdo chetlanishlari',
+        'ru': 'Отклонения в продажах за вчера'
+    },
+    'staff.notification.content.sales_exception_summary': {
+        'en': '⚠️ {count} sales exception(s) recorded on {day}. Review them at {path}',
+        'uz': '⚠️ {day} sanasida {count} ta savdo chetlanishi qayd etildi. Ko\'rish: {path}',
+        'ru': '⚠️ За {day} зафиксировано отклонений: {count}. Посмотреть: {path}'
+    },
+    # ============================================================================
+    # Sales module - the customer-bot proposal for an order a sales agent placed
+    # on this store's behalf (telegram_bot/webhook_server.py
+    # ::agent_order_proposed_handler + telegram_bot/handlers/agent_orders.py).
+    # `proposed` is the whole frame: the item lines are rendered one by one with
+    # `item` and handed in as {items}, because i18n.get fills placeholders itself
+    # and a caller may not .format() its result.
+    # ============================================================================
+    'telegram.agent_order.proposed': {
+        'en': '🧾 <b>Order proposal {order_number}</b>\n\n'
+              '{agent_name} prepared this order for you:\n{items}\n\n'
+              '💰 Total: {total} UZS\n🚚 Delivery: {delivery_date}\n\n'
+              'Please confirm or decline.',
+        'uz': '🧾 <b>{order_number} — buyurtma taklifi</b>\n\n'
+              '{agent_name} siz uchun quyidagi buyurtmani tayyorladi:\n{items}\n\n'
+              '💰 Jami: {total} so\'m\n🚚 Yetkazib berish: {delivery_date}\n\n'
+              'Iltimos, tasdiqlang yoki rad eting.',
+        'ru': '🧾 <b>Предложение заказа {order_number}</b>\n\n'
+              '{agent_name} подготовил для вас заказ:\n{items}\n\n'
+              '💰 Итого: {total} сум\n🚚 Доставка: {delivery_date}\n\n'
+              'Пожалуйста, подтвердите или отклоните.'
+    },
+    # A localized unit word, not the same symbolic line three times: the
+    # per-key Cyrillic guard in tests/telegram_bot/test_agent_order_copy_is_seeded.py
+    # exists to catch a ru row that is really the English string, and exempting
+    # this key from it would blind the guard for every future key too.
+    'telegram.agent_order.item': {
+        'en': '• {name} × {qty}',
+        'uz': '• {name} — {qty} dona',
+        'ru': '• {name} — {qty} шт.'
+    },
+    'telegram.agent_order.confirm_button': {
+        'en': '✅ Confirm',
+        'uz': '✅ Tasdiqlash',
+        'ru': '✅ Подтвердить'
+    },
+    'telegram.agent_order.decline_button': {
+        'en': '❌ Decline',
+        'uz': '❌ Rad etish',
+        'ru': '❌ Отклонить'
+    },
+    'telegram.agent_order.confirmed': {
+        'en': '✅ Order confirmed. Thank you!',
+        'uz': '✅ Buyurtma tasdiqlandi. Rahmat!',
+        'ru': '✅ Заказ подтверждён. Спасибо!'
+    },
+    'telegram.agent_order.declined': {
+        'en': '❌ Order declined.',
+        'uz': '❌ Buyurtma rad etildi.',
+        'ru': '❌ Заказ отклонён.'
+    },
+    # An answered proposal now loses its buttons and gains the answer
+    # (telegram_bot/handlers/agent_orders.py::_settle), so a second tap means the
+    # edit was refused (past the 48h window, a deleted message) or the answer came
+    # from elsewhere. Still ordinary, still needs this sentence.
+    # The backend answers 409 SALES_CONFIRMATION_NOT_PENDING and the
+    # store reads this instead of the backend's English message.
+    'telegram.agent_order.not_pending': {
+        'en': 'This order has already been answered.',
+        'uz': 'Bu buyurtmaga allaqachon javob berilgan.',
+        'ru': 'На этот заказ уже дан ответ.'
+    },
+
 }
 
 
@@ -6999,6 +7144,11 @@ ADMIN_UI_PRODUCT_TRANSLATIONS = {
     'ui.products.image_too_large': _ui_tr('Image is too large'),
     'ui.products.image_upload_failed': _ui_tr('Image upload failed'),
     'ui.products.import_csv': _ui_tr('Import CSV', 'CSV import', 'Импорт CSV'),
+    'ui.products.in_sales_stock_check': _ui_tr(
+        'Sales stock check',
+        'Savdo agenti qoldiqni tekshiradi',
+        'Агент проверяет остаток',
+    ),
     'ui.products.is_tryout_eligible': _ui_tr('Try-out Eligible'),
     'ui.products.low_marking_stock': _ui_tr('Low labels'),
     'ui.products.low_marking_stock_products': _ui_tr('Low Marking-Code Stock', 'Kam markirovka zaxirasi', 'Низкий запас кодов маркировки'),
@@ -7054,6 +7204,12 @@ ADMIN_UI_PRODUCT_TRANSLATIONS = {
         'Ushbu mahsulot qaytariladigan idishlarni hisobga olar ekan, 0 dan katta bo\'lishi kerak',
         'Должно быть больше 0, пока товар учитывает возвратную тару',
     ),
+    'ui.products.sales_stock_check_help': _ui_tr(
+        'Agents count this SKU at a visit only while the product is also Active.',
+        'Agent bu mahsulotni tashrifda faqat u Faol bo\'lganda hisoblaydi.',
+        'Агент считает этот товар на визите, только пока товар активен.',
+    ),
+    'ui.products.sales_stock_check_tag': _ui_tr('Stock check', 'Qoldiq tekshiruvi', 'Проверка остатка'),
     'ui.products.search_marking_codes': _ui_tr('Search marking codes'),
     'ui.products.search_placeholder': _ui_tr('Search products'),
     'ui.products.select_csv': _ui_tr('Select CSV'),

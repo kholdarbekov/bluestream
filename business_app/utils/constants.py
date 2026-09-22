@@ -264,6 +264,7 @@ ORDER_SOURCE_PREFIXES = {
     "admin": "AD",  # Admin-created orders
     "api": "AP",  # Direct API orders
     "mobile": "MB",  # Mobile app orders (future)
+    "sales_agent": "SA",  # Sales-agent orders placed on a store's behalf at a visit
 }
 
 # Regex Patterns
@@ -271,7 +272,8 @@ PATTERNS = {
     "PHONE_UZ": r"^\+998[0-9]{9}$",
     "EMAIL": r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$",
     "PASSWORD": r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[a-zA-Z\d@$!%*?&]{8,}$",
-    "ORDER_NUMBER": r"^(TG|WB|CC|AD|AP|MB)_\d{6}_\d{2}$",  # e.g., TG_000042_26
+    # Keep the alternation in step with ORDER_SOURCE_PREFIXES above.
+    "ORDER_NUMBER": r"^(TG|WB|CC|AD|AP|MB|SA)_\d{6}_\d{2}$",  # e.g., TG_000042_26
     "TRACKING_CODE": r"^TR[A-Z0-9]{8}$",
 }
 

@@ -1,0 +1,45 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Agent Performance - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Agent Performance</h1>
+{% endblock %}
+
+{% block content %}
+{% macro cell(value) %}{% if value is none %}—{% else %}{{ value }}{% endif %}{% endmacro %}
+<h2>Weekly sales agent performance</h2>
+
+<div class="info-box">
+    <p>Week: <strong>{{ week_start }}</strong> to <strong>{{ week_end }}</strong></p>
+    <p>Agents: <strong>{{ agent_count }}</strong></p>
+    <p>Top agent by revenue: <strong>{{ cell(top_agent_name) }}</strong></p>
+</div>
+
+{% for agent in agents %}
+<hr class="divider">
+<h2>{{ agent.agent_name }}</h2>
+<table class="details-table">
+    <tr><th>Planned visits</th><td>{{ cell(agent.planned_visits) }}</td></tr>
+    <tr><th>Completed visits</th><td>{{ cell(agent.completed_visits) }}</td></tr>
+    <tr><th>Plan vs fact, %</th><td>{{ cell(agent.plan_vs_fact_pct) }}</td></tr>
+    <tr><th>Unplanned visits</th><td>{{ cell(agent.unplanned_visits) }}</td></tr>
+    <tr><th>Visits per day</th><td>{{ cell(agent.visits_per_day) }}</td></tr>
+    <tr><th>Strike rate, %</th><td>{{ cell(agent.strike_rate_pct) }}</td></tr>
+    <tr><th>Assigned outlets</th><td>{{ cell(agent.assigned_outlets) }}</td></tr>
+    <tr><th>Active outlets</th><td>{{ cell(agent.active_outlets) }}</td></tr>
+    <tr><th>Active share, %</th><td>{{ cell(agent.active_share_pct) }}</td></tr>
+    <tr><th>New outlets registered</th><td>{{ cell(agent.new_outlets_registered) }}</td></tr>
+    <tr><th>New outlets activated</th><td>{{ cell(agent.new_outlets_activated) }}</td></tr>
+    <tr><th>Orders placed</th><td>{{ cell(agent.orders_placed) }}</td></tr>
+    <tr><th>Orders delivered and paid</th><td>{{ cell(agent.orders_delivered_paid) }}</td></tr>
+    <tr><th>Bottles delivered and paid</th><td>{{ cell(agent.bottles_delivered_paid) }}</td></tr>
+    <tr class="total-row"><th>Revenue delivered and paid</th><td>{{ cell(agent.revenue_delivered_paid) }} UZS</td></tr>
+    <tr><th>Orders cancelled</th><td>{{ cell(agent.agent_orders_cancelled) }}</td></tr>
+    <tr><th>Suggested vs accepted, %</th><td>{{ cell(agent.suggested_vs_accepted_pct) }}</td></tr>
+    <tr><th>Out-of-range check-ins</th><td>{{ cell(agent.out_of_range_checkins) }}</td></tr>
+    <tr><th>Skipped check-ins</th><td>{{ cell(agent.skipped_checkins) }}</td></tr>
+    <tr><th>Average visit, minutes</th><td>{{ cell(agent.avg_visit_minutes) }}</td></tr>
+</table>
+{% endfor %}
+{% endblock %}

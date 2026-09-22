@@ -8,9 +8,18 @@ The per-language marker asserts the RIGHT language file rendered (not a
 cross-language fallback), and 'None' must never leak from an optional key.
 """
 
+import pathlib
+import re
+
 import pytest
 
+import business_app
 from business_app.services.email_template_service import EmailTemplateService
+from business_app.services.sales.agent_metrics_service import METRIC_KEYS
+
+# Resolved from the package, not from the runner's cwd: these tests are collected
+# inside the container from a path the host does not share.
+EMAIL_TEMPLATES_DIR = pathlib.Path(business_app.__file__).parent / "templates" / "emails"
 
 # Representative payloads mirroring business_app/tasks/analytics_tasks.py sends.
 PAYLOADS = {
@@ -85,6 +94,67 @@ PAYLOADS = {
         "total_products": 1,
         "generated_at": "2026-07-01T06:30:00+00:00",
     },
+    # Mirrors business_app/tasks/analytics_tasks.py::generate_weekly_agent_performance_report.
+    # The second agent's week is empty on purpose: every ratio is null, which is
+    # what "None" not in html (below) proves the templates print as an em dash.
+    "agent_performance": {
+        "week_start": "2026-09-07",
+        "week_end": "2026-09-13",
+        "agent_count": 2,
+        "top_agent_name": "Sardor Agent",
+        "agents": [
+            {
+                "agent_user_id": 11,
+                "agent_name": "Sardor Agent",
+                "phone": "+998901234585",
+                "planned_visits": 18,
+                "completed_visits": 15,
+                "plan_vs_fact_pct": 83.3,
+                "unplanned_visits": 2,
+                "visits_per_day": 2.1,
+                "strike_rate_pct": 60.0,
+                "assigned_outlets": 24,
+                "active_outlets": 9,
+                "active_share_pct": 37.5,
+                "new_outlets_registered": 4,
+                "new_outlets_activated": 2,
+                "orders_placed": 9,
+                "orders_delivered_paid": 6,
+                "bottles_delivered_paid": 137,
+                "revenue_delivered_paid": 2480000.0,
+                "agent_orders_cancelled": 1,
+                "suggested_vs_accepted_pct": 72.5,
+                "out_of_range_checkins": 1,
+                "skipped_checkins": 2,
+                "avg_visit_minutes": 12.4,
+            },
+            {
+                "agent_user_id": 12,
+                "agent_name": "Dilnoza Agent",
+                "phone": "+998901234586",
+                "planned_visits": 0,
+                "completed_visits": 0,
+                "plan_vs_fact_pct": None,
+                "unplanned_visits": 0,
+                "visits_per_day": 0.0,
+                "strike_rate_pct": None,
+                "assigned_outlets": 0,
+                "active_outlets": 0,
+                "active_share_pct": None,
+                "new_outlets_registered": 0,
+                "new_outlets_activated": 0,
+                "orders_placed": 0,
+                "orders_delivered_paid": 0,
+                "bottles_delivered_paid": 0,
+                "revenue_delivered_paid": 0.0,
+                "agent_orders_cancelled": 0,
+                "suggested_vs_accepted_pct": None,
+                "out_of_range_checkins": 0,
+                "skipped_checkins": 0,
+                "avg_visit_minutes": None,
+            },
+        ],
+    },
 }
 
 # Unique per-language header text — proves the correct language file rendered.
@@ -109,6 +179,11 @@ MARKERS = {
         "en": "Reorder Suggestions",
         "ru": "Предложения по дозаказу",
     },
+    "agent_performance": {
+        "uz": "Agentlar samaradorligi",
+        "en": "Agent Performance",
+        "ru": "Эффективность агентов",
+    },
 }
 
 # A scalar value from each payload that must appear verbatim in the body.
@@ -121,6 +196,7 @@ SCALAR = {
     "low_stock_alert": "AE-19L-001",
     "inventory_report": "19L Aqua Element",
     "reorder_suggestions": "195",
+    "agent_performance": "137",
 }
 
 _CASES = [(rt, lang) for rt in PAYLOADS for lang in ("uz", "en", "ru")]
@@ -146,3 +222,39 @@ def test_report_subject_is_non_empty(app, report_type, language):
 
     assert subject and subject.strip(), f"{report_type}/{language} subject empty"
     assert "{" not in subject, "unresolved subject placeholder"
+
+
+@pytest.mark.unit
+def test_the_agent_performance_notification_type_resolves_to_its_template(app):
+    """`render_notification_email` is the real send path: it maps the notification
+    TYPE through TEMPLATE_MAPPING before rendering and pulls the subject from
+    EMAIL_SUBJECTS. The two parametrized tests above call render_template() and
+    get_subject() with the template NAME directly, so they stay green even with
+    the mapping entry missing and the subject silently empty."""
+    with app.app_context():
+        rendered = EmailTemplateService().render_notification_email(
+            "agent_performance", "en", PAYLOADS["agent_performance"]
+        )
+
+    assert rendered is not None, "agent_performance does not resolve to a template"
+    assert rendered["subject"].startswith("Agent Performance (week of 2026-09-07)")
+    assert "{" not in rendered["subject"], "unresolved subject placeholder"
+    assert MARKERS["agent_performance"]["en"] in rendered["content"]
+    assert SCALAR["agent_performance"] in rendered["content"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("language", ("uz", "en", "ru"))
+def test_the_agent_performance_template_prints_every_metric_key_in_order(language):
+    """Each language's email prints all 20 KPI keys, in METRIC_KEYS order.
+
+    Nothing else can see a renamed key: Jinja's default undefined renders a missing
+    attribute as the EMPTY string, so `"None" not in html` stays green while the email
+    silently ships a blank column, and `test_report_template_renders` would too. The
+    task-level test pins the keys on the PRODUCER side only. This reads the template
+    source rather than rendered HTML, so it also pins the ORDER the brief calls the
+    pinned group order (visits 6, outlets 5, orders 6, discipline 3).
+    """
+    source = (EMAIL_TEMPLATES_DIR / language / "agent_performance.html").read_text(encoding="utf-8")
+
+    assert re.findall(r"cell\(agent\.(\w+)\)", source) == list(METRIC_KEYS)

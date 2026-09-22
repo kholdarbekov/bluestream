@@ -475,6 +475,57 @@ def format_local_time(dt: Optional[datetime] = None, with_seconds: bool = False)
     return moment.astimezone(ZoneInfo(DISPLAY_TIMEZONE)).strftime(fmt)
 
 
+def format_local_date(value: Any, fmt: str = '%d.%m.%Y') -> str:
+    """A backend date/datetime rendered in the business display timezone, or ''.
+
+    The sibling of :func:`format_local_time`, and for the same reason: the
+    backend answers in UTC (`_iso(...)` in
+    ``business_app/serializers/sales_serializers.py``) and the reader is
+    standing in Tashkent. A visit closed at 00:30 local is stamped 19:30Z the
+    day before, so a date sliced off the ISO string — or formatted without
+    converting — is wrong for every evening of every day.
+
+    Accepts the three shapes the sales payloads actually carry: a tz-aware
+    datetime string, a bare ``YYYY-MM-DD`` (a ``Date`` column such as
+    ``agent_next_visit_at``), and a real ``date``/``datetime`` object. A naive
+    datetime is read as UTC, matching every other timestamp this bot receives.
+
+    Returns ``''`` for None and for anything unparseable, so the caller gates
+    its whole line on the result instead of guarding the parse itself.
+    """
+    from datetime import date as _date, timezone as _tz
+    from zoneinfo import ZoneInfo
+
+    from shared.constants import DISPLAY_TIMEZONE
+
+    if value is None or value == '':
+        return ''
+
+    moment = value
+    if isinstance(moment, str):
+        try:
+            # A bare `YYYY-MM-DD` is parsed as a DATE first. Read as a datetime it
+            # becomes midnight UTC and is then converted, which moves it to the day
+            # before under any display timezone behind UTC -- correct today only
+            # because Tashkent is ahead of it.
+            moment = (
+                _date.fromisoformat(moment)
+                if 'T' not in moment and ' ' not in moment
+                else datetime.fromisoformat(moment)
+            )
+        except ValueError:
+            return ''
+    # `datetime` subclasses `date`, so it must be tested first or every
+    # timestamp would take the naive branch and skip the conversion.
+    if isinstance(moment, datetime):
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=_tz.utc)
+        return moment.astimezone(ZoneInfo(DISPLAY_TIMEZONE)).strftime(fmt)
+    if isinstance(moment, _date):
+        return moment.strftime(fmt)
+    return ''
+
+
 def format_user_card(user: Dict[str, Any], language: str) -> str:
     """Format user details card (for operator)"""
     name = _escape(f"{user.get('first_name', '')} {user.get('last_name', '')}".strip())

@@ -4,7 +4,6 @@ Shows the customer their returnable bottle balance and ledger history per addres
 """
 
 import html
-from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 from telegram import Update
@@ -14,7 +13,7 @@ from api_client import api_client
 from handlers.base import BaseHandler
 from i18n import i18n
 from keyboards import KeyboardBuilder, MenuKeyboards
-from utils import user_middleware, get_auth_token
+from utils import user_middleware, get_auth_token, format_date
 
 
 def _to_decimal(value) -> Decimal:
@@ -34,14 +33,13 @@ def _normalize_qty(value) -> str:
 
 
 def _format_ledger_date(value) -> str:
-    """Format an ISO occurred_at timestamp as 'dd.mm.yyyy'; '' when absent/unparseable."""
-    if not value:
-        return ''
-    try:
-        dt = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
-    except (ValueError, TypeError):
-        return ''
-    return dt.strftime('%d.%m.%Y')
+    """Format an ISO occurred_at timestamp as 'dd.mm.yyyy'; '' when absent/unparseable.
+
+    Delegates to ``utils.format_date`` — the customer bot's single date-shaping
+    rule. Kept as a named local so the ledger's two call sites below stay
+    readable, but it decides nothing of its own.
+    """
+    return format_date(value)
 
 
 # Event types that represent one physical order visit and are collapsed into a

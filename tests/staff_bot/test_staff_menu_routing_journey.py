@@ -70,6 +70,8 @@ LANGUAGES = ("en", "uz", "ru")
 # Every key `MenuKeyboards.main_menu` renders, for any role combination.
 MENU_KEYS = (
     "staff.menu.new_orders",
+    "staff.menu.my_outlets",
+    "staff.menu.new_outlet",
     "staff.menu.active_deliveries",
     "staff.menu.tryouts",
     "staff.menu.cash",
@@ -97,6 +99,7 @@ CATCH_ALL = "StaffBot._handle_text_message"
 # router doesn't know, or a conversation that swallows a navigation tap.
 EXPECTED_CLAIMANT = {
     "staff.menu.new_orders": CATCH_ALL,
+    "staff.menu.my_outlets": CATCH_ALL,
     "staff.menu.active_deliveries": CATCH_ALL,
     "staff.menu.tryouts": CATCH_ALL,
     "staff.menu.cash": CATCH_ALL,
@@ -106,6 +109,10 @@ EXPECTED_CLAIMANT = {
     "staff.menu.create_client": "conversation:staff_create_user",
     "staff.menu.search_client": "conversation:staff_search_user",
     "staff.menu.create_order": "conversation:staff_create_order",
+    # The sales agent's own entry-point label: it opens a conversation instead
+    # of routing, so like the three operator labels it is deliberately absent
+    # from EXPECTED_ACTION below.
+    "staff.menu.new_outlet": "conversation:staff_sales_new_outlet",
 }
 
 # The action the catch-all router must resolve the label to. This is the
@@ -113,6 +120,7 @@ EXPECTED_CLAIMANT = {
 # what a driver expects the button to DO.
 EXPECTED_ACTION = {
     "staff.menu.new_orders": "staff_new_orders_unified",
+    "staff.menu.my_outlets": "staff_sales_hub",
     "staff.menu.active_deliveries": "staff_active_deliveries",
     "staff.menu.tryouts": "staff_tryouts_hub",
     "staff.menu.cash": "staff_cash_hub",
@@ -126,6 +134,13 @@ DRIVER_KEYS = {
     "staff.menu.active_deliveries",
     "staff.menu.tryouts",
     "staff.menu.cash",
+    "staff.menu.profile",
+    "staff.menu.settings",
+    "staff.menu.help",
+}
+SALES_AGENT_KEYS = {
+    "staff.menu.my_outlets",
+    "staff.menu.new_outlet",
     "staff.menu.profile",
     "staff.menu.settings",
     "staff.menu.help",
@@ -368,6 +383,37 @@ async def test_every_button_on_the_operator_menu_routes_in_every_language(monkey
     for key, label in sorted(by_key.items()):
         assert _claimed_by(harness, operator.text(label)) == EXPECTED_CLAIMANT[key], (
             f"{language} operator label {label!r} ({key}) is claimed by the wrong handler"
+        )
+
+
+@pytest.mark.parametrize("language", LANGUAGES)
+async def test_every_button_on_the_sales_agent_menu_routes_in_every_language(monkeypatch, language):
+    """The sales agent's menu is the smallest one in the bot: My outlets and
+    New outlet, plus the three common buttons.
+
+    Smallest, and therefore the easiest to leave dead. Those two buttons are
+    the only things this role can DO — if either label and the router's idea of
+    it drift apart, a sales agent has a bot that can only show them their own
+    profile. They are wired differently and both have to hold: My outlets
+    resolves through `_menu_action_map` to `staff_sales_hub`, while New outlet
+    is a ConversationHandler ENTRY POINT and must be absent from that map.
+    """
+    harness = await build_staff(monkeypatch, roles=["sales_agent"], language=language)
+    agent, labels = await sign_in(harness)
+    bot = _staff_bot(harness)
+    by_key = _labels_by_key(labels, language, SALES_AGENT_KEYS)
+    assert set(by_key) == SALES_AGENT_KEYS, f"sales agent menu rendered {sorted(by_key)}"
+    for key, label in sorted(by_key.items()):
+        assert _claimed_by(harness, agent.text(label)) == EXPECTED_CLAIMANT[key], key
+        if key not in EXPECTED_ACTION:
+            # A conversation ENTRY POINT ("New outlet"), like the three
+            # operator labels: it owns a flow rather than a router action, so
+            # `_menu_action_map` must NOT know it. Its claimant assertion above
+            # is the whole contract.
+            continue
+        assert bot._match_menu_action(label, language) == EXPECTED_ACTION[key], (
+            f"{language} label {label!r} ({key}) renders on the sales agent's keyboard but the "
+            "text router does not recognise it — the button is dead"
         )
 
 

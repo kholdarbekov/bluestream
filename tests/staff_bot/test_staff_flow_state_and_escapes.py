@@ -61,6 +61,7 @@ from staff_bot.handlers.operator.create_user import (
     SELECT_LANGUAGE as CREATE_USER_LANG,
 )
 from staff_bot.handlers.operator.manage_address import CONFIRM_ADDRESS
+from staff_bot.handlers.sales.visit import V_CLOSE, V_DAY, V_NOTES
 from staff_bot.handlers.start import SELECT_LANGUAGE as AUTH_SELECT_LANGUAGE
 from staff_bot.utils.flow_state import PENDING_FLOW_USER_DATA_KEYS
 
@@ -100,6 +101,8 @@ LANGUAGES = ("en", "uz", "ru")
 MENU_KEYS = (
     "staff.menu.new_orders",
     "staff.menu.active_deliveries",
+    "staff.menu.my_outlets",
+    "staff.menu.new_outlet",
     "staff.menu.tryouts",
     "staff.menu.cash",
     "staff.menu.create_client",
@@ -121,6 +124,12 @@ MESSAGE_KEYS = (
     # Leaving a flow by /cancel, and a flow that expired on its own.
     "staff.bottle_flow_cancelled",
     "staff.flow_timed_out",
+    # ...and the ONE flow whose expiry means something else. A visit is
+    # server-side state: the timeout drops the phone-side draft and nothing
+    # more, so `staff.flow_timed_out`'s "Nothing was saved" would be a lie
+    # about a check-in that really happened.
+    "staff.sales.visit.timeout",
+    "staff.sales.card.resume_visit",
     # The navigation destination an inline "Back" inside a bottle flow lands on.
     "staff.cash.hub_title",
 )
@@ -142,6 +151,22 @@ OPEN_SESSION = {
     "current_inventory": 25,
 }
 OTHER_DRIVERS = [{"id": 12, "first_name": "Bek", "last_name": "Toshev", "name": "Bek Toshev"}]
+
+# The open visit `staff_sales_visit`'s entry point walks into. Two calls, not
+# one: `POST /visits` answers with the visit alone, and the check-in screen
+# has to NAME the outlet, so the entry re-reads `GET /visits/current` (which
+# is also the only way the 409 path can learn the open visit's id — the bot's
+# APIResponse drops the error `details`).
+OPEN_VISIT = {
+    "id": 31,
+    "outlet_id": 7,
+    "agent_user_id": 55,
+    "status": "in_progress",
+    "planned": True,
+    "current_step": "checkin",
+    "started_at": "2026-09-08T05:10:00+00:00",
+    "stock_checks": [],
+}
 
 
 def _curated(key: str, language: str) -> str:
@@ -204,14 +229,17 @@ def _login_payload(roles, language):
     }
 
 
-async def build_staff(monkeypatch, *, roles=("delivery_driver", "operator"), language="en",
-                      staff_roles_in_db=None):
+async def build_staff(monkeypatch, *, roles=("delivery_driver", "operator", "sales_agent"),
+                      language="en", staff_roles_in_db=None):
     """A harness for a staff member holding ``roles``.
 
-    Both roles by default: the flows under test span the driver's bottle
-    conversations and the operator's client/order conversations, and a driver
-    who is also an operator is a real (and the most exposed) configuration —
-    every conversation in the bot is reachable from one keyboard.
+    All three by default: the flows under test span the driver's bottle
+    conversations, the operator's client/order conversations and the sales
+    agent's outlet onboarding, and someone holding every role is a real (and
+    the most exposed) configuration — it is also the only way the claim this
+    default exists for stays TRUE, that every conversation in the bot is
+    reachable from one keyboard. A role dropped from here silently drops its
+    conversations out of the sweep below.
     """
     roles = list(roles)
     harness = await build_staff_harness(
@@ -292,6 +320,17 @@ ENTRY_TAP = {
     "staff_bottle_returned_wh": "staff_bottle_return_warehouse",
     "staff_bottle_transfer": "staff_bottle_transfer_start",
     "staff_bottle_transfer_confirm": "staff_transfer_custom_9",
+    "staff_sales_new_outlet": "staff_sales_new_outlet",
+    # The visit loop opens from the outlet card's ▶ Start visit, so the tap
+    # carries an outlet id — 7, the id `prepare_backend` answers for below.
+    "staff_sales_visit": "staff_sales_visit_start_7",
+    # Nearby opens from the hub row and asks for a pin before it asks the
+    # backend anything, so it needs no `prepare_backend` branch: the entry
+    # point renders two messages and makes zero calls.
+    "staff_sales_nearby": "staff_sales_nearby",
+    # The try-out opens from the outlet card's 🧪 button, so the tap carries an
+    # outlet id — 7, the id `prepare_backend` answers for below.
+    "staff_sales_tryout": "staff_sales_tryout_7",
 }
 
 # `staff_auth` is entered by /start rather than a button and only parks an
@@ -317,6 +356,180 @@ def prepare_backend(harness, name):
         harness.backend.route("GET", AVAILABLE_DRIVERS_ENDPOINT, lambda _call: list(OTHER_DRIVERS))
     elif name in {"staff_create_user", "staff_create_order", "staff_search_user"}:
         harness.backend.route("GET", OPERATOR_SEARCH_ENDPOINT, lambda _call: [])
+    elif name == "staff_sales_visit":
+        # Starting a visit WRITES before it renders. With no routed reply the
+        # fake backend's empty default would come back, the entry point would
+        # end the conversation, and the sweep would be measuring a screen
+        # production never draws.
+        harness.backend.route(
+            "POST", "/api/v1/staff/sales/outlets/7/visits", lambda _call: {"visit": dict(OPEN_VISIT)}
+        )
+        harness.backend.route(
+            "GET",
+            "/api/v1/staff/sales/visits/current",
+            lambda _call: {"visit": dict(OPEN_VISIT), "outlet": {"id": 7, "name": "Bahor market"}},
+        )
+    elif name == "staff_sales_tryout":
+        # The entry point READS twice before it renders: the outlet (ownership
+        # and the name) and the catalogue. With no routed reply the fake
+        # backend's empty default comes back, the entry point ends the
+        # conversation, and the sweep would be measuring a screen production
+        # never draws.
+        harness.backend.route(
+            "GET", "/api/v1/staff/sales/outlets/7",
+            lambda _call: {"outlet": {"id": 7, "name": "Bahor market", "stage": "prospect"}},
+        )
+        harness.backend.route(
+            "GET", "/api/v1/products/",
+            lambda _call: {"items": [{
+                "id": 11, "name": "Pure Water 19L",
+                "flags": {"is_active": True},
+                "inventory": {"is_tryout_eligible": True},
+            }]},
+        )
+
+
+# ---------------------------------------------------------------------------
+# The visit conversation's three FREE-TEXT states
+# ---------------------------------------------------------------------------
+# `staff_sales_visit` opens at V_CHECKIN, which takes a location and buttons
+# and no text, so the parametrised sweep above never puts a menu label in front
+# of `receive_delivery_date`, `receive_order_notes` or `receive_close_notes`.
+# bot.py:1574-1577 states the rule those three depend on — "`menu_escape` stays
+# FIRST in every state: in the three states that also take free text it is the
+# only thing standing between a main-menu tap and being filed as a delivery
+# note" — and nothing drove it. The static sweep further down asks
+# `any(... == "_conv_menu_escape" ...)` over the claiming handlers, so it is
+# blind to handler ORDER, which is the one property that comment calls
+# load-bearing.
+
+SALES_CURRENT_VISIT_ENDPOINT = "/api/v1/staff/sales/visits/current"
+SALES_PAYMENT_METHODS_ENDPOINT = "/api/v1/staff/sales/outlets/7/payment-methods"
+SALES_ORDER_ESTIMATE_ENDPOINT = "/api/v1/staff/sales/outlets/7/order-estimate"
+
+# One priced line, so *Order suggested* has something to take and the rail step
+# has a basket to ask about. `serialize_stock_check`'s own key names.
+VISIT_SUGGESTION = {
+    "product_id": 11, "product_name": "Pure Water 19L", "on_hand_qty": 3,
+    "empties_qty": None, "is_sold_out": False, "is_low": False,
+    "suggested_qty": 20, "accepted_qty": None, "rate_per_day": 1.5,
+    "rate_source": "stock_checks", "last_order_qty": 15,
+}
+VISIT_ORDER = {"id": 1229, "order_number": "SA_000413_26", "status": "pending",
+               "total_amount": 300000.0}
+
+# The three states that carry a TEXT MessageHandler, imported from production
+# so the walk below cannot quietly stop one screen early and re-test V_CHECKIN.
+VISIT_TEXT_STATES = {"day": V_DAY, "order_notes": V_NOTES, "close_notes": V_CLOSE}
+
+
+def _visit_at(step, **over):
+    visit = {**OPEN_VISIT, "current_step": step, "checkin_skipped": True}
+    visit.update(over)
+    return visit
+
+
+async def open_visit_at_text_prompt(harness, staff_member, prompt):
+    """Walk the REAL visit conversation to one of its three free-text prompts.
+
+    Driven through the entry point and the buttons, never by poking
+    `_conversations`: the state the escape has to survive is the state
+    production actually arms — which is also why the caller asserts the exact
+    state it landed in. A walk that quietly stopped one screen early would
+    leave the sweep testing V_CHECKIN all over again.
+    """
+    if prompt == "close_notes":
+        # An order exists, so the close skips straight to the note question.
+        harness.backend.route(
+            "GET", SALES_CURRENT_VISIT_ENDPOINT,
+            lambda _call: {"visit": _visit_at("close", order=dict(VISIT_ORDER)),
+                           "outlet": {"id": 7, "name": "Bahor market"}},
+        )
+        await harness.send(staff_member.tap("staff_sales_visit_resume"))
+        return
+
+    harness.backend.route(
+        "GET", SALES_CURRENT_VISIT_ENDPOINT,
+        lambda _call: {"visit": _visit_at("order", stock_checks=[dict(VISIT_SUGGESTION)]),
+                       "outlet": {"id": 7, "name": "Bahor market"}},
+    )
+    # One rail, so the agent is taken straight to the delivery-day question.
+    harness.backend.route("GET", SALES_PAYMENT_METHODS_ENDPOINT,
+                          lambda _call: {"methods": [{"method": "cash"}]})
+    harness.backend.route("POST", SALES_ORDER_ESTIMATE_ENDPOINT,
+                          lambda _call: {"estimate": {"items": [], "total_amount": 300000.0}})
+    await harness.send(staff_member.tap("staff_sales_visit_resume"))
+    await harness.send(staff_member.tap("staff_sales_v_ordersugg"))
+    if prompt == "day":
+        # The typed-date branch: "Pick a date" leaves V_DAY waiting for text.
+        await harness.send(staff_member.tap("staff_sales_v_day_pick"))
+        return
+    await harness.send(staff_member.tap("staff_sales_v_day_tomorrow"))
+
+
+@pytest.mark.parametrize("prompt", ("day", "order_notes", "close_notes"))
+async def test_a_menu_tap_at_a_visit_text_prompt_escapes_instead_of_being_filed(
+    monkeypatch, prompt
+):
+    """The label must reach the menu, not the field the prompt is collecting.
+
+    Each of these three states registers a TEXT MessageHandler, and PTB runs
+    the FIRST handler in the state that claims the update. If `menu_escape`
+    ever stops being first, "💰 Cash" is stored as the delivery note, the
+    confirm screen renders with it, and `POST /order` carries it to the driver
+    — the exact shape of the leak `staff_bot_text_router_state_leak` already
+    shipped once.
+    """
+    harness = await build_staff(monkeypatch)
+    staff_member, labels = await sign_in(harness)
+    errors = capture_errors(harness)
+    await open_visit_at_text_prompt(harness, staff_member, prompt)
+    assert harness.conversation_state("staff_sales_visit") == VISIT_TEXT_STATES[prompt], (
+        f"fixture: the agent is parked on the {prompt} prompt"
+    )
+    harness.telegram.reset()
+    harness.backend.calls.clear()
+
+    await harness.send(staff_member.text(menu_label(labels, "staff.menu.cash")))
+
+    assert errors == [], f"escaping the {prompt} prompt raised {errors}"
+    assert harness.conversation_state("staff_sales_visit") is None, (
+        f"the visit conversation is still armed after a menu tap at the {prompt} prompt"
+    )
+    assert "sales_visit" not in user_data(harness)
+    assert harness.telegram.shown[-1].callback_data(), "the cash hub never rendered"
+    # The label was not filed as an answer: nothing was priced, nothing was
+    # sent, and the VISIT is untouched on the server.
+    assert [call for call in harness.backend.calls if call.method == "POST"] == []
+
+
+@pytest.mark.parametrize("prompt", ("day", "order_notes", "close_notes"))
+async def test_cancel_and_start_also_leave_a_visit_text_prompt(monkeypatch, prompt):
+    """`/cancel` and `/start` are fallbacks, so they must outrank the TEXT handler.
+
+    A command typed at one of these prompts arrives as an ordinary message with
+    a `bot_command` entity; if the state's `MessageHandler(filters.TEXT)`
+    claimed it first, "/start" would be filed as the delivery note and the
+    agent would be told nothing at all.
+    """
+    for command in ("cancel", "start"):
+        harness = await build_staff(monkeypatch)
+        staff_member, labels = await sign_in(harness)
+        errors = capture_errors(harness)
+        await open_visit_at_text_prompt(harness, staff_member, prompt)
+        assert harness.conversation_state("staff_sales_visit") == VISIT_TEXT_STATES[prompt]
+        harness.telegram.reset()
+        harness.backend.calls.clear()
+
+        await harness.send(staff_member.command(command))
+
+        assert errors == [], f"/{command} at the {prompt} prompt raised {errors}"
+        assert harness.conversation_state("staff_sales_visit") is None, (
+            f"/{command} left the visit conversation armed at the {prompt} prompt"
+        )
+        assert "sales_visit" not in user_data(harness)
+        # Leaving is not abandoning: the visit stays open on the server.
+        assert [call for call in harness.backend.calls if call.method == "POST"] == []
 
 
 async def open_conversation(harness, staff_member, name):
@@ -1248,6 +1461,11 @@ async def fire_timeout(harness, name, last_update):
     Driving PTB's job queue from a test would mean waiting out a real 300s
     timer, so this reproduces the job's own loop against the REAL registered
     handlers instead of asserting on the state dict.
+
+    Returns what the TIMEOUT handler returned. The forced pop below makes
+    ``conversation_state(...) is None`` true whatever the handler did, so the
+    handler's own verdict is the only thing that can tell "this handler ended
+    the conversation" from "the job ended it anyway".
     """
     from telegram.ext import CallbackContext
 
@@ -1255,15 +1473,17 @@ async def fire_timeout(harness, name, last_update):
     handlers = conv.states.get(ConversationHandler.TIMEOUT, [])
     assert handlers, f"{name} has no TIMEOUT state: it expires in silence"
     context = CallbackContext.from_update(last_update, harness.application)
+    returned = None
     for handler in handlers:
         check = handler.check_update(last_update)
         if check is not None and check is not False:
-            await handler.handle_update(last_update, harness.application, check, context)
+            returned = await handler.handle_update(last_update, harness.application, check, context)
     # PTB's job forces the conversation to END afterwards, whatever the
     # handlers returned. Mirrored here so the state left behind is the real one.
     conv._conversations.pop(
         (DEFAULT_DRIVER_TELEGRAM_ID, DEFAULT_DRIVER_TELEGRAM_ID), None
     )
+    return returned
 
 
 async def test_a_flow_abandoned_at_a_text_prompt_says_so_when_it_expires(monkeypatch):
@@ -1322,6 +1542,44 @@ async def test_a_flow_abandoned_on_an_inline_button_also_says_so_when_it_expires
     answer = harness.telegram.last_shown()
     assert answer.text == _curated("staff.flow_timed_out", "en")
     assert answer.button_labels() == labels
+
+
+async def test_an_expiring_visit_says_the_visit_is_still_open(monkeypatch):
+    """The shared copy is FALSE for this one flow, and dangerously so.
+
+    `staff.flow_timed_out` says "I closed it. Nothing was saved" — but a
+    timeout does not touch a visit. The server still holds it open, the
+    check-in and the counts are already recorded, and Resume walks back into
+    it. An agent told their visit was thrown away opens a second one, which
+    `uq_visits_one_open_per_agent` then refuses: they are stuck outside a visit
+    they cannot reopen, holding a phone that says it is gone.
+
+    The DRAFT is still dropped — the conversation really has ended, and its
+    keys are stale the moment it does.
+    """
+    harness = await build_staff(monkeypatch)
+    staff_member, labels = await sign_in(harness)
+    prepare_backend(harness, "staff_sales_visit")
+    harness.telegram.reset()
+
+    last = staff_member.tap(ENTRY_TAP["staff_sales_visit"])
+    await harness.send(last)
+    assert harness.conversation_state("staff_sales_visit") is not None, (
+        "fixture: the agent is standing on the check-in screen"
+    )
+    assert user_data(harness).get("sales_visit") is not None, "fixture: a live draft"
+
+    harness.telegram.reset()
+    await fire_timeout(harness, "staff_sales_visit", last)
+
+    answer = harness.telegram.last_shown()
+    assert answer.text == _curated("staff.sales.visit.timeout", "en")
+    assert answer.text != _curated("staff.flow_timed_out", "en")
+    # ...and the way back in is on the message, not something to go looking for.
+    assert answer.callback_data() == ["staff_sales_visit_resume"]
+    assert "sales_visit" not in user_data(harness), (
+        "the expired visit left its draft for the next flow to trip over"
+    )
 
 
 # ---------------------------------------------------------------------------

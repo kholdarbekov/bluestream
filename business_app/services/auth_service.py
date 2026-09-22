@@ -28,6 +28,13 @@ from business_app import db
 
 logger = logging.getLogger(__name__)
 
+# Registration sources whose accounts a Telegram user may claim by proving the phone
+# with an OTP. The list is a whitelist on purpose: a source is listed only when the
+# account was created WITHOUT a Telegram identity of its own, so linking one cannot
+# take over somebody else's chat. `sales_agent` qualifies — an agent registers a
+# customer in the field from their phone number alone (see OutletService).
+TELEGRAM_SELF_LINK_SOURCES = ("web", "email", "phone", "admin_created", "sales_agent")
+
 
 class AuthService:
     """Authentication and authorization service"""
@@ -1015,12 +1022,14 @@ class AuthService:
         tax_id: str = None,
         user_type: str = None,
         entity_subtype: str = None,
+        registration_source: str = "admin_created",
     ) -> User:
         """
         Create a user account via admin panel (for call center operations).
 
         Users created this way:
-        - Are marked with registration_source='admin_created'
+        - Are marked with registration_source='admin_created' (or the given
+          registration_source, e.g. 'sales_agent')
         - Have status=ACTIVE (can receive orders)
         - Have is_verified=False (cannot login to cabinet)
         - Have a random password hash (cannot login with password)
@@ -1035,6 +1044,9 @@ class AuthService:
             company_name: Optional - Company or legal entity name
             tax_id: Optional - Tax identifier
             user_type: Optional - User classification (`individual` or `entity`)
+            registration_source: Optional - Origin stamped on the account; must stay a
+                member of TELEGRAM_SELF_LINK_SOURCES for the customer to be able to
+                claim it from the Telegram bot later
 
         Returns:
             Created User object
@@ -1141,7 +1153,7 @@ class AuthService:
             role=UserRole.CUSTOMER.value,
             status=UserStatus.ACTIVE.value,  # Active so orders can be placed
             is_verified=False,  # Not verified - cannot access cabinet pages
-            registration_source="admin_created",
+            registration_source=registration_source,
             preferred_language="uz",  # Default language for Uzbekistan
             company_name=normalized_company_name,
             tax_id=normalized_tax_id,
@@ -1796,7 +1808,7 @@ class AuthService:
         can_link = (
             existing_user.telegram_id is None
             and user_status == UserStatus.ACTIVE.value
-            and existing_user.registration_source in ["web", "email", "phone", "admin_created"]
+            and existing_user.registration_source in TELEGRAM_SELF_LINK_SOURCES
         )
 
         masked_name = existing_user.first_name[:1] + "***" if existing_user.first_name else "***"

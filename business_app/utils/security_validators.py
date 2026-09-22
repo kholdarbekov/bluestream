@@ -39,7 +39,7 @@ class SecurityValidator:
     ]
 
     # Valid roles in the system
-    VALID_ROLES = ["customer", "admin", "manager", "delivery_driver", "operator"]
+    VALID_ROLES = ["customer", "admin", "manager", "delivery_driver", "operator", "sales_agent"]
 
     # Valid user statuses
     VALID_STATUSES = ["active", "inactive", "banned", "pending_verification"]

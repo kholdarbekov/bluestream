@@ -26,6 +26,9 @@ import Blog from './pages/Blog';
 import TimeSlots from './pages/TimeSlots';
 import DeliveryPersons from './pages/DeliveryPersons';
 import Operators from './pages/Operators';
+import SalesAgents from './pages/SalesAgents';
+import Outlets from './pages/Outlets';
+import Visits from './pages/Visits';
 import StaffManagement from './pages/StaffManagement';
 import Prepayments from './pages/Prepayments';
 import MarkingCodeOperations from './pages/MarkingCodeOperations';
@@ -75,8 +78,17 @@ function App() {
                   <Route path="/blog" element={<Blog />} />
                   <Route path="/translations" element={<Translations />} />
                   <Route path="/settings" element={<Settings />} />
+                  {/* D24: the sales module lives under /sales from phase 3. The old paths stay as
+                      replace-redirects so a bookmark, a browser history entry or a link in an old
+                      email still lands, and Back does not bounce forward again. */}
+                  <Route path="/sales" element={<Navigate to="/sales/outlets" replace />} />
+                  <Route path="/sales/agents" element={<SalesAgents />} />
+                  <Route path="/sales/outlets" element={<Outlets />} />
+                  <Route path="/sales/visits" element={<Visits />} />
+                  <Route path="/outlets" element={<Navigate to="/sales/outlets" replace />} />
                   <Route path="/staff/delivery-persons" element={<DeliveryPersons />} />
                   <Route path="/staff/operators" element={<Operators />} />
+                  <Route path="/staff/sales-agents" element={<Navigate to="/sales/agents" replace />} />
                   <Route path="/staff/management" element={<StaffManagement />} />
                   <Route path="/staff/prepayments" element={<Prepayments />} />
                   <Route path="/marking-codes" element={<MarkingCodeOperations />} />

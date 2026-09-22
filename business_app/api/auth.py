@@ -2390,7 +2390,7 @@ def sync_profile():
                         "last_name": {"type": "string", "example": "Admin"},
                         "role": {
                             "type": "string",
-                            "enum": ["admin", "manager", "operator", "delivery_driver"],
+                            "enum": ["admin", "manager", "operator", "delivery_driver", "sales_agent"],
                             "example": "admin",
                         },
                         "phone": {"type": "string", "example": "+998901234567"},
@@ -2443,6 +2443,7 @@ def admin_create_user():
                 UserRole.MANAGER.value,
                 UserRole.OPERATOR.value,
                 UserRole.DELIVERY_DRIVER.value,
+                UserRole.SALES_AGENT.value,
             ]
             if data["role"] not in valid_roles:
                 return {"success": False, "message": f'Invalid role. Must be one of: {", ".join(valid_roles)}'}, 400

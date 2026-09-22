@@ -17,6 +17,7 @@ from handlers.loyalty import loyalty_handlers
 from handlers.payments import payment_handlers
 from handlers.bottles import BottleBalanceHandler
 from handlers.support import support_flow_handlers
+from handlers.agent_orders import agent_order_handlers
 
 bottle_handlers = BottleBalanceHandler()
 
@@ -107,5 +108,6 @@ __all__ = [
     'support_handlers',
     'support_flow_handlers',
     'payment_handlers',
-    'bottle_handlers'
+    'bottle_handlers',
+    'agent_order_handlers'
 ]

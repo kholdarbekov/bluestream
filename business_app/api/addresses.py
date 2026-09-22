@@ -392,11 +392,28 @@ def reverse_geocode():
         district = None
         formatted_address = result.get("formatted_address", "")
 
-        if "address_components" in result:
-            components = result["address_components"]
-            # Try different component types for district
-            for component in components if isinstance(components, list) else []:
-                types = component.get("types", [])
+        components = result.get("address_components")
+        if isinstance(components, dict):
+            # Nominatim (MAPS_PROVIDER=osm, the configured provider) answers with an `address`
+            # OBJECT, not the Google-shaped LIST — `MapsService._osm_reverse_geocode` passes
+            # `data["address"]` straight through. The list-only loop below therefore skipped it
+            # entirely and this endpoint returned `district: null` for every OSM lookup, which
+            # is how the staff bot's "New outlet" pin step could never learn a district.
+            #
+            # ORDER IS LOAD-BEARING. Live Nominatim puts the Tashkent district in `county` and the
+            # MAHALLA in `suburb` -- 41.2925,69.3297 answers
+            # {"suburb": "Aviasozlar", "county": "Yashnobod Tumani"} -- so probing `suburb` first
+            # returns a neighbourhood name that matches no district and files the outlet under
+            # none. Administrative fields first, neighbourhood fields last.
+            for field in ("city_district", "county", "state_district", "district", "borough", "suburb"):
+                value = components.get(field)
+                if value:
+                    district = value
+                    break
+        elif isinstance(components, list):
+            # Google / Yandex: a list of typed components.
+            for component in components:
+                types = component.get("types", []) if isinstance(component, dict) else []
                 if "sublocality_level_1" in types or "administrative_area_level_2" in types:
                     district = component.get("long_name")
                     break

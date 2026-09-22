@@ -174,3 +174,92 @@ class TestDeliveryZoneEnforcement:
             headers=auth_headers,
         )
         assert response.status_code == 201
+
+
+@pytest.mark.integration
+@pytest.mark.api
+class TestReverseGeocodeDistrict:
+    """`POST /addresses/reverse-geocode` has to read the district out of BOTH
+    provider shapes, because the two disagree about what `address_components` is.
+
+    Google and Yandex hand back a LIST of typed components. Nominatim — the
+    configured provider (`MAPS_PROVIDER=osm`) — hands back its `address`
+    OBJECT, straight through `MapsService._osm_reverse_geocode`. The extractor
+    iterated lists only, so under the provider this deployment actually runs,
+    `district` was `null` for every lookup. The staff bot's "New outlet" pin
+    step forwards that field verbatim, so an outlet onboarded in the field
+    could never learn which district it stood in.
+    """
+
+    def _reverse(self, client, headers, monkeypatch, components):
+        from business_app.services import maps_service as maps_module
+
+        def _fake(self, latitude, longitude):
+            return {"formatted_address": "Chilonzor 5-kvartal, 12", "address_components": components}
+
+        monkeypatch.setattr(maps_module.MapsService, "reverse_geocode", _fake)
+        response = client.post("/api/v1/addresses/reverse-geocode", json=IN_ZONE, headers=headers)
+        assert response.status_code == 200, response.get_data(as_text=True)
+        return response.get_json()["data"]
+
+    def test_nominatim_dict_components_yield_a_district(self, client, auth_headers, db, monkeypatch):
+        """The real Nominatim `address` object for a Tashkent pin, captured live at
+        41.2925,69.3297 — and the reason the probe ORDER is load-bearing.
+
+        Nominatim files the Tashkent district under `county` and puts the MAHALLA
+        ("Aviasozlar") in `suburb`. Probing `suburb` first therefore returns a
+        neighbourhood name that canonicalises to nothing, and the outlet is filed
+        under no district at all — a bug that would have looked exactly like the
+        one this endpoint was just fixed for.
+        """
+        data = self._reverse(
+            client,
+            auth_headers,
+            monkeypatch,
+            {
+                "road": "Mashinasozlar",
+                "suburb": "Aviasozlar",
+                "county": "Yashnobod Tumani",
+                "city": "Tashkent",
+                "ISO3166-2-lvl4": "UZ-TK",
+                "postcode": "100016",
+                "country": "Uzbekistan",
+            },
+        )
+        assert data["district"] == "Yashnobod Tumani"
+        assert data["formatted_address"] == "Chilonzor 5-kvartal, 12"
+
+    def test_an_administrative_field_wins_over_the_neighbourhood_one(self, client, auth_headers, db, monkeypatch):
+        """Both present, `city_district` first in the probe order."""
+        data = self._reverse(
+            client,
+            auth_headers,
+            monkeypatch,
+            {"suburb": "Aviasozlar", "city_district": "Chilanzar District", "county": "Yashnobod Tumani"},
+        )
+        assert data["district"] == "Chilanzar District"
+
+    def test_a_neighbourhood_only_answer_still_yields_something(self, client, auth_headers, db, monkeypatch):
+        """`suburb` stays in the probe list, last: a mahalla name is a worse answer than a
+        district but a better one than nothing, and `_canonical_district` safely refuses it
+        rather than guessing."""
+        data = self._reverse(client, auth_headers, monkeypatch, {"suburb": "Aviasozlar"})
+        assert data["district"] == "Aviasozlar"
+
+    def test_google_list_components_still_yield_a_district(self, client, auth_headers, db, monkeypatch):
+        data = self._reverse(
+            client,
+            auth_headers,
+            monkeypatch,
+            [
+                {"long_name": "Chilonzor 5-kvartal", "types": ["route"]},
+                {"long_name": "Chilanzar District", "types": ["sublocality_level_1"]},
+            ],
+        )
+        assert data["district"] == "Chilanzar District"
+
+    def test_components_naming_no_district_stay_null(self, client, auth_headers, db, monkeypatch):
+        data = self._reverse(
+            client, auth_headers, monkeypatch, {"road": "Chilonzor 5-kvartal", "country": "Uzbekistan"}
+        )
+        assert data["district"] is None

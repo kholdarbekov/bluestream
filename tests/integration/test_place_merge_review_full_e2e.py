@@ -3004,7 +3004,178 @@ def test_the_api_contract_snapshot_still_lists_the_merge_preview_route(db):
     # (admin.send_support_location) (Task 8: let an operator reply to a
     # customer's support conversation with a file or a pin, not just text).
     # Unrelated to place-merge; only the estate-wide count moved.
-    assert len(routes) == 568
+    #
+    # 568 -> 573: the sales-agent phase-1 plan added the `admin_sales` blueprint
+    # with five routes -- GET /api/v1/admin/staff/sales-agents
+    # (admin_sales.list_sales_agents), POST /api/v1/admin/staff/sales-agents
+    # (admin_sales.create_sales_agent), GET
+    # /api/v1/admin/staff/sales-agents/<int:user_id>
+    # (admin_sales.get_sales_agent), PUT
+    # /api/v1/admin/staff/sales-agents/<int:user_id>
+    # (admin_sales.update_sales_agent) and PUT
+    # /api/v1/admin/staff/sales-agents/<int:user_id>/active
+    # (admin_sales.set_sales_agent_active). They are the admin CRUD for the new
+    # sales_agent staff role, delegating to StaffService.create_sales_agent /
+    # update_sales_agent and SalesAgentAccountService. Unrelated to place-merge;
+    # only the estate-wide count moved.
+    #
+    # 573 -> 583: the sales-agent phase-1 plan added the `staff_sales` blueprint
+    # with ten routes -- the staff-bot surface for a sales agent's own outlets
+    # plus the operator's activation queue. Sales agent (`require_staff_roles
+    # ("sales_agent")`): GET /api/v1/staff/sales/outlets
+    # (staff_sales.list_outlets, the agent's scoped outlet list), GET
+    # /api/v1/staff/sales/outlets/dedupe (staff_sales.dedupe_outlet, the
+    # pre-create duplicate probe), POST /api/v1/staff/sales/outlets
+    # (staff_sales.create_outlet, 409 SALES_OUTLET_DUPLICATE unless forced),
+    # GET /api/v1/staff/sales/outlets/<int:outlet_id> (staff_sales.get_outlet,
+    # the outlet card with open receivable / bottle balance / last orders), PUT
+    # /api/v1/staff/sales/outlets/<int:outlet_id> (staff_sales.update_outlet),
+    # POST /api/v1/staff/sales/outlets/<int:outlet_id>/contacts
+    # (staff_sales.add_outlet_contact) and POST
+    # /api/v1/staff/sales/outlets/<int:outlet_id>/request-activation
+    # (staff_sales.request_outlet_activation). Operator
+    # (`require_staff_roles("operator")`): GET
+    # /api/v1/staff/sales/activation-requests
+    # (staff_sales.list_activation_requests, the approval queue), POST
+    # /api/v1/staff/sales/outlets/<int:outlet_id>/approve
+    # (staff_sales.approve_outlet, which creates/links the customer and address)
+    # and POST /api/v1/staff/sales/outlets/<int:outlet_id>/reject
+    # (staff_sales.reject_outlet). All ten delegate to OutletService. Unrelated
+    # to place-merge; only the estate-wide count moved.
+    #
+    # 583 -> 592: the sales-agent phase-1 plan added the admin (back-office)
+    # half of the outlet surface to the `admin_sales` blueprint with nine
+    # routes, all behind `manager_or_higher_required` and all delegating to
+    # OutletService -- GET /api/v1/admin/sales/outlets
+    # (admin_sales.list_outlets, the filterable outlet list carrying a
+    # per-stage `meta.summary`, plus a `?format=pins` branch that returns only
+    # the pinned outlets for the map), GET
+    # /api/v1/admin/sales/outlets/<int:outlet_id> (admin_sales.get_outlet_admin,
+    # the outlet card with open receivable / bottle balance / last orders plus
+    # its stage history), PUT /api/v1/admin/sales/outlets/<int:outlet_id>
+    # (admin_sales.update_outlet_admin), POST
+    # /api/v1/admin/sales/outlets/<int:outlet_id>/approve
+    # (admin_sales.approve_outlet_admin), POST
+    # /api/v1/admin/sales/outlets/<int:outlet_id>/reject
+    # (admin_sales.reject_outlet_admin), POST
+    # /api/v1/admin/sales/outlets/<int:outlet_id>/assign
+    # (admin_sales.assign_outlet_admin, 400 SALES_AGENT_PROFILE_REQUIRED when
+    # the target user is not a sales agent), POST
+    # /api/v1/admin/sales/outlets/<int:outlet_id>/mark-lost
+    # (admin_sales.mark_outlet_lost_admin), POST
+    # /api/v1/admin/sales/outlets/bulk-assign
+    # (admin_sales.bulk_assign_outlets_admin, one agent over a whole district)
+    # and POST /api/v1/admin/sales/outlets/import-existing-customers
+    # (admin_sales.import_existing_customers_admin, which backfills one active
+    # class-C outlet per existing grocery/workplace customer). The approve and
+    # reject rules are the operator queue's admin twins, not replacements: the
+    # staff ones stay for the staff bot. Unrelated to place-merge; only the
+    # estate-wide count moved.
+    #
+    # 592 -> 603: the sales-agent phase-2a plan added the visit loop with eleven
+    # routes. Ten on the `staff_sales` blueprint behind
+    # `require_staff_roles("sales_agent")`, all delegating to VisitService /
+    # ReplenishmentService -- POST
+    # /api/v1/staff/sales/outlets/<int:outlet_id>/visits
+    # (staff_sales.start_visit, 409 SALES_VISIT_ALREADY_OPEN with the open
+    # visit's id so the bot can offer Resume), GET
+    # /api/v1/staff/sales/visits/current (staff_sales.current_visit, the
+    # server-defined step the conversation always resumes from), POST
+    # /api/v1/staff/sales/visits/<int:visit_id>/checkin
+    # (staff_sales.checkin_visit, which stamps distance_m/in_radius against the
+    # outlet pin and never blocks), POST
+    # /api/v1/staff/sales/visits/<int:visit_id>/stock-check
+    # (staff_sales.stock_check_visit, an idempotent upsert that answers with the
+    # suggested quantities), GET /api/v1/staff/sales/stock-check-products
+    # (staff_sales.stock_check_products, the admin-flagged shelf list), GET
+    # /api/v1/staff/sales/outlets/<int:outlet_id>/payment-methods
+    # (staff_sales.outlet_payment_methods, get_client_payment_methods filtered
+    # to cash/business_account), POST
+    # /api/v1/staff/sales/outlets/<int:outlet_id>/order-estimate
+    # (staff_sales.outlet_order_estimate, the operator quote replayed for the
+    # outlet's customer), POST
+    # /api/v1/staff/sales/visits/<int:visit_id>/order
+    # (staff_sales.place_visit_order, which places the order on the customer's
+    # behalf through OrderService.create_order -- no third creation path -- and
+    # publishes the confirmation state), POST
+    # /api/v1/staff/sales/visits/<int:visit_id>/close (staff_sales.close_visit)
+    # and POST /api/v1/staff/sales/visits/<int:visit_id>/abandon
+    # (staff_sales.abandon_visit). One on `orders`: POST
+    # /api/v1/orders/<int:order_id>/agent-confirmation
+    # (orders.agent_order_confirmation), the customer's Confirm/Decline on an
+    # order an agent placed for them. Unrelated to place-merge; only the
+    # estate-wide count moved.
+    #
+    # 603 -> 604: the sales-agent phase-2b plan's FIRST new route --
+    # POST /api/v1/staff/sales/visits/<int:visit_id>/photos
+    # (staff_sales.add_visit_photo), on the `staff_sales` blueprint behind
+    # `require_staff_roles("sales_agent")`: one multipart storefront/shelf
+    # photo per call, stored through FileStorageService and hashed with
+    # SHA-256 over the ORIGINAL bytes, so a re-sent photo is published as
+    # `is_duplicate` instead of quietly counting twice. 2b's other read
+    # surface adds NO rule -- `?scope=nearby` is a query parameter on the
+    # existing GET /api/v1/staff/sales/outlets. Task 5 moves this to 605
+    # with the field try-out route. Unrelated to place-merge; only the
+    # estate-wide count moved.
+    #
+    # 604 -> 605: the sales-agent phase-2b plan's second and last new route --
+    # POST /api/v1/staff/sales/outlets/<int:outlet_id>/tryouts
+    # (staff_sales.create_outlet_tryout, Task 5: the try-out an agent leaves
+    # at the counter, built from the outlet's own primary contact and pin and
+    # created through the ONE TryoutService.create_tryout path with
+    # complete_handoff=False and no driver, so the hand-off task stays in the
+    # driver pool and the outlet moves prospect -> trial). 2b's other two
+    # surfaces add NO rule: `?scope=nearby` is a query parameter on the
+    # existing GET /api/v1/staff/sales/outlets, and the morning digest is a
+    # Celery push to the staff bot. Unrelated to place-merge; only the
+    # estate-wide count moved.
+    #
+    # 605 -> 608: the sales-agent phase-3 plan's first three routes, all GET and all
+    # read-only. Two on the `admin_sales` blueprint behind `manager_or_higher_required`:
+    # GET /api/v1/admin/sales/agents/metrics (admin_sales.list_agent_metrics -- every
+    # ACTIVE sales agent's twenty KPIs over one inclusive local-day window in ONE pass,
+    # so the Analytics *Agent performance* tab and the Sales-agents cards never make a
+    # call per row) and GET /api/v1/admin/sales/agents/<int:user_id>/metrics
+    # (admin_sales.get_agent_metrics -- the same twenty for one agent, where the path id
+    # is a users.id and never a sales_agent_profiles.id). One on `staff_sales` behind
+    # require_staff_roles("sales_agent"): GET /api/v1/staff/sales/me/stats
+    # (staff_sales.my_stats -- the caller's own card for period=today|week|month, which
+    # the staff bot's My stats screen renders). All three parse a window and delegate to
+    # AgentMetricsService, the ONE aggregator; none of them computes a number itself.
+    # Unrelated to place-merge; only the estate-wide count moved.
+    #
+    # 608 -> 610: the sales-agent phase-3 plan's Task 4 -- the supervisor's two read
+    # surfaces, both GET on the `admin_sales` blueprint behind
+    # `manager_or_higher_required`. GET /api/v1/admin/sales/visits
+    # (admin_sales.list_visits_admin): the Visits page's server-paginated list,
+    # windowed on `visits.started_at` (the one indexed instant, and the boundary
+    # `planned` was stamped against) with the agent/outlet/outcome/in_radius
+    # filters delegated to VisitService.list_for_admin -- `in_radius` through
+    # `parse_bool_arg`, because the column is a TRI-STATE and `type=bool` reads
+    # "false" as True. GET /api/v1/admin/sales/plan-vs-fact
+    # (admin_sales.plan_vs_fact_admin): one row per agent per LOCAL day from
+    # AgentDayPlanService.plan_vs_fact, whose denominator is the nightly
+    # `sales_agent_day_plans` snapshot -- a day the job never ran for publishes
+    # due: null / plan_source: "none" rather than a replay of today's cadence
+    # against a past calendar. Both parse their period through the ONE
+    # `local_windows.parse_date_range` helper, so an inverted or >92-day range is
+    # a 400 SALES_DATE_RANGE_INVALID instead of an unbounded scan. Unrelated to
+    # place-merge; only the estate-wide count moved.
+    #
+    # 610 -> 611: the sales-agent phase-3 plan's LAST new route --
+    # GET /api/v1/admin/sales/exceptions (admin_sales.list_sales_exceptions), on the
+    # `admin_sales` blueprint behind `manager_or_higher_required`: the supervisor
+    # exceptions feed. One superset row (`EXCEPTION_ROW_KEYS`) for seven typed queries --
+    # out-of-range check-ins, skipped check-ins, visits shorter than
+    # SALES_SHORT_VISIT_SECONDS, declined agent orders (an `expired` confirmation is NOT a
+    # decline), duplicate photos, and the two AS-OF-NOW states, unvisited-beyond
+    # SALES_UNVISITED_ALERT_DAYS and an outlet carrying MORE THAN ONE open try-out
+    # (`draft`/`scheduled`/`active`) -- delegated
+    # whole to ExceptionFeedService, so the route file's API-boundary budget stays 0.
+    # Phase 3's other new surface here, the managers' 08:00 daily exception summary, is a
+    # Celery beat task reading the same service and adds no route. Unrelated to
+    # place-merge; only the estate-wide count moved.
+    assert len(routes) == 611
     entry = next(r for r in routes if r["rule"] == "/api/v1/admin/place-groups/merge-preview")
     assert entry["methods"] == ["GET"]
     assert entry["endpoint"] == "admin.get_place_group_merge_preview"

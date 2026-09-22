@@ -23,6 +23,7 @@ GUARD_DECORATORS = {
     "require_role",
     "require_delivery_driver",
     "require_operator",
+    "require_sales_agent",
     "require_any_staff_role",
     "require_auth",
 }

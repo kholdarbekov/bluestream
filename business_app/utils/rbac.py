@@ -134,6 +134,7 @@ ROLE_PERMISSIONS: Dict[UserRole, Set[Permission]] = {
         Permission.MANAGE_NOTIFICATIONS,
         Permission.EMERGENCY_ORDERS,
     },
+    UserRole.SALES_AGENT: set(),
     UserRole.ADMIN: set(Permission),  # Admin has all permissions
 }
 

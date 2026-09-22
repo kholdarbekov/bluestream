@@ -49,6 +49,20 @@ def _bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _str(name: str, default: str) -> str:
+    """Read a string env var, treating unset/blank as the default.
+
+    Surrounding whitespace is stripped for the same reason the boolean reader is
+    strict: a value typed into a compose `.env` file carries whatever spacing it
+    was typed with, and `"08:30 "` is not a different setting from `"08:30"` —
+    it is the same setting that no longer parses.
+    """
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip()
+
+
 # ─── Orders ─────────────────────────────────────────────────────────────
 MIN_ORDER_AMOUNT = _int("MIN_ORDER_AMOUNT", 20000)  # UZS — minimum order floor
 MAX_ORDER_ITEMS = _int("MAX_ORDER_ITEMS", 50)
@@ -174,3 +188,112 @@ PLACE_SUGGESTION_RADIUS_M = _float("PLACE_SUGGESTION_RADIUS_M", 10.0)
 # Set PLACE_COD_COLLECTION_ENABLED=false to roll back to Plan D behaviour
 # without a code change; a restart is required (read at import time).
 PLACE_COD_COLLECTION_ENABLED = _bool("PLACE_COD_COLLECTION_ENABLED", True)
+
+# ─── Sales agents (phase 1) ─────────────────────────────────────────────
+# Two outlets with similar names closer than this are flagged as duplicates
+# at field onboarding (spec 2026-09-07-sales-agent-role-design.md, D14).
+SALES_DEDUPE_RADIUS_M = _int("SALES_DEDUPE_RADIUS_M", 150)
+
+# ─── Sales agents (phase 2a — visit loop) ───────────────────────────────
+# Visit check-in geofence. The pin the agent shares is compared against the
+# outlet pin and `in_radius` is published as a FIELD (D15) — neither bot nor
+# admin UI re-derives it. An out-of-radius check-in is RECORDED, never refused:
+# this radius sizes an honesty signal, not a gate.
+SALES_GEOFENCE_RADIUS_M = _int("SALES_GEOFENCE_RADIUS_M", 250)
+
+# Suggested quantity (D15):
+#   cover_days    = cadence_days(outlet) + SALES_DELIVERY_LEAD_DAYS
+#   suggested_qty = max(0, ceil(rate_per_day × cover_days × SAFETY_FACTOR − on_hand))
+# The factor is the margin that keeps a store from running dry between visits.
+# It is a FLOAT deliberately, and the damage would arrive with the first deployed
+# OVERRIDE rather than with the default: `_int` returns an unset default untouched,
+# so the shipped 1.5 would survive, but `SALES_SUGGEST_SAFETY_FACTOR=1.5` in the
+# environment would then raise `ValueError: invalid literal for int()` at import and
+# only whole numbers would load — a `1` cuts every suggestion a third of its cover.
+SALES_SUGGEST_SAFETY_FACTOR = _float("SALES_SUGGEST_SAFETY_FACTOR", 1.5)
+# Days between placing an agent order and the goods arriving — added to the
+# cadence above, and subtracted from a predicted stock-out when the backend
+# computes `next_visit_due_at` (D7), so the visit lands before the shelf empties.
+SALES_DELIVERY_LEAD_DAYS = _int("SALES_DELIVERY_LEAD_DAYS", 1)
+
+# Default visit cadence per outlet class. `Outlet.outlet_class` (DB column
+# "class", business_app/models/sales.py:97) selects A/B/C; a NULL class reads C,
+# and `Outlet.cadence_days_override` (:98) beats all three.
+SALES_CADENCE_DAYS_A = _int("SALES_CADENCE_DAYS_A", 7)
+SALES_CADENCE_DAYS_B = _int("SALES_CADENCE_DAYS_B", 14)
+SALES_CADENCE_DAYS_C = _int("SALES_CADENCE_DAYS_C", 30)
+
+# A visit the agent never closed (phone died, walked out of the store) is swept
+# to `abandoned` after this many hours. One agent may hold only one open visit,
+# so without the sweep a single dead phone strands that agent out of the flow.
+SALES_VISIT_AUTO_ABANDON_HOURS = _int("SALES_VISIT_AUTO_ABANDON_HOURS", 6)
+
+# How long the store owner has to Confirm / Decline an order the agent placed on
+# their behalf in the customer bot. On expiry the order is CONFIRMED anyway
+# ("delivery confirms", D5) — this TTL bounds the wait, it never cancels.
+SALES_CONFIRMATION_TTL_HOURS = _int("SALES_CONFIRMATION_TTL_HOURS", 3)
+
+# Upper bound for a single on-hand / empties figure typed at a stock check. A
+# fat-fingered 5000 must come back as a validation error, not as a consumption
+# rate that books the whole depot on the next visit.
+SALES_STOCK_QTY_MAX = _int("SALES_STOCK_QTY_MAX", 500)
+
+# Fallback consumption window. With fewer than two stock checks for an
+# outlet × product, `rate_per_day` is the delivered quantity over this many days
+# DIVIDED BY the same number (spec, `rate_per_day` source 2). Named once so the
+# window and its divisor can never drift apart.
+#
+# ONE tunable, two consumers (backlog L-ruling R10): the same number also bounds
+# how far back `ReplenishmentService` looks for delivered history when it sizes
+# the in-transit horizon. Splitting it into two knobs would let an operator widen
+# the rate window and leave the horizon behind it, which reads on the agent's
+# screen as a suggestion that ignores a delivery the shop has already had.
+SALES_RATE_HISTORY_DAYS = _int("SALES_RATE_HISTORY_DAYS", 60)
+
+# ─── Sales agents (phase 2b — nightly jobs, digest, nearby) ─────────────
+# `active → at_risk` when the days since the outlet's last DELIVERED order
+# exceed this multiple of that outlet's OWN median inter-order interval (D23).
+# A float deliberately, and the damage lands on the first deployed override:
+# read through `_int`, `SALES_AT_RISK_RATIO=1.5` raises `ValueError` at import,
+# so only whole multiples would ever load and a `1` would flag every outlet
+# at-risk the day after its normal interval passed.
+SALES_AT_RISK_RATIO = _float("SALES_AT_RISK_RATIO", 1.5)
+
+# How long an outlet may stay `at_risk` before the job stops planning visits to
+# it and calls it `dormant`. Measured from the AT-RISK TRANSITION, not from the
+# last delivered order (Task 2): with the default class C (30 d) the at-risk
+# threshold is 1.5 × 30 = 45, so an absolute "days since delivery" clock would
+# give every class-NULL outlet — which is every outlet phase 1 imported — a
+# one-night at-risk window, i.e. an alert nobody ever sees.
+SALES_DORMANT_DAYS = _int("SALES_DORMANT_DAYS", 45)
+
+# An active-stage outlet nobody has walked into for longer than this is listed
+# in its agent's morning digest (top five by days). Not a due date and not a
+# stage change: purely the "you have forgotten this shop" line.
+SALES_UNVISITED_ALERT_DAYS = _int("SALES_UNVISITED_ALERT_DAYS", 21)
+
+# When the morning digest goes out, as local "HH:MM" in DISPLAY_TIMEZONE.
+# Celery beat already runs in that timezone (the nightly-backup entries rely on
+# the same fact), so this parses straight into a crontab with no conversion.
+# One string rather than two ints because it is ONE setting an operator moves,
+# and a pair could be half-overridden.
+SALES_DIGEST_LOCAL_TIME = _str("SALES_DIGEST_LOCAL_TIME", "08:30")
+
+# How many rows the agent's *Nearby* list answers with, ordered by distance
+# from the pin the agent just shared. There is deliberately no radius tunable:
+# a radius would hide the one shop the agent is standing next to whenever the
+# pin is coarse indoors, and a list is cheap to scroll.
+SALES_NEARBY_LIMIT = _int("SALES_NEARBY_LIMIT", 20)
+
+# ─── Sales agents (phase 3 — KPIs, plan-vs-fact, exceptions) ────────────
+# A completed visit whose door-to-door time is under this many seconds is listed
+# in the supervisor's exceptions feed. Measured from `checkin_at` (presence), not
+# from `started_at` (the Start tap, which can be minutes up the street), so the
+# number means "how long the agent was actually in the shop".
+SALES_SHORT_VISIT_SECONDS = _int("SALES_SHORT_VISIT_SECONDS", 60)
+
+# The widest date range any KPI / visits / exceptions read will answer, in local
+# calendar days inclusive. A ceiling rather than a silent clamp: a mistyped year
+# must come back as a clear 400, because a clamped answer is a number an owner
+# would read as the whole period and act on.
+SALES_METRICS_MAX_RANGE_DAYS = _int("SALES_METRICS_MAX_RANGE_DAYS", 92)

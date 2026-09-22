@@ -43,7 +43,7 @@ i18n
     },
 
     // Namespace configuration - each namespace maps to a ui_* category in the database
-    ns: ['common', 'navigation', 'dashboard', 'orders', 'products', 'users', 'settings', 'profile', 'analytics', 'blog', 'delivery', 'loyalty', 'login', 'staff', 'subscriptions', 'bottle_tracking', 'time_slots', 'product_categories', 'translations_page', 'tryouts', 'notifications'],
+    ns: ['common', 'navigation', 'dashboard', 'orders', 'products', 'users', 'settings', 'profile', 'analytics', 'blog', 'delivery', 'loyalty', 'login', 'staff', 'subscriptions', 'bottle_tracking', 'time_slots', 'product_categories', 'translations_page', 'tryouts', 'notifications', 'sales_agents'],
     defaultNS: 'common',
     // Most admin UI keys are still stored as full ui.* keys in the shared namespace.
     // Feature namespaces should fall back to common while scoped ui_* categories are phased in.

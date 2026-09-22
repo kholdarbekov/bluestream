@@ -65,7 +65,7 @@ from handlers import (
     product_handlers, order_handlers, subscription_handlers,
     profile_handlers, loyalty_handlers, admin_handlers,
     support_handlers, support_flow_handlers, payment_handlers, bottle_handlers,
-    quick_order_handlers,
+    quick_order_handlers, agent_order_handlers,
 )
 # Import conversation states directly (they are module-level constants)
 from handlers.profile import (
@@ -783,6 +783,15 @@ class WaterBusinessBot:
             # prefixes above ("report_issue_" / "support_cancel" match none of them).
             CallbackQueryHandler(support_flow_handlers.start_order_issue_report, pattern=r"^report_issue_\d+$"),
             CallbackQueryHandler(support_flow_handlers.cancel_issue_report, pattern="^support_cancel$"),
+
+            # Sales-agent order proposal pushed by
+            # telegram_bot/webhook_server.py::agent_order_proposed_handler.
+            # No conflict with the ^order_ / ^cancel_order_ / ^confirm_order
+            # prefixes registered above: none of them is a prefix of
+            # "agent_order_". `\d+$` is load-bearing — the handler parses the
+            # trailing segment with int().
+            CallbackQueryHandler(agent_order_handlers.confirm, pattern=r"^agent_order_confirm_\d+$"),
+            CallbackQueryHandler(agent_order_handlers.decline, pattern=r"^agent_order_decline_\d+$"),
 
             # Admin callbacks (restricted - access control handled in handler)
             CallbackQueryHandler(admin_handlers.admin_orders, pattern="^admin_orders$"),

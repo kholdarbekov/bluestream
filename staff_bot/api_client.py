@@ -286,7 +286,8 @@ class StaffAPIClient:
         token: str = None, data: Dict = None,
         params: Dict = None,
         headers: Dict = None,
-        sign: bool = False
+        sign: bool = False,
+        files: Dict = None
     ) -> APIResponse:
         """Make HTTP request with retry logic and circuit breaker."""
         if not self._circuit_breaker.allow_request():
@@ -297,6 +298,13 @@ class StaffAPIClient:
             request_headers['Authorization'] = f'Bearer {token}'
         if headers:
             request_headers.update(headers)
+
+        # Multipart: httpx writes its own Content-Type WITH the boundary, and
+        # an explicit JSON one here would survive into the request and make
+        # the backend parse the body as JSON and find nothing in it. In this
+        # shape `data` carries the FORM FIELDS rather than a JSON body.
+        if files is not None:
+            request_headers.pop('Content-Type', None)
 
         # Signed requests (currently: staff login) must send exactly the
         # bytes we sign — httpx `json=` serializes internally, so we can't
@@ -334,6 +342,18 @@ class StaffAPIClient:
                             method=method,
                             url=endpoint,
                             content=signed_body,
+                            params=params,
+                            headers=request_headers
+                        )
+                    elif files is not None:
+                        # Every part is BYTES, never an open file object, so a
+                        # retry re-sends the same payload instead of an
+                        # already-exhausted stream.
+                        response = await client.request(
+                            method=method,
+                            url=endpoint,
+                            data=data or None,
+                            files=files,
                             params=params,
                             headers=request_headers
                         )
@@ -742,6 +762,225 @@ class StaffAPIClient:
             'PUT',
             f'/api/v1/staff/orders/{order_id}/preparing',
             token=token
+        )
+
+    # --- Sales Operations ---
+    #
+    # Paths are written out as literals (no `config.business_api.*_endpoint`
+    # indirection) so tests/contract/test_bot_backend_route_compat.py can scan
+    # them and check every one against the real Flask url map.
+
+    async def sales_list_outlets(
+        self, token: str, scope: str = 'all', search: str = None, page: int = 1,
+        lat: float = None, lng: float = None,
+    ) -> APIResponse:
+        """List the caller's outlets (scope: all | prospects | due | nearby).
+
+        A pin swaps the whole query shape: `nearby` is ranked by distance from
+        `lat`/`lng` and capped by `SALES_NEARBY_LIMIT`, so it carries NO
+        `page`/`per_page`. Sending one would be the bot deciding how long the
+        nearest-first list is -- and a `per_page` that disagreed with the
+        backend's limit would truncate it silently, which on this screen means
+        hiding the shop the agent is standing next to.
+        """
+        if lat is not None and lng is not None:
+            params = {'scope': scope, 'lat': lat, 'lng': lng}
+        else:
+            params = {'scope': scope, 'page': page, 'per_page': 20}
+            if search:
+                params['search'] = search
+        return await self._make_request(
+            'GET', '/api/v1/staff/sales/outlets', token=token, params=params
+        )
+
+    async def sales_dedupe_outlet(self, token: str, params: Dict) -> APIResponse:
+        """Duplicate candidates for a name/phone/pin before creating an outlet."""
+        return await self._make_request(
+            'GET', '/api/v1/staff/sales/outlets/dedupe', token=token, params=params
+        )
+
+    async def sales_create_outlet(self, token: str, outlet_data: Dict) -> APIResponse:
+        """Create an outlet owned by the calling sales agent."""
+        return await self._make_request(
+            'POST', '/api/v1/staff/sales/outlets', token=token, data=outlet_data
+        )
+
+    async def sales_get_outlet(self, token: str, outlet_id: int) -> APIResponse:
+        """Get one outlet the caller owns."""
+        return await self._make_request(
+            'GET', f'/api/v1/staff/sales/outlets/{outlet_id}', token=token
+        )
+
+    async def sales_request_activation(self, token: str, outlet_id: int) -> APIResponse:
+        """Submit an outlet for admin activation."""
+        return await self._make_request(
+            'POST', f'/api/v1/staff/sales/outlets/{outlet_id}/request-activation',
+            token=token, data={}
+        )
+
+    async def sales_list_activation_requests(self, token: str) -> APIResponse:
+        """List outlets awaiting activation (approver view)."""
+        return await self._make_request(
+            'GET', '/api/v1/staff/sales/activation-requests', token=token
+        )
+
+    async def sales_approve_outlet(self, token: str, outlet_id: int) -> APIResponse:
+        """Approve an outlet's activation request."""
+        return await self._make_request(
+            'POST', f'/api/v1/staff/sales/outlets/{outlet_id}/approve', token=token, data={}
+        )
+
+    async def sales_reject_outlet(self, token: str, outlet_id: int, reason: str) -> APIResponse:
+        """Reject an outlet's activation request with a reason."""
+        return await self._make_request(
+            'POST', f'/api/v1/staff/sales/outlets/{outlet_id}/reject',
+            token=token, data={'reason': reason}
+        )
+
+    # The visit loop (phase 2a). Same rule as above: the paths are literals so
+    # tests/contract/test_bot_backend_route_compat.py can check every one of
+    # them against the real Flask url map. Nothing here re-derives a rule --
+    # suggested quantities, geofence verdicts, confirmation state and the
+    # next-visit date all arrive as backend FIELDS.
+
+    async def sales_start_visit(self, token: str, outlet_id: int) -> APIResponse:
+        """Open a visit at one of the caller's outlets (409 when one is already open)."""
+        return await self._make_request(
+            'POST', f'/api/v1/staff/sales/outlets/{outlet_id}/visits', token=token, data={}
+        )
+
+    async def sales_current_visit(self, token: str) -> APIResponse:
+        """The caller's open visit and its outlet card, or 404 when there is none.
+
+        The conversation resumes from `visit.current_step`, which is why this
+        is a GET the bot may call at any moment rather than something cached
+        in `user_data`: a restart, a timeout or a second device must all land
+        on the same step.
+        """
+        return await self._make_request(
+            'GET', '/api/v1/staff/sales/visits/current', token=token
+        )
+
+    async def sales_checkin(self, token: str, visit_id: int, data: Dict) -> APIResponse:
+        """Record the check-in pin, or a skip (`{'skipped': True}` alone)."""
+        return await self._make_request(
+            'POST', f'/api/v1/staff/sales/visits/{visit_id}/checkin', token=token, data=data
+        )
+
+    async def sales_stock_check(self, token: str, visit_id: int, items: List[Dict]) -> APIResponse:
+        """Upsert the shelf count; re-submission overwrites the whole set."""
+        return await self._make_request(
+            'POST', f'/api/v1/staff/sales/visits/{visit_id}/stock-check',
+            token=token, data={'items': items}
+        )
+
+    async def sales_stock_check_products(self, token: str) -> APIResponse:
+        """The products the stock check asks about (`products.in_sales_stock_check`)."""
+        return await self._make_request(
+            'GET', '/api/v1/staff/sales/stock-check-products', token=token
+        )
+
+    async def sales_payment_methods(self, token: str, outlet_id: int) -> APIResponse:
+        """The payment methods this outlet may actually use, already filtered."""
+        return await self._make_request(
+            'GET', f'/api/v1/staff/sales/outlets/{outlet_id}/payment-methods', token=token
+        )
+
+    async def sales_order_estimate(self, token: str, outlet_id: int, items: List[Dict],
+                                   payment_method: Optional[str] = None) -> APIResponse:
+        """Price the basket before the agent confirms it.
+
+        The RAIL travels with it: `create_order` quotes a live tier discount
+        per payment method, so a quote that omitted the rail read one total to
+        the shopkeeper while the store was charged another.
+        """
+        return await self._make_request(
+            'POST', f'/api/v1/staff/sales/outlets/{outlet_id}/order-estimate',
+            token=token, data={'items': items, 'payment_method': payment_method}
+        )
+
+    async def sales_place_order(self, token: str, visit_id: int, data: Dict) -> APIResponse:
+        """Place the visit's order on the customer's behalf.
+
+        `visit_id` is the idempotency key: a second call answers
+        SALES_VISIT_ORDER_EXISTS rather than creating a twin order, so this
+        POST is never retried automatically.
+        """
+        return await self._make_request(
+            'POST', f'/api/v1/staff/sales/visits/{visit_id}/order', token=token, data=data
+        )
+
+    async def sales_close_visit(self, token: str, visit_id: int, data: Dict) -> APIResponse:
+        """Close the visit with an outcome, notes and a next-visit date."""
+        return await self._make_request(
+            'POST', f'/api/v1/staff/sales/visits/{visit_id}/close', token=token, data=data
+        )
+
+    async def sales_abandon_visit(self, token: str, visit_id: int) -> APIResponse:
+        """Abandon the open visit (an ordered visit is closed as order_placed instead — ruling 74)."""
+        return await self._make_request(
+            'POST', f'/api/v1/staff/sales/visits/{visit_id}/abandon', token=token, data={}
+        )
+
+    async def sales_add_photo(self, token: str, visit_id: int, file_bytes: bytes,
+                              filename: str, kind: str, file_unique_id: str = None) -> APIResponse:
+        """Attach one photo to the caller's OPEN visit (multipart, not JSON).
+
+        The BYTES cross the wire, not Telegram's `file_id`: a bot-token
+        rotation turns every stored `file_id` into a dead reference, which is
+        how the support inbox lost its media history. `file_unique_id` rides
+        along as the SECONDARY reference only (D17).
+
+        The FILENAME must carry an image extension. `FileStorageService.
+        _validate_file` checks it against `ALLOWED_EXTENSIONS`, and a Telegram
+        download has no name of its own -- a suffix-less part is refused as
+        `SALES_PHOTO_INVALID` for a perfectly good JPEG.
+
+        Nothing here hashes or compares: `photo.is_duplicate` is the
+        backend's SHA-256 verdict over the ORIGINAL bytes, per agent.
+        """
+        return await self._make_request(
+            'POST', f'/api/v1/staff/sales/visits/{visit_id}/photos',
+            token=token,
+            data={'kind': kind, 'telegram_file_unique_id': file_unique_id or ''},
+            files={'file': (filename, bytes(file_bytes), 'image/jpeg')},
+        )
+
+    # Try-out from the field (phase 2b). Same rule as above: the paths are
+    # literals so tests/contract/test_bot_backend_route_compat.py can check
+    # them against the real Flask url map.
+
+    async def sales_tryout_products(self, token: str) -> APIResponse:
+        """The catalogue the try-out screen filters for eligibility.
+
+        The CUSTOMER products endpoint on purpose, not a sales one:
+        `serialize_product` already publishes `flags.is_active` and
+        `inventory.is_tryout_eligible`, which is the whole rule, and a second
+        route republishing the same two booleans would be a second place for
+        them to drift. `per_page` is the route's own cap (100).
+        """
+        return await self._make_request(
+            'GET', '/api/v1/products/', token=token, params={'page': 1, 'per_page': 100}
+        )
+
+    async def sales_create_tryout(self, token: str, outlet_id: int, data: Dict) -> APIResponse:
+        """Lend this outlet some product: no driver, so the hand-off task stays
+        in the pool, and the outlet's stage moves to `trial` server-side."""
+        return await self._make_request(
+            'POST', f'/api/v1/staff/sales/outlets/{outlet_id}/tryouts', token=token, data=data
+        )
+
+    async def sales_agent_stats(self, token: str, *, period: str = 'today') -> APIResponse:
+        """The caller's own KPIs for ONE window.
+
+        `period` is the whole query. The backend decides what "week" and
+        "month" mean (local calendar days, `business_app/utils/
+        local_windows.py`) and answers with the dates it used, so the bot
+        never sends a range it computed itself -- and the card prints the
+        window the answer names.
+        """
+        return await self._make_request(
+            'GET', '/api/v1/staff/sales/me/stats', token=token, params={'period': period}
         )
 
     # --- Shared Operations ---

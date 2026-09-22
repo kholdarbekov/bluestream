@@ -26,6 +26,8 @@ from business_app.serializers.order_serializers import (
     OrderFeedbackRequest,
     CartEstimateRequest,
 )
+from business_app.serializers.sales_serializers import AgentConfirmationPayload
+from business_app.services.sales.agent_order_confirmation_service import AgentOrderConfirmationService
 from business_app.utils.decorators import validate_json, rate_limit, require_verification
 from business_app.utils.constants import NotificationType
 from shared.enums import OrderStatus, PaymentMethod
@@ -620,6 +622,33 @@ def cancel_order(order_id):
         _rollback_session()
         current_app.logger.error(f"Cancel order error: {e}")
         return internal_error_response(message=get_translation("error.server_error"))
+
+
+@orders_bp.route("/<int:order_id>/agent-confirmation", methods=["POST"])
+@handle_api_exception
+@jwt_required()
+def agent_order_confirmation(order_id):
+    """The store's answer to an order its sales agent placed on its behalf (D5).
+
+    Confirm arms the delivery exactly like any other confirmation; decline cancels
+    the order and tells the agent why. Ownership, the pending-request check and the
+    agent push all live in `AgentOrderConfirmationService.respond` — this handler
+    parses the body and nothing else. `handle_api_exception` turns the service's
+    NotFoundError into 404, ConflictError into 409 and ValidationError into 400,
+    each carrying its `error_code`.
+    """
+    try:
+        payload = AgentConfirmationPayload(**(request.get_json(silent=True) or {}))
+    except PydanticValidationError as e:
+        return validation_error_response(e.errors())
+
+    result = AgentOrderConfirmationService.respond(
+        order_id,
+        int(get_jwt_identity()),
+        payload.action,
+        payload.reason,
+    )
+    return success_response(data=result)
 
 
 @orders_bp.route("/cart/estimate", methods=["POST"])

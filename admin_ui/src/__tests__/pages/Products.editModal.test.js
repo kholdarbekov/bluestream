@@ -74,8 +74,13 @@ const productRow = (overrides = {}) => ({
   min_order_quantity: 1,
   volume: 18.9,
   status: 'active',
+  is_active: true,
   is_featured: false,
   is_tryout_eligible: true,
+  in_sales_stock_check: false,
+  // The backend's answer to "is this on the agent's list", published beside the
+  // column it is derived from (serialize_product_admin). The tag reads THIS.
+  in_agent_stock_list: false,
   tracks_returnable_bottles: true,
   returnable_bottles_per_unit: 1,
   created_at: '2026-03-11T10:00:00+00:00',
@@ -246,6 +251,128 @@ describe('Products edit modal', () => {
           }),
         );
       });
+    });
+  });
+
+  // ReplenishmentService.stock_check_products() reads this column, so this
+  // modal is the only place a human can put a product on the sales agent's
+  // visit stock screen. A switch that renders but never reaches the PUT body
+  // would leave the agent with an empty stock list and no way to fix it.
+  describe('sales stock-check flag', () => {
+    it('renders the switch ON from a row that is on the agent stock list', async () => {
+      const user = userEvent.setup();
+      mockProducts({ in_sales_stock_check: true });
+
+      const dialog = await openEditModal(user);
+
+      expect(within(dialog).getByLabelText('Sales stock check')).toBeChecked();
+    });
+
+    it('renders the switch OFF for a product the agent does not count', async () => {
+      const user = userEvent.setup();
+
+      const dialog = await openEditModal(user);
+
+      expect(within(dialog).getByLabelText('Sales stock check')).not.toBeChecked();
+    });
+
+    it('sends the flag in the update payload when the admin switches it on', async () => {
+      const user = userEvent.setup();
+      // Every neighbouring switch carries a DIFFERENT value, so an assertion on
+      // in_sales_stock_check cannot be satisfied by the form echoing some other
+      // boolean back under the new name.
+      mockProducts({
+        in_sales_stock_check: false,
+        is_tryout_eligible: false,
+        is_featured: true,
+        tracks_returnable_bottles: true,
+      });
+
+      const dialog = await openEditModal(user);
+      await user.click(within(dialog).getByLabelText('Sales stock check'));
+      await user.click(within(dialog).getByRole('button', { name: 'Update Product' }));
+
+      await waitFor(() => {
+        expect(adminService.updateProduct).toHaveBeenCalledWith(
+          44,
+          expect.objectContaining({
+            in_sales_stock_check: true,
+            is_tryout_eligible: false,
+            is_featured: true,
+            tracks_returnable_bottles: true,
+          }),
+        );
+      });
+    });
+
+    it('tags the product in the table so the agent list is readable without opening a modal', async () => {
+      mockProducts({ in_sales_stock_check: true, in_agent_stock_list: true });
+
+      render(<Products />, { wrapper: createWrapper() });
+      await waitFor(() => expect(adminService.getProducts).toHaveBeenCalled());
+
+      const row = (await screen.findByText('Aqua Element 18.9L')).closest('tr');
+      expect(within(row).getByText('Stock check')).toBeInTheDocument();
+    });
+
+    it('leaves the tag off a product outside the agent stock list', async () => {
+      render(<Products />, { wrapper: createWrapper() });
+      await waitFor(() => expect(adminService.getProducts).toHaveBeenCalled());
+
+      const row = (await screen.findByText('Aqua Element 18.9L')).closest('tr');
+      expect(within(row).queryByText('Stock check')).toBeNull();
+    });
+
+    // Membership of the agent's stock list has ONE authority:
+    // ReplenishmentService.stock_check_products() = in_sales_stock_check AND
+    // is_active (business_app/services/sales/replenishment_service.py:73-83),
+    // published as `in_agent_stock_list`. A flagged SKU that is switched off is
+    // NOT on that list, and a tag that reads the raw column tells the admin the
+    // agent counts a product the backend never sends him. The page renders the
+    // published answer -- it does not compute one.
+    it('leaves the tag off a flagged product the backend excludes for being inactive', async () => {
+      mockProducts({
+        in_sales_stock_check: true,
+        in_agent_stock_list: false,
+        is_active: false,
+        status: 'inactive',
+      });
+
+      render(<Products />, { wrapper: createWrapper() });
+      await waitFor(() => expect(adminService.getProducts).toHaveBeenCalled());
+
+      const row = (await screen.findByText('Aqua Element 18.9L')).closest('tr');
+      expect(within(row).getByText('inactive')).toBeInTheDocument();
+      expect(within(row).queryByText('Stock check')).toBeNull();
+    });
+
+    // Green before and after on purpose: it pins that the tag fix does NOT
+    // also hide or clear the stored column. The deploy runbook (C12) tells the
+    // operator to flag the SKUs BEFORE enabling agents, so the switch has to
+    // stay writable and truthful while the product is still inactive.
+    it('still shows the stored flag on the switch for that inactive product', async () => {
+      const user = userEvent.setup();
+      mockProducts({
+        in_sales_stock_check: true,
+        in_agent_stock_list: false,
+        is_active: false,
+        status: 'inactive',
+      });
+
+      const dialog = await openEditModal(user);
+
+      expect(within(dialog).getByLabelText('Sales stock check')).toBeChecked();
+    });
+
+    it('spells out the Active condition under the switch', async () => {
+      const user = userEvent.setup();
+      mockProducts({ in_sales_stock_check: true, in_agent_stock_list: true });
+
+      const dialog = await openEditModal(user);
+
+      expect(
+        within(dialog).getByText('Agents count this SKU at a visit only while the product is also Active.'),
+      ).toBeInTheDocument();
     });
   });
 });

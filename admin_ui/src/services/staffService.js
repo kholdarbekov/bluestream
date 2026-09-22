@@ -85,6 +85,52 @@ class StaffServiceClass {
     return api.put(`/admin/staff/users/${userId}/roles`, { staff_roles: staffRoles });
   }
 
+  // ─── Sales Agents ─────────────────────────────────────
+
+  /**
+   * List sales agents with filtering and pagination
+   * @param {Object} params - { page, per_page, search, status }
+   */
+  getSalesAgents(params = {}) {
+    return api.get('/admin/staff/sales-agents', { params });
+  }
+
+  /**
+   * Create sales agent (user + sales agent profile), or grant the role to an existing user
+   * @param {Object} payload
+   */
+  createSalesAgent(payload) {
+    return api.post('/admin/staff/sales-agents', payload);
+  }
+
+  /**
+   * Get a single sales agent
+   * @param {number} userId - User ID
+   */
+  getSalesAgent(userId) {
+    return api.get(`/admin/staff/sales-agents/${userId}`);
+  }
+
+  /**
+   * Update sales agent user fields and profile.
+   * NOTE: never send `is_active` here — `UpdateSalesAgentPayload` drops it on
+   * purpose; activation has its own route so it writes its own audit entry.
+   * @param {number} userId - User ID
+   * @param {Object} payload
+   */
+  updateSalesAgent(userId, payload) {
+    return api.put(`/admin/staff/sales-agents/${userId}`, payload);
+  }
+
+  /**
+   * Activate/deactivate a sales agent (the single door onto SalesAgentProfile.is_active)
+   * @param {number} userId - User ID
+   * @param {boolean} isActive
+   */
+  setSalesAgentActive(userId, isActive) {
+    return api.put(`/admin/staff/sales-agents/${userId}/active`, { is_active: isActive });
+  }
+
   // ─── Staff Overview ───────────────────────────────────
 
   /**

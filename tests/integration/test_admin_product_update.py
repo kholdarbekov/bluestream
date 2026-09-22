@@ -44,6 +44,7 @@ def _read_product(app, product_id):
             "sku": product.sku,
             "stock_quantity": product.stock_quantity,
             "requires_marking_codes": product.requires_marking_codes,
+            "in_sales_stock_check": product.in_sales_stock_check,
         }
 
 
@@ -298,3 +299,201 @@ def test_hand_typed_stock_change_still_refused_when_the_column_is_stale(
     assert resp.status_code == 400, resp.get_json()
     assert "marking code" in " ".join(resp.get_json()["errors"]).lower()
     assert _read_product(app, product_id)["stock_quantity"] == 486
+
+
+# ---------------------------------------------------------------------------
+# in_sales_stock_check -- the column the sales agent's visit stock list IS
+# ---------------------------------------------------------------------------
+#
+# ReplenishmentService.stock_check_products() filters on this column, so an
+# admin turning the switch on is the ONLY way a product reaches the agent's
+# stock screen. Task 1 taught every read surface to publish the flag; a write
+# path that publishes a field and then drops it on save is precisely the bug
+# class this file was opened for, so both real payloads are driven here: the
+# create modal's full object and the edit modal's echo of the listing row.
+
+
+def test_create_product_persists_the_sales_stock_check_flag(app, admin_auth_headers, sample_category):
+    """The create modal's payload, switch ON, has to reach the column."""
+    resp = app.test_client().post(
+        "/api/v1/admin/products",
+        json={
+            "name": "Agent Route 19L",
+            "description": "Counted by the sales agent on every visit",
+            "category_id": sample_category.id,
+            "sku": "AGENT-19",
+            "price": 16000,
+            "stock_quantity": 40,
+            "min_order_quantity": 1,
+            "volume": 19.0,
+            "status": "active",
+            "is_featured": False,
+            "is_tryout_eligible": False,
+            "tracks_returnable_bottles": True,
+            "returnable_bottles_per_unit": 1,
+            "in_sales_stock_check": True,
+            "images": [],
+        },
+        headers=admin_auth_headers,
+    )
+
+    assert resp.status_code == 200, resp.get_json()
+    created = resp.get_json()["data"]["product"]
+    # Distinct values per switch on purpose: a flag that merely echoed a
+    # neighbouring boolean would satisfy a single-key assertion.
+    assert created["in_sales_stock_check"] is True
+    assert created["is_tryout_eligible"] is False
+    assert created["tracks_returnable_bottles"] is True
+    assert _read_product(app, created["id"])["in_sales_stock_check"] is True
+
+
+def test_create_product_defaults_the_sales_stock_check_flag_off(app, admin_auth_headers, sample_category):
+    """A payload that never mentions the flag leaves the product off the agent's list."""
+    resp = app.test_client().post(
+        "/api/v1/admin/products",
+        json={
+            "name": "Shelf Only 5L",
+            "category_id": sample_category.id,
+            "price": 6000,
+        },
+        headers=admin_auth_headers,
+    )
+
+    assert resp.status_code == 200, resp.get_json()
+    created = resp.get_json()["data"]["product"]
+    assert created["in_sales_stock_check"] is False
+    assert _read_product(app, created["id"])["in_sales_stock_check"] is False
+
+
+def test_update_publishes_the_sales_stock_check_flag_on_every_read_surface(
+    app, admin_auth_headers, sample_product
+):
+    """PUT the flag on; the admin listing AND the public catalogue must both say so.
+
+    Three surfaces, one fact: the write path here, the admin row the modal
+    re-reads, and the public inventory block. They are asserted together so a
+    future change cannot move one without the others.
+    """
+    product_id = sample_product.id
+    client = app.test_client()
+
+    resp = client.put(
+        f"/api/v1/admin/products/{product_id}",
+        json={"in_sales_stock_check": True},
+        headers=admin_auth_headers,
+    )
+
+    assert resp.status_code == 200, resp.get_json()
+    assert resp.get_json()["data"]["product"]["in_sales_stock_check"] is True
+    assert _read_product(app, product_id)["in_sales_stock_check"] is True
+
+    listing = client.get("/api/v1/admin/products", headers=admin_auth_headers)
+    assert listing.status_code == 200, listing.get_json()
+    admin_row = next(item for item in listing.get_json()["data"]["items"] if item["id"] == product_id)
+    assert admin_row["in_sales_stock_check"] is True
+
+    public = client.get("/api/v1/products/")
+    assert public.status_code == 200, public.get_json()
+    public_row = next(item for item in public.get_json()["data"]["items"] if item["id"] == product_id)
+    assert public_row["inventory"]["in_sales_stock_check"] is True
+
+
+def test_the_admin_row_publishes_agent_stock_list_membership_not_just_the_column(
+    app, admin_auth_headers, sample_product
+):
+    """M13: the admin listing answers the question the agent's screen is built from.
+
+    `in_sales_stock_check` is a COLUMN; membership of the agent's stock list is
+    `ReplenishmentService.stock_check_products()` — the column AND `is_active`. An admin
+    UI that re-derives the pair in JSX is a second expression of a backend rule, and the
+    one that drifts the day the query grows a third clause. The row publishes the answer;
+    the page renders it.
+
+    The predicate is IMPORTED, never restated here: this test would otherwise be a third
+    copy of the rule, green against a production that had moved on.
+    """
+    from business_app.models.product import Product
+    from business_app.services.sales.replenishment_service import ReplenishmentService
+
+    product_id = sample_product.id
+    client = app.test_client()
+    assert client.put(
+        f"/api/v1/admin/products/{product_id}",
+        json={"in_sales_stock_check": True, "is_active": False},
+        headers=admin_auth_headers,
+    ).status_code == 200
+
+    listing = client.get("/api/v1/admin/products", headers=admin_auth_headers)
+    assert listing.status_code == 200, listing.get_json()
+    row = next(item for item in listing.get_json()["data"]["items"] if item["id"] == product_id)
+
+    # Flagged, so the switch still shows it on ...
+    assert row["in_sales_stock_check"] is True
+    # ... and NOT on the list the agent is served, which is what the tag means.
+    assert row["in_agent_stock_list"] is False
+    with app.app_context():
+        product = Product.query.get(product_id)
+        assert row["in_agent_stock_list"] is ReplenishmentService.in_stock_check_list(product)
+        assert product not in ReplenishmentService.stock_check_products()
+
+
+def test_update_can_turn_the_sales_stock_check_flag_back_off(app, admin_auth_headers, sample_product):
+    """False is a value, not a missing key: the switch has to work both ways.
+
+    Seeded on the AMBIENT session (not a nested app context) so the request
+    that follows sees the new column value -- the _seed_stale_marking_code_product
+    arrangement above, for the same reason.
+    """
+    product_id = sample_product.id
+    sample_product.in_sales_stock_check = True
+    db.session.commit()
+
+    resp = app.test_client().put(
+        f"/api/v1/admin/products/{product_id}",
+        json={"in_sales_stock_check": False, "price": 15500},
+        headers=admin_auth_headers,
+    )
+
+    assert resp.status_code == 200, resp.get_json()
+    assert resp.get_json()["data"]["product"]["in_sales_stock_check"] is False
+    assert _read_product(app, product_id)["in_sales_stock_check"] is False
+
+
+def test_admin_row_round_trip_keeps_the_sales_stock_check_flag_on(app, admin_auth_headers, sample_product):
+    """GET the row, PUT it straight back: the modal's no-op save must not clear the flag.
+
+    The listing row now carries in_sales_stock_check and antd submits every
+    field the form holds, so the write path has to ACCEPT the key it publishes.
+    """
+    product_id = sample_product.id
+    sample_product.in_sales_stock_check = True
+    db.session.commit()
+
+    client = app.test_client()
+    listing = client.get("/api/v1/admin/products", headers=admin_auth_headers)
+    assert listing.status_code == 200, listing.get_json()
+    row = next(item for item in listing.get_json()["data"]["items"] if item["id"] == product_id)
+    assert row["in_sales_stock_check"] is True, "precondition: the listing publishes the flag"
+
+    resp = client.put(f"/api/v1/admin/products/{product_id}", json=row, headers=admin_auth_headers)
+
+    assert resp.status_code == 200, resp.get_json()
+    assert resp.get_json()["data"]["product"]["in_sales_stock_check"] is True
+    assert _read_product(app, product_id)["in_sales_stock_check"] is True
+
+
+def test_product_serializers_export_no_admin_request_schema():
+    """`CreateProductRequest` / `UpdateProductRequest` documented a write contract
+    no handler ever validated: `create_product` reads `data.get(...)` and
+    `update_product` uses a presence test (`if "in_sales_stock_check" in data`,
+    business_app/api/admin.py:3154). The two disagreed with that handler as well --
+    `Optional[bool] = None` cannot express "absent", so a payload built from the
+    model and dumped would carry an explicit null, which the handler's presence
+    test turns into `bool(None)` = flag OFF. The live contract is the four HTTP
+    tests above; a second, divergent paper copy must not come back."""
+    import business_app.serializers.product_serializers as product_serializers
+
+    assert not hasattr(product_serializers, "CreateProductRequest")
+    assert not hasattr(product_serializers, "UpdateProductRequest")
+    assert "CreateProductRequest" not in product_serializers.__all__
+    assert "UpdateProductRequest" not in product_serializers.__all__

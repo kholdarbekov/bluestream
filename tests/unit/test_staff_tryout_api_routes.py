@@ -4,6 +4,9 @@ from unittest.mock import Mock
 
 from flask_jwt_extended import create_access_token
 
+from business_app.models.tryout import ProductTryout
+from business_app.services.sales.replenishment_service import effective_line_qty_max
+
 
 def _staff_headers(app, user_id: int) -> dict:
     with app.app_context():
@@ -42,3 +45,30 @@ def test_staff_record_pickup_route_delegates_to_service(client, app, delivery_dr
     assert response.status_code == 200
     service.record_pickup.assert_called_once()
     assert response.get_json()['data']['tryout']['pickup_state'] == 'partial'
+
+
+def test_a_driver_tryout_line_is_bounded_by_the_shared_ceiling(client, app, db, delivery_driver, sample_product):
+    """The driver door forces `complete_handoff=True`, so an unbounded line writes stock at once.
+
+    The ceiling is `TryoutService._validate_and_build_items` -- the validator all three try-out
+    doors share -- so proving it here proves it lives in the shared home and not on the agent
+    route that reported it.
+    """
+    with app.app_context():
+        over_cap = effective_line_qty_max() + 1
+    stock_before = sample_product.stock_quantity
+
+    response = client.post(
+        '/api/v1/staff/tryouts',
+        headers=_staff_headers(app, delivery_driver.id),
+        json={
+            'trial_contact': {'first_name': 'Trial', 'phone': '+998900000141'},
+            'address': {'full_address': 'Some address'},
+            'items': [{'product_id': sample_product.id, 'quantity': over_cap}],
+        },
+    )
+
+    assert response.status_code == 400, response.get_data(as_text=True)
+    assert ProductTryout.query.count() == 0
+    db.session.refresh(sample_product)
+    assert sample_product.stock_quantity == stock_before

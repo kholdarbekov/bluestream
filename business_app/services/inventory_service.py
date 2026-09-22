@@ -245,8 +245,13 @@ class InventoryService:
         ttl = ttl or self.reservation_ttl
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl)
 
-        # Check availability for all items first
-        availability_results = self.check_multiple_products_availability(items)
+        # Check availability for all items first — EXCLUDING this order's own hold. Counting
+        # the units an order already holds as rival demand refuses it its own stock whenever
+        # free stock is under twice the line. A brand-new order holds nothing, so the argument
+        # changes nothing on the `create_order` path; it matters to any caller that reserves
+        # for an order twice. (Lengthening an existing hold is NOT such a caller — that is
+        # `extend_reservations`, which never rolls back and so cannot destroy the hold.)
+        availability_results = self.check_multiple_products_availability(items, exclude_order_id=order_id)
 
         unavailable_items = [result for result in availability_results if not result.is_available]
         if unavailable_items:
@@ -361,6 +366,50 @@ class InventoryService:
         except Exception as e:
             logger.exception("Failed to release reservations for order %s", order_id)
             return {"success": False, "reason": f"Release failed: {str(e)}"}
+
+    def extend_reservations(self, order_id: int, items: List[Dict[str, Any]], ttl: int) -> Dict[str, Any]:
+        """Push out the expiry of the reservation keys this order ALREADY holds.
+
+        `reserve_inventory` is the wrong tool for lengthening a hold and cannot be made
+        into the right one cheaply: its failure path is an order-scoped blanket delete
+        (`release_reservations` → `KEYS inventory_reservation:{order_id}:*` → `DEL`), which
+        cannot tell the keys it has just written from the ones the order already owned. A
+        fault between two of its writes therefore destroyed the hold instead of extending
+        it (C00). This method cannot do that: it never deletes, and a fault part-way
+        through leaves every key it has not reached exactly as it found it.
+
+        No availability check. WHETHER these units may be held was answered when they were
+        reserved, and the keys' continued existence IS that answer — re-asking it here
+        would only invent a way to refuse an extension over stock the order is already
+        holding.
+
+        `EXPIRE` rather than a read-then-`SETEX`: Redis refuses it on a key that does not
+        exist, so "touch only what is already held" is a property of the operation instead
+        of a read we would then be racing. A line whose hold has already lapsed is skipped
+        and reported, never re-created.
+        """
+        redis_client = self._get_redis_client()
+        if not redis_client:
+            return {"success": False, "reason": "Reservation system not available"}
+
+        extended = []
+        lapsed = []
+        for item in items:
+            product_id = item["product_id"]
+            if redis_client.expire(RedisKeyspace.inventory_reservation(order_id, product_id), ttl):
+                redis_client.expire(RedisKeyspace.reservation_details(order_id, product_id), ttl)
+                extended.append(product_id)
+            else:
+                lapsed.append(product_id)
+
+        logger.info(
+            "Extended %s inventory reservations for order %s to %ss (%s already lapsed)",
+            len(extended),
+            order_id,
+            ttl,
+            len(lapsed),
+        )
+        return {"success": True, "extended_products": extended, "lapsed_products": lapsed}
 
     def confirm_reservations(self, order_id: int) -> Dict[str, Any]:
         """

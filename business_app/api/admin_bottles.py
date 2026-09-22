@@ -30,6 +30,10 @@ admin_bottles_bp = Blueprint("admin_bottles", __name__)
 def _validated_payload(schema_cls):
     payload = request.get_json() or {}
     try:
+        # NOTE: `exclude_none`, unlike the same-named helper in api/admin_sales.py and
+        # api/staff_sales.py, which uses `exclude_unset` so an explicitly sent null clears a
+        # column. That is a per-blueprint decision, not the house rule: these payloads have not
+        # been walked for null-safety. See the sales helper's comment before copying either way.
         return schema_cls(**payload).model_dump(exclude_none=True)
     except PydanticValidationError as exc:
         return validation_error_response(exc.errors())

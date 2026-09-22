@@ -120,6 +120,32 @@ class TestStaffTranslationCatalogIsComplete:
             f"Missing: {missing}"
         )
 
+    def test_every_api_error_code_maps_to_a_seeded_string(self):
+        """`API_ERROR_CODE_KEY_MAP`'s VALUES are the bot's blind spot.
+
+        Every other required key gets into `/health`'s set because somebody
+        wrote `i18n.get('staff.x')` and the extractor's regex found the
+        literal. These keys are never written that way — they are dict values
+        looked up at runtime by `_resolve_api_error_message` — so an unseeded
+        one is invisible to the extractor, invisible to `/health`, and shows up
+        only as a humanised English key tail in an alert on a staff member's
+        phone at the exact moment something has already gone wrong.
+        """
+        from staff_bot.handlers.base import BaseHandler
+
+        module = _load_seed_script()
+        unseeded = sorted(
+            {
+                key
+                for key in BaseHandler.API_ERROR_CODE_KEY_MAP.values()
+                if not module._curated_value(key, "en")
+            }
+        )
+        assert not unseeded, (
+            "these BaseHandler.API_ERROR_CODE_KEY_MAP targets have no seeded English "
+            f"value, so the backend error they translate renders as a key tail: {unseeded}"
+        )
+
     def test_the_specific_keys_that_caused_the_outage_are_present(self):
         """Named regression guard for the 2026-08-13 investigation.
 
@@ -145,6 +171,7 @@ class TestPlaceholdersMatchAcrossLanguages:
             ("", module.STAFF_TRANSLATIONS),
             ("staff.delivery.", module.DELIVERY_TEXT_TRANSLATIONS),
             ("staff.operator.", module.OPERATOR_TEXT_TRANSLATIONS),
+            ("staff.sales.", module.SALES_TEXT_TRANSLATIONS),
         ]
 
         mismatches = {}

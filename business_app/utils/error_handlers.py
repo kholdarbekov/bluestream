@@ -287,7 +287,10 @@ def handle_api_exception(f):
 
             # Determine log level
             log_level = "error"
-            if isinstance(e, (ValidationError, NotFoundError, UnauthorizedError, ForbiddenError)):
+            # 409 by status, not by class: `ConflictError` (a duplicate Confirm tap, a double
+            # "Start visit") and `InvalidStateTransition` are both refusals the caller is
+            # expected to meet and retry, and grading them ERROR buried the real 500s.
+            if isinstance(e, (ValidationError, NotFoundError, UnauthorizedError, ForbiddenError)) or status_code == 409:
                 log_level = "warning"
             elif status_code >= 500:
                 log_level = "critical"

@@ -9,7 +9,7 @@ OUTLET_KEYS = {
     "latitude", "longitude", "address_text", "district", "assigned_agent_user_id", "assigned_agent_name",
     "onboarded_by_user_id", "next_visit_due_at", "agent_next_visit_at", "last_visit_at", "last_order_at",
     "opening_hours", "preferred_visit_window", "delivery_window_start", "delivery_window_end", "payment_terms",
-    "legal_form", "tax_id", "preferred_language", "storefront_photo_path", "competitor_note", "status_warning",
+    "legal_form", "tax_id", "preferred_language", "competitor_note", "status_warning",
     "dedupe_candidates",
     "activation_requested_at", "approved_at", "approved_by_user_id", "rejected_reason", "lost_reason", "lost_note",
     "notes", "contacts", "created_at", "updated_at",

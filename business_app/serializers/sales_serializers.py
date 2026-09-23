@@ -59,6 +59,17 @@ class ContactPayload(_Payload):
     presence_window: Optional[str] = Field(default=None, max_length=100)
 
 
+class UpdateContactPayload(_Payload):
+    """`PUT /admin/sales/outlets/<id>/contacts/<contact_id>` (D30). Every field optional: the route
+    is exclude_unset, so an absent key is left alone and an explicit null clears it."""
+
+    name: Optional[str] = Field(default=None, max_length=100)
+    phone: Optional[str] = Field(default=None, max_length=20)
+    role: Optional[str] = None
+    presence_window: Optional[str] = Field(default=None, max_length=100)
+    is_primary: Optional[bool] = None
+
+
 class CreateOutletPayload(_Payload):
     name: str = Field(..., min_length=1, max_length=200)
     outlet_type: str
@@ -155,6 +166,19 @@ class CloseVisitPayload(_Payload):
     notes: Optional[str] = None
     next_visit_at: Optional[date] = None
     dm_present: Optional[bool] = None
+
+
+class AddVisitPhotoPayload(_Payload):
+    """`POST /visits/<id>/photos` (D27): the staff bot's Telegram reference, never the bytes.
+
+    Loose on purpose: `VisitService.add_photo` is the one place that decides what a recordable
+    photo is, and answers every refusal with SALES_PHOTO_INVALID -- the code the bot branches on.
+    """
+
+    kind: Optional[str] = None
+    telegram_file_id: Optional[str] = None
+    telegram_file_unique_id: Optional[str] = None
+    sha256: Optional[str] = None
 
 
 class AgentConfirmationPayload(_Payload):
@@ -286,6 +310,7 @@ class AdminVisitsQuery(PaginatedRangeQuery):
     outlet_id: Optional[int] = None
     outcome: Optional[str] = None
     in_radius: Optional[bool] = None
+    photo: Optional[str] = None
 
 
 def _iso(value) -> Optional[str]:
@@ -349,7 +374,6 @@ def serialize_outlet(outlet) -> Dict[str, Any]:
         "legal_form": outlet.legal_form,
         "tax_id": outlet.tax_id,
         "preferred_language": outlet.preferred_language,
-        "storefront_photo_path": outlet.storefront_photo_path,
         "competitor_note": outlet.competitor_note,
         "status_warning": outlet.status_warning,
         "dedupe_candidates": list(outlet.dedupe_candidates or []),
@@ -455,6 +479,9 @@ def serialize_visit(visit, *, previous_stock=None) -> Dict[str, Any]:
         "agent_user_id": visit.agent_user_id,
         "status": visit.status,
         "planned": bool(visit.planned),
+        # D26/D28: whether the bot asks for a photo after check-in. Published, never re-derived in
+        # the bot, so the check-in reply and the resume read cannot disagree.
+        "photo_requested": bool(visit.outlet is not None and visit.outlet.is_business_outlet),
         "current_step": visit.current_step,
         "started_at": _iso(visit.started_at),
         "checkin_at": _iso(visit.checkin_at),
@@ -492,6 +519,11 @@ def serialize_visit_admin_row(visit) -> Dict[str, Any]:
     data["outlet_name"] = visit.outlet.name if visit.outlet is not None else None
     data["agent_name"] = visit.agent.full_name if visit.agent is not None else None
     data["order_number"] = order["order_number"] if order else None
+    # Eager-loaded by `list_for_admin`. Built from `serialize_visit_photo`, never a second shape,
+    # so the Visits row and the outlet Photos tab cannot disagree about a photo.
+    photos = list(visit.photos)
+    data["photo_count"] = len(photos)
+    data["photos"] = [serialize_visit_photo(photo) for photo in photos]
     return data
 
 
@@ -520,11 +552,10 @@ def serialize_plan_vs_fact_row(row) -> Dict[str, Any]:
 
 
 def serialize_visit_photo(photo) -> Dict[str, Any]:
-    """One stored visit photo, as the 201 and (phase 3) the exception feed read it.
+    """One visit photo, as the 201, the Visits page and the outlet Photos tab read it.
 
-    `file_path` is the stored copy and `sha256` is over the bytes the phone sent, so the
-    history survives a bot-token rotation; `telegram_file_unique_id` is kept only as a
-    secondary reference, which is exactly the support-inbox lesson (D17).
+    `telegram_file_id` is deliberately NOT published: `GET /admin/sales/visit-photos/<id>/file`
+    resolves it from the row, and a client holding it could only use it to go around that route.
 
     `is_duplicate` is published rather than derived: the hash comparison happened on the
     server, and a client that re-decided it from `duplicate_of_photo_id` would be the same
@@ -534,13 +565,23 @@ def serialize_visit_photo(photo) -> Dict[str, Any]:
         "id": photo.id,
         "visit_id": photo.visit_id,
         "kind": photo.kind,
-        "file_path": photo.file_path,
         "sha256": photo.sha256,
         "telegram_file_unique_id": photo.telegram_file_unique_id,
         "received_at": _iso(photo.received_at),
         "duplicate_of_photo_id": photo.duplicate_of_photo_id,
         "is_duplicate": photo.duplicate_of_photo_id is not None,
     }
+
+
+def serialize_outlet_photo_row(photo) -> Dict[str, Any]:
+    """One tile of the outlet drawer's *Photos* tab: the photo plus who took it.
+
+    Built ON `serialize_visit_photo`, so the tab and the Visits page agree on kind and duplicate.
+    """
+    data = serialize_visit_photo(photo)
+    agent = photo.visit.agent if photo.visit is not None else None
+    data["agent_name"] = agent.full_name if agent is not None else None
+    return data
 
 
 def serialize_stock_check_product(product) -> Dict[str, Any]:

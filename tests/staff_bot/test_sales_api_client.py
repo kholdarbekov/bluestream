@@ -107,56 +107,32 @@ def test_is_sales_agent_reads_staff_roles():
     # Application in tests/staff_bot/test_sales_hub_journey.py::test_driver_cannot_open_the_sales_hub.
 
 
-async def test_the_photo_wrapper_posts_multipart_not_json(monkeypatch):
-    """The visit photo is the one sales call whose body is BYTES.
-
-    `_make_request` serializes `data` as a JSON body everywhere else; here
-    `data` is the FORM FIELDS and `files` is the picture. A wrapper that
-    passed the bytes as `data` would send a JSON document containing a
-    base64-less repr of a bytes object and the backend would find no file at
-    all — a 400 with nothing in the logs to say why.
-
-    The FILENAME carries `.jpg` on purpose. `FileStorageService._validate_file`
-    checks the extension against `ALLOWED_EXTENSIONS`, and a Telegram download
-    has no name of its own, so a suffix-less part is refused as
-    `SALES_PHOTO_INVALID` for a perfectly good JPEG.
-    """
+async def test_the_photo_wrapper_posts_the_telegram_reference_as_json(monkeypatch):
+    """D27: the photo stays on Telegram. The body names it -- this bot's file id, the stable
+    unique id and the digest of the bytes -- and carries no bytes at all."""
     calls = []
 
-    async def fake(method, endpoint, token=None, data=None, params=None, files=None, **_):
-        calls.append((method, endpoint, token, data, params, files))
+    async def fake(method, endpoint, token=None, data=None, params=None, **kwargs):
+        calls.append((method, endpoint, token, data, params, kwargs))
         return module.APIResponse(success=True, data={"photo": {"id": 4, "is_duplicate": False}})
 
     monkeypatch.setattr(module.api_client, "_make_request", fake)
 
-    response = await module.api_client.sales_add_photo(
-        "t", 31, b"\xff\xd8\xff\xe0JPEG", "visit_31_u-l.jpg", "storefront", "u-l"
-    )
+    response = await module.api_client.sales_add_photo("t", 31, "AgAC-file", "u-l", "a" * 64, "storefront")
 
     assert response.success
     assert calls == [(
         "POST", "/api/v1/staff/sales/visits/31/photos", "t",
-        {"kind": "storefront", "telegram_file_unique_id": "u-l"},
+        {"kind": "storefront", "telegram_file_id": "AgAC-file", "telegram_file_unique_id": "u-l", "sha256": "a" * 64},
         None,
-        {"file": ("visit_31_u-l.jpg", b"\xff\xd8\xff\xe0JPEG", "image/jpeg")},
+        {},
     )]
 
 
-async def test_the_real_request_puts_the_photo_on_the_wire_as_multipart():
-    """The one seam both suites stop short of: the request httpx actually builds.
+async def test_the_real_request_puts_the_photo_reference_on_the_wire_as_json():
+    """The request httpx actually builds: a JSON body with the JSON content type."""
+    import json
 
-    Every photo journey replaces `_make_request`, and the backend's own photo
-    tests start at the WSGI boundary — so the two lines that make a multipart
-    POST a multipart POST (`request_headers.pop('Content-Type', None)`, and the
-    `files=` call beside it) are executed by nothing. Left with the JSON content
-    type, httpx sends a multipart body labelled `application/json`: werkzeug
-    parses it as JSON, `request.files` is empty, the route answers 400
-    SALES_PHOTO_INVALID, and every upload in production is dead with no log line
-    naming the cause.
-
-    Driven through `httpx.MockTransport`, so the headers and the body asserted
-    here are the ones httpx assembled, not ones this test wrote.
-    """
     import httpx
 
     from staff_bot.api_client import StaffAPIClient
@@ -166,27 +142,19 @@ async def test_the_real_request_puts_the_photo_on_the_wire_as_multipart():
     def handler(request):
         captured["content_type"] = request.headers.get("Content-Type", "")
         captured["authorization"] = request.headers.get("Authorization")
-        captured["body"] = request.content
+        captured["body"] = json.loads(request.content)
         return httpx.Response(200, json={"data": {"photo": {"id": 4, "is_duplicate": False}}})
 
     client = StaffAPIClient()
-    client._client = httpx.AsyncClient(
-        base_url="http://backend", transport=httpx.MockTransport(handler)
-    )
+    client._client = httpx.AsyncClient(base_url="http://backend", transport=httpx.MockTransport(handler))
     try:
-        response = await client._make_request(
-            "POST", "/api/v1/staff/sales/visits/31/photos", token="t",
-            data={"kind": "shelf", "telegram_file_unique_id": "u-1"},
-            files={"file": ("a.jpg", b"\xff\xd8\xff\xe0JPEG", "image/jpeg")},
-        )
+        response = await client.sales_add_photo("t", 31, "AgAC-file", "u-1", "b" * 64, "shelf")
     finally:
         await client._client.aclose()
 
     assert response.success, response.error
-    assert captured["content_type"].startswith("multipart/form-data; boundary="), captured["content_type"]
-    # The token still rides along: the multipart POST drops ONLY the content type.
+    assert captured["content_type"].startswith("application/json")
     assert captured["authorization"] == "Bearer t"
-    body = captured["body"]
-    assert b'name="kind"' in body and b"shelf" in body
-    assert b'name="telegram_file_unique_id"' in body and b"u-1" in body
-    assert b'filename="a.jpg"' in body and b"\xff\xd8\xff\xe0JPEG" in body
+    assert captured["body"] == {
+        "kind": "shelf", "telegram_file_id": "AgAC-file", "telegram_file_unique_id": "u-1", "sha256": "b" * 64,
+    }

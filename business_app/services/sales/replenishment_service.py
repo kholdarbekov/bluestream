@@ -79,6 +79,12 @@ def effective_line_qty_max() -> int:
 # only due when the agent said so (D7).
 DUE_WHEN_NEVER_VISITED_STAGES = ("active", "at_risk", "dormant")
 
+# The stages whose due date nobody republishes: `recompute_all` skips them and so does an admin's
+# class edit (D29), which must publish exactly the date tonight's run would. Skipped rather than
+# nulled -- the due scope filters on stage anyway, and a shop somebody may yet win back keeps the
+# date it had.
+DUE_DATE_FROZEN_STAGES = ("lost",)
+
 # Never incoming, whatever the transition map says (ruling 53). DELIVERED because
 # `delivered_qty` has already counted it — adding it here would double the shelf. RETURNED
 # because the water is physically back at the depot: it is not on its way to this shop, and if
@@ -558,19 +564,18 @@ class ReplenishmentService:
 
     @staticmethod
     def recompute_all(now: Optional[datetime] = None) -> int:
-        """The 01:00 job: republish `next_visit_due_at` for every non-`lost` outlet.
+        """The 01:00 job: republish `next_visit_due_at` for every outlet outside
+        `DUE_DATE_FROZEN_STAGES`.
 
-        `lost` is skipped rather than nulled — the due scope filters on stage anyway, and a
-        shop somebody may yet win back keeps the date it had. The catalogue is read ONCE for
-        the whole run and handed to each outlet (L30); everything else per outlet is the
-        existing D7 rule, unchanged, so the job and a visit close cannot publish different
-        dates for the same shop.
+        The catalogue is read ONCE for the whole run and handed to each outlet (L30);
+        everything else per outlet is the existing D7 rule, unchanged, so the job and a visit
+        close cannot publish different dates for the same shop.
 
         One commit at the end: the job is the transaction.
         """
         moment = _aware(now) if now is not None else datetime.now(timezone.utc)
         product = ReplenishmentService.primary_returnable_product()
-        outlets = Outlet.query.filter(Outlet.stage != "lost").order_by(Outlet.id.asc()).all()
+        outlets = Outlet.query.filter(Outlet.stage.notin_(DUE_DATE_FROZEN_STAGES)).order_by(Outlet.id.asc()).all()
         for outlet in outlets:
             ReplenishmentService.recompute_outlet(outlet, now=moment, product=product)
         db.session.commit()

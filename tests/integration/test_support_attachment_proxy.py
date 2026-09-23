@@ -67,7 +67,7 @@ def _fake_telegram(monkeypatch, *, get_file_ok=True, payload=b"JPEGBYTES"):
             resp.headers = {"Content-Length": str(len(payload))}
         return resp
 
-    monkeypatch.setattr("business_app.services.support_attachment_service.requests.get", fake_get)
+    monkeypatch.setattr("business_app.services.telegram_file_proxy.requests.get", fake_get)
     return calls
 
 
@@ -233,7 +233,7 @@ def test_streams_when_redis_read_is_unavailable(app, db, monkeypatch):
     msg = _photo_message("proxy_redis_read@example.com")
     _fake_telegram(monkeypatch)
     monkeypatch.setattr(
-        "business_app.services.support_attachment_service.redis_client.get",
+        "business_app.services.telegram_file_proxy.redis_client.get",
         MagicMock(side_effect=Exception("redis down")),
     )
 
@@ -250,7 +250,7 @@ def test_streams_when_redis_write_is_unavailable(app, db, monkeypatch):
     msg = _photo_message("proxy_redis_write@example.com")
     _fake_telegram(monkeypatch)
     monkeypatch.setattr(
-        "business_app.services.support_attachment_service.redis_client.setex",
+        "business_app.services.telegram_file_proxy.redis_client.setex",
         MagicMock(side_effect=Exception("redis down")),
     )
 
@@ -271,7 +271,7 @@ def test_a_cache_hit_skips_getfile_entirely(app, db, monkeypatch):
     msg = _photo_message("proxy_cache_hit@example.com", file_id="cached-file-id")
     calls = _fake_telegram(monkeypatch)
     monkeypatch.setattr(
-        "business_app.services.support_attachment_service.redis_client.get",
+        "business_app.services.telegram_file_proxy.redis_client.get",
         MagicMock(return_value=b"photos/already_resolved.jpg"),
     )
 
@@ -295,12 +295,12 @@ def test_resolved_file_path_is_cached_with_ttl_2700(app, db, monkeypatch):
     msg = _photo_message("proxy_ttl@example.com")
     _fake_telegram(monkeypatch)
     monkeypatch.setattr(
-        "business_app.services.support_attachment_service.redis_client.get",
+        "business_app.services.telegram_file_proxy.redis_client.get",
         MagicMock(return_value=None),
     )
     setex_mock = MagicMock()
     monkeypatch.setattr(
-        "business_app.services.support_attachment_service.redis_client.setex", setex_mock
+        "business_app.services.telegram_file_proxy.redis_client.setex", setex_mock
     )
 
     r = app.test_client().get(

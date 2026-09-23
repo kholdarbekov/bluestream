@@ -972,13 +972,27 @@ class SalesKeyboards:
         return InlineKeyboardMarkup(rows)
 
     @staticmethod
+    def photo_request(language: str) -> InlineKeyboardMarkup:
+        """The one-time photo prompt after check-in (D26). The photo itself is sent as a message,
+        so the keyboard carries only the two ways past it."""
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(
+                f"⏭ {i18n.get('staff.sales.visit.photo_skip', language)}",
+                # NOT `staff_sales_v_photo_...`: `^staff_sales_v_photo_\w+$` is the kind picker's pattern.
+                callback_data="staff_sales_v_photoskip",
+            )],
+            SalesKeyboards._abandon_row(language),
+        ])
+
+    @staticmethod
     def photo_kind(language: str) -> InlineKeyboardMarkup:
         """What the photo that just arrived is of.
 
         Deliberately NO abandon row: this is not a step of the visit. It
         answers a message, the step screen is untouched above it, and every
         handler behind these buttons returns None -- which PTB reads as
-        "state unchanged".
+        "state unchanged" -- except on the one-time prompt (D26), where a
+        filed photo is the answer and the shelf follows.
         """
         return InlineKeyboardMarkup([
             [InlineKeyboardButton(

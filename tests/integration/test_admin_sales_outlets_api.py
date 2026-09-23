@@ -1,5 +1,5 @@
 """/api/v1/admin/sales/outlets driven the way Outlets.js drives it."""
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -7,6 +7,7 @@ from business_app.models.corporate import CorporateContract
 from business_app.models.sales import Outlet, SalesAgentProfile
 from business_app.models.user import UserAddress
 from business_app.services.sales.outlet_service import OutletService
+from business_app.services.sales.replenishment_service import ReplenishmentService
 from business_app.utils.constants import MAX_PAGE_SIZE
 from business_app.utils.service_factory import get_corporate_contract_service
 from shared.enums import EntitySubtype
@@ -556,3 +557,105 @@ def test_the_admin_drawer_publishes_the_account_and_the_attach_candidate(
         "account_name" not in row and "is_branch" not in row and "account_candidate" not in row
         for row in listed["data"]["items"]
     )
+
+
+LAST_VISIT = datetime(2026, 9, 1, 6, 0, tzinfo=UTC)
+
+
+def _visited(db, agent, *, outlet_class="C", stage="active"):
+    outlet = Outlet(
+        name="Bahor market", outlet_type="grocery_store", stage=stage, outlet_class=outlet_class,
+        district="chilanzar", assigned_agent_user_id=agent.id, last_visit_at=LAST_VISIT,
+    )
+    db.session.add(outlet)
+    db.session.commit()
+    return outlet
+
+
+def _due(response):
+    return datetime.fromisoformat(response.get_json()["data"]["outlet"]["next_visit_due_at"])
+
+
+def test_a_class_change_moves_the_due_date_now(client, app, admin_claim_headers, db, agent):
+    """D29 (owner-confirmed): C -> A is a promise to visit weekly, and the due list must say so
+    today, not after the 01:00 job."""
+    outlet = _visited(db, agent, outlet_class="C")
+
+    moved = client.put(f"{URL}/{outlet.id}", json={"class": "A"}, headers=admin_claim_headers)
+
+    assert moved.status_code == 200, moved.get_data(as_text=True)
+    assert _due(moved) == LAST_VISIT + timedelta(days=app.config["SALES_CADENCE_DAYS_A"])
+
+
+def test_clearing_the_class_falls_back_to_the_c_cadence(client, app, admin_claim_headers, db, agent):
+    outlet = _visited(db, agent, outlet_class="A")
+
+    cleared = client.put(f"{URL}/{outlet.id}", json={"class": None}, headers=admin_claim_headers)
+
+    assert cleared.status_code == 200, cleared.get_data(as_text=True)
+    assert _due(cleared) == LAST_VISIT + timedelta(days=app.config["SALES_CADENCE_DAYS_C"])
+
+
+def test_a_cadence_override_moves_the_due_date_now(client, admin_claim_headers, db, agent):
+    outlet = _visited(db, agent, outlet_class="C")
+
+    moved = client.put(f"{URL}/{outlet.id}", json={"cadence_days_override": 3}, headers=admin_claim_headers)
+
+    assert moved.status_code == 200, moved.get_data(as_text=True)
+    assert _due(moved) == LAST_VISIT + timedelta(days=3)
+
+
+def test_an_edit_that_leaves_the_cadence_alone_leaves_the_due_date_alone(client, admin_claim_headers, db, agent):
+    outlet = _visited(db, agent, outlet_class="C")
+    pinned = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
+    outlet.next_visit_due_at = pinned
+    db.session.commit()
+
+    edited = client.put(f"{URL}/{outlet.id}", json={"notes": "Closed on Sundays", "class": "C"},
+                        headers=admin_claim_headers)
+
+    assert edited.status_code == 200, edited.get_data(as_text=True)
+    assert _due(edited) == pinned
+
+
+def test_a_prospects_class_change_publishes_the_date_the_nightly_job_would(
+    client, app, admin_claim_headers, db, agent
+):
+    """The 01:00 job republishes a prospect too, so the edit's gate is the job's: anything narrower
+    only holds the new date back until tonight."""
+    outlet = _visited(db, agent, outlet_class="C", stage="prospect")
+
+    edited = client.put(f"{URL}/{outlet.id}", json={"class": "A"}, headers=admin_claim_headers)
+
+    assert edited.status_code == 200, edited.get_data(as_text=True)
+    assert _due(edited) == LAST_VISIT + timedelta(days=app.config["SALES_CADENCE_DAYS_A"])
+    # The job itself, not a copy of its rule: tonight's run writes the date the edit published.
+    ReplenishmentService.recompute_all()
+    assert _due(client.get(f"{URL}/{outlet.id}", headers=admin_claim_headers)) == _due(edited)
+
+
+def test_a_lost_outlets_class_change_leaves_its_due_date_alone(client, admin_claim_headers, db, agent):
+    """`lost` is the stage the job never republishes, and the edit shares the job's gate."""
+    outlet = _visited(db, agent, outlet_class="C", stage="lost")
+    kept = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
+    outlet.next_visit_due_at = kept
+    db.session.commit()
+
+    edited = client.put(f"{URL}/{outlet.id}", json={"class": "A"}, headers=admin_claim_headers)
+
+    assert edited.status_code == 200, edited.get_data(as_text=True)
+    assert edited.get_json()["data"]["outlet"]["class"] == "A"
+    assert _due(edited) == kept
+
+
+def test_payment_terms_outside_the_named_tuple_are_refused(client, admin_claim_headers, db, agent):
+    from business_app.models.sales import PAYMENT_TERMS
+
+    outlet = _visited(db, agent)
+    assert PAYMENT_TERMS == ("cash", "business_account")
+
+    refused = client.put(f"{URL}/{outlet.id}", json={"payment_terms": "credit"}, headers=admin_claim_headers)
+    accepted = client.put(f"{URL}/{outlet.id}", json={"payment_terms": "business_account"}, headers=admin_claim_headers)
+
+    assert refused.status_code == 400 and refused.get_json()["error_code"] == "SALES_PAYMENT_TERMS_INVALID"
+    assert accepted.get_json()["data"]["outlet"]["payment_terms"] == "business_account"

@@ -39,7 +39,7 @@ const OUTLET_ROW_KEYS = new Set([
   'latitude', 'longitude', 'address_text', 'district', 'assigned_agent_user_id', 'assigned_agent_name',
   'onboarded_by_user_id', 'next_visit_due_at', 'agent_next_visit_at', 'last_visit_at', 'last_order_at',
   'opening_hours', 'preferred_visit_window', 'delivery_window_start', 'delivery_window_end', 'payment_terms',
-  'legal_form', 'tax_id', 'preferred_language', 'storefront_photo_path', 'competitor_note', 'status_warning',
+  'legal_form', 'tax_id', 'preferred_language', 'competitor_note', 'status_warning',
   'dedupe_candidates', 'activation_requested_at', 'approved_at', 'approved_by_user_id', 'rejected_reason',
   'lost_reason', 'lost_note', 'notes', 'contacts', 'created_at', 'updated_at',
 ]);
@@ -102,6 +102,13 @@ beforeEach(() => {
   // The district pickers are fed from the geo-config KEYS, the same list SalesAgents.js uses.
   api.get.mockResolvedValue({ data: { success: true, data: { districts: [{ key: 'chilanzar', name: 'Chilanzar' }, { key: 'yunusabad', name: 'Yunusabad' }] } } });
   salesService.getVisits.mockResolvedValue({ visits: [], meta: { page: 1, per_page: 20, total: 0, pages: 0, has_next: false, has_prev: false }, start_date: day(89), end_date: day(0) });
+  salesService.addOutletContact.mockResolvedValue({ contact: { id: 2 } });
+  salesService.updateOutletContact.mockResolvedValue({ contact: { id: 1 } });
+  salesService.deleteOutletContact.mockResolvedValue({ contact_id: 1 });
+  salesService.getOutletPhotos.mockResolvedValue({ photos: [], meta: { page: 1, per_page: 20, total: 0 } });
+  salesService.getVisitPhotoBlob.mockResolvedValue(new Blob(['x'], { type: 'image/jpeg' }));
+  global.URL.createObjectURL = vi.fn(() => 'blob:fake-url');
+  global.URL.revokeObjectURL = vi.fn();
 });
 
 it('lists outlets with stage tags and the per-stage summary', async () => {
@@ -364,9 +371,9 @@ it('returns to page 1 when a filter narrows the list', async () => {
 // order the agent places at this outlet, and only when BOTH edges are set (visit_service.py:571).
 // The admin page is its only writer, so both-or-neither has to hold here.
 
-const openWindowModal = async () => {
+const openEditModal = async () => {
   const drawer = await openDrawer();
-  fireEvent.click(within(drawer).getByRole('button', { name: /edit delivery window/i }));
+  fireEvent.click(within(drawer).getByRole('button', { name: /^edit$/i }));
   return waitFor(() => { expect(lastModal()).toBeTruthy(); return lastModal(); });
 };
 
@@ -398,24 +405,36 @@ it('shows a dash when the outlet has no window at all', async () => {
   expect(descValue(drawer, 'Delivery window')).toBe('—');
 });
 
-it('writes the window back as two HH:MM strings', async () => {
+it('opens the Edit form on the stored values and sends only what changed', async () => {
   render(<Outlets />, { wrapper: createWrapper() });
-  const modal = await openWindowModal();
+  const modal = await openEditModal();
 
-  // The modal opens ON the stored pair — reopening empty over a window that is really stored is
-  // how an admin clears one by accident.
+  // The form opens ON the stored pair — reopening empty over a stored window is how an admin
+  // clears one by accident.
   expect([...modal.querySelectorAll('.ant-picker input')].map((i) => i.value)).toEqual(['09:30', '18:45']);
-
+  await pickOption(within(modal).getByTestId('edit-class-select').querySelector('.ant-select-selector'), 'A');
   fireEvent.click(within(modal).getByRole('button', { name: /save/i }));
 
-  await waitFor(() => expect(salesService.updateOutlet).toHaveBeenCalledWith(5, {
-    delivery_window_start: '09:30', delivery_window_end: '18:45',
-  }));
+  // Class alone: the window, the name and the payment terms were not touched, so they are not sent.
+  await waitFor(() => expect(salesService.updateOutlet).toHaveBeenCalledWith(5, { class: 'A' }));
+});
+
+it('clears an emptied text field with an explicit null', async () => {
+  salesService.getOutlet.mockResolvedValue({ outlet: { ...OUTLET, notes: 'Corner shop', open_receivable: 0, bottle_balance: 0, last_orders: [] }, stage_history: STAGE_HISTORY });
+  render(<Outlets />, { wrapper: createWrapper() });
+  const modal = await openEditModal();
+
+  fireEvent.change(within(modal).getByTestId('edit-notes'), { target: { value: '' } });
+  fireEvent.click(within(modal).getByRole('button', { name: /save/i }));
+
+  // null, never '' and never an omitted key: the PUT is exclude_unset, so an absent key is
+  // "leave it alone" and the emptied note would survive a success toast.
+  await waitFor(() => expect(salesService.updateOutlet).toHaveBeenCalledWith(5, { notes: null }));
 });
 
 it('clears a stored window with two explicit nulls', async () => {
   render(<Outlets />, { wrapper: createWrapper() });
-  const modal = await openWindowModal();
+  const modal = await openEditModal();
   const clearIcons = () => modal.querySelectorAll('.ant-picker-clear');
 
   expect(clearIcons()).toHaveLength(2);
@@ -435,7 +454,7 @@ it('clears a stored window with two explicit nulls', async () => {
 
 it('refuses half a window without touching the API', async () => {
   render(<Outlets />, { wrapper: createWrapper() });
-  const modal = await openWindowModal();
+  const modal = await openEditModal();
 
   // Clear the END only. One edge alone is a window the order path silently ignores, so it is
   // refused where the admin can still see both fields.
@@ -494,4 +513,76 @@ it('shows the house error alert when the drawer visits query fails, never an emp
   fireEvent.click(within(drawer).getByRole('tab', { name: 'Visits' }));
 
   expect(await within(drawer).findByText('Date range is invalid')).toBeInTheDocument();
+});
+
+it('adds a contact from the Contacts tab with explicit nulls for empty fields', async () => {
+  render(<Outlets />, { wrapper: createWrapper() });
+  const drawer = await openDrawer();
+  fireEvent.click(within(drawer).getByRole('tab', { name: 'Contacts' }));
+  fireEvent.click(await within(drawer).findByRole('button', { name: /add contact/i }));
+  const modal = await waitFor(() => { expect(lastModal()).toBeTruthy(); return lastModal(); });
+
+  fireEvent.change(within(modal).getByLabelText('Name'), { target: { value: 'Zafar' } });
+  fireEvent.change(within(modal).getByLabelText('Phone'), { target: { value: '+998901112299' } });
+  fireEvent.click(within(modal).getByRole('button', { name: /save/i }));
+
+  await waitFor(() => expect(salesService.addOutletContact).toHaveBeenCalledWith(5, {
+    name: 'Zafar', phone: '+998901112299', role: 'owner', presence_window: null,
+  }));
+});
+
+it('moves the primary flag and deletes a contact', async () => {
+  const contacts = [
+    { id: 1, name: 'Olim aka', phone: '+998901112266', role: 'owner', is_primary: true, presence_window: null },
+    { id: 2, name: 'Zafar', phone: '+998901112299', role: 'receiver', is_primary: false, presence_window: null },
+  ];
+  salesService.getOutlet.mockResolvedValue({ outlet: { ...OUTLET, contacts, open_receivable: 0, bottle_balance: 0, last_orders: [] }, stage_history: STAGE_HISTORY });
+  render(<Outlets />, { wrapper: createWrapper() });
+  const drawer = await openDrawer();
+  fireEvent.click(within(drawer).getByRole('tab', { name: 'Contacts' }));
+
+  // Only the non-primary row offers "Make primary".
+  const makePrimary = await within(drawer).findAllByRole('button', { name: /make primary/i });
+  expect(makePrimary).toHaveLength(1);
+  fireEvent.click(makePrimary[0]);
+  await waitFor(() => expect(salesService.updateOutletContact).toHaveBeenCalledWith(5, 2, { is_primary: true }));
+
+  fireEvent.click(within(drawer).getAllByRole('button', { name: /^delete$/i })[0]);
+  fireEvent.click(await screen.findByRole('button', { name: /^ok$/i }));
+  await waitFor(() => expect(salesService.deleteOutletContact).toHaveBeenCalledWith(5, 1));
+});
+
+it('shows the outlet photos, fetched by id through the proxy', async () => {
+  salesService.getOutletPhotos.mockResolvedValue({
+    photos: [{ id: 41, visit_id: 9, kind: 'shelf', sha256: 'a'.repeat(64), telegram_file_unique_id: 'u', received_at: '2026-09-14T06:05:00+00:00', duplicate_of_photo_id: 40, is_duplicate: true, agent_name: 'Sardor Alimov' }],
+    meta: { page: 1, per_page: 20, total: 1 },
+  });
+  render(<Outlets />, { wrapper: createWrapper() });
+  const drawer = await openDrawer();
+  fireEvent.click(within(drawer).getByRole('tab', { name: 'Photos' }));
+
+  await waitFor(() => expect(salesService.getVisitPhotoBlob).toHaveBeenCalledWith(41));
+  expect(salesService.getOutletPhotos).toHaveBeenCalledWith(5, { page: 1, per_page: 20 });
+  // The alt is the kind's label; this suite's `t` mock answers the inline default, which for
+  // `photos.kind.*` is the raw kind — the seeds carry the English "Shelf".
+  expect(await within(drawer).findByRole('img', { name: 'shelf' })).toHaveAttribute('src', 'blob:fake-url');
+  expect(within(drawer).getByText('Duplicate')).toBeInTheDocument();
+  // Scoped to the photo card: the Overview pane stays mounted behind the active tab and its agent
+  // Select already reads 'Sardor Alimov', so a drawer-wide text query matches twice.
+  expect(within(within(drawer).getByTestId('outlet-photo')).getByText('Sardor Alimov')).toBeInTheDocument();
+});
+
+it('shows "Photo unavailable" for a photo Telegram no longer serves', async () => {
+  salesService.getOutletPhotos.mockResolvedValue({
+    photos: [{ id: 41, visit_id: 9, kind: 'storefront', sha256: 'a'.repeat(64), telegram_file_unique_id: 'u', received_at: '2026-09-14T06:05:00+00:00', duplicate_of_photo_id: null, is_duplicate: false, agent_name: 'Sardor Alimov' }],
+    meta: { page: 1, per_page: 20, total: 1 },
+  });
+  salesService.getVisitPhotoBlob.mockRejectedValue(new Error('404'));
+  render(<Outlets />, { wrapper: createWrapper() });
+  const drawer = await openDrawer();
+  fireEvent.click(within(drawer).getByRole('tab', { name: 'Photos' }));
+
+  expect(await within(drawer).findByText('Photo unavailable')).toBeInTheDocument();
+  // The rest of the drawer still renders.
+  expect(within(drawer).getByRole('tab', { name: 'Overview' })).toBeInTheDocument();
 });

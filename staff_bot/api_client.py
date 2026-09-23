@@ -286,8 +286,7 @@ class StaffAPIClient:
         token: str = None, data: Dict = None,
         params: Dict = None,
         headers: Dict = None,
-        sign: bool = False,
-        files: Dict = None
+        sign: bool = False
     ) -> APIResponse:
         """Make HTTP request with retry logic and circuit breaker."""
         if not self._circuit_breaker.allow_request():
@@ -298,13 +297,6 @@ class StaffAPIClient:
             request_headers['Authorization'] = f'Bearer {token}'
         if headers:
             request_headers.update(headers)
-
-        # Multipart: httpx writes its own Content-Type WITH the boundary, and
-        # an explicit JSON one here would survive into the request and make
-        # the backend parse the body as JSON and find nothing in it. In this
-        # shape `data` carries the FORM FIELDS rather than a JSON body.
-        if files is not None:
-            request_headers.pop('Content-Type', None)
 
         # Signed requests (currently: staff login) must send exactly the
         # bytes we sign — httpx `json=` serializes internally, so we can't
@@ -342,18 +334,6 @@ class StaffAPIClient:
                             method=method,
                             url=endpoint,
                             content=signed_body,
-                            params=params,
-                            headers=request_headers
-                        )
-                    elif files is not None:
-                        # Every part is BYTES, never an open file object, so a
-                        # retry re-sends the same payload instead of an
-                        # already-exhausted stream.
-                        response = await client.request(
-                            method=method,
-                            url=endpoint,
-                            data=data or None,
-                            files=files,
                             params=params,
                             headers=request_headers
                         )
@@ -941,28 +921,24 @@ class StaffAPIClient:
             'POST', f'/api/v1/staff/sales/visits/{visit_id}/abandon', token=token, data={}
         )
 
-    async def sales_add_photo(self, token: str, visit_id: int, file_bytes: bytes,
-                              filename: str, kind: str, file_unique_id: str = None) -> APIResponse:
-        """Attach one photo to the caller's OPEN visit (multipart, not JSON).
+    async def sales_add_photo(self, token: str, visit_id: int, telegram_file_id: str,
+                              file_unique_id: Optional[str], sha256: str, kind: str) -> APIResponse:
+        """Record one photo on the caller's OPEN visit by its Telegram reference (D27).
 
-        The BYTES cross the wire, not Telegram's `file_id`: a bot-token
-        rotation turns every stored `file_id` into a dead reference, which is
-        how the support inbox lost its media history. `file_unique_id` rides
-        along as the SECONDARY reference only (D17).
-
-        The FILENAME must carry an image extension. `FileStorageService.
-        _validate_file` checks it against `ALLOWED_EXTENSIONS`, and a Telegram
-        download has no name of its own -- a suffix-less part is refused as
-        `SALES_PHOTO_INVALID` for a perfectly good JPEG.
-
-        Nothing here hashes or compares: `photo.is_duplicate` is the
-        backend's SHA-256 verdict over the ORIGINAL bytes, per agent.
+        The photo stays on Telegram: the backend keeps this bot's `file_id` and
+        streams the picture to the admin UI on demand. `sha256` is over the bytes
+        this bot downloaded into memory, so the backend's per-agent duplicate
+        rule compares pictures, not ids. `photo.is_duplicate` is its answer.
         """
         return await self._make_request(
             'POST', f'/api/v1/staff/sales/visits/{visit_id}/photos',
             token=token,
-            data={'kind': kind, 'telegram_file_unique_id': file_unique_id or ''},
-            files={'file': (filename, bytes(file_bytes), 'image/jpeg')},
+            data={
+                'kind': kind,
+                'telegram_file_id': telegram_file_id,
+                'telegram_file_unique_id': file_unique_id,
+                'sha256': sha256,
+            },
         )
 
     # Try-out from the field (phase 2b). Same rule as above: the paths are

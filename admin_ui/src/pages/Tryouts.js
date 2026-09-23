@@ -362,13 +362,18 @@ const Tryouts = () => {
   };
 
   const handleExport = async () => {
-    const blob = await tryoutService.exportTryouts(filters);
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'tryouts_export.csv';
-    link.click();
-    window.URL.revokeObjectURL(url);
+    try {
+      const blob = await tryoutService.exportTryouts(filters);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'tryouts_export.csv';
+      link.click();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      // A blob request gets no global toast (services/api.js), so the export says it failed itself.
+      message.error(t('ui.common.error_occurred', { defaultValue: 'An error occurred' }));
+    }
   };
 
   const columns = [

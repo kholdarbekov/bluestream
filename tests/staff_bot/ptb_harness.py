@@ -49,12 +49,6 @@ class StaffBackendCall:
     endpoint: str
     data: Optional[dict] = None
     params: Optional[dict] = None
-    # Multipart parts exactly as the client hands them to httpx:
-    # {field: (filename, bytes, content_type)}. Recorded rather than swallowed
-    # by **_kwargs because the one call that uses it -- the visit photo -- is
-    # the only place the BYTES are the payload, and a test that could not see
-    # them could prove only that some request was made.
-    files: Optional[dict] = None
 
 
 class FakeStaffBackend:
@@ -68,8 +62,8 @@ class FakeStaffBackend:
     def route(self, method: str, endpoint: str, responder):
         self.routes[(method.upper(), endpoint)] = responder
 
-    async def handle(self, method, endpoint, token=None, data=None, params=None, files=None, **_kwargs):
-        call = StaffBackendCall(method.upper(), endpoint, data, params, files)
+    async def handle(self, method, endpoint, token=None, data=None, params=None, **_kwargs):
+        call = StaffBackendCall(method.upper(), endpoint, data, params)
         self.calls.append(call)
 
         responder = self.routes.get((call.method, endpoint))

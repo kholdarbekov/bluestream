@@ -136,3 +136,34 @@ describe('salesService.approveOutlet', () => {
     expect(api.post).toHaveBeenCalledWith('/admin/sales/outlets/6/approve', { contract_number: null, attach: false });
   });
 });
+
+describe('salesService outlet editing and photos', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('reads an outlet photo as a blob, by photo id only', async () => {
+    const blob = new Blob(['x']);
+    api.get.mockResolvedValue({ data: blob });
+    await expect(salesService.getVisitPhotoBlob(41)).resolves.toBe(blob);
+    expect(api.get).toHaveBeenCalledWith('/admin/sales/visit-photos/41/file', { responseType: 'blob' });
+  });
+
+  it('reads the outlet photos page and unwraps data.data', async () => {
+    api.get.mockResolvedValue(envelope({ photos: [{ id: 41 }], meta: { total: 1 } }));
+    await expect(salesService.getOutletPhotos(5, { page: 2, per_page: 20 })).resolves.toEqual({ photos: [{ id: 41 }], meta: { total: 1 } });
+    expect(api.get).toHaveBeenCalledWith('/admin/sales/outlets/5/photos', { params: { page: 2, per_page: 20 } });
+  });
+
+  it('writes contacts through the three admin routes', async () => {
+    api.post.mockResolvedValue(envelope({ contact: { id: 2 } }));
+    api.put.mockResolvedValue(envelope({ contact: { id: 2 } }));
+    api.delete.mockResolvedValue(envelope({ contact_id: 2 }));
+
+    await salesService.addOutletContact(5, { name: 'Zafar' });
+    await salesService.updateOutletContact(5, 2, { is_primary: true });
+    await salesService.deleteOutletContact(5, 2);
+
+    expect(api.post).toHaveBeenCalledWith('/admin/sales/outlets/5/contacts', { name: 'Zafar' });
+    expect(api.put).toHaveBeenCalledWith('/admin/sales/outlets/5/contacts/2', { is_primary: true });
+    expect(api.delete).toHaveBeenCalledWith('/admin/sales/outlets/5/contacts/2');
+  });
+});

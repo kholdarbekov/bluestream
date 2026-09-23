@@ -157,7 +157,7 @@ def seeded(db, agent, sample_user):
     original = VisitPhoto(
         visit_id=clean.id,
         kind="storefront",
-        file_path="sales_visits/original.jpg",
+        telegram_file_id="AgAC-original",
         sha256="a" * 64,
         received_at=day_start + timedelta(hours=12, minutes=10),
     )
@@ -166,7 +166,7 @@ def seeded(db, agent, sample_user):
     duplicate = VisitPhoto(
         visit_id=clean.id,
         kind="shelf",
-        file_path="sales_visits/again.jpg",
+        telegram_file_id="AgAC-again",
         sha256="a" * 64,
         received_at=photo_received,
         duplicate_of_photo_id=original.id,

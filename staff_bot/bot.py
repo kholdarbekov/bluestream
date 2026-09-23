@@ -121,6 +121,7 @@ from staff_bot.handlers.sales.visit import (
     V_NOTES,
     V_CONFIRM,
     V_CLOSE,
+    V_PHOTO,
 )
 from staff_bot.handlers.sales.tryout import (
     TryoutFromFieldHandler,
@@ -1639,10 +1640,11 @@ class StaffBot:
                 # 📷 A photo is accepted at EVERY step (D17), so both handlers
                 # are registered in every state rather than at the top level:
                 # only a state handler can keep the agent where they are, and
-                # both return None, which PTB reads as "state unchanged". The
-                # pair sits directly under `menu_escape` in each state -- a
-                # photo is neither text nor a location, so it collides with
-                # nothing below it.
+                # both return None, which PTB reads as "state unchanged" --
+                # except in V_PHOTO, where a filed photo IS the answer and the
+                # visit moves on to the shelf (D26). The pair sits directly
+                # under `menu_escape` in each state -- a photo is neither text
+                # nor a location, so it collides with nothing below it.
                 V_CHECKIN: [
                     menu_escape,
                     MessageHandler(filters.PHOTO, visit_handler.receive_photo),
@@ -1652,10 +1654,20 @@ class StaffBot:
                     CallbackQueryHandler(visit_handler.resume_from_conflict, pattern="^staff_sales_v_resume$"),
                     CallbackQueryHandler(visit_handler.abandon, pattern="^staff_sales_v_abandon$"),
                 ],
+                # D26: the one-time photo prompt after check-in at a shop or an office.
+                V_PHOTO: [
+                    menu_escape,
+                    MessageHandler(filters.PHOTO, visit_handler.receive_photo),
+                    CallbackQueryHandler(visit_handler.choose_photo_kind, pattern=r"^staff_sales_v_photo_\w+$"),
+                    CallbackQueryHandler(visit_handler.skip_photo, pattern="^staff_sales_v_photoskip$"),
+                    CallbackQueryHandler(visit_handler.abandon, pattern="^staff_sales_v_abandon$"),
+                ],
                 V_STOCK: [
                     menu_escape,
                     MessageHandler(filters.PHOTO, visit_handler.receive_photo),
                     CallbackQueryHandler(visit_handler.choose_photo_kind, pattern=r"^staff_sales_v_photo_\w+$"),
+                    # Backstop: the prompt's leftover Skip, if clearing it failed (see `skip_photo`).
+                    CallbackQueryHandler(visit_handler.skip_photo, pattern="^staff_sales_v_photoskip$"),
                     CallbackQueryHandler(visit_handler.open_product, pattern=r"^staff_sales_v_stock_\d+$"),
                     CallbackQueryHandler(visit_handler.stock_done, pattern="^staff_sales_v_stockdone$"),
                     CallbackQueryHandler(visit_handler.stock_retry, pattern="^staff_sales_v_stockretry$"),

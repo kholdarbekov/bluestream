@@ -25,6 +25,7 @@ from business_app import db
 from business_app.models.base import TimestampMixin
 from business_app.utils.geo_validation import register_delivery_zone_listeners
 from business_app.utils.timezone_utils import get_utc_now
+from shared.enums import EntitySubtype
 
 OUTLET_TYPES = ("grocery_store", "workplace", "individual")
 OUTLET_STAGES = ("prospect", "trial", "activation_requested", "active", "at_risk", "dormant", "lost")
@@ -43,6 +44,20 @@ LOST_REASONS = (
     "other",
 )
 EMPLOYMENT_TYPES = ("employee", "contractor")
+
+# The two ways an outlet settles. `OutletService.update` refuses anything else, and the admin edit
+# form's options are pinned to this tuple.
+PAYMENT_TERMS = ("cash", "business_account")
+
+# The outlet types that become an ENTITY customer account on approval, and the subtype each
+# becomes. Moved here from outlet_service.py (D28) so the model can answer `is_business_outlet`:
+# `serialize_visit` reads it, and outlet_service imports the serializers, so a service-level home
+# would be an import cycle.
+ENTITY_SUBTYPE_BY_OUTLET_TYPE = {
+    "grocery_store": EntitySubtype.GROCERY_STORE,
+    "workplace": EntitySubtype.WORKPLACE,
+}
+BUSINESS_OUTLET_TYPES = tuple(ENTITY_SUBTYPE_BY_OUTLET_TYPE)
 
 
 def _quoted(values):
@@ -123,7 +138,6 @@ class Outlet(db.Model, TimestampMixin):
     legal_form = Column(String(30), nullable=True)
     tax_id = Column(String(20), nullable=True)
     preferred_language = Column(String(5), nullable=False, default="uz")
-    storefront_photo_path = Column(String(500), nullable=True)
     competitor_note = Column(Text, nullable=True)
     status_warning = Column(Text, nullable=True)
     dedupe_candidates = Column(JSON, nullable=False, default=list)
@@ -151,6 +165,11 @@ class Outlet(db.Model, TimestampMixin):
             if contact.is_primary:
                 return contact
         return self.contacts[0] if self.contacts else None
+
+    @property
+    def is_business_outlet(self) -> bool:
+        """D28: a shop or an office -- the visits the staff bot asks for a photo at (D26)."""
+        return self.outlet_type in BUSINESS_OUTLET_TYPES
 
     def __repr__(self):
         return f"<Outlet {self.id} {self.name!r} {self.stage}>"

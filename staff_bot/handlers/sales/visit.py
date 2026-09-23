@@ -14,11 +14,12 @@ Nothing here re-derives a backend rule. `distance_m` and `in_radius` are read,
 never measured; `suggested_qty` and `rate_per_day` are printed, never
 computed; the geofence radius is not a constant this file knows.
 """
+import hashlib
 import logging
 from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
-from telegram import Update
+from telegram import Message, Update
 from telegram.error import TelegramError
 from telegram.ext import ContextTypes, ConversationHandler
 
@@ -44,6 +45,9 @@ from staff_bot.utils.formatters import escape_html, format_currency, format_loca
 logger = logging.getLogger(__name__)
 
 V_CHECKIN, V_STOCK, V_STOCK_QTY, V_ORDER, V_ORDER_EDIT, V_PAYMENT, V_DAY, V_NOTES, V_CONFIRM, V_CLOSE = range(310, 320)
+# D26: the one-time photo prompt after check-in. Outside 310-319, which is full; 320-321 are
+# Nearby and 322-325 the field try-out.
+V_PHOTO = 326
 FLOW_KEY = flow_state.SALES_VISIT_FLOW_KEY
 
 # The suffixes each screen accepts. The registered patterns are `\w+` / `\d+`
@@ -103,7 +107,7 @@ class VisitHandler(SalesHubHandler):
     async def _flow(self, update, context) -> Optional[Dict]:
         return await self._require_flow(update, context, FLOW_KEY)
 
-    async def _say(self, update: Update, text: str, keyboard=None, *, force_new: bool = False) -> None:
+    async def _say(self, update: Update, text: str, keyboard=None, *, force_new: bool = False) -> Optional[Message]:
         """Edit the screen the agent is looking at, or send a new message.
 
         Through `_safe_callback_answer`, never a bare `answer()` -- the
@@ -118,13 +122,15 @@ class VisitHandler(SalesHubHandler):
         order receipt the close prompt follows, the reply keyboard handed back
         after a check-in), and every one of those paths has already answered
         its callback. Answering twice there is the same rejection again.
+
+        Returns the message it sent or edited, for the one screen that has to
+        be found again later (the D26 photo prompt).
         """
         query = update.callback_query
         if query and not force_new:
             await self._safe_callback_answer(query, None, show_alert=False)
-            await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
-            return
-        await update.effective_message.reply_text(
+            return await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
+        return await update.effective_message.reply_text(
             text, reply_markup=keyboard, parse_mode='HTML', disable_notification=True
         )
 
@@ -627,16 +633,41 @@ class VisitHandler(SalesHubHandler):
         )
         return V_CHECKIN
 
-    async def _after_checkin(self, update, context, flow: Dict, language: str, result: str) -> int:
-        """Hand the main menu back, then draw the shelf screen.
+    async def _after_checkin(self, update, context, flow: Dict, language: str, result: str, visit: Dict) -> int:
+        """Hand the main menu back, then ask for a photo (D26) or draw the shelf screen.
 
         The location request replaced the agent's main menu with a one-shot
         prompt keyboard (the `_after_pin` shape in new_outlet.py): one message
         restores the menu and reports the result, the next draws the screen,
-        because a message can carry only one keyboard.
+        because a message can carry only one keyboard. `photo_requested` is the
+        backend's answer; the bot never decides which outlets are asked.
         """
         await self._say(update, result, self._main_menu(context, language), force_new=True)
+        if visit.get('photo_requested'):
+            return await self._render_photo_request(update, flow, language)
         return await self._render_stock(update, context, flow, language, edit=False)
+
+    async def _render_photo_request(self, update, flow: Dict, language: str) -> int:
+        """D26: ask once, right after check-in, at a shop or an office.
+
+        Bot-local: the server's step is already `stock`, so a restart or a second
+        device resumes on the shelf and never asks twice. `photo_prompt` marks
+        that the kind picker, once answered, leads on to the shelf.
+        """
+        flow['photo_prompt'] = True
+        prompt = await self._say(
+            update,
+            '\n'.join(line for line in (
+                self._header(flow),
+                f"📷 {i18n.get('staff.sales.visit.photo_request', language)}",
+            ) if line),
+            SalesKeyboards.photo_request(language),
+            force_new=True,
+        )
+        # A photo answers the prompt with a NEW shelf message, so this one is
+        # not replaced and has to be found by id to lose its buttons.
+        flow['photo_prompt_message_id'] = getattr(prompt, 'message_id', None)
+        return V_PHOTO
 
     # ---- entry -------------------------------------------------------------------
     @require_auth
@@ -776,6 +807,7 @@ class VisitHandler(SalesHubHandler):
         return await self._after_checkin(
             update, context, flow, language,
             f"{mark} {i18n.get(key, language, distance=shown)}",
+            visit,
         )
 
     @require_auth
@@ -807,6 +839,7 @@ class VisitHandler(SalesHubHandler):
         return await self._after_checkin(
             update, context, flow, language,
             f"⏭ {i18n.get('staff.sales.visit.checkin_skipped', language)}",
+            visit,
         )
 
     # ---- the shelf ---------------------------------------------------------------
@@ -1970,10 +2003,10 @@ class VisitHandler(SalesHubHandler):
         step screen the agent is standing on keeps its buttons and its place.
         A picture is an annotation, never a move through the loop.
 
-        The BYTES are downloaded here and posted to the backend; the
-        `file_id` is never stored server-side (a bot-token rotation would
-        kill every stored reference), and `file_unique_id` rides along as the
-        secondary one (D17).
+        The bytes are downloaded here only to be fingerprinted, then dropped:
+        the backend keeps this bot's `file_id` and the SHA-256 (D27), and the
+        picture stays on Telegram. `file_unique_id` rides along as the stable
+        reference.
 
         A BURST queues. Telegram delivers a media group as separate updates,
         and one picker per photo would leave two dead keyboards behind and
@@ -2023,12 +2056,11 @@ class VisitHandler(SalesHubHandler):
             return None
         queue = flow.setdefault('pending_photo', [])
         queue.append({
-            'bytes': bytes(payload),
-            # The extension is not decoration: `FileStorageService.
-            # _validate_file` checks it, and a Telegram download has no name
-            # of its own -- a suffix-less part is a 400 for a good JPEG.
-            'filename': f"visit_{visit_id}_{size.file_unique_id}.jpg",
+            'file_id': size.file_id,
             'file_unique_id': size.file_unique_id,
+            # The digest, not the id, is what the duplicate rule compares: Telegram
+            # mints a new file id for every upload of the same picture.
+            'sha256': hashlib.sha256(bytes(payload)).hexdigest(),
         })
         if len(queue) > 1:
             # The picker drawn for the first photo of the burst is still on
@@ -2058,9 +2090,8 @@ class VisitHandler(SalesHubHandler):
         the way to a login screen, and the agent's only recovery would be to
         photograph the shelf again.
 
-        `is_duplicate` is read, never computed -- the SHA-256 is taken
-        server-side over the ORIGINAL bytes, before any resize, and scoped to
-        this agent (D17).
+        `is_duplicate` is read, never computed -- the backend compares this
+        agent's digests (D27).
         """
         language = await self._get_language(update, context)
         flow = await self._flow(update, context)
@@ -2095,8 +2126,7 @@ class VisitHandler(SalesHubHandler):
         async with api_client as client:
             for item in queue:
                 response = await client.sales_add_photo(
-                    token, visit_id, item['bytes'], item['filename'], kind,
-                    item['file_unique_id'],
+                    token, visit_id, item['file_id'], item['file_unique_id'], item['sha256'], kind,
                 )
                 if not response.success:
                     failure = response
@@ -2116,29 +2146,58 @@ class VisitHandler(SalesHubHandler):
             # staying would park the agent on a screen whose every button posts
             # to a visit that is over, with no draft behind any of them.
             gone = self._visit_is_gone(context, failure)
-            if getattr(failure, 'status_code', None) == 413:
-                # Flask refuses an oversize body BEFORE the route runs
-                # (`MAX_CONTENT_LENGTH`), so this answer carries no JSON and
-                # therefore no `error_code`: `_resolve_api_error_message`
-                # would fall back to the generic "Something went wrong" for
-                # the one failure the agent can actually act on. Same verdict
-                # as `SALES_PHOTO_INVALID` -- this file cannot be stored --
-                # so it gets the same sentence. Decided here rather than in
-                # `API_ERROR_CODE_KEY_MAP`, which keys on a CODE a 413 has
-                # none of.
-                reason = i18n.get('staff.sales.error.photo_invalid', language)
-            else:
-                reason = self._resolve_api_error_message(
-                    language,
-                    error=getattr(failure, 'error', None),
-                    status_code=getattr(failure, 'status_code', None),
-                    error_code=getattr(failure, 'error_code', None),
-                )
+            reason = self._resolve_api_error_message(
+                language,
+                error=getattr(failure, 'error', None),
+                status_code=getattr(failure, 'status_code', None),
+                error_code=getattr(failure, 'error_code', None),
+            )
             lines.append(f"⚠️ {reason}")
         await self._say(update, '\n'.join(line for line in lines if line))
         if gone:
             return ConversationHandler.END
+        if saved and flow.pop('photo_prompt', False):
+            # D26: the prompt has its answer; the visit moves on to the shelf.
+            # Its Skip goes first: left live above the shelf, a tap on it from a
+            # later step reaches `stale_tap`, which re-seeds the draft and drops
+            # the counts or the basket not yet sent.
+            prompt_id = flow.pop('photo_prompt_message_id', None)
+            if prompt_id:
+                try:
+                    await context.bot.edit_message_reply_markup(
+                        chat_id=update.effective_chat.id, message_id=prompt_id, reply_markup=None,
+                    )
+                except TelegramError as error:
+                    logger.debug("Could not clear the photo prompt keyboard: %s", error)
+            return await self._render_stock(update, context, flow, language, edit=False)
         return None
+
+    @require_auth
+    @require_sales_agent
+    async def skip_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """⏭ on the one-time photo prompt (D26): straight on to the shelf.
+
+        Also registered on the shelf screen, where it can only be the prompt's
+        LEFTOVER button -- a photo already answered the prompt and moved the visit
+        on, and `choose_photo_kind` failed to clear it. There it clears its own
+        keyboard and nothing else: unregistered, the tap would reach `stale_tap`,
+        which re-reads the visit and drops shelf counts the agent has typed but
+        not yet sent.
+        """
+        language = await self._get_language(update, context)
+        flow = await self._flow(update, context)
+        if flow is None:
+            return ConversationHandler.END
+        if not flow.pop('photo_prompt', False):
+            await self._ack(update, V_STOCK)
+            try:
+                await update.callback_query.edit_message_reply_markup(reply_markup=None)
+            except TelegramError as error:
+                logger.debug("Could not clear the photo prompt keyboard: %s", error)
+            return V_STOCK
+        # The shelf is drawn over the prompt itself, so there is no keyboard left to find.
+        flow.pop('photo_prompt_message_id', None)
+        return await self._render_stock(update, context, flow, language)
 
     # ---- leaving -----------------------------------------------------------------
     @require_auth

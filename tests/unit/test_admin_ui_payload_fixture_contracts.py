@@ -47,6 +47,7 @@ OUTLETS_TEST = REPO_ROOT / "admin_ui/src/__tests__/pages/Outlets.test.js"
 OUTLETS_PAGE = REPO_ROOT / "admin_ui/src/pages/Outlets.js"
 VISITS_TEST = REPO_ROOT / "admin_ui/src/__tests__/pages/Visits.test.js"
 VISITS_PAGE = REPO_ROOT / "admin_ui/src/pages/Visits.js"
+OUTLET_VOCABULARY = REPO_ROOT / "admin_ui/src/components/sales/outletVocabulary.js"
 ANALYTICS_PAGE = REPO_ROOT / "admin_ui/src/pages/Analytics.js"
 ANALYTICS_AGENT_TEST = REPO_ROOT / "admin_ui/src/__tests__/pages/Analytics.agentPerformance.test.js"
 
@@ -422,7 +423,8 @@ def test_visits_row_fixture_matches_serialize_visit_admin_row(app, db):
 
 
 def test_outlets_page_mirrors_the_backend_enumerations():
-    """`Outlets.js` hand-copies four tuples out of `business_app/models/sales.py`.
+    """`Outlets.js` and `components/sales/outletVocabulary.js` hand-copy tuples out of
+    `business_app/models/sales.py`.
 
     Nothing else can catch them drifting. The stage/type/class/lost-reason values are CHECK
     constraints and validator whitelists on the backend, so a value added there is simply missing
@@ -439,7 +441,6 @@ def test_outlets_page_mirrors_the_backend_enumerations():
     for js_name, live in (
         ("STAGES", OUTLET_STAGES),
         ("OUTLET_TYPES", OUTLET_TYPES),
-        ("OUTLET_CLASSES", OUTLET_CLASSES),
         ("LOST_REASONS", LOST_REASONS),
     ):
         assert _declared_array(OUTLETS_PAGE, js_name) == list(live), (
@@ -447,6 +448,19 @@ def test_outlets_page_mirrors_the_backend_enumerations():
             f"business_app/models/sales.py. Update the JS array — a stage the backend accepts but "
             f"the page never offers is invisible, and one the page offers but the backend rejects "
             f"400s only when an admin picks it."
+        )
+
+    # D29/D30: the Edit form and the Contacts tab read three more hand-copies, from one module.
+    from business_app.models.sales import CONTACT_ROLES, PAYMENT_TERMS
+
+    for js_name, live in (
+        ("OUTLET_CLASSES", OUTLET_CLASSES),
+        ("PAYMENT_TERMS", PAYMENT_TERMS),
+        ("CONTACT_ROLES", CONTACT_ROLES),
+    ):
+        assert _declared_array(OUTLET_VOCABULARY, js_name) == list(live), (
+            f"\n{js_name} in admin_ui/src/components/sales/outletVocabulary.js no longer mirrors "
+            "business_app/models/sales.py."
         )
 
     # The *Visits* page's outcome filter is the same class of hand-copy, in a second file.

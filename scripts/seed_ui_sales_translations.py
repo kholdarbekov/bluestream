@@ -8,7 +8,8 @@ scripts/seed_backend_translations.py (that script stores dotted `ui.*` keys in
 the shared `ui` category).
 
 English values here MUST equal the inline `t(key, 'default')` strings in
-admin_ui/src/pages/SalesAgents.js and admin_ui/src/pages/Outlets.js exactly.
+admin_ui/src/pages/SalesAgents.js, admin_ui/src/pages/Outlets.js and
+admin_ui/src/components/sales/ exactly.
 A mismatch is silent: the seeded text wins in every language, so an English
 session shows one wording and the source another. The one carve-out is
 `employment_*`, whose call site passes the raw enum value as its default
@@ -28,6 +29,10 @@ literal default:
   whose default is the raw feed type. Same carve-out as `employment_*`: the English rows
   here are the intended labels and deliberately differ from that default. All seven of
   `ExceptionFeedService.EXCEPTION_TYPES` are present.
+- `outlets.payment_terms.*`, `contacts.role.*`, `photos.kind.*` — the same raw-value default,
+  in admin_ui/src/components/sales/ (OutletEditModal, OutletContactsTab, VisitPhotoThumb), over
+  `PAYMENT_TERMS`, `CONTACT_ROLES` (business_app/models/sales.py) and `PHOTO_KINDS`
+  (business_app/models/sales_visits.py). Same carve-out: the English rows are the labels.
 A missing key in either family degrades to the English default, not to a
 visible raw key, so a partial seed fails silently.
 
@@ -158,7 +163,6 @@ UI_SALES_TRANSLATIONS = {
         "agents.orders_today": "Orders today",
         # --- Outlets page: the outlet's standing delivery window (C24) ---
         "outlets.delivery_window.label": "Delivery window",
-        "outlets.delivery_window.edit": "Edit delivery window",
         "outlets.delivery_window.start": "From",
         "outlets.delivery_window.end": "Until",
         "outlets.delivery_window.help": (
@@ -166,6 +170,42 @@ UI_SALES_TRANSLATIONS = {
             " Clear both fields to remove it."
         ),
         "outlets.delivery_window.invalid": "Set both the start and the end, or clear both.",
+        # --- Outlets drawer: the Edit form, the Contacts tab and the Photos tab (D27/D29/D30) ---
+        "outlets.edit": "Edit",
+        "outlets.edit_title": "Edit outlet",
+        "outlets.fields.channel": "Channel",
+        "outlets.fields.cadence_days_override": "Visit every (days)",
+        "outlets.fields.cadence_help": "Leave empty to use the class default.",
+        "outlets.fields.preferred_visit_window": "Best time to visit",
+        "outlets.fields.payment_terms": "Payment terms",
+        "outlets.fields.preferred_language": "Language",
+        "outlets.fields.legal_form": "Legal form",
+        "outlets.fields.tax_id": "Tax ID (INN)",
+        "outlets.fields.competitor_note": "Competitor note",
+        "outlets.fields.status_warning": "Warning for staff",
+        "outlets.payment_terms.cash": "Cash",
+        "outlets.payment_terms.business_account": "Business account",
+        "contacts.add": "Add contact",
+        "contacts.edit": "Edit",
+        "contacts.edit_title": "Edit contact",
+        "contacts.delete": "Delete",
+        "contacts.delete_confirm": "Delete this contact?",
+        "contacts.make_primary": "Make primary",
+        "contacts.primary": "Primary",
+        "contacts.presence_window": "When available",
+        "contacts.saved": "Contact saved",
+        "contacts.deleted": "Contact deleted",
+        "contacts.role.owner": "Owner",
+        "contacts.role.decision_maker": "Decision maker",
+        "contacts.role.receiver": "Receives deliveries",
+        "contacts.role.payer": "Pays",
+        "photos.tab": "Photos",
+        "photos.empty": "No photos yet",
+        "photos.unavailable": "Photo unavailable",
+        "photos.duplicate": "Duplicate",
+        "photos.kind.storefront": "Storefront",
+        "photos.kind.shelf": "Shelf",
+        "photos.kind.other": "Other",
         # --- Visits page (admin *Visits* page + the Outlets drawer's Visits tab) ---
         "visits.title": "Visits",
         "visits.tab_visits": "Visits",
@@ -175,12 +215,15 @@ UI_SALES_TRANSLATIONS = {
         "visits.columns.checkin": "Check-in",
         "visits.columns.order": "Order",
         "visits.columns.detail": "Detail",
+        "visits.columns.photos": "Photos",
         "visits.planned_yes": "Planned",
         "visits.planned_no": "Unplanned",
         "visits.checkin_skipped": "Skipped",
         "visits.checkin_unmeasured": "Not measured",
         "visits.filters.in_radius_true": "In radius",
         "visits.filters.in_radius_false": "Out of range",
+        "visits.filters.photo": "Photo",
+        "visits.filters.photo_missing": "No photo",
         "visits.filters.type": "Exception type",
         "visits.map_caption": "The map shows the check-ins on this page of the table only.",
         "visits.exceptions_caption": (
@@ -318,7 +361,6 @@ UI_SALES_TRANSLATIONS = {
         "agents.visits_today": "Bugungi tashriflar",
         "agents.orders_today": "Bugungi buyurtmalar",
         "outlets.delivery_window.label": "Yetkazish oynasi",
-        "outlets.delivery_window.edit": "Yetkazish oynasini tahrirlash",
         "outlets.delivery_window.start": "Dan",
         "outlets.delivery_window.end": "Gacha",
         "outlets.delivery_window.help": (
@@ -326,6 +368,42 @@ UI_SALES_TRANSLATIONS = {
             " Olib tashlash uchun ikkala maydonni tozalang."
         ),
         "outlets.delivery_window.invalid": "Boshlanish va tugash vaqtini birga kiriting yoki ikkalasini tozalang.",
+        # --- Outlets drawer: the Edit form, the Contacts tab and the Photos tab (D27/D29/D30) ---
+        "outlets.edit": "Tahrirlash",
+        "outlets.edit_title": "Nuqtani tahrirlash",
+        "outlets.fields.channel": "Kanal",
+        "outlets.fields.cadence_days_override": "Tashrif oralig'i (kun)",
+        "outlets.fields.cadence_help": "Bo'sh qoldirilsa, toifa bo'yicha oraliq ishlatiladi.",
+        "outlets.fields.preferred_visit_window": "Tashrif uchun qulay vaqt",
+        "outlets.fields.payment_terms": "To'lov shartlari",
+        "outlets.fields.preferred_language": "Til",
+        "outlets.fields.legal_form": "Tashkiliy-huquqiy shakl",
+        "outlets.fields.tax_id": "STIR (INN)",
+        "outlets.fields.competitor_note": "Raqobatchi haqida izoh",
+        "outlets.fields.status_warning": "Xodimlar uchun ogohlantirish",
+        "outlets.payment_terms.cash": "Naqd",
+        "outlets.payment_terms.business_account": "Korporativ hisob",
+        "contacts.add": "Kontakt qo'shish",
+        "contacts.edit": "Tahrirlash",
+        "contacts.edit_title": "Kontaktni tahrirlash",
+        "contacts.delete": "O'chirish",
+        "contacts.delete_confirm": "Bu kontakt o'chirilsinmi?",
+        "contacts.make_primary": "Asosiy qilish",
+        "contacts.primary": "Asosiy",
+        "contacts.presence_window": "Qachon bo'ladi",
+        "contacts.saved": "Kontakt saqlandi",
+        "contacts.deleted": "Kontakt o'chirildi",
+        "contacts.role.owner": "Egasi",
+        "contacts.role.decision_maker": "Qaror qabul qiluvchi",
+        "contacts.role.receiver": "Yetkazmani qabul qiladi",
+        "contacts.role.payer": "To'lovchi",
+        "photos.tab": "Suratlar",
+        "photos.empty": "Hali suratlar yo'q",
+        "photos.unavailable": "Surat mavjud emas",
+        "photos.duplicate": "Takroriy",
+        "photos.kind.storefront": "Do'kon peshtoqi",
+        "photos.kind.shelf": "Javon",
+        "photos.kind.other": "Boshqa",
         # --- Visits page (admin *Visits* page + the Outlets drawer's Visits tab) ---
         "visits.title": "Tashriflar",
         "visits.tab_visits": "Tashriflar",
@@ -335,12 +413,15 @@ UI_SALES_TRANSLATIONS = {
         "visits.columns.checkin": "Belgilanish",
         "visits.columns.order": "Buyurtma",
         "visits.columns.detail": "Tafsilot",
+        "visits.columns.photos": "Suratlar",
         "visits.planned_yes": "Rejalashtirilgan",
         "visits.planned_no": "Rejadan tashqari",
         "visits.checkin_skipped": "O'tkazib yuborilgan",
         "visits.checkin_unmeasured": "O'lchanmagan",
         "visits.filters.in_radius_true": "Radius ichida",
         "visits.filters.in_radius_false": "Radius tashqarisida",
+        "visits.filters.photo": "Surat",
+        "visits.filters.photo_missing": "Suratsiz",
         "visits.filters.type": "Chetlanish turi",
         "visits.map_caption": "Xaritada jadvalning faqat shu sahifasidagi belgilanishlar ko'rsatiladi.",
         "visits.exceptions_caption": (
@@ -478,7 +559,6 @@ UI_SALES_TRANSLATIONS = {
         "agents.visits_today": "Визиты сегодня",
         "agents.orders_today": "Заказы сегодня",
         "outlets.delivery_window.label": "Окно доставки",
-        "outlets.delivery_window.edit": "Изменить окно доставки",
         "outlets.delivery_window.start": "С",
         "outlets.delivery_window.end": "До",
         "outlets.delivery_window.help": (
@@ -486,6 +566,42 @@ UI_SALES_TRANSLATIONS = {
             " Очистите оба поля, чтобы убрать его."
         ),
         "outlets.delivery_window.invalid": "Укажите и начало, и конец либо очистите оба поля.",
+        # --- Outlets drawer: the Edit form, the Contacts tab and the Photos tab (D27/D29/D30) ---
+        "outlets.edit": "Изменить",
+        "outlets.edit_title": "Изменить точку",
+        "outlets.fields.channel": "Канал",
+        "outlets.fields.cadence_days_override": "Посещать каждые (дней)",
+        "outlets.fields.cadence_help": "Оставьте пустым, чтобы использовать интервал по классу.",
+        "outlets.fields.preferred_visit_window": "Удобное время визита",
+        "outlets.fields.payment_terms": "Условия оплаты",
+        "outlets.fields.preferred_language": "Язык",
+        "outlets.fields.legal_form": "Организационно-правовая форма",
+        "outlets.fields.tax_id": "ИНН",
+        "outlets.fields.competitor_note": "Заметка о конкуренте",
+        "outlets.fields.status_warning": "Предупреждение для сотрудников",
+        "outlets.payment_terms.cash": "Наличные",
+        "outlets.payment_terms.business_account": "Корпоративный счёт",
+        "contacts.add": "Добавить контакт",
+        "contacts.edit": "Изменить",
+        "contacts.edit_title": "Изменить контакт",
+        "contacts.delete": "Удалить",
+        "contacts.delete_confirm": "Удалить этот контакт?",
+        "contacts.make_primary": "Сделать основным",
+        "contacts.primary": "Основной",
+        "contacts.presence_window": "Когда на месте",
+        "contacts.saved": "Контакт сохранён",
+        "contacts.deleted": "Контакт удалён",
+        "contacts.role.owner": "Владелец",
+        "contacts.role.decision_maker": "Принимает решения",
+        "contacts.role.receiver": "Принимает доставку",
+        "contacts.role.payer": "Оплачивает",
+        "photos.tab": "Фото",
+        "photos.empty": "Фото пока нет",
+        "photos.unavailable": "Фото недоступно",
+        "photos.duplicate": "Повтор",
+        "photos.kind.storefront": "Витрина",
+        "photos.kind.shelf": "Полка",
+        "photos.kind.other": "Другое",
         # --- Visits page (admin *Visits* page + the Outlets drawer's Visits tab) ---
         "visits.title": "Визиты",
         "visits.tab_visits": "Визиты",
@@ -495,12 +611,15 @@ UI_SALES_TRANSLATIONS = {
         "visits.columns.checkin": "Отметка",
         "visits.columns.order": "Заказ",
         "visits.columns.detail": "Детали",
+        "visits.columns.photos": "Фото",
         "visits.planned_yes": "Плановый",
         "visits.planned_no": "Внеплановый",
         "visits.checkin_skipped": "Пропущена",
         "visits.checkin_unmeasured": "Не измерено",
         "visits.filters.in_radius_true": "В радиусе",
         "visits.filters.in_radius_false": "Вне радиуса",
+        "visits.filters.photo": "Фото",
+        "visits.filters.photo_missing": "Без фото",
         "visits.filters.type": "Тип отклонения",
         "visits.map_caption": "На карте показаны отметки только с этой страницы таблицы.",
         "visits.exceptions_caption": (

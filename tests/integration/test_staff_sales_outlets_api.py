@@ -956,3 +956,24 @@ def test_marking_a_junk_branch_lost_takes_the_real_shop_out_of_branch_mode(
     assert after.status_code == 200, after.get_data(as_text=True)
     body = after.get_json()["data"]["outlet"]
     assert (body["account_name"], body["branch_count"], body["is_branch"]) == ("Bahor", 1, False)
+
+
+def test_an_agents_class_change_moves_the_due_date_too(client, app, db, sales_agent_user, sales_agent_auth_headers):
+    """D29 applies to the agent's PUT as well: it is one service method."""
+    from datetime import UTC, datetime, timedelta
+
+    from business_app.models.sales import Outlet
+
+    last_visit = datetime(2026, 9, 1, 6, 0, tzinfo=UTC)
+    outlet = Outlet(
+        name="Bahor market", outlet_type="grocery_store", stage="active", outlet_class="C",
+        district="chilanzar", assigned_agent_user_id=sales_agent_user.id, last_visit_at=last_visit,
+    )
+    db.session.add(outlet)
+    db.session.commit()
+
+    moved = client.put(f"{OUTLETS}/{outlet.id}", json={"class": "B"}, headers=sales_agent_auth_headers)
+
+    assert moved.status_code == 200, moved.get_data(as_text=True)
+    due = datetime.fromisoformat(moved.get_json()["data"]["outlet"]["next_visit_due_at"])
+    assert due == last_visit + timedelta(days=app.config["SALES_CADENCE_DAYS_B"])

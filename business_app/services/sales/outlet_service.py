@@ -17,10 +17,12 @@ from sqlalchemy import and_, or_
 from business_app import db
 from business_app.models.sales import (
     CONTACT_ROLES,
+    ENTITY_SUBTYPE_BY_OUTLET_TYPE,
     LOST_REASONS,
     OUTLET_CLASSES,
     OUTLET_STAGES,
     OUTLET_TYPES,
+    PAYMENT_TERMS,
     Outlet,
     OutletContact,
     OutletStageHistory,
@@ -61,10 +63,6 @@ INTERVAL_SAMPLE_SIZE = 5
 MIN_INTERVAL_DAYS = 7
 
 _SECONDS_PER_DAY = 86400.0
-ENTITY_SUBTYPE_BY_OUTLET_TYPE = {
-    "grocery_store": EntitySubtype.GROCERY_STORE,
-    "workplace": EntitySubtype.WORKPLACE,
-}
 
 
 def _norm(text: Optional[str]) -> str:
@@ -627,6 +625,52 @@ class OutletService:
         db.session.commit()
         return contact
 
+    @staticmethod
+    def get_contact(outlet: Outlet, contact_id: int) -> OutletContact:
+        contact = OutletContact.query.filter_by(id=contact_id, outlet_id=outlet.id).first()
+        if contact is None:
+            raise NotFoundError("Contact not found", error_code="SALES_CONTACT_NOT_FOUND")
+        return contact
+
+    @staticmethod
+    def update_contact(outlet: Outlet, contact: OutletContact, payload: Dict[str, Any]) -> OutletContact:
+        """Edit one contact (D30). Normalised by `_contact_fields`, exactly as a new one is.
+
+        Never touches the linked customer account: the contacts are the agent's address book,
+        and the customer's phone is their login. Before approval, `account_candidate` follows the
+        primary phone on its own -- it is read from the contacts on every card.
+        """
+        if payload.get("is_primary") is False and contact.is_primary:
+            raise ValidationError(
+                "An outlet keeps one primary contact; make another contact primary instead",
+                error_code="SALES_CONTACT_PRIMARY_REQUIRED",
+            )
+        merged = {
+            key: payload[key] if key in payload else getattr(contact, key)
+            for key in ("name", "phone", "role", "presence_window")
+        }
+        fields = OutletService._contact_fields(merged, outlet.name)
+        if fields is None:
+            raise ValidationError("Contact needs a name or a phone", error_code="SALES_CONTACT_PHONE_INVALID")
+        for key, value in fields.items():
+            setattr(contact, key, value)
+        if payload.get("is_primary"):
+            for other in outlet.contacts:
+                other.is_primary = other.id == contact.id
+        db.session.commit()
+        return contact
+
+    @staticmethod
+    def delete_contact(outlet: Outlet, contact: OutletContact) -> None:
+        """Remove one contact (D30). Deleting the primary promotes the OLDEST remaining contact
+        (`outlet.contacts` is ordered by id). The last one may go too; activation then refuses with
+        SALES_ACTIVATION_PHONE_REQUIRED, the rule that already guards a phoneless outlet."""
+        was_primary = contact.is_primary
+        outlet.contacts.remove(contact)  # delete-orphan: the row goes with it
+        if was_primary and outlet.contacts:
+            outlet.contacts[0].is_primary = True
+        db.session.commit()
+
     # ------------------------------------------------------------------ linking
     @staticmethod
     def _assert_linkable(outlet_type: str, user: User) -> None:
@@ -987,6 +1031,7 @@ class OutletService:
         # the instance, so a refusal raised further down left every one of those assignments
         # sitting on the session — and the next successful write committed the edit the server
         # had already answered 400 to (L50). Validating up here is what makes the refusal total.
+        cadence_before = (outlet.outlet_class, outlet.cadence_days_override)
         window = {}
         for key in ("delivery_window_start", "delivery_window_end"):
             if key in payload:
@@ -1049,11 +1094,20 @@ class OutletService:
         if "tax_id" in payload:
             outlet.tax_id = (payload["tax_id"] or "").strip().upper() or None
         if "payment_terms" in payload:
-            if payload["payment_terms"] not in ("cash", "business_account"):
+            if payload["payment_terms"] not in PAYMENT_TERMS:
                 raise ValidationError(
                     "payment_terms must be cash or business_account", error_code="SALES_PAYMENT_TERMS_INVALID"
                 )
             outlet.payment_terms = payload["payment_terms"]
+        # D29 (owner-confirmed): class and the override are the two inputs of `cadence_days`, so a
+        # change to either republishes the due date now rather than at the 01:00 job. The job's
+        # own stage gate, not `_set_stage`'s DUE_STAGES: the job republishes a prospect too, so a
+        # narrower gate here would only hold today's edit back until tonight.
+        from business_app.services.sales.replenishment_service import DUE_DATE_FROZEN_STAGES, ReplenishmentService
+
+        cadence_changed = (outlet.outlet_class, outlet.cadence_days_override) != cadence_before
+        if cadence_changed and outlet.stage not in DUE_DATE_FROZEN_STAGES:
+            ReplenishmentService.recompute_outlet(outlet)
         db.session.commit()
         return outlet
 

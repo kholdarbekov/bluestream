@@ -193,20 +193,19 @@ class OrderConfirmationRequest(db.Model, TimestampMixin):
 
 
 class VisitPhoto(db.Model, TimestampMixin):
-    """One photo taken at a visit, stored through FileStorageService (D17).
+    """One photo taken at a visit, kept on Telegram (D27, reversing D17).
 
-    `file_path` is a stored object, not a Telegram `file_id`: rotating the bot
-    token invalidates every `file_id` ever issued, which is how the support
-    inbox lost its media history. `telegram_file_unique_id` is kept only as a
-    secondary reference back to the message the photo arrived on.
+    We never store the picture: `telegram_file_id` is the STAFF bot's id for it, and the admin UI
+    streams it through `VisitService.stream_photo` on demand. A file id works only through the bot
+    that received it, so replacing the staff bot makes these rows unviewable -- an accepted
+    consequence (spec D27). `telegram_file_unique_id` is kept as the stable cross-bot reference.
 
-    `sha256` is the digest of the ORIGINAL bytes, taken before the storage
-    service resizes anything, so two uploads of one photograph hash alike
-    whatever the pipeline does to them. `duplicate_of_photo_id` points at the
-    earliest photo carrying that digest FOR THE SAME AGENT — the service owns
-    that lookup and publishes the answer as a field (`is_duplicate`); neither
-    bot nor admin UI re-decides it. The index on `sha256` is therefore a lookup
-    index and deliberately NOT unique: a repeat is recorded, never refused.
+    `sha256` is the digest of the bytes the bot downloaded into memory, so two uploads of one
+    photograph hash alike although Telegram gives each upload a new file id.
+    `duplicate_of_photo_id` points at the earliest photo carrying that digest FOR THE SAME AGENT --
+    the service owns that lookup and publishes the answer as a field (`is_duplicate`); neither bot
+    nor admin UI re-decides it. The index on `sha256` is therefore a lookup index and deliberately
+    NOT unique: a repeat is recorded, never refused.
     """
 
     __tablename__ = "visit_photos"
@@ -219,7 +218,7 @@ class VisitPhoto(db.Model, TimestampMixin):
     id = Column(Integer, primary_key=True)
     visit_id = Column(Integer, ForeignKey("visits.id", name="fk_visit_photos_visit_id"), nullable=False)
     kind = Column(String(20), nullable=False)
-    file_path = Column(String(500), nullable=False)
+    telegram_file_id = Column(String(255), nullable=False)
     sha256 = Column(String(64), nullable=False)
     telegram_file_unique_id = Column(String(100), nullable=True)
     received_at = Column(DateTime(timezone=True), nullable=False)

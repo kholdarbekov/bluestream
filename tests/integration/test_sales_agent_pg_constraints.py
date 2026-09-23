@@ -644,7 +644,7 @@ def _open_visit(pg_db, *, phone, outlet_name):
 def _photo(**kwargs):
     fields = {
         "kind": "storefront",
-        "file_path": "sales_visits/2026/09/photo.jpg",
+        "telegram_file_id": "AgACAgIAAxk-pg-photo",
         "sha256": "a" * 64,
         "received_at": datetime.now(UTC),
     }
@@ -669,6 +669,30 @@ def test_phase2b_table_and_column_exist(pg_db):
         ).scalars()
     )
     assert "outlet_id" in columns
+
+
+def test_visit_photos_carry_a_telegram_file_id_and_no_stored_path(pg_db):
+    """D27: a photo row is a Telegram reference. A NULL file id would be a photo nobody can open,
+    and the two dropped path columns must not linger as places a later change writes files to."""
+    columns = dict(
+        pg_db.session.execute(
+            text(
+                "SELECT column_name, is_nullable FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND table_name = 'visit_photos'"
+            )
+        ).all()
+    )
+    assert columns.get("telegram_file_id") == "NO"
+    assert "file_path" not in columns
+    outlet_columns = set(
+        pg_db.session.execute(
+            text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND table_name = 'outlets'"
+            )
+        ).scalars()
+    )
+    assert "storefront_photo_path" not in outlet_columns
 
 
 def test_visit_photos_accept_every_documented_kind_and_refuse_anything_else(pg_db):

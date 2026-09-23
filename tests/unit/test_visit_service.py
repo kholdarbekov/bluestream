@@ -43,10 +43,10 @@ NEAR_30M = (PIN[0] + 0.00027, PIN[1])
 FAR_700M = (PIN[0] + 0.00629, PIN[1])
 
 VISIT_KEYS = {
-    "id", "outlet_id", "agent_user_id", "status", "planned", "current_step", "started_at", "checkin_at",
-    "checkin_latitude", "checkin_longitude", "checkin_accuracy_m", "distance_m", "in_radius", "checkin_skipped",
-    "ended_at", "outcome", "no_order_reason", "dm_present", "notes", "next_visit_at", "order", "stock_checks",
-    "previous_stock",
+    "id", "outlet_id", "agent_user_id", "status", "planned", "photo_requested", "current_step", "started_at",
+    "checkin_at", "checkin_latitude", "checkin_longitude", "checkin_accuracy_m", "distance_m", "in_radius",
+    "checkin_skipped", "ended_at", "outcome", "no_order_reason", "dm_present", "notes", "next_visit_at", "order",
+    "stock_checks", "previous_stock",
 }
 STOCK_CHECK_KEYS = {
     "product_id", "product_name", "on_hand_qty", "empties_qty", "is_sold_out", "is_low",
@@ -54,7 +54,7 @@ STOCK_CHECK_KEYS = {
 }
 STOCK_CHECK_PRODUCT_KEYS = {"id", "name", "is_returnable_bottle", "min_order_quantity"}
 VISIT_PHOTO_KEYS = {
-    "id", "visit_id", "kind", "file_path", "sha256", "telegram_file_unique_id",
+    "id", "visit_id", "kind", "sha256", "telegram_file_unique_id",
     "received_at", "duplicate_of_photo_id", "is_duplicate",
 }
 
@@ -1070,13 +1070,13 @@ def test_serialize_visit_photo_publishes_the_duplicate_flag(db, outlet, sales_ag
     visit = VisitService.start(sales_agent_user.id, outlet.id)
     received = datetime(2026, 9, 15, 6, 30, tzinfo=UTC)
     original = VisitPhoto(
-        visit_id=visit.id, kind="storefront", file_path="sales_visits/9/a.jpg",
+        visit_id=visit.id, kind="storefront", telegram_file_id="AgAC-a",
         sha256="a" * 64, telegram_file_unique_id="AgADBAAD", received_at=received,
     )
     db.session.add(original)
     db.session.commit()
     copy = VisitPhoto(
-        visit_id=visit.id, kind="shelf", file_path="sales_visits/9/b.jpg",
+        visit_id=visit.id, kind="shelf", telegram_file_id="AgAC-b",
         sha256="a" * 64, received_at=received, duplicate_of_photo_id=original.id,
     )
     db.session.add(copy)
@@ -1091,6 +1091,6 @@ def test_serialize_visit_photo_publishes_the_duplicate_flag(db, outlet, sales_ag
     # `_iso`, not a raw isoformat: SQLite drops the tzinfo PostgreSQL keeps, and one field
     # with two wire formats is a parser the bot only ever exercises against the naive one.
     assert first["received_at"] == "2026-09-15T06:30:00+00:00"
-    assert (first["kind"], first["file_path"]) == ("storefront", "sales_visits/9/a.jpg")
+    assert first["kind"] == "storefront" and "telegram_file_id" not in first
     assert second["is_duplicate"] is True and second["duplicate_of_photo_id"] == original.id
     assert second["kind"] == "shelf" and second["sha256"] == "a" * 64

@@ -5,7 +5,6 @@ Handles SMS, Email, Telegram, and Push notifications
 
 import html
 import json
-import os
 import re
 import uuid
 from celery.utils.log import get_task_logger
@@ -46,6 +45,7 @@ from business_app.utils.constants import (
     NotificationStatus,
     Priority,
 )
+from business_app.utils.telegram_tokens import get_staff_bot_token
 from shared.enums import (
     DeliveryStatus,
     UserRole,
@@ -387,12 +387,7 @@ class NotificationService:
 
         # Telegram configuration
         self.telegram_bot_token = current_app.config.get("TELEGRAM_BOT_TOKEN")
-        self.staff_telegram_bot_token = (
-            current_app.config.get("STAFF_BOT_TOKEN")
-            or current_app.config.get("STAFF_TELEGRAM_BOT_TOKEN")
-            or os.environ.get("STAFF_BOT_TOKEN")
-            or os.environ.get("STAFF_TELEGRAM_BOT_TOKEN")
-        )
+        self.staff_telegram_bot_token = get_staff_bot_token()
 
         # Company information
         self.company_name = current_app.config.get("COMPANY_NAME", "Aqua Element")
@@ -2484,11 +2479,15 @@ class NotificationService:
 
             rows = db.session.query(LoyaltyPoints.user_id).distinct().all()
             candidate_ids = {row.user_id for row in rows}
-            eligible = {
-                user.id
-                for user in User.query.filter(User.id.in_(candidate_ids)).all()
-                if LoyaltyService.is_user_loyalty_eligible(user)
-            } if candidate_ids else set()
+            eligible = (
+                {
+                    user.id
+                    for user in User.query.filter(User.id.in_(candidate_ids)).all()
+                    if LoyaltyService.is_user_loyalty_eligible(user)
+                }
+                if candidate_ids
+                else set()
+            )
             return sorted(eligible)
 
         if campaign.target_audience == "custom_segment":

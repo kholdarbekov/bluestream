@@ -185,6 +185,11 @@ KEYS = (
     "staff.sales.visit.photo_saved", "staff.sales.visit.photo_duplicate",
     "staff.sales.visit.photo_failed", "staff.sales.visit.photo_forwarded",
     "staff.sales.error.photo_invalid",
+    # D26: the one-time photo prompt after check-in
+    # (tests/staff_bot/test_sales_visit_photo_prompt_journey.py). Its "never
+    # asked" cases assert the prompt is ABSENT, which a `humanise_key`
+    # rendering would satisfy vacuously.
+    "staff.sales.visit.photo_request", "staff.sales.visit.photo_skip",
     # Phase 3, Task 7: the agent's own KPI card (tests/staff_bot/
     # test_sales_stats_journey.py builds its table from this tuple). Written
     # out member by member rather than looped: the harness falls back to

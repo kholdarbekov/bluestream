@@ -1,6 +1,7 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { message } from 'antd';
 
 import Tryouts from '../../pages/Tryouts';
 import adminService from '../../services/adminService';
@@ -57,5 +58,19 @@ describe('Tryouts page', () => {
     expect(await screen.findByText('Try-outs')).toBeInTheDocument();
     expect(await screen.findByText('TRY-1001')).toBeInTheDocument();
     expect(screen.getAllByText('Actions').length).toBeGreaterThan(0);
+  });
+
+  it('a failed CSV export says so itself: a blob request gets no global toast', async () => {
+    const errorSpy = vi.spyOn(message, 'error');
+    tryoutService.exportTryouts.mockRejectedValue(Object.assign(new Error('Request failed with status code 500'), {
+      config: { responseType: 'blob' },
+      response: { status: 500 },
+    }));
+    render(<Tryouts />, { wrapper: createWrapper() });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Export CSV/ }));
+
+    await waitFor(() => expect(errorSpy).toHaveBeenCalledWith('An error occurred'));
+    errorSpy.mockRestore();
   });
 });

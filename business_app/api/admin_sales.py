@@ -10,16 +10,20 @@ from business_app.serializers.sales_serializers import (
     ApprovePayload,
     AssignPayload,
     BulkAssignPayload,
+    ContactPayload,
     CreateSalesAgentPayload,
     DateRangeQuery,
     MarkLostPayload,
     RejectPayload,
     SetActivePayload,
+    UpdateContactPayload,
     UpdateOutletPayload,
     UpdateSalesAgentPayload,
     serialize_agent_metrics,
     serialize_exception_row,
     serialize_outlet,
+    serialize_outlet_contact,
+    serialize_outlet_photo_row,
     serialize_plan_vs_fact_row,
     serialize_visit_admin_row,
 )
@@ -254,6 +258,41 @@ def update_outlet_admin(outlet_id):
     return success_response(data={"outlet": serialize_outlet(outlet)})
 
 
+@admin_sales_bp.route("/sales/outlets/<int:outlet_id>/contacts", methods=["POST"])
+@handle_api_exception
+@jwt_required()
+@manager_or_higher_required
+def add_outlet_contact_admin(outlet_id):
+    payload = _validated_payload(ContactPayload)
+    if not isinstance(payload, dict):
+        return payload
+    contact = OutletService.add_contact(OutletService.get(outlet_id), payload)
+    return success_response(data={"contact": serialize_outlet_contact(contact)}, status_code=201)
+
+
+@admin_sales_bp.route("/sales/outlets/<int:outlet_id>/contacts/<int:contact_id>", methods=["PUT"])
+@handle_api_exception
+@jwt_required()
+@manager_or_higher_required
+def update_outlet_contact_admin(outlet_id, contact_id):
+    payload = _validated_payload(UpdateContactPayload)
+    if not isinstance(payload, dict):
+        return payload
+    outlet = OutletService.get(outlet_id)
+    contact = OutletService.update_contact(outlet, OutletService.get_contact(outlet, contact_id), payload)
+    return success_response(data={"contact": serialize_outlet_contact(contact)})
+
+
+@admin_sales_bp.route("/sales/outlets/<int:outlet_id>/contacts/<int:contact_id>", methods=["DELETE"])
+@handle_api_exception
+@jwt_required()
+@manager_or_higher_required
+def delete_outlet_contact_admin(outlet_id, contact_id):
+    outlet = OutletService.get(outlet_id)
+    OutletService.delete_contact(outlet, OutletService.get_contact(outlet, contact_id))
+    return success_response(data={"contact_id": contact_id})
+
+
 @admin_sales_bp.route("/sales/outlets/<int:outlet_id>/approve", methods=["POST"])
 @handle_api_exception
 @jwt_required()
@@ -356,6 +395,7 @@ def list_visits_admin():
             "outlet_id": request.args.get("outlet_id", type=int),
             "outcome": (request.args.get("outcome") or "").strip() or None,
             "in_radius": parse_bool_arg("in_radius"),
+            "photo": (request.args.get("photo") or "").strip() or None,
             "page": request.args.get("page", 1, type=int),
             "per_page": request.args.get("per_page", DEFAULT_PAGE_SIZE, type=int),
         }
@@ -372,6 +412,7 @@ def list_visits_admin():
         outlet_id=params.outlet_id,
         outcome=params.outcome,
         in_radius=params.in_radius,
+        photo=params.photo,
         page=params.page,
         per_page=params.per_page,
     )
@@ -386,6 +427,34 @@ def list_visits_admin():
             "end_date": end_date.isoformat(),
         }
     )
+
+
+@admin_sales_bp.route("/sales/outlets/<int:outlet_id>/photos", methods=["GET"])
+@handle_api_exception
+@jwt_required()
+@manager_or_higher_required
+def list_outlet_photos_admin(outlet_id):
+    # `list_outlets`' page parsing: a junk `?page=abc` lands on the default, and
+    # `paginate(error_out=False)` answers an empty page past the end rather than a 404.
+    page = max(request.args.get("page", 1, type=int), 1)
+    per_page = min(max(request.args.get("per_page", DEFAULT_PAGE_SIZE, type=int), 1), MAX_PAGE_SIZE)
+    outlet = OutletService.get(outlet_id)
+    photos, total = VisitService.list_outlet_photos(outlet.id, page=page, per_page=per_page)
+    return success_response(
+        data={
+            "photos": [serialize_outlet_photo_row(photo) for photo in photos],
+            "meta": pagination_meta(page=page, per_page=per_page, total=total),
+        }
+    )
+
+
+@admin_sales_bp.route("/sales/visit-photos/<int:photo_id>/file", methods=["GET"])
+@handle_api_exception
+@jwt_required()
+@manager_or_higher_required
+def get_visit_photo_file_admin(photo_id):
+    # A photo id only: the Telegram file id is resolved from the row inside `stream_photo`.
+    return VisitService.stream_photo(photo_id)
 
 
 @admin_sales_bp.route("/sales/plan-vs-fact", methods=["GET"])

@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
-  Alert, Button, Card, Col, DatePicker, Row, Select, Space, Table, Tabs, Tag, Typography,
+  Alert, Button, Card, Col, DatePicker, Image, Row, Select, Space, Table, Tabs, Tag, Typography,
 } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
@@ -10,6 +10,7 @@ import dayjs from 'dayjs';
 import salesService from '../services/salesService';
 import staffService from '../services/staffService';
 import OperationsMap from '../components/OperationsMap';
+import VisitPhotoThumb from '../components/sales/VisitPhotoThumb';
 import { fetchAllPages } from '../utils/pagination';
 import { BULK_LOAD_PAGE_SIZE, DEFAULT_PAGE_SIZE } from '../utils/constants';
 import { extractApiErrorMessage } from '../utils/apiError';
@@ -56,6 +57,7 @@ const Visits = () => {
   const [agentId, setAgentId] = useState();
   const [outcome, setOutcome] = useState();
   const [inRadius, setInRadius] = useState();
+  const [photoFilter, setPhotoFilter] = useState();
   const [exceptionType, setExceptionType] = useState();
   const [pagination, setPagination] = useState({ page: 1, per_page: DEFAULT_PAGE_SIZE });
   const [exceptionPagination, setExceptionPagination] = useState({ page: 1, per_page: DEFAULT_PAGE_SIZE });
@@ -81,9 +83,10 @@ const Visits = () => {
     // business_app/utils/request_helpers.py::parse_bool_arg reads on the other side — a
     // `|| undefined` here would erase the deliberate `false`.
     in_radius: inRadius,
+    photo: photoFilter || undefined,
     page: pagination.page,
     per_page: pagination.per_page,
-  }), [period, outcome, inRadius, pagination]);
+  }), [period, outcome, inRadius, photoFilter, pagination]);
 
   const exceptionFilters = useMemo(() => ({
     ...period,
@@ -176,6 +179,18 @@ const Visits = () => {
     { title: t('sales_agents:visits.columns.outcome', 'Outcome'), dataIndex: 'outcome', key: 'outcome', render: (v) => v || '—' },
     { title: t('sales_agents:visits.columns.checkin', 'Check-in'), key: 'checkin', render: (_, record) => renderCheckin(record) },
     { title: t('sales_agents:visits.columns.order', 'Order'), dataIndex: 'order_number', key: 'order_number', render: (v) => v || '—' },
+    {
+      title: t('sales_agents:visits.columns.photos', 'Photos'),
+      key: 'photos',
+      // `photo_requested` is the backend's answer (D28): the page never decides which outlets
+      // were asked for a photo.
+      render: (_, record) => {
+        if (record.photo_count > 0) return `📷 ${record.photo_count}`;
+        return record.photo_requested
+          ? <Tag color="orange">{t('sales_agents:visits.filters.photo_missing', 'No photo')}</Tag>
+          : '—';
+      },
+    },
   ];
 
   const planColumns = [
@@ -265,6 +280,14 @@ const Visits = () => {
                 // for a page the backend would refuse.
                 showSizeChanger: true,
                 pageSizeOptions: [20, 50, 100],
+              }}
+              expandable={{
+                rowExpandable: (record) => record.photo_count > 0,
+                expandedRowRender: (record) => (
+                  <Image.PreviewGroup>
+                    <Space wrap>{record.photos.map((photo) => <VisitPhotoThumb key={photo.id} photo={photo} />)}</Space>
+                  </Image.PreviewGroup>
+                ),
               }}
               scroll={{ x: 900 }}
             />
@@ -381,6 +404,19 @@ const Visits = () => {
                 { value: false, label: t('sales_agents:visits.filters.in_radius_false', 'Out of range') },
               ]}
               data-testid="filter-in-radius"
+            />
+          </Col>
+          )}
+          {tab === 'visits' && (
+          <Col xs={12} sm={4}>
+            <Select
+              placeholder={t('sales_agents:visits.filters.photo', 'Photo')}
+              value={photoFilter}
+              onChange={narrow(setPhotoFilter)}
+              allowClear
+              style={{ width: '100%' }}
+              options={[{ value: 'missing', label: t('sales_agents:visits.filters.photo_missing', 'No photo') }]}
+              data-testid="filter-photo"
             />
           </Col>
           )}

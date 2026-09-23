@@ -1,16 +1,15 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { Button, Image, Typography } from 'antd';
 import { DownloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 
 import adminService from '../../services/adminService';
+import useAuthedObjectUrl from '../../hooks/useAuthedObjectUrl';
 
 const { Text } = Typography;
 
 const SupportAttachment = ({ message }) => {
   const { t } = useTranslation('common');
-  const [objectUrl, setObjectUrl] = useState(null);
-  const [failed, setFailed] = useState(false);
 
   // The 20 MB Bot-API-download rule is decided ONCE, server-side
   // (`TELEGRAM_MAX_DOWNLOAD_BYTES` in support_attachment_service.py) and
@@ -18,24 +17,11 @@ const SupportAttachment = ({ message }) => {
   // threshold here — that would be two places deciding one answer.
   const tooLarge = Boolean(message.attachment_too_large);
 
-  useEffect(() => {
-    if (!message.has_attachment || tooLarge) return undefined;
-    let url = null;
-    let cancelled = false;
-
-    adminService.getSupportAttachmentBlob(message.id)
-      .then((blob) => {
-        if (cancelled) return;
-        url = URL.createObjectURL(blob);
-        setObjectUrl(url);
-      })
-      .catch(() => { if (!cancelled) setFailed(true); });
-
-    return () => {
-      cancelled = true;
-      if (url) URL.revokeObjectURL(url);
-    };
-  }, [message.id, message.has_attachment, tooLarge]);
+  const { url: objectUrl, failed } = useAuthedObjectUrl(
+    message.id,
+    () => adminService.getSupportAttachmentBlob(message.id),
+    Boolean(message.has_attachment) && !tooLarge,
+  );
 
   if (!message.has_attachment) return null;
 

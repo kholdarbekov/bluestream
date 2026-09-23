@@ -25,17 +25,20 @@ vi.mock('../../components/OperationsMap', () => ({
 }));
 
 // Every field `serialize_visit` publishes (business_app/serializers/sales_serializers.py:409-444)
-// plus the three `serialize_visit_admin_row` adds. Null-first, then the values a case needs, so a
+// plus the five `serialize_visit_admin_row` adds. Null-first, then the values a case needs, so a
 // field the page reads but the serializer never publishes is `null` here, not silently undefined.
 const VISIT_ROW_KEYS = new Set([
   'id', 'outlet_id', 'agent_user_id', 'status', 'planned', 'current_step', 'started_at', 'checkin_at',
   'checkin_latitude', 'checkin_longitude', 'checkin_accuracy_m', 'distance_m', 'in_radius', 'checkin_skipped',
   'ended_at', 'outcome', 'no_order_reason', 'dm_present', 'notes', 'next_visit_at', 'order', 'stock_checks',
-  'previous_stock', 'outlet_name', 'agent_name', 'order_number',
+  'previous_stock', 'photo_requested', 'outlet_name', 'agent_name', 'order_number', 'photo_count', 'photos',
 ]);
 const visitRow = (overrides) => Object.assign(
   Object.fromEntries([...VISIT_ROW_KEYS].map((k) => [k, null])),
-  { status: 'completed', planned: false, checkin_skipped: false, stock_checks: [], previous_stock: [] },
+  {
+    status: 'completed', planned: false, checkin_skipped: false, stock_checks: [], previous_stock: [],
+    photo_requested: false, photo_count: 0, photos: [],
+  },
   overrides,
 );
 
@@ -111,6 +114,11 @@ beforeEach(() => {
   // `hasNext = meta ? meta.has_next : …` is undefined → falsy → break. Deliberate — adding
   // `has_next: false` is equivalent, but adding `has_next: true` would loop the mock forever.
   staffService.getSalesAgents.mockResolvedValue({ data: { data: { items: [{ user_id: 41, full_name: 'Sardor Alimov' }, { user_id: 77, full_name: 'Nodira Karimova' }] }, meta: { total: 2 } } });
+  // VisitPhotoThumb (Task 8) fetches its bytes through the same authed-blob hook the support
+  // inbox uses — jsdom has no real blob: URL machinery, so both sides of it are stubbed here.
+  salesService.getVisitPhotoBlob.mockResolvedValue(new Blob(['x']));
+  global.URL.createObjectURL = vi.fn(() => 'blob:fake-url');
+  global.URL.revokeObjectURL = vi.fn();
 });
 
 it('lists the period\'s visits with the check-in verdict the backend published', async () => {
@@ -294,4 +302,44 @@ it('renders every duplicate-photo row on one visit, not just the first', async (
   // so only the warning distinguishes a correct key from a colliding one.
   expect(consoleError.mock.calls.map((c) => c.join(' ')).join('\n')).not.toMatch(/same key/);
   consoleError.mockRestore();
+});
+
+// D27/D28: the backend decides which outlets were asked for a photo (`photo_requested`) and how
+// many arrived (`photo_count`) — the page only renders that verdict, never re-derives it.
+const PHOTO = { id: 41, visit_id: 601, kind: 'storefront', sha256: 'a'.repeat(64), telegram_file_unique_id: 'u', received_at: '2026-09-14T04:10:00+00:00', duplicate_of_photo_id: null, is_duplicate: false };
+const SHOT = visitRow({ id: 601, outlet_name: 'Bahor market', agent_name: 'Sardor Alimov', started_at: '2026-09-14T04:05:00+00:00', photo_requested: true, photo_count: 1, photos: [PHOTO] });
+const BARE = visitRow({ id: 602, outlet_name: 'Yashnobod ofis', agent_name: 'Sardor Alimov', started_at: '2026-09-14T05:05:00+00:00', photo_requested: true });
+const HOME = visitRow({ id: 603, outlet_name: 'Anvar aka uyi', agent_name: 'Sardor Alimov', started_at: '2026-09-14T06:05:00+00:00', photo_requested: false });
+
+it('shows how many photos a visit has, "No photo" where one was asked for, and a dash elsewhere', async () => {
+  salesService.getVisits.mockResolvedValue({ visits: [SHOT, BARE, HOME], meta: { page: 1, per_page: 20, total: 3, pages: 1, has_next: false, has_prev: false }, start_date: '2026-09-08', end_date: '2026-09-14' });
+  render(<Visits />, { wrapper: createWrapper() });
+
+  expect(await screen.findByRole('row', { name: /Bahor market/ })).toHaveTextContent('📷 1');
+  expect(screen.getByRole('row', { name: /Yashnobod ofis/ })).toHaveTextContent('No photo');
+  expect(screen.getByRole('row', { name: /Anvar aka uyi/ })).not.toHaveTextContent('No photo');
+});
+
+it('asks the backend for visits without a photo', async () => {
+  render(<Visits />, { wrapper: createWrapper() });
+  await screen.findByTestId('visits-table');
+
+  fireEvent.mouseDown(screen.getByTestId('filter-photo').querySelector('.ant-select-selector'));
+  fireEvent.click(await screen.findByTitle('No photo'));
+
+  await waitFor(() => expect(salesService.getVisits).toHaveBeenLastCalledWith(expect.objectContaining({ photo: 'missing', page: 1 })));
+});
+
+it('expands a visit into its photos, fetched by id', async () => {
+  salesService.getVisits.mockResolvedValue({ visits: [SHOT], meta: { page: 1, per_page: 20, total: 1, pages: 1, has_next: false, has_prev: false }, start_date: '2026-09-08', end_date: '2026-09-14' });
+  render(<Visits />, { wrapper: createWrapper() });
+  const row = await screen.findByRole('row', { name: /Bahor market/ });
+
+  fireEvent.click(within(row).getByRole('button', { name: /expand row/i }));
+
+  await waitFor(() => expect(salesService.getVisitPhotoBlob).toHaveBeenCalledWith(41));
+  // Controller ruling: this file's `useTranslation` mock returns the DEFAULT verbatim
+  // (react-i18next mock above, shared by VisitPhotoThumb), and `photo.kind` ('storefront') is
+  // that default — so the accessible name really renders lowercase, not Title Case.
+  expect(await screen.findByRole('img', { name: 'storefront' })).toHaveAttribute('src', 'blob:fake-url');
 });

@@ -89,6 +89,8 @@ REGISTERED_PATTERNS = (
     # arrive on any step and the picker has to be answerable from the step
     # the agent is standing on.
     r"^staff_sales_v_photo_\w+$",
+    # D26's Skip on the one-time photo prompt (and its leftover on the shelf screen).
+    r"^staff_sales_v_photoskip$",
     # The card's entry point (Task 10 draws it too, Task 11 registers it).
     # `visit_resume` below draws it from INSIDE this module, for the
     # transport-ambiguous order POST of controller ruling 30.
@@ -177,6 +179,7 @@ VISIT_SUFFIXES = (
     "visit.timeout",
     "visit.photo_kind_prompt", "visit.photo_saved", "visit.photo_duplicate",
     "visit.photo_failed", "visit.photo_forwarded",
+    "visit.photo_request", "visit.photo_skip",
     "notify.digest_due_today", "notify.digest_overdue", "notify.digest_unvisited",
     "notify.digest_open_visit", "notify.digest_days", "notify.digest_never",
     "notify.digest_more",
@@ -291,6 +294,7 @@ def _every_visit_keyboard():
         ("close_outcome", SalesKeyboards.close_outcome("en")),
         ("next_visit", SalesKeyboards.next_visit("en")),
         ("photo_kind", SalesKeyboards.photo_kind("en")),
+        ("photo_request", SalesKeyboards.photo_request("en")),
     ]
 
 

@@ -33,6 +33,33 @@ class SalesService {
     return unwrap(response);
   }
 
+  async addOutletContact(outletId, payload) {
+    const response = await api.post(`/admin/sales/outlets/${outletId}/contacts`, payload);
+    return unwrap(response);
+  }
+
+  async updateOutletContact(outletId, contactId, payload) {
+    const response = await api.put(`/admin/sales/outlets/${outletId}/contacts/${contactId}`, payload);
+    return unwrap(response);
+  }
+
+  async deleteOutletContact(outletId, contactId) {
+    const response = await api.delete(`/admin/sales/outlets/${outletId}/contacts/${contactId}`);
+    return unwrap(response);
+  }
+
+  // `meta` rides inside `data`, the visits-route shape, so `unwrap` is the whole adapter.
+  async getOutletPhotos(outletId, params = {}) {
+    const response = await api.get(`/admin/sales/outlets/${outletId}/photos`, { params });
+    return unwrap(response);
+  }
+
+  // A photo id only (D27): the backend resolves the Telegram file id from its own row.
+  async getVisitPhotoBlob(photoId) {
+    const response = await api.get(`/admin/sales/visit-photos/${photoId}/file`, { responseType: 'blob' });
+    return response.data;
+  }
+
   // D25: ONE body shape, both keys always present. `attach` decides whether approval CREATES a
   // customer account or joins the outlet to the account the backend matched by phone and
   // published as `account_candidate` on the outlet GET — this client never looks a phone up.

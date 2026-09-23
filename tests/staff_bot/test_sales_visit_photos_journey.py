@@ -6,10 +6,12 @@ handler wired into one state is a camera that works on one screen, and the
 bug is invisible to a handler-level test.
 
 Every verdict on the picture is the backend's. ``is_duplicate`` is its
-SHA-256 answer over the original bytes, the size ceiling is the storage
-service's, and the only thing this bot refuses on its own is a FORWARD --
-which is not a judgement about the file, but about where it was taken.
+answer over this agent's SHA-256 digests (D27), and the only thing this bot
+refuses on its own is a FORWARD -- which is not a judgement about the file,
+but about where it was taken.
 """
+
+import hashlib
 
 import pytest
 
@@ -23,6 +25,7 @@ from staff_bot.handlers.sales.visit import (
     V_ORDER,
     V_ORDER_EDIT,
     V_PAYMENT,
+    V_PHOTO,
     V_STOCK,
     V_STOCK_QTY,
 )
@@ -36,9 +39,10 @@ from tests.staff_bot.test_sales_visit_orders_journey import _to_order
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
 
 PHOTOS = f"{SALES}/visits/{VISIT_ID}/photos"
+DEFAULT_SHA = hashlib.sha256(DEFAULT_FILE_BYTES).hexdigest()
 EVERY_VISIT_STATE = (
     V_CHECKIN, V_STOCK, V_STOCK_QTY, V_ORDER, V_ORDER_EDIT,
-    V_PAYMENT, V_DAY, V_NOTES, V_CONFIRM, V_CLOSE,
+    V_PAYMENT, V_DAY, V_NOTES, V_CONFIRM, V_CLOSE, V_PHOTO,
 )
 
 
@@ -69,7 +73,6 @@ def _photo_reply(photo_id=4, duplicate=False):
     """`serialize_visit_photo` -- what POST /photos answers with."""
     return {"photo": {
         "id": photo_id, "visit_id": VISIT_ID, "kind": "storefront",
-        "file_path": f"sales_visits/{photo_id}.jpg",
         "sha256": "a" * 64, "telegram_file_unique_id": "u-l",
         "received_at": "2026-09-15T05:20:00+00:00",
         "duplicate_of_photo_id": 2 if duplicate else None,
@@ -77,8 +80,8 @@ def _photo_reply(photo_id=4, duplicate=False):
     }}
 
 
-async def test_a_photo_asks_what_it_is_and_then_posts_the_bytes(monkeypatch):
-    """One picture, one question, one multipart POST -- and the step is untouched.
+async def test_a_photo_asks_what_it_is_and_then_posts_its_telegram_reference(monkeypatch):
+    """One picture, one question, one JSON POST -- and the step is untouched.
 
     The agent is counting the shelf. Sending a photo must not move them off
     that screen, which is why every photo path returns None: PTB reads that
@@ -99,21 +102,17 @@ async def test_a_photo_asks_what_it_is_and_then_posts_the_bytes(monkeypatch):
     await harness.send(ops.tap("staff_sales_v_photo_storefront"))
 
     posted = _calls(harness, "POST", PHOTOS)
-    assert [call.data for call in posted] == [
-        {"kind": "storefront", "telegram_file_unique_id": "u-l"}
-    ]
-    # The FILENAME carries `.jpg`: `FileStorageService._validate_file` checks
-    # the extension, and a Telegram download has no name of its own.
-    assert [call.files for call in posted] == [
-        {"file": (f"visit_{VISIT_ID}_u-l.jpg", DEFAULT_FILE_BYTES, "image/jpeg")}
-    ]
+    assert [call.data for call in posted] == [{
+        "kind": "storefront", "telegram_file_id": "photo-file-id",
+        "telegram_file_unique_id": "u-l", "sha256": DEFAULT_SHA,
+    }]
     assert _curated("staff.sales.visit.photo_saved") in harness.telegram.last_shown().text
     assert harness.telegram.last_shown().callback_data() == []
     assert harness.conversation_state(CONV) == V_STOCK
 
 
 async def test_the_duplicate_line_is_the_backends_verdict_not_a_second_upload(monkeypatch):
-    """`is_duplicate` is a field, so the bot hashes nothing and posts once.
+    """`is_duplicate` is a field, so the bot compares nothing and posts once.
 
     The duplicate is still STORED (the exception feed is what surfaces it in
     phase 3); the agent is told, not refused.
@@ -171,8 +170,8 @@ async def test_a_burst_draws_one_picker_and_one_tap_files_all_of_them(monkeypatc
     for index in (1, 2, 3):
         await harness.send(ops.photo(file_id=f"shot-{index}", file_unique_id=f"u-{index}"))
 
-    # Three photos, three DOWNLOADS: the queue holds three sets of bytes, not
-    # one picture re-read three times.
+    # Three photos, three DOWNLOADS: the queue holds three digests, not one
+    # picture re-read three times.
     assert len(set(harness.telegram.downloaded)) == 3, harness.telegram.downloaded
     pickers = [
         call for call in harness.telegram.shown
@@ -184,9 +183,7 @@ async def test_a_burst_draws_one_picker_and_one_tap_files_all_of_them(monkeypatc
 
     posted = _calls(harness, "POST", PHOTOS)
     assert [call.data["telegram_file_unique_id"] for call in posted] == ["u-1", "u-2", "u-3"]
-    assert [call.files["file"][0] for call in posted] == [
-        f"visit_{VISIT_ID}_u-1.jpg", f"visit_{VISIT_ID}_u-2.jpg", f"visit_{VISIT_ID}_u-3.jpg"
-    ]
+    assert [call.data["telegram_file_id"] for call in posted] == ["shot-1", "shot-2", "shot-3"]
     assert {call.data["kind"] for call in posted} == {"shelf"}
 
 
@@ -215,34 +212,6 @@ async def test_a_refused_file_shows_the_backends_own_sentence_and_is_not_retried
     assert len(_calls(harness, "POST", PHOTOS)) == 1
     answered = [c.params.get("text", "") for c in harness.telegram.of("answerCallbackQuery")]
     assert any(_curated("staff.sales.visit.photo_failed") in text for text in answered)
-
-
-async def test_an_oversize_photo_reads_like_any_other_unusable_file(monkeypatch):
-    """A 413 is the ONE photo refusal with no error code to map.
-
-    `MAX_CONTENT_LENGTH` is Flask's, enforced before the route function runs
-    (`business_app/config/base.py`), so the body is HTML and the client's
-    catch-all branch returns `error_code=None` with `status_code=413`. Left
-    to `_resolve_api_error_message` that is the generic "Something went
-    wrong" -- for the one failure whose remedy the agent can carry out on the
-    spot. The verdict is the same as `SALES_PHOTO_INVALID`'s (this file
-    cannot be stored), so the sentence is the same too, and this test is what
-    stops the two drifting apart.
-    """
-    harness, ops, _ = await _agent(monkeypatch)
-    await _to_stock(harness, ops)
-    harness.backend.route(
-        "POST", PHOTOS,
-        lambda _c: staff_backend_failure("Request Entity Too Large", 413),
-    )
-
-    await harness.send(ops.photo())
-    await harness.send(ops.tap("staff_sales_v_photo_other"))
-
-    assert len(_calls(harness, "POST", PHOTOS)) == 1
-    shown = harness.telegram.last_shown().text
-    assert _curated("staff.sales.error.photo_invalid") in shown
-    assert _curated("staff.sales.visit.photo_saved") not in shown
 
 
 async def test_a_photo_taken_before_the_check_in_is_filed_on_the_check_in_screen(monkeypatch):
@@ -300,7 +269,7 @@ async def test_every_visit_state_answers_both_a_photo_and_the_kind_tap(monkeypat
     """The wiring claim, checked against the registration PTB actually uses.
 
     One end-to-end drive can only prove the state it runs in. This walks the
-    ten states of the visit conversation and asks each one what it would do
+    eleven states of the visit conversation and asks each one what it would do
     with a photo and with a kind tap -- the question a handler-level test
     cannot ask at all, and the one a missing line in `bot.py` answers with
     silence on a screen the agent is standing on.

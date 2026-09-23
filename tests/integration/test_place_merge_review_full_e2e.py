@@ -3176,7 +3176,14 @@ def test_the_api_contract_snapshot_still_lists_the_merge_preview_route(db):
     # Phase 3's other new surface here, the managers' 08:00 daily exception summary, is a
     # Celery beat task reading the same service and adds no route. Unrelated to
     # place-merge; only the estate-wide count moved.
-    assert len(routes) == 611
+    # 611 -> 613: the outlet-editing/visit-photos plan's two admin reads, both on `admin_sales`
+    # behind `manager_or_higher_required` -- GET /api/v1/admin/sales/outlets/<id>/photos
+    # (the drawer's Photos tab) and GET /api/v1/admin/sales/visit-photos/<id>/file (streams the
+    # picture from Telegram through the staff bot, D27). Unrelated to place-merge.
+    # 613 -> 616: D30's contact routes on `admin_sales` behind `manager_or_higher_required` --
+    # POST/PUT/DELETE /api/v1/admin/sales/outlets/<id>/contacts[/<contact_id>]. Unrelated to
+    # place-merge; only the estate-wide count moved.
+    assert len(routes) == 616
     entry = next(r for r in routes if r["rule"] == "/api/v1/admin/place-groups/merge-preview")
     assert entry["methods"] == ["GET"]
     assert entry["endpoint"] == "admin.get_place_group_merge_preview"

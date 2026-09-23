@@ -15,7 +15,7 @@ Ownership is never re-decided here. `OutletService.get_for_agent` is the one ans
 agent's own visit" — a second copy of either would be a second, drifting rule.
 """
 
-import hashlib
+import re
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -26,7 +26,7 @@ from sqlalchemy.orm import selectinload
 from business_app import db
 from business_app.models.order import Order
 from business_app.models.product import Product
-from business_app.models.sales import Outlet
+from business_app.models.sales import BUSINESS_OUTLET_TYPES, Outlet
 from business_app.models.sales_visits import (
     NO_ORDER_REASONS,
     PHOTO_KINDS,
@@ -41,18 +41,19 @@ from business_app.services.sales.agent_order_confirmation_service import AgentOr
 from business_app.services.sales.outlet_service import OutletService
 from business_app.services.sales.replenishment_service import ReplenishmentService, effective_line_qty_max
 from business_app.services.staff_service import StaffService
+from business_app.services.telegram_file_proxy import TelegramFileProxy
 from business_app.utils.constants import MAX_PAGE_SIZE
 from business_app.utils.delivery_window import local_now, parse_and_validate_schedule
 from business_app.utils.exceptions import (
+    AttachmentUnavailableError,
     ConflictError,
-    FileStorageError,
     ForbiddenError,
     NotFoundError,
     ValidationError,
 )
 from business_app.utils.helpers import calculate_distance
 from business_app.utils.local_windows import window_bounds
-from business_app.utils.service_factory import get_file_storage_service
+from business_app.utils.telegram_tokens import get_staff_bot_token
 from business_app.utils.timezone_utils import ensure_utc
 from shared.staff_constants import STAFF_ACTIONS
 
@@ -60,6 +61,14 @@ from shared.staff_constants import STAFF_ACTIONS
 # renders AND by the guard that accepts an order — a menu that offers what the guard refuses
 # (or hides what it accepts) is the same rule expressed twice.
 AGENT_PAYMENT_METHODS = ("cash", "business_account")
+
+# visit_photos.telegram_file_id is VARCHAR(255).
+TELEGRAM_FILE_ID_MAX = 255
+# hashlib's `hexdigest()` shape: what the bot sends, nothing looser.
+_SHA256_HEX = re.compile(r"[0-9a-f]{64}")
+
+# The one value `GET /admin/sales/visits?photo=` accepts.
+PHOTO_FILTER_MISSING = "missing"
 
 
 def _int_or_none(raw: Any) -> Optional[int]:
@@ -803,6 +812,7 @@ class VisitService:
         outlet_id: Optional[int] = None,
         outcome: Optional[str] = None,
         in_radius: Optional[bool] = None,
+        photo: Optional[str] = None,
         page: int = 1,
         per_page: int = 20,
         now: Optional[datetime] = None,
@@ -842,8 +852,21 @@ class VisitService:
             query = query.filter(Visit.outcome == outcome)
         if in_radius is not None:
             query = query.filter(Visit.in_radius.is_(bool(in_radius)))
-        # The four relationships `serialize_visit_admin_row` reads are all default-lazy, so a
-        # page costs 1 + 4n SELECTs left alone -- ~401 at the `MAX_PAGE_SIZE` cap. Four eager
+        if photo is not None:
+            if photo != PHOTO_FILTER_MISSING:
+                raise ValidationError(
+                    f"Unknown photo filter {photo}",
+                    details={"photo": photo, "expected": [PHOTO_FILTER_MISSING]},
+                    error_code="SALES_VISIT_PHOTO_FILTER_INVALID",
+                )
+            # D28: only a business outlet is ever asked for a photo, so a home visit without one
+            # is missing nothing.
+            query = query.join(Outlet, Outlet.id == Visit.outlet_id).filter(
+                Outlet.outlet_type.in_(BUSINESS_OUTLET_TYPES),
+                ~Visit.photos.any(),
+            )
+        # The five relationships `serialize_visit_admin_row` reads are all default-lazy, so a
+        # page costs 1 + 5n SELECTs left alone -- ~501 at the `MAX_PAGE_SIZE` cap. Five eager
         # loads instead, the `AgentMetricsService` precedent. `selectinload` issues a separate
         # IN query per relationship rather than joining, so the ORDER BY below stays the ONLY
         # thing deciding row order and the paging contract is untouched.
@@ -853,6 +876,7 @@ class VisitService:
                 selectinload(Visit.agent),
                 selectinload(Visit.order),
                 selectinload(Visit.stock_checks),
+                selectinload(Visit.photos),
             )
             .order_by(Visit.started_at.desc(), Visit.id.desc())
             .paginate(page=page, per_page=min(per_page, MAX_PAGE_SIZE), error_out=False)
@@ -864,19 +888,18 @@ class VisitService:
     def add_photo(
         visit: Visit,
         *,
-        file,
-        filename: Optional[str],
-        kind: str,
+        telegram_file_id: Optional[str],
         telegram_file_unique_id: Optional[str],
+        sha256: Optional[str],
+        kind: Optional[str],
         agent_user_id: int,
     ) -> VisitPhoto:
-        """Store one visit photo and flag it when this agent has already sent these bytes (D17/R8).
+        """Record one visit photo by the staff bot's Telegram file id, and flag a repeat (D27).
 
-        The SHA-256 is taken over the bytes the PHONE sent, before `upload_image` resizes and
-        re-encodes them: two identical uploads do not have to produce two identical JPEGs, so
-        hashing the stored artefact would flag nothing at all. The stream is rewound
-        afterwards, because the same handle is what storage then reads -- forgetting that
-        stores a zero-byte file and every row-level assertion still passes.
+        Nothing is downloaded or stored here. The bot hashed the bytes it fetched from Telegram and
+        sends the digest; the picture stays on Telegram until an admin opens it (`stream_photo`).
+        The DIGEST, not the file id, is what the duplicate rule compares: Telegram mints a new file
+        id for every upload, so a re-sent gallery photo carries a new id and the same bytes.
 
         A duplicate is RECORDED, never refused: the agent's visit carries on and the
         supervisor's feed gets the row. It points at the EARLIEST match rather than the most
@@ -886,7 +909,7 @@ class VisitService:
         The scope is per AGENT (R8). Two reps photographing the same chain storefront on the
         same morning is ordinary work; flagging it would bury the case this exists for.
 
-        No `_require_step`: the 📷 button is live at every step of the visit (spec *Visit*),
+        No `_require_step`: a photo is accepted at every step of the visit (spec *Visit*),
         and the route's `get_owned(..., must_be_open=True)` is the whole gate.
         """
         if kind not in PHOTO_KINDS:
@@ -895,23 +918,12 @@ class VisitService:
                 details={"kind": kind, "expected": list(PHOTO_KINDS)},
                 error_code="SALES_PHOTO_INVALID",
             )
-        if file is None or not (filename or "").strip():
-            raise ValidationError("A photo file is required", error_code="SALES_PHOTO_INVALID")
-        raw = file.read()
-        if not raw:
-            raise ValidationError("The photo is empty", error_code="SALES_PHOTO_INVALID")
-        digest = hashlib.sha256(raw).hexdigest()
-        file.seek(0)
-        try:
-            stored = get_file_storage_service().upload_image(
-                file, filename, folder="sales_visits", user_id=agent_user_id, resize=True
-            )
-        except FileStorageError as exc:
-            # The size ceiling and the image sniffing are the storage service's (R8), so its
-            # refusal is TRANSLATED into the one code the bot branches on rather than
-            # restated here as a second set of limits that would drift from it.
-            current_app.logger.warning("Visit photo rejected by storage (visit %s): %s", visit.id, exc)
-            raise ValidationError("The photo could not be stored", error_code="SALES_PHOTO_INVALID") from exc
+        file_id = (telegram_file_id or "").strip()
+        if not file_id or len(file_id) > TELEGRAM_FILE_ID_MAX:
+            raise ValidationError("A Telegram file id is required", error_code="SALES_PHOTO_INVALID")
+        digest = sha256 or ""
+        if not _SHA256_HEX.fullmatch(digest):
+            raise ValidationError("sha256 must be 64 lowercase hex characters", error_code="SALES_PHOTO_INVALID")
         original = (
             db.session.query(VisitPhoto.id)
             .join(Visit, Visit.id == VisitPhoto.visit_id)
@@ -922,9 +934,9 @@ class VisitService:
         photo = VisitPhoto(
             visit_id=visit.id,
             kind=kind,
-            file_path=stored["file_path"],
+            telegram_file_id=file_id,
             sha256=digest,
-            telegram_file_unique_id=telegram_file_unique_id or None,
+            telegram_file_unique_id=(telegram_file_unique_id or "").strip()[:100] or None,
             received_at=datetime.now(UTC),
             duplicate_of_photo_id=original[0] if original is not None else None,
         )
@@ -943,3 +955,38 @@ class VisitService:
             },
         )
         return photo
+
+    @staticmethod
+    def list_outlet_photos(outlet_id: int, *, page: int, per_page: int) -> Tuple[List[VisitPhoto], int]:
+        """Every photo taken at one outlet, across all its visits, newest first."""
+        pagination = (
+            VisitPhoto.query.join(Visit, Visit.id == VisitPhoto.visit_id)
+            .filter(Visit.outlet_id == outlet_id)
+            .options(selectinload(VisitPhoto.visit).selectinload(Visit.agent))
+            .order_by(VisitPhoto.received_at.desc(), VisitPhoto.id.desc())
+            .paginate(page=page, per_page=min(per_page, MAX_PAGE_SIZE), error_out=False)
+        )
+        return list(pagination.items), pagination.total
+
+    @staticmethod
+    def stream_photo(photo_id: int):
+        """Stream one visit photo from Telegram through the STAFF bot (D27).
+
+        The file id is read from the row, never from the request. A photo Telegram cannot serve --
+        a dead file id, a replaced bot, no token, an outage -- is a 404 the admin UI draws as
+        "Photo unavailable", never a 500.
+        """
+        photo = db.session.get(VisitPhoto, photo_id)
+        if photo is None:
+            raise NotFoundError("Photo not found", error_code="SALES_PHOTO_NOT_FOUND")
+        proxy = TelegramFileProxy(get_staff_bot_token(), cache_namespace="sales_photo")
+        try:
+            return proxy.stream(
+                photo.telegram_file_id,
+                mime="image/jpeg",
+                filename=f"visit_{photo.visit_id}_photo_{photo.id}.jpg",
+            )
+        except AttachmentUnavailableError as exc:
+            # str(exc) is already scrubbed of the token by the proxy.
+            current_app.logger.warning("Visit photo %s unavailable: %s", photo.id, exc)
+            raise NotFoundError("Photo is no longer available", error_code="SALES_PHOTO_UNAVAILABLE") from exc

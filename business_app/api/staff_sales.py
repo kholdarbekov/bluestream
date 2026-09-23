@@ -7,6 +7,7 @@ from flask_jwt_extended import get_jwt_identity, jwt_required
 from pydantic import ValidationError as PydanticValidationError
 
 from business_app.serializers.sales_serializers import (
+    AddVisitPhotoPayload,
     ApprovePayload,
     CheckinPayload,
     CloseVisitPayload,
@@ -383,20 +384,19 @@ def place_visit_order(visit_id):
 @jwt_required()
 @require_staff_roles("sales_agent")
 def add_visit_photo(visit_id):
-    # Multipart, so `_validated_payload` (JSON + pydantic) has nothing to parse: the two
-    # scalars ride in the FORM beside the file. Everything they carry is checked by
-    # `VisitService.add_photo`, which is the one place that knows what a storable photo is.
-    upload = request.files.get("file")
+    payload = _validated_payload(AddVisitPhotoPayload)
+    if not isinstance(payload, dict):
+        return payload
     actor_id = _actor_id()
     # `must_be_open=True` (R8), spelled out rather than left to the default: a closed visit
     # is a record of what happened, and a photo is work in progress.
     visit = VisitService.get_owned(visit_id, actor_id, must_be_open=True)
     photo = VisitService.add_photo(
         visit,
-        file=upload,
-        filename=(upload.filename if upload is not None else None),
-        kind=(request.form.get("kind") or "").strip(),
-        telegram_file_unique_id=(request.form.get("telegram_file_unique_id") or "").strip() or None,
+        telegram_file_id=payload.get("telegram_file_id"),
+        telegram_file_unique_id=payload.get("telegram_file_unique_id"),
+        sha256=payload.get("sha256"),
+        kind=(payload.get("kind") or "").strip(),
         agent_user_id=actor_id,
     )
     return success_response(data={"photo": serialize_visit_photo(photo)}, status_code=201)

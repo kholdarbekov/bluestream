@@ -2082,7 +2082,7 @@ EXTRA_TRANSLATIONS = {
     },
     "staff.help.sales_agent": {
         "en": "🏪 <b>Sales agent</b>\n• My outlets — your stores, prospects and their cards\n• New outlet — register a store you found in the field\n• Request activation once the contact phone and pin are in place; an operator or admin approves it",
-        "uz": "🏪 <b>Savdo agenti</b>\n• Mening savdo nuqtalarim — do'konlaringiz, nomzodlar va ularning kartalari\n• Yangi savdo nuqtasi — dalada topgan do'koningizni ro'yxatga oling\n• Telefon va joylashuv kiritilgach faollashtirishni so'rang; operator yoki admin tasdiqlaydi",
+        "uz": "🏪 <b>Savdo agenti</b>\n• Mening savdo nuqtalarim — do'konlaringiz, nomzodlar va ularning kartalari\n• Yangi savdo nuqtasi — Yangi do'koninni ro'yxatga oling\n• Telefon va joylashuv kiritilgach faollashtirishni so'rang; operator yoki admin tasdiqlaydi",
         "ru": "🏪 <b>Торговый агент</b>\n• Мои точки — ваши магазины, кандидаты и их карточки\n• Новая точка — зарегистрируйте магазин, найденный на маршруте\n• Запросите активацию, когда указаны телефон и геометка; оператор или админ подтвердит",
     },
     "staff.profile.title": {"en": "Profile", "uz": "Profil", "ru": "Профиль"},
@@ -2487,6 +2487,9 @@ SALES_TEXT_TRANSLATIONS = {
     "visit.photo_duplicate": {"en": "You have already sent this photo.", "uz": "Bu suratni allaqachon yuborgansiz.", "ru": "Вы уже отправляли это фото."},
     "visit.photo_failed": {"en": "The photo could not be saved. Send it again.", "uz": "Suratni saqlab bo'lmadi. Qaytadan yuboring.", "ru": "Фото не удалось сохранить. Отправьте ещё раз."},
     "visit.photo_forwarded": {"en": "Forwarded photos are not accepted — take the photo here.", "uz": "Uzatilgan suratlar qabul qilinmaydi — suratni shu yerda oling.", "ru": "Пересланные фото не принимаются — сделайте снимок здесь."},
+    # D26: the one-time prompt after check-in at a shop or an office, and the way past it.
+    "visit.photo_request": {"en": "Take a photo of the shop — the storefront or the shelf.", "uz": "Do'konni suratga oling — peshtoq yoki javonni.", "ru": "Сфотографируйте магазин — витрину или полку."},
+    "visit.photo_skip": {"en": "Skip photo", "uz": "Suratni o'tkazish", "ru": "Пропустить фото"},
     # The morning digest's section labels. Plain text: the handler wraps them
     # in <b> and escapes them, so the HTML lives in exactly one place.
     "notify.digest_due_today": {"en": "Due today", "uz": "Bugunga rejalashtirilgan", "ru": "На сегодня"},

@@ -162,6 +162,11 @@ api.interceptors.response.use(
       localStorage.removeItem('admin_permissions');
       window.location.href = '/login';
       toast.error('Session expired. Please login again.');
+    } else if (error.config?.responseType === 'blob') {
+      // A blob caller owns its failure UI (a photo tile's "Photo unavailable", an export's own
+      // message), and a Blob body leaves `message` as axios's bare "Request failed with status
+      // code 404". One toast per request turned an outlet with 20 dead photos into 20 toasts.
+      // After the 401 branch on purpose: a thumbnail still refreshes an expired session.
     } else if (error.response?.status === 403) {
       toast.error('Access denied. Insufficient permissions.');
     } else if (error.response?.status >= 500) {

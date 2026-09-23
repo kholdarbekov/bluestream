@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   Alert, Card, Table, Tag, Space, Button, Input, Select, Row, Col, Statistic, Drawer, Descriptions, Typography,
-  message, Modal, Form, Tabs, InputNumber, Popconfirm, TimePicker,
+  message, Modal, Form, Tabs, InputNumber, Popconfirm,
 } from 'antd';
 import { SearchOutlined, ReloadOutlined, ImportOutlined, TeamOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
@@ -12,14 +12,16 @@ import api from '../services/api';
 import { fetchAllPages } from '../utils/pagination';
 import { BULK_LOAD_PAGE_SIZE, DEFAULT_PAGE_SIZE } from '../utils/constants';
 import { extractApiErrorMessage } from '../utils/apiError';
+import OutletEditModal from '../components/sales/OutletEditModal';
+import OutletContactsTab from '../components/sales/OutletContactsTab';
+import OutletPhotosTab from '../components/sales/OutletPhotosTab';
+import { OUTLET_CLASSES } from '../components/sales/outletVocabulary';
 import dayjs from 'dayjs';
-import customParseFormat from 'dayjs/plugin/customParseFormat';
-
-dayjs.extend(customParseFormat);
 
 const { Title, Text } = Typography;
 
-// Mirror business_app/models/sales.py — OUTLET_STAGES, OUTLET_TYPES, OUTLET_CLASSES, LOST_REASONS.
+// Mirror business_app/models/sales.py — OUTLET_STAGES, OUTLET_TYPES, LOST_REASONS. OUTLET_CLASSES
+// is shared with the Edit form, so it lives in components/sales/outletVocabulary.js.
 const STAGES = ['prospect', 'trial', 'activation_requested', 'active', 'at_risk', 'dormant', 'lost'];
 const STAGE_COLORS = {
   prospect: 'default', trial: 'purple', activation_requested: 'gold', active: 'green', at_risk: 'orange', dormant: 'blue', lost: 'red',
@@ -28,12 +30,7 @@ const STAGE_LABELS = {
   prospect: 'Prospect', trial: 'Trial', activation_requested: 'Awaiting activation', active: 'Active', at_risk: 'At risk', dormant: 'Dormant', lost: 'Lost',
 };
 const OUTLET_TYPES = ['grocery_store', 'workplace', 'individual'];
-const OUTLET_CLASSES = ['A', 'B', 'C'];
 const LOST_REASONS = ['price', 'has_supplier', 'no_space', 'owner_absent', 'low_footfall', 'payment_terms', 'quality', 'closed', 'not_reached', 'other'];
-
-// The wire shape of both window columns: `serialize_outlet` publishes "HH:MM" and
-// `parse_window_time` (time.fromisoformat) reads it back. Same string, both directions.
-const WINDOW_FORMAT = 'HH:mm';
 
 const Outlets = () => {
   const { t, i18n } = useTranslation(['sales_agents', 'common']);
@@ -55,7 +52,7 @@ const Outlets = () => {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [lostOpen, setLostOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
-  const [windowOpen, setWindowOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [approveOpen, setApproveOpen] = useState(false);
   const [drawerTab, setDrawerTab] = useState('overview');
 
@@ -153,7 +150,7 @@ const Outlets = () => {
   const approveMutation = useMutation({ mutationFn: ({ id, contractNumber, attach }) => salesService.approveOutlet(id, { contract_number: contractNumber, attach }), onSuccess: () => { message.success(t('sales_agents:outlet_approved', 'Outlet activated')); setApproveOpen(false); refresh(); }, onError });
   const rejectMutation = useMutation({ mutationFn: ({ id, reason }) => salesService.rejectOutlet(id, reason), onSuccess: () => { message.success(t('sales_agents:outlet_rejected', 'Request rejected')); setRejectOpen(false); rejectForm.resetFields(); refresh(); }, onError });
   const assignMutation = useMutation({ mutationFn: ({ id, agentUserId }) => salesService.assignOutlet(id, agentUserId), onSuccess: () => { message.success(t('sales_agents:outlet_assigned', 'Agent assigned')); refresh(); }, onError });
-  const updateMutation = useMutation({ mutationFn: ({ id, payload }) => salesService.updateOutlet(id, payload), onSuccess: () => { message.success(t('sales_agents:outlet_updated', 'Outlet updated')); setWindowOpen(false); refresh(); }, onError });
+  const updateMutation = useMutation({ mutationFn: ({ id, payload }) => salesService.updateOutlet(id, payload), onSuccess: () => { message.success(t('sales_agents:outlet_updated', 'Outlet updated')); setEditOpen(false); refresh(); }, onError });
   const lostMutation = useMutation({ mutationFn: ({ id, reason, note }) => salesService.markLost(id, reason, note), onSuccess: () => { message.success(t('sales_agents:outlet_marked_lost', 'Marked as lost')); setLostOpen(false); lostForm.resetFields(); refresh(); }, onError });
   const bulkMutation = useMutation({ mutationFn: ({ district: d, agentUserId }) => salesService.bulkAssign(d, agentUserId), onSuccess: (res) => { message.success(`${t('sales_agents:bulk_assigned', 'Outlets assigned')}: ${res?.updated ?? 0}`); setBulkOpen(false); bulkForm.resetFields(); refresh(); }, onError });
   const importMutation = useMutation({ mutationFn: () => salesService.importExistingCustomers(), onSuccess: (res) => { message.success(`${t('sales_agents:imported', 'Customers imported as outlets')}: ${res?.created ?? 0}`); refresh(); }, onError });
@@ -184,20 +181,6 @@ const Outlets = () => {
   // Resolved server-side too: the outlet's primary phone already belongs to this account, so a
   // plain approve would 409. This page never matches a phone itself.
   const accountCandidate = outlet?.account_candidate || null;
-
-  // Both-or-neither, and explicit nulls to clear. One edge alone is not a window: the order path
-  // offers the outlet's window only when BOTH edges are set (visit_service.py:571-580), so half a
-  // pair is a write that looks saved and changes nothing. And "cleared" has to travel as null —
-  // `_validated_payload`'s exclude_unset leaves an absent key alone.
-  const submitWindow = (values) => {
-    const start = values.delivery_window_start ? values.delivery_window_start.format(WINDOW_FORMAT) : null;
-    const end = values.delivery_window_end ? values.delivery_window_end.format(WINDOW_FORMAT) : null;
-    if ((start === null) !== (end === null)) {
-      message.error(t('sales_agents:outlets.delivery_window.invalid', 'Set both the start and the end, or clear both.'));
-      return;
-    }
-    updateMutation.mutate({ id: outlet.id, payload: { delivery_window_start: start, delivery_window_end: end } });
-  };
 
   return (
     <div>
@@ -253,7 +236,7 @@ const Outlets = () => {
       <Drawer title={outlet?.name || ''} open={Boolean(selectedId)} onClose={() => { setSelectedId(null); setDrawerTab('overview'); }} width={760}
         extra={outlet ? (
           <Space>
-            <Button onClick={() => setWindowOpen(true)}>{t('sales_agents:outlets.delivery_window.edit', 'Edit delivery window')}</Button>
+            <Button onClick={() => setEditOpen(true)}>{t('sales_agents:outlets.edit', 'Edit')}</Button>
             {canApprove && (
               <Button type="primary" onClick={() => setApproveOpen(true)}>
                 {accountCandidate
@@ -334,7 +317,7 @@ const Outlets = () => {
             {
               key: 'contacts',
               label: t('sales_agents:tab_contacts', 'Contacts'),
-              children: <Table rowKey="id" pagination={false} dataSource={outlet.contacts || []} columns={[{ title: t('sales_agents:contact_name', 'Name'), dataIndex: 'name' }, { title: t('sales_agents:phone', 'Phone'), dataIndex: 'phone' }, { title: t('sales_agents:role', 'Role'), dataIndex: 'role' }]} />,
+              children: <OutletContactsTab outlet={outlet} onChanged={refresh} />,
             },
             {
               key: 'visits',
@@ -373,6 +356,13 @@ const Outlets = () => {
               ),
             },
             {
+              key: 'photos',
+              label: t('sales_agents:photos.tab', 'Photos'),
+              // Mounted only while open, like the Visits tab's query: the drawer opens on Overview
+              // and should not stream a gallery of photos from Telegram nobody asked to see.
+              children: drawerTab === 'photos' ? <OutletPhotosTab outletId={outlet.id} /> : null,
+            },
+            {
               key: 'history',
               label: t('sales_agents:tab_history', 'History'),
               children: <Table rowKey="id" pagination={false} dataSource={detail?.stage_history || []} columns={[{ title: t('sales_agents:when', 'When'), dataIndex: 'created_at', render: (v) => (v ? v.replace('T', ' ').slice(0, 16) : '') }, { title: t('sales_agents:from', 'From'), dataIndex: 'from_stage', render: (v) => v || '—' }, { title: t('sales_agents:to', 'To'), dataIndex: 'to_stage' }, { title: t('sales_agents:reason', 'Reason'), dataIndex: 'reason_code', render: (v, r) => [v, r.note].filter(Boolean).join(' — ') || '—' }]} />,
@@ -395,7 +385,7 @@ const Outlets = () => {
         footer={null}
         destroyOnClose
       >
-        {/* No `form` instance on purpose, exactly like the delivery-window modal below:
+        {/* No `form` instance on purpose, exactly like OutletEditModal below:
             destroyOnClose unmounts the fields, so the next open starts empty. */}
         <Form layout="vertical" onFinish={(v) => approveMutation.mutate({ id: outlet?.id, contractNumber: v.contract_number || null, attach: Boolean(accountCandidate) })}>
           {accountCandidate ? (
@@ -445,40 +435,13 @@ const Outlets = () => {
         </Form>
       </Modal>
 
-      <Modal title={t('sales_agents:outlets.delivery_window.label', 'Delivery window')} open={windowOpen} onCancel={() => setWindowOpen(false)} footer={null} destroyOnClose>
-        {/* destroyOnClose is what makes `initialValues` re-read the card on every open, so the
-            modal always opens on what is actually stored rather than on the first outlet opened. */}
-        {/* M28: antd here is 5.29.3, where `destroyOnClose` is DEPRECATED in favour of
-            `destroyOnHidden` (renamed in 5.25) and logs a console warning. `destroyOnClose` is
-            still what the two Modals directly above this one use (`Outlets.js:251`, `:258`), so
-            this file stays consistent with itself — do not mix the two spellings in one page.
-            Confirm the version before writing it: `grep -m1 '"version"' admin_ui/node_modules/antd/package.json`.
-            If a vitest setup in this repo ever starts failing on console warnings, rename ALL
-            THREE in this file together, not just the new one. */}
-        <Form
-          layout="vertical"
-          initialValues={{
-            delivery_window_start: outlet?.delivery_window_start ? dayjs(outlet.delivery_window_start, WINDOW_FORMAT) : null,
-            delivery_window_end: outlet?.delivery_window_end ? dayjs(outlet.delivery_window_end, WINDOW_FORMAT) : null,
-          }}
-          onFinish={submitWindow}
-        >
-          <Text type="secondary">{t('sales_agents:outlets.delivery_window.help', 'The default delivery window for every order placed at this outlet. Clear both fields to remove it.')}</Text>
-          <Row gutter={16} style={{ marginTop: 16 }}>
-            <Col span={12}>
-              <Form.Item name="delivery_window_start" label={t('sales_agents:outlets.delivery_window.start', 'From')}>
-                <TimePicker format={WINDOW_FORMAT} style={{ width: '100%' }} />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="delivery_window_end" label={t('sales_agents:outlets.delivery_window.end', 'Until')}>
-                <TimePicker format={WINDOW_FORMAT} style={{ width: '100%' }} />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Button type="primary" htmlType="submit" loading={updateMutation.isPending}>{t('ui.common.save', 'Save')}</Button>
-        </Form>
-      </Modal>
+      <OutletEditModal
+        outlet={outlet}
+        open={editOpen}
+        saving={updateMutation.isPending}
+        onCancel={() => setEditOpen(false)}
+        onSubmit={(payload) => updateMutation.mutate({ id: outlet.id, payload })}
+      />
     </div>
   );
 };

@@ -25,6 +25,7 @@ async def test_sales_wrappers_call_the_documented_routes(monkeypatch):
     await client.sales_request_activation("t", 7)
     await client.sales_list_activation_requests("t")
     await client.sales_approve_outlet("t", 7)
+    await client.sales_approve_outlet("t", 8, attach=True)
     await client.sales_reject_outlet("t", 7, "Incomplete")
     # --- phase 2a: the visit loop ---
     await client.sales_start_visit("t", 7)
@@ -64,6 +65,11 @@ async def test_sales_wrappers_call_the_documented_routes(monkeypatch):
         ("POST", "/api/v1/staff/sales/outlets/7/request-activation", "t", {}, None),
         ("GET", "/api/v1/staff/sales/activation-requests", "t", None, None),
         ("POST", "/api/v1/staff/sales/outlets/7/approve", "t", {}, None),
+        # D25: attach is the SAME door with one flag. A plain approve still
+        # posts an empty body -- `ApprovePayload.attach` defaults to False and
+        # a body that spelled the default out would be the bot restating a
+        # rule the serializer owns.
+        ("POST", "/api/v1/staff/sales/outlets/8/approve", "t", {"attach": True}, None),
         ("POST", "/api/v1/staff/sales/outlets/7/reject", "t", {"reason": "Incomplete"}, None),
         ("POST", "/api/v1/staff/sales/outlets/7/visits", "t", {}, None),
         ("GET", "/api/v1/staff/sales/visits/current", "t", None, None),

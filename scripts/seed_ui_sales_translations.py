@@ -110,7 +110,7 @@ UI_SALES_TRANSLATIONS = {
         "summary_is_estate_wide": "Totals across every outlet — the filters below do not narrow them.",
         "bulk_assign": "Bulk assign by district",
         "import_existing": "Import existing customers",
-        "import_confirm": "Create an outlet for every grocery/workplace customer without one?",
+        "import_confirm": "Create an outlet for every grocery/workplace address that has none yet?",
         "imported": "Customers imported as outlets",
         "bulk_assigned": "Outlets assigned",
         "approve": "Approve",
@@ -128,6 +128,16 @@ UI_SALES_TRANSLATIONS = {
         "open_receivable": "Owes",
         "bottle_balance": "Bottles at outlet",
         "dedupe_candidates": "Possible duplicates found at creation",
+        # --- D25 branch outlets: the account line and the approve/attach modal ---
+        "outlet_account_line": "Account: {{account}} · {{count}} branches",
+        "open_receivable_account": "Owes (account)",
+        "bottles_branch": "Bottles at this branch",
+        "approve_modal_title": "Approve outlet",
+        "attach_modal_title": "Attach to {{account}}",
+        "attach_confirm": (
+            "This outlet joins {{account}} as a branch — no new customer account is created."
+        ),
+        "contract_number_label": "Contract number",
         "role": "Role",
         "when": "When",
         "from": "From",
@@ -263,7 +273,7 @@ UI_SALES_TRANSLATIONS = {
         "summary_is_estate_wide": "Barcha nuqtalar bo'yicha jami — quyidagi filtrlar bu raqamlarni o'zgartirmaydi.",
         "bulk_assign": "Tuman bo'yicha biriktirish",
         "import_existing": "Mavjud mijozlarni import qilish",
-        "import_confirm": "Nuqtasi bo'lmagan har bir do'kon/ish joyi mijozi uchun nuqta yaratilsinmi?",
+        "import_confirm": "Hali nuqtasi bo'lmagan har bir do'kon/ish joyi manzili uchun nuqta yaratilsinmi?",
         "imported": "Mijozlar nuqta sifatida import qilindi",
         "bulk_assigned": "Nuqtalar biriktirildi",
         "approve": "Tasdiqlash",
@@ -281,6 +291,17 @@ UI_SALES_TRANSLATIONS = {
         "open_receivable": "Qarzdorlik",
         "bottle_balance": "Nuqtadagi idishlar",
         "dedupe_candidates": "Yaratishda topilgan ehtimoliy takrorlar",
+        # --- D25 branch outlets ---
+        "outlet_account_line": "Hisob: {{account}} · {{count}} ta filial",
+        "open_receivable_account": "Qarzdorlik (hisob bo'yicha)",
+        "bottles_branch": "Ushbu filialdagi idishlar",
+        "approve_modal_title": "Nuqtani tasdiqlash",
+        "attach_modal_title": "{{account}} hisobiga biriktirish",
+        "attach_confirm": (
+            "Bu nuqta {{account}} hisobiga filial sifatida qo'shiladi"
+            " — yangi mijoz hisobi yaratilmaydi."
+        ),
+        "contract_number_label": "Shartnoma raqami",
         "role": "Rol",
         "when": "Qachon",
         "from": "Dan",
@@ -412,7 +433,7 @@ UI_SALES_TRANSLATIONS = {
         "summary_is_estate_wide": "Итоги по всем точкам — фильтры ниже их не сужают.",
         "bulk_assign": "Назначить по району",
         "import_existing": "Импортировать существующих клиентов",
-        "import_confirm": "Создать точку для каждого магазина/офиса без точки?",
+        "import_confirm": "Создать точку для каждого адреса магазина/офиса, у которого её ещё нет?",
         "imported": "Клиенты импортированы как точки",
         "bulk_assigned": "Точки назначены",
         "approve": "Одобрить",
@@ -430,6 +451,17 @@ UI_SALES_TRANSLATIONS = {
         "open_receivable": "Долг",
         "bottle_balance": "Бутылей на точке",
         "dedupe_candidates": "Возможные дубликаты, найденные при создании",
+        # --- D25 branch outlets ---
+        "outlet_account_line": "Аккаунт: {{account}} · филиалов: {{count}}",
+        "open_receivable_account": "Долг (по аккаунту)",
+        "bottles_branch": "Бутылей в этом филиале",
+        "approve_modal_title": "Одобрить точку",
+        "attach_modal_title": "Привязать к аккаунту {{account}}",
+        "attach_confirm": (
+            "Эта точка станет филиалом аккаунта {{account}}"
+            " — новый клиентский аккаунт не создаётся."
+        ),
+        "contract_number_label": "Номер договора",
         "role": "Роль",
         "when": "Когда",
         "from": "Из",

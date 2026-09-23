@@ -262,7 +262,12 @@ def approve_outlet_admin(outlet_id):
     payload = _validated_payload(ApprovePayload)
     if not isinstance(payload, dict):
         return payload
-    outlet = OutletService.approve(outlet_id, actor_id=_actor_id(), contract_number=payload.get("contract_number"))
+    outlet = OutletService.approve(
+        outlet_id,
+        actor_id=_actor_id(),
+        contract_number=payload.get("contract_number"),
+        attach=bool(payload.get("attach", False)),
+    )
     return success_response(data={"outlet": serialize_outlet(outlet)})
 
 

@@ -2014,6 +2014,12 @@ class StaffBot:
         self.application.add_handler(
             CallbackQueryHandler(sales_approvals_handler.approve, pattern=r"^staff_sales_approve_\d+$")
         )
+        # D25: the same route with `attach: true`. Drawn INSTEAD of approve when
+        # the request's phone belongs to an account, so both patterns are
+        # registered and only one button is ever on screen.
+        self.application.add_handler(
+            CallbackQueryHandler(sales_approvals_handler.attach, pattern=r"^staff_sales_attach_\d+$")
+        )
         self.application.add_handler(
             CallbackQueryHandler(sales_approvals_handler.reject, pattern=r"^staff_sales_reject_\d+_\w+$")
         )

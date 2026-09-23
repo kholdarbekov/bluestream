@@ -1,13 +1,18 @@
 """/api/v1/admin/sales/outlets driven the way Outlets.js drives it."""
+from datetime import UTC, datetime
+
 import pytest
 
+from business_app.models.corporate import CorporateContract
 from business_app.models.sales import Outlet, SalesAgentProfile
 from business_app.models.user import UserAddress
 from business_app.services.sales.outlet_service import OutletService
 from business_app.utils.constants import MAX_PAGE_SIZE
+from business_app.utils.service_factory import get_corporate_contract_service
 from shared.enums import EntitySubtype
+from tests.integration.test_outlet_approval import _address
 from tests.integration.test_outlet_create import GROCERY
-from tests.unit.test_outlet_dedupe import PIN, _customer
+from tests.unit.test_outlet_dedupe import FAR, PIN, _customer
 from tests.unit.test_sales_agent_role import make_sales_agent_user
 
 pytestmark = pytest.mark.integration
@@ -93,6 +98,31 @@ def test_approve_reject_assign_mark_lost(client, admin_claim_headers, db, agent,
         f"{URL}/{outlet.id}/mark-lost", json={"reason": "closed", "note": "Shop closed"}, headers=admin_claim_headers
     )
     assert lost.status_code == 200 and lost.get_json()["data"]["outlet"]["lost_reason"] == "closed"
+
+
+def test_the_approve_modals_body_with_no_number_auto_numbers_the_contract(client, admin_claim_headers, db, agent):
+    """The approve modal's exact body when the operator leaves *Contract number* empty.
+
+    `salesService.approveOutlet` always sends both keys -- `{contract_number: null, attach:
+    false}` -- so the explicit null is what the door must read as "no number": a new account
+    and the auto-numbered `SA-<outlet_id>-<yyyymmdd>` contract, exactly as a contract-less
+    approve has always produced.
+    """
+    outlet = OutletService.create(agent.id, dict(GROCERY))
+    OutletService.request_activation(outlet, agent.id)
+    day_before = f"{datetime.now(UTC):%Y%m%d}"
+
+    approved = client.post(
+        f"{URL}/{outlet.id}/approve", json={"contract_number": None, "attach": False}, headers=admin_claim_headers
+    )
+
+    day_after = f"{datetime.now(UTC):%Y%m%d}"  # the pair only matters across a UTC midnight
+    assert approved.status_code == 200, approved.get_data(as_text=True)
+    assert approved.get_json()["data"]["outlet"]["stage"] == "active"
+    row = Outlet.query.get(outlet.id)
+    contract = get_corporate_contract_service().get_active_amount_contract_for_user(row.user_id)
+    assert contract is not None
+    assert contract.contract_number in {f"SA-{outlet.id}-{day_before}", f"SA-{outlet.id}-{day_after}"}
 
 
 def test_bulk_assign_and_import(client, admin_claim_headers, db, agent):
@@ -311,3 +341,218 @@ def test_the_outlet_delivery_window_is_writable_from_the_admin_page(client, admi
     db.session.expire_all()
     row = Outlet.query.get(outlet.id)
     assert (row.delivery_window_start, row.delivery_window_end) == (None, None)
+
+
+def test_import_creates_one_outlet_per_address_and_backfills_on_a_re_run(client, admin_claim_headers, db):
+    """The Outlets toolbar button, with the payload Outlets.js sends: POST with an empty body.
+
+    The reply counts OUTLETS, so a two-branch chain reads 2 the first time and 0 the second --
+    and an address added later is back-filled by pressing the button again. That re-run IS the
+    prod remediation for the chains imported under the old one-outlet-per-account rule.
+    """
+    chain = _customer(db, "+998901117744", company="Chinor", subtype=EntitySubtype.GROCERY_STORE)
+    _address(db, chain, "Chilonzor 9", "chilanzar", title="Bosh do'kon", is_default=True)
+    _address(db, chain, "Yunusobod 4", "Yunusabad", title="Filial-2", is_default=False)
+    db.session.commit()
+
+    first = client.post(f"{URL}/import-existing-customers", json={}, headers=admin_claim_headers)
+    assert first.status_code == 200, first.get_data(as_text=True)
+    assert first.get_json()["data"] == {"created": 2}
+
+    again = client.post(f"{URL}/import-existing-customers", json={}, headers=admin_claim_headers)
+    assert again.status_code == 200, again.get_data(as_text=True)
+    assert again.get_json()["data"] == {"created": 0}
+
+    _address(db, chain, "Sergeli 3", "sergeli", title="Filial-3", is_default=False)
+    db.session.commit()
+    third = client.post(f"{URL}/import-existing-customers", json={}, headers=admin_claim_headers)
+    assert third.status_code == 200, third.get_data(as_text=True)
+    assert third.get_json()["data"] == {"created": 1}
+
+    listed = client.get(URL, headers=admin_claim_headers, query_string={"search": "Chinor", "per_page": 50})
+    assert listed.status_code == 200, listed.get_data(as_text=True)
+    rows = listed.get_json()["data"]["items"]
+    assert sorted(row["name"] for row in rows) == [
+        "Chinor, Bosh do'kon",
+        "Chinor, Filial-2",
+        "Chinor, Filial-3",
+    ]
+    assert sorted(row["district"] for row in rows) == ["chilanzar", "sergeli", "yunusabad"]
+    assert {row["user_id"] for row in rows} == {chain.id}
+    assert len({row["address_id"] for row in rows}) == 3
+
+
+def _chain_account(db, admin_user, *, phone="+998901115511", company="Chinor"):
+    """An existing chain, in the shape the two prod accounts have: one customer account, one
+    address, one outlet already standing on it, and the AMOUNT contract its first branch's
+    approval minted. `attach` must JOIN this, not duplicate it."""
+    account = _customer(db, phone, company=company, subtype=EntitySubtype.GROCERY_STORE)
+    address = UserAddress(
+        user_id=account.id,
+        full_address="Chilonzor 9",
+        district="chilanzar",
+        latitude=PIN[0],
+        longitude=PIN[1],
+        is_default=True,
+    )
+    db.session.add(address)
+    db.session.flush()
+    db.session.add(
+        Outlet(
+            name=f"{company}, Chilonzor 9",
+            outlet_type="grocery_store",
+            stage="active",
+            user_id=account.id,
+            address_id=address.id,
+            latitude=PIN[0],
+            longitude=PIN[1],
+        )
+    )
+    db.session.commit()
+    get_corporate_contract_service().create_contract(
+        {"user_id": account.id, "contract_number": "CHAIN-0001", "name": f"{company} chain"},
+        actor_user_id=admin_user.id,
+    )
+    db.session.commit()
+    # The whole "the contract is reused, no second number is minted" assertion rests on this row
+    # being the account's ACTIVE amount contract (status + effective window come from
+    # `create_contract`'s defaults). Asserted here so a fixture problem fails as a fixture
+    # problem, not as a false "attach minted a second contract".
+    assert get_corporate_contract_service().get_active_amount_contract_for_user(account.id) is not None
+    return account
+
+
+def _branch_outlet(agent, *, name="Chinor, Yunusobod 4", phone="+998901115511"):
+    """The second shop of that chain, registered from the field: same phone, its own pin."""
+    outlet = OutletService.create(
+        agent.id,
+        {
+            **GROCERY,
+            "name": name,
+            "latitude": FAR[0],
+            "longitude": FAR[1],
+            "address_text": "Yunusobod 4-kvartal, 7",
+            "contact": {"name": "Olim aka", "phone": phone, "role": "owner"},
+        },
+        force=True,
+    )
+    return OutletService.request_activation(outlet, agent.id)
+
+
+def test_approve_refuses_a_chain_phone_and_attaches_the_branch_on_demand(
+    client, admin_claim_headers, db, agent, admin_user
+):
+    """D25 rule 3, through the door Outlets.js uses.
+
+    A phone that already has an account is not a mistake to be refused — it is the account the
+    new shop belongs to. The plain Approve still refuses (joining an account is a DECISION a
+    human makes), but the refusal now names the account; `attach: true` joins it: one more
+    branch on the same wallet, its own non-default address, the chain's contract reused.
+    """
+    account = _chain_account(db, admin_user)
+    branch = _branch_outlet(agent)
+
+    refused = client.post(f"{URL}/{branch.id}/approve", json={}, headers=admin_claim_headers)
+    assert refused.status_code == 409, refused.get_data(as_text=True)
+    body = refused.get_json()
+    assert body["error_code"] == "SALES_APPROVAL_PHONE_TAKEN"
+    assert body["details"]["account"] == {"user_id": account.id, "name": "Chinor", "outlet_count": 1}
+    assert Outlet.query.get(branch.id).stage == "activation_requested"
+    assert Outlet.query.get(branch.id).user_id is None
+
+    # The attach modal's exact body (salesService.approveOutlet in attach mode, R27): no number
+    # field is drawn, so the contract number always travels as an explicit null.
+    attached = client.post(
+        f"{URL}/{branch.id}/approve",
+        json={"contract_number": None, "attach": True},
+        headers=admin_claim_headers,
+    )
+    assert attached.status_code == 200, attached.get_data(as_text=True)
+    assert attached.get_json()["data"]["outlet"]["stage"] == "active"
+
+    joined = Outlet.query.get(branch.id)
+    assert joined.user_id == account.id
+    branch_address = UserAddress.query.get(joined.address_id)
+    assert branch_address.user_id == account.id and branch_address.is_default is False
+    assert branch_address.full_address == "Yunusobod 4-kvartal, 7"
+    assert UserAddress.query.filter_by(user_id=account.id).count() == 2
+    # One account, one contract: a branch reuses the chain's and never mints a second one.
+    assert [c.contract_number for c in CorporateContract.query.filter_by(user_id=account.id).all()] == [
+        "CHAIN-0001"
+    ]
+
+    history = client.get(f"{URL}/{branch.id}", headers=admin_claim_headers).get_json()["data"]["stage_history"]
+    assert [h["reason_code"] for h in history] == ["created", "requested", "attached"]
+
+    # Idempotent, like every other approval step: a second tap re-addresses nothing.
+    again = client.post(
+        f"{URL}/{branch.id}/approve", json={"contract_number": None, "attach": True}, headers=admin_claim_headers
+    )
+    assert again.status_code == 200 and again.get_json()["data"]["outlet"]["stage"] == "active"
+    assert UserAddress.query.filter_by(user_id=account.id).count() == 2
+    history = client.get(f"{URL}/{branch.id}", headers=admin_claim_headers).get_json()["data"]["stage_history"]
+    assert [h["reason_code"] for h in history] == ["created", "requested", "attached"]
+
+
+def test_attach_adopts_the_accounts_free_address_at_the_branch_pin(
+    client, admin_claim_headers, db, agent, admin_user
+):
+    """R39 on the attach door: the chain already registered this shop's address (a FREE,
+    non-default row ~55 m from the branch pin), so the attach adopts THAT row instead of
+    minting a second address for the same place — the helper `_link_customer` uses."""
+    account = _chain_account(db, admin_user)
+    shop = UserAddress(
+        user_id=account.id,
+        full_address="Yunusobod 4-kvartal, 7",
+        district="yunusabad",
+        latitude=FAR[0] + 0.0004,
+        longitude=FAR[1] + 0.0004,
+        is_default=False,
+    )
+    db.session.add(shop)
+    db.session.commit()
+    shop_id = shop.id
+    addresses_before = UserAddress.query.filter_by(user_id=account.id).count()
+    branch = _branch_outlet(agent)
+
+    attached = client.post(
+        f"{URL}/{branch.id}/approve", json={"contract_number": None, "attach": True}, headers=admin_claim_headers
+    )
+
+    assert attached.status_code == 200, attached.get_data(as_text=True)
+    assert attached.get_json()["data"]["outlet"]["stage"] == "active"
+    joined = Outlet.query.get(branch.id)
+    assert (joined.user_id, joined.address_id) == (account.id, shop_id)
+    assert UserAddress.query.filter_by(user_id=account.id).count() == addresses_before == 2
+
+
+def test_the_admin_drawer_publishes_the_account_and_the_attach_candidate(
+    client, admin_claim_headers, db, agent, admin_user
+):
+    """R9/R6: the drawer draws an Account line and an Attach button from FIELDS, never from a
+    phone it looks up itself. A pending branch has no account yet — hence the nulls — but it
+    does name the one it would join."""
+    account = _chain_account(db, admin_user)
+    branch = _branch_outlet(agent)
+
+    pending = client.get(f"{URL}/{branch.id}", headers=admin_claim_headers).get_json()["data"]["outlet"]
+    assert pending["account_name"] is None and pending["branch_count"] is None
+    assert pending["is_branch"] is False  # no account yet, so nothing to be a branch OF
+    assert pending["open_receivable_scope"] == "account"
+    assert pending["account_candidate"] == {"user_id": account.id, "name": "Chinor", "outlet_count": 1}
+
+    attached = client.post(
+        f"{URL}/{branch.id}/approve", json={"contract_number": None, "attach": True}, headers=admin_claim_headers
+    )
+    assert attached.status_code == 200, attached.get_data(as_text=True)
+
+    joined = client.get(f"{URL}/{branch.id}", headers=admin_claim_headers).get_json()["data"]["outlet"]
+    assert joined["account_name"] == "Chinor" and joined["branch_count"] == 2
+    assert joined["is_branch"] is True
+    assert joined["account_candidate"] is None
+    # The list rows stay lean on purpose (no per-row account lookup on a 100-row page).
+    listed = client.get(URL, headers=admin_claim_headers, query_string={"per_page": 50}).get_json()
+    assert all(
+        "account_name" not in row and "is_branch" not in row and "account_candidate" not in row
+        for row in listed["data"]["items"]
+    )

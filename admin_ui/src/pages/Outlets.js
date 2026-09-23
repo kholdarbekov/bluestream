@@ -56,6 +56,7 @@ const Outlets = () => {
   const [lostOpen, setLostOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [windowOpen, setWindowOpen] = useState(false);
+  const [approveOpen, setApproveOpen] = useState(false);
   const [drawerTab, setDrawerTab] = useState('overview');
 
   const narrow = (setter) => (value) => { setter(value); setPagination((p) => ({ ...p, page: 1 })); };
@@ -149,7 +150,7 @@ const Outlets = () => {
   };
   const onError = (err) => message.error(extractApiErrorMessage(err, t('ui.common.error_occurred', 'An error occurred')));
 
-  const approveMutation = useMutation({ mutationFn: ({ id }) => salesService.approveOutlet(id, null), onSuccess: () => { message.success(t('sales_agents:outlet_approved', 'Outlet activated')); refresh(); }, onError });
+  const approveMutation = useMutation({ mutationFn: ({ id, contractNumber, attach }) => salesService.approveOutlet(id, { contract_number: contractNumber, attach }), onSuccess: () => { message.success(t('sales_agents:outlet_approved', 'Outlet activated')); setApproveOpen(false); refresh(); }, onError });
   const rejectMutation = useMutation({ mutationFn: ({ id, reason }) => salesService.rejectOutlet(id, reason), onSuccess: () => { message.success(t('sales_agents:outlet_rejected', 'Request rejected')); setRejectOpen(false); rejectForm.resetFields(); refresh(); }, onError });
   const assignMutation = useMutation({ mutationFn: ({ id, agentUserId }) => salesService.assignOutlet(id, agentUserId), onSuccess: () => { message.success(t('sales_agents:outlet_assigned', 'Agent assigned')); refresh(); }, onError });
   const updateMutation = useMutation({ mutationFn: ({ id, payload }) => salesService.updateOutlet(id, payload), onSuccess: () => { message.success(t('sales_agents:outlet_updated', 'Outlet updated')); setWindowOpen(false); refresh(); }, onError });
@@ -174,6 +175,15 @@ const Outlets = () => {
 
   const outlet = detail?.outlet;
   const canApprove = outlet && ['activation_requested', 'prospect', 'trial'].includes(outlet.stage);
+  // D25 branch mode, read ONCE from what the backend published. `is_branch` IS
+  // `OutletService.is_branch` — the same answer the staff bot's card gates on — so neither
+  // renderer re-derives the rule from `branch_count` (two derivations with two different null
+  // defaults is exactly the duplication CLAUDE.md's "full scope" note forbids). `branch_count` is
+  // only the NUMBER the account line prints.
+  const isBranch = outlet?.is_branch === true;
+  // Resolved server-side too: the outlet's primary phone already belongs to this account, so a
+  // plain approve would 409. This page never matches a phone itself.
+  const accountCandidate = outlet?.account_candidate || null;
 
   // Both-or-neither, and explicit nulls to clear. One edge alone is not a window: the order path
   // offers the outlet's window only when BOTH edges are set (visit_service.py:571-580), so half a
@@ -196,7 +206,7 @@ const Outlets = () => {
         <Col>
           <Space>
             <Button icon={<TeamOutlined />} onClick={() => setBulkOpen(true)}>{t('sales_agents:bulk_assign', 'Bulk assign by district')}</Button>
-            <Popconfirm title={t('sales_agents:import_confirm', 'Create an outlet for every grocery/workplace customer without one?')} onConfirm={() => importMutation.mutate()}>
+            <Popconfirm title={t('sales_agents:import_confirm', 'Create an outlet for every grocery/workplace address that has none yet?')} onConfirm={() => importMutation.mutate()}>
               <Button icon={<ImportOutlined />} loading={importMutation.isPending}>{t('sales_agents:import_existing', 'Import existing customers')}</Button>
             </Popconfirm>
           </Space>
@@ -244,7 +254,13 @@ const Outlets = () => {
         extra={outlet ? (
           <Space>
             <Button onClick={() => setWindowOpen(true)}>{t('sales_agents:outlets.delivery_window.edit', 'Edit delivery window')}</Button>
-            {canApprove && <Button type="primary" loading={approveMutation.isPending} onClick={() => approveMutation.mutate({ id: outlet.id })}>{t('sales_agents:approve', 'Approve')}</Button>}
+            {canApprove && (
+              <Button type="primary" onClick={() => setApproveOpen(true)}>
+                {accountCandidate
+                  ? t('sales_agents:attach_modal_title', { account: accountCandidate.name, defaultValue: 'Attach to {{account}}' })
+                  : t('sales_agents:approve', 'Approve')}
+              </Button>
+            )}
             {outlet.stage === 'activation_requested' && <Button danger onClick={() => setRejectOpen(true)}>{t('sales_agents:reject', 'Reject')}</Button>}
             {outlet.stage !== 'lost' && <Button onClick={() => setLostOpen(true)}>{t('sales_agents:mark_lost', 'Mark lost')}</Button>}
           </Space>
@@ -257,6 +273,13 @@ const Outlets = () => {
               label: t('sales_agents:tab_overview', 'Overview'),
               children: (
                 <Space direction="vertical" size="large" style={{ width: '100%' }}>
+                  {/* D25: whose account this branch belongs to. Above the Descriptions rather
+                      than inside it — the grid is `column={2}` and a ninth item would reflow
+                      every pair below it. Gated on branch mode for the same reason the staff
+                      card is: a single-outlet account has nothing to disambiguate. */}
+                  {isBranch && (
+                    <Text type="secondary">{t('sales_agents:outlet_account_line', { account: outlet.account_name || '—', count: outlet.branch_count, defaultValue: 'Account: {{account}} · {{count}} branches' })}</Text>
+                  )}
                   <Descriptions bordered column={2} size="small">
                     <Descriptions.Item label={t('sales_agents:stage', 'Stage')}><Tag color={STAGE_COLORS[outlet.stage] || 'default'}>{outlet.stage}</Tag></Descriptions.Item>
                     <Descriptions.Item label={t('sales_agents:outlet_type', 'Type')}>{outlet.outlet_type}</Descriptions.Item>
@@ -266,8 +289,14 @@ const Outlets = () => {
                         decides it: no customer account means no wallet, no address row means no
                         bottle ledger. `?? 0` printed "Owes: 0 UZS" on a prospect that has never
                         ordered, which reads as a settled bill. A real 0 still renders as 0. */}
-                    <Descriptions.Item label={t('sales_agents:open_receivable', 'Owes')}>{outlet.open_receivable == null ? '—' : `${outlet.open_receivable} UZS`}</Descriptions.Item>
-                    <Descriptions.Item label={t('sales_agents:bottle_balance', 'Bottles at outlet')}>{outlet.bottle_balance ?? '—'}</Descriptions.Item>
+                    {/* D25: the figure is unchanged — the receivable is account-wide in every
+                        mode and the bottle ledger is per address. In branch mode the labels say
+                        which, because "Owes" on one branch of a chain reads as that branch's
+                        debt. The money qualifier also reads `open_receivable_scope`, which is
+                        what the backend says the figure MEANS: if the receivable ever stopped
+                        being account-wide this label would stop claiming it is. */}
+                    <Descriptions.Item label={isBranch && outlet.open_receivable_scope === 'account' ? t('sales_agents:open_receivable_account', 'Owes (account)') : t('sales_agents:open_receivable', 'Owes')}>{outlet.open_receivable == null ? '—' : `${outlet.open_receivable} UZS`}</Descriptions.Item>
+                    <Descriptions.Item label={isBranch ? t('sales_agents:bottles_branch', 'Bottles at this branch') : t('sales_agents:bottle_balance', 'Bottles at outlet')}>{outlet.bottle_balance ?? '—'}</Descriptions.Item>
                     {/* Each edge on its own. The MODAL refuses to save a half pair, but nothing
                         refuses to STORE one (the backend's both-or-neither refusal is backlog and
                         the agent PUT accepts the fields independently), so `09:30` with no end is
@@ -351,6 +380,43 @@ const Outlets = () => {
           ]} />
         ) : null}
       </Drawer>
+
+      {/* D25: one button, two doors. With no `account_candidate` the backend creates a customer
+          account, as it always has. With one, the outlet's primary phone already belongs to an
+          account and a plain approve is refused (409 SALES_APPROVAL_PHONE_TAKEN) — so the modal
+          names that account and sends `attach: true`, which joins the outlet to it as a branch.
+          The choice is the backend's; this modal only labels it and offers it. */}
+      <Modal
+        title={accountCandidate
+          ? t('sales_agents:attach_modal_title', { account: accountCandidate.name, defaultValue: 'Attach to {{account}}' })
+          : t('sales_agents:approve_modal_title', 'Approve outlet')}
+        open={approveOpen}
+        onCancel={() => setApproveOpen(false)}
+        footer={null}
+        destroyOnClose
+      >
+        {/* No `form` instance on purpose, exactly like the delivery-window modal below:
+            destroyOnClose unmounts the fields, so the next open starts empty. */}
+        <Form layout="vertical" onFinish={(v) => approveMutation.mutate({ id: outlet?.id, contractNumber: v.contract_number || null, attach: Boolean(accountCandidate) })}>
+          {accountCandidate ? (
+            /* R27 — attach mode is the sentence and Save, nothing else. A contract number typed
+               here would be silently ignored whenever the account already has an active AMOUNT
+               contract, which is the normal case for a chain; and an account without one is
+               numbered by the backend exactly as a contract-less approve numbers it
+               (`SA-<outlet_id>-<yyyymmdd>`). A field whose value usually vanishes is worse than
+               no field, so the body carries `contract_number: null`. */
+            <Text type="secondary">{t('sales_agents:attach_confirm', { account: accountCandidate.name, defaultValue: 'This outlet joins {{account}} as a branch — no new customer account is created.' })}</Text>
+          ) : (
+            /* Approve mode only. `ApprovePayload.contract_number` is max_length=100 and has been
+               accepted by both approve doors since phase 1 with no way to fill it in. Optional:
+               left empty, the backend numbers the contract itself. */
+            <Form.Item name="contract_number" label={t('sales_agents:contract_number_label', 'Contract number')}>
+              <Input maxLength={100} />
+            </Form.Item>
+          )}
+          <Button type="primary" htmlType="submit" loading={approveMutation.isPending}>{t('ui.common.save', 'Save')}</Button>
+        </Form>
+      </Modal>
 
       <Modal title={t('sales_agents:reject', 'Reject')} open={rejectOpen} onCancel={() => setRejectOpen(false)} footer={null} destroyOnClose>
         <Form form={rejectForm} layout="vertical" onFinish={(v) => rejectMutation.mutate({ id: outlet?.id, reason: v.reason })}>

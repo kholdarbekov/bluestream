@@ -727,10 +727,55 @@ def test_push_task_posts_the_proposal_with_the_request_id(
         "order_number": order.order_number,
         "request_id": row.request_id,
         "agent_name": "Sardor Agent",
+        # D25 rule 8: a chain owner reads every branch's proposal in ONE chat.
+        "outlet_name": "Bahor market",
+        "delivery_address": "Chilonzor 5",
         "items": [{"name": "Pure Water 19L", "qty": 2}],
         "total": float(order.total_amount),
         "delivery_date": None,
     }
+
+
+def test_the_proposal_carries_the_address_the_order_will_go_to_not_the_outlets_pin(
+    app, db, agent, linked_outlet, sample_product, monkeypatch
+):
+    """D25 rule 8. Two branches of one chain send their proposals to the SAME Telegram chat,
+    so the message has to say which door the water is coming to — and it has to say the door
+    the ORDER carries (`orders.delivery_address_id`, what `place_order` stamped), not the
+    outlet's current `address_text` nor the address row its `address_id` points at NOW. A
+    branch that is re-pinned or re-addressed tomorrow must not silently rewrite what a
+    proposal already sitting in the store's chat promises today.
+
+    `street_address` wins over `full_address` when it is filled: it is the short line a
+    shopkeeper recognises, and the pin flow leaves it NULL often enough that the fallback is
+    the half that actually ships.
+    """
+    _spy(monkeypatch, sales_agent_tasks.push_agent_order_confirmation, "delay")
+    order, _ = _place_order(agent, linked_outlet, sample_product)
+    address = UserAddress.query.get(order.delivery_address_id)
+    assert address.id == linked_outlet.address_id and address.street_address is None
+    address.street_address = "Chilonzor 5-kvartal, 12"
+    # The outlet moves AFTER the order was placed: a second address row of the same account
+    # (coordinate-less, so the delivery-zone listener skips it), with text of its own in BOTH
+    # columns so neither half of the street/full fallback can accidentally match the order's.
+    moved = UserAddress(
+        user_id=linked_outlet.user_id,
+        street_address="Yunusobod 19-kvartal, 4",
+        full_address="Yunusobod tumani, 19-kvartal, 4",
+    )
+    db.session.add(moved)
+    db.session.flush()
+    linked_outlet.address_id = moved.id
+    linked_outlet.address_text = "SOMEWHERE ELSE ENTIRELY"
+    db.session.commit()
+    assert order.delivery_address_id != linked_outlet.address_id
+    calls = _spy(monkeypatch, sales_agent_tasks, "trigger_bot_webhook", result={"success": True})
+
+    sales_agent_tasks.push_agent_order_confirmation.run(order.id)
+
+    (_endpoint, payload), _kwargs = calls[0]
+    assert payload["delivery_address"] == "Chilonzor 5-kvartal, 12"
+    assert payload["outlet_name"] == "Bahor market"
 
 
 def test_the_push_task_sends_the_request_id_as_the_x_request_id_header(

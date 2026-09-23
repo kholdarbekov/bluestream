@@ -136,6 +136,65 @@ async def test_duplicate_candidates_offer_link_or_create_anyway(monkeypatch):
     assert harness.conversation_state(CONV) is None
 
 
+async def test_a_branch_of_the_same_account_is_offered_to_open_not_to_link(monkeypatch):
+    """D25 rule 4: a chain's other branches share the chain's phone.
+
+    The dedupe lookup names them, as SIBLINGS -- informational, never a block
+    and never a link target, because the account is already this outlet's. The
+    only useful action on one is to open the branch that exists, and the way
+    past the screen stays the create-anyway button every duplicate screen
+    carries. Drawing 🔗 Link on the sibling would post `link_user_id` for the
+    account on the address of a DIFFERENT branch.
+
+    The payload is the one the backend really sends: a sibling only exists
+    beside the `customer` row for the account the same lookup matched
+    (`find_duplicates` relabels only outlets whose account it has just named),
+    here by the phone the agent typed. So the screen is exactly one 🔗 Link
+    row for the ACCOUNT, one 🏢 row for the BRANCH, then the two exits.
+    """
+    harness, ops, labels = await _agent(monkeypatch)
+    harness.backend.route("POST", REVERSE, lambda c: {
+        "formatted_address": "Chilonzor 5", "district": "Mirzo Ulug‘bek Tumani"})
+    harness.backend.route("GET", DEDUPE, lambda c: {"candidates": [
+        {"kind": "customer", "user_id": 41, "outlet_id": None, "name": "Bahor Savdo",
+         "phone": "+998901112266", "distance_m": None, "reason": "phone"},
+        {"kind": "sibling", "user_id": 41, "outlet_id": 3, "name": "Bahor Savdo, Chilonzor 5",
+         "phone": "+998901112266", "distance_m": None, "reason": "same_account_branch"},
+    ]})
+    harness.backend.route("GET", f"{OUTLETS}/3",
+                          lambda c: {"outlet": _outlet(id=3, name="Bahor Savdo, Chilonzor 5")})
+
+    await harness.send(ops.text(_label(labels, "staff.menu.new_outlet")))
+    await harness.send(ops.tap("staff_sales_no_type_grocery_store"))
+    await harness.send(ops.text("Bahor market"))
+    await harness.send(ops.text("Olim aka"))
+    await harness.send(ops.text("90 111 22 66"))
+    await harness.send(ops.location(*IN_ZONE))
+    await harness.send(ops.tap("staff_sales_no_class_skip"))
+    await harness.send(ops.tap("staff_sales_no_skip_notes"))
+
+    screen = harness.telegram.last_shown()
+    assert screen.callback_data() == [
+        "staff_sales_no_link_41",   # the ACCOUNT: the agent's Link door
+        "staff_sales_outlet_3",     # the BRANCH: open it, never link it
+        "staff_sales_no_force",
+        "staff_back_to_main",
+    ]
+    # The whole label, literally (R31): a seed row that grew its own 🏢 would
+    # double the glyph on both sides of a composed expectation and pass.
+    assert "🏢 Branch of Bahor Savdo, Chilonzor 5" in screen.button_labels()
+    link_labels = [label for label in screen.button_labels() if label.startswith("🔗")]
+    assert link_labels == [f"🔗 {_curated('staff.sales.new.link_existing')}: Bahor Savdo"]
+    # The row is a list button like any other: the label ceiling still holds.
+    assert all(len(label) <= 60 for label in screen.button_labels())
+
+    # And the branch row is live, not merely drawn: it opens the branch that
+    # exists and ends the walk-in.
+    await harness.send(ops.tap("staff_sales_outlet_3"))
+    assert _calls(harness, "GET", f"{OUTLETS}/3")
+    assert harness.conversation_state(CONV) is None
+
+
 async def test_create_anyway_sets_force(monkeypatch):
     harness, ops, labels = await _agent(monkeypatch)
     harness.backend.route("POST", REVERSE, lambda c: {"formatted_address": "Chilonzor 5", "district": "Mirzo Ulug\u2018bek Tumani"})

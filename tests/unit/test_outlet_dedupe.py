@@ -83,3 +83,35 @@ def test_name_match_within_radius_only(db):
     assert kinds == [("customer", "name_nearby"), ("outlet", "name_nearby")]
     assert all(c["distance_m"] < 150 for c in found)
     assert far.id not in [c.get("outlet_id") for c in found]
+
+
+def test_branches_of_the_account_the_phone_names_come_back_as_siblings(db):
+    """D25 rule 4: a chain's branches carry the chain's number, so every sibling flagged the
+    others as a duplicate. They are places of one account — labelled `sibling`, informational.
+    The account itself stays a `customer` candidate: that row is the agent's 🔗 Link door.
+    An outlet on somebody ELSE's account (`rival`) or on none (`stranger`) is still a plain
+    duplicate: the relabel reads "an account THIS lookup named", never "an account at all" --
+    otherwise another customer's shop stops blocking `create()` and is drawn as a branch."""
+    account = _customer(db, "+998901112244", company="Bahor", subtype=EntitySubtype.GROCERY_STORE)
+    branch = Outlet(name="Bahor market, Chilonzor", outlet_type="grocery_store", user_id=account.id)
+    branch.contacts.append(OutletContact(name="Olim aka", phone="+998901112244", is_primary=True))
+    stranger = Outlet(name="Navruz", outlet_type="grocery_store")
+    stranger.contacts.append(OutletContact(name="Boshqa", phone="+998901112244", is_primary=True))
+    other = _customer(db, "+998901112299", company="Navruz", subtype=EntitySubtype.GROCERY_STORE)
+    rival = Outlet(name="Navruz 2", outlet_type="grocery_store", user_id=other.id)
+    rival.contacts.append(OutletContact(name="Boshqa", phone="+998901112244", is_primary=True))
+    db.session.add_all([branch, stranger, rival])
+    db.session.commit()
+
+    found = OutletService.find_duplicates("Bahor market, Yunusobod", "+998901112244", None, None)
+
+    # The full rows, not a set of kinds: `rival` and `stranger` share a kind, so a set would
+    # read the same whether the rival stayed a duplicate or turned into a sibling.
+    rows = [(c["kind"], c["reason"], c["outlet_id"], c["user_id"]) for c in found]
+    expected = [
+        ("customer", "phone", None, account.id),
+        ("outlet", "phone", stranger.id, None),
+        ("outlet", "phone", rival.id, other.id),
+        ("sibling", "same_account_branch", branch.id, account.id),
+    ]
+    assert sorted(rows, key=str) == sorted(expected, key=str)

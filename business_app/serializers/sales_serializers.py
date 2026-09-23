@@ -100,6 +100,10 @@ class UpdateOutletPayload(_Payload):
 
 class ApprovePayload(_Payload):
     contract_number: Optional[str] = Field(default=None, max_length=100)
+    # D25 rule 3: the operator's explicit "this shop belongs to the account that phone already
+    # names". Default False, so the bot's `{}` and the admin's contract-only body keep meaning
+    # "create a new account or refuse" -- attaching is never implicit.
+    attach: bool = False
 
 
 class RejectPayload(_Payload):

@@ -24,7 +24,7 @@ from business_app.models.order import Order, OrderItem, OrderStatusHistory
 from business_app.models.product import Product
 from business_app.models.sales import Outlet
 from business_app.models.sales_visits import Visit, VisitStockCheck
-from business_app.models.user import User
+from business_app.models.user import User, UserAddress
 from business_app.services.sales import replenishment_service as replenishment_module
 from business_app.services.sales.replenishment_service import INCOMING_ORDER_STATUSES, ReplenishmentService
 from business_app.services.sales.visit_service import VisitService
@@ -93,6 +93,34 @@ def _outlet(db, owner=None, *, stage="active", outlet_class="A", **columns):
     return outlet
 
 
+def _address(db, owner, *, full_address, is_default=False):
+    """One branch's own delivery address -- the column every branch-scoped query joins on.
+
+    Deliberately coordinate-less: `register_delivery_zone_listeners` skips a row with no
+    pin, so these fixtures never have to carry an in-polygon coordinate to say where a
+    branch is.
+    """
+    address = UserAddress(user_id=owner.id, full_address=full_address, is_default=is_default)
+    db.session.add(address)
+    db.session.commit()
+    return address
+
+
+def _chain(db, product):
+    """One grocery ACCOUNT with two branches, each on its own address (D25).
+
+    Returns (owner, busy_branch, quiet_branch, busy_address, quiet_address). Two outlets on
+    one `user_id` is what `OutletService.is_branch` answers True to.
+    """
+    owner = _owner(db, phone="+998901234593")
+    busy_address = _address(db, owner, full_address="Chilonzor 5", is_default=True)
+    quiet_address = _address(db, owner, full_address="Yunusobod 12")
+    busy = _outlet(db, owner, address_id=busy_address.id)
+    quiet = _outlet(db, owner, address_id=quiet_address.id)
+    _flag_for_stock_check(db, product)
+    return owner, busy, quiet, busy_address, quiet_address
+
+
 def _visit(db, outlet, agent, *, started_at):
     visit = Visit(
         outlet_id=outlet.id,
@@ -121,11 +149,13 @@ def _stock_check(db, visit, product, *, on_hand):
     return row
 
 
-def _delivered_order(db, owner, product, *, quantity, delivered_at, number):
+def _delivered_order(db, owner, product, *, quantity, delivered_at, number, delivery_address_id=None):
     """A DELIVERED order whose delivery instant lives on the status-history row.
 
     `orders` has no `delivered_at` column — the DELIVERED history row is the only
     record of when it landed, which is exactly what the rate window reads.
+    `delivery_address_id` is the branch key: nullable on `orders`, so leaving it None
+    is what a legacy order really looks like.
     """
     order = Order(
         user_id=owner.id,
@@ -133,6 +163,7 @@ def _delivered_order(db, owner, product, *, quantity, delivered_at, number):
         status=OrderStatus.DELIVERED,
         subtotal=Decimal("15000.00"),
         total_amount=Decimal("15000.00"),
+        delivery_address_id=delivery_address_id,
         created_at=delivered_at,
     )
     db.session.add(order)
@@ -159,13 +190,15 @@ def _delivered_order(db, owner, product, *, quantity, delivered_at, number):
     return order
 
 
-def _pending_order(db, owner, product, *, quantity, number, status=OrderStatus.PENDING, created_at=None):
+def _pending_order(db, owner, product, *, quantity, number, status=OrderStatus.PENDING, created_at=None,
+                   delivery_address_id=None):
     order = Order(
         user_id=owner.id,
         order_number=number,
         status=status,
         subtotal=Decimal("15000.00"),
         total_amount=Decimal("15000.00"),
+        delivery_address_id=delivery_address_id,
     )
     db.session.add(order)
     db.session.flush()
@@ -1031,3 +1064,77 @@ class TestSuggestionAndDueDate:
 
         assert ReplenishmentService.local_day_end_utc() == ros._driver_day_start_utc() + timedelta(days=1)
         assert ReplenishmentService.local_day_end_utc() == datetime(2026, 9, 8, 19, 0, tzinfo=timezone.utc)
+
+
+class TestBranchScopedHistory:
+    """D25 rule 5: on a chain account every branch's numbers come from ITS OWN address.
+
+    Before branch outlets, `outlets.user_id` was unique, so "this outlet's history" and
+    "this account's history" were the same sentence. With two shops on one account they are
+    not: unscoped, a busy branch's deliveries hide a dead one's silence, and every number the
+    agent is shown for the dead branch -- rate, suggested quantity, stage -- is the chain's.
+    """
+
+    def test_a_branch_counts_only_what_was_delivered_to_its_own_address(self, db, sample_product):
+        owner, busy, quiet, busy_address, quiet_address = _chain(db, sample_product)
+        _delivered_order(db, owner, sample_product, quantity=6, delivered_at=DELIVERY_AT,
+                         number="SA_000401_26", delivery_address_id=busy_address.id)
+        _delivered_order(db, owner, sample_product, quantity=11, delivered_at=SECOND_VISIT_AT,
+                         number="SA_000402_26", delivery_address_id=quiet_address.id)
+
+        assert ReplenishmentService.delivered_qty(busy, sample_product, since=FIRST_VISIT_AT) == 6
+        assert ReplenishmentService.delivered_qty(quiet, sample_product, since=FIRST_VISIT_AT) == 11
+        # The D15 fallback quantity: "order what they took last time" must mean last time HERE.
+        assert ReplenishmentService.last_delivered_qty(busy, sample_product) == 6
+        assert ReplenishmentService.last_delivered_qty(quiet, sample_product) == 11
+        # The stage sweep's one input (`update_stages` -> `delivered_instants`).
+        assert [ensure_utc(i) for i in ReplenishmentService.delivered_instants(busy, limit=5)] == [DELIVERY_AT]
+        assert [ensure_utc(i) for i in ReplenishmentService.delivered_instants(quiet, limit=5)] == [SECOND_VISIT_AT]
+
+    def test_a_siblings_undelivered_order_is_not_on_its_way_to_this_branch(self, db, sample_product):
+        """`incoming_qty` pushes the stock-out projection out. A pallet booked for the OTHER
+        branch used to push this one's, so the shop that was actually running dry fell off the
+        due list because its sibling had just ordered."""
+        owner, busy, quiet, busy_address, quiet_address = _chain(db, sample_product)
+        _pending_order(db, owner, sample_product, quantity=4, number="SA_000403_26",
+                       created_at=DELIVERY_AT, delivery_address_id=busy_address.id)
+        _pending_order(db, owner, sample_product, quantity=7, number="SA_000404_26",
+                       created_at=DELIVERY_AT, delivery_address_id=quiet_address.id)
+
+        assert ReplenishmentService.incoming_qty(busy, sample_product, now=FROZEN_UTC) == 4
+        assert ReplenishmentService.incoming_qty(quiet, sample_product, now=FROZEN_UTC) == 7
+
+    def test_a_single_outlet_account_still_counts_its_address_less_history(self, db, sample_product):
+        """R2. `orders.delivery_address_id` is nullable and legacy rows carry NULL, so the
+        address conjunct is added ONLY when the account really has siblings. A one-shop
+        account -- every account on the estate until an import creates a second outlet --
+        answers exactly as it did before this change."""
+        owner = _owner(db, phone="+998901234594")
+        address = _address(db, owner, full_address="Chilonzor 5", is_default=True)
+        only = _outlet(db, owner, address_id=address.id)
+        _flag_for_stock_check(db, sample_product)
+        _delivered_order(db, owner, sample_product, quantity=8, delivered_at=DELIVERY_AT,
+                         number="SA_000405_26", delivery_address_id=None)
+
+        assert ReplenishmentService.delivered_qty(only, sample_product, since=FIRST_VISIT_AT) == 8
+        assert ReplenishmentService.last_delivered_qty(only, sample_product) == 8
+
+    def test_a_branchs_address_less_legacy_orders_are_the_documented_cost(self, db, sample_product):
+        """R3's stated price, pinned so nobody 'fixes' it into a fallback by accident.
+
+        Once an account has two outlets, an order with no `delivery_address_id` belongs to
+        neither branch and is counted for neither. Falling back to the account when a branch
+        has no address-stamped history would hand a dead branch its sibling's rhythm -- the
+        exact bug this task exists to remove -- so the trade is deliberate: `Mark lost` and a
+        fresh visit rebuild the number, an implicit fallback never would.
+        """
+        owner, busy, quiet, busy_address, _quiet_address = _chain(db, sample_product)
+        _delivered_order(db, owner, sample_product, quantity=9, delivered_at=DELIVERY_AT,
+                         number="SA_000406_26", delivery_address_id=None)
+        _delivered_order(db, owner, sample_product, quantity=2, delivered_at=SECOND_VISIT_AT,
+                         number="SA_000407_26", delivery_address_id=busy_address.id)
+
+        assert ReplenishmentService.delivered_qty(busy, sample_product, since=FIRST_VISIT_AT) == 2
+        assert ReplenishmentService.delivered_qty(quiet, sample_product, since=FIRST_VISIT_AT) == 0
+        assert ReplenishmentService.last_delivered_qty(quiet, sample_product) is None
+        assert ReplenishmentService.delivered_instants(quiet, limit=5) == []

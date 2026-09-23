@@ -476,7 +476,7 @@ def my_stats():
 @jwt_required()
 @require_staff_roles("operator")
 def list_activation_requests():
-    return success_response(data={"items": [serialize_outlet(o) for o in OutletService.list_activation_requests()]})
+    return success_response(data={"items": OutletService.activation_request_rows()})
 
 
 @staff_sales_bp.route("/sales/outlets/<int:outlet_id>/approve", methods=["POST"])
@@ -487,7 +487,12 @@ def approve_outlet(outlet_id):
     payload = _validated_payload(ApprovePayload)
     if not isinstance(payload, dict):
         return payload
-    outlet = OutletService.approve(outlet_id, actor_id=_actor_id(), contract_number=payload.get("contract_number"))
+    outlet = OutletService.approve(
+        outlet_id,
+        actor_id=_actor_id(),
+        contract_number=payload.get("contract_number"),
+        attach=bool(payload.get("attach", False)),
+    )
     return success_response(data={"outlet": serialize_outlet(outlet)})
 
 

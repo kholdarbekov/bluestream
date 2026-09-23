@@ -110,3 +110,29 @@ describe('salesService phase-3 read methods', () => {
     expect(result.agents.map((row) => row.agent_user_id)).toEqual([41, 77]);
   });
 });
+
+describe('salesService.approveOutlet', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('posts the attach flag and the contract number as one body', async () => {
+    api.post.mockResolvedValue(envelope({ outlet: { id: 5, stage: 'active' } }));
+
+    const result = await salesService.approveOutlet(5, { contract_number: 'DG-2026-77', attach: true });
+
+    // D25: `attach` is what tells the backend to JOIN the account its own phone lookup already
+    // found (`account_candidate`) instead of creating one. A missing key reads as "create" on a
+    // door whose refusal is a 409 SALES_APPROVAL_PHONE_TAKEN, so it travels explicitly.
+    expect(api.post).toHaveBeenCalledWith('/admin/sales/outlets/5/approve', { contract_number: 'DG-2026-77', attach: true });
+    expect(result).toEqual({ outlet: { id: 5, stage: 'active' } });
+  });
+
+  it('defaults to a plain approve with no contract number', async () => {
+    api.post.mockResolvedValue(envelope({ outlet: { id: 6, stage: 'active' } }));
+
+    await salesService.approveOutlet(6);
+
+    // Explicit null, explicit false — `_validated_payload` keeps what the client actually sent
+    // (exclude_unset), and both are what phase 1's empty body already meant.
+    expect(api.post).toHaveBeenCalledWith('/admin/sales/outlets/6/approve', { contract_number: null, attach: false });
+  });
+});

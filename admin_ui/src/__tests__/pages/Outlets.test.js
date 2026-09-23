@@ -14,7 +14,19 @@ vi.mock('../../services/salesService');
 vi.mock('../../services/staffService');
 vi.mock('../../services/api', () => ({ __esModule: true, default: { get: vi.fn() } }));
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key, opts) => (typeof opts === 'string' ? opts : opts?.defaultValue) || key }),
+  useTranslation: () => ({
+    // The positional default this page uses (`t(key, 'Owes')`) PLUS i18next's own `{{token}}`
+    // interpolation, which the D25 account line and the attach modal depend on. Without it
+    // those assertions would read `{{account}}` back out of the page and pass on a string no
+    // operator ever sees. Same shape as BottleTracking.test.js:59.
+    t: (key, opts) => {
+      const options = typeof opts === 'string' ? {} : (opts || {});
+      const value = (typeof opts === 'string' ? opts : opts?.defaultValue) || key;
+      return value.replace(/\{\{(\w+)\}\}/g, (_, token) => (
+        options[token] !== undefined ? String(options[token]) : `{{${token}}}`
+      ));
+    },
+  }),
 }));
 vi.mock('antd', async () => {
   const actual = await vi.importActual('antd');
@@ -106,14 +118,68 @@ it('opens the drawer and approves with the dedupe candidates visible', async () 
   const drawer = await openDrawer();
   expect(within(drawer).getByText(/Bahor \(Olim\)/)).toBeInTheDocument();
   fireEvent.click(within(drawer).getByRole('button', { name: /^approve$/i }));
-  await waitFor(() => expect(salesService.approveOutlet).toHaveBeenCalledWith(5, null));
+
+  // D25: Approve now opens a modal — a contract number, and the attach flag when the outlet's
+  // phone already belongs to an account. With no candidate it approves exactly as it always did.
+  const modal = await waitFor(() => { expect(lastModal()).toBeTruthy(); return lastModal(); });
+  expect(within(modal).getByText('Approve outlet')).toBeInTheDocument();
+  fireEvent.click(within(modal).getByRole('button', { name: /save/i }));
+
+  await waitFor(() => expect(salesService.approveOutlet).toHaveBeenCalledWith(5, { contract_number: null, attach: false }));
+});
+
+it('sends the contract number the approve modal collected', async () => {
+  render(<Outlets />, { wrapper: createWrapper() });
+  const drawer = await openDrawer();
+  fireEvent.click(within(drawer).getByRole('button', { name: /^approve$/i }));
+  const modal = await waitFor(() => { expect(lastModal()).toBeTruthy(); return lastModal(); });
+
+  // `ApprovePayload.contract_number` has been accepted by both approve doors since phase 1 and
+  // no admin could ever fill it: the button posted an empty body.
+  expect(within(modal).getByText('Contract number')).toBeInTheDocument();
+  fireEvent.change(within(modal).getByRole('textbox'), { target: { value: 'DG-2026-77' } });
+  fireEvent.click(within(modal).getByRole('button', { name: /save/i }));
+
+  await waitFor(() => expect(salesService.approveOutlet).toHaveBeenCalledWith(5, { contract_number: 'DG-2026-77', attach: false }));
+});
+
+it('attaches an outlet whose phone already belongs to an account instead of approving it', async () => {
+  // The candidate is the BACKEND's answer (OutletService.account_candidate), published on the
+  // outlet GET. A plain approve on this outlet is a 409 SALES_APPROVAL_PHONE_TAKEN, so the same
+  // button must offer the door that works — and must name the account it is about to join.
+  salesService.getOutlet.mockResolvedValue({
+    outlet: {
+      ...OUTLET, open_receivable: 0, bottle_balance: 0, last_orders: [],
+      account_candidate: { user_id: 908, name: 'Bahor Savdo MChJ', outlet_count: 3 },
+    },
+    stage_history: STAGE_HISTORY,
+  });
+  render(<Outlets />, { wrapper: createWrapper() });
+  const drawer = await openDrawer();
+  // R28: the chain is visible BEFORE the click. The drawer's own primary button carries the
+  // account's name, so an operator never presses Approve to discover it is really an Attach.
+  // Finding the button by that name IS the assertion — there is no `Approve` button on this outlet.
+  expect(within(drawer).queryByRole('button', { name: /^approve$/i })).toBeNull();
+  fireEvent.click(within(drawer).getByRole('button', { name: 'Attach to Bahor Savdo MChJ' }));
+  const modal = await waitFor(() => { expect(lastModal()).toBeTruthy(); return lastModal(); });
+
+  expect(within(modal).getByText('Attach to Bahor Savdo MChJ')).toBeInTheDocument();
+  expect(within(modal).getByText('This outlet joins Bahor Savdo MChJ as a branch — no new customer account is created.')).toBeInTheDocument();
+  // R27: no contract-number field in attach mode. A number typed here is silently ignored whenever
+  // the account already has an active AMOUNT contract — the normal case for a chain — so the field
+  // is not offered at all, and the body carries `contract_number: null`.
+  expect(within(modal).queryByText('Contract number')).toBeNull();
+  expect(within(modal).queryByRole('textbox')).toBeNull();
+  fireEvent.click(within(modal).getByRole('button', { name: /save/i }));
+
+  await waitFor(() => expect(salesService.approveOutlet).toHaveBeenCalledWith(5, { contract_number: null, attach: true }));
 });
 
 it('imports existing customers from the toolbar', async () => {
   render(<Outlets />, { wrapper: createWrapper() });
   await screen.findByText('Bahor market');
   fireEvent.click(screen.getByRole('button', { name: /import existing customers/i }));
-  // Creating an outlet per customer estate-wide is confirmed, never one stray click.
+  // Creating an outlet per grocery/workplace ADDRESS estate-wide (D25/R4) is confirmed, never one stray click.
   fireEvent.click(await screen.findByRole('button', { name: /^ok$/i }));
   await waitFor(() => expect(salesService.importExistingCustomers).toHaveBeenCalledTimes(1));
 });
@@ -146,6 +212,68 @@ it('still shows a real zero balance for an outlet that has an account', async ()
 
   expect(descValue(drawer, 'Owes')).toBe('0 UZS');
   expect(descValue(drawer, 'Bottles at outlet')).toBe('0');
+});
+
+it('names the account and labels the money and the bottles for a branch', async () => {
+  salesService.getOutlet.mockResolvedValue({
+    outlet: {
+      ...OUTLET, stage: 'active', open_receivable: 250000, bottle_balance: 7, last_orders: [],
+      account_name: 'Bahor Savdo MChJ', branch_count: 3, is_branch: true,
+      open_receivable_scope: 'account',
+    },
+    stage_history: STAGE_HISTORY,
+  });
+  render(<Outlets />, { wrapper: createWrapper() });
+  const drawer = await openDrawer();
+
+  // Money is ONE wallet per account (`OutletService.card` keeps the receivable account-wide);
+  // bottles are per address, i.e. per branch. Two distinct numbers, so a swapped label fails.
+  expect(within(drawer).getByText('Account: Bahor Savdo MChJ · 3 branches')).toBeInTheDocument();
+  expect(descValue(drawer, 'Owes (account)')).toBe('250000 UZS');
+  expect(descValue(drawer, 'Bottles at this branch')).toBe('7');
+});
+
+it('keeps the plain labels and shows no account line for a single-outlet account', async () => {
+  // The rule lives on the backend (`OutletService.is_branch`) and this page reads the answer it
+  // published — "1 branches" is not a sentence, and "Owes (account)" on a one-shop customer is
+  // a distinction without a difference. `branch_count: 1` travels anyway; it must not be what
+  // decides.
+  salesService.getOutlet.mockResolvedValue({
+    outlet: {
+      ...OUTLET, stage: 'active', open_receivable: 12000, bottle_balance: 4, last_orders: [],
+      account_name: 'Olim aka', branch_count: 1, is_branch: false,
+      open_receivable_scope: 'account',
+    },
+    stage_history: STAGE_HISTORY,
+  });
+  render(<Outlets />, { wrapper: createWrapper() });
+  const drawer = await openDrawer();
+
+  expect(within(drawer).queryByText(/^Account:/)).toBeNull();
+  expect(descValue(drawer, 'Owes')).toBe('12000 UZS');
+  expect(descValue(drawer, 'Bottles at outlet')).toBe('4');
+});
+
+it('does not call the money account-wide when the backend says its scope is not', async () => {
+  // Branch mode alone does not earn "(account)": the qualifier is what `open_receivable_scope`
+  // says the figure MEANS. Every other branch fixture sends 'account', so without this case the
+  // label could stop reading the scope and no test would notice. The account line and the
+  // bottles label still follow `is_branch` — only the money claim is withdrawn.
+  salesService.getOutlet.mockResolvedValue({
+    outlet: {
+      ...OUTLET, stage: 'active', open_receivable: 250000, bottle_balance: 7, last_orders: [],
+      account_name: 'Bahor Savdo MChJ', branch_count: 3, is_branch: true,
+      open_receivable_scope: 'address',
+    },
+    stage_history: STAGE_HISTORY,
+  });
+  render(<Outlets />, { wrapper: createWrapper() });
+  const drawer = await openDrawer();
+
+  expect(within(drawer).getByText('Account: Bahor Savdo MChJ · 3 branches')).toBeInTheDocument();
+  expect(within(drawer).queryByText('Owes (account)')).toBeNull();
+  expect(descValue(drawer, 'Owes')).toBe('250000 UZS');
+  expect(descValue(drawer, 'Bottles at this branch')).toBe('7');
 });
 
 it('repairs a NULL district from the drawer', async () => {

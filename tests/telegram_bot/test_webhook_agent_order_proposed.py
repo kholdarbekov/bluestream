@@ -14,6 +14,7 @@ Application is.
 import hashlib
 import hmac
 import json
+from string import Formatter
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -38,6 +39,11 @@ ws_module = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(ws_module)
 WebhookServer = ws_module.WebhookServer
 
+# AFTER the bot import, on purpose: `scripts/seed_backend_translations.py` inserts `/app` at
+# `sys.path[0]` at import time, and `/app/config.py` would then shadow the bot's bare `config`
+# for anything imported later. Same ordering and reason as test_agent_order_callbacks.py.
+from scripts.seed_backend_translations import BACKEND_TRANSLATIONS  # noqa: E402
+
 
 SECRET = "test-webhook-secret"
 
@@ -50,6 +56,8 @@ PAYLOAD = {
     "order_number": "SA_000123_26",
     "request_id": "a1b2c3d4e5f60718",
     "agent_name": "Dilshod",
+    "outlet_name": "Bahor market, Yunusobod",
+    "delivery_address": "Yunusobod 12",
     "items": [
         {"name": "Pure Water 19L", "qty": 4},
         {"name": "Bottle Cap", "qty": 2},
@@ -150,6 +158,14 @@ async def test_valid_request_sends_the_proposal_with_both_buttons(ws):
     assert text.startswith("telegram.agent_order.proposed|en|")
     assert "agent_name=Dilshod" in text
     assert "order_number=SA_000123_26" in text
+    # D25 rule 8: one chat, several branches — the proposal has to say which shop and
+    # which door, or a chain owner is confirming money against a guess.
+    assert "|outlet_name=Bahor market, Yunusobod|" in text
+    # Anchored on the separators, and the wire spelling ruled out: `address=` is also a
+    # substring of `delivery_address=`, which is the rename R30 forbids -- the seeded copy
+    # carries `{address}`, and a template it cannot fill reaches the customer as a humanised key.
+    assert "|address=Yunusobod 12|" in text
+    assert "delivery_address=" not in text
     # Every line is rendered through the per-line key, then joined — so a
     # second product is a second rendered row, not a hand-built string.
     assert (
@@ -253,6 +269,76 @@ async def test_missing_delivery_date_still_renders_a_value(ws):
 
     assert resp.status == 200
     assert "delivery_date=—" in ws.bot_app.bot.send_message.await_args.kwargs["text"]
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_a_proposal_with_no_branch_details_still_renders_values(ws):
+    """Both new fields are nullable on the backend side: `outlet.name` is never blank, but a
+    legacy order carries no `delivery_address_id` at all, and an older backend does not send
+    the keys. `render_translation` degrades a template whose placeholders it cannot fill to
+    the humanised key — raw English debug text on the one message that asks a real customer
+    to commit money — so a dash is a value here exactly as it is for `delivery_date`.
+    """
+    payload = {k: v for k, v in PAYLOAD.items() if k not in ("outlet_name", "delivery_address")}
+
+    resp = await ws.agent_order_proposed_handler(_make_request(payload))
+
+    assert resp.status == 200
+    text = ws.bot_app.bot.send_message.await_args.kwargs["text"]
+    assert "|outlet_name=—|" in text
+    assert "|address=—|" in text
+    assert "delivery_address=" not in text
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_the_branch_name_and_address_are_html_escaped(ws):
+    """Both are free text somebody typed — an agent named the outlet, a customer wrote the
+    address. `parse_mode='HTML'` is on, and one stray '<' makes Telegram reject the WHOLE
+    send: the store sees no proposal and the order rides the TTL into an auto-confirm.
+    """
+    payload = dict(PAYLOAD, outlet_name="Bahor <market>", delivery_address="12 & 14 Yunusobod")
+
+    resp = await ws.agent_order_proposed_handler(_make_request(payload))
+
+    assert resp.status == 200
+    text = ws.bot_app.bot.send_message.await_args.kwargs["text"]
+    assert "|outlet_name=Bahor &lt;market&gt;|" in text
+    assert "|address=12 &amp; 14 Yunusobod|" in text
+    assert "delivery_address=" not in text
+    assert "<market>" not in text
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+@pytest.mark.parametrize("language", ["uz", "ru", "en"])
+async def test_the_call_site_passes_exactly_the_placeholders_the_seeded_copy_carries(
+    ws, monkeypatch, language
+):
+    """The placeholder set, read off the REAL call site and compared with the REAL seed row.
+
+    `shared.i18n_rendering.render_translation` never raises: a template whose placeholders
+    the call does not fill degrades to the humanised key, on the one message that asks a store
+    to commit money. `test_agent_order_copy_is_seeded.py` pins the seed against its own
+    hand-written `BOT_KEYS`; this is the half that ties those names to what the handler passes,
+    so renaming a kwarg (the `delivery_address` "fix" R30 forbids) cannot pass both files.
+    """
+    seen = {}
+
+    def recording_get(key, language, **kwargs):
+        seen.setdefault(key, set(kwargs))
+        return "|".join([key, language] + [f"{k}={v}" for k, v in kwargs.items()])
+
+    monkeypatch.setattr(ws_module.i18n, "get", recording_get)
+    monkeypatch.setattr(ws_module.i18n, "get_user_language", AsyncMock(return_value=language))
+
+    resp = await ws.agent_order_proposed_handler(_make_request(PAYLOAD))
+
+    assert resp.status == 200
+    for key in ("telegram.agent_order.proposed", "telegram.agent_order.item"):
+        seeded = {name for _, name, _, _ in Formatter().parse(BACKEND_TRANSLATIONS[key][language]) if name}
+        assert seen[key] == seeded, (key, language)
 
 
 @pytest.mark.unit

@@ -3067,7 +3067,8 @@ def test_the_api_contract_snapshot_still_lists_the_merge_preview_route(db):
     # (admin_sales.bulk_assign_outlets_admin, one agent over a whole district)
     # and POST /api/v1/admin/sales/outlets/import-existing-customers
     # (admin_sales.import_existing_customers_admin, which backfills one active
-    # class-C outlet per existing grocery/workplace customer). The approve and
+    # class-C outlet per existing grocery/workplace customer ADDRESS — D25: an
+    # account may own several branches). The approve and
     # reject rules are the operator queue's admin twins, not replacements: the
     # staff ones stay for the staff bot. Unrelated to place-merge; only the
     # estate-wide count moved.

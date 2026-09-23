@@ -2245,6 +2245,7 @@ SALES_TEXT_TRANSLATIONS = {
     "error.stage_invalid": {"en": "This action is not possible at the outlet's current stage.", "uz": "Bu amal savdo nuqtasining hozirgi bosqichida mumkin emas.", "ru": "Действие невозможно на текущем этапе точки."},
     "error.approval_failed": {"en": "Activation failed at one step. Try again or ask an admin.", "uz": "Faollashtirish bir bosqichda to'xtadi. Qayta urinib ko'ring yoki adminga murojaat qiling.", "ru": "Активация прервалась на одном из шагов. Повторите или обратитесь к администратору."},
     "error.phone_taken": {"en": "This phone already belongs to another customer.", "uz": "Bu telefon boshqa mijozga tegishli.", "ru": "Этот телефон уже принадлежит другому клиенту."},
+    "error.attach_no_account": {"en": "No existing customer account matches this outlet's contact phone.", "uz": "Bu nuqtaning aloqa telefoni bo'yicha mavjud mijoz hisobi topilmadi.", "ru": "По контактному телефону точки не найден существующий аккаунт клиента."},
     "error.district_invalid": {"en": "Unknown district.", "uz": "Noma'lum tuman.", "ru": "Неизвестный район."},
     "hub.title": {"en": "My outlets", "uz": "Mening savdo nuqtalarim", "ru": "Мои точки"},
     # Names the due list first, because that row is the agent's day (L95: the
@@ -2265,6 +2266,13 @@ SALES_TEXT_TRANSLATIONS = {
     "card.address": {"en": "Address", "uz": "Manzil", "ru": "Адрес"},
     "card.receivable": {"en": "Owes", "uz": "Qarzdorlik", "ru": "Долг"},
     "card.bottles": {"en": "Bottles at outlet", "uz": "Nuqtadagi idishlar", "ru": "Бутылей на точке"},
+    # D25: the two labels that name the SCOPE of the figure beside them, drawn
+    # only when the account owns more than one outlet, plus the account line
+    # itself. The glyphs live in `format_outlet_card` with every other card
+    # glyph -- a row that carried one too would double it on the agent's screen.
+    "card.account": {"en": "{account} · {count} branches", "uz": "{account} · {count} ta filial", "ru": "{account} · филиалов: {count}"},
+    "card.receivable_account": {"en": "Owes (account)", "uz": "Qarzdorlik (hisob bo'yicha)", "ru": "Долг (по аккаунту)"},
+    "card.bottles_branch": {"en": "Bottles at this branch", "uz": "Shu filialdagi idishlar", "ru": "Бутылей в этом филиале"},
     "card.notes": {"en": "Notes", "uz": "Izohlar", "ru": "Заметки"},
     "card.last_orders": {"en": "Last orders", "uz": "So'nggi buyurtmalar", "ru": "Последние заказы"},
     "card.request_activation": {"en": "Request activation", "uz": "Faollashtirishni so'rash", "ru": "Запросить активацию"},
@@ -2302,6 +2310,11 @@ SALES_TEXT_TRANSLATIONS = {
     "new.open_existing": {"en": "Open", "uz": "Ochish", "ru": "Открыть"},
     "new.create_anyway": {"en": "Create anyway", "uz": "Baribir yaratish", "ru": "Всё равно создать"},
     "new.created": {"en": "Outlet saved", "uz": "Savdo nuqtasi saqlandi", "ru": "Точка сохранена"},
+    # D25 rule 4. Not in the `new.` family: this row belongs to the duplicate
+    # screen's vocabulary about ACCOUNTS, not to a step of the walk-in. The 🏢
+    # glyph is drawn by `duplicate_choice`, beside the 🔗 and 📍 of the other
+    # two row shapes.
+    "new_outlet.sibling": {"en": "Branch of {account}", "uz": "{account} filiali", "ru": "Филиал: {account}"},
     # The operator's approval queue. `approvals.reason.*` is also a dynamic
     # family — `SalesKeyboards.approval_actions` builds the key from
     # `REJECT_REASONS`, and the twin loop in
@@ -2319,6 +2332,13 @@ SALES_TEXT_TRANSLATIONS = {
     "approvals.reason.not_customer": {"en": "Not a customer", "uz": "Mijoz emas", "ru": "Не клиент"},
     "approvals.reason.other": {"en": "Other", "uz": "Boshqa", "ru": "Другое"},
     "approvals.back": {"en": "Back to requests", "uz": "So'rovlarga qaytish", "ru": "К заявкам"},
+    # D25 rule 3. `approvals.attached` carries no placeholder on purpose: the
+    # approve route answers with a plain `serialize_outlet`, which publishes no
+    # account name, and a sentence that named the account would have to be fed
+    # from a second fetch the operator does not need.
+    "approvals.candidate": {"en": "Phone belongs to {account} (outlets: {count})", "uz": "Telefon {account} hisobiga tegishli ({count} ta nuqta)", "ru": "Телефон принадлежит аккаунту {account} (точек: {count})"},
+    "approvals.attach": {"en": "Attach to existing account", "uz": "Mavjud hisobga biriktirish", "ru": "Привязать к существующему аккаунту"},
+    "approvals.attached": {"en": "Outlet attached to the existing account as a branch. The agent has been notified.", "uz": "Nuqta mavjud hisobga filial sifatida biriktirildi. Agentga xabar berildi.", "ru": "Точка привязана к существующему аккаунту как филиал. Агент уведомлён."},
     # ---- phase 2a: the due list, the card's visit lines and the visit loop ----
     # Only `card.overdue`, `list.overdue_suffix`, `visit.checkin_ok`,
     # `visit.checkin_far`, `visit.order_created` and `visit.closed`

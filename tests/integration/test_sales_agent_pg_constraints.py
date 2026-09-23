@@ -1,7 +1,7 @@
 """Postgres-only guarantees of migrations c3d9e5f1a7b2 (phase 1), d4e7f9a2b6c1
 (phase 2a), f1a2b3c4d5e6 (the delivered-history index), b7c8d9e0f1a2 (phase 2b:
-visit photos, the try-out's outlet link) and d8e9f0a1b2c3 (phase 3: the agent
-day-plan snapshot) — SQLite cannot see them.
+visit photos, the try-out's outlet link), d8e9f0a1b2c3 (phase 3: the agent
+day-plan snapshot) and e0f1a2b3c4d5 (branch outlets) — SQLite cannot see them.
 
 The SQLite suite builds its schema from the models with ``db.create_all()``, so
 every CHECK / partial-unique that only the migration writes is invisible there.
@@ -33,7 +33,7 @@ from business_app.models.sales_visits import (
     VisitStockCheck,
 )
 from business_app.models.tryout import ProductTryout, TrialContact
-from business_app.models.user import User
+from business_app.models.user import User, UserAddress
 from business_app.utils.state_validators import STAFF_ORDER_SOURCES
 
 pytestmark = pytest.mark.integration
@@ -877,3 +877,102 @@ def test_the_day_plan_index_is_live_on_plan_date(pg_db):
 
     assert {name: _index_def(pg_db, name) for name in expected} == expected
     assert _index_def(pg_db, "ix_sales_agent_day_plans_no_such_index") is None
+
+
+# --------------------------------------------------------------------------- #
+# D25 — branch outlets: one account, several outlets, one per address
+# --------------------------------------------------------------------------- #
+
+
+def _address(pg_db, *, user_id, full_address, is_default=False):
+    """One `addresses` row, committed. No pin: the zone listener skips coordinate-less rows."""
+    address = UserAddress(user_id=user_id, full_address=full_address, is_default=is_default)
+    pg_db.session.add(address)
+    pg_db.session.commit()
+    return address
+
+
+def test_one_account_may_hold_several_outlets_but_never_two_on_one_address(pg_db):
+    """Both halves of migration e0f1a2b3c4d5, because only one of them changed.
+
+    `uq_outlets_user_id` had to go: a chain is ONE customer account with several delivery
+    addresses, and the second branch's INSERT died on it. `uq_outlets_address_id` had to
+    stay: two outlets on one address would share that place's bottle scope and its
+    per-branch order history, i.e. the branch would stop being a branch.
+    """
+    _agent, first = _agent_and_outlet(pg_db, phone="+998900000014", outlet_name="Chain, Chilonzor")
+    customer = User(phone="+998900000114", password_hash="not-a-real-hash", first_name="Chain")
+    pg_db.session.add(customer)
+    pg_db.session.commit()
+    home = _address(pg_db, user_id=customer.id, full_address="Chilonzor 5", is_default=True)
+    branch = _address(pg_db, user_id=customer.id, full_address="Yunusobod 19")
+
+    first.user_id = customer.id
+    first.address_id = home.id
+    pg_db.session.add(
+        Outlet(
+            name="Chain, Yunusobod",
+            outlet_type="grocery_store",
+            stage="active",
+            user_id=customer.id,
+            address_id=branch.id,
+        )
+    )
+    pg_db.session.commit()
+    assert Outlet.query.filter_by(user_id=customer.id).count() == 2
+
+    _rollback_on_named_integrity(
+        pg_db,
+        Outlet(
+            name="Chain, Yunusobod (again)",
+            outlet_type="grocery_store",
+            user_id=customer.id,
+            address_id=branch.id,
+        ),
+        "uq_outlets_address_id",
+    )
+    assert _constraint_def(pg_db, "outlets", "uq_outlets_address_id") == "UNIQUE (address_id)"
+
+
+def test_the_outlet_address_foreign_key_is_enforced_by_name(pg_db):
+    """The branch IS its address, so a branch pointing at no address is not a branch.
+
+    Pinned by NAME because `downgrade()` drops constraints by name and because every
+    address-scoped read added by D25 (`order_scope`, the bottle place balance) trusts this
+    column to point at a real row.
+    """
+    _agent, _outlet = _agent_and_outlet(pg_db, phone="+998900000015", outlet_name="Fifteenth Shop")
+    customer = User(phone="+998900000115", password_hash="not-a-real-hash", first_name="Store")
+    pg_db.session.add(customer)
+    pg_db.session.commit()
+    missing = 10**8  # an id no row in this throwaway database can hold
+
+    _rollback_on_named_integrity(
+        pg_db,
+        Outlet(name="Ghost branch", outlet_type="grocery_store", user_id=customer.id, address_id=missing),
+        "fk_outlets_address_id",
+    )
+
+    address = _address(pg_db, user_id=customer.id, full_address="Sergeli 3")
+    pg_db.session.add(
+        Outlet(name="Real branch", outlet_type="grocery_store", user_id=customer.id, address_id=address.id)
+    )
+    pg_db.session.commit()
+    assert Outlet.query.filter_by(address_id=address.id).count() == 1
+
+
+def test_the_account_index_is_live_and_the_account_unique_is_gone(pg_db):
+    """The unique was also the only index on `outlets.user_id`.
+
+    Dropping it without a replacement turns "the other branches of this account" — the
+    card's branch count, the sibling dedupe, every account-scoped read — into a sequential
+    scan. Postgres renders a unique's backing index in `pg_indexes` too, so `_index_def`
+    answering None is the crisp "the unique is gone".
+    """
+    expected = {"ix_outlets_user_id": "CREATE INDEX ix_outlets_user_id ON public.outlets USING btree (user_id)"}
+
+    assert {name: _index_def(pg_db, name) for name in expected} == expected
+    assert _index_def(pg_db, "uq_outlets_user_id") is None
+    assert _constraint_def(pg_db, "outlets", "uq_outlets_user_id") is None
+    # Negative control: the helper really does answer None for something absent.
+    assert _index_def(pg_db, "ix_outlets_no_such_index") is None

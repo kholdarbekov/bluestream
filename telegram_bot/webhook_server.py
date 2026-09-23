@@ -782,6 +782,8 @@ class WebhookServer:
             "order_number": "SA_000123_26",
             "request_id": "a1b2c3d4e5f60718",
             "agent_name": "Dilshod",
+            "outlet_name": "Bahor market, Yunusobod",   # which branch of the chain
+            "delivery_address": "Yunusobod 12",         # the order's own delivery address
             "items": [{"name": "Pure Water 19L", "qty": 4}],
             "total": 60000.0,            # raw float; this bot formats it
             "delivery_date": "2026-09-10" # ISO date or null; this bot formats it
@@ -821,6 +823,8 @@ class WebhookServer:
             telegram_id = data.get('telegram_id')
             order_number = data.get('order_number')
             agent_name = data.get('agent_name')
+            outlet_name = data.get('outlet_name')
+            delivery_address = data.get('delivery_address')
             items = data.get('items') or []
             total = data.get('total')
             delivery_date = data.get('delivery_date')
@@ -896,13 +900,17 @@ class WebhookServer:
                     for item in items
                 ]
 
-                # `delivery_date` is nullable on `orders`, and shared.i18n_rendering
-                # degrades a template it cannot fill to the humanised key (raw
-                # English debug text). A dash is a value; None is not.
+                # `delivery_date`, `outlet_name` and `delivery_address` are all nullable on
+                # the backend side, and shared.i18n_rendering degrades a template it cannot
+                # fill to the humanised key (raw English debug text). A dash is a value;
+                # None is not. (`_html_escaped(None)` is '', which is why the `or` is here
+                # and not inside the helper.)
                 message_text = i18n.get(
                     'telegram.agent_order.proposed', language,
                     agent_name=_html_escaped(agent_name),
                     order_number=_html_escaped(order_number or order_id),
+                    outlet_name=_html_escaped(outlet_name) or '—',
+                    address=_html_escaped(delivery_address) or '—',
                     items='\n'.join(item_lines) or '—',
                     total=format_price(float(total or 0)),
                     delivery_date=format_date(delivery_date) or '—',

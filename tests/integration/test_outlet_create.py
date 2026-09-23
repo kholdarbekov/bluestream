@@ -7,10 +7,12 @@ from business_app.services.auth_service import TELEGRAM_SELF_LINK_SOURCES, AuthS
 from business_app.services.sales.outlet_service import OutletService
 from business_app.utils.exceptions import ConflictError, ValidationError
 from shared.enums import EntitySubtype, UserRole, UserType
-from tests.unit.test_outlet_dedupe import NEAR, PIN, _customer
+from tests.unit.test_outlet_dedupe import FAR, NEAR, PIN, _customer
 from tests.unit.test_sales_agent_role import make_sales_agent_user
 
 pytestmark = pytest.mark.integration
+
+MID = (41.3121, 69.2797)          # ~111 m from PIN: inside SALES_DEDUPE_RADIUS_M, farther than NEAR
 
 GROCERY = {
     "name": "Bahor market",
@@ -71,9 +73,122 @@ def test_link_existing_grocery_customer_makes_the_outlet_active(db, agent):
 
     assert outlet.user_id == customer.id and outlet.address_id == address.id and outlet.stage == "active"
     assert _history(outlet) == [(None, "prospect", "created"), ("prospect", "active", "linked")]
-    with pytest.raises(ConflictError) as excinfo:
-        OutletService.create(agent.id, {**GROCERY, "name": "Bahor 2", "contact": None}, force=True, link_user_id=customer.id)
-    assert excinfo.value.error_code == "SALES_OUTLET_USER_LINKED"
+
+    # R39 (ii), the branch case: branch #2 of the same chain, pinned ~4 km from every address
+    # the account has. Nothing is within SALES_DEDUPE_RADIUS_M of its pin, so it is neither a
+    # same-place duplicate nor an adoption — it gets a non-default address of its own.
+    branch = OutletService.create(
+        agent.id,
+        {
+            **GROCERY,
+            "name": "Bahor market, Yunusobod",
+            "contact": None,
+            "latitude": FAR[0],
+            "longitude": FAR[1],
+            "address_text": "Yunusobod 19-kvartal, 4",
+        },
+        link_user_id=customer.id,
+    )
+
+    assert branch.id != outlet.id and branch.user_id == customer.id and branch.stage == "active"
+    assert _history(branch) == [(None, "prospect", "created"), ("prospect", "active", "linked")]
+    branch_address = UserAddress.query.get(branch.address_id)
+    assert branch_address.id != address.id
+    assert (branch_address.user_id, branch_address.is_default, branch_address.is_business) == (customer.id, False, True)
+    assert (branch_address.title, branch_address.full_address) == ("Bahor market, Yunusobod", "Yunusobod 19-kvartal, 4")
+    assert (branch_address.latitude, branch_address.longitude) == (FAR[0], FAR[1])
+    assert {o.id for o in Outlet.query.filter_by(user_id=customer.id)} == {outlet.id, branch.id}
+    assert {a.id for a in UserAddress.query.filter_by(user_id=customer.id)} == {address.id, branch_address.id}
+
+
+def test_link_creates_its_own_address_when_the_free_default_is_somewhere_else(db, agent):
+    """R39: the pin decides which address this shop IS. The account's default is free (no
+    outlet holds it) but ~4 km away, so adopting it — what "a free one, else its own" did —
+    would point every order on behalf and the branch history at the wrong place."""
+    customer = _customer(db, "+998901112345", company="Bahor", subtype=EntitySubtype.GROCERY_STORE)
+    office = UserAddress(user_id=customer.id, full_address="Yunusobod 19", latitude=FAR[0], longitude=FAR[1], is_default=True)
+    db.session.add(office)
+    db.session.commit()
+    office_id = office.id
+
+    outlet = OutletService.create(agent.id, {**GROCERY, "contact": None}, link_user_id=customer.id)
+
+    assert outlet.stage == "active" and outlet.address_id not in (None, office_id)
+    shop = UserAddress.query.get(outlet.address_id)
+    assert (shop.user_id, shop.is_default, shop.title, shop.full_address) == (
+        customer.id,
+        False,
+        "Bahor market",
+        "Chilonzor 5-kvartal, 12",
+    )
+    assert (shop.latitude, shop.longitude) == PIN
+    assert Outlet.query.filter_by(address_id=office_id).first() is None  # the office stays free
+
+
+def test_link_adopts_the_nearest_free_address_and_never_a_held_one(db, agent):
+    """R39: among the account's addresses within SALES_DEDUPE_RADIUS_M of the pin, the NEAREST
+    one no outlet holds is adopted — no new row. The one AT the pin is held by a branch whose
+    own pin is elsewhere (an address edited after its outlet was pinned — outlet pins are
+    write-once), so taking it would break `uq_outlets_address_id`; the ~111 m one is free but
+    farther than the ~56 m one."""
+    customer = _customer(db, "+998901112346", company="Bahor", subtype=EntitySubtype.GROCERY_STORE)
+    held = UserAddress(user_id=customer.id, full_address="Chilonzor 5", latitude=PIN[0], longitude=PIN[1], is_default=True)
+    mid = UserAddress(user_id=customer.id, full_address="Chilonzor 6", latitude=MID[0], longitude=MID[1])
+    near = UserAddress(user_id=customer.id, full_address="Chilonzor 5, back door", latitude=NEAR[0], longitude=NEAR[1])
+    # Inserted in this order on purpose: `mid` gets the lower id, so "the first free address"
+    # and "the NEAREST free address" answer differently here.
+    for address in (held, mid, near):
+        db.session.add(address)
+        db.session.flush()
+    db.session.add(
+        Outlet(
+            name="Bahor market, Yunusobod",
+            outlet_type="grocery_store",
+            stage="active",
+            user_id=customer.id,
+            address_id=held.id,
+            latitude=FAR[0],
+            longitude=FAR[1],
+        )
+    )
+    db.session.commit()
+    before = {a.id for a in UserAddress.query.filter_by(user_id=customer.id)}
+
+    outlet = OutletService.create(agent.id, {**GROCERY, "contact": None}, link_user_id=customer.id)
+
+    assert (outlet.stage, outlet.address_id) == ("active", near.id)
+    assert {a.id for a in UserAddress.query.filter_by(user_id=customer.id)} == before
+
+
+def test_a_pin_less_link_falls_back_to_the_free_default_and_takes_its_pin(db, agent):
+    """R39's pin-less branch (API-only — the bot always sends a pin): with no place to compare,
+    the same-place check is skipped and the account's default is adopted while it is free,
+    lending the outlet its pin."""
+    customer = _customer(db, "+998901112347", company="Bahor", subtype=EntitySubtype.GROCERY_STORE)
+    home = UserAddress(user_id=customer.id, full_address="Chilonzor 5", latitude=PIN[0], longitude=PIN[1], is_default=True)
+    db.session.add(home)
+    db.session.commit()
+
+    outlet = OutletService.create(
+        agent.id, {**GROCERY, "contact": None, "latitude": None, "longitude": None}, link_user_id=customer.id
+    )
+
+    assert (outlet.stage, outlet.address_id) == ("active", home.id)
+    assert (outlet.latitude, outlet.longitude) == PIN
+    assert UserAddress.query.filter_by(user_id=customer.id).count() == 1
+
+
+def test_linking_an_account_with_no_address_gives_the_outlet_one(db, agent):
+    """The hole branch mode made visible: `_link_customer` used to leave `address_id` NULL
+    whenever it could not adopt an address, and `VisitService._assert_orderable` refuses
+    exactly that — a shop at stage `active` nobody can place an order for."""
+    customer = _customer(db, "+998901112344", company="Navruz", subtype=EntitySubtype.GROCERY_STORE)
+
+    outlet = OutletService.create(agent.id, {**GROCERY, "name": "Navruz market", "contact": None}, link_user_id=customer.id)
+
+    assert outlet.stage == "active" and outlet.address_id is not None
+    address = UserAddress.query.get(outlet.address_id)
+    assert (address.user_id, address.is_default, address.title) == (customer.id, True, "Navruz market")
 
 
 def test_link_refuses_a_customer_of_another_type(db, agent):

@@ -99,7 +99,10 @@ class BaseHandler:
         'SALES_OUTLET_STAGE_INVALID': 'staff.sales.error.stage_invalid',
         'SALES_APPROVAL_STEP_FAILED': 'staff.sales.error.approval_failed',
         'SALES_APPROVAL_PHONE_TAKEN': 'staff.sales.error.phone_taken',
-        'SALES_OUTLET_USER_LINKED': 'staff.sales.error.phone_taken',
+        # D25 rule 3: Attach was tapped on an outlet whose contact phone names no account.
+        # Its own sentence, not `phone_taken`'s: nothing is taken, there is simply nothing to
+        # join, and the operator's next move is plain Approve.
+        'SALES_ATTACH_NO_ACCOUNT': 'staff.sales.error.attach_no_account',
         'SALES_CONTACT_PHONE_INVALID': 'staff.operator.invalid_phone',
         'SALES_DISTRICT_INVALID': 'staff.sales.error.district_invalid',
         # Sales-agent visit loop (business_app/api/staff_sales.py, phase 2a).

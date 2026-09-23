@@ -210,6 +210,11 @@ KEYS = (
     "staff.sales.stats.metric_suggested_vs_accepted_pct",
     "staff.sales.stats.metric_out_of_range_checkins",
     "staff.sales.stats.metric_skipped_checkins", "staff.sales.stats.metric_avg_visit_minutes",
+    # D25 branch outlets: the account line and the two labels that say WHOSE
+    # figure the card is printing. The tests assert their RENDERED lines whole
+    # and literally (R31), never the template.
+    "staff.sales.card.account", "staff.sales.card.receivable_account",
+    "staff.sales.card.bottles_branch", "staff.sales.new_outlet.sibling",
 )
 
 
@@ -285,6 +290,19 @@ def _card(**over):
         rate_per_day=1.9,
         suggested_now=20,
         open_visit_id=None,
+        # D25: what `OutletService.card` publishes about the ACCOUNT. The
+        # default is a one-outlet account -- `is_branch` False, `branch_count`
+        # counting this outlet only -- so every card test written before branch
+        # outlets keeps the plain labels, and only a test that flips `is_branch`
+        # gets the branch line. The bot gates on `is_branch`, never on the count.
+        account_name="Bahor Savdo",
+        branch_count=1,
+        is_branch=False,
+        open_receivable_scope="account",
+        # R25's fifth published field. The agent's card renderer never reads it (only the
+        # operator's review row does), but the fixture mirrors the real payload: the default
+        # is an account this outlet already belongs to, so there is nothing left to attach.
+        account_candidate=None,
     )
     base.update(over)
     return base
@@ -439,6 +457,123 @@ async def test_a_half_activated_outlet_shows_its_debt_but_not_a_bottle_count(mon
     card = harness.telegram.last_shown()
     assert _curated("staff.sales.card.receivable") in card.text
     assert _curated("staff.sales.card.bottles") not in card.text
+
+
+async def test_a_branch_card_names_its_account_and_labels_the_money_account_wide(monkeypatch):
+    """D25 rules 5-7: money is the ACCOUNT's, bottles are the BRANCH's.
+
+    A chain's second outlet shows the same receivable as its sibling -- the
+    figure is the account's wallet, not this shop's -- so the card has to say
+    so, or the agent reads one branch's debt as the chain's and collects
+    twice. The bottle count is already per address and is labelled as the
+    branch's for the same reason. Branch mode is the backend's `is_branch`;
+    the bot does no counting and no comparing of its own.
+    """
+    harness, ops, _labels = await _agent(monkeypatch)
+    # 4 branches against 3 bottles: every figure on this card is distinct, so a
+    # renderer that printed one in the other's line would fail here.
+    harness.backend.route("GET", f"{OUTLETS}/5", lambda c: {"outlet": _card(
+        id=5, name="Bahor market, Chilonzor 5", account_name="Bahor Savdo MChJ",
+        branch_count=4, is_branch=True,
+    )})
+
+    await harness.send(ops.tap("staff_sales_outlet_5"))
+
+    card = harness.telegram.last_shown()
+    lines = card.text.split("\n")
+    # R31 pins the RENDERED lines, glyph included, so they are asserted whole
+    # and literally. An expectation composed from the seed (`f"🏢 {_rendered(...)}"`)
+    # would double its glyph along with a seed row that grew one and still
+    # pass -- the doubled-glyph bug R31 exists to stop.
+    assert "🏢 Bahor Savdo MChJ · 4 branches" in lines
+    # Directly under the address: the address is what makes it a branch.
+    assert lines[lines.index("📍 Address: Chilonzor 5") + 1] == "🏢 Bahor Savdo MChJ · 4 branches"
+    # One label per figure: the account-wide number is never ALSO printed
+    # under the plain label, which is what would make the qualifier decorative.
+    assert [line for line in lines if line.startswith("💰")] == ["💰 Owes (account): 250,000 UZS"]
+    assert [line for line in lines if line.startswith("🧴")] == ["🧴 Bottles at this branch: 3"]
+
+
+async def test_a_single_outlet_account_keeps_the_plain_labels(monkeypatch):
+    """`is_branch: false` is not a branch: one shop, one account, and exactly
+    the card that has always shipped.
+
+    The fixture's default -- `is_branch` False, `branch_count` 1 -- and the
+    account name never leaks onto a card that has no second branch to
+    disambiguate from. The shapes where the flag and the count could be
+    confused (a count of two with the flag off, a payload with no `is_branch`
+    key at all) are pinned by
+    `test_the_branch_labels_follow_the_published_fields_not_a_count`.
+    """
+    harness, ops, _labels = await _agent(monkeypatch)
+    harness.backend.route("GET", f"{OUTLETS}/5", lambda c: {"outlet": _card()})
+
+    await harness.send(ops.tap("staff_sales_outlet_5"))
+
+    card = harness.telegram.last_shown()
+    lines = card.text.split("\n")
+    assert [line for line in lines if line.startswith("💰")] == ["💰 Owes: 250,000 UZS"]
+    assert [line for line in lines if line.startswith("🧴")] == ["🧴 Bottles at outlet: 3"]
+    assert not [line for line in lines if line.startswith("🏢")]
+    assert "Bahor Savdo" not in card.text
+
+
+@pytest.mark.parametrize("over, drop, money_line, bottles_line, account_line", [
+    # The flag is off and the count says two. The count is only the number the
+    # account line prints; reading it as the predicate is the re-derivation R25
+    # forbids.
+    pytest.param(
+        {"account_name": "Bahor Savdo MChJ", "branch_count": 2, "is_branch": False}, (),
+        "💰 Owes: 250,000 UZS", "🧴 Bottles at outlet: 3", None,
+        id="is_branch_false_beats_a_count_of_two",
+    ),
+    # A branch whose receivable the backend does NOT call account-wide: the
+    # money label is the conjunction R10 rules, so it stays plain while the
+    # bottle label (branch mode alone) and the account line still move.
+    pytest.param(
+        {"account_name": "Bahor Savdo MChJ", "branch_count": 4, "is_branch": True,
+         "open_receivable_scope": "address"}, (),
+        "💰 Owes: 250,000 UZS", "🧴 Bottles at this branch: 3", "🏢 Bahor Savdo MChJ · 4 branches",
+        id="a_branch_whose_money_is_not_account_wide",
+    ),
+    # The account name is what a customer typed as their company, and the card
+    # is sent with parse_mode=HTML: one raw '<' makes Telegram refuse the whole
+    # card, so the agent standing in the shop sees nothing at all.
+    pytest.param(
+        {"account_name": "Bahor <Savdo> & Co", "branch_count": 4, "is_branch": True}, (),
+        "💰 Owes (account): 250,000 UZS", "🧴 Bottles at this branch: 3",
+        "🏢 Bahor &lt;Savdo&gt; &amp; Co · 4 branches",
+        id="the_account_name_is_html_escaped",
+    ),
+    # No `is_branch` key at all -- the plain `serialize_outlet` shape the
+    # operator's review card renders -- even with every account field and both
+    # figures present: absent is not a branch.
+    pytest.param(
+        {"account_name": "Bahor Savdo MChJ", "branch_count": 4}, ("is_branch",),
+        "💰 Owes: 250,000 UZS", "🧴 Bottles at outlet: 3", None,
+        id="no_is_branch_key_at_all",
+    ),
+])
+async def test_the_branch_labels_follow_the_published_fields_not_a_count(
+    monkeypatch, over, drop, money_line, bottles_line, account_line,
+):
+    """Branch mode is `is_branch`, and the account-wide money label is
+    `is_branch AND open_receivable_scope == 'account'` (R10/R25) -- the
+    backend's published answers, read and never re-derived from
+    `branch_count` or `account_name`.
+    """
+    outlet = _card(**over)
+    for key in drop:
+        del outlet[key]
+    harness, ops, _labels = await _agent(monkeypatch)
+    harness.backend.route("GET", f"{OUTLETS}/5", lambda c: {"outlet": outlet})
+
+    await harness.send(ops.tap("staff_sales_outlet_5"))
+
+    lines = harness.telegram.last_shown().text.split("\n")
+    assert [line for line in lines if line.startswith("💰")] == [money_line]
+    assert [line for line in lines if line.startswith("🧴")] == [bottles_line]
+    assert [line for line in lines if line.startswith("🏢")] == ([account_line] if account_line else [])
 
 
 async def test_the_card_speaks_the_agents_language_for_money_and_status(monkeypatch):

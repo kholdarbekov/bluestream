@@ -10,6 +10,7 @@ from staff_bot.handlers.sales.hub import format_outlet_card
 from staff_bot.i18n import i18n
 from staff_bot.keyboards.sales import REJECT_REASONS, SalesKeyboards
 from staff_bot.permissions import require_auth, require_operator
+from staff_bot.utils.formatters import escape_html
 
 logger = logging.getLogger(__name__)
 
@@ -89,17 +90,35 @@ class SalesApprovalsHandler(BaseHandler):
                     update, i18n.get('staff.sales.error.stage_invalid', language), show_alert=True
                 )
                 return
+            candidate = outlet.get('account_candidate') or {}
+            text = format_outlet_card(outlet, language)
+            if candidate:
+                # Published on the activation-request row (D25 rule 3): the
+                # phone on this request already belongs to a customer account,
+                # so the operator reads WHO before the keyboard offers Attach
+                # in place of Approve. Never looked up here -- one phone, one
+                # place that decides whose it is.
+                text += "\n\n🔗 " + i18n.get(
+                    'staff.sales.approvals.candidate', language,
+                    account=escape_html(candidate.get('name') or ''),
+                    count=candidate.get('outlet_count') or 0,
+                )
             await self._render(
-                update, format_outlet_card(outlet, language),
-                SalesKeyboards.approval_actions(language, outlet_id),
+                update, text,
+                SalesKeyboards.approval_actions(
+                    language, outlet_id, has_account_candidate=bool(candidate)
+                ),
             )
         except Exception as e:
             logger.error(f"Error reviewing outlet {outlet_id}: {e}", exc_info=True)
             await self._handle_error(update, context)
 
-    @require_auth
-    @require_operator
-    async def approve(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def _activate(self, update: Update, context: ContextTypes.DEFAULT_TYPE, *, attach: bool) -> None:
+        """The body `approve` and `attach` share: one route, one payload flag.
+
+        Unguarded on purpose -- it is private, and both callers carry
+        `@require_auth` + `@require_operator` themselves.
+        """
         language = await self._get_language(update, context)
         outlet_id = int(update.callback_query.data.split('_')[-1])
         token = await self._get_auth_token(update, context)
@@ -108,19 +127,45 @@ class SalesApprovalsHandler(BaseHandler):
             return
         try:
             async with api_client as client:
-                response = await client.sales_approve_outlet(token, outlet_id)
+                response = await client.sales_approve_outlet(token, outlet_id, attach=attach)
             if not response.success:
                 await self._handle_api_response_error(update, response, language)
                 return
             outlet = (response.data or {}).get('outlet') or {}
-            text = (
-                f"✅ {i18n.get('staff.sales.approvals.approved', language)}\n\n"
-                f"{format_outlet_card(outlet, language)}"
+            # Two LITERAL calls rather than a key chosen into a variable: the
+            # /health required-key extractor only sees a literal staff key
+            # passed as the call's first argument, so both sentences stay in
+            # the set it checks is seeded.
+            done = (
+                i18n.get('staff.sales.approvals.attached', language) if attach
+                else i18n.get('staff.sales.approvals.approved', language)
             )
+            text = f"✅ {done}\n\n{format_outlet_card(outlet, language)}"
             await self._render(update, text, SalesKeyboards.approval_result(language))
         except Exception as e:
-            logger.error(f"Error approving outlet {outlet_id}: {e}", exc_info=True)
+            action = 'attaching' if attach else 'approving'
+            logger.error(f"Error {action} outlet {outlet_id}: {e}", exc_info=True)
             await self._handle_error(update, context)
+
+    @require_auth
+    @require_operator
+    async def approve(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await self._activate(update, context, attach=False)
+
+    @require_auth
+    @require_operator
+    async def attach(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Activate this outlet as a BRANCH of the account its phone belongs to.
+
+        The same door as `approve` with one payload flag (D25 rule 3): the
+        backend links the existing customer, creates a non-default address from
+        the outlet's pin and reuses the account's contract, instead of minting
+        a second customer. The candidate is not re-resolved here -- the row the
+        operator tapped from published it, and the backend re-checks it on the
+        write, so a stale button ends as a translated alert like any other
+        refusal rather than as a second opinion about whose phone this is.
+        """
+        await self._activate(update, context, attach=True)
 
     @require_auth
     @require_operator

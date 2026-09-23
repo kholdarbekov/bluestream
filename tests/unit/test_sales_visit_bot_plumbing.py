@@ -1266,3 +1266,20 @@ class TestTheStatsCardMirrorsTheBackendsMetricContract:
             name: tuple(keys) for name, keys in METRIC_GROUPS.items()
         }
         assert list(drawn) == list(METRIC_GROUPS)
+
+
+class TestTheAttachRefusalIsTranslated:
+    """D25 rule 3's new code, `SALES_ATTACH_NO_ACCOUNT`.
+
+    The operator meets it by tapping Attach on an outlet whose phone matches nothing, i.e. at
+    the exact moment something has already gone sideways -- the worst moment to read a raw
+    backend code. And because `/health` derives its required-key set from the error map's
+    VALUES, an unseeded target parks the staff_bot container `unhealthy` on the next restart.
+    """
+
+    def test_the_attach_refusal_maps_to_a_seeded_key(self):
+        key = BaseHandler.API_ERROR_CODE_KEY_MAP.get("SALES_ATTACH_NO_ACCOUNT")
+        assert key == "staff.sales.error.attach_no_account"
+        module = _load_seed_script()
+        unseeded = [language for language in LANGUAGES if not module._curated_value(key, language)]
+        assert not unseeded, f"attach refusal copy is missing in {unseeded}"

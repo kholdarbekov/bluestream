@@ -6605,15 +6605,18 @@ BACKEND_TRANSLATIONS = {
     # ============================================================================
     'telegram.agent_order.proposed': {
         'en': '🧾 <b>Order proposal {order_number}</b>\n\n'
-              '{agent_name} prepared this order for you:\n{items}\n\n'
+              '{agent_name} prepared this order for <b>{outlet_name}</b>:\n'
+              '📍 {address}\n{items}\n\n'
               '💰 Total: {total} UZS\n🚚 Delivery: {delivery_date}\n\n'
               'Please confirm or decline.',
         'uz': '🧾 <b>{order_number} — buyurtma taklifi</b>\n\n'
-              '{agent_name} siz uchun quyidagi buyurtmani tayyorladi:\n{items}\n\n'
+              '{agent_name} <b>{outlet_name}</b> uchun quyidagi buyurtmani tayyorladi:\n'
+              '📍 {address}\n{items}\n\n'
               '💰 Jami: {total} so\'m\n🚚 Yetkazib berish: {delivery_date}\n\n'
               'Iltimos, tasdiqlang yoki rad eting.',
         'ru': '🧾 <b>Предложение заказа {order_number}</b>\n\n'
-              '{agent_name} подготовил для вас заказ:\n{items}\n\n'
+              '{agent_name} подготовил заказ для <b>{outlet_name}</b>:\n'
+              '📍 {address}\n{items}\n\n'
               '💰 Итого: {total} сум\n🚚 Доставка: {delivery_date}\n\n'
               'Пожалуйста, подтвердите или отклоните.'
     },

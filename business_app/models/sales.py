@@ -77,12 +77,15 @@ class Outlet(db.Model, TimestampMixin):
 
     __tablename__ = "outlets"
     __table_args__ = (
-        UniqueConstraint("user_id", name="uq_outlets_user_id"),
+        # One outlet per ADDRESS, several outlets per ACCOUNT: a chain is one customer with
+        # one shop per delivery address (D25, migration e0f1a2b3c4d5). The account unique that
+        # used to sit here is gone; `ix_outlets_user_id` replaces the read path it also served.
         UniqueConstraint("address_id", name="uq_outlets_address_id"),
         CheckConstraint(f"outlet_type IN ({_quoted(OUTLET_TYPES)})", name="ck_outlets_outlet_type"),
         CheckConstraint(f"stage IN ({_quoted(OUTLET_STAGES)})", name="ck_outlets_stage"),
         CheckConstraint(f'"class" IS NULL OR "class" IN ({_quoted(OUTLET_CLASSES)})', name="ck_outlets_class"),
         CheckConstraint("(latitude IS NULL) = (longitude IS NULL)", name="ck_outlets_coords_pair"),
+        Index("ix_outlets_user_id", "user_id"),
         Index("ix_outlets_stage", "stage"),
         Index("ix_outlets_assigned_agent_user_id", "assigned_agent_user_id"),
         Index("ix_outlets_onboarded_by_user_id", "onboarded_by_user_id"),

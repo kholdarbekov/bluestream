@@ -69,12 +69,21 @@ def push_agent_order_confirmation(self, order_id: int):
         return {"success": False, "reason": "no_telegram_id", "order_id": order_id}
 
     agent = User.query.get(order.created_by_staff_id) if order.created_by_staff_id else None
+    # D25 rule 8: one Telegram chat receives every branch's proposal, so the message has to
+    # name the shop and the door. The address is the ORDER's own (`delivery_address_id`, the
+    # branch address `VisitService.place_order` stamped on it), never the outlet's current
+    # pin text — re-pinning a branch must not rewrite a proposal the store has not answered.
+    order_address = order.delivery_address
     payload = {
         "telegram_id": int(customer.telegram_id),
         "order_id": order.id,
         "order_number": order.order_number,
         "request_id": request_row.request_id,
         "agent_name": agent.full_name if agent is not None else None,
+        "outlet_name": outlet.name,
+        "delivery_address": (
+            (order_address.street_address or order_address.full_address) if order_address is not None else None
+        ),
         # Raw numbers cross the wire; the customer bot formats money and dates
         # with its own locale helpers (no pre-rendered strings).
         "items": [

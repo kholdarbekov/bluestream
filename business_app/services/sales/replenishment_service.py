@@ -8,7 +8,11 @@ date. Two facts shape the queries:
     DELIVERED row in `order_status_history`;
   * an outlet only has consumption history once it is linked to a customer
     account (`outlets.user_id`), so an unlinked prospect scores zero rather
-    than raising.
+    than raising;
+  * an account may own several BRANCH outlets, one per address (D25), so
+    "whose history is this" is asked once, of `OutletService.order_scope`,
+    which adds the `delivery_address_id` conjunct only in branch mode. Every
+    query below filters through it and none of them restates the rule.
 
 Only `recompute_all` — the nightly job's own entry point — commits. `recompute_outlet`
 writes the column and leaves the transaction to its caller (`VisitService.close`,
@@ -178,6 +182,8 @@ class ReplenishmentService:
         if not outlet.user_id:
             return 0
 
+        from business_app.services.sales.outlet_service import OutletService
+
         delivered_order = aliased(Order, name="delivered_order")
         delivered_orders = (
             select(OrderStatusHistory.order_id)
@@ -195,7 +201,13 @@ class ReplenishmentService:
             db.session.query(func.coalesce(func.sum(OrderItem.quantity), 0))
             .join(Order, Order.id == OrderItem.order_id)
             .filter(
-                Order.user_id == outlet.user_id,
+                # `order_scope` is the branch rule; the inner `delivered_order.user_id`
+                # predicate above stays ACCOUNT-wide on purpose. It narrows the SCAN, not the
+                # answer (M04) -- the outer filter is what decides which branch these units
+                # belong to -- and an account has two or three branches, so re-scoping the
+                # gather would buy nothing and would force the rule to be spelled a second
+                # time against the alias.
+                OutletService.order_scope(outlet),
                 Order.status == OrderStatus.DELIVERED,
                 OrderItem.product_id == product.id,
                 Order.id.in_(delivered_orders),
@@ -227,12 +239,14 @@ class ReplenishmentService:
         if not outlet.user_id:
             return 0
 
+        from business_app.services.sales.outlet_service import OutletService
+
         horizon_start = _aware(now) - timedelta(days=int(current_app.config["SALES_RATE_HISTORY_DAYS"]))
         total = (
             db.session.query(func.coalesce(func.sum(OrderItem.quantity), 0))
             .join(Order, Order.id == OrderItem.order_id)
             .filter(
-                Order.user_id == outlet.user_id,
+                OutletService.order_scope(outlet),
                 Order.status.in_(INCOMING_ORDER_STATUSES),
                 OrderItem.product_id == product.id,
                 Order.created_at >= horizon_start,
@@ -247,12 +261,14 @@ class ReplenishmentService:
         if not outlet.user_id:
             return None
 
+        from business_app.services.sales.outlet_service import OutletService
+
         row = (
             db.session.query(OrderItem.quantity)
             .join(Order, Order.id == OrderItem.order_id)
             .join(OrderStatusHistory, OrderStatusHistory.order_id == Order.id)
             .filter(
-                Order.user_id == outlet.user_id,
+                OutletService.order_scope(outlet),
                 Order.status == OrderStatus.DELIVERED,
                 OrderItem.product_id == product.id,
                 OrderStatusHistory.new_status == OrderStatus.DELIVERED,
@@ -278,15 +294,20 @@ class ReplenishmentService:
 
         An outlet with no customer account has no history at all and answers with an empty
         list rather than raising — the contract `delivered_qty` already keeps.
+
+        On a chain account the answer is this BRANCH's landings (`OutletService.order_scope`),
+        which is what lets one shop of a chain go `at_risk` while its sibling keeps buying.
         """
         if not outlet.user_id:
             return []
+
+        from business_app.services.sales.outlet_service import OutletService
 
         rows = (
             db.session.query(func.max(OrderStatusHistory.changed_at))
             .join(Order, Order.id == OrderStatusHistory.order_id)
             .filter(
-                Order.user_id == outlet.user_id,
+                OutletService.order_scope(outlet),
                 Order.status == OrderStatus.DELIVERED,
                 OrderStatusHistory.new_status == OrderStatus.DELIVERED,
             )

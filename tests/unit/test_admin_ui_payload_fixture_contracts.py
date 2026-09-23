@@ -550,3 +550,50 @@ def test_the_exception_type_labels_are_the_backends_own_vocabulary():
         "published type. If it now holds its own map of the seven names, pin THAT instead — "
         "otherwise the seed and the page can disagree with nothing to notice."
     )
+
+
+BRANCH_OUTLET_KEYS = (
+    "outlet_account_line",
+    "open_receivable_account",
+    "bottles_branch",
+    "approve_modal_title",
+    "attach_modal_title",
+    "attach_confirm",
+    "contract_number_label",
+    # Not new, but its VALUE moves in this task (R29): the import Popconfirm now promises one
+    # outlet per ADDRESS. Pinned here so the seed row and the inline default can never drift apart.
+    "import_confirm",
+)
+
+
+def test_the_branch_outlet_keys_are_trilingual_and_say_what_the_page_says():
+    """D25's admin copy: the seven bare `ui_sales_agents` rows the Outlets drawer and its
+    approve/attach modal render, plus `import_confirm`, whose wording this task corrects (R29).
+
+    Two silent failures neither vitest nor the seed's own `_assert_complete` can see. vitest
+    mocks i18next and reads the inline English default, so it never meets a Russian row at all;
+    `_assert_complete` compares key SETS, so a `{{account}}` dropped from one translation ships
+    the literal `{{account}}` to that operator. The last assertion is the seed docstring's rule
+    in code: once a row exists the seeded text WINS in every language, so an English row that
+    differs from the page's default means the page shows one wording and its source another.
+    """
+    from scripts.seed_ui_sales_translations import UI_SALES_TRANSLATIONS
+
+    page = OUTLETS_PAGE.read_text(encoding="utf-8")
+    placeholder = re.compile(r"\{\{(\w+)\}\}")
+    for key in BRANCH_OUTLET_KEYS:
+        values = {}
+        for language in ("en", "uz", "ru"):
+            block = UI_SALES_TRANSLATIONS[language]
+            assert key in block, (
+                f"{key!r} is missing from the {language} block of scripts/seed_ui_sales_translations.py"
+            )
+            assert block[key].strip(), f"empty {language} value for {key!r}"
+            values[language] = block[key]
+        tokens = {language: frozenset(placeholder.findall(value)) for language, value in values.items()}
+        assert len(set(tokens.values())) == 1, f"{key!r} carries different placeholders per language: {tokens}"
+        assert values["en"] in page, (
+            f"the English row for {key!r} is not the inline default in "
+            f"admin_ui/src/pages/Outlets.js — the seeded text wins in every language, so the "
+            f"page would render one wording and its own source another."
+        )

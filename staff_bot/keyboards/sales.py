@@ -413,7 +413,10 @@ class SalesKeyboards:
         A `customer` candidate is a person we already know, so the outlet is
         LINKED to their account; an `outlet` candidate is a record we already
         have, so the only sane action is to open it rather than create a
-        second one. The escape hatch is last, never first.
+        second one. A `sibling` (D25) is another branch of the account this
+        outlet would belong to anyway: it is not a duplicate and not a link
+        target, so it is drawn as what it is and opens. The escape hatch is
+        last, never first.
         """
         rows = []
         for candidate in candidates[:5]:
@@ -425,7 +428,13 @@ class SalesKeyboards:
             # it -- a button nothing checks has a registered handler for.
             user_id = candidate.get('user_id')
             outlet_id = candidate.get('outlet_id')
-            if candidate.get('kind') == 'customer' and user_id:
+            kind = candidate.get('kind')
+            if kind == 'sibling' and outlet_id:
+                rows.append([InlineKeyboardButton(
+                    f"🏢 {i18n.get('staff.sales.new_outlet.sibling', language, account=name)}",
+                    callback_data=f"staff_sales_outlet_{outlet_id}",
+                )])
+            elif kind == 'customer' and user_id:
                 rows.append([InlineKeyboardButton(
                     f"🔗 {i18n.get('staff.sales.new.link_existing', language)}: {name}",
                     callback_data=f"staff_sales_no_link_{user_id}",
@@ -491,11 +500,31 @@ class SalesKeyboards:
         ])
 
     @staticmethod
-    def approval_actions(language: str, outlet_id: int) -> InlineKeyboardMarkup:
-        rows = [[InlineKeyboardButton(
-            f"✅ {i18n.get('staff.sales.approvals.approve', language)}",
-            callback_data=f"staff_sales_approve_{outlet_id}",
-        )]]
+    def approval_actions(language: str, outlet_id: int, *,
+                         has_account_candidate: bool = False) -> InlineKeyboardMarkup:
+        """The review card's actions: approve, or ATTACH to the account whose
+        phone this is, plus the four rejection reasons.
+
+        The first two are mutually exclusive, and the SERVER decides which one
+        is drawn: with `account_candidate` on the row, a plain approve is a 409
+        (`SALES_APPROVAL_PHONE_TAKEN`), so offering it would be offering a
+        button whose only outcome is a refusal -- the rule the outlet card
+        already follows for Start visit vs Resume visit. The keyboard looks no
+        phone up of its own; it draws the answer it was handed.
+        """
+        # Hoisted out of the f-strings, as everywhere else in this module: the
+        # static literal guard's scraper cannot span an inner quote, and a
+        # literal it cannot read is a button nobody checks has a handler.
+        if has_account_candidate:
+            rows = [[InlineKeyboardButton(
+                f"🔗 {i18n.get('staff.sales.approvals.attach', language)}",
+                callback_data=f"staff_sales_attach_{outlet_id}",
+            )]]
+        else:
+            rows = [[InlineKeyboardButton(
+                f"✅ {i18n.get('staff.sales.approvals.approve', language)}",
+                callback_data=f"staff_sales_approve_{outlet_id}",
+            )]]
         # Two reasons per row, drawn from REJECT_REASONS so the buttons and the
         # handler's allowlist can never drift apart.
         reasons = [

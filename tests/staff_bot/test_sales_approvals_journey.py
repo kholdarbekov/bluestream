@@ -17,7 +17,12 @@ import json
 
 import pytest
 
-from tests.staff_bot.ptb_harness import DEFAULT_DRIVER_TELEGRAM_ID, FakeStaffDatabase, build_staff_harness
+from tests.staff_bot.ptb_harness import (
+    DEFAULT_DRIVER_TELEGRAM_ID,
+    FakeStaffDatabase,
+    build_staff_harness,
+    staff_backend_failure,
+)
 from tests.staff_bot.test_sales_hub_journey import (
     LOGIN,
     OUTLETS,
@@ -39,6 +44,12 @@ EXTRA_KEYS = (
     "staff.sales.approvals.reason.not_customer", "staff.sales.approvals.reason.other",
     "staff.sales.approvals.back", "staff.profile.title", "staff.profile.name", "staff.profile.phone",
     "staff.profile.roles", "staff.profile.language",
+    # D25: the attach door. `error.stage_invalid` is already seeded -- it is
+    # the sentence `review` shows when the request has gone, and the one the
+    # backend's own refusal maps to -- but it was never in this table, so the
+    # harness served a humanised fallback for it.
+    "staff.sales.approvals.attach", "staff.sales.approvals.attached",
+    "staff.sales.approvals.candidate", "staff.sales.error.stage_invalid",
 )
 
 
@@ -110,6 +121,92 @@ async def test_operator_lists_reviews_approves_and_rejects(monkeypatch):
     assert _curated("staff.sales.approvals.title") in harness.telegram.last_shown().text
 
 
+async def test_a_request_whose_phone_is_a_known_account_attaches_instead_of_approving(monkeypatch):
+    """D25 rule 3: the phone already belongs to a customer account.
+
+    A plain approve on it is a 409 (`SALES_APPROVAL_PHONE_TAKEN`), so the
+    backend publishes the candidate on the activation-request row, the review
+    card names WHO it is, and the keyboard draws Attach INSTEAD of Approve. The
+    operator is never handed a button whose only outcome is a refusal -- the
+    same rule the outlet card follows for Start visit vs Resume visit -- and
+    the bot resolves no phone of its own to decide it.
+    """
+    harness, ops = await _operator(monkeypatch)
+    # The activation-requests row: `serialize_outlet` plus `account_candidate`.
+    pending = [_outlet(id=5, stage="activation_requested",
+                       account_candidate={"user_id": 41, "name": "Bahor Savdo MChJ",
+                                          "outlet_count": 2})]
+    harness.backend.route("GET", REQUESTS, lambda c: {"items": pending})
+    harness.backend.route("POST", f"{OUTLETS}/5/approve",
+                          lambda c: {"outlet": _outlet(id=5, stage="active")})
+
+    await harness.send(ops.tap("staff_sales_approvals"))
+    await harness.send(ops.tap("staff_sales_review_5"))
+
+    review = harness.telegram.last_shown()
+    # The rendered line and button are asserted WHOLE and literally (R31/R44):
+    # an expectation composed from the seed would double its glyph along with
+    # a seed row that grew one, and still pass.
+    assert "🔗 Phone belongs to Bahor Savdo MChJ (outlets: 2)" in review.text.split("\n")
+    assert "🔗 Attach to existing account" in review.button_labels()
+    assert _curated("staff.sales.approvals.approve") not in " ".join(review.button_labels())
+    assert "staff_sales_attach_5" in review.callback_data()
+    assert "staff_sales_approve_5" not in review.callback_data()
+
+    await harness.send(ops.tap("staff_sales_attach_5"))
+
+    assert [c.data for c in _calls(harness, "POST", f"{OUTLETS}/5/approve")] == [{"attach": True}]
+    attached = harness.telegram.last_shown()
+    assert attached.text.split("\n")[0] == (
+        "✅ Outlet attached to the existing account as a branch. The agent has been notified."
+    )
+    assert _curated("staff.sales.approvals.approved") not in attached.text
+    # Still working a queue: the way back to it is on the result screen.
+    assert _curated("staff.sales.approvals.back") in " ".join(attached.button_labels())
+
+
+async def test_the_account_name_on_the_review_card_is_html_escaped(monkeypatch):
+    """The candidate's name is whatever the customer typed as their company, and the review
+    card is sent with parse_mode=HTML: one raw '<' and Telegram refuses the whole card, so the
+    operator gets no review screen -- and no Attach button -- at all."""
+    harness, ops = await _operator(monkeypatch)
+    harness.backend.route("GET", REQUESTS, lambda c: {"items": [
+        _outlet(id=5, stage="activation_requested",
+                account_candidate={"user_id": 41, "name": "Bahor <Savdo> & Co", "outlet_count": 2}),
+    ]})
+
+    await harness.send(ops.tap("staff_sales_approvals"))
+    await harness.send(ops.tap("staff_sales_review_5"))
+
+    review = harness.telegram.last_shown()
+    assert "🔗 Phone belongs to Bahor &lt;Savdo&gt; &amp; Co (outlets: 2)" in review.text.split("\n")
+    assert "<Savdo>" not in review.text
+
+
+async def test_an_attach_that_lost_its_race_is_an_alert_not_a_crash(monkeypatch):
+    """Somebody approved the request between the queue being drawn and the
+    button being tapped.
+
+    The attach door answers the way every other sales write does -- the
+    backend's own error code, translated, as an alert -- and the operator keeps
+    the screen they are standing on instead of a spinner.
+    """
+    harness, ops = await _operator(monkeypatch)
+    harness.backend.route("GET", REQUESTS, lambda c: {"items": [
+        _outlet(id=5, stage="activation_requested",
+                account_candidate={"user_id": 41, "name": "Bahor Savdo MChJ", "outlet_count": 2}),
+    ]})
+    harness.backend.route("POST", f"{OUTLETS}/5/approve", lambda c: staff_backend_failure(
+        "stage invalid", 409, "SALES_OUTLET_STAGE_INVALID"))
+
+    await harness.send(ops.tap("staff_sales_approvals"))
+    await harness.send(ops.tap("staff_sales_review_5"))
+    await harness.send(ops.tap("staff_sales_attach_5"))
+
+    assert f"❌ {_curated('staff.sales.error.stage_invalid')}" in _alerts(harness)
+    assert _curated("staff.sales.approvals.attached") not in harness.telegram.last_shown().text
+
+
 async def test_empty_queue_and_non_operator_denied(monkeypatch):
     harness, ops = await _operator(monkeypatch)
     harness.backend.route("GET", REQUESTS, lambda c: {"items": []})
@@ -121,6 +218,15 @@ async def test_empty_queue_and_non_operator_denied(monkeypatch):
     agent_harness, agent_ops, _labels = await _agent(monkeypatch)
     await agent_harness.send(agent_ops.tap("staff_sales_approvals"))
     assert _curated("staff.unauthorized") in _alerts(agent_harness)
+
+    # The Attach door is its own callback, so it carries its own operator guard: a stale or
+    # forwarded button tapped by an agent is refused HERE, before anything is posted. (The
+    # guard lint accepts `require_auth` alone, so only this tap notices a dropped
+    # `@require_operator`.)
+    agent_harness.telegram.reset()
+    await agent_harness.send(agent_ops.tap("staff_sales_attach_5"))
+    assert _curated("staff.unauthorized") in _alerts(agent_harness)
+    assert not _calls(agent_harness, "POST", f"{OUTLETS}/5/approve")
 
 
 async def test_a_reason_the_keyboard_never_drew_is_answered_not_sent(monkeypatch):

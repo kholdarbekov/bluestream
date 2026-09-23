@@ -202,6 +202,48 @@ def _canonical_district(raw: Optional[str]) -> Optional[str]:
     return None
 
 
+def _import_outlet_name(
+    account_name: str,
+    address: Optional[UserAddress],
+    *,
+    branch_mode: bool,
+    account_titles: List[Optional[str]],
+) -> str:
+    """The name the backfill gives ONE PLACE of one account (D25 rule 2, R22, R41).
+
+    A CHAIN -- an account holding two or more addresses -- is named "<account>, <branch>", because
+    two rows called "Chinor" are two rows nobody can tell apart in a list. The branch half is the
+    first NON-BLANK of, in order: the address's `street_address`; its `title`, but only when no
+    other address of the account carries the same title (compared stripped, case-sensitively);
+    the first 40 characters of its free-text `full_address`. The title comes after the street
+    because the customer bot writes canned titles ("Uy", "Ish", "Boshqa", "Try-out") that repeat
+    inside one chain. A whitespace-only value counts as absent, the label is trimmed of the stray
+    comma a cut mid-address leaves behind, and the whole name is capped at `Outlet.name`'s 200.
+    Two addresses that still yield the same label keep it -- `name` is agent-editable.
+
+    `account_titles` is the title of EVERY address the account holds, this one's included. The
+    function is pure (no session), so the caller hands it what the uniqueness test reads.
+
+    An account with ONE address keeps the bare `<company or full name>` the earlier
+    one-outlet-per-account import already wrote. That is not a convenience: every outlet standing
+    on prod today carries the short name, `name` is in `AGENT_EDITABLE_OUTLET_FIELDS` so a re-run
+    must never rewrite one, and the 60-character label ceilings in the digest and the due list
+    would truncate the long form for the majority of customers who have exactly one shop.
+
+    Stated, not fixed (R22): an account that grows from one address to two reads
+    "Chinor" + "Chinor, Yunusobod 4" until an agent renames the first by hand -- two rows for the
+    office, against long truncated names for everyone else.
+    """
+    if address is None or not branch_mode:
+        return account_name[:200]
+    street = (address.street_address or "").strip()
+    title = (address.title or "").strip()
+    title_is_unique = sum(1 for other in account_titles if (other or "").strip() == title) == 1
+    free_text = (address.full_address or "").strip()[:40]
+    branch = (street or (title if title_is_unique else "") or free_text).strip(" ,")
+    return (f"{account_name}, {branch}" if branch else account_name)[:200]
+
+
 class OutletService:
     # ------------------------------------------------------------------ stages
     @staticmethod
@@ -248,6 +290,63 @@ class OutletService:
         note: Optional[str] = None,
     ) -> None:
         OutletService._record_stage(outlet, outlet.stage, to_stage, actor_id, reason_code, note)
+
+    # ------------------------------------------------------------- branch mode
+    @staticmethod
+    def account_outlet_count(user_id: Optional[int]) -> int:
+        """How many outlets this customer account holds (D25 rule 1), not counting `lost` ones.
+
+        One indexed `SELECT count(*)` per call, on `ix_outlets_user_id` — the index migration
+        e0f1a2b3c4d5 put where `uq_outlets_user_id` used to be. The card calls it for
+        `branch_count`, and `is_branch` calls it -- including from inside `order_scope`, which
+        every per-branch history query builds -- so a card, a recompute or a stock check asks it
+        several times. It is never asked per row of a list: the list serializers deliberately
+        publish no account fields.
+
+        Lost outlets are excluded (R45): a junk import branch marked lost must not keep a real
+        shop in branch mode.
+        """
+        if user_id is None:
+            return 0
+        return Outlet.query.filter(Outlet.user_id == user_id, Outlet.stage != "lost").count()
+
+    @staticmethod
+    def is_branch(outlet: Outlet) -> bool:
+        """True when this outlet is one of SEVERAL live (not lost) outlets on its account — "branch
+        mode" (D25 rule 5, R45).
+
+        The ONE expression of that question. Every per-branch rule (the four replenishment
+        history queries, the card's last orders, the money label) asks it here instead of
+        counting outlets itself, so a chain can never be a chain for the consumption rate and a
+        single shop for the stage job. A single-outlet account is deliberately NOT in branch
+        mode: its legacy orders carry no `delivery_address_id`, and scoping them to an address
+        would zero the history the rate is computed from.
+        """
+        if outlet is None or outlet.user_id is None:
+            return False
+        return OutletService.account_outlet_count(outlet.user_id) >= 2
+
+    @staticmethod
+    def order_scope(outlet: Outlet):
+        """The WHERE clause for "the orders that belong to THIS outlet".
+
+        Account-wide for a single-outlet account (its whole history, legacy address-less rows
+        included); narrowed to the branch's own delivery address in branch mode. Returned as a
+        clause rather than applied here so the four `ReplenishmentService` history queries and
+        the card's `last_orders` share one rule instead of five copies of a conjunct.
+
+        A branch with NO address of its own is deliberately not narrowed: `address_id` is
+        nullable, and `Order.delivery_address_id == None` renders `delivery_address_id IS NULL`,
+        so the conjunct would hand that outlet every legacy address-less order on the account —
+        the exact bug this helper exists to remove, inverted. It falls back to the account
+        clause until the office gives it an address.
+        """
+        from business_app.models.order import Order
+
+        clauses = [Order.user_id == outlet.user_id]
+        if OutletService.is_branch(outlet) and outlet.address_id is not None:
+            clauses.append(Order.delivery_address_id == outlet.address_id)
+        return and_(*clauses)
 
     # ------------------------------------------------------------------ dedupe
     @staticmethod
@@ -329,6 +428,21 @@ class OutletService:
                             "reason": "name_nearby",
                         },
                     )
+
+        # D25 rule 4: an outlet that already belongs to an account THIS lookup named is a
+        # branch of it, not a duplicate of the shop being registered — one account, one outlet
+        # per address. Labelled here, once, so every renderer (the bot's duplicate screen, the
+        # 409's details, the admin drawer) reads the same answer instead of re-deriving it
+        # from `user_id`. The account itself keeps `kind: "customer"`: that is the Link row.
+        account_ids = {
+            candidate["user_id"]
+            for candidate in candidates.values()
+            if candidate["kind"] == "customer" and candidate["user_id"] is not None
+        }
+        for candidate in candidates.values():
+            if candidate["kind"] == "outlet" and candidate["user_id"] in account_ids:
+                candidate["kind"] = "sibling"
+                candidate["reason"] = "same_account_branch"
 
         return list(candidates.values())
 
@@ -423,14 +537,36 @@ class OutletService:
             link_user = User.query.get(link_user_id)
             if link_user is None:
                 raise NotFoundError("Customer not found", error_code="STAFF_USER_NOT_FOUND")
-            if Outlet.query.filter_by(user_id=link_user.id).first() is not None:
-                raise ConflictError("Customer already has an outlet", error_code="SALES_OUTLET_USER_LINKED")
+            # No per-ACCOUNT refusal since e0f1a2b3c4d5: an account owns one outlet per ADDRESS
+            # (D25 rule 3). What IS refused (R39) is the account already having an outlet at this
+            # pin's place — Link skips `find_duplicates`, so `_same_place_outlets` is this path's
+            # own duplicate check. `force` overrides it exactly as it overrides the plain dedupe
+            # 409 (R40), and the hits are kept in `dedupe_candidates` below the same way. Anything
+            # else links, and `_adopt_or_create_address` adopts the account's free address nearest
+            # the pin within SALES_DEDUPE_RADIUS_M or creates the branch's own;
+            # `uq_outlets_address_id` is the backstop.
             OutletService._assert_linkable(fields["outlet_type"], link_user)
+            candidates = OutletService._same_place_outlets(link_user.id, fields["latitude"], fields["longitude"])
+            if candidates and not force:
+                raise ConflictError(
+                    "Possible duplicate outlet",
+                    details={"candidates": candidates},
+                    error_code="SALES_OUTLET_DUPLICATE",
+                )
         else:
             candidates = OutletService.find_duplicates(
                 fields["name"], contact_phone, fields["latitude"], fields["longitude"]
             )
-            if candidates and not force:
+            # Siblings never block: they answer "this chain already has branches", which is
+            # expected. What still stops the create is a genuine duplicate — or the ACCOUNT
+            # itself, whose `customer` row is the 🔗 Link the agent is meant to tap. The full
+            # list travels in the details either way, siblings included, so the screen can
+            # show the chain it belongs to. This filter is a STATEMENT of the rule, not a live
+            # branch: a candidate only becomes a sibling because the same lookup already named
+            # its account as a `customer` candidate, and that row blocks — so keep it as the
+            # one place the rule is written, and do not treat it as covered by a test.
+            blocking = [candidate for candidate in candidates if candidate["kind"] != "sibling"]
+            if blocking and not force:
                 raise ConflictError(
                     "Possible duplicate outlet",
                     details={"candidates": candidates},
@@ -516,13 +652,105 @@ class OutletService:
         )
 
     @staticmethod
+    def _km_within_dedupe_radius(
+        latitude: float, longitude: float, other_latitude: Optional[float], other_longitude: Optional[float]
+    ) -> Optional[float]:
+        """Kilometres from the pin to the other point when both are the same PLACE, else None.
+
+        "Same place" is `find_duplicates`' own test — within SALES_DEDUPE_RADIUS_M by the same
+        `calculate_distance` — so the link path's refusal and its address adoption cannot
+        disagree with the dedupe screen about where a shop is. A point with no coordinates is
+        nowhere.
+        """
+        if other_latitude is None or other_longitude is None:
+            return None
+        distance_km = calculate_distance(latitude, longitude, other_latitude, other_longitude)
+        return distance_km if distance_km <= current_app.config["SALES_DEDUPE_RADIUS_M"] / 1000.0 else None
+
+    @staticmethod
+    def _same_place_outlets(
+        user_id: int, latitude: Optional[float], longitude: Optional[float]
+    ) -> List[Dict[str, Any]]:
+        """This account's outlets at the pin's place, as `find_duplicates` candidates (R39).
+
+        The 🔗 Link path skips `find_duplicates` — the agent has already picked the account — so
+        this is its whole duplicate check: an outlet of the SAME account within
+        SALES_DEDUPE_RADIUS_M is this shop, already linked, not a new branch. The account's
+        outlets anywhere else are branches and never block (R8). A pin-less create (API-only;
+        the bot always sends a pin) has no place to compare and skips the check.
+        """
+        if latitude is None or longitude is None:
+            return []
+        found = []
+        for outlet in Outlet.query.filter(Outlet.user_id == user_id).order_by(Outlet.id.asc()):
+            distance_km = OutletService._km_within_dedupe_radius(latitude, longitude, outlet.latitude, outlet.longitude)
+            if distance_km is not None:
+                found.append(
+                    {
+                        "kind": "outlet",
+                        "user_id": outlet.user_id,
+                        "outlet_id": outlet.id,
+                        "name": outlet.name,
+                        "phone": outlet.primary_contact.phone if outlet.primary_contact else None,
+                        "distance_m": round(distance_km * 1000),
+                        "reason": "same_place",
+                    }
+                )
+        return found
+
+    @staticmethod
+    def _adopt_or_create_address(outlet: Outlet, user: User) -> None:
+        """Give this outlet the address of `user`'s account that IS its place, or a new one (R39).
+
+        One outlet per ADDRESS is the invariant (`uq_outlets_address_id`); one outlet per
+        ACCOUNT is not, since e0f1a2b3c4d5. With a pin, the pin decides: the account's address
+        NEAREST the pin within SALES_DEDUPE_RADIUS_M that no outlet holds is adopted, and when
+        there is none the branch gets a row of its own from the pin (`_create_address`,
+        non-default whenever the account already has a default). The default is never adopted
+        merely for being free — a chain's office or first shop is not this branch, and adopting
+        it would send orders on behalf and branch history to the wrong place. Only a pin-less
+        outlet falls back to the default while it is free, else a row of its own. Pin-less is
+        API-only or a converted try-out: the bot always sends a pin and `approve` refuses
+        pin-less activation (`SALES_ACTIVATION_PIN_REQUIRED`), so the coordinate-less address a
+        pin-less link can still mint stays confined to those doors. Written once and shared with
+        `_activate_converted_tryouts`, because "which address is this shop" must not be answered
+        two ways.
+        """
+        if outlet.address_id is not None:
+            return
+        if outlet.latitude is not None and outlet.longitude is not None:
+            addresses = UserAddress.query.filter(UserAddress.user_id == user.id).all()
+            held = {
+                address_id
+                for (address_id,) in db.session.query(Outlet.address_id).filter(
+                    Outlet.address_id.in_([address.id for address in addresses])
+                )
+            }
+            nearby = []
+            for address in addresses:
+                if address.id in held:
+                    continue
+                distance_km = OutletService._km_within_dedupe_radius(
+                    outlet.latitude, outlet.longitude, address.latitude, address.longitude
+                )
+                if distance_km is not None:
+                    nearby.append((distance_km, address.id))
+            if nearby:
+                outlet.address_id = min(nearby)[1]
+                return
+        else:
+            address = OutletService._default_address(user)
+            if address is not None and Outlet.query.filter_by(address_id=address.id).first() is None:
+                outlet.address_id = address.id
+                if address.latitude is not None:
+                    outlet.latitude, outlet.longitude = address.latitude, address.longitude
+                return
+        outlet.address_id = OutletService._create_address(outlet, user).id
+
+    @staticmethod
     def _link_customer(outlet: Outlet, user: User, actor_id: Optional[int]) -> None:
         outlet.user_id = user.id
-        address = OutletService._default_address(user)
-        if address is not None and Outlet.query.filter_by(address_id=address.id).first() is None:
-            outlet.address_id = address.id
-            if outlet.latitude is None and address.latitude is not None:
-                outlet.latitude, outlet.longitude = address.latitude, address.longitude
+        OutletService._adopt_or_create_address(outlet, user)
         status_value = user.status.value if hasattr(user.status, "value") else user.status
         if status_value == UserStatus.ACTIVE.value:
             OutletService.transition(outlet, "active", actor_id, reason_code="linked")
@@ -855,6 +1083,50 @@ class OutletService:
         return outlet
 
     @staticmethod
+    def account_candidate(outlet: Outlet) -> Optional[Dict[str, Any]]:
+        """The existing customer ACCOUNT this outlet's contact phone already belongs to, or None.
+
+        ONE definition, read in exactly three places: `approve`'s refusal (the 409 that carries it
+        as `details.account`), `activation_request_rows` and `card` -- so no renderer ever looks a
+        phone up for itself and offers an Attach the backend would refuse (D25 rule 3). The attach
+        decision itself does NOT read it: `approve(attach=True)` reads the phone-user lookup,
+        because an Attach onto a customer that holds no outlet yet is still a link (R24).
+
+        Narrow on purpose (R24): an account only counts when it ALREADY HOLDS A LIVE (not lost) OUTLET. That is
+        exactly the case approval already refused, and it is the only case where "this shop joins
+        that account as a branch" is a true sentence. A phone that belongs to a customer with no
+        outlet at all -- the orphan `users` row a failed individual activation leaves behind -- is
+        linked silently by `approve`, as it always was, and no surface offers an Attach for it.
+        None once the outlet HAS an account: there is nothing left to attach it to.
+        """
+        if outlet.user_id is not None:
+            return None
+        contact = outlet.primary_contact
+        phone = contact.phone if contact else None
+        if not phone:
+            return None
+        user = User.query.filter_by(phone=phone).first()
+        if user is None:
+            return None
+        try:
+            OutletService._assert_linkable(outlet.outlet_type, user)
+        except ConflictError:
+            # A customer of another type is not an account this outlet may join. `approve` still
+            # refuses that phone -- `_assert_linkable` raises SALES_APPROVAL_PHONE_TAKEN below --
+            # but there is no account to offer, so no surface draws an Attach button for it.
+            return None
+        outlet_count = OutletService.account_outlet_count(user.id)
+        if outlet_count < 1:
+            # A customer with no outlet is not a chain. Linking it is the silent recovery path
+            # approval has always taken, and nothing about it is an operator decision.
+            return None
+        return {
+            "user_id": user.id,
+            "name": _user_display_name(user),
+            "outlet_count": outlet_count,
+        }
+
+    @staticmethod
     def list_activation_requests() -> List[Outlet]:
         return (
             Outlet.query.filter(Outlet.stage == "activation_requested")
@@ -863,8 +1135,33 @@ class OutletService:
         )
 
     @staticmethod
-    def approve(outlet_id: int, actor_id: int, contract_number: Optional[str] = None) -> Outlet:
-        """Resumable: each step is skipped when its result already exists (spec D2)."""
+    def activation_request_rows() -> List[Dict[str, Any]]:
+        """The operator's queue as its renderers read it: the outlet row plus the account its
+        contact phone already belongs to (R6).
+
+        The candidate is resolved HERE because the bot's review card is rendered out of this
+        LIST and must never look a phone up for itself -- a plain Approve on a row that has a
+        candidate is the 409, so the button the operator sees has to come from the same answer.
+        One phone query per pending row, on a list that is short by construction.
+        """
+        from business_app.serializers.sales_serializers import serialize_outlet
+
+        return [
+            {**serialize_outlet(outlet), "account_candidate": OutletService.account_candidate(outlet)}
+            for outlet in OutletService.list_activation_requests()
+        ]
+
+    @staticmethod
+    def approve(outlet_id: int, actor_id: int, contract_number: Optional[str] = None, attach: bool = False) -> Outlet:
+        """Resumable: each step is skipped when its result already exists (spec D2).
+
+        `attach=True` is the operator's explicit "this shop belongs to the account its phone
+        already names" (D25 rule 3): the account is JOINED instead of created. Never implicit --
+        the default keeps every existing caller meaning "create a new account, or refuse". Any
+        LINK to an existing user (the attach, or the silent link of a customer with no outlet)
+        takes its address through `_adopt_or_create_address` (R42); only an account created here
+        gets its address straight from the pin.
+        """
         from business_app.utils.service_factory import get_corporate_contract_service
 
         outlet = OutletService.get(outlet_id)
@@ -876,26 +1173,46 @@ class OutletService:
         phone = contact.phone if contact else None
 
         step = "customer"
+        created = False
         try:
             if outlet.user_id is None:
                 if not phone:
                     raise ValidationError(
                         "A contact phone is required to activate", error_code="SALES_ACTIVATION_PHONE_REQUIRED"
                     )
+                # D25 rule 3: a phone whose customer ALREADY HOLDS A LIVE OUTLET (R45) is a chain, not a
+                # mistake -- and that is exactly the case this step already refused. Joining it
+                # is a DECISION, so the refusal now carries the account the caller would be
+                # joining, and every surface draws its Attach from that one answer instead of
+                # looking the phone up again. The narrowness is the point (R24): a phone that
+                # belongs to a customer with NO outlet keeps being linked silently, below.
+                candidate = OutletService.account_candidate(outlet)
+                if candidate is not None and not attach:
+                    raise ConflictError(
+                        "Phone already belongs to a customer account",
+                        details={"account": candidate},
+                        error_code="SALES_APPROVAL_PHONE_TAKEN",
+                    )
                 # An orphan users row can already exist from a failed individual activation, so a
-                # matching customer is LINKED rather than refused; only a type mismatch or a
-                # customer that already belongs to another outlet is SALES_APPROVAL_PHONE_TAKEN.
+                # matching customer is LINKED rather than refused; a type mismatch is
+                # SALES_APPROVAL_PHONE_TAKEN, raised by `_assert_linkable` itself.
                 existing = User.query.filter_by(phone=phone).first()
+                if attach and existing is None:
+                    # `attach` is a claim about an account that EXISTS. The refusal is about the
+                    # missing account, not about the missing candidate: an attach on a phone held
+                    # by a 0-outlet customer still links it (there is an account to join), and an
+                    # attach on a phone held by a customer of another TYPE falls through to
+                    # `_assert_linkable`'s SALES_APPROVAL_PHONE_TAKEN, which is the truthful code.
+                    raise ValidationError(
+                        "No existing customer account matches this outlet's contact phone",
+                        error_code="SALES_ATTACH_NO_ACCOUNT",
+                    )
                 if existing is not None:
-                    if Outlet.query.filter(Outlet.user_id == existing.id, Outlet.id != outlet.id).first() is not None:
-                        raise ConflictError(
-                            "Phone already belongs to another outlet's customer",
-                            error_code="SALES_APPROVAL_PHONE_TAKEN",
-                        )
                     OutletService._assert_linkable(outlet.outlet_type, existing)
                     user = existing
                 else:
                     user = OutletService._create_customer(outlet, contact.name, phone, actor_id)
+                    created = True
                 outlet.user_id = user.id
                 db.session.commit()
             user = User.query.get(outlet.user_id)
@@ -904,7 +1221,17 @@ class OutletService:
             if outlet.address_id is None:
                 if outlet.latitude is None:
                     raise ValidationError("A pin is required to activate", error_code="SALES_ACTIVATION_PIN_REQUIRED")
-                outlet.address_id = OutletService._create_address(outlet, user).id
+                if created:
+                    # An account minted a moment ago has no address to adopt: its first row is
+                    # written from the pin.
+                    outlet.address_id = OutletService._create_address(outlet, user).id
+                else:
+                    # R42: every LINK to an existing user -- the attach, the silent link of a
+                    # customer with no outlet, or a resumed run whose customer step already
+                    # committed -- takes the account's FREE address at the pin when there is one,
+                    # else its own row: the same "which address is this shop" answer the Link
+                    # path gives (R39), so a link never mints a second row for a known place.
+                    OutletService._adopt_or_create_address(outlet, user)
                 db.session.commit()
 
             step = "contract"
@@ -926,6 +1253,7 @@ class OutletService:
             db.session.rollback()
             if getattr(exc, "error_code", None) in (
                 "SALES_APPROVAL_PHONE_TAKEN",
+                "SALES_ATTACH_NO_ACCOUNT",
                 "SALES_ACTIVATION_PHONE_REQUIRED",
                 "SALES_ACTIVATION_PIN_REQUIRED",
             ):
@@ -940,7 +1268,7 @@ class OutletService:
         outlet.approved_at = datetime.now(UTC)
         outlet.approved_by_user_id = actor_id
         outlet.rejected_reason = None
-        OutletService.transition(outlet, "active", actor_id, reason_code="approved")
+        OutletService.transition(outlet, "active", actor_id, reason_code="attached" if attach else "approved")
         db.session.commit()
         notifications.notify_agent_event(outlet, SALES_EVENT_OUTLET_APPROVED)
         StaffService._log_activity(
@@ -998,7 +1326,29 @@ class OutletService:
 
     @staticmethod
     def import_existing_customers(actor_id: int) -> int:
-        """One outlet per active grocery/workplace customer that has none yet (class C, active)."""
+        """One outlet per ADDRESS of every active grocery/workplace customer (class C, active).
+
+        An outlet is one PLACE; a customer ACCOUNT may own several (D25). A chain is one account
+        with several delivery addresses, so this walks addresses, not accounts. An address that
+        already carries an outlet is skipped -- which is also what makes a RE-RUN back-fill the
+        branches of the chains imported under the old one-outlet-per-account rule, instead of
+        finding the account taken and doing nothing. An account with no address at all still
+        gets its single address-less outlet, guarded by "this account has no outlet yet".
+
+        Naming is `_import_outlet_name`'s (R22, R41): a chain's outlets are "<account>, <branch>",
+        a one-address account keeps the bare account name the earlier one-outlet-per-account
+        import wrote. Names are never rewritten on a re-run.
+
+        Known and stated, not fixed: an account whose ONLY outlet is the address-less one this
+        method wrote before it had any address gets a SECOND outlet the day an address appears.
+        The address-less row then reads the account's whole history (`order_scope` refuses to
+        narrow an outlet with no address) while the new row reads its address — two rows for one
+        shop until the office marks one lost, which is R4's stated answer for a junk branch.
+        Adopting the address-less outlet onto the first free address instead would be the fix;
+        it is not ruled, and doing it silently here would also move that outlet's pin and text.
+
+        Returns the number of OUTLETS created, which is the figure the admin toolbar reports.
+        """
         users = User.query.filter(
             User.user_type == UserType.ENTITY,
             User.entity_subtype.in_([EntitySubtype.GROCERY_STORE, EntitySubtype.WORKPLACE]),
@@ -1006,55 +1356,92 @@ class OutletService:
         ).all()
         created = 0
         for user in users:
-            if Outlet.query.filter_by(user_id=user.id).first() is not None:
-                continue
-            address = OutletService._default_address(user)
-            if address is not None and Outlet.query.filter_by(address_id=address.id).first() is not None:
-                address = None
-            latitude = address.latitude if address else None
-            longitude = address.longitude if address else None
-            # A user_addresses row written before the delivery-zone backstop existed can still hold
-            # an out-of-zone pin, and register_delivery_zone_listeners(Outlet) refuses it on INSERT.
-            # Drop the PIN only, and keep going: raising here cost every remaining store its outlet,
-            # while the address link, its text and its district are all perfectly usable without it.
-            if latitude is not None and longitude is not None and not is_in_delivery_zone(latitude, longitude):
-                current_app.logger.info(
-                    "Importing outlet for user %s without a pin: address %s is outside the delivery zone",
-                    user.id,
-                    address.id,
-                )
-                latitude = longitude = None
-            outlet = Outlet(
-                name=(user.company_name or user.full_name or user.phone)[:200],
-                outlet_type=user.entity_subtype.value,
-                stage="active",
-                outlet_class="C",
-                user_id=user.id,
-                address_id=address.id if address else None,
-                latitude=latitude,
-                longitude=longitude,
-                address_text=address.full_address if address else None,
-                district=_canonical_district(address.district) if address else None,
-                preferred_language=user.preferred_language or "uz",
-                approved_at=datetime.now(UTC),
-                approved_by_user_id=actor_id,
+            account_name = user.company_name or user.full_name or user.phone
+            # Same order as `_default_address`, so the head shop is imported first and the
+            # branch rows land in a stable, explainable sequence.
+            addresses = (
+                UserAddress.query.filter_by(user_id=user.id)
+                .order_by(UserAddress.is_default.desc(), UserAddress.id.asc())
+                .all()
             )
-            db.session.add(outlet)
-            db.session.flush()
-            if user.phone:
-                db.session.add(
-                    OutletContact(
-                        outlet_id=outlet.id,
-                        name=(user.full_name or user.company_name or "Owner")[:100],
-                        phone=user.phone,
-                        role="owner",
-                        is_primary=True,
+            if not addresses:
+                if Outlet.query.filter_by(user_id=user.id).first() is None:
+                    OutletService._import_outlet(
+                        user, None, account_name, actor_id, branch_mode=False, account_titles=[]
                     )
+                    created += 1
+                continue
+            # R22: only a CHAIN's outlets carry the ", <branch>" half. Decided once per account,
+            # from the addresses it has right now -- a one-shop customer keeps the bare name the
+            # earlier one-outlet-per-account import gave it, which is also the name already
+            # standing on prod. R41 reads every title of the account to tell a unique one apart.
+            branch_mode = len(addresses) >= 2
+            account_titles = [address.title for address in addresses]
+            for address in addresses:
+                if Outlet.query.filter_by(address_id=address.id).first() is not None:
+                    continue
+                OutletService._import_outlet(
+                    user, address, account_name, actor_id, branch_mode=branch_mode, account_titles=account_titles
                 )
-            OutletService._record_stage(outlet, None, "active", actor_id, reason_code="imported")
-            created += 1
+                created += 1
         db.session.commit()
         return created
+
+    @staticmethod
+    def _import_outlet(
+        user: User,
+        address: Optional[UserAddress],
+        account_name: str,
+        actor_id: int,
+        *,
+        branch_mode: bool,
+        account_titles: List[Optional[str]],
+    ) -> Outlet:
+        """One imported outlet: active, class C, pinned at its address."""
+        latitude = address.latitude if address else None
+        longitude = address.longitude if address else None
+        # An `addresses` row written before the delivery-zone backstop existed can still hold an
+        # out-of-zone pin, and register_delivery_zone_listeners(Outlet) refuses it on INSERT.
+        # Drop the PIN only, and keep going: raising here cost every remaining store its outlet,
+        # while the address link, its text and its district are all perfectly usable without it.
+        if latitude is not None and longitude is not None and not is_in_delivery_zone(latitude, longitude):
+            current_app.logger.info(
+                "Importing outlet for user %s without a pin: address %s is outside the delivery zone",
+                user.id,
+                address.id,
+            )
+            latitude = longitude = None
+        outlet = Outlet(
+            name=_import_outlet_name(account_name, address, branch_mode=branch_mode, account_titles=account_titles),
+            outlet_type=user.entity_subtype.value,
+            stage="active",
+            outlet_class="C",
+            user_id=user.id,
+            address_id=address.id if address else None,
+            latitude=latitude,
+            longitude=longitude,
+            address_text=address.full_address if address else None,
+            district=_canonical_district(address.district) if address else None,
+            preferred_language=user.preferred_language or "uz",
+            approved_at=datetime.now(UTC),
+            approved_by_user_id=actor_id,
+        )
+        db.session.add(outlet)
+        db.session.flush()
+        if user.phone:
+            # Every branch carries the ACCOUNT's contact: one chain, one number to call. The same
+            # phone on N outlets is why dedupe has to read siblings as siblings, not duplicates.
+            db.session.add(
+                OutletContact(
+                    outlet_id=outlet.id,
+                    name=(user.full_name or user.company_name or "Owner")[:100],
+                    phone=user.phone,
+                    role="owner",
+                    is_primary=True,
+                )
+            )
+        OutletService._record_stage(outlet, None, "active", actor_id, reason_code="imported")
+        return outlet
 
     # ------------------------------------------------------------- nightly jobs
     @staticmethod
@@ -1098,9 +1485,14 @@ class OutletService:
     def _activate_converted_tryouts() -> int:
         """A try-out that converted turns its outlet into a serving one (D8, R5).
 
-        The user link is written only when the outlet has none AND no other outlet already
-        holds that customer — `uq_outlets_user_id` is a unique, and a conversion that cannot
-        be linked must still activate the shop rather than abort the whole nightly run.
+        The user link is written whenever the outlet has none. It used to be written only
+        when no OTHER outlet already held that customer, because `uq_outlets_user_id` made a
+        second one impossible; since e0f1a2b3c4d5 an account may hold several outlets (D25),
+        and that guard's only remaining effect was to leave a chain's converted trial shop
+        account-less for ever. The address is what makes it a branch, so whenever the outlet has
+        none — whether or not the link was written this run — it takes the one
+        `_adopt_or_create_address` picks for its account (R39); an activated shop with no
+        address is refused by every money route (`VisitService._assert_orderable`).
         No commit: `update_stages` owns the transaction.
         """
         rows = (
@@ -1117,9 +1509,11 @@ class OutletService:
                 continue
             seen.add(outlet.id)
             if outlet.user_id is None:
-                taken = Outlet.query.filter(Outlet.user_id == converted_user_id, Outlet.id != outlet.id).first()
-                if taken is None:
-                    outlet.user_id = converted_user_id
+                outlet.user_id = converted_user_id
+            if outlet.address_id is None:
+                customer = User.query.get(outlet.user_id)
+                if customer is not None:
+                    OutletService._adopt_or_create_address(outlet, customer)
             OutletService.transition(outlet, "active", None, reason_code="job_tryout_converted")
             activated += 1
         return activated
@@ -1410,7 +1804,8 @@ class OutletService:
                 # SSOT (business_app/utils/payment_projection.py) requires every caller to add its
                 # own DELIVERED conjunct. A COD payment is born PENDING with amount_collected=0, so
                 # without it a confirmed-but-undelivered — or cancelled — order reads as debt the
-                # store does not owe. `last_orders` below is deliberately unfiltered.
+                # store does not owe. `last_orders` below is deliberately unfiltered BY STATUS;
+                # it is scoped to the BRANCH instead (see below).
                 status_value = order.status.value if hasattr(order.status, "value") else order.status
                 if status_value != OrderStatus.DELIVERED.value:
                     continue
@@ -1422,7 +1817,16 @@ class OutletService:
             # and `_iso` normalises the instant the same way every other timestamp on this card is
             # normalised -- a raw `.isoformat()` publishes a naive string under SQLite and an
             # offset-bearing one under PostgreSQL, i.e. one field with two wire formats.
-            last_orders = [{**serialize_order_brief(o), "created_at": _iso(o.created_at)} for o in orders[:3]]
+            # The money above is the ACCOUNT's and stays that way (D25 rule 6): one wallet
+            # behind every branch, labelled as such by the renderers. The HISTORY is this
+            # BRANCH's, through the same `order_scope` the four replenishment queries read —
+            # a second expression of "whose orders are these" is how a card and a rate end up
+            # disagreeing about the same shop. On a single-outlet account the clause is
+            # `Order.user_id` alone, so this is the query that was here before.
+            branch_orders = (
+                Order.query.filter(OutletService.order_scope(outlet)).order_by(Order.created_at.desc()).limit(3).all()
+            )
+            last_orders = [{**serialize_order_brief(o), "created_at": _iso(o.created_at)} for o in branch_orders]
         # NULL, not zero, when the figure does not apply: an outlet with no customer account has
         # no wallet, and one with no address row has no bottle ledger. A 0.0 there reads as a
         # settled bill and an empty crate on a store that has never ordered. Decided once, HERE, so
@@ -1433,6 +1837,25 @@ class OutletService:
             float(BottleTrackingService.get_place_balance(outlet.address_id)) if outlet.address_id else None
         )
         data["last_orders"] = last_orders
+        # Account-level vs branch-level, decided HERE and only LABELLED by the renderers
+        # (D25 rules 6-7): the receivable above is the ACCOUNT's -- one wallet for the whole
+        # chain -- while the bottle balance is this branch's own place ledger. `is_branch` is the
+        # DECISION, published so the staff card and the admin drawer read the same answer instead
+        # of each re-deriving it from a count (two expressions of one rule, with two different
+        # null defaults, is the bug CLAUDE.md's "full scope" note is about); `branch_count` is the
+        # NUMBER that answer prints; `open_receivable_scope` says what the money figure MEANS,
+        # which is why it is a constant rather than a nullable. None, not 0, for the two account
+        # figures when there is no account yet -- the same rule the two figures above follow --
+        # while `is_branch` is a plain False, because a prospect is not "unknown", it is not a
+        # branch. List rows carry none of this: one query per CARD is not one query per row.
+        if outlet.user_id is None:
+            data["account_name"] = data["branch_count"] = None
+        else:
+            data["account_name"] = _user_display_name(outlet.user)
+            data["branch_count"] = OutletService.account_outlet_count(outlet.user_id)
+        data["is_branch"] = OutletService.is_branch(outlet)
+        data["open_receivable_scope"] = "account"
+        data["account_candidate"] = OutletService.account_candidate(outlet)
 
         # --- what the visit loop needs (phase 2a) -------------------------------------------
         # Every field below is a RULE, computed once HERE and published (D15). The staff-bot card

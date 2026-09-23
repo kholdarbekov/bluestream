@@ -17,7 +17,7 @@ import pytest
 
 from business_app.models.order import Order, OrderItem, OrderStatusHistory
 from business_app.models.sales import Outlet, OutletStageHistory
-from business_app.models.user import User
+from business_app.models.user import User, UserAddress
 from business_app.services.sales.outlet_service import OutletService
 from business_app.services.sales.replenishment_service import ReplenishmentService
 from business_app.services.tryout_service import TryoutService
@@ -63,7 +63,16 @@ def _outlet(db, owner=None, *, name="Bahor market", stage="active", outlet_class
     return outlet
 
 
-def _delivered(db, owner, product, *, days_ago, number, anchor=FROZEN_UTC):
+def _branch_address(db, owner, full_address, *, is_default=False):
+    """One branch's own address. Coordinate-less on purpose: the delivery-zone listener
+    skips an un-pinned row, and the stage rule reads the address as an IDENTITY, not a place."""
+    address = UserAddress(user_id=owner.id, full_address=full_address, is_default=is_default)
+    db.session.add(address)
+    db.session.commit()
+    return address
+
+
+def _delivered(db, owner, product, *, days_ago, number, anchor=FROZEN_UTC, delivery_address_id=None):
     """A DELIVERED order whose landing instant lives on its status-history row.
 
     `orders` has no `delivered_at` column, so this row IS "when the water arrived" —
@@ -78,6 +87,7 @@ def _delivered(db, owner, product, *, days_ago, number, anchor=FROZEN_UTC):
         status=OrderStatus.DELIVERED,
         subtotal=Decimal("15000.00"),
         total_amount=Decimal("15000.00"),
+        delivery_address_id=delivery_address_id,
         created_at=landed,
     )
     db.session.add(order)
@@ -221,6 +231,41 @@ class TestStageSweep:
         assert chatty.stage == "active"
         assert _last_stage_row(quiet) == ("active", "at_risk", "job_at_risk", None)
         assert _stage_rows(chatty) == []
+
+    def test_a_dead_branch_goes_at_risk_while_its_busy_sibling_stays_active(self, db, sample_product):
+        """D25 rule 5 through the 01:10 sweep -- the surface the agent actually feels.
+
+        Both branches belong to ONE account and are class A (cadence 7, ratio 1.5 => 10.5 days).
+        Account-wide, the sweep saw two deliveries one day apart, read the median gap as 1 day,
+        floored it to MIN_INTERVAL_DAYS and measured "days since the last delivery" from the
+        SIBLING's order: 10 days, under the threshold, so the shop that had taken nothing for
+        eleven days stayed `active` for ever. Per branch, each shop answers for itself.
+        """
+        owner = _owner(db, "+998901234612")
+        quiet_address = _branch_address(db, owner, "Chilonzor 5", is_default=True)
+        busy_address = _branch_address(db, owner, "Yunusobod 12")
+        quiet = _outlet(db, owner, name="Bahor market, Chilonzor", outlet_class="A",
+                        address_id=quiet_address.id)
+        busy = _outlet(db, owner, name="Bahor market, Yunusobod", outlet_class="A",
+                       address_id=busy_address.id)
+        _delivered(db, owner, sample_product, days_ago=11, number="SA_000140_26",
+                   delivery_address_id=quiet_address.id)
+        _delivered(db, owner, sample_product, days_ago=10, number="SA_000141_26",
+                   delivery_address_id=busy_address.id)
+
+        counts = OutletService.update_stages(now=FROZEN_UTC)
+
+        assert counts == {
+            "scanned": 2,
+            "at_risk": 1,
+            "dormant": 0,
+            "reactivated": 0,
+            "activated_from_trial": 0,
+        }
+        assert quiet.stage == "at_risk"
+        assert busy.stage == "active"
+        assert _last_stage_row(quiet) == ("active", "at_risk", "job_at_risk", None)
+        assert _stage_rows(busy) == []
 
     def test_the_interval_is_this_shops_own_median_not_its_class_cadence(self, db, sample_product):
         """Six deliveries 20 days apart give a median gap of 20 and a threshold of 30, so
@@ -376,7 +421,56 @@ class TestStageSweep:
         assert counts["scanned"] == 0
         assert outlet.stage == "active"
         assert outlet.user_id == converted.id
+        assert outlet.address_id is not None
+        assert UserAddress.query.get(outlet.address_id).user_id == converted.id
         assert _last_stage_row(outlet) == ("trial", "active", "job_tryout_converted", None)
+
+    def test_a_converted_tryout_joins_an_account_that_already_has_a_branch(self, db, sample_product, admin_user):
+        """The guard this replaces was written for `uq_outlets_user_id`: the link was skipped
+        whenever another outlet already held that customer, so a chain's converted trial shop
+        stayed account-less for ever and never reached a due list. It also needs an address of
+        its own, or it activates into a shop no order can be placed for."""
+        outlet, converted = _converted_tryout_outlet(db, sample_product, admin_user)
+        existing = UserAddress(user_id=converted.id, full_address="Chilonzor 5", is_default=True)
+        db.session.add(existing)
+        db.session.flush()
+        db.session.add(
+            Outlet(
+                name="Chain, Chilonzor",
+                outlet_type="grocery_store",
+                stage="active",
+                user_id=converted.id,
+                address_id=existing.id,
+            )
+        )
+        db.session.commit()
+        existing_id = existing.id
+
+        counts = OutletService.update_stages(now=FROZEN_UTC)
+
+        assert counts["activated_from_trial"] == 1
+        assert (outlet.stage, outlet.user_id) == ("active", converted.id)
+        branch = UserAddress.query.get(outlet.address_id)
+        assert branch.id != existing_id
+        assert (branch.user_id, branch.is_default, branch.title) == (converted.id, False, "Trial shop")
+
+    def test_a_converted_tryout_already_carrying_its_customer_still_gets_an_address(
+        self, db, sample_product, admin_user
+    ):
+        """R39: the address step keys on `address_id`, not on whether the link was written this
+        run. A trial outlet whose `user_id` was set earlier (by hand, or by a partial run) used to
+        skip the address entirely and activate into a shop no order can be placed for."""
+        outlet, converted = _converted_tryout_outlet(db, sample_product, admin_user)
+        outlet.user_id = converted.id
+        db.session.commit()
+
+        counts = OutletService.update_stages(now=FROZEN_UTC)
+
+        assert counts["activated_from_trial"] == 1
+        assert (outlet.stage, outlet.user_id) == ("active", converted.id)
+        assert outlet.address_id is not None
+        address = UserAddress.query.get(outlet.address_id)
+        assert (address.user_id, address.is_default, address.title) == (converted.id, True, "Trial shop")
 
 
 class TestNightlyJobWiring:

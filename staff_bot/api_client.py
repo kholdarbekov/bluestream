@@ -824,10 +824,29 @@ class StaffAPIClient:
             'GET', '/api/v1/staff/sales/activation-requests', token=token
         )
 
-    async def sales_approve_outlet(self, token: str, outlet_id: int) -> APIResponse:
-        """Approve an outlet's activation request."""
+    async def sales_approve_outlet(self, token: str, outlet_id: int, *,
+                                   attach: bool = False,
+                                   contract_number: Optional[str] = None) -> APIResponse:
+        """Approve an outlet's activation request.
+
+        `attach=True` is the operator answering "this phone is that account's,
+        make this outlet a branch of it" (D25 rule 3): the backend links the
+        existing customer and creates a branch address instead of minting a
+        second account. It is the same route either way -- one payload key, no
+        new door -- and the CANDIDATE is never resolved here: the
+        activation-request row publishes `account_candidate`, and a lookup from
+        the bot would be a second place deciding whose phone this is.
+
+        Unset fields are OMITTED rather than sent as their defaults, so a plain
+        approve still posts `{}`.
+        """
+        data: Dict = {}
+        if attach:
+            data['attach'] = True
+        if contract_number:
+            data['contract_number'] = contract_number
         return await self._make_request(
-            'POST', f'/api/v1/staff/sales/outlets/{outlet_id}/approve', token=token, data={}
+            'POST', f'/api/v1/staff/sales/outlets/{outlet_id}/approve', token=token, data=data
         )
 
     async def sales_reject_outlet(self, token: str, outlet_id: int, reason: str) -> APIResponse:

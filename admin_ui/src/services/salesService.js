@@ -33,8 +33,16 @@ class SalesService {
     return unwrap(response);
   }
 
-  async approveOutlet(outletId, contractNumber = null) {
-    const response = await api.post(`/admin/sales/outlets/${outletId}/approve`, contractNumber ? { contract_number: contractNumber } : {});
+  // D25: ONE body shape, both keys always present. `attach` decides whether approval CREATES a
+  // customer account or joins the outlet to the account the backend matched by phone and
+  // published as `account_candidate` on the outlet GET — this client never looks a phone up.
+  // `contract_number` stays optional; the route's `payload.get("contract_number")` has always
+  // read a missing key and an explicit null the same way.
+  async approveOutlet(outletId, { contract_number = null, attach = false } = {}) {
+    const response = await api.post(`/admin/sales/outlets/${outletId}/approve`, {
+      contract_number: contract_number || null,
+      attach: Boolean(attach),
+    });
     return unwrap(response);
   }
 

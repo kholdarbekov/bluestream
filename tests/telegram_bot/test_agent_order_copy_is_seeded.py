@@ -26,10 +26,14 @@ LANGUAGES = ("en", "uz", "ru")
 
 # key -> the placeholders the call sites (telegram_bot/webhook_server.py
 # ::agent_order_proposed_handler and telegram_bot/handlers/agent_orders.py)
-# actually pass.
+# actually pass. Written by hand, so it is only half the chain: this file pins
+# the SEED against it, and tests/telegram_bot/test_webhook_agent_order_proposed.py
+# ::test_the_call_site_passes_exactly_the_placeholders_the_seeded_copy_carries
+# pins the handler's real kwargs against the same seed rows. Note the
+# deliberate `address` here vs `delivery_address` on the wire (R30).
 BOT_KEYS = {
     "telegram.agent_order.proposed": {
-        "agent_name", "order_number", "items", "total", "delivery_date",
+        "agent_name", "order_number", "outlet_name", "address", "items", "total", "delivery_date",
     },
     "telegram.agent_order.item": {"name", "qty"},
     "telegram.agent_order.confirm_button": set(),

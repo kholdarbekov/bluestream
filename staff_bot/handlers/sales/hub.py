@@ -36,6 +36,13 @@ def format_outlet_card(outlet: Dict, language: str) -> str:
     line gates on its OWN field. A 0 printed here reads as a settled bill and an
     empty crate on a store that has never ordered.
 
+    D25 adds the account: an account may own several outlets, one per address,
+    so the receivable is the ACCOUNT's figure while the bottle ledger is the
+    BRANCH's. Which of the two labels is printed follows `is_branch` — the
+    answer the backend published, and the money label also checks the
+    `open_receivable_scope` it published beside it. The bot never counts an
+    account's outlets and never reads `user_id` to guess at one.
+
     The same rule governs the phase-2a visit block. `overdue_days` is computed
     by the backend (never by subtracting dates here), and `rate_per_day` /
     `suggested_now` distinguish NULL — "not computable yet", no second stock
@@ -45,6 +52,16 @@ def format_outlet_card(outlet: Dict, language: str) -> str:
     class this codebase keeps rediscovering.
     """
     type_label = i18n.get(f"staff.sales.type.{outlet.get('outlet_type', 'grocery_store')}", language)
+    # D25: branch mode is the BACKEND's answer, published by `OutletService.card`
+    # as `is_branch` (= `OutletService.is_branch`). Read into ONE local by the
+    # three lines below -- the account line, the money label and the bottle
+    # label -- so the card cannot say "branch" in one place and "account" in
+    # another, and so the rule is not re-derived here from a count (the admin
+    # drawer reads the same field for the same reason). A payload that carries
+    # no `is_branch` is not a branch: the operator's review card renders a plain
+    # `serialize_outlet` row, which publishes none of these fields (R9: no
+    # sibling count per row on a list).
+    is_branch = outlet.get('is_branch') is True
     lines = [
         f"🏪 <b>{escape_html(outlet.get('name', ''))}</b> · {type_label}",
         f"{i18n.get('staff.sales.card.stage', language)}: {stage_label(outlet.get('stage', 'prospect'), language)}",
@@ -61,6 +78,14 @@ def format_outlet_card(outlet: Dict, language: str) -> str:
             lines.append(f"📞 {i18n.get('staff.sales.card.contact', language)}: {who}")
     if outlet.get('address_text'):
         lines.append(f"📍 {i18n.get('staff.sales.card.address', language)}: {escape_html(outlet['address_text'])}")
+    if is_branch and outlet.get('account_name'):
+        # Under the address, because the address is what makes a branch a
+        # branch and this line says which account it belongs to.
+        account_line = i18n.get(
+            'staff.sales.card.account', language,
+            account=escape_html(outlet['account_name']), count=outlet.get('branch_count'),
+        )
+        lines.append(f"🏢 {account_line}")
     last_visit = outlet.get('last_visit') or {}
     visited_on = format_local_date(last_visit.get('ended_at'))
     if visited_on:
@@ -89,13 +114,32 @@ def format_outlet_card(outlet: Dict, language: str) -> str:
             f"{int(outlet['suggested_now'])}"
         )
     if outlet.get('open_receivable') is not None:
+        # Both keys are written as LITERALS in their own `i18n.get` call: the
+        # required-key extractor (`Translation._extract_literal_staff_keys`)
+        # only sees a literal staff key passed directly as that call's first
+        # argument, so a key chosen into a variable drops out of /health's
+        # required set and an unseeded one reaches an agent's phone as a
+        # humanised key tail.
+        # The qualifier is printed only when there is a distinction to draw AND
+        # the backend says the figure is the account's: `open_receivable_scope`
+        # is what the money line MEANS, so if it ever stopped being account-wide
+        # this label would stop claiming otherwise instead of lying.
+        account_money = is_branch and outlet.get('open_receivable_scope') == 'account'
+        receivable_label = (
+            i18n.get('staff.sales.card.receivable_account', language) if account_money
+            else i18n.get('staff.sales.card.receivable', language)
+        )
         lines.append(
-            f"💰 {i18n.get('staff.sales.card.receivable', language)}: "
+            f"💰 {receivable_label}: "
             f"{format_currency(outlet['open_receivable'], language=language)}"
         )
     if outlet.get('bottle_balance') is not None:
+        bottles_label = (
+            i18n.get('staff.sales.card.bottles_branch', language) if is_branch
+            else i18n.get('staff.sales.card.bottles', language)
+        )
         lines.append(
-            f"🧴 {i18n.get('staff.sales.card.bottles', language)}: "
+            f"🧴 {bottles_label}: "
             f"{float(outlet['bottle_balance']):,.0f}"
         )
     if outlet.get('last_orders'):

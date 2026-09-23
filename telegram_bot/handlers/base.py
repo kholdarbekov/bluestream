@@ -3,7 +3,7 @@ Base handler class with shared error handling for Telegram bot handlers.
 """
 import logging
 from typing import Any
-from telegram import Update
+from telegram import Message, Update
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
@@ -113,8 +113,14 @@ class BaseHandler:
         text: str,
         reply_markup: Any = None,
         parse_mode: str | None = None,
-    ) -> None:
-        """Edit callback text when possible, otherwise replace the message with a text reply."""
+    ) -> Message | None:
+        """Edit callback text when possible, otherwise replace the message with a text reply.
+
+        Returns the message now showing ``text`` — the edited one, or the
+        replacement — for callers that need to know which bubble holds the
+        screen (the quantity screen records it so a typed number can replace
+        it). Callers that do not care ignore it.
+        """
         kwargs = {"text": text}
         if reply_markup is not None:
             kwargs["reply_markup"] = reply_markup
@@ -122,13 +128,14 @@ class BaseHandler:
             kwargs["parse_mode"] = parse_mode
 
         try:
-            await query.edit_message_text(**kwargs)
-            return
+            edited = await query.edit_message_text(**kwargs)
+            # `True` instead of a Message only for inline-mode messages.
+            return edited if isinstance(edited, Message) else getattr(query, "message", None)
         except BadRequest as exc:
             reason = str(exc).lower()
             if "message is not modified" in reason:
                 # The message already shows exactly this content; nothing to do.
-                return
+                return getattr(query, "message", None)
             if "there is no text in the message" in reason:
                 # Expected for media (photo/caption) messages: replace below.
                 logger.info("Callback message has no editable text; replacing message: %s", exc)
@@ -148,7 +155,7 @@ class BaseHandler:
         except Exception as delete_exc:
             logger.warning("Failed to delete callback message before fallback send: %s", delete_exc)
 
-        await message.reply_text(**kwargs)
+        return await message.reply_text(**kwargs)
 
     async def _ensure_loyalty_eligible(self, update, context, telegram_id, language) -> bool:
         """Block loyalty actions for ineligible users: brief toast + main menu.

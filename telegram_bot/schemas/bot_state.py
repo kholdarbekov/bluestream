@@ -43,6 +43,14 @@ class BotState(BaseModel):
     # Address-related state
     address_id: Optional[int] = Field(None, description="ID of address being edited")
 
+    # Which cart quantity screen a TYPED number answers:
+    # {'product_id', 'message_id', 'shown_at'}. A routing hint that coexists
+    # with any armed prompt, so it is a `_PRESERVED_KEYS` entry beside
+    # `awaiting_input` rather than a value of it. Closed by anything else the
+    # customer does, and after 30 minutes (handlers/quantity_screen.py).
+    # tests/telegram_bot/test_typed_quantity_journeys.py
+    quantity_screen: Optional[dict] = None
+
     class Config:
         extra = 'allow'  # Allow additional fields for forward compatibility
 

@@ -143,7 +143,12 @@ class BotUserRepository:
     # single `awaiting_input` slot would silently disarm whatever prompt was
     # already armed (a "Report an issue" waiting for its message, say), which is
     # the very clobbering this preserved set exists to prevent.
-    _PRESERVED_KEYS = ('address_draft', 'awaiting_location_at')
+    # `quantity_screen` is preserved for the same reason: it names which cart
+    # line a typed NUMBER belongs to while the quantity screen is up, and it
+    # must not be wiped when an unrelated prompt ("Report an issue") is filed
+    # and disarmed, nor wipe that prompt when the screen opens. Navigation
+    # ends it instead (`handlers/quantity_screen.py`).
+    _PRESERVED_KEYS = ('address_draft', 'awaiting_location_at', 'quantity_screen')
 
     async def clear_awaiting_input(self, telegram_id: int, *awaiting_inputs: str) -> bool:
         """Disarm ONLY the named prompts. Thin alias for `disarm` (see its
@@ -214,6 +219,37 @@ class BotUserRepository:
         if state.pop('awaiting_location_at', None) is None:
             return
         await self.update_user_state(telegram_id, state, touch_activity=False)
+
+    async def remember_quantity_screen(
+        self, telegram_id: int, *, product_id: int, message_id: Optional[int], shown_at: str
+    ) -> None:
+        """Record which quantity screen a typed number would answer.
+
+        A MERGE, like `remember_pin_prompt`: the screen coexists with whatever
+        prompt the customer armed before it, so it must not touch
+        `awaiting_input`. `message_id` is the bubble that shows the screen, so
+        the next typed number can replace it rather than leave two live
+        screens. Written on EVERY render (add, preset, ±, typed) so it always
+        names the latest one.
+        """
+        state = await self.get_user_state(telegram_id)
+        state['quantity_screen'] = {
+            'product_id': product_id,
+            'message_id': message_id,
+            'shown_at': shown_at,
+        }
+        await self.update_user_state(telegram_id, state)
+
+    async def forget_quantity_screen(self, telegram_id: int) -> bool:
+        """Close the typing window, leaving every other key untouched.
+
+        Returns False, with no write, when no window was open.
+        """
+        state = await self.get_user_state(telegram_id)
+        if state.pop('quantity_screen', None) is None:
+            return False
+        await self.update_user_state(telegram_id, state, touch_activity=False)
+        return True
 
     async def disarm(self, telegram_id: int, *owned: str) -> bool:
         """Disarm ONLY the named prompts, preserving `_PRESERVED_KEYS`.

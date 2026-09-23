@@ -237,7 +237,11 @@ class TestProductHandlerDeepFlows:
 
         update.callback_query.message.delete.assert_awaited_once()
         update.callback_query.message.reply_text.assert_awaited_once_with(
-            text="🛒 Water\n\ntelegram.quantity:en: 2\ntelegram.total:en: 30,000 UZS",
+            text=(
+                "🛒 Water\n\ntelegram.quantity:en: 2\ntelegram.total:en: 30,000 UZS"
+                # An orderable product invites a typed quantity.
+                "\n\ntelegram.products.type_quantity_hint:en"
+            ),
             reply_markup="qty-kbd",
         )
         update.callback_query.answer.assert_awaited_once()

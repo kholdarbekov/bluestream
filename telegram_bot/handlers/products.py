@@ -3,12 +3,13 @@ Product browsing and shopping cart handlers
 """
 import logging
 import json
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 from urllib.parse import urlparse, urlunparse
 from io import BytesIO
 import os
 import httpx
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, constants
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Message, constants
 from telegram.ext import ContextTypes
 from telegram.helpers import escape_markdown
 
@@ -23,6 +24,8 @@ from utils import user_middleware, format_price, get_auth_token
 from handlers.base import BaseHandler
 from shared.business_config import MAX_QUANTITY_PER_ITEM, MIN_ORDER_AMOUNT
 from handlers.quick_order import quick_order_handlers
+from handlers.quantity_screen import live_quantity_screen
+from quantity_input import TypedQuantity, parse_typed_quantity
 from config import config
 
 logger = logging.getLogger('handlers')
@@ -154,17 +157,22 @@ class ProductHandlers(BaseHandler):
         min_order_qty, upper = cls._purchase_bounds(product)
         return upper >= min_order_qty
 
-    async def _purchase_bounds_or_refuse(self, query, product: Dict[str, Any],
+    async def _purchase_bounds_or_refuse(self, update: Update, product: Dict[str, Any],
                                language: str) -> Optional[tuple[int, int]]:
         """``(floor, ceiling)`` quantities for one product, or None when it
         cannot be ordered at all (the customer has then been told why).
 
         A ceiling below the floor means no quantity is orderable, so the honest
         answer is to refuse here rather than write a number the backend is
-        going to reject.
+        going to reject. The refusal is a toast on a tap and a reply to a typed
+        number — `_ack` alone says nothing when there is no callback query.
         """
         if not self._is_orderable(product):
-            await self._ack(query, i18n.get('telegram.products.out_of_stock', language))
+            refusal = i18n.get('telegram.products.out_of_stock', language)
+            if update.callback_query is not None:
+                await self._ack(update.callback_query, refusal)
+            else:
+                await update.message.reply_text(refusal)
             return None
         return self._purchase_bounds(product)
 
@@ -680,6 +688,10 @@ class ProductHandlers(BaseHandler):
             text += (
                 f"\nℹ️ {i18n.get('telegram.products.min_order_quantity_label', language, min_qty=min_order_qty)}"
             )
+        if self._is_orderable(product):
+            # Only when a number could be accepted: inviting a typed quantity
+            # on a sold-out screen promises what the next message refuses.
+            text += f"\n\n{i18n.get('telegram.products.type_quantity_hint', language)}"
         return text
 
     async def _render_quantity_step(
@@ -690,15 +702,27 @@ class ProductHandlers(BaseHandler):
         product: Dict[str, Any],
         quantity: int,
         language: str,
+        *,
+        replaces_message_id: Optional[int] = None,
     ) -> None:
         """Render the quantity selector with the product image shown.
 
-        Strategy:
+        Strategy for a TAP (callback query):
           * If the current callback bubble is already a photo, edit its caption
             and keyboard in place (cheap, no re-upload).
           * If it's a text bubble and a product image is available, delete and
             re-send as a photo so the user sees what they're ordering.
           * Otherwise fall back to editing text in place.
+
+        For a TYPED number (no callback query) the customer's message now sits
+        below the old screen, so the fresh screen is sent under it and the old
+        one (``replaces_message_id``) is deleted — one live screen, at the
+        bottom where they are looking.
+
+        Every render records the bubble as the screen a typed number answers
+        (``BotUserRepository.remember_quantity_screen``). One place, so no
+        entry point — add, preset, ±, typed — can leave the window pointing at
+        a screen that is no longer there.
 
         The product image is fetched via the same helpers used by
         `product_details` so private/internal URLs are downloaded server-side
@@ -716,66 +740,103 @@ class ProductHandlers(BaseHandler):
             min_order_qty=min_order_qty,
             max_quantity=max_quantity,
         )
+        # Private chat: the customer's id IS the chat id (the send target this
+        # screen has always used).
+        chat_id = update.effective_user.id
 
         query = update.callback_query
-        if not query:
-            # Defensive: shouldn't happen from real callback flow.
-            await update.message.reply_text(text=text, reply_markup=keyboard)
-            return
+        if query is None:
+            shown = await self._send_quantity_screen(context, chat_id, product, text, keyboard)
+            if shown is None:
+                # Nothing new reached the customer, so the old screen is still
+                # the live one: keep it, and keep answering typed numbers for it.
+                shown_message_id = replaces_message_id
+            else:
+                shown_message_id = shown.message_id
+                if replaces_message_id and replaces_message_id != shown_message_id:
+                    try:
+                        await context.bot.delete_message(chat_id=chat_id, message_id=replaces_message_id)
+                    except Exception as e:
+                        # Already gone (deleted by hand, or older than 48h):
+                        # the new screen below is what matters.
+                        logger.info(f"Could not delete the previous quantity screen: {e}")
+        else:
+            shown = await self._redraw_quantity_screen(query, context, chat_id, product, text, keyboard)
+            shown_message_id = getattr(shown, 'message_id', None)
 
+        try:
+            await self.user_repo.remember_quantity_screen(
+                update.effective_user.id,
+                product_id=product_id,
+                message_id=shown_message_id,
+                shown_at=datetime.now(timezone.utc).isoformat(),
+            )
+        except Exception as e:
+            # The screen is drawn and its buttons work; only typing is lost.
+            logger.warning(f"Could not record the quantity screen for typed input: {e}")
+
+    async def _redraw_quantity_screen(self, query, context, chat_id: int, product: Dict[str, Any],
+                                      text: str, keyboard: InlineKeyboardMarkup) -> Optional[Message]:
+        """The tap half of `_render_quantity_step`; returns the bubble now showing it."""
         message = query.message
         is_photo_message = bool(getattr(message, 'photo', None))
 
         # Fast path: already a photo bubble — edit caption only.
         if is_photo_message:
             try:
-                await query.edit_message_caption(caption=text, reply_markup=keyboard)
-                return
+                edited = await query.edit_message_caption(caption=text, reply_markup=keyboard)
+                return edited if isinstance(edited, Message) else message
             except Exception as e:
                 logger.warning(f"edit_message_caption failed, falling back to resend: {e}")
 
-        image_url = self._extract_product_image_url(product)
-        user_id = update.effective_user.id
-
-        # Helper to send the photo using the same private/public logic as product_details.
-        async def _send_with_photo(photo: Any) -> bool:
-            try:
-                await context.bot.send_photo(
-                    chat_id=user_id,
-                    photo=photo,
-                    caption=text,
-                    reply_markup=keyboard,
-                )
-                return True
-            except Exception as send_err:
-                logger.warning(f"send_photo failed in quantity step: {send_err}")
-                return False
-
-        if image_url:
+        if self._extract_product_image_url(product):
             try:
                 await message.delete()
             except Exception:
                 pass
+            return await self._send_quantity_screen(context, chat_id, product, text, keyboard)
 
-            sent = False
+        # No image available — edit text in place (or replace as needed).
+        return await self._edit_or_replace_callback_message(query, text, reply_markup=keyboard)
+
+    async def _send_quantity_screen(self, context, chat_id: int, product: Dict[str, Any],
+                                    text: str, keyboard: InlineKeyboardMarkup) -> Optional[Message]:
+        """Send the quantity screen as a NEW message: the product photo when one
+        can be delivered, plain text otherwise. None when nothing could be sent.
+
+        Uses the same private/public image logic as product_details.
+        """
+        async def _send_with_photo(photo: Any) -> Optional[Message]:
+            try:
+                return await context.bot.send_photo(
+                    chat_id=chat_id,
+                    photo=photo,
+                    caption=text,
+                    reply_markup=keyboard,
+                )
+            except Exception as send_err:
+                logger.warning(f"send_photo failed in quantity step: {send_err}")
+                return None
+
+        image_url = self._extract_product_image_url(product)
+        if image_url:
+            sent = None
             if not self._is_private_image_url(image_url):
                 sent = await _send_with_photo(image_url)
-            if not sent:
+            if sent is None:
                 fetch_url = self._build_internal_fetch_url(image_url)
                 downloaded = await self._download_image_bytes(fetch_url) if fetch_url else None
                 if downloaded:
                     sent = await _send_with_photo(downloaded)
-            if sent:
-                return
+            if sent is not None:
+                return sent
             # Fall through to plain text as last resort.
-            try:
-                await context.bot.send_message(chat_id=user_id, text=text, reply_markup=keyboard)
-            except Exception as e:
-                logger.warning(f"Quantity step text fallback failed: {e}")
-            return
 
-        # No image available — edit text in place (or replace as needed).
-        await self._edit_or_replace_callback_message(query, text, reply_markup=keyboard)
+        try:
+            return await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
+        except Exception as e:
+            logger.warning(f"Quantity step text fallback failed: {e}")
+            return None
 
     async def add_to_cart(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show quantity selector (with product image) for adding to cart."""
@@ -893,7 +954,7 @@ class ProductHandlers(BaseHandler):
                     return
 
                 product = response.data['data']['product']
-                bounds = await self._purchase_bounds_or_refuse(query, product, language)
+                bounds = await self._purchase_bounds_or_refuse(update, product, language)
                 if bounds is None:
                     return  # sold out — nothing to write, customer already told
                 min_order_qty, upper = bounds
@@ -943,6 +1004,101 @@ class ProductHandlers(BaseHandler):
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="quantity_handler")
+
+    async def handle_typed_quantity(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
+                                    text: str, user_state: Dict[str, Any], language: str) -> bool:
+        """Answer a number TYPED at the cart quantity screen.
+
+        Returns False — having done nothing — when the message is not ours: no
+        quantity screen is live (`live_quantity_screen`), or the text does not
+        read as a quantity (`parse_typed_quantity`). The caller then routes it
+        exactly as before, which for words means the Support Inbox.
+
+        Returns True once the message is answered: the line SET to the number,
+        or a reply saying why not. The write mirrors a preset button — an
+        absolute quantity, inside `_purchase_bounds`, read from
+        ``GET /products/<id>`` (a cart line's product payload has no
+        ``inventory`` block, so its minimum would read as 1). Out-of-range
+        numbers are refused with the limit rather than clamped: the customer
+        typed a number, and silently writing a different one would be a
+        surprise on the confirmation screen.
+        """
+        screen = live_quantity_screen(user_state)
+        if screen is None:
+            return False
+        typed = parse_typed_quantity(text)
+        if typed is None:
+            return False
+
+        product_id = screen['product_id']
+        try:
+            async with api_client as client:
+                user_token = await get_auth_token(update, context, client)
+                if not user_token:
+                    await self._handle_auth_error(update, language)
+                    return True
+
+                response = await client.get_product(user_token, product_id, language=language)
+                if not response.success:
+                    await self._handle_api_error(update, response.error, language)
+                    return True
+                product = response.data['data']['product']
+
+                bounds = await self._purchase_bounds_or_refuse(update, product, language)
+                if bounds is None:
+                    return True  # sold out — told so; the screen keeps answering
+                refusal = self._typed_quantity_refusal(typed, *bounds, language)
+                if refusal:
+                    await update.message.reply_text(refusal)
+                    return True
+                quantity = typed.value
+
+                # POST /cart/items is an INCREMENT and PUT is a SET that 404s on
+                # a missing line, so which write is right depends on the SERVER
+                # cart — never on a guess (the 2026-06-27 accumulation bug).
+                in_cart, cart_error = await self._read_cart_quantity(
+                    client, user_token, product_id, language
+                )
+                if cart_error:
+                    await self._handle_api_error(update, cart_error, language)
+                    return True
+                if in_cart:
+                    write = await client.update_cart_item(user_token, product_id, quantity=quantity)
+                else:
+                    # The line left the cart since the screen was drawn (removed
+                    # on the website, say); the read proved it is absent, so an
+                    # increment from nothing is exactly the number typed.
+                    write = await client.add_to_cart(user_token, product_id, quantity=quantity)
+                if not write.success:
+                    await self._handle_api_error(update, write.error, language)
+                    return True
+
+            await self._render_quantity_step(
+                update, context, product_id, product, quantity, language,
+                replaces_message_id=screen.get('message_id'),
+            )
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="handle_typed_quantity")
+        return True
+
+    @staticmethod
+    def _typed_quantity_refusal(typed: TypedQuantity, min_order_qty: int, upper: int,
+                                language: str) -> Optional[str]:
+        """Why a typed quantity cannot be written, or None when it can."""
+        if typed.value is None:
+            return i18n.get(
+                'telegram.products.typed_quantity_not_whole', language,
+                min_qty=min_order_qty, max_qty=upper,
+            )
+        if typed.value < min_order_qty:
+            return i18n.get(
+                'telegram.products.typed_quantity_below_min', language, min_qty=min_order_qty,
+            )
+        if typed.value > upper:
+            return i18n.get(
+                'telegram.products.typed_quantity_above_max', language, max_qty=upper,
+            )
+        return None
 
     async def cart_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle cart actions"""
@@ -1020,7 +1176,7 @@ class ProductHandlers(BaseHandler):
                     await self._handle_api_error(update, product_response.error, language)
                     return
                 product = product_response.data['data']['product']
-                bounds = await self._purchase_bounds_or_refuse(query, product, language)
+                bounds = await self._purchase_bounds_or_refuse(update, product, language)
                 if bounds is None:
                     return  # sold out — nothing to write, customer already told
                 min_order_qty, upper = bounds

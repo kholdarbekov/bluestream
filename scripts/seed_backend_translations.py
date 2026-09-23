@@ -5851,6 +5851,30 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Minimal buyurtma: {min_qty}',
         'ru': 'Минимальный заказ: {min_qty}'
     },
+    # A quantity TYPED at the cart quantity screen
+    # (telegram_bot/handlers/products.py::handle_typed_quantity). The hint is
+    # shown on the screen itself; the three refusals answer a number the
+    # product's bounds (`_purchase_bounds`) cannot accept — nothing is written.
+    'telegram.products.type_quantity_hint': {
+        'en': '✏️ Or just type the number you need',
+        'uz': '✏️ Yoki kerakli sonni yozib yuboring',
+        'ru': '✏️ Или просто напишите нужное количество'
+    },
+    'telegram.products.typed_quantity_below_min': {
+        'en': 'The minimum order for this product is {min_qty}. Please type {min_qty} or more.',
+        'uz': "Bu mahsulot uchun eng kam buyurtma — {min_qty} ta. {min_qty} yoki undan ko'p son yozing.",
+        'ru': 'Минимальный заказ этого товара — {min_qty} шт. Напишите {min_qty} или больше.'
+    },
+    'telegram.products.typed_quantity_above_max': {
+        'en': 'You can order at most {max_qty} of this product right now. Please type a smaller number.',
+        'uz': "Hozir bu mahsulotdan ko'pi bilan {max_qty} ta buyurtma qilish mumkin. Kichikroq son yozing.",
+        'ru': 'Сейчас можно заказать не больше {max_qty} шт. этого товара. Напишите число поменьше.'
+    },
+    'telegram.products.typed_quantity_not_whole': {
+        'en': 'Please type a whole number from {min_qty} to {max_qty}.',
+        'uz': 'Iltimos, {min_qty} dan {max_qty} gacha butun son yozing.',
+        'ru': 'Пожалуйста, напишите целое число от {min_qty} до {max_qty}.'
+    },
     'telegram.cart_total': {
         'en': 'Cart total',
         'uz': 'Savat jami',

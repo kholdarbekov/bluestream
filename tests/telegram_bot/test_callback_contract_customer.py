@@ -1189,6 +1189,11 @@ async def test_middlewares_run_before_conversations_which_run_before_the_catch_a
     group 0 (the group-0 text catch-all files unmatched free text as a support
     ticket, so a conversation's own TEXT step landing after it would have the
     customer's answer silently turned into a support message).
+
+    The quantity-screen middleware (closes the typed-quantity window on any
+    other tap or command) must run AFTER the dedup guard — a dropped duplicate
+    navigates nowhere — and BEFORE every conversation, so the window is shut
+    before whatever was tapped arms its own prompt.
     """
     groups = bot.application.handlers
 
@@ -1199,12 +1204,16 @@ async def test_middlewares_run_before_conversations_which_run_before_the_catch_a
         for handler in handlers
         if isinstance(handler, TypeHandler)
     )
-    assert len(middleware_groups) == 2, (
-        f"expected exactly the two dispatcher middlewares, found groups "
+    assert len(middleware_groups) == 3, (
+        f"expected exactly the three dispatcher middlewares, found groups "
         f"{middleware_groups}"
     )
     assert middleware_groups[0] == debug_logger_group == -10
     assert middleware_groups[1] == -5, "the callback-dedup guard moved out of group -5"
+    assert middleware_groups[2] == -4, (
+        "the quantity-screen middleware must sit between the dedup guard and "
+        "the conversations"
+    )
 
     conversation_groups = sorted({group for group, _ in _conversations(bot.application)})
     assert conversation_groups, "no conversations registered at all"
@@ -1277,7 +1286,7 @@ async def test_the_free_text_catch_all_is_the_last_handler_in_group_zero(bot):
 
 
 async def test_both_dispatcher_middlewares_claim_every_update(bot, user):
-    """The two middlewares were once registered in `initialize()` instead of
+    """The middlewares were once registered in `initialize()` instead of
     `_setup_handlers()`, which meant anything building the app from
     `_setup_handlers()` alone — this harness included — ran with NO dedup guard
     and could not see a double-tap regression at all.
@@ -1290,9 +1299,10 @@ async def test_both_dispatcher_middlewares_claim_every_update(bot, user):
         type_handlers = [
             handler for _group, handler in claimed if isinstance(handler, TypeHandler)
         ]
-        assert len(type_handlers) == 2, (
-            f"{update} is seen by {len(type_handlers)} middleware(s); both the "
-            "debug logger and the callback-dedup guard must see every update"
+        assert len(type_handlers) == 3, (
+            f"{update} is seen by {len(type_handlers)} middleware(s); the debug "
+            "logger, the callback-dedup guard and the quantity-screen window "
+            "must all see every update"
         )
 
 

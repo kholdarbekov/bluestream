@@ -795,6 +795,26 @@ async def arm_location_request(context: ContextTypes.DEFAULT_TYPE,
             logger.warning("Could not record the pin prompt for %s: %s", user_id, arm_error)
 
 
+def is_stamp_stale(armed_at_raw, minutes: int) -> bool:
+    """True when an arming stamp is missing/invalid or older than ``minutes``.
+
+    The ONE expression of "has this prompt expired?" for every marker the bot
+    arms without a conversation behind it — the pin prompt, "Report an issue",
+    the quantity screen's typing window. None of them has a cancel/timeout that
+    is guaranteed to fire, so the stamp is the only thing that ends them. A
+    naive stamp is read as UTC, which is what every arming site writes.
+    """
+    if not armed_at_raw:
+        return True
+    try:
+        armed_at = datetime.fromisoformat(armed_at_raw)
+    except (TypeError, ValueError):
+        return True
+    if armed_at.tzinfo is None:
+        armed_at = armed_at.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - armed_at) > timedelta(minutes=minutes)
+
+
 # Mirrors `handlers/support.py::_SUPPORT_STALE_MINUTES` — same 30-minute
 # window, same rationale: a marker with no time-based expiry outlives the
 # flow that armed it once event-based teardown is skipped (no conversation
@@ -806,15 +826,7 @@ def is_awaiting_location_stale(armed_at_raw) -> bool:
     """True when the `awaiting_location_at` stamp is missing/invalid or older
     than `AWAITING_LOCATION_STALE_MINUTES`. Shared so bot.py's routing and any
     test asserting staleness agree on one definition."""
-    if not armed_at_raw:
-        return True
-    try:
-        armed_at = datetime.fromisoformat(armed_at_raw)
-    except (TypeError, ValueError):
-        return True
-    if armed_at.tzinfo is None:
-        armed_at = armed_at.replace(tzinfo=timezone.utc)
-    return (datetime.now(timezone.utc) - armed_at) > timedelta(minutes=AWAITING_LOCATION_STALE_MINUTES)
+    return is_stamp_stale(armed_at_raw, AWAITING_LOCATION_STALE_MINUTES)
 
 
 async def validate_phone_number(phone: str) -> bool:

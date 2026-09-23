@@ -6,7 +6,7 @@ awaiting_input state; the next free-text message is posted to the admin Support
 Inbox prefixed with the order number, and the customer is acknowledged.
 """
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -16,7 +16,7 @@ from handlers.base import BaseHandler
 from i18n import i18n
 from keyboards import KeyboardBuilder
 from support_capture import capture_support_message
-from utils import get_auth_token
+from utils import get_auth_token, is_stamp_stale
 
 logger = logging.getLogger('handlers')
 
@@ -134,15 +134,7 @@ class SupportHandlers(BaseHandler):
     @staticmethod
     def _is_stale(armed_at_raw) -> bool:
         """True when the arming timestamp is missing/invalid or older than 30 min."""
-        if not armed_at_raw:
-            return True
-        try:
-            armed_at = datetime.fromisoformat(armed_at_raw)
-        except (TypeError, ValueError):
-            return True
-        if armed_at.tzinfo is None:
-            armed_at = armed_at.replace(tzinfo=timezone.utc)
-        return (datetime.now(timezone.utc) - armed_at) > timedelta(minutes=_SUPPORT_STALE_MINUTES)
+        return is_stamp_stale(armed_at_raw, _SUPPORT_STALE_MINUTES)
 
     async def _silent_capture(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str = None):
         """Persist unprefixed input for admin reply; no ack."""

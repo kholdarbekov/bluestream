@@ -634,6 +634,20 @@ class WaterBusinessBot:
         )
         logger.info("Callback dedup middleware installed!")
 
+        # Quantity-screen middleware: anything but a tap on the live cart
+        # quantity screen or a typed quantity — another button, an older
+        # bubble, a command, words, a photo — closes the window in which a
+        # TYPED number sets that screen's cart line. Behind the dedup guard (a
+        # dropped duplicate navigates nowhere) and ahead of every conversation
+        # and handler (so the window is shut before whatever the customer did
+        # arms its own prompt). Never stops dispatch.
+        # See handlers.quantity_screen.
+        from handlers.quantity_screen import leave_quantity_screen_middleware
+        self.application.add_handler(
+            TypeHandler(Update, leave_quantity_screen_middleware), group=-4
+        )
+        logger.info("Quantity-screen middleware installed!")
+
 
         # Command handlers
         self.application.add_handler(CommandHandler("menu", main_menu_handler))
@@ -1487,6 +1501,18 @@ class WaterBusinessBot:
             # The durable half is read FIRST, because the in-memory half does
             # not survive the deploy this branch exists to survive.
             user_state = await self.user_repository.get_user_state(user_id)
+
+            # A number typed at the cart quantity screen. Checked BEFORE every
+            # armed prompt on purpose: anything else the customer does closes
+            # the screen's typing window (handlers/quantity_screen.py), so a
+            # live window means the quantity screen is the NEWEST thing they
+            # touched, and a number typed under it is meant for it. Text that
+            # does not read as a quantity — including a 6-digit verification
+            # code, which never does — is declined untouched and falls through
+            # to the routing below.
+            # tests/telegram_bot/test_typed_quantity_journeys.py
+            if await product_handlers.handle_typed_quantity(update, context, text, user_state, language):
+                return
 
             # Awaiting the phone-verification code? `awaiting_otp` is the live
             # marker; `bot_state.awaiting_input == 'phone_otp'` is the same fact

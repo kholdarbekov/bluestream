@@ -15,7 +15,7 @@ from sqlalchemy.orm import joinedload
 from decimal import Decimal
 
 from business_app.models.user import User, UserAddress
-from business_app.models.order import Order, OrderItem
+from business_app.models.order import Order, OrderItem, OrderStatusHistory
 from business_app.models.delivery import Delivery, DeliveryPerson, DeliveryStatusHistory
 from business_app.models.staff import StaffActivityLog
 from business_app.services.cod_collect_ceiling import (
@@ -34,6 +34,7 @@ from business_app.utils.payment_projection import (
     reserved_prepayment_amount,
 )
 from business_app.utils.state_validators import (
+    ACTIVE_ORDER_STATUSES,
     assert_order_address_for_status,
     assert_order_creator_for_source,
     assert_unassigned_for_pool_status,
@@ -1197,6 +1198,19 @@ class StaffService:
         if not delivery:
             raise NotFoundError("Delivery not found", error_code="STAFF_DELIVERY_NOT_FOUND")
 
+        # The order and its delivery are not kept in lockstep once the delivery
+        # reaches a terminal status (FAILED) — an order can be cancelled (or
+        # delivered/returned some other way) independently, hours or months
+        # later, while the delivery still sits FAILED. Refuse to pool a
+        # delivery whose order already left the active lifecycle instead of
+        # forcing it back to CONFIRMED underneath that order.
+        if delivery.order is not None and delivery.order.status not in ACTIVE_ORDER_STATUSES:
+            raise ConflictError(
+                f"Order {delivery.order.order_number} is {delivery.order.status.value}; "
+                "only an active order's delivery can be returned to the pool.",
+                error_code="STAFF_ORDER_NOT_ACTIVE",
+            )
+
         now = datetime.now(timezone.utc)
         old_status = delivery.status
         old_driver_id = delivery.delivery_person_id
@@ -1215,8 +1229,7 @@ class StaffService:
         # whose order is CONFIRMED/PREPARING; a failed/out-for-delivery order
         # would keep the returned delivery hidden.
         if delivery.order and delivery.order.status not in (OrderStatus.CONFIRMED, OrderStatus.PREPARING):
-            delivery.order.status = OrderStatus.CONFIRMED
-            delivery.order.updated_at = now
+            StaffService._restore_order_to_pool_eligible(delivery.order, actor_id, notes=notes)
 
         history = DeliveryStatusHistory(
             delivery_id=delivery.id,
@@ -1261,6 +1274,50 @@ class StaffService:
         return delivery
 
     @staticmethod
+    def _restore_order_to_pool_eligible(order: Order, actor_id: int, *, notes: Optional[str]) -> None:
+        """Move ``order`` back to CONFIRMED so its returned delivery is pool-eligible.
+
+        Routes through the ``OrderService.update_order_status`` SSOT whenever
+        CONFIRMED is a transition-table-legal move from the order's current
+        status (e.g. PENDING -> CONFIRMED). OUT_FOR_DELIVERY -> CONFIRMED is
+        not part of that forward-only table — the same reason
+        ``AdminDeliveryService._apply_status_update`` writes RETURNED directly
+        for its own out-of-band admin transition — so that case still writes
+        the field directly, but always pairs it with an explicit
+        ``OrderStatusHistory`` row so the move is never invisible to the audit
+        trail the way the bug this replaces was.
+        """
+        from shared.status_transitions import is_valid_order_transition
+
+        old_status = order.status
+
+        if is_valid_order_transition(old_status, OrderStatus.CONFIRMED):
+            from business_app.services.order_service import OrderService
+
+            OrderService().update_order_status(
+                order.id,
+                OrderStatus.CONFIRMED,
+                actor_id,
+                notes=notes or "Returned to pool for re-dispatch",
+                commit=False,
+            )
+            return
+
+        now = datetime.now(timezone.utc)
+        order.status = OrderStatus.CONFIRMED
+        order.updated_at = now
+        db.session.add(
+            OrderStatusHistory(
+                order_id=order.id,
+                old_status=old_status,
+                new_status=OrderStatus.CONFIRMED,
+                changed_by=actor_id,
+                changed_at=now,
+                notes=notes or "Returned to pool for re-dispatch",
+            )
+        )
+
+    @staticmethod
     def redispatch_failed_delivery(
         delivery_id: int,
         actor_id: int,
@@ -1296,9 +1353,18 @@ class StaffService:
     @staticmethod
     def get_failed_deliveries(limit: int = 25) -> List[Delivery]:
         """List recent FAILED deliveries available for operator re-dispatch,
-        newest first."""
+        newest first.
+
+        Excludes deliveries whose order already left the active lifecycle
+        (cancelled / delivered / returned) independently of the delivery — a
+        FAILED delivery can outlive its order by months, and such a row must
+        never surface as a redispatch candidate (see return_delivery_to_pool)."""
         return (
-            Delivery.query.filter(Delivery.status == DeliveryStatus.FAILED)
+            Delivery.query.join(Order, Delivery.order_id == Order.id)
+            .filter(
+                Delivery.status == DeliveryStatus.FAILED,
+                Order.status.in_(ACTIVE_ORDER_STATUSES),
+            )
             .options(
                 joinedload(Delivery.order).joinedload(Order.order_items).joinedload(OrderItem.product),
                 joinedload(Delivery.order).joinedload(Order.delivery_address),

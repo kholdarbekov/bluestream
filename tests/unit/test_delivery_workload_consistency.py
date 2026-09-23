@@ -6,12 +6,12 @@ from decimal import Decimal
 import pytest
 
 from business_app.models.delivery import Delivery, DeliveryPerson
-from business_app.models.order import Order
+from business_app.models.order import Order, OrderStatusHistory
 from business_app.models.user import User
 from business_app.services.admin_delivery_service import AdminDeliveryService
 from business_app.services.staff_service import StaffService
 from shared.enums import DeliveryStatus, OrderStatus, PaymentMethod, UserRole, UserStatus, UserType
-from business_app.utils.exceptions import InvalidStateTransition, ValidationError
+from business_app.utils.exceptions import ConflictError, InvalidStateTransition, ValidationError
 from business_app.utils.password_security import hash_password
 from business_app.utils.state_validators import assert_unassigned_for_pool_status
 
@@ -312,6 +312,102 @@ def test_redispatch_rejects_non_failed_delivery(db, sample_user, delivery_driver
 
     db.session.refresh(delivery)
     assert delivery.status == DeliveryStatus.IN_TRANSIT  # unchanged
+
+
+def test_return_delivery_to_pool_rejects_order_cancelled_independently(
+    db, sample_user, delivery_driver, admin_user
+):
+    """A delivery can sit FAILED for months after its order is cancelled through
+    a completely separate flow — the two are not kept in lockstep once the
+    delivery reaches a terminal status. Returning such a delivery to the pool
+    must not resurrect the dead order. This is the exact mechanism behind the
+    prod incident where TG_000116_26 and TG_000280_26 reappeared as
+    'confirmed' months after being cancelled."""
+    order = _create_order(db, sample_user.id, "ORD-DEADORDER-1")
+    order.status = OrderStatus.CANCELLED
+    db.session.commit()
+    delivery = _create_delivery(
+        db, order.id, delivery_person_id=delivery_driver.id, status=DeliveryStatus.FAILED
+    )
+
+    with pytest.raises(ConflictError) as exc_info:
+        StaffService.return_delivery_to_pool(delivery.id, admin_user.id, reason="retry")
+    assert exc_info.value.error_code == "STAFF_ORDER_NOT_ACTIVE"
+
+    db.session.refresh(delivery)
+    db.session.refresh(order)
+    assert delivery.status == DeliveryStatus.FAILED  # unchanged
+    assert delivery.delivery_person_id == delivery_driver.id  # unchanged
+    assert order.status == OrderStatus.CANCELLED  # unchanged — never resurrected
+
+
+def test_redispatch_rejects_delivery_whose_order_was_cancelled_independently(
+    db, sample_user, delivery_driver, admin_user
+):
+    """Same guard via the redispatch_failed_delivery entry point (staff bot /
+    admin panel 'failed deliveries' list)."""
+    order = _create_order(db, sample_user.id, "ORD-DEADORDER-2")
+    order.status = OrderStatus.CANCELLED
+    db.session.commit()
+    delivery = _create_delivery(
+        db, order.id, delivery_person_id=delivery_driver.id, status=DeliveryStatus.FAILED
+    )
+
+    with pytest.raises(ConflictError) as exc_info:
+        StaffService.redispatch_failed_delivery(delivery.id, admin_user.id)
+    assert exc_info.value.error_code == "STAFF_ORDER_NOT_ACTIVE"
+
+    db.session.refresh(delivery)
+    assert delivery.status == DeliveryStatus.FAILED
+    assert delivery.delivery_person_id == delivery_driver.id
+
+
+def test_get_failed_deliveries_excludes_orders_no_longer_active(db, sample_user, delivery_driver):
+    """A FAILED delivery whose order was independently cancelled (or delivered
+    / returned) must never surface as a redispatch candidate — see the prod
+    incident this guards against."""
+    dead_order = _create_order(db, sample_user.id, "ORD-FAILEDLIST-DEAD")
+    dead_order.status = OrderStatus.CANCELLED
+    db.session.commit()
+    dead = _create_delivery(
+        db, dead_order.id, delivery_person_id=delivery_driver.id, status=DeliveryStatus.FAILED
+    )
+    live_order = _create_order(db, sample_user.id, "ORD-FAILEDLIST-LIVE")
+    live_order.status = OrderStatus.OUT_FOR_DELIVERY
+    db.session.commit()
+    live = _create_delivery(
+        db, live_order.id, delivery_person_id=delivery_driver.id, status=DeliveryStatus.FAILED
+    )
+
+    ids = {d.id for d in StaffService.get_failed_deliveries()}
+    assert live.id in ids
+    assert dead.id not in ids
+
+
+def test_redispatch_failed_delivery_logs_order_status_history(db, sample_user, delivery_driver, admin_user):
+    """The order-status restore (OUT_FOR_DELIVERY -> CONFIRMED) must leave an
+    audit trail via the OrderStatusHistory SSOT. Before the fix this went
+    through a raw `order.status =` write with no history row at all — exactly
+    why the prod resurrection of TG_000116_26 / TG_000280_26 had no recorded
+    transition and looked inexplicable."""
+    order = _create_order(db, sample_user.id, "ORD-REDISPATCH-HISTORY")
+    order.status = OrderStatus.OUT_FOR_DELIVERY
+    db.session.commit()
+    delivery = _create_delivery(
+        db, order.id, delivery_person_id=delivery_driver.id, status=DeliveryStatus.FAILED
+    )
+
+    StaffService.redispatch_failed_delivery(delivery.id, admin_user.id, reason="retry after failure")
+
+    db.session.refresh(order)
+    assert order.status == OrderStatus.CONFIRMED
+    history = (
+        OrderStatusHistory.query.filter_by(order_id=order.id).order_by(OrderStatusHistory.id.desc()).first()
+    )
+    assert history is not None
+    assert history.old_status == OrderStatus.OUT_FOR_DELIVERY
+    assert history.new_status == OrderStatus.CONFIRMED
+    assert history.changed_by == admin_user.id
 
 
 def test_get_failed_deliveries_lists_only_failed(db, sample_user, delivery_driver):

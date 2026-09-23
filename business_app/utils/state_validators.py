@@ -62,6 +62,24 @@ DELIVERY_POOL_UNASSIGNED_STATES: FrozenSet[DeliveryStatus] = frozenset(
 )
 
 
+# Orders considered "alive" — between placement and the order leaving the
+# board (delivered / cancelled / returned). A delivery can sit FAILED for
+# months after its order dies through a completely separate flow (the two are
+# not kept in lockstep once the delivery reaches a terminal status), so any
+# code reviving a delivery from FAILED must re-check the ORDER's current
+# status against this set rather than assume it is still active. See the
+# failed-delivery re-dispatch flow (StaffService.redispatch_failed_delivery /
+# return_delivery_to_pool).
+ACTIVE_ORDER_STATUSES: FrozenSet[OrderStatus] = frozenset(
+    {
+        OrderStatus.PENDING,
+        OrderStatus.CONFIRMED,
+        OrderStatus.PREPARING,
+        OrderStatus.OUT_FOR_DELIVERY,
+    }
+)
+
+
 def _coerce_order_status(value) -> Optional[OrderStatus]:
     if value is None or isinstance(value, OrderStatus):
         return value

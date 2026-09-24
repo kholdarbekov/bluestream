@@ -996,6 +996,7 @@ def test_resolve_delivery_status_channels_honors_explicit_delivery_telegram_disa
     [
         NotificationType.DELIVERY_UPDATE,
         NotificationType.DELIVERY_REMINDER,
+        NotificationType.DELIVERY_RESCHEDULED,
         NotificationType.ORDER_STATUS_UPDATE,
         NotificationType.ORDER_UPDATE,
     ],

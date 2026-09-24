@@ -560,6 +560,7 @@ celery.conf.task_annotations = {
     # Transactional notifications — higher throughput
     "business_app.tasks.notification_tasks.send_order_notification_task": {"rate_limit": "60/m"},
     "business_app.tasks.notification_tasks.send_delivery_update_task": {"rate_limit": "60/m"},
+    "business_app.tasks.notification_tasks.send_delivery_rescheduled_notification_task": {"rate_limit": "60/m"},
     "business_app.tasks.notification_tasks.send_payment_confirmation_task": {"rate_limit": "60/m"},
     # Payment processing
     "business_app.tasks.payment_tasks.process_payment_webhook": {"rate_limit": "60/m"},

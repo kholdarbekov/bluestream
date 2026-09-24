@@ -221,9 +221,16 @@ class TestAStopThatEndsAtTheDoorLeavesTheSequence:
 
 
 class TestRawOwnershipWritesAlsoClearTheSequence:
-    """Two paths write `delivery_person_id` directly instead of going through
-    an assignment SSOT. Bookkeeping placed only in the SSOTs cannot reach them,
-    so each is its own way of stranding a stop on a route nobody drives.
+    """`AdminDeliveryService._apply_status_update` writes `delivery_person_id`
+    directly instead of going through an assignment SSOT. Bookkeeping placed
+    only in the SSOTs cannot reach it, so it is its own way of stranding a stop
+    on a route nobody drives.
+
+    The second raw writer, `reschedule_failed_delivery_task`, was deleted by
+    R19 of docs/superpowers/specs/2026-09-23-admin-order-reschedule-design.md.
+    A failed delivery is now re-dated through `OrderScheduleService.reschedule`,
+    whose route cleanup is pinned in
+    tests/integration/test_redispatch_reschedules_to_today.py.
     """
 
     def test_marking_a_delivery_returned_from_the_admin_panel_clears_its_slot(
@@ -244,30 +251,6 @@ class TestRawOwnershipWritesAlsoClearTheSequence:
         db.session.commit()
 
         AdminDeliveryService.update_delivery(returned.id, {"status": "returned"}, actor_id=admin_user.id)
-
-        db.session.refresh(route)
-        assert route.optimized_order == [kept.id]
-
-    def test_auto_rescheduling_a_failed_delivery_clears_its_slot(
-        self, db, delivery_driver, sample_user, sample_order,
-    ):
-        """`reschedule_failed_delivery_task` clears the driver and re-enqueues
-        auto-assign. Left on the old route, the delivery is drawn on two
-        drivers' routes as soon as the next one picks it up.
-        """
-        from business_app.tasks.delivery_tasks import reschedule_failed_delivery_task
-
-        kept = _delivery(db, sample_user, sample_order, order_number="ORD-RAW-2A",
-                         driver_id=delivery_driver.id)
-        failed = _delivery(db, sample_user, sample_order, order_number="ORD-RAW-2B",
-                           driver_id=delivery_driver.id, status=DeliveryStatus.FAILED)
-        # The task reads `estimated_delivery_time` to rebuild tomorrow's slot.
-        failed.estimated_delivery_time = datetime.now(timezone.utc)
-        route = _route(db, delivery_driver.id, [kept.id, failed.id])
-        db.session.commit()
-
-        with patch("business_app.tasks.delivery_tasks.auto_assign_delivery_task"):
-            reschedule_failed_delivery_task(failed.id)
 
         db.session.refresh(route)
         assert route.optimized_order == [kept.id]

@@ -307,12 +307,15 @@ def evaluate_pool_insertion_suggestions_task(self, delivery_id: int):
     driver gets the targeted offer. It then ALWAYS enqueues the new-order
     broadcast, excluding the diverted driver — so nobody ever receives two
     Accept buttons for the same order (§10 duplicate-message bug). Diversion
-    failures degrade to a full broadcast, never to silence.
+    failures degrade to a full broadcast, never to silence. A delivery that
+    is no longer claimable when this RUNS (taken, or moved to a later day
+    since it was queued) gets neither.
     """
     try:
         from flask import current_app
         from business_app.models.delivery import DeliveryPerson
         from business_app.services.route_optimization_service import RouteOptimizationService
+        from business_app.services.staff_service import StaffService
         from business_app.utils.bot_webhook import notify_pool_insertion_suggestion
         from business_app.tasks.staff_tasks import notify_staff_new_order
 
@@ -321,6 +324,12 @@ def evaluate_pool_insertion_suggestions_task(self, delivery_id: int):
             return {"suggested": False, "reason": "delivery_not_found"}
         if delivery.delivery_person_id is not None:
             return {"suggested": False, "reason": "already_assigned"}
+        # Queued post-commit as the delivery landed in the pool, and an admin
+        # can move the order to a later day before this runs. A RESCHEDULED row
+        # is driverless but not claimable (R3). This task is the single
+        # broadcast fan-out, so stopping here stops the offer AND the broadcast.
+        if not StaffService.is_delivery_claimable(delivery):
+            return {"suggested": False, "reason": "not_claimable"}
 
         best: Dict[str, Any] = {}
         try:
@@ -713,7 +722,10 @@ def handle_delivery_exception_task(self, delivery_id: int, exception_type: str, 
             delivery.failed_delivery_reason = attempt_reason
             delivery.updated_at = datetime.now(timezone.utc)
 
-            # Notify customer and schedule retry
+            # Notify the customer. There is no automatic re-date: re-dating has
+            # one path, OrderScheduleService.reschedule, reached from the admin
+            # Reschedule and the Re-dispatch buttons (R19 of
+            # docs/superpowers/specs/2026-09-23-admin-order-reschedule-design.md).
             notification_service.send_notification(
                 delivery.order.user_id,
                 "delivery_failed_attempt",
@@ -723,10 +735,6 @@ def handle_delivery_exception_task(self, delivery_id: int, exception_type: str, 
                     "retry_info": "We will contact you to reschedule delivery",
                 },
             )
-
-            # Auto-reschedule if attempts < 3
-            if delivery.delivery_attempts < 3:
-                reschedule_failed_delivery_task.delay(delivery_id)
 
         elif exception_type == "vehicle_breakdown":
             # Reassign to another driver
@@ -749,66 +757,6 @@ def handle_delivery_exception_task(self, delivery_id: int, exception_type: str, 
 
     except Exception as exc:
         logger.error(f"Failed to handle delivery exception: {exc}")
-        raise self.retry(exc=exc)
-
-
-@shared_task(bind=True, max_retries=3, default_retry_delay=600, time_limit=600, soft_time_limit=540)
-def reschedule_failed_delivery_task(self, delivery_id: int):
-    """Reschedule a failed delivery attempt"""
-    try:
-        logger.info(f"Rescheduling failed delivery {delivery_id}")
-
-        delivery = Delivery.query.get(delivery_id)
-        if not delivery:
-            logger.error(f"Delivery {delivery_id} not found")
-            return {"success": False, "error": "Delivery not found"}
-
-        # Reset delivery status and schedule for next available slot
-        delivery.status = DeliveryStatus.SCHEDULED
-
-        # Schedule for next day, same time slot
-        next_day = delivery.scheduled_date + timedelta(days=1)
-        delivery.scheduled_date = next_day
-        delivery.estimated_delivery_time = next_day.replace(
-            hour=delivery.estimated_delivery_time.hour, minute=delivery.estimated_delivery_time.minute
-        )
-
-        # Clear driver assignment for reassignment — and with it the stop's
-        # place in that driver's planned sequence. This path writes the
-        # ownership column directly rather than through an assignment SSOT, so
-        # without the second line the delivery stays listed on the old route
-        # while auto-assign hands it to somebody else, and it is drawn on two
-        # drivers' routes at once.
-        previous_driver_id = delivery.delivery_person_id
-        delivery.delivery_person_id = None
-        delivery.updated_at = datetime.now(timezone.utc)
-        if previous_driver_id:
-            from business_app.services.route_optimization_service import RouteOptimizationService
-
-            RouteOptimizationService.drop_from_route(previous_driver_id, delivery.id)
-
-        db.session.commit()
-
-        # Notify customer about rescheduling
-        notification_service = NotificationService()
-        notification_service.send_notification(
-            delivery.order.user_id,
-            "delivery_rescheduled",
-            template_data={
-                "order_number": delivery.order.order_number,
-                "new_date": next_day.strftime("%Y-%m-%d"),
-                "tracking_number": delivery.tracking_number,
-            },
-        )
-
-        # Auto-assign to new driver
-        auto_assign_delivery_task.delay(delivery_id)
-
-        logger.info(f"Delivery {delivery_id} rescheduled to {next_day}")
-        return {"success": True, "delivery_id": delivery_id, "new_date": next_day.isoformat()}
-
-    except Exception as exc:
-        logger.error(f"Failed to reschedule delivery {delivery_id}: {exc}")
         raise self.retry(exc=exc)
 
 

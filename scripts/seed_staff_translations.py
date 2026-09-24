@@ -94,6 +94,14 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Yetkazish hovuzga qayta yuborildi. Endi haydovchi uni qayta olishi mumkin.",
         "ru": "Доставка возвращена в пул. Теперь водитель может взять её снова.",
     },
+    # A re-dispatch before today's first shift is held until that shift starts
+    # (R25 of docs/superpowers/specs/2026-09-23-admin-order-reschedule-design.md).
+    # {time} is the local HH:MM.
+    "staff.redispatch.success_held": {
+        "en": "Re-dispatched. Drivers will see it when today's shift opens at {time}.",
+        "uz": "Qayta yuborildi. Haydovchilar uni bugungi smena soat {time} da boshlanganda ko'radi.",
+        "ru": "Доставка переотправлена. Водители увидят её, когда в {time} начнётся сегодняшняя смена.",
+    },
     "staff.menu.new_orders_view": {
         "en": "New Orders (View)",
         "uz": "Yangi buyurtmalar (Korish)",
@@ -448,6 +456,14 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "➖ {number}-buyurtma dispetcher tomonidan marshrutingizdan olib tashlandi. U yana umumiy ro'yxatga qaytdi.",
         "ru": "➖ Заказ {number} снят с вашего маршрута диспетчером и возвращён в общий пул.",
         "en": "➖ Order {number} was removed from your route by dispatch and returned to the pool.",
+    },
+    # The unassign notice's sibling for an admin RESCHEDULE (spec §4.2, R16): the order moved
+    # to another day rather than back to today's pool, so the copy above would be false.
+    # `{date}` arrives already formatted by `format_local_date`, the same in every language.
+    "staff.notification.order_rescheduled": {
+        "uz": "📅 {number}-buyurtma dispetcher tomonidan {date} sanasiga ko'chirildi va marshrutingizdan olib tashlandi.",
+        "ru": "📅 Заказ {number} перенесён диспетчером на {date} и снят с вашего маршрута.",
+        "en": "📅 Order {number} was rescheduled to {date} by dispatch and removed from your route.",
     },
     "staff.delivery.next_stop": {
         "en": "Next stop",
@@ -1184,6 +1200,22 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Bu buyurtma allaqachon boshqa kuryer tomonidan olingan.",
         "ru": "Этот заказ уже принят другим курьером.",
     },
+    # A claim on a delivery that stopped being claimable before the tap landed
+    # (STAFF_DELIVERY_NOT_CLAIMABLE): rescheduled to a later day, failed or
+    # cancelled. Not "already taken" -- nobody took it.
+    "staff.error.api.delivery_not_claimable": {
+        "en": "This order is no longer available.",
+        "uz": "Bu buyurtma endi mavjud emas.",
+        "ru": "Этот заказ больше недоступен.",
+    },
+    # R20 (admin-order-reschedule spec): the delivery on the driver's card was
+    # rescheduled, reassigned or returned to the pool after the card was drawn.
+    # It is shown on the stale-card screen, so it states the fact, not an error.
+    "staff.error.api.delivery_not_owned": {
+        "en": "This order is no longer assigned to you.",
+        "uz": "Bu buyurtma endi sizga biriktirilmagan.",
+        "ru": "Этот заказ больше не назначен вам.",
+    },
     "staff.error.api.driver_cod_blocked": {
         "en": "You cannot accept new cash-on-delivery orders until your pending cash reconciliation is resolved. Please complete Cash Reconciliation first.",
         "uz": "Naqd pul yarashtiruvi hal qilinmaguncha siz yangi naqd tolovli buyurtmalarni qabul qila olmaysiz. Iltimos, avval Naqd pul yarashtiruvini bajaring.",
@@ -1919,6 +1951,7 @@ DELIVERY_STATUS_TRANSLATIONS = {
     "failed": {"en": "Failed", "uz": "Muvaffaqiyatsiz", "ru": "Неудачно"},
     "cancelled": {"en": "Cancelled", "uz": "Bekor qilingan", "ru": "Отменен"},
     "returned": {"en": "Returned", "uz": "Qaytarilgan", "ru": "Возвращен"},
+    "rescheduled": {"en": "Rescheduled", "uz": "Ko'chirildi", "ru": "Перенесён"},
 }
 
 # Driver cash-reconciliation session status — `shared.enums.DriverCashSessionStatus`.

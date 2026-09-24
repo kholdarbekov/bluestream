@@ -179,6 +179,12 @@ api.interceptors.response.use(
       // dialog) must not also self-announce as a toast error. Scoped to these
       // two error_codes only — do not widen to all 409s/422s or all error_codes.
       // The promise still rejects below so each mutation's onError still runs.
+    } else if (error.config?.handledErrorCodes?.includes(error.response?.data?.data?.error_code)) {
+      // The request named this code as one its caller explains itself, in the
+      // admin's language, so a toast here would show the same refusal twice.
+      // Per request and per code: nothing is silenced for a request that names
+      // no codes, and any other failure of this request still toasts below.
+      // The promise still rejects.
     } else {
       toast.error(message);
     }

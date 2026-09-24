@@ -137,6 +137,10 @@ def get_order_pool():
                 "order_number": order.order_number if order else None,
                 "status": order_status,
                 "delivery_status": delivery_status,
+                # The bot's "View details" card hides Accept / Mark-preparing on
+                # False. Published here, never re-derived from `delivery_status`
+                # in the bot: a RESCHEDULED row is driverless yet unclaimable.
+                "is_claimable": StaffService.is_delivery_claimable(delivery),
                 "customer_name": (
                     f"{order.user.first_name} {order.user.last_name or ''}".strip() if order and order.user else ""
                 ),
@@ -224,7 +228,12 @@ def accept_order(delivery_id):
 @jwt_required()
 @require_staff_roles("delivery_driver")
 def update_delivery_status(delivery_id):
-    """Update delivery status with validation"""
+    """Update delivery status with validation.
+
+    Only the delivery's current driver may move it. A card drawn before a
+    reschedule, reassign or return to the pool is answered with 409
+    STAFF_DELIVERY_NOT_OWNED, and nothing is written (R20).
+    """
     current_user_id = get_jwt_identity()
     data = request.get_json()
 
@@ -232,7 +241,13 @@ def update_delivery_status(delivery_id):
         raise ValidationError("status field is required", error_code="STAFF_STATUS_REQUIRED")
 
     metadata = data.get("metadata", {})
-    delivery = StaffService.update_delivery_status(delivery_id, data["status"], current_user_id, metadata)
+    delivery = StaffService.update_delivery_status(
+        delivery_id,
+        data["status"],
+        current_user_id,
+        metadata,
+        acting_driver_id=int(current_user_id),
+    )
 
     return success_response(
         {
@@ -520,16 +535,20 @@ def get_failed_deliveries():
 @jwt_required()
 @require_staff_roles("operator")
 def redispatch_failed_delivery(delivery_id):
-    """Operator: re-dispatch a FAILED delivery back to the unassigned pool."""
+    """Operator: re-dispatch a FAILED delivery, i.e. reschedule it to today (R18)."""
     actor_id = int(get_jwt_identity())
     payload = request.get_json(silent=True) or {}
     reason = (payload.get("reason") or "").strip() or None
     delivery = StaffService.redispatch_failed_delivery(delivery_id, actor_id, reason=reason)
+    # Set only when it landed `rescheduled` before today's first shift, so the bot
+    # can say when drivers will see it (R25).
+    release_at = StaffService.redispatch_release_at(delivery)
     return success_response(
         {
             "delivery_id": delivery.id,
             "status": delivery.status.value if hasattr(delivery.status, "value") else delivery.status,
             "message": "Delivery re-dispatched to pool",
+            "release_at": release_at.isoformat() if release_at else None,
         }
     )
 

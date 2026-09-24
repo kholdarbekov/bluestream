@@ -130,6 +130,7 @@ DELIVERY_KEYS = (
     "staff.error.api.account_deactivated",
     "staff.error.api.conflict",
     "staff.error.api.service_unavailable",
+    "staff.error.api.delivery_not_claimable",
     "staff.delivery.pool_empty",
     "staff.delivery.pool_title",
     "staff.delivery.pool_count",
@@ -672,6 +673,73 @@ async def test_claiming_an_order_another_driver_already_took_refuses_and_disarms
         "the refusal screen still offers Confirm — a stale claim button on a "
         "screen that just said 'already taken' is an invitation to hammer it"
     )
+    assert len(backend_calls(bot, "POST", accept_endpoint(501))) == 1
+
+
+@pytest.mark.parametrize(
+    "moved_to_another_day, expected_buttons",
+    [
+        (False, ["staff_accept_order_501", "staff_mark_preparing_9501", "staff_new_orders"]),
+        (True, ["staff_new_orders"]),
+    ],
+    ids=["still-claimable", "moved-to-another-day"],
+)
+async def test_order_details_offer_accept_only_while_the_backend_says_the_order_is_claimable(
+    bot, moved_to_another_day, expected_buttons
+):
+    """The pool card was drawn while the order was up for grabs, and the driver opens
+    its details a few minutes later.
+
+    If dispatch moved the order to a later day in between, the delivery is driverless
+    but NOT claimable (spec R3), and the backend says so in `is_claimable`. Accept
+    there only earns a refusal, and Mark-preparing would start preparing an order for
+    a day that has not come. The bot reads the flag and never re-derives it from
+    `delivery_status`.
+    """
+    driver, labels = await sign_in(bot)
+    bot.desk.pool = [
+        pool_row(501, "BS-1001", status="confirmed", delivery_status="scheduled", is_claimable=True)
+    ]
+    bot.desk.serve(501)
+    await bot.send(driver.text(menu_label(labels, "staff.menu.new_orders")))
+
+    if moved_to_another_day:
+        bot.desk.pool[0].update(delivery_status="rescheduled", is_claimable=False)
+
+    bot.telegram.reset()
+    await bot.send(driver.tap("staff_view_order_501"))
+
+    detail = bot.telegram.last_shown()
+    assert "#BS-1001" in detail.text
+    assert detail.callback_data() == expected_buttons
+    assert backend_calls(bot, "GET", POOL)[-1].params == {
+        "delivery_id": 501,
+        "include_assigned": True,
+        "page": 1,
+        "per_page": 1,
+    }
+    assert not backend_calls(bot, "POST", accept_endpoint(501))
+
+
+async def test_accept_on_a_broadcast_for_an_order_moved_to_another_day_says_it_is_gone(bot):
+    """The new-order broadcast is still in the driver's chat with its Accept button
+    (`staff_confirm_accept_<id>`) when dispatch moves the order to a later day. The
+    backend refuses the claim with STAFF_DELIVERY_NOT_CLAIMABLE (a 400). The driver
+    must read that the order is no longer available, and the stale Confirm must go.
+    """
+    driver, _labels = await sign_in(bot)
+    bot.desk.serve(501)
+    bot.desk.accept_outcomes[501] = staff_backend_failure(
+        "This delivery can no longer be assigned (status: rescheduled)",
+        status_code=400,
+        error_code="STAFF_DELIVERY_NOT_CLAIMABLE",
+    )
+
+    await bot.send(driver.tap("staff_confirm_accept_501"))
+
+    refusal = bot.telegram.last_shown()
+    assert refusal.text == f"❌ {copy_for('staff.error.api.delivery_not_claimable')}"
+    assert refusal.callback_data() == ["staff_new_orders"]
     assert len(backend_calls(bot, "POST", accept_endpoint(501))) == 1
 
 

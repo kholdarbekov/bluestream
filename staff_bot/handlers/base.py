@@ -14,6 +14,7 @@ from telegram.ext import ContextTypes
 from staff_bot.i18n import i18n
 from staff_bot.database import db_manager, StaffUserRepository
 from staff_bot.keyboards.common import CommonKeyboards
+from staff_bot.utils import flow_state
 # Module-level so this module carries the same `api_client` seam every
 # handler module does — the guard below reads the backend, and a test that
 # swaps a handler module's client has to be able to swap this one too.
@@ -47,6 +48,17 @@ class BaseHandler:
         'STAFF_DELIVERY_PERSON_EXISTS': 'staff.error.api.conflict',
         'STAFF_EMPLOYEE_ID_EXISTS': 'staff.error.api.conflict',
         'STAFF_DELIVERY_ALREADY_TAKEN': 'staff.error.api.already_taken',
+        # A claim (pool card, or a broadcast's Accept) on a delivery that stopped
+        # being claimable before the tap landed: moved to a later day, failed or
+        # cancelled (`assign_driver`'s claimable guard, a 400). Nobody took it,
+        # so `already_taken` would be false, and the generic 400 copy ("check
+        # the entered data") is addressed to a driver who typed nothing.
+        'STAFF_DELIVERY_NOT_CLAIMABLE': 'staff.error.api.delivery_not_claimable',
+        # R20: the delivery a driver's card acts on was rescheduled, reassigned
+        # or returned to the pool after the card was drawn. The three
+        # delivery-status call sites render it as a stale card, not an alert
+        # (`_handle_api_response_error`).
+        'STAFF_DELIVERY_NOT_OWNED': 'staff.error.api.delivery_not_owned',
         # The place-scope lock ladder timed out (Postgres 55P03) — an admin is
         # regrouping this address right now. Transient and RETRYABLE, so it gets
         # its own "try again in a moment" copy instead of the generic conflict
@@ -78,6 +90,16 @@ class BaseHandler:
         'STAFF_INVALID_STATUS_TRANSITION': 'staff.error.api.invalid_input',
         'STAFF_INVALID_FAIL_REASON': 'staff.error.api.invalid_input',
         'STAFF_ORDER_STATUS_INVALID_FOR_PREPARING': 'staff.error.api.invalid_input',
+        # Re-dispatch is a reschedule to today (R18, admin-order-reschedule spec),
+        # so its refusals are the reschedule's 400s. Every one an operator can meet
+        # means the row changed under their card: the order was cancelled or
+        # delivered, a colleague re-dispatched first, or the contract ran out. The
+        # 400 fallback would say "check the entered data" to someone who typed
+        # nothing; this is the sentence the old 409 STAFF_ORDER_NOT_ACTIVE produced.
+        'ORDER_NOT_RESCHEDULABLE': 'staff.error.api.conflict',
+        'DELIVERY_NOT_RESCHEDULABLE': 'staff.error.api.conflict',
+        'STAFF_DELIVERY_NOT_REDISPATCHABLE': 'staff.error.api.conflict',
+        'ORDER_RESCHEDULE_PAST_CONTRACT_END': 'staff.error.api.conflict',
         'STAFF_PHONE_FIRST_NAME_REQUIRED': 'staff.error.api.validation',
         'STAFF_ORDER_ITEMS_REQUIRED': 'staff.error.api.validation',
         'BOTTLE_SESSION_REQUIRED': 'staff.error.api.bottle_session_required',
@@ -473,13 +495,16 @@ class BaseHandler:
             await update.message.reply_text(text, parse_mode='HTML')
         return None
 
-    async def _refuse_stale_card(self, update: Update, language: str):
+    async def _refuse_stale_card(self, update: Update, language: str, *, text: Optional[str] = None):
         """The tapped delivery is gone from the driver's active list.
 
         Acting on the snapshot that happens to be loaded is exactly the bug this
         guard exists to stop, so say so and send them back to the list.
+        ``text`` replaces the sentence when the backend said WHY (the
+        ``STAFF_DELIVERY_NOT_OWNED`` refusal in ``_handle_api_response_error``).
+        The screen and the way back stay the same.
         """
-        text = i18n.get('staff.delivery.not_found', language)
+        text = text or i18n.get('staff.delivery.not_found', language)
         keyboard = CommonKeyboards.back_button(language, "staff_active_deliveries")
         if update.callback_query:
             await update.callback_query.edit_message_text(
@@ -548,14 +573,48 @@ class BaseHandler:
         error_msg = f"❌ {self._resolve_api_error_message(language, error, status_code, error_code)}"
         await self._notify_user(update, error_msg, show_alert=True)
 
-    async def _handle_api_response_error(self, update: Update, response, language: str):
-        """Handle API response object error."""
+    async def _handle_api_response_error(
+        self,
+        update: Update,
+        response,
+        language: str,
+        context: Optional[ContextTypes.DEFAULT_TYPE] = None,
+    ):
+        """Handle API response object error.
+
+        ``context`` is passed by the three ``update_delivery_status`` call sites
+        in ``StatusUpdateHandler``, the only screens that can meet
+        ``STAFF_DELIVERY_NOT_OWNED``. That refusal means a STALE CARD, not bad
+        input. Dispatch rescheduled, reassigned or pooled the delivery after the
+        driver opened it, and the backend wrote nothing. An alert alone would
+        leave ``current_delivery`` naming a stop the driver no longer holds. It
+        would also leave the at-door cash flow armed, so the next amount they
+        typed would be submitted again.
+
+        So the handler forgets the snapshot and leaves the flow through THE exit
+        every other screen uses (``flow_state.clear_pending_flows``, which also
+        drops the Redis mirror and drains deferred pool offers). It then answers
+        the way ``_refuse_stale_card`` does: one sentence and the way back to
+        the active list. ``current_delivery`` is popped by hand because it is
+        session state that ``clear_pending_flows`` deliberately keeps. Here the
+        snapshot itself is what went stale. Every other caller keeps the alert.
+        """
+        error_code = getattr(response, 'error_code', None)
+        if context is not None and error_code == 'STAFF_DELIVERY_NOT_OWNED':
+            context.user_data.pop('current_delivery', None)
+            await flow_state.clear_pending_flows(context, update)
+            await self._refuse_stale_card(
+                update,
+                language,
+                text=self._resolve_api_error_message(language, error_code=error_code),
+            )
+            return
         await self._handle_api_error(
             update,
             getattr(response, 'error', None),
             language,
             status_code=getattr(response, 'status_code', None),
-            error_code=getattr(response, 'error_code', None),
+            error_code=error_code,
         )
 
     async def _handle_error(self, update: Update, context: ContextTypes.DEFAULT_TYPE = None):

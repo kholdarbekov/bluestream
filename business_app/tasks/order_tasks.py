@@ -17,7 +17,7 @@ from business_app.models.product import Product
 from business_app.services.order_service import OrderService
 from business_app.services.notification_service import NotificationService
 from business_app.utils.constants import NotificationChannel
-from shared.enums import OrderStatus, PaymentStatus, UserRole, UserStatus
+from shared.enums import DeliveryStatus, OrderStatus, PaymentStatus, UserRole, UserStatus
 from business_app.utils.helpers import get_current_language
 from business_app import db
 
@@ -539,6 +539,9 @@ def release_due_scheduled_orders():
 
     A future-dated order has NO delivery row, which is exactly what makes it
     invisible to every driver-facing surface. This sweep is what ends that.
+    A row held in `rescheduled` (released once, then moved to a later day) is
+    the other shape of "not yet due", and is picked up the same way: the gate
+    flips it back to `scheduled` and offers it again.
 
     Query-driven rather than a per-order `apply_async(eta=...)`: an ETA is lost
     if the broker or worker restarts, whereas a sweep that matches
@@ -563,7 +566,7 @@ def release_due_scheduled_orders():
     candidates = (
         Order.query.outerjoin(Delivery, Delivery.order_id == Order.id)
         .filter(
-            Delivery.id.is_(None),
+            or_(Delivery.id.is_(None), Delivery.status == DeliveryStatus.RESCHEDULED),
             Order.delivery_date.isnot(None),
             Order.delivery_date <= local_today,
             Order.status.in_(RELEASABLE_ORDER_STATUSES),

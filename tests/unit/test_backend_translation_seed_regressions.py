@@ -100,3 +100,76 @@ def test_seed_script_includes_the_sales_nav_group_keys():
 
     assert "'ui.nav.sales': {" in text
     assert "'ui.nav.visits': {" in text
+
+
+def test_every_delivery_status_has_an_admin_ui_label():
+    """The Delivery page renders `ui.delivery.status_<value>` for every status: tag,
+    filter option and update dropdown. An unseeded row shows the English fallback to a
+    uz/ru admin, which is what `rescheduled` would have done."""
+    from scripts.seed_backend_translations import BACKEND_TRANSLATIONS
+    from shared.enums import DeliveryStatus
+
+    missing = [
+        status.value for status in DeliveryStatus if f"ui.delivery.status_{status.value}" not in BACKEND_TRANSLATIONS
+    ]
+    assert missing == []
+    assert BACKEND_TRANSLATIONS["ui.delivery.status_rescheduled"] == {
+        "en": "Rescheduled",
+        "uz": "Ko'chirildi",
+        "ru": "Перенесено",
+    }
+
+
+def _assert_seeded_as_the_delivery_page_writes_it(expected):
+    """Each key is seeded trilingually, rendered by `Delivery.js`, and falls back there to
+    the seeded English. Two different English sentences would be two copies of one
+    message, and an unseeded key shows that English to a uz/ru admin."""
+    from scripts.seed_backend_translations import BACKEND_TRANSLATIONS
+
+    page = (ROOT / "admin_ui" / "src" / "pages" / "Delivery.js").read_text(encoding="utf-8")
+    for key, row in expected.items():
+        assert BACKEND_TRANSLATIONS[key] == row, key
+        assert f"'{key}'" in page, f"{key} is not rendered by admin_ui/src/pages/Delivery.js"
+        assert row["en"] in page, f"{key}: Delivery.js falls back to different English"
+
+
+def test_the_delivery_page_redispatch_copy_is_seeded_as_the_page_writes_it():
+    """R25 and the two re-dispatch refusals, as the Delivery page renders them."""
+    from scripts.seed_backend_translations import BACKEND_TRANSLATIONS
+
+    expected = {
+        "ui.delivery.redispatch_held": {
+            "en": "Re-dispatched. Drivers will see it when today's shift opens at {{time}}.",
+            "uz": "Qayta yuborildi. Haydovchilar uni bugungi smena soat {{time}} da boshlanganda ko'radi.",
+            "ru": "Переотправлено. Водители увидят доставку, когда сегодня в {{time}} начнётся смена.",
+        },
+        "ui.delivery.redispatch_error.ORDER_NOT_RESCHEDULABLE": {
+            "en": "This order is delivered, cancelled or returned, so its delivery can no longer be re-dispatched.",
+            "uz": "Bu buyurtma yetkazilgan, bekor qilingan yoki qaytarilgan, shuning uchun uni endi qayta yuborib bo'lmaydi.",
+            "ru": "Этот заказ уже доставлен, отменён или возвращён, поэтому доставку больше нельзя переотправить.",
+        },
+        "ui.delivery.redispatch_error.STAFF_DELIVERY_NOT_REDISPATCHABLE": {
+            "en": "This delivery is no longer failed, so there is nothing to re-dispatch. Refresh the list.",
+            "uz": "Bu yetkazib berish endi muvaffaqiyatsiz holatda emas, qayta yuboradigan narsa yo'q. Ro'yxatni yangilang.",
+            "ru": "Эта доставка больше не в статусе «Сбой», переотправлять нечего. Обновите список.",
+        },
+    }
+
+    _assert_seeded_as_the_delivery_page_writes_it(expected)
+    # The page fills {{time}}. A translation that drops the slot would show no time at all.
+    assert all("{{time}}" in text for text in BACKEND_TRANSLATIONS["ui.delivery.redispatch_held"].values())
+
+
+def test_the_delivery_page_notes_action_is_seeded_as_the_page_writes_it():
+    """A row with no status move (failed, delivered, cancelled, returned, held) still opens
+    the update form, for its notes. With no status to pick, the action is labelled as a
+    notes edit rather than "Update Status"."""
+    _assert_seeded_as_the_delivery_page_writes_it(
+        {
+            "ui.delivery.edit_notes": {
+                "en": "Edit notes",
+                "uz": "Izohni tahrirlash",
+                "ru": "Изменить заметки",
+            },
+        }
+    )

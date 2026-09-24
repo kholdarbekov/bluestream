@@ -2,7 +2,9 @@ from datetime import date, datetime, time, timedelta, timezone
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
-from business_app.models.delivery import Delivery, DeliveryPerson
+import pytest
+
+from business_app.models.delivery import Delivery, DeliveryPerson, DeliveryStatusHistory
 from business_app.models.order import Order
 from business_app.models.user import User
 from business_app.services.order_schedule_service import OrderScheduleService
@@ -466,3 +468,442 @@ def test_earliest_shift_start_works_uncached_outside_an_app_context(monkeypatch)
     monkeypatch.setattr(oss_module, "current_app", _FakeCurrentApp())
 
     assert OrderScheduleService.earliest_shift_start() == time(9, 0)
+
+
+# ---------------------------------------------------------------------------
+# Reschedule eligibility (docs/superpowers/specs/2026-09-23-admin-order-
+# reschedule-design.md, R1/R2). The statuses are written out here AS THE SPEC
+# STATES THEM and never imported from the service: a test that read the
+# service's own set would agree with any set it was pointed at.
+# ---------------------------------------------------------------------------
+
+_R1_LIVE_ORDER_STATUSES = {
+    OrderStatus.PENDING,
+    OrderStatus.CONFIRMED,
+    OrderStatus.PREPARING,
+    OrderStatus.OUT_FOR_DELIVERY,
+}
+_R2_MOVABLE_DELIVERY_STATUSES = {
+    DeliveryStatus.SCHEDULED,
+    DeliveryStatus.PENDING,
+    DeliveryStatus.ASSIGNED,
+    DeliveryStatus.PICKED_UP,
+    DeliveryStatus.IN_TRANSIT,
+    DeliveryStatus.ARRIVED,
+    DeliveryStatus.FAILED,
+    DeliveryStatus.RESCHEDULED,
+}
+
+
+@pytest.mark.parametrize("order_status", list(OrderStatus), ids=lambda s: s.value)
+def test_only_a_live_order_can_be_rescheduled(app, order_status):
+    """R1. No delivery row, so the order's own status is the whole answer.
+    Built in memory: the rule reads two attributes and needs no table."""
+    order = Order(order_number=f"R1-{order_status.value}", user_id=1, status=order_status, total_amount=1000)
+
+    expected = None if order_status in _R1_LIVE_ORDER_STATUSES else "ORDER_NOT_RESCHEDULABLE"
+    assert OrderScheduleService.reschedule_block_code(order) == expected
+
+
+@pytest.mark.parametrize("delivery_status", list(DeliveryStatus), ids=lambda s: s.value)
+def test_every_delivery_status_has_a_reschedule_answer(app, delivery_status):
+    """R2, over the whole enum rather than a sample, on a live (CONFIRMED)
+    order so only the delivery can refuse."""
+    order = Order(
+        order_number=f"R2-{delivery_status.value}", user_id=1, status=OrderStatus.CONFIRMED, total_amount=1000
+    )
+    order.delivery = Delivery(
+        status=delivery_status,
+        scheduled_date=datetime(2026, 9, 23, 3, 0, tzinfo=timezone.utc),
+        scheduled_time_slot="anytime",
+    )
+
+    expected = None if delivery_status in _R2_MOVABLE_DELIVERY_STATUSES else "DELIVERY_NOT_RESCHEDULABLE"
+    assert OrderScheduleService.reschedule_block_code(order) == expected
+
+
+def test_a_dead_order_is_refused_as_an_order_even_when_its_delivery_is_dead_too(app):
+    """The order is checked first: "this order is delivered" is the reason an
+    admin can act on, not "this delivery is delivered"."""
+    order = Order(order_number="R1-first", user_id=1, status=OrderStatus.DELIVERED, total_amount=1000)
+    order.delivery = Delivery(
+        status=DeliveryStatus.DELIVERED,
+        scheduled_date=datetime(2026, 9, 23, 3, 0, tzinfo=timezone.utc),
+        scheduled_time_slot="anytime",
+    )
+
+    assert OrderScheduleService.reschedule_block_code(order) == "ORDER_NOT_RESCHEDULABLE"
+
+
+@pytest.mark.parametrize(
+    "delivery_status,expected",
+    [
+        (None, {"can_reschedule": True, "reschedule_block_code": None}),
+        (DeliveryStatus.ASSIGNED, {"can_reschedule": True, "reschedule_block_code": None}),
+        (DeliveryStatus.DELIVERED, {"can_reschedule": False, "reschedule_block_code": "DELIVERY_NOT_RESCHEDULABLE"}),
+    ],
+    ids=["no-row", "assigned", "delivered"],
+)
+def test_the_list_row_answer_costs_no_query(app, db, count_queries, delivery_driver, delivery_status, expected):
+    """`serialize_order_admin` asks this for every row of a page of up to 100.
+    Loaded the way `GET /admin/orders` loads it (`get_orders_with_details`,
+    the list's own eager-load), the answer is read off the row: not one
+    statement, and no detail-only key."""
+    from business_app.utils.query_optimization import get_orders_with_details
+
+    driver_id = delivery_driver.id
+    with app.app_context():
+        order = _confirmed_order(db, delivery_date=None)
+        if delivery_status is not None:
+            db.session.add(
+                Delivery(
+                    order_id=order.id,
+                    status=delivery_status,
+                    delivery_person_id=driver_id,
+                    scheduled_date=datetime(2026, 9, 23, 3, 0, tzinfo=timezone.utc),
+                    scheduled_time_slot="anytime",
+                )
+            )
+            db.session.commit()
+        loaded = get_orders_with_details(Order.query.filter(Order.id == order.id)).one()
+
+        with count_queries() as counter:
+            metadata = OrderScheduleService.get_reschedule_metadata(loaded, detail=False)
+
+    assert metadata == expected
+    assert counter.count == 0, counter.statements
+
+
+def test_two_active_amount_contracts_leave_the_horizon_uncapped_and_say_so(app, db, caplog):
+    """The contract lookup refuses to choose between two active AMOUNT
+    contracts. The delivery charge fails on the same ambiguity, so no date
+    cap could protect it: the bounds fall back to the booking horizon and a
+    warning names the order and the store, instead of the admin order page
+    failing. Real rows, so it is the real lookup that refuses."""
+    import logging
+
+    from business_app.models.corporate import CorporateContract, CorporateContractStatus
+    from business_app.services import order_schedule_service as oss_module
+    from shared.business_config import MAX_SCHEDULE_HORIZON_DAYS
+    from shared.enums import CorporateContractTrackingMode, EntitySubtype, UserType
+
+    now_local = datetime.now(TZ).replace(hour=10, minute=0, second=0, microsecond=0)
+    today = now_local.date()
+    with app.app_context():
+        store = User(
+            email="two-contracts@example.com",
+            phone="+998909990012",
+            password_hash=hash_password("StorePassword123!"),
+            first_name="Ikki",
+            last_name="Market",
+            user_type=UserType.ENTITY,
+            entity_subtype=EntitySubtype.GROCERY_STORE,
+            company_name="Ikki Market",
+            role=UserRole.CUSTOMER,
+        )
+        db.session.add(store)
+        db.session.flush()
+        for number, ends_in_days in (("GS-TWO-001", 3), ("GS-TWO-002", 5)):
+            db.session.add(
+                CorporateContract(
+                    user_id=store.id,
+                    contract_number=number,
+                    name=f"Ikki Market {number}",
+                    status=CorporateContractStatus.ACTIVE,
+                    start_date=datetime.now(timezone.utc) - timedelta(days=30),
+                    end_date=datetime.now(timezone.utc) + timedelta(days=ends_in_days),
+                    currency="UZS",
+                    is_active=True,
+                    tracking_mode=CorporateContractTrackingMode.AMOUNT,
+                )
+            )
+        order = Order(user_id=store.id, status=OrderStatus.CONFIRMED, total_amount=1000, order_source="admin")
+        db.session.add(order)
+        db.session.commit()
+
+        # The module logger does not propagate to caplog's root handler.
+        oss_module.logger.addHandler(caplog.handler)
+        try:
+            with caplog.at_level(logging.WARNING, logger=oss_module.logger.name), patch(
+                "business_app.utils.delivery_window.local_now", return_value=now_local
+            ):
+                bounds = OrderScheduleService.reschedule_date_bounds(order)
+        finally:
+            oss_module.logger.removeHandler(caplog.handler)
+
+        order_id, store_id = order.id, store.id
+
+    assert bounds == (today, today + timedelta(days=MAX_SCHEDULE_HORIZON_DAYS))
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any(f"order {order_id}" in m and f"customer {store_id}" in m for m in warnings), warnings
+
+
+# ---------------------------------------------------------------------------
+# A held (`rescheduled`) row (docs/superpowers/specs/2026-09-23-admin-order-
+# reschedule-design.md §3.5): released to drivers once, then moved to a later
+# day. The gate is its one way back into the pool, decided on locked,
+# re-read rows.
+# ---------------------------------------------------------------------------
+
+
+def _held_row(db, order):
+    """The shape a reschedule to a later day leaves: driverless, no ETA, and
+    the distance `create_delivery` measured when the row was first released."""
+    delivery = Delivery(
+        order_id=order.id,
+        status=DeliveryStatus.RESCHEDULED,
+        delivery_person_id=None,
+        distance_km=3.0,
+        estimated_delivery_time=None,
+        scheduled_date=datetime(2026, 8, 20, 3, 0, tzinfo=timezone.utc),
+        scheduled_time_slot="anytime",
+    )
+    db.session.add(delivery)
+    db.session.commit()
+    return delivery
+
+
+def test_a_held_row_is_awaiting_release_until_its_morning(app, db):
+    with app.app_context():
+        _driver(db, shift_start="08:00", suffix="held1")
+        order = _confirmed_order(db, delivery_date=date(2026, 8, 20))
+        _held_row(db, order)
+        # Prove the relationship resolved before trusting the predicate.
+        assert order.delivery is not None
+
+        evening_before = datetime(2026, 8, 19, 14, 0, tzinfo=TZ).astimezone(timezone.utc)
+        with patch("business_app.services.order_schedule_service.get_utc_now", return_value=evening_before):
+            assert OrderScheduleService.is_awaiting_release(order) is True
+        opened = datetime(2026, 8, 20, 8, 1, tzinfo=TZ).astimezone(timezone.utc)
+        with patch("business_app.services.order_schedule_service.get_utc_now", return_value=opened):
+            assert OrderScheduleService.is_awaiting_release(order) is False
+
+
+@pytest.mark.parametrize(
+    "order_status, row_status, expected",
+    [
+        # Held until 08:00 Tashkent, which is 03:00 UTC.
+        (OrderStatus.CONFIRMED, DeliveryStatus.RESCHEDULED, datetime(2026, 8, 20, 3, 0, tzinfo=timezone.utc)),
+        # R23 corollary: held until it is confirmed, which has no instant to quote.
+        (OrderStatus.PENDING, DeliveryStatus.RESCHEDULED, None),
+        # Already in the pool: drivers see it now.
+        (OrderStatus.CONFIRMED, DeliveryStatus.SCHEDULED, None),
+    ],
+    ids=["held-confirmed", "held-pending", "released"],
+)
+def test_published_release_at_is_the_instant_only_while_the_order_is_held(
+    app, db, order_status, row_status, expected
+):
+    """The one answer behind every published `release_at` (the admin order payloads and
+    both re-dispatch responses). The clock is the evening before, so the release instant
+    is still ahead in every case, and only the order and its row decide."""
+    with app.app_context():
+        _driver(db, shift_start="08:00", suffix="pub")
+        order = _confirmed_order(db, delivery_date=date(2026, 8, 20), status=order_status)
+        db.session.add(
+            Delivery(
+                order_id=order.id,
+                status=row_status,
+                scheduled_date=datetime(2026, 8, 20, 3, 0, tzinfo=timezone.utc),
+                scheduled_time_slot="anytime",
+            )
+        )
+        db.session.commit()
+        # Prove the relationship resolved before trusting the answer.
+        assert order.delivery is not None
+
+        evening_before = datetime(2026, 8, 19, 14, 0, tzinfo=TZ).astimezone(timezone.utc)
+        with patch("business_app.services.order_schedule_service.get_utc_now", return_value=evening_before):
+            assert OrderScheduleService.published_release_at(order) == expected
+
+
+def _release_spies(monkeypatch):
+    """The two Celery publishes a release makes through `offer_to_drivers`: the
+    auto-assign timer and the diversion evaluator (which itself broadcasts).
+
+    Only the broker is replaced. `_task_spy` binds each publish against the
+    task's own signature and records its exact payload, so `offer_to_drivers`
+    and `create_delivery` run for real and a gate that offered too early, too
+    often or with the wrong id shows up here.
+    """
+    from business_app.tasks import delivery_tasks
+    from tests.unit.test_delivery_service_business_rules import _task_spy
+
+    auto_assign = _task_spy(monkeypatch, delivery_tasks.auto_assign_delivery_task, "apply_async")
+    evaluator = _task_spy(monkeypatch, delivery_tasks.evaluate_pool_insertion_suggestions_task, "delay")
+    return auto_assign, evaluator
+
+
+def test_gate_leaves_a_held_row_alone_before_its_morning(app, db, monkeypatch):
+    with app.app_context():
+        _driver(db, shift_start="08:00", suffix="held2")
+        order = _confirmed_order(db, delivery_date=date(2026, 8, 20))
+        held = _held_row(db, order)
+        auto_assign, evaluator = _release_spies(monkeypatch)
+        evening_before = datetime(2026, 8, 19, 14, 0, tzinfo=TZ).astimezone(timezone.utc)
+
+        with patch("business_app.services.order_schedule_service.get_utc_now", return_value=evening_before):
+            assert OrderScheduleService.ensure_delivery_if_due(order) is None
+
+        assert auto_assign == []
+        assert evaluator == []
+        assert Delivery.query.filter_by(order_id=order.id).count() == 1
+        assert db.session.get(Delivery, held.id).status == DeliveryStatus.RESCHEDULED
+        assert DeliveryStatusHistory.query.filter_by(delivery_id=held.id).count() == 0
+
+
+def test_gate_releases_a_held_row_once_its_morning_arrives(app, db, monkeypatch):
+    with app.app_context():
+        _driver(db, shift_start="08:00", suffix="held3")
+        order = _confirmed_order(db, delivery_date=date(2026, 8, 20))
+        held = _held_row(db, order)
+        auto_assign, evaluator = _release_spies(monkeypatch)
+        opened = datetime(2026, 8, 20, 8, 1, tzinfo=TZ).astimezone(timezone.utc)
+
+        with patch("business_app.services.order_schedule_service.get_utc_now", return_value=opened):
+            released = OrderScheduleService.ensure_delivery_if_due(order)
+
+        assert released is not None and released.id == held.id
+        assert released.status == DeliveryStatus.SCHEDULED
+        assert released.delivery_person_id is None
+        assert released.estimated_delivery_time is not None
+        # The row already exists: release flips it, it never makes a second one.
+        assert Delivery.query.filter_by(order_id=order.id).count() == 1
+        # Offered once, exactly as a fresh pool row is.
+        assert auto_assign == [((held.id,), {}, {"countdown": 300})]
+        assert evaluator == [((held.id,), {})]
+        history = DeliveryStatusHistory.query.filter_by(delivery_id=held.id).all()
+        assert [(h.old_status, h.new_status, h.changed_by, h.automatic) for h in history] == [
+            (DeliveryStatus.RESCHEDULED, DeliveryStatus.SCHEDULED, None, True)
+        ]
+
+
+def test_gate_keeps_a_held_row_whose_order_is_not_releasable(app, db, monkeypatch):
+    """PENDING is outside RELEASABLE_ORDER_STATUSES. The held row waits for its
+    order to be confirmed, exactly as an order with no row does. The shape is
+    real: a reschedule never confirms an order (R23), so an unpaid order that
+    owned a row keeps PENDING when that row is held."""
+    with app.app_context():
+        _driver(db, shift_start="08:00", suffix="held4")
+        order = _confirmed_order(db, delivery_date=date(2026, 8, 20), status=OrderStatus.PENDING)
+        held = _held_row(db, order)
+        auto_assign, evaluator = _release_spies(monkeypatch)
+        opened = datetime(2026, 8, 20, 8, 1, tzinfo=TZ).astimezone(timezone.utc)
+
+        with patch("business_app.services.order_schedule_service.get_utc_now", return_value=opened):
+            assert OrderScheduleService.ensure_delivery_if_due(order) is None
+
+        assert auto_assign == []
+        assert evaluator == []
+        assert Delivery.query.filter_by(order_id=order.id).count() == 1
+        assert db.session.get(Delivery, held.id).status == DeliveryStatus.RESCHEDULED
+
+
+def test_gate_hands_back_a_held_row_that_was_cancelled_while_it_looked(app, db, monkeypatch):
+    """The sweep selects its candidates with an UNLOCKED read. If the
+    order-cancel cascade ends the held row in that gap, the locked re-read
+    must see CANCELLED. Flipping the stale RESCHEDULED instance would put a
+    cancelled order's delivery back in the pool.
+
+    The concurrent write goes through `db.session.connection()` so the
+    identity map never hears of it (the same technique as
+    `test_gate_declines_for_a_stale_in_memory_order_after_a_concurrent_reschedule`):
+    only a `populate_existing` re-read can see it."""
+    from sqlalchemy import text
+
+    with app.app_context():
+        _driver(db, shift_start="08:00", suffix="held5")
+        order = _confirmed_order(db, delivery_date=date(2026, 8, 20))
+        held = _held_row(db, order)
+        auto_assign, evaluator = _release_spies(monkeypatch)
+        opened = datetime(2026, 8, 20, 8, 1, tzinfo=TZ).astimezone(timezone.utc)
+
+        with patch("business_app.services.order_schedule_service.get_utc_now", return_value=opened):
+            stale_order = Order.query.get(order.id)
+            assert stale_order.delivery.status == DeliveryStatus.RESCHEDULED
+            db.session.connection().execute(
+                text("UPDATE deliveries SET status = 'cancelled' WHERE id = :delivery_id"),
+                {"delivery_id": held.id},
+            )
+            # Still stale in memory: the precondition that makes this test mean something.
+            assert stale_order.delivery.status == DeliveryStatus.RESCHEDULED
+
+            result = OrderScheduleService.ensure_delivery_if_due(stale_order)
+
+        assert result.id == held.id
+        assert result.status == DeliveryStatus.CANCELLED
+        assert auto_assign == []
+        assert evaluator == []
+        assert Delivery.query.filter_by(order_id=order.id).count() == 1
+        assert DeliveryStatusHistory.query.filter_by(delivery_id=held.id).count() == 0
+
+
+def test_gate_rereads_the_order_date_before_releasing_a_held_row(app, db, monkeypatch):
+    """The same race from the order's side: a reschedule to a later day
+    commits between the sweep's read and the gate. The locked Order re-read
+    must see the new date and keep the row held."""
+    from sqlalchemy import bindparam, text
+    from sqlalchemy.types import Date as SADate
+
+    with app.app_context():
+        _driver(db, shift_start="08:00", suffix="held6")
+        order = _confirmed_order(db, delivery_date=date(2026, 8, 20))
+        held = _held_row(db, order)
+        auto_assign, evaluator = _release_spies(monkeypatch)
+        opened = datetime(2026, 8, 20, 8, 1, tzinfo=TZ).astimezone(timezone.utc)
+
+        with patch("business_app.services.order_schedule_service.get_utc_now", return_value=opened):
+            stale_order = Order.query.get(order.id)
+            _ = stale_order.delivery
+            db.session.connection().execute(
+                text("UPDATE orders SET delivery_date = :new_date WHERE id = :order_id").bindparams(
+                    bindparam("new_date", type_=SADate)
+                ),
+                {"new_date": date(2026, 8, 25), "order_id": order.id},
+            )
+            assert stale_order.delivery_date == date(2026, 8, 20)
+
+            result = OrderScheduleService.ensure_delivery_if_due(stale_order)
+
+        assert result is None
+        assert auto_assign == []
+        assert evaluator == []
+        assert Delivery.query.filter_by(order_id=order.id).count() == 1
+        assert db.session.get(Delivery, held.id).status == DeliveryStatus.RESCHEDULED
+
+
+def test_a_due_reschedule_lands_in_the_pool_only_for_a_status_the_release_gate_offers(app, db, admin_user, monkeypatch):
+    """The reschedule's landing status asks the release gate's own constant, not a
+    restatement of it. Narrow `RELEASABLE_ORDER_STATUSES` to CONFIRMED and a PREPARING
+    order's row, moved to a date whose morning has passed, must be held, not put in
+    today's pool and offered: a status the gate would not offer never reaches drivers
+    through a reschedule either."""
+    from business_app.services import order_schedule_service as oss_module
+
+    with app.app_context():
+        _driver(db, shift_start="08:00", suffix="gate")
+        today = datetime.now(TZ).date()
+        order = _confirmed_order(db, delivery_date=today, status=OrderStatus.PREPARING)
+        delivery = Delivery(
+            order_id=order.id,
+            status=DeliveryStatus.SCHEDULED,
+            delivery_person_id=None,
+            distance_km=3.0,
+            scheduled_date=datetime.combine(today, time.min, tzinfo=timezone.utc),
+            scheduled_time_slot="anytime",
+        )
+        db.session.add(delivery)
+        db.session.commit()
+        auto_assign, evaluator = _release_spies(monkeypatch)
+        monkeypatch.setattr(oss_module, "RELEASABLE_ORDER_STATUSES", (OrderStatus.CONFIRMED,))
+        noon = datetime.combine(today, time(12, 0), tzinfo=TZ).astimezone(timezone.utc)
+
+        with patch("business_app.services.order_schedule_service.get_utc_now", return_value=noon):
+            # Past the 08:00 roster start: only the order's status can hold the row.
+            assert OrderScheduleService.release_at(order) <= noon
+            OrderScheduleService.reschedule(order.id, delivery_date=today, actor_user_id=admin_user.id)
+
+        assert db.session.get(Delivery, delivery.id).status == DeliveryStatus.RESCHEDULED
+        assert db.session.get(Order, order.id).status == OrderStatus.PREPARING
+        assert auto_assign == []
+        assert evaluator == []

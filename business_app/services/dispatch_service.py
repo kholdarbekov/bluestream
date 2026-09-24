@@ -9,10 +9,12 @@ implies it is showing all the work, and an order with neither reason surfaced
 is exactly the one that gets forgotten.
 
 Also — deliberately — `scheduled`: orders awaiting release (see
-`OrderScheduleService.is_awaiting_release`) that carry no `Delivery` row at
-all, and so can never land in `pool` (which requires `delivery_id is not
-None`). Without this bucket, a board driven only by `pool` would understate
-the day's work by exactly the orders not yet offered to a driver.
+`OrderScheduleService.is_awaiting_release`). Such an order carries no
+`Delivery` row at all, or a row held in `rescheduled` (released once, then
+moved to a later day), and neither can land in `pool`, which requires a
+delivery in a pool status. Without this bucket, a board driven only by `pool`
+would understate the day's work by exactly the orders not yet offered to a
+driver.
 
 An order's schedule is resolved as `order.delivery_date` if set, else its
 `delivery.scheduled_date` — `order.delivery_date` is nullable and, in
@@ -61,9 +63,11 @@ class DispatchService:
         OrderStatus.OUT_FOR_DELIVERY,
     )
 
-    # Allowlist, not a blocklist: the same set staff_service.get_delivery_pool
-    # and assert_unassigned_for_pool_status use for "this delivery is actually
-    # sitting in the pool". A blocklist (e.g. "not terminal") would admit
+    # Allowlist, not a blocklist: the same two statuses staff_service.get_delivery_pool
+    # lists for "this delivery is actually sitting in the pool". (The driver invariant,
+    # assert_unassigned_for_pool_status, checks the WIDER DELIVERY_DRIVERLESS_STATES: a
+    # held `rescheduled` row is driverless too, but it waits for its day and must not
+    # show here.) A blocklist (e.g. "not terminal") would admit
     # anything nobody thought to exclude — an ASSIGNED delivery that somehow
     # lost its driver would still read as claimable. The allowlist only ever
     # admits the two states a pooled delivery is allowed to be in, and keeps
@@ -159,11 +163,11 @@ class DispatchService:
         ]
 
         # Orders that are on the board for this day but not yet offered to any
-        # driver. They have no delivery row at all — that is precisely what
-        # keeps them out of `pool` above — so they can never appear there, and
-        # a board that showed only `pool` would imply the day has less work
-        # than it does. Derived from `rows`, the same fetch `orders`/`unmapped`
-        # came from — no second query.
+        # driver: no delivery row at all, or one held in `rescheduled`. Neither
+        # is in a pool status, which is precisely what keeps them out of `pool`
+        # above, and a board that showed only `pool` would imply the day has
+        # less work than it does. Derived from `rows`, the same fetch
+        # `orders`/`unmapped` came from — no second query.
         scheduled = []
         for order in rows:
             if not OrderScheduleService.is_awaiting_release(order):

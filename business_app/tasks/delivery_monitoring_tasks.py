@@ -1,10 +1,11 @@
 """Periodic monitoring for delivery data-integrity anomalies.
 
-Currently watches for "stranded" deliveries: rows in a pool status
-(scheduled/pending) that still carry a ``delivery_person_id``. Such rows are
-invisible to both the driver's active list (status filter excludes
-scheduled/pending) and the unassigned pool (which only lists driverless rows),
-so they silently fall out of every operational screen.
+Currently watches for "stranded" deliveries: rows in a driverless status
+(``DELIVERY_DRIVERLESS_STATES``: the scheduled/pending pool, or a held
+``rescheduled`` row) that still carry a ``delivery_person_id``. Such rows are
+invisible to both the driver's active list (its status filter excludes all
+three) and the unassigned pool (which only lists driverless rows), so they
+silently fall out of every operational screen.
 
 The supported way to avoid creating these is ``StaffService.return_delivery_to_pool``
 (which clears the driver) plus the ``assert_unassigned_for_pool_status``
@@ -23,12 +24,10 @@ from business_app import db
 from business_app.models.delivery import Delivery
 from business_app.models.order import Order
 from business_app.utils.prometheus_metrics import set_stranded_deliveries
+from business_app.utils.state_validators import DELIVERY_DRIVERLESS_STATES
 from shared.enums import DeliveryStatus, OrderStatus
 
 logger = get_task_logger(__name__)
-
-# Pool statuses that must never retain a driver assignment.
-POOL_STATUSES = (DeliveryStatus.SCHEDULED, DeliveryStatus.PENDING)
 
 # A driverless pool delivery older than this (minutes) is re-offered for
 # auto-assignment. Below it, the creation-time auto_assign is still in flight.
@@ -51,7 +50,7 @@ def monitor_stranded_deliveries() -> Dict[str, Any]:
         )
         .join(Order, Order.id == Delivery.order_id)
         .filter(
-            Delivery.status.in_(POOL_STATUSES),
+            Delivery.status.in_(DELIVERY_DRIVERLESS_STATES),
             Delivery.delivery_person_id.isnot(None),
         )
         .order_by(Delivery.id.asc())
@@ -94,9 +93,7 @@ def reenqueue_stale_pool_deliveries() -> Dict[str, Any]:
     from business_app.tasks.delivery_tasks import auto_assign_delivery_task
 
     threshold_minutes = int(
-        current_app.config.get(
-            "STALE_POOL_REENQUEUE_MINUTES", STALE_POOL_REENQUEUE_MINUTES_DEFAULT
-        )
+        current_app.config.get("STALE_POOL_REENQUEUE_MINUTES", STALE_POOL_REENQUEUE_MINUTES_DEFAULT)
     )
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=threshold_minutes)
 
@@ -118,12 +115,9 @@ def reenqueue_stale_pool_deliveries() -> Dict[str, Any]:
         auto_assign_delivery_task.delay(delivery_id)
 
     if delivery_ids:
-        details = "; ".join(
-            f"delivery={row.id} order={row.order_number}" for row in stale[:50]
-        )
+        details = "; ".join(f"delivery={row.id} order={row.order_number}" for row in stale[:50])
         logger.warning(
-            "Re-enqueued %d stale unassigned pool deliveries (older than %d min) "
-            "for auto-assign: %s",
+            "Re-enqueued %d stale unassigned pool deliveries (older than %d min) " "for auto-assign: %s",
             len(delivery_ids),
             threshold_minutes,
             details,

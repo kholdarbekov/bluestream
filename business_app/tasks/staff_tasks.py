@@ -87,8 +87,25 @@ def notify_staff_new_order(self, order_id: int, order_info: dict = None, exclude
         # (see tasks/celery_app.py); do NOT build a second app with create_app()
         # here — it re-ran env validation per order and was pure overhead.
         from business_app import db
-        from business_app.models.delivery import DeliveryPerson
+        from business_app.models.delivery import Delivery, DeliveryPerson
         from business_app.models.user import User
+        from business_app.services.staff_service import StaffService
+
+        # Read the delivery when the broadcast SENDS, not when it was queued. It
+        # waits behind the diversion evaluator (and create_delivery's fallback),
+        # and in that gap the order can be claimed, cancelled or moved to a later
+        # day -- a RESCHEDULED row is driverless but not claimable (R3). Every
+        # Accept on such a card could only be refused. No row at all means the
+        # order was never released to drivers.
+        delivery = Delivery.query.filter_by(order_id=order_id).first()
+        if delivery is None or not StaffService.is_delivery_claimable(delivery):
+            logger.info(
+                "new-order broadcast skipped for order %s: delivery %s is not claimable (status=%s)",
+                order_id,
+                getattr(delivery, "id", None),
+                getattr(getattr(delivery, "status", None), "value", None),
+            )
+            return
 
         # Get all active delivery persons who haven't muted notifications
         query = (
@@ -111,7 +128,6 @@ def notify_staff_new_order(self, order_id: int, order_info: dict = None, exclude
         # standard accept flow.
         if not order_info:
             from business_app.models.order import Order
-            from business_app.models.delivery import Delivery
             from business_app.utils.address_helpers import get_address_line
             from business_app.utils.delivery_window import format_delivery_window
 
@@ -120,7 +136,6 @@ def notify_staff_new_order(self, order_id: int, order_info: dict = None, exclude
                 logger.warning(f"Order {order_id} not found for notification")
                 return
 
-            delivery = Delivery.query.filter_by(order_id=order_id).first()
             addr = order.delivery_address
 
             customer_name = f"{order.user.first_name} {order.user.last_name or ''}".strip() if order.user else ""
@@ -134,7 +149,7 @@ def notify_staff_new_order(self, order_id: int, order_info: dict = None, exclude
 
             order_info = {
                 "order_id": order_id,
-                "delivery_id": delivery.id if delivery else None,
+                "delivery_id": delivery.id,
                 "order_number": order.order_number,
                 "customer_name": customer_name,
                 "total_amount": float(order.total_amount) if order.total_amount else 0,
@@ -211,9 +226,11 @@ def notify_staff_order_cancelled(self, telegram_id: str, order_info: dict):
 def notify_staff_order_unassigned(self, telegram_id: str, order_info: dict):
     """Tell a driver that dispatch took an order off their route.
 
-    Distinct from `notify_staff_order_cancelled`: the order is NOT cancelled —
-    it went back to the pool at CONFIRMED and someone else will take it. Reusing
-    the cancellation copy here would tell the driver something false.
+    Distinct from `notify_staff_order_cancelled`: the order is NOT cancelled.
+    Without `order_info["rescheduled_to"]` it went back to today's pool and
+    someone else will take it. With it (an ISO date an admin reschedule sets)
+    it moved to that day, and the bot says so instead of the pool copy.
+    Reusing the cancellation copy here would tell the driver something false.
     """
     if not telegram_id:
         return

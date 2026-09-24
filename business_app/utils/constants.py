@@ -29,6 +29,11 @@ class NotificationType(Enum):
     # Delivery notification types
     DELIVERY_UPDATE = "delivery_update"
     DELIVERY_REMINDER = "delivery_reminder"
+    # An admin moved the delivery to another date. A type of its own, not
+    # DELIVERY_UPDATE: that one is gated to the in_transit/arrived milestones, and
+    # OrderScheduleService.customer_already_notified (R13) looks up an earlier
+    # notice by this exact value.
+    DELIVERY_RESCHEDULED = "delivery_rescheduled"
 
     # Payment notification types
     PAYMENT_CONFIRMATION = "payment_confirmation"

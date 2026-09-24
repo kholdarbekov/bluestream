@@ -98,3 +98,88 @@ def test_scope_lock_timeout_resolves_ahead_of_the_status_code_fallback(monkeypat
         error_code="BOTTLE_SCOPE_LOCK_TIMEOUT",
     )
     assert resolved == "staff.error.api.scope_busy"
+
+
+# --------------------------------------------------------------------------- #
+# A claim on a delivery that stopped being claimable (reschedule spec, R3/R22)
+# --------------------------------------------------------------------------- #
+
+
+def test_a_claim_on_a_no_longer_claimable_delivery_maps_to_its_own_key():
+    """STAFF_DELIVERY_NOT_CLAIMABLE is a 400. Unmapped, it fell through to
+    `staff.error.api.validation`, "Please check the entered data", shown to a
+    driver who typed nothing. It is not `already_taken` either: nobody took the
+    order. Dispatch moved it to another day, or it failed or was cancelled."""
+    assert (
+        BaseHandler.API_ERROR_CODE_KEY_MAP.get("STAFF_DELIVERY_NOT_CLAIMABLE")
+        == "staff.error.api.delivery_not_claimable"
+    )
+
+
+def test_delivery_not_claimable_copy_is_seeded_in_all_three_languages():
+    from scripts.seed_staff_translations import STAFF_TRANSLATIONS as TRANSLATIONS
+
+    assert TRANSLATIONS.get("staff.error.api.delivery_not_claimable") == {
+        "en": "This order is no longer available.",
+        "uz": "Bu buyurtma endi mavjud emas.",
+        "ru": "Этот заказ больше недоступен.",
+    }
+
+
+@pytest.mark.parametrize(
+    "error_code",
+    [
+        "ORDER_NOT_RESCHEDULABLE",
+        "DELIVERY_NOT_RESCHEDULABLE",
+        "STAFF_DELIVERY_NOT_REDISPATCHABLE",
+        "ORDER_RESCHEDULE_PAST_CONTRACT_END",
+    ],
+)
+def test_redispatch_refusals_read_as_a_conflict_not_as_bad_input(error_code):
+    """Re-dispatch is a reschedule to today (R18), and its refusals are 400s.
+
+    Unmapped, a 400 falls through to ``staff.error.api.validation`` ("check the
+    entered data") for an operator who entered nothing: the row changed under
+    their card. The old cancelled-order code was a 409 and read as the conflict
+    sentence, and these codes keep it.
+    """
+    assert BaseHandler.API_ERROR_CODE_KEY_MAP.get(error_code) == "staff.error.api.conflict"
+
+
+def test_not_owned_maps_to_its_own_key():
+    """R20: the delivery a driver's card acts on was rescheduled, reassigned or
+    pooled after the card was drawn. The generic 409 copy ("cannot be completed
+    because of a conflict") would not tell them the order is no longer theirs."""
+    assert (
+        BaseHandler.API_ERROR_CODE_KEY_MAP.get("STAFF_DELIVERY_NOT_OWNED")
+        == "staff.error.api.delivery_not_owned"
+    )
+
+
+def test_not_owned_without_a_context_still_alerts_in_its_own_words(monkeypatch):
+    """Only the three delivery-status call sites pass ``context``. Any other
+    screen that met the code gets the alert, in the mapped sentence. It does not
+    get a stale-card redraw for state it never held."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    from staff_bot.handlers import base as base_mod
+
+    monkeypatch.setattr(base_mod.i18n, "get", lambda key, language, **kw: key)
+    handler = BaseHandler.__new__(BaseHandler)
+    update = MagicMock()
+    update.callback_query.answer = AsyncMock()
+    update.callback_query.edit_message_text = AsyncMock()
+    response = MagicMock(
+        success=False,
+        error="This order is no longer assigned to you",
+        status_code=409,
+        error_code="STAFF_DELIVERY_NOT_OWNED",
+    )
+
+    asyncio.run(handler._handle_api_response_error(update, response, "uz"))
+
+    update.callback_query.answer.assert_awaited_once_with(
+        "❌ staff.error.api.delivery_not_owned", show_alert=True
+    )
+    update.callback_query.edit_message_text.assert_not_called()

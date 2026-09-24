@@ -288,9 +288,10 @@ class TestPoolAndRoutes:
 
     def test_unassigned_delivery_in_non_pool_status_is_excluded_from_pool(self, db, sample_user, sample_order):
         """`pool` must be an ALLOWLIST of `DELIVERY_POOL_UNASSIGNED_STATES`
-        (SCHEDULED/PENDING) — the same set `staff_service.get_delivery_pool` and
-        `assert_unassigned_for_pool_status` use — not a terminal-status
-        blocklist. A blocklist admits anything nobody thought to list: an
+        (SCHEDULED/PENDING) — the same set `staff_service.get_delivery_pool`
+        lists — not a terminal-status blocklist (nor the wider
+        `DELIVERY_DRIVERLESS_STATES`, which adds the held RESCHEDULED).
+        A blocklist admits anything nobody thought to list: an
         ASSIGNED delivery that somehow lost its driver is neither terminal nor
         pool-eligible, but a blocklist would still show it as claimable. This is
         exactly the case a blocklist lets through and an allowlist does not.

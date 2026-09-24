@@ -8,6 +8,7 @@ vi.mock('../../services/api', () => ({
     get: vi.fn(),
     post: vi.fn(),
     put: vi.fn(),
+    patch: vi.fn(),
     delete: vi.fn()
   },
   getCookie: vi.fn()
@@ -975,6 +976,42 @@ describe('AdminService', () => {
         new_method: 'click',
         bypass_cod_check: false
       });
+    });
+  });
+
+  describe('rescheduleOrder', () => {
+    it('PATCHes the schedule route with the payload as built and the codes its caller explains', async () => {
+      const envelope = { success: true, data: { order: { id: 321 } } };
+      api.patch.mockResolvedValue({ data: envelope });
+      const payload = {
+        delivery_date: '2026-09-25',
+        delivery_window_start: '18:00',
+        delivery_window_end: '21:00',
+        reason: 'Customer asked for the evening'
+      };
+      const handledErrorCodes = ['ORDER_NOT_RESCHEDULABLE', 'ORDER_RESCHEDULE_PAST_CONTRACT_END'];
+
+      const result = await adminService.rescheduleOrder(321, payload, { handledErrorCodes });
+
+      expect(api.patch).toHaveBeenCalledWith('/admin/orders/321/schedule', payload, { handledErrorCodes });
+      expect(result).toEqual(envelope);
+    });
+  });
+
+  describe('redispatchDelivery', () => {
+    it('POSTs an empty body and hands api.js the codes its caller explains', async () => {
+      const envelope = {
+        success: true,
+        message: 'Delivery re-dispatched to pool',
+        data: { delivery: { id: 7, status: 'scheduled' }, release_at: null }
+      };
+      api.post.mockResolvedValue({ data: envelope });
+      const handledErrorCodes = ['ORDER_NOT_RESCHEDULABLE', 'STAFF_DELIVERY_NOT_REDISPATCHABLE'];
+
+      const result = await adminService.redispatchDelivery(7, { handledErrorCodes });
+
+      expect(api.post).toHaveBeenCalledWith('/admin/deliveries/7/redispatch', {}, { handledErrorCodes });
+      expect(result).toEqual(envelope);
     });
   });
 });

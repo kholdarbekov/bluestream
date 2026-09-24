@@ -62,14 +62,24 @@ DELIVERY_POOL_UNASSIGNED_STATES: FrozenSet[DeliveryStatus] = frozenset(
 )
 
 
+# Delivery: every status that must NOT carry a driver -- the claimable pool above
+# plus RESCHEDULED, a delivery released once and now held for a later day (R3 of
+# docs/superpowers/specs/2026-09-23-admin-order-reschedule-design.md). A held row
+# is driverless but NOT claimable, which is why it joins this set and not the
+# pool: the pool is what DispatchService and the staff pool offer to drivers;
+# this set is what `assert_unassigned_for_pool_status`, the stranded-delivery
+# monitor and the CHECK `ck_deliveries_no_driver_for_pool_status` enforce.
+DELIVERY_DRIVERLESS_STATES: FrozenSet[DeliveryStatus] = DELIVERY_POOL_UNASSIGNED_STATES | {DeliveryStatus.RESCHEDULED}
+
+
 # Orders considered "alive" — between placement and the order leaving the
 # board (delivered / cancelled / returned). A delivery can sit FAILED for
 # months after its order dies through a completely separate flow (the two are
 # not kept in lockstep once the delivery reaches a terminal status), so any
 # code reviving a delivery from FAILED must re-check the ORDER's current
 # status against this set rather than assume it is still active. See the
-# failed-delivery re-dispatch flow (StaffService.redispatch_failed_delivery /
-# return_delivery_to_pool).
+# failed-delivery re-dispatch (StaffService.redispatch_failed_delivery ->
+# OrderScheduleService.reschedule) and return_delivery_to_pool.
 ACTIVE_ORDER_STATUSES: FrozenSet[OrderStatus] = frozenset(
     {
         OrderStatus.PENDING,
@@ -189,13 +199,13 @@ def assert_unassigned_for_pool_status(
     delivery,
     target_status: DeliveryStatus,
 ) -> None:
-    """Reject leaving a delivery in a pool status (scheduled/pending) while it
-    still has a delivery person. Such rows are stranded — invisible to both the
-    driver's active list and the unassigned pool. Inverse of
-    ``assert_delivery_person_for_status``. Callers mutate the delivery (clear the
-    driver / set the status) before calling."""
+    """Reject leaving a delivery in a driverless status (the scheduled/pending
+    pool, or a held `rescheduled` row) while it still has a delivery person.
+    Such rows are stranded — invisible to both the driver's active list and the
+    unassigned pool. Inverse of ``assert_delivery_person_for_status``. Callers
+    mutate the delivery (clear the driver / set the status) before calling."""
     target = _coerce_delivery_status(target_status)
-    if target not in DELIVERY_POOL_UNASSIGNED_STATES:
+    if target not in DELIVERY_DRIVERLESS_STATES:
         return
 
     if getattr(delivery, "delivery_person_id", None) is not None:

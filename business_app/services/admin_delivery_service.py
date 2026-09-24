@@ -1,7 +1,7 @@
 """Admin delivery management service."""
 
 from datetime import UTC, datetime, timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import func, or_
 from sqlalchemy.orm import aliased, joinedload, selectinload
@@ -12,9 +12,11 @@ from business_app.models.order import Order, OrderItem
 from business_app.models.user import User, UserAddress
 from business_app.serializers.order_serializers import format_order_items_summary
 from business_app.services.staff_service import StaffService
+from business_app.services.delivery_assignment_service import DeliveryAssignmentService
 from shared.enums import DeliveryStatus, OrderStatus
 from business_app.utils.exceptions import NotFoundError, ValidationError
 from business_app.utils.payment_projection import net_open_receivable_amount
+from business_app.utils.state_validators import DELIVERY_POOL_UNASSIGNED_STATES
 
 
 ACTIVE_DELIVERY_STATUSES = {
@@ -24,29 +26,19 @@ ACTIVE_DELIVERY_STATUSES = {
     DeliveryStatus.ARRIVED,
 }
 
-TERMINAL_DELIVERY_STATUSES = {
-    DeliveryStatus.DELIVERED,
-    DeliveryStatus.FAILED,
-    DeliveryStatus.CANCELLED,
-    DeliveryStatus.RETURNED,
-}
+# Targets the admin Update-status form may pick only once a driver owns the
+# delivery: the driver-driven steps and their two outcomes.
+ADMIN_DRIVER_REQUIRED_TARGETS = frozenset(ACTIVE_DELIVERY_STATUSES | {DeliveryStatus.DELIVERED, DeliveryStatus.FAILED})
 
 
 class AdminDeliveryService:
     """Business/query logic for admin delivery management."""
 
-    STATUS_ALIASES = {
-        "scheduled": DeliveryStatus.SCHEDULED,
-        "pending": DeliveryStatus.PENDING,
-        "assigned": DeliveryStatus.ASSIGNED,
-        "picked_up": DeliveryStatus.PICKED_UP,
-        "in_transit": DeliveryStatus.IN_TRANSIT,
-        "arrived": DeliveryStatus.ARRIVED,
-        "delivered": DeliveryStatus.DELIVERED,
-        "failed": DeliveryStatus.FAILED,
-        "cancelled": DeliveryStatus.CANCELLED,
-        "returned": DeliveryStatus.RETURNED,
-    }
+    # Every delivery status is a valid `?status=` filter on the Delivery page.
+    # Derived, not hand-listed: a hand-written copy is how a new status (the
+    # held `rescheduled`) turns the page's filter into a 400 "Invalid delivery
+    # status".
+    STATUS_ALIASES = {status.value: status for status in DeliveryStatus}
 
     ADMIN_ALLOWED_TRANSITIONS = {
         DeliveryStatus.SCHEDULED: {
@@ -80,7 +72,28 @@ class AdminDeliveryService:
         DeliveryStatus.FAILED: set(),
         DeliveryStatus.CANCELLED: set(),
         DeliveryStatus.RETURNED: set(),
+        # Held for a later day (R3/R22 of the 2026-09-23 reschedule spec): no admin
+        # move. A reschedule to today is the only early release, and only
+        # OrderScheduleService puts a row here, so no set above lists it either.
+        DeliveryStatus.RESCHEDULED: set(),
     }
+
+    @staticmethod
+    def allowed_status_transitions(delivery: Delivery) -> List[DeliveryStatus]:
+        """The statuses the admin Update-status form may move ``delivery`` to.
+
+        The ONE answer. `_apply_status_update` refuses anything outside it, and
+        `serialize_delivery` publishes it as `allowed_status_transitions`, so the
+        Delivery page's dropdown cannot offer a move the write path refuses. A
+        driverless row loses the driver-driven targets, which the write path has
+        always refused with "Assign a driver first". PENDING -> ASSIGNED, for
+        example, is something only an assignment can do. Sorted by value so the
+        published list is stable.
+        """
+        allowed = AdminDeliveryService.ADMIN_ALLOWED_TRANSITIONS.get(delivery.status, set())
+        if not delivery.delivery_person_id:
+            allowed = {status for status in allowed if status not in ADMIN_DRIVER_REQUIRED_TARGETS}
+        return sorted(allowed, key=lambda status: status.value)
 
     @staticmethod
     def list_deliveries(
@@ -106,6 +119,8 @@ class AdminDeliveryService:
         ordered_query = query.options(
             joinedload(Delivery.order).joinedload(Order.user),
             joinedload(Delivery.order).joinedload(Order.delivery_address),
+            # `can_redispatch` reads it back through the order (`reschedule_block_code`).
+            joinedload(Delivery.order).joinedload(Order.delivery),
             joinedload(Delivery.order).selectinload(Order.order_items).joinedload(OrderItem.product),
             joinedload(Delivery.delivery_person),
             selectinload(Delivery.status_history).joinedload(DeliveryStatusHistory.changed_by_user),
@@ -163,17 +178,26 @@ class AdminDeliveryService:
 
     @staticmethod
     def redispatch_delivery(delivery_id: int, actor_id: int, *, reason: Optional[str] = None) -> Dict[str, Any]:
-        """Re-dispatch a failed delivery back to the unassigned pool (admin panel
-        entry point). Delegates the status check + return-to-pool to
-        StaffService so the rule lives in a single place, then returns the
-        refreshed serialized delivery for the admin UI."""
+        """Re-dispatch a failed delivery (admin panel entry point): a reschedule
+        to today, window unchanged (R18). Delegates to
+        StaffService.redispatch_failed_delivery so the rule lives in a single
+        place.
+
+        Returns the route's payload: ``delivery``, the refreshed serialized
+        delivery for the admin UI, and ``release_at``, the ISO UTC instant
+        drivers will see a held (``rescheduled``) landing, or None when it went
+        straight back to the pool (R25, ``StaffService.redispatch_release_at``)."""
         StaffService.redispatch_failed_delivery(delivery_id, actor_id, reason=reason)
         delivery = Delivery.query.options(
             joinedload(Delivery.order),
             joinedload(Delivery.status_history).joinedload(DeliveryStatusHistory.changed_by_user),
             joinedload(Delivery.delivery_person),
         ).get(delivery_id)
-        return AdminDeliveryService.serialize_delivery(delivery)
+        release_at = StaffService.redispatch_release_at(delivery)
+        return {
+            "delivery": AdminDeliveryService.serialize_delivery(delivery),
+            "release_at": release_at.isoformat() if release_at else None,
+        }
 
     @staticmethod
     def reassign_delivery(delivery_id: int, new_person_id: int, actor_id: int) -> Delivery:
@@ -182,7 +206,6 @@ class AdminDeliveryService:
         Thin wrapper over the canonical DeliveryAssignmentService.assign_driver
         SSOT (source=REASSIGN, allow_in_progress=True) so the bottle binding,
         COD-block, capacity, counter sync, and history are handled once."""
-        from business_app.services.delivery_assignment_service import DeliveryAssignmentService
         from shared.enums import AssignmentSource
 
         delivery = Delivery.query.get(delivery_id)
@@ -234,6 +257,18 @@ class AdminDeliveryService:
             "order_id": delivery.order_id,
             "order_number": order.order_number if order else None,
             "status": AdminDeliveryService._status_value(delivery.status),
+            # What the Delivery page may offer on this row. Each value is the write
+            # path's own answer, so no button promises what its endpoint refuses.
+            "allowed_status_transitions": [
+                status.value for status in AdminDeliveryService.allowed_status_transitions(delivery)
+            ],
+            "can_redispatch": StaffService.redispatch_block_code(delivery) is None,
+            # AssignDeliveryModal takes Assign (POST /admin/staff/delivery/assign) for a
+            # driverless row and Reassign (PUT .../reassign, the explicit admin
+            # override) for an owned one.
+            "can_assign": DeliveryAssignmentService.is_assignable(
+                delivery.status, allow_in_progress=delivery.delivery_person_id is not None
+            ),
             "priority": AdminDeliveryService._derive_priority(order, delivery),
             "customer_name": customer.full_name if customer else None,
             "customer_phone": customer.phone if customer else None,
@@ -318,19 +353,15 @@ class AdminDeliveryService:
         if current_status not in AdminDeliveryService.ADMIN_ALLOWED_TRANSITIONS:
             raise ValidationError("Current delivery status is not supported")
 
-        allowed_statuses = AdminDeliveryService.ADMIN_ALLOWED_TRANSITIONS[current_status]
+        allowed_statuses = AdminDeliveryService.allowed_status_transitions(delivery)
         if new_status not in allowed_statuses:
-            allowed = ", ".join(status.value for status in sorted(allowed_statuses, key=lambda item: item.value))
+            if new_status in AdminDeliveryService.ADMIN_ALLOWED_TRANSITIONS[current_status]:
+                raise ValidationError("Assign a driver before updating this delivery status")
+            allowed = ", ".join(status.value for status in allowed_statuses)
             raise ValidationError(
                 f"Cannot transition delivery from {current_status.value} to {new_status.value}. "
                 f"Allowed transitions: {allowed or 'none'}"
             )
-
-        if (
-            new_status in ACTIVE_DELIVERY_STATUSES.union({DeliveryStatus.DELIVERED, DeliveryStatus.FAILED})
-            and not delivery.delivery_person_id
-        ):
-            raise ValidationError("Assign a driver before updating this delivery status")
 
         if new_status in {
             DeliveryStatus.PICKED_UP,
@@ -501,9 +532,12 @@ class AdminDeliveryService:
         returned = counts.get(DeliveryStatus.RETURNED.value, 0)
         terminal_total = delivered + failed + cancelled + returned
 
+        # "Unassigned" means waiting in the pool for a driver: the claimable
+        # statuses, not "anything driverless that is not finished". A held
+        # `rescheduled` row is driverless too, but it waits for its day.
         unassigned_count = (
             query.filter(Delivery.delivery_person_id.is_(None))
-            .filter(Delivery.status.notin_(list(TERMINAL_DELIVERY_STATUSES)))
+            .filter(Delivery.status.in_(DELIVERY_POOL_UNASSIGNED_STATES))
             .count()
         )
 
@@ -520,6 +554,7 @@ class AdminDeliveryService:
             "failed_deliveries": failed,
             "cancelled_deliveries": cancelled,
             "returned_deliveries": returned,
+            "rescheduled_deliveries": counts.get(DeliveryStatus.RESCHEDULED.value, 0),
             "unassigned_deliveries": unassigned_count,
             "completion_rate": round((delivered / terminal_total) * 100, 2) if terminal_total else 0.0,
             "status_breakdown": counts,

@@ -15,7 +15,7 @@ from business_app.models.delivery import (
 )
 from business_app.models.order import Order
 from business_app.utils.exceptions import ValidationError, NotFoundError, DeliveryError
-from business_app.utils.state_validators import assert_delivery_person_for_status
+from business_app.utils.state_validators import DELIVERY_POOL_UNASSIGNED_STATES, assert_delivery_person_for_status
 from business_app.utils.constants import DeliveryType, DELIVERY_ZONES
 from business_app.utils.delivery_window import window_slot_label
 from shared.enums import DeliveryStatus, OrderStatus
@@ -54,16 +54,13 @@ class DeliveryService:
             return None
         return int(actor_user_id)
 
-    def create_delivery(
-        self, order_id: int, delivery_type: DeliveryType = DeliveryType.STANDARD, scheduled_time_slot: str = None
-    ) -> Delivery:
+    def create_delivery(self, order_id: int, delivery_type: DeliveryType = DeliveryType.STANDARD) -> Delivery:
         """
         Create delivery for an order
 
         Args:
             order_id: Order ID
-            delivery_type: Type of delivery
-            scheduled_time_slot: Scheduled delivery time slot
+            delivery_type: Type of delivery (sets the ETA's travel allowance)
 
         Returns:
             Delivery object
@@ -96,26 +93,66 @@ class DeliveryService:
         # Determine delivery zone
         self._get_delivery_zone(distance)
 
-        # Estimate delivery time
-        estimated_time = self._calculate_estimated_delivery_time(distance, delivery_type)
-
-        # Create delivery record
+        # Create delivery record. Its schedule columns come from the ONE writer
+        # of them, which reschedule and release use too.
         delivery = Delivery(
             order_id=order_id,
             status=DeliveryStatus.SCHEDULED,
             distance_km=round(distance, 2),
-            estimated_delivery_time=estimated_time,
-            scheduled_date=order.delivery_date or datetime.now(UTC),
-            scheduled_time_slot=scheduled_time_slot
-            or window_slot_label(order.delivery_window_start, order.delivery_window_end),
         )
+        self.stamp_schedule(delivery, order, now=datetime.now(UTC), delivery_type=delivery_type)
 
         db.session.add(delivery)
         db.session.commit()
 
-        # Schedule delivery assignment. Best-effort: this runs after the commit
-        # above, inside the Click Complete chain — a broker hiccup here must not
-        # abort fiscalization/notifications (spec 2026-07-08 defect #6).
+        self.offer_to_drivers(delivery)
+        return delivery
+
+    def stamp_schedule(
+        self,
+        delivery: Delivery,
+        order: Order,
+        *,
+        now: datetime,
+        delivery_type: DeliveryType = DeliveryType.STANDARD,
+    ) -> None:
+        """Write the order's schedule onto its delivery row.
+
+        The ONE writer of a delivery's three schedule columns, shared by
+        `create_delivery`, `OrderScheduleService.reschedule` and the release of a
+        held row. The admin pages read three different columns
+        (`scheduled_date`, `scheduled_time_slot`, `estimated_delivery_time`),
+        and three writers are how those pages would come to disagree.
+
+        The caller sets `delivery.status` FIRST, because the ETA depends on it. A
+        row in (or entering) the pool gets `now` plus the travel allowance. Any
+        other row, such as a held `rescheduled` one, gets NULL, which keeps the
+        customer's Track screen from counting down hours to a day that has not
+        come. A NULL ETA is not new: operator phone orders have always had one.
+
+        Never commits, never queries.
+        """
+        delivery.scheduled_date = order.delivery_date or now
+        delivery.scheduled_time_slot = window_slot_label(order.delivery_window_start, order.delivery_window_end)
+        if delivery.status in DELIVERY_POOL_UNASSIGNED_STATES:
+            delivery.estimated_delivery_time = self._calculate_estimated_delivery_time(
+                delivery.distance_km or 0.0, delivery_type, now=now
+            )
+        else:
+            delivery.estimated_delivery_time = None
+
+    def offer_to_drivers(self, delivery: Delivery) -> None:
+        """Put a pool row in front of the drivers. Post-commit, best effort.
+
+        Moved whole out of `create_delivery`, so that a held row released on its
+        day and a reschedule that lands straight in the pool fan out exactly as a
+        fresh order does. Every enqueue is wrapped: this runs after the caller's
+        commit, so a broker hiccup here must never undo or abort anything.
+        """
+        # Schedule delivery assignment. Best-effort: for a fresh order this runs
+        # after the commit, inside the Click Complete chain — a broker hiccup
+        # here must not abort fiscalization/notifications (spec 2026-07-08
+        # defect #6).
         try:
             self._schedule_delivery_assignment(delivery.id)
         except Exception as exc:  # noqa: BLE001
@@ -139,11 +176,11 @@ class DeliveryService:
                 try:
                     from ..tasks.staff_tasks import notify_staff_new_order
 
-                    notify_staff_new_order.delay(order_id)
+                    notify_staff_new_order.delay(delivery.order_id)
                 except Exception as exc2:  # noqa: BLE001
-                    current_app.logger.warning("Failed to enqueue new-order broadcast for order %s: %s", order_id, exc2)
-
-        return delivery
+                    current_app.logger.warning(
+                        "Failed to enqueue new-order broadcast for order %s: %s", delivery.order_id, exc2
+                    )
 
     def assign_delivery_driver(self, delivery_id: int, driver_id: int) -> Delivery:
         """Assign delivery to a driver (auto-assign / admin single-assign entrypoint).
@@ -733,10 +770,11 @@ class DeliveryService:
                 return zone
         return "OUTER"
 
-    def _calculate_estimated_delivery_time(self, distance_km: float, delivery_type: DeliveryType) -> datetime:
-        """Calculate estimated delivery time"""
-        base_time = datetime.now(timezone.utc)
-
+    def _calculate_estimated_delivery_time(
+        self, distance_km: float, delivery_type: DeliveryType, *, now: datetime
+    ) -> datetime:
+        """Estimated delivery time, counted from `now` (the caller's clock, so a
+        reschedule and a release stamp the same moment they record)."""
         if delivery_type == DeliveryType.EXPRESS:
             # Express: 1-2 hours
             estimated_minutes = 60 + (distance_km * 2)
@@ -747,7 +785,7 @@ class DeliveryService:
             # Standard: 2-4 hours
             estimated_minutes = 120 + (distance_km * 3)
 
-        return base_time + timedelta(minutes=estimated_minutes)
+        return now + timedelta(minutes=estimated_minutes)
 
     def _is_driver_available(self, driver_id: int) -> bool:
         """Check if driver is available for assignment.

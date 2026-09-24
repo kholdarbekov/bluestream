@@ -1,0 +1,32 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Доставка перенесена - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Доставка перенесена</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Здравствуйте{% if user_name %}, {{ user_name }}{% endif %}!</h2>
+
+<div class="info-box">
+    <p>Доставка вашего заказа <strong>#{{ order_number }}</strong> перенесена на <strong>{{ new_date }}</strong>.</p>
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Номер заказа</th>
+        <td>#{{ order_number }}</td>
+    </tr>
+    <tr>
+        <th>Новая дата доставки</th>
+        <td>{{ new_date }}</td>
+    </tr>
+</table>
+
+<hr class="divider">
+
+<div class="info-box">
+    <p>Если у вас есть вопросы по доставке, свяжитесь с нами по телефону <a href="tel:{{ company_phone }}">{{ company_phone }}</a>.</p>
+</div>
+{% endblock %}

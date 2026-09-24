@@ -10,6 +10,7 @@ vi.mock('react-hot-toast', () => ({
 // stubbed: `api.defaults.adapter` stands in for the HTTP round trip.
 let api;
 let salesService;
+let adminService;
 
 beforeAll(async () => {
   // api.js fetches a CSRF token with the bare axios client the moment it is imported; answer it
@@ -17,6 +18,7 @@ beforeAll(async () => {
   vi.spyOn(axios, 'get').mockResolvedValue({ data: { csrf_token: 'test-csrf' } });
   api = (await import('../../services/api')).default;
   salesService = (await import('../../services/salesService')).default;
+  adminService = (await import('../../services/adminService')).default;
 });
 
 const failWith = (status, data) => (config) => Promise.reject(
@@ -49,5 +51,46 @@ describe('api response interceptor', () => {
 
     expect(toast.error).toHaveBeenCalledTimes(1);
     expect(toast.error).toHaveBeenCalledWith('Outlet not found');
+  });
+
+  // A caller that explains a refusal itself, in the admin's language, names its code on the
+  // request (RescheduleOrderModal names its fence codes). The interceptor must not toast that code
+  // as well (one refusal, one message), and must keep toasting everything the request did not name.
+  it('a refusal whose code the request handles rejects to its caller without a toast', async () => {
+    api.defaults.adapter = failWith(400, {
+      success: false,
+      message: 'Validation failed',
+      errors: ['delivery_date 2026-10-09 is after the contract end 2026-09-30'],
+      data: { error_code: 'ORDER_RESCHEDULE_PAST_CONTRACT_END' },
+    });
+
+    await expect(
+      adminService.rescheduleOrder(321, { delivery_date: '2026-10-09' }, {
+        handledErrorCodes: ['ORDER_RESCHEDULE_PAST_CONTRACT_END'],
+      }),
+    ).rejects.toMatchObject({
+      response: { status: 400, data: { data: { error_code: 'ORDER_RESCHEDULE_PAST_CONTRACT_END' } } },
+    });
+
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  const NAMED = { handledErrorCodes: ['ORDER_NOT_RESCHEDULABLE'] };
+  const SENTENCE = 'Order ORD-321 is delivered; it can no longer be rescheduled.';
+
+  it.each([
+    ['a code the request does not name', 400, 'DELIVERY_NOT_RESCHEDULABLE', NAMED, SENTENCE],
+    ['a request that names no codes', 400, 'ORDER_NOT_RESCHEDULABLE', undefined, SENTENCE],
+    // Status branches come first: naming a code never hides a permission or server failure.
+    ['a 403 whose code the request names', 403, 'ORDER_NOT_RESCHEDULABLE', NAMED, 'Access denied. Insufficient permissions.'],
+    ['a 5xx whose code the request names', 500, 'ORDER_NOT_RESCHEDULABLE', NAMED, 'Server error. Please try again later.'],
+  ])('%s is still toasted, once', async (_label, status, code, options, text) => {
+    api.defaults.adapter = failWith(status, { success: false, message: SENTENCE, data: { error_code: code } });
+
+    await expect(adminService.rescheduleOrder(321, { delivery_date: '2026-10-09' }, options))
+      .rejects.toMatchObject({ response: { status } });
+
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(toast.error).toHaveBeenCalledWith(text);
   });
 });

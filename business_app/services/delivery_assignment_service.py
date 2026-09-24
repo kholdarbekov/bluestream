@@ -30,6 +30,26 @@ class DeliveryAssignmentService:
     """The canonical assign-driver primitive. All paths delegate here."""
 
     @staticmethod
+    def is_assignable(status: DeliveryStatus, *, allow_in_progress: bool) -> bool:
+        """Whether a delivery in ``status`` may be given a driver.
+
+        The ONE statement of `assign_driver`'s status guard. `assign_driver`
+        refuses with it, and any surface that offers an Assign button asks it
+        instead of restating the rule:
+
+        * a held (`rescheduled`) row: never, not even through an explicit admin
+          reassign (R22). Rescheduling it to today is the only early release;
+        * a pool row (SCHEDULED/PENDING): always;
+        * anything else: only through an explicit admin reassign
+          (``allow_in_progress``).
+        """
+        from business_app.services.staff_service import StaffService
+
+        if status == DeliveryStatus.RESCHEDULED:
+            return False
+        return allow_in_progress or status in StaffService.CLAIMABLE_DELIVERY_STATUSES
+
+    @staticmethod
     def assign_driver(
         delivery_id: int,
         *,
@@ -43,8 +63,16 @@ class DeliveryAssignmentService:
         from business_app.services.staff_service import StaffService
         from business_app.services.bottle_tracking_service import BottleTrackingService
 
-        # 1. Lock the delivery row.
-        delivery = Delivery.query.with_for_update().get(delivery_id)
+        # 1. Lock the delivery row -- and REFRESH it. `with_for_update()` alone
+        #    re-selects the row but hands back the instance already in the
+        #    session with its pre-lock attributes (measured; see
+        #    `OrderScheduleService.ensure_delivery_if_due`). The hand-assign
+        #    callers (`RouteEditService.move_stop`, the admin reassign route and
+        #    `AdminDeliveryService.reassign_delivery`) have all loaded this
+        #    delivery unlocked a moment earlier, and the guards below must judge
+        #    the row as it is now. A reschedule committed in between is exactly
+        #    the case step 3 exists for.
+        delivery = db.session.get(Delivery, delivery_id, with_for_update=True, populate_existing=True)
         if not delivery:
             raise NotFoundError("Delivery not found", error_code="STAFF_DELIVERY_NOT_FOUND")
 
@@ -55,9 +83,13 @@ class DeliveryAssignmentService:
         if old_person_id == driver_user_id and old_status in StaffService.ACTIVE_DELIVERY_STATUSES:
             return AssignmentResult(delivery=delivery, history_id=None, changed=False)
 
-        # 3. Claimable-status guard. In-progress/terminal deliveries are only
-        #    re-assignable by an explicit admin reassign (allow_in_progress).
-        if delivery.status not in StaffService.CLAIMABLE_DELIVERY_STATUSES and not allow_in_progress:
+        # 3. Status guard, stated once in `is_assignable`: pool rows are
+        #    claimable; in-progress/terminal ones only through an explicit admin
+        #    reassign (allow_in_progress); a held RESCHEDULED row never, not even
+        #    then (spec R22). It waits for its new day and is released by its
+        #    date, never by hand; an admin who wants it out today reschedules it
+        #    to today.
+        if not DeliveryAssignmentService.is_assignable(delivery.status, allow_in_progress=allow_in_progress):
             raise ValidationError(
                 f"This delivery can no longer be assigned (status: {delivery.status.value})",
                 error_code="STAFF_DELIVERY_NOT_CLAIMABLE",
@@ -120,9 +152,7 @@ class DeliveryAssignmentService:
                 # else require_session=False and (no session or insufficient capacity): best-effort skip
 
         # 8. Compute the new status: pool→ASSIGNED; in-progress reassign keeps status.
-        new_status = (
-            DeliveryStatus.ASSIGNED if old_status in (DeliveryStatus.SCHEDULED, DeliveryStatus.PENDING) else old_status
-        )
+        new_status = DeliveryStatus.ASSIGNED if old_status in StaffService.CLAIMABLE_DELIVERY_STATUSES else old_status
 
         # 9. ARCH-006: person must be set before/at the assigned status.
         assert_delivery_person_for_status(delivery, new_status, delivery_person_id=driver_user_id)

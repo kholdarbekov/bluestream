@@ -8,10 +8,12 @@ from business_app.utils.delivery_window import (
     local_now,
     parse_and_validate_schedule,
     parse_window_time,
+    schedule_date_bounds,
     validate_schedule,
     window_kind,
     window_slot_label,
 )
+from shared.business_config import MAX_SCHEDULE_HORIZON_DAYS
 
 TZ = ZoneInfo("Asia/Tashkent")
 
@@ -187,3 +189,40 @@ def test_the_clock_defaults_to_business_local_time_when_not_injected():
         (today_local + timedelta(days=1)).isoformat(), None, None
     )
     assert ok == []
+
+
+# --- schedule_date_bounds: the one statement of the horizon ---------------------
+
+
+def test_schedule_date_bounds_is_local_today_through_the_horizon():
+    now = datetime(2026, 8, 19, 14, 0, tzinfo=TZ)
+    assert schedule_date_bounds(now) == (
+        date(2026, 8, 19),
+        date(2026, 8, 19) + timedelta(days=MAX_SCHEDULE_HORIZON_DAYS),
+    )
+
+
+def test_validate_schedule_accepts_exactly_the_bounds_it_publishes():
+    """The published range and the checked range are one range. The admin picker
+    offers `schedule_date_bounds()`; if `validate_schedule` kept its own copy, the
+    first and last day could drift apart from what the picker shows."""
+    now = datetime(2026, 8, 19, 14, 0, tzinfo=TZ)
+    first, last = schedule_date_bounds(now)
+
+    assert validate_schedule(first, None, None, now_local=now) == []
+    assert validate_schedule(last, None, None, now_local=now) == []
+    assert validate_schedule(first - timedelta(days=1), None, None, now_local=now) == [
+        "delivery_date cannot be in the past"
+    ]
+    assert validate_schedule(last + timedelta(days=1), None, None, now_local=now) == [
+        f"delivery_date cannot be more than {MAX_SCHEDULE_HORIZON_DAYS} days in the future"
+    ]
+
+
+def test_schedule_date_bounds_defaults_to_the_business_clock(monkeypatch):
+    """00:30 in Tashkent is 19:30 the previous day in UTC. A caller that used the
+    container's UTC date would publish yesterday as the first bookable day."""
+    frozen = datetime(2026, 9, 24, 0, 30, tzinfo=TZ)
+    monkeypatch.setattr("business_app.utils.delivery_window.local_now", lambda: frozen)
+
+    assert schedule_date_bounds()[0] == date(2026, 9, 24)

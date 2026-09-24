@@ -1,6 +1,7 @@
 """Business-rule unit tests for DeliveryService constraints and helpers."""
 
-from datetime import UTC, datetime, timedelta
+import inspect
+from datetime import UTC, date, datetime, time, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -8,9 +9,68 @@ import pytest
 from business_app.models.delivery import Delivery, DeliveryStatusHistory
 from business_app.models.user import UserAddress
 from business_app.services.delivery_service import DeliveryService
+from business_app.tasks import delivery_tasks, staff_tasks
 from business_app.utils.constants import DeliveryType
 from shared.enums import DeliveryStatus
 from business_app.utils.exceptions import DeliveryError, ValidationError
+
+
+def _patch_task_publish(monkeypatch, task, method, fake):
+    """Replace `task.delay` / `task.apply_async` for one test, and leave nothing behind.
+
+    Not `monkeypatch.setattr(task, method, fake)`: both methods live on the Task
+    class, so setattr saves the BOUND method `getattr` returns (the autouse no-op
+    from tests/conftest.py) and its undo writes that onto the task instance. The
+    stale no-op then outlives the test and shadows every later class-level patch
+    of `Task.delay` in the worker, so a recorder patching the class (`enqueued`
+    in test_redispatch_reschedules_to_today.py) saw no publish at all. Patching
+    the instance `__dict__` undoes to "absent".
+    """
+    monkeypatch.setitem(vars(task), method, fake)
+
+
+def _unshadow_task_publish(monkeypatch):
+    """Let a class-level patch of `Task.delay` / `Task.apply_async` see every publish.
+
+    For this test only, drop any instance-level `delay` / `apply_async` that an
+    earlier test in the worker left behind by patching a task with
+    `monkeypatch.setattr` (several suites still do). Such a leftover routes the
+    call around the class, so the recorder never sees it.
+    """
+    from celery import current_app
+
+    for task in current_app.tasks.values():
+        for method in ("delay", "apply_async"):
+            monkeypatch.delitem(vars(task), method, raising=False)
+
+
+def _task_spy(monkeypatch, task, method):
+    """Record `.delay` / `.apply_async` calls on a Celery task, binding each call
+    against the TASK's own signature (`run`, with `self` already bound on a
+    `bind=True` task). `Task.delay(*args, **kwargs)` accepts any call at all, so
+    a payload the worker could not run would stay green (same idea as `_spy` in
+    tests/unit/test_agent_order_confirmation.py).
+
+    `.delay` calls are recorded as `(args, kwargs)`, and `.apply_async` calls as
+    `(args, kwargs, options)`.
+    """
+    signature = inspect.signature(task.run)
+    calls = []
+
+    if method == "delay":
+
+        def fake(*args, **kwargs):
+            signature.bind(*args, **kwargs)
+            calls.append((args, kwargs))
+
+    else:
+
+        def fake(args=None, kwargs=None, **options):
+            signature.bind(*(args or ()), **(kwargs or {}))
+            calls.append((tuple(args or ()), dict(kwargs or {}), options))
+
+    _patch_task_publish(monkeypatch, task, method, fake)
+    return calls
 
 
 @pytest.fixture
@@ -119,6 +179,23 @@ class TestDeliveryServiceBusinessRules:
         evaluator_delay.assert_called_once_with(delivery.id)
         broadcast_delay.assert_called_once_with(order_with_address.id)
 
+    def test_create_delivery_stamps_the_row_it_creates(self, delivery_service, order_with_address, monkeypatch, db):
+        """Characterisation: what a freshly released row carries today. It must
+        read the same once the stamping moves into `stamp_schedule`."""
+        monkeypatch.setattr("business_app.services.delivery_service.calculate_distance", lambda *_a, **_k: 5.25)
+        order_with_address.delivery_date = date(2026, 9, 25)
+        order_with_address.delivery_window_start = None
+        order_with_address.delivery_window_end = time(10, 0)
+        db.session.commit()
+
+        delivery = delivery_service.create_delivery(order_with_address.id)
+        db.session.refresh(delivery)
+
+        assert delivery.status == DeliveryStatus.SCHEDULED
+        assert delivery.scheduled_date.date() == date(2026, 9, 25)
+        assert delivery.scheduled_time_slot == "until 10:00"
+        assert delivery.estimated_delivery_time is not None
+
     def test_get_available_time_slots_filters_by_capacity(self, delivery_service, monkeypatch):
         monkeypatch.setattr(
             "business_app.services.delivery_service.get_time_slots",
@@ -206,3 +283,132 @@ class TestDeliveryServiceBusinessRules:
 
         assert history is not None
         delay_mock.assert_called_once_with(history.id)
+
+
+@pytest.mark.unit
+@pytest.mark.delivery
+class TestStampSchedule:
+    """`stamp_schedule` is the ONE writer of a delivery's three schedule columns
+    (spec §3.3). Create, reschedule and release all go through it, so the three
+    admin pages that read three different columns cannot disagree."""
+
+    NOW = datetime(2026, 9, 23, 6, 30, tzinfo=UTC)
+
+    @staticmethod
+    def _row(order, status, **extra):
+        return Delivery(order_id=order.id, status=status, distance_km=5.25, **extra)
+
+    def test_a_pool_row_gets_the_orders_day_and_window_and_an_eta_from_now(
+        self, delivery_service, order_with_address
+    ):
+        order_with_address.delivery_date = date(2026, 9, 25)
+        order_with_address.delivery_window_start = time(12, 0)
+        order_with_address.delivery_window_end = time(18, 0)
+        delivery = self._row(order_with_address, DeliveryStatus.SCHEDULED)
+
+        delivery_service.stamp_schedule(delivery, order_with_address, now=self.NOW)
+
+        assert delivery.scheduled_date == date(2026, 9, 25)
+        assert delivery.scheduled_time_slot == "12:00-18:00"
+        # Anchored on the injected `now`, not on the wall clock.
+        assert delivery.estimated_delivery_time == delivery_service._calculate_estimated_delivery_time(
+            5.25, DeliveryType.STANDARD, now=self.NOW
+        )
+        assert delivery.estimated_delivery_time > self.NOW
+
+    def test_a_held_row_carries_no_eta_even_if_it_had_one(self, delivery_service, order_with_address):
+        """A NULL ETA keeps the customer's Track screen from counting down hours to
+        a day that has not come (spec §3.3)."""
+        order_with_address.delivery_date = date(2026, 9, 25)
+        order_with_address.delivery_window_start = None
+        order_with_address.delivery_window_end = time(10, 0)
+        delivery = self._row(
+            order_with_address,
+            DeliveryStatus.RESCHEDULED,
+            estimated_delivery_time=self.NOW + timedelta(hours=2),
+        )
+
+        delivery_service.stamp_schedule(delivery, order_with_address, now=self.NOW)
+
+        assert delivery.estimated_delivery_time is None
+        assert delivery.scheduled_date == date(2026, 9, 25)
+        assert delivery.scheduled_time_slot == "until 10:00"
+
+    def test_an_undated_order_is_scheduled_for_now(self, delivery_service, order_with_address):
+        order_with_address.delivery_date = None
+        order_with_address.delivery_window_start = None
+        order_with_address.delivery_window_end = None
+        delivery = self._row(order_with_address, DeliveryStatus.PENDING)
+
+        delivery_service.stamp_schedule(delivery, order_with_address, now=self.NOW)
+
+        assert delivery.scheduled_date == self.NOW
+        assert delivery.scheduled_time_slot == "anytime"
+        assert delivery.estimated_delivery_time == delivery_service._calculate_estimated_delivery_time(
+            5.25, DeliveryType.STANDARD, now=self.NOW
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.delivery
+class TestOfferToDrivers:
+    """`offer_to_drivers` is `create_delivery`'s fan-out, moved out whole so a
+    released held row and a reschedule that lands in the pool reach drivers
+    exactly as a fresh order does (spec §3.3)."""
+
+    @staticmethod
+    def _pool_row(db, order):
+        delivery = Delivery(
+            order_id=order.id,
+            status=DeliveryStatus.SCHEDULED,
+            scheduled_date=datetime.now(UTC),
+            scheduled_time_slot="anytime",
+        )
+        db.session.add(delivery)
+        db.session.commit()
+        return delivery
+
+    def test_arms_auto_assign_and_enqueues_only_the_evaluator(
+        self, delivery_service, order_with_address, db, monkeypatch
+    ):
+        auto_assign = _task_spy(monkeypatch, delivery_tasks.auto_assign_delivery_task, "apply_async")
+        evaluator = _task_spy(monkeypatch, delivery_tasks.evaluate_pool_insertion_suggestions_task, "delay")
+        broadcast = _task_spy(monkeypatch, staff_tasks.notify_staff_new_order, "delay")
+        delivery = self._pool_row(db, order_with_address)
+
+        delivery_service.offer_to_drivers(delivery)
+
+        assert auto_assign == [((delivery.id,), {}, {"countdown": 300})]
+        assert evaluator == [((delivery.id,), {})]
+        # The evaluator enqueues the broadcast itself (§10 duplicate-message bug).
+        assert broadcast == []
+
+    def test_falls_back_to_a_direct_broadcast_when_the_evaluator_cannot_be_enqueued(
+        self, delivery_service, order_with_address, db, monkeypatch
+    ):
+        _task_spy(monkeypatch, delivery_tasks.auto_assign_delivery_task, "apply_async")
+
+        def broker_down(*_args, **_kwargs):
+            raise RuntimeError("broker down")
+
+        _patch_task_publish(monkeypatch, delivery_tasks.evaluate_pool_insertion_suggestions_task, "delay", broker_down)
+        broadcast = _task_spy(monkeypatch, staff_tasks.notify_staff_new_order, "delay")
+        delivery = self._pool_row(db, order_with_address)
+
+        delivery_service.offer_to_drivers(delivery)
+
+        assert broadcast == [((order_with_address.id,), {})]
+
+    def test_an_auto_assign_broker_failure_still_offers_the_row(
+        self, delivery_service, order_with_address, db, monkeypatch
+    ):
+        def broker_down(*_args, **_kwargs):
+            raise RuntimeError("broker down")
+
+        _patch_task_publish(monkeypatch, delivery_tasks.auto_assign_delivery_task, "apply_async", broker_down)
+        evaluator = _task_spy(monkeypatch, delivery_tasks.evaluate_pool_insertion_suggestions_task, "delay")
+        delivery = self._pool_row(db, order_with_address)
+
+        delivery_service.offer_to_drivers(delivery)
+
+        assert evaluator == [((delivery.id,), {})]

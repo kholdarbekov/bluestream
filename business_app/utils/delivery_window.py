@@ -81,6 +81,22 @@ def parse_window_time(raw: Optional[str]) -> Optional[time]:
     return time.fromisoformat(raw)  # raises ValueError on anything else
 
 
+def schedule_date_bounds(now_local: Optional[datetime] = None) -> Tuple[date, date]:
+    """The first and last day a delivery may be scheduled for, both inclusive.
+
+    `(local today, local today + MAX_SCHEDULE_HORIZON_DAYS)`. The ONE statement
+    of the horizon: `validate_schedule` checks against it, and
+    `GET /orders/statuses` publishes it for the admin date picker. That way the
+    picker can never offer a day the write path refuses, or hide one it
+    accepts. `now_local` defaults to `local_now()`, the business clock, which
+    is looked up at call time so tests can freeze it.
+    """
+    if now_local is None:
+        now_local = local_now()
+    today = now_local.date()
+    return today, today + timedelta(days=MAX_SCHEDULE_HORIZON_DAYS)
+
+
 def validate_schedule(
     delivery_date: Optional[date],
     window_start: Optional[time],
@@ -95,12 +111,12 @@ def validate_schedule(
     the caller owns the clock and tests can freeze it.
     """
     errors: List[str] = []
-    today = now_local.date()
+    today, last_day = schedule_date_bounds(now_local)
 
     if delivery_date is not None:
         if delivery_date < today:
             errors.append("delivery_date cannot be in the past")
-        elif delivery_date > today + timedelta(days=MAX_SCHEDULE_HORIZON_DAYS):
+        elif delivery_date > last_day:
             errors.append(f"delivery_date cannot be more than {MAX_SCHEDULE_HORIZON_DAYS} days in the future")
 
     if window_start is not None and window_end is not None and window_start >= window_end:

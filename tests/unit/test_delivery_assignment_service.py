@@ -180,3 +180,60 @@ def test_assign_driver_over_capacity_raises_when_require_session(db, app, sample
             assert exc.value.error_code == "BOTTLE_SESSION_CAPACITY_EXCEEDED"
         finally:
             app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False
+
+
+@pytest.mark.unit
+def test_assign_driver_judges_the_locked_row_not_the_callers_stale_copy(db, app, sample_user, sample_product):
+    """Every hand-assign caller (`RouteEditService.move_stop`, the admin reassign route
+    and `reassign_delivery`) loads the delivery unlocked first. If an admin rescheduled
+    it in between, `with_for_update()` alone hands back that stale instance: SCHEDULED
+    in memory, RESCHEDULED in the table. The R22 refusal must be decided on the table."""
+    from sqlalchemy import update
+    from tests.unit.test_bottle_session_integration import _make_order_with_bottles
+
+    driver = _driver(db, "+998901500010")
+    order = _make_order_with_bottles(db, sample_user, sample_product, quantity=1)
+    delivery = _scheduled_delivery(db, order)
+    db.session.commit()
+
+    stale = db.session.get(Delivery, delivery.id)
+    assert stale.status == DeliveryStatus.SCHEDULED
+    # The reschedule commits from another request: the row moves, this session's
+    # instance does not.
+    db.session.execute(
+        update(Delivery).where(Delivery.id == delivery.id).values(status=DeliveryStatus.RESCHEDULED),
+        execution_options={"synchronize_session": False},
+    )
+    assert stale.status == DeliveryStatus.SCHEDULED
+
+    with app.test_request_context():
+        with pytest.raises(ValidationError) as exc:
+            DeliveryAssignmentService.assign_driver(
+                delivery.id,
+                driver_user_id=driver.id,
+                actor_id=1,
+                source=AssignmentSource.ADMIN_DISPATCH,
+                allow_in_progress=True,
+            )
+    assert exc.value.error_code == "STAFF_DELIVERY_NOT_CLAIMABLE"
+    assert stale.status == DeliveryStatus.RESCHEDULED
+    assert stale.delivery_person_id is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("allow_in_progress", [False, True], ids=["assign", "explicit-reassign"])
+def test_is_assignable_is_the_status_guard_for_every_status(allow_in_progress):
+    """`assign_driver`'s status guard, as the one predicate the Delivery page will
+    publish as `can_assign`. A pool row may always be given a driver. Any other row
+    only through an explicit admin reassign. A held row never, not even then (R22):
+    it is released by its date, or by a reschedule to today."""
+    assignable = {
+        status
+        for status in DeliveryStatus
+        if DeliveryAssignmentService.is_assignable(status, allow_in_progress=allow_in_progress)
+    }
+
+    if allow_in_progress:
+        assert assignable == set(DeliveryStatus) - {DeliveryStatus.RESCHEDULED}
+    else:
+        assert assignable == {DeliveryStatus.SCHEDULED, DeliveryStatus.PENDING}

@@ -963,8 +963,10 @@ class StaffWebhookServer:
         POST /internal/order-unassigned
 
         Deliberately separate from /internal/order-cancelled: the order is not
-        cancelled, it is back in the pool for another driver. Same copy would be
-        a lie to the driver.
+        cancelled. Either it is back in the pool for another driver, or, when
+        `order_info` carries `rescheduled_to` (an admin reschedule, spec §4.2),
+        it moved to that day. Each gets its own copy; the cancellation copy
+        would be a lie to the driver.
         """
         try:
             if not await verify_webhook_signature(request):
@@ -991,8 +993,16 @@ class StaffWebhookServer:
                 return web.json_response({'success': True, 'message': 'No delivery person to notify'})
 
             language = await i18n.get_user_language(int(telegram_id))
-            message = i18n.get('staff.notification.order_unassigned', language,
-                               number=order_info.get('order_number', ''))
+            number = order_info.get('order_number', '')
+            # `format_local_date` is the staff bot's date SSOT and answers '' for a
+            # missing or unreadable value, so the whole date sentence is gated on it:
+            # never "rescheduled to  by dispatch".
+            rescheduled_to = format_local_date(order_info.get('rescheduled_to'))
+            if rescheduled_to:
+                message = i18n.get('staff.notification.order_rescheduled', language,
+                                   number=number, date=rescheduled_to)
+            else:
+                message = i18n.get('staff.notification.order_unassigned', language, number=number)
             await self.bot_app.bot.send_message(chat_id=telegram_id, text=message)
 
             return web.json_response({'success': True, 'message': 'Unassignment notification sent'})

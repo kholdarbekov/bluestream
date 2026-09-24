@@ -35,6 +35,7 @@ from business_app.utils.payment_projection import (
 )
 from business_app.utils.state_validators import (
     ACTIVE_ORDER_STATUSES,
+    DELIVERY_POOL_UNASSIGNED_STATES,
     assert_order_address_for_status,
     assert_order_creator_for_source,
     assert_unassigned_for_pool_status,
@@ -61,14 +62,33 @@ class StaffService:
         DeliveryStatus.ARRIVED,
     )
 
+    # Where the dispatch map's "Return to pool" may start from: a stop a driver
+    # holds, or one they failed. Anything else is refused with
+    # STAFF_DELIVERY_NOT_POOLABLE. SCHEDULED/PENDING are in the pool already,
+    # and a RESCHEDULED row is waiting for its new day: a board drawn before the
+    # reschedule must not drag it into today's pool (R22).
+    POOL_RETURNABLE_DELIVERY_STATUSES = ACTIVE_DELIVERY_STATUSES + (DeliveryStatus.FAILED,)
+
     # Statuses an unassigned delivery may be in while sitting in the pool waiting
     # to be claimed. Only these can be accepted by a driver — accepting anything
-    # else (in-progress, delivered, failed, cancelled, returned) is invalid and
-    # must go through the admin/operator re-dispatch flow instead.
-    CLAIMABLE_DELIVERY_STATUSES = (
-        DeliveryStatus.SCHEDULED,
-        DeliveryStatus.PENDING,
-    )
+    # else (in-progress, delivered, failed, cancelled, returned, or held for a
+    # later day) is invalid and must go through the admin/operator re-dispatch
+    # flow instead. Derived from the pool-status SSOT the driverless CHECK is
+    # built on, never listed again; sorted only so the tuple is stable (every
+    # reader uses `in`).
+    CLAIMABLE_DELIVERY_STATUSES = tuple(sorted(DELIVERY_POOL_UNASSIGNED_STATES, key=lambda s: s.value))
+
+    @staticmethod
+    def is_delivery_claimable(delivery: Delivery) -> bool:
+        """Can a driver claim this delivery right now?
+
+        The ONE answer every driver-facing reader uses: the pool card's
+        `is_claimable`, the new-order broadcast and the diversion evaluator.
+        "Has no driver" alone was never the test. A RESCHEDULED delivery is
+        driverless on purpose and still not claimable: it is waiting for its
+        new day (reschedule spec R3).
+        """
+        return delivery.status in StaffService.CLAIMABLE_DELIVERY_STATUSES and delivery.delivery_person_id is None
 
     @staticmethod
     def _normalize_role_value(value: Any) -> Optional[str]:
@@ -1089,7 +1109,7 @@ class StaffService:
         else:
             query = query.filter(
                 Delivery.delivery_person_id.is_(None),
-                Delivery.status.in_([DeliveryStatus.SCHEDULED, DeliveryStatus.PENDING]),
+                Delivery.status.in_(StaffService.CLAIMABLE_DELIVERY_STATUSES),
             )
 
         # Deadline first: an order with an explicit "until HH:MM" is a promise
@@ -1173,30 +1193,39 @@ class StaffService:
         reason: Optional[str] = None,
         notes: Optional[str] = None,
     ) -> Delivery:
-        """Return a delivery to the unassigned pool so it can be (re-)claimed.
+        """Return a delivery a driver holds (or failed) to the unassigned pool.
 
-        This is the single supported way to move a delivery *back* toward the
-        pool and the foundation of the failed-delivery re-dispatch flow. It:
+        The dispatch map's "Return to pool". (Failed-delivery re-dispatch is
+        a reschedule to today since R18; see redispatch_failed_delivery.)
+        The work itself is ``_pull_back_delivery`` with a SCHEDULED
+        target, the same core the admin reschedule runs. This wrapper adds only
+        what an immediate return needs: the lock, two refusals, and the commit.
 
-        - clears the driver assignment (``delivery_person_id`` → None),
-        - resets the delivery status to SCHEDULED,
-        - restores the parent order to a pool-eligible status (CONFIRMED) when
-          it has moved past it (e.g. OUT_FOR_DELIVERY/RETURNED), so the delivery
-          actually surfaces in the pool (which requires the order to be in
-          CONFIRMED/PREPARING),
-        - clears the order's bottle-session binding (so re-accept doesn't conflict),
-        - records a DeliveryStatusHistory row attributed to ``actor_id``,
-        - resyncs the previous driver's active-delivery counters.
-
-        It enforces the invariant that a pool-status delivery never retains a
-        driver (``assert_unassigned_for_pool_status``).
+        Refuses with 409 (``ConflictError``):
+        - ``STAFF_DELIVERY_NOT_POOLABLE`` unless the delivery is in
+          ``POOL_RETURNABLE_DELIVERY_STATUSES``;
+        - ``STAFF_ORDER_NOT_ACTIVE`` when the order already left the active
+          lifecycle.
 
         Raises:
             NotFoundError: If delivery not found.
+            ConflictError: STAFF_DELIVERY_NOT_POOLABLE / STAFF_ORDER_NOT_ACTIVE.
         """
-        delivery = Delivery.query.with_for_update().get(delivery_id)
+        # `populate_existing` is load-bearing. `RouteEditService.return_stop_to_pool`
+        # has already loaded this delivery unlocked, and `with_for_update` alone
+        # would hand that instance back with its pre-lock status (see
+        # `OrderScheduleService.ensure_delivery_if_due`). The refusals below
+        # must judge the row as it is now.
+        delivery = db.session.get(Delivery, delivery_id, with_for_update=True, populate_existing=True)
         if not delivery:
             raise NotFoundError("Delivery not found", error_code="STAFF_DELIVERY_NOT_FOUND")
+
+        if delivery.status not in StaffService.POOL_RETURNABLE_DELIVERY_STATUSES:
+            raise ConflictError(
+                f"Delivery {delivery.id} is {delivery.status.value}; only a stop a driver holds "
+                "or has failed can be returned to the pool.",
+                error_code="STAFF_DELIVERY_NOT_POOLABLE",
+            )
 
         # The order and its delivery are not kept in lockstep once the delivery
         # reaches a terminal status (FAILED) — an order can be cancelled (or
@@ -1211,59 +1240,13 @@ class StaffService:
                 error_code="STAFF_ORDER_NOT_ACTIVE",
             )
 
-        now = datetime.now(timezone.utc)
-        old_status = delivery.status
-        old_driver_id = delivery.delivery_person_id
-
-        delivery.delivery_person_id = None
-        delivery.status = DeliveryStatus.SCHEDULED
-        # Clear the stale failure reason so the next driver doesn't inherit it;
-        # delivery_attempts is intentionally preserved as the running counter.
-        delivery.failed_delivery_reason = None
-        delivery.updated_at = now
-
-        # Enforce the pool invariant on the row we just produced.
-        assert_unassigned_for_pool_status(delivery, DeliveryStatus.SCHEDULED)
-
-        # Make sure the order is pool-eligible. The pool only lists deliveries
-        # whose order is CONFIRMED/PREPARING; a failed/out-for-delivery order
-        # would keep the returned delivery hidden.
-        if delivery.order and delivery.order.status not in (OrderStatus.CONFIRMED, OrderStatus.PREPARING):
-            StaffService._restore_order_to_pool_eligible(delivery.order, actor_id, notes=notes)
-
-        history = DeliveryStatusHistory(
-            delivery_id=delivery.id,
-            old_status=old_status,
-            new_status=DeliveryStatus.SCHEDULED,
-            changed_by=actor_id,
-            changed_at=now,
-            notes=notes or "Returned to delivery pool for re-dispatch",
+        old_status, old_driver_id = StaffService._pull_back_delivery(
+            delivery,
+            actor_id,
+            target_status=DeliveryStatus.SCHEDULED,
             reason=reason,
+            notes=notes or "Returned to delivery pool for re-dispatch",
         )
-        db.session.add(history)
-
-        # The delivery no longer has a driver, so its order must not keep a stale
-        # bottle-session binding — otherwise the next driver to accept it hits a
-        # cross-session ConflictError in bind_order_to_session. The order rebinds
-        # when it is re-accepted/re-assigned.
-        if delivery.order:
-            from business_app.services.bottle_tracking_service import BottleTrackingService
-
-            BottleTrackingService().unbind_order(delivery.order.id)
-
-        # The previous driver lost a delivery — refresh their cached workload,
-        # and take the stop off their planned sequence. Without the second half
-        # the delivery was simultaneously offered in the unassigned pool (which
-        # reads live ownership) and numbered as a stop on that driver's route
-        # (which read `optimized_order`), so assigning it from the pool looked
-        # like a duplicate rather than a move. Same transaction as the rest of
-        # the return, and the same SSOT `DeliveryAssignmentService` uses.
-        if old_driver_id:
-            from business_app.services.route_optimization_service import RouteOptimizationService
-
-            StaffService.sync_active_delivery_counters([old_driver_id])
-            RouteOptimizationService.drop_from_route(old_driver_id, delivery.id)
-
         db.session.commit()
 
         current_app.logger.info(
@@ -1274,8 +1257,108 @@ class StaffService:
         return delivery
 
     @staticmethod
+    def _pull_back_delivery(
+        delivery: Delivery,
+        actor_id: int,
+        *,
+        target_status: DeliveryStatus,
+        reason: Optional[str] = None,
+        notes: Optional[str] = None,
+        restore_order: bool = True,
+    ) -> Tuple[DeliveryStatus, Optional[int]]:
+        """Take a delivery off its driver and park it driverless. Never commits.
+
+        The one body behind "return to pool" (target SCHEDULED) and the admin
+        reschedule (target SCHEDULED, or RESCHEDULED while its new day has not
+        started). The caller must already hold the row lock, read with
+        ``populate_existing``, and owns the commit. That way the pull-back and
+        whatever the caller writes beside it (the reschedule's new dates) land
+        or roll back together.
+
+        - Clears the driver and the stale failure reason (``delivery_attempts``
+          is kept as the running counter), then asserts the driverless invariant.
+        - With ``restore_order`` (the default), moves the order back to
+          CONFIRMED when it is not CONFIRMED/PREPARING, with NO free-text note.
+          The customer bot prints order-history notes on its Track screen, so
+          the note and the reason live on DeliveryStatusHistory and in the
+          caller's audit event instead. The reschedule passes
+          ``restore_order=False`` unless the order is OUT_FOR_DELIVERY: a
+          reschedule never confirms an order (R23), because a PENDING order
+          would go through ``update_order_status`` and its CONFIRMED side
+          effects. With ``restore_order=False`` the order is not touched.
+        - Records DeliveryStatusHistory only when the status really changes:
+          re-dating a row that is already RESCHEDULED is not a transition.
+        - Unbinds the order from the old bottle session, resyncs the old
+          driver's counters and takes the stop off their planned route.
+        - Leaves ``scheduled_date`` and the ETA alone; restamping them is the
+          caller's job (``DeliveryService.stamp_schedule``).
+
+        Returns ``(old_status, old_driver_user_id)``.
+        """
+        if target_status not in (DeliveryStatus.SCHEDULED, DeliveryStatus.RESCHEDULED):
+            raise ValueError(f"_pull_back_delivery cannot park a delivery in {target_status}")
+
+        now = datetime.now(timezone.utc)
+        old_status = delivery.status
+        old_driver_id = delivery.delivery_person_id
+
+        delivery.delivery_person_id = None
+        delivery.status = target_status
+        # Clear the stale failure reason so the next driver doesn't inherit it;
+        # delivery_attempts is intentionally preserved as the running counter.
+        delivery.failed_delivery_reason = None
+        delivery.updated_at = now
+
+        # Enforce the driverless invariant on the row we just produced.
+        assert_unassigned_for_pool_status(delivery, target_status)
+
+        # The pool only lists deliveries whose order is CONFIRMED/PREPARING; an
+        # out-for-delivery order would keep the delivery hidden once released.
+        # The caller decides whether the order may move at all (R23).
+        order = delivery.order
+        if restore_order and order is not None and order.status not in (OrderStatus.CONFIRMED, OrderStatus.PREPARING):
+            StaffService._restore_order_to_pool_eligible(order, actor_id, notes=None)
+
+        if old_status != target_status:
+            db.session.add(
+                DeliveryStatusHistory(
+                    delivery_id=delivery.id,
+                    old_status=old_status,
+                    new_status=target_status,
+                    changed_by=actor_id,
+                    changed_at=now,
+                    notes=notes,
+                    reason=reason,
+                )
+            )
+
+        # The delivery no longer has a driver, so its order must not keep a stale
+        # bottle-session binding — otherwise the next driver to accept it hits a
+        # cross-session ConflictError in bind_order_to_session. The order rebinds
+        # when it is re-accepted/re-assigned.
+        if order is not None:
+            from business_app.services.bottle_tracking_service import BottleTrackingService
+
+            BottleTrackingService().unbind_order(order.id)
+
+        # The previous driver lost a delivery — refresh their cached workload,
+        # and take the stop off their planned sequence. Without the second half
+        # the delivery was simultaneously offered in the unassigned pool (which
+        # reads live ownership) and numbered as a stop on that driver's route
+        # (which read `optimized_order`), so assigning it from the pool looked
+        # like a duplicate rather than a move. Same transaction as the rest of
+        # the pull-back, and the same SSOT `DeliveryAssignmentService` uses.
+        if old_driver_id:
+            from business_app.services.route_optimization_service import RouteOptimizationService
+
+            StaffService.sync_active_delivery_counters([old_driver_id])
+            RouteOptimizationService.drop_from_route(old_driver_id, delivery.id)
+
+        return old_status, old_driver_id
+
+    @staticmethod
     def _restore_order_to_pool_eligible(order: Order, actor_id: int, *, notes: Optional[str]) -> None:
-        """Move ``order`` back to CONFIRMED so its returned delivery is pool-eligible.
+        """Move ``order`` back to CONFIRMED so its pulled-back delivery is pool-eligible.
 
         Routes through the ``OrderService.update_order_status`` SSOT whenever
         CONFIRMED is a transition-table-legal move from the order's current
@@ -1286,6 +1369,12 @@ class StaffService:
         the field directly, but always pairs it with an explicit
         ``OrderStatusHistory`` row so the move is never invisible to the audit
         trail the way the bug this replaces was.
+
+        ``notes`` is written VERBATIM on both branches, and ``None`` means no
+        note. The customer bot prints every order-history note on its Track
+        screen (telegram_bot/handlers/orders.py), so the old default ("Returned
+        to pool for re-dispatch") reached customers in English. Staff wording
+        belongs on DeliveryStatusHistory.
         """
         from shared.status_transitions import is_valid_order_transition
 
@@ -1298,7 +1387,7 @@ class StaffService:
                 order.id,
                 OrderStatus.CONFIRMED,
                 actor_id,
-                notes=notes or "Returned to pool for re-dispatch",
+                notes=notes,
                 commit=False,
             )
             return
@@ -1313,9 +1402,27 @@ class StaffService:
                 new_status=OrderStatus.CONFIRMED,
                 changed_by=actor_id,
                 changed_at=now,
-                notes=notes or "Returned to pool for re-dispatch",
+                notes=notes,
             )
         )
+
+    @staticmethod
+    def redispatch_block_code(delivery: Delivery) -> Optional[str]:
+        """Why ``delivery`` cannot be re-dispatched now, or None if it can.
+
+        The ONE statement of the re-dispatch rule (R18): the delivery is FAILED
+        and its order may still be rescheduled (`OrderScheduleService.
+        reschedule_block_code`, which means the order is still active).
+        `redispatch_failed_delivery` refuses with this code, and the admin
+        Delivery page publishes `can_redispatch` from it, so the button is
+        offered exactly when the endpoint would accept it. `reschedule`
+        re-checks both halves on the locked row.
+        """
+        if delivery.status != DeliveryStatus.FAILED:
+            return "STAFF_DELIVERY_NOT_REDISPATCHABLE"
+        from business_app.services.order_schedule_service import OrderScheduleService
+
+        return OrderScheduleService.reschedule_block_code(delivery.order)
 
     @staticmethod
     def redispatch_failed_delivery(
@@ -1324,31 +1431,82 @@ class StaffService:
         *,
         reason: Optional[str] = None,
     ) -> Delivery:
-        """Re-dispatch a FAILED delivery by returning it to the pool.
+        """Re-dispatch a FAILED delivery: reschedule its order to local today (R18).
 
-        Thin wrapper over ``return_delivery_to_pool`` that enforces the source
-        status. Shared entry point for the admin re-dispatch endpoint and the
-        operator staff-bot flow so the "only failed deliveries are
-        re-dispatchable" rule lives in one place.
+        This is the shared entry point for the admin Delivery-page button and the operator
+        staff-bot flow. It is a reschedule to today with the customer's window unchanged,
+        so a re-dispatch and an admin Reschedule are one code path
+        (``OrderScheduleService.reschedule``). They cannot disagree on the unassign,
+        history, bottle unbind, route and counter cleanup, the order's date, or who is
+        told.
+
+        The check below (`redispatch_block_code`: FAILED, and an order that may still
+        be rescheduled) is a FAST PATH only, read unlocked so the common mistake is
+        refused without taking a lock. ``expected_delivery_status`` makes
+        ``reschedule`` re-check FAILED on the row it has locked, and that check is the
+        one that counts. The landing follows R5. Once today's release has passed, the
+        delivery is ``scheduled`` and offered to drivers at once. Before that it is
+        ``rescheduled`` until the day's first shift starts (``redispatch_release_at``
+        says when). A still-PENDING order's row is held until the order is confirmed,
+        which has no instant to quote, so ``redispatch_release_at`` is None for it.
+
+        The window is passed through as it is. It is the customer's original preference,
+        not new admin input, so the endpoint validator's "same-day window already past"
+        rule does not apply to it.
 
         Raises:
-            NotFoundError: If delivery not found.
-            ValidationError: If the delivery is not in FAILED status.
+            NotFoundError: If the delivery is not found.
+            ValidationError: STAFF_DELIVERY_NOT_REDISPATCHABLE (not FAILED, here or
+                under the lock), ORDER_NOT_RESCHEDULABLE (the order left the active
+                lifecycle, here or under the lock), or any other ``reschedule`` refusal.
         """
         delivery = Delivery.query.get(delivery_id)
         if not delivery:
             raise NotFoundError("Delivery not found", error_code="STAFF_DELIVERY_NOT_FOUND")
-        if delivery.status != DeliveryStatus.FAILED:
+        # Fast path on an unlocked read; `reschedule` re-checks under the lock.
+        block_code = StaffService.redispatch_block_code(delivery)
+        if block_code == "STAFF_DELIVERY_NOT_REDISPATCHABLE":
             raise ValidationError(
                 f"Only failed deliveries can be re-dispatched (current status: {delivery.status.value})",
-                error_code="STAFF_DELIVERY_NOT_REDISPATCHABLE",
+                error_code=block_code,
             )
-        return StaffService.return_delivery_to_pool(
-            delivery_id,
-            actor_id,
+        if block_code is not None:
+            raise ValidationError(
+                f"Order {delivery.order.order_number} is {delivery.order.status.value}; "
+                "its delivery can no longer be re-dispatched.",
+                error_code=block_code,
+            )
+
+        from business_app.services.order_schedule_service import OrderScheduleService
+        from business_app.utils import delivery_window
+
+        order = delivery.order
+        rescheduled = OrderScheduleService.reschedule(
+            order.id,
+            delivery_date=delivery_window.local_now().date(),
+            window_start=order.delivery_window_start,
+            window_end=order.delivery_window_end,
+            actor_user_id=actor_id,
             reason=reason,
-            notes="Re-dispatched from failed status",
+            expected_delivery_status=DeliveryStatus.FAILED,
         )
+        return rescheduled.delivery
+
+    @staticmethod
+    def redispatch_release_at(delivery: Delivery) -> Optional[datetime]:
+        """When drivers will see a re-dispatched delivery, or None if there is no such instant (R25).
+
+        A re-dispatch made before today's first shift lands ``rescheduled`` and is held
+        until that shift starts (R5/R18). Both re-dispatch endpoints publish this
+        instant, so the operator is told when instead of "a driver can now re-claim
+        it". It asks ``OrderScheduleService.published_release_at``, the answer
+        ``order_schedule_fields`` publishes as ``release_at``, so a row held only
+        because its order is still PENDING (R23 corollary) quotes no instant that
+        has already passed.
+        """
+        from business_app.services.order_schedule_service import OrderScheduleService
+
+        return OrderScheduleService.published_release_at(delivery.order)
 
     @staticmethod
     def get_failed_deliveries(limit: int = 25) -> List[Delivery]:
@@ -1358,9 +1516,14 @@ class StaffService:
         Excludes deliveries whose order already left the active lifecycle
         (cancelled / delivered / returned) independently of the delivery — a
         FAILED delivery can outlive its order by months, and such a row must
-        never surface as a redispatch candidate (see return_delivery_to_pool)."""
+        never surface as a redispatch candidate (the re-dispatch itself refuses
+        it with ORDER_NOT_RESCHEDULABLE, see OrderScheduleService.reschedule)."""
         return (
             Delivery.query.join(Order, Delivery.order_id == Order.id)
+            # The SQL form of `StaffService.redispatch_block_code(delivery) is None`
+            # (FAILED, order still active). The operator bot must offer exactly the rows
+            # the re-dispatch accepts, so change the two together. Pinned by
+            # tests/integration/test_admin_delivery_page_actions.py.
             .filter(
                 Delivery.status == DeliveryStatus.FAILED,
                 Order.status.in_(ACTIVE_ORDER_STATUSES),
@@ -1377,7 +1540,12 @@ class StaffService:
 
     @staticmethod
     def update_delivery_status(
-        delivery_id: int, new_status: str, staff_user_id: int, metadata: Optional[Dict[str, Any]] = None
+        delivery_id: int,
+        new_status: str,
+        staff_user_id: int,
+        metadata: Optional[Dict[str, Any]] = None,
+        *,
+        acting_driver_id: Optional[int] = None,
     ) -> Delivery:
         """
         Update delivery status with transition validation and order status sync.
@@ -1387,18 +1555,45 @@ class StaffService:
             new_status: New status string (e.g. 'picked_up', 'in_transit', 'delivered', 'failed')
             staff_user_id: ID of the staff user making the update
             metadata: Optional metadata (e.g. fail_reason, cash_collected, notes)
+            acting_driver_id: The driver's users.id when the driver endpoint
+                (``PUT /staff/delivery/<id>/status``) is the caller. The delivery
+                must be assigned to exactly that user, or nothing is written
+                (R20). The admin Delivery page calls this method too and passes
+                nothing, because an admin may move any driver's delivery.
 
         Returns:
             Updated Delivery object
 
         Raises:
             NotFoundError: If delivery not found
+            ConflictError: STAFF_DELIVERY_NOT_OWNED, when ``acting_driver_id`` is not
+                the delivery's current driver
             ValidationError: If status transition is invalid
         """
         metadata = metadata or {}
-        delivery = Delivery.query.get(delivery_id)
+        if acting_driver_id is None:
+            delivery = Delivery.query.get(delivery_id)
+        else:
+            # Locked and re-read. A reschedule, reassign or return to the pool
+            # can commit between the driver drawing this card and tapping it.
+            # Each of them locks the Delivery first and moves
+            # `delivery_person_id`. Without the lock, a "Failed" tap that is in
+            # flight as a reschedule commits would write FAILED over the
+            # driverless row. Without `populate_existing`, the lock would be
+            # taken on a row whose already-loaded values are never refreshed
+            # (see OrderScheduleService.ensure_delivery_if_due).
+            delivery = Delivery.query.filter_by(id=delivery_id).with_for_update().populate_existing().one_or_none()
         if not delivery:
             raise NotFoundError("Delivery not found", error_code="STAFF_DELIVERY_NOT_FOUND")
+
+        # users.id against users.id. `delivery_person_id` references users.id,
+        # and so does the JWT identity. A DeliveryPerson.id is a different id
+        # space that only coincides by accident.
+        if acting_driver_id is not None and delivery.delivery_person_id != acting_driver_id:
+            raise ConflictError(
+                "This order is no longer assigned to you",
+                error_code="STAFF_DELIVERY_NOT_OWNED",
+            )
 
         cash_collection_service = None
         pre_cod_restricted = None
@@ -3479,7 +3674,7 @@ class StaffService:
 
         unassigned_deliveries = Delivery.query.filter(
             Delivery.delivery_person_id.is_(None),
-            Delivery.status.in_([DeliveryStatus.SCHEDULED, DeliveryStatus.PENDING]),
+            Delivery.status.in_(StaffService.CLAIMABLE_DELIVERY_STATUSES),
         ).count()
 
         deliveries_today = Delivery.query.filter(

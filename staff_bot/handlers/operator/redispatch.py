@@ -1,18 +1,22 @@
 """
 Re-dispatch Failed Delivery Handler for Staff Bot (operators / dispatchers).
 
-Lists deliveries currently in FAILED status and lets an operator return a chosen
-one to the unassigned pool (clearing the driver and restoring the order) so a
-driver can re-claim it. Mirrors the structure of RecentOrdersHandler.
+Lists deliveries currently in FAILED status and lets an operator re-dispatch a
+chosen one. The backend reschedules it to today (R18 of
+docs/superpowers/specs/2026-09-23-admin-order-reschedule-design.md). It returns to
+the pool at once, or at the day's first shift start if that has not come yet, and
+the operator is told which (R25). Mirrors the structure of RecentOrdersHandler.
 """
 import logging
+from datetime import datetime
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from staff_bot.handlers.base import BaseHandler
 from staff_bot.api_client import api_client
 from staff_bot.keyboards.common import CommonKeyboards
-from staff_bot.utils.formatters import format_currency, escape_html
+from staff_bot.utils.formatters import format_currency, escape_html, format_local_time
 from staff_bot.permissions import require_auth, require_operator
 from staff_bot.i18n import i18n
 
@@ -126,8 +130,20 @@ class RedispatchHandler(BaseHandler):
                     await self._handle_api_response_error(update, response, language)
                 return
 
+            # Before today's first shift the backend holds the delivery (`rescheduled`)
+            # and publishes when drivers will see it. "A driver can now re-claim it"
+            # would be false then (R25, admin-order-reschedule spec).
+            release_at = (response.data or {}).get('release_at')
+            if release_at:
+                text = i18n.get(
+                    'staff.redispatch.success_held',
+                    language,
+                    time=format_local_time(datetime.fromisoformat(release_at)),
+                )
+            else:
+                text = i18n.get('staff.redispatch.success', language)
             await query.edit_message_text(
-                f"✅ {i18n.get('staff.redispatch.success', language)}",
+                f"✅ {text}",
                 parse_mode='HTML',
                 reply_markup=CommonKeyboards.back_button(language),
             )

@@ -108,6 +108,11 @@ class DeliveryStatus(Enum):
     FAILED = 'failed'
     CANCELLED = 'cancelled'
     RETURNED = 'returned'
+    # Released to drivers once, now held for the later day an admin moved it to. Always
+    # driverless and never claimable: OrderScheduleService puts a row here and the release task
+    # takes it out (R3 of docs/superpowers/specs/2026-09-23-admin-order-reschedule-design.md).
+    # Last, because Postgres `ADD VALUE` appends the label (migration d7e8f9a0b1c2).
+    RESCHEDULED = 'rescheduled'
 
 
 class AssignmentSource(Enum):

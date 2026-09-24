@@ -35,6 +35,7 @@ class EmailTemplateService:
         "payment_confirmation": "payment_confirmation",
         "loyalty_reward": "loyalty_reward",
         "delivery_update": "delivery_update",
+        "delivery_rescheduled": "delivery_rescheduled",
         "subscription_created": "subscription_created",
         "subscription_reminder": "subscription_reminder",
         "subscription_renewal": "subscription_renewal",
@@ -84,6 +85,11 @@ class EmailTemplateService:
             "uz": "Yetkazib berish yangiligi - {company_name}",
             "en": "Delivery Update - {company_name}",
             "ru": "Обновление доставки - {company_name}",
+        },
+        "delivery_rescheduled": {
+            "uz": "Yetkazib berish sanasi o'zgardi: buyurtma #{order_number} - {company_name}",
+            "en": "Delivery rescheduled: order #{order_number} - {company_name}",
+            "ru": "Доставка перенесена: заказ #{order_number} - {company_name}",
         },
         "subscription_created": {
             "uz": "Obuna faollashtirildi - {company_name}",

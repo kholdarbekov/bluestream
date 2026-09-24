@@ -954,6 +954,11 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Yetib keldi',
         'ru': 'Прибыл'
     },
+    'notification.delivery_status.rescheduled': {
+        'en': 'Rescheduled',
+        'uz': 'Ko\'chirildi',
+        'ru': 'Перенесён'
+    },
     'staff.notification.cash_session_reopened': {
         'en': 'Your cash session #{session_id} was reopened by admin because the collected cash for order #{order_id} was corrected. Please re-submit when ready.',
         'uz': 'Kassa sessiyangiz #{session_id} administrator tomonidan qayta ochildi: #{order_id} buyurtma bo\'yicha yig\'ilgan summa tuzatildi. Iltimos, qayta yuboring.',
@@ -7110,6 +7115,84 @@ ADMIN_UI_ORDER_TRANSLATIONS = {
     'ui.orders.items_after': _ui_tr('Items after', 'Yangi mahsulotlar', 'Товары после'),
     'ui.orders.totals_before': _ui_tr('Totals before', 'Eski jami', 'Итоги до'),
     'ui.orders.totals_after': _ui_tr('Totals after', 'Yangi jami', 'Итоги после'),
+    # ---- Delivery schedule: Create Order picker, list column, detail row ----
+    # Rendered since the scheduled-orders feature (2026-08-19) but never seeded, so a ru/uz admin
+    # read English. Pinned by tests/unit/test_order_reschedule_ui_translations.py.
+    'ui.orders.delivery_schedule': _ui_tr('Delivery schedule', 'Yetkazib berish vaqti', 'Дата и время доставки'),
+    'ui.orders.awaiting_release': _ui_tr('Scheduled', 'Rejalashtirilgan', 'Запланировано'),
+    'ui.orders.deliver_asap': _ui_tr(
+        'Deliver as soon as possible',
+        'Imkon qadar tezroq yetkazish',
+        'Доставить как можно скорее',
+    ),
+    'ui.orders.window_between': _ui_tr('{{start}}–{{end}}', '{{start}}–{{end}}', '{{start}}–{{end}}'),
+    'ui.orders.window_until': _ui_tr('Before {{end}}', '{{end}} gacha', 'До {{end}}'),
+    'ui.orders.window_after': _ui_tr('After {{start}}', '{{start}} dan keyin', 'После {{start}}'),
+    'ui.orders.window_anytime': _ui_tr('Anytime', 'Istalgan vaqtda', 'В любое время'),
+    'ui.orders.window_morning': _ui_tr('Morning', 'Ertalab', 'Утро'),
+    'ui.orders.window_afternoon': _ui_tr('Afternoon', 'Kunduzi', 'День'),
+    'ui.orders.window_evening': _ui_tr('Evening', 'Kechqurun', 'Вечер'),
+    'ui.orders.window_custom': _ui_tr('Custom', 'Boshqa vaqt', 'Своё время'),
+    'ui.orders.window_from_any': _ui_tr('From (any)', 'Dan (istalgan)', 'С (любое)'),
+    'ui.orders.window_to_any': _ui_tr('To (any)', 'Gacha (istalgan)', 'До (любое)'),
+    # ---- Reschedule modal + detail row (docs/superpowers/specs/2026-09-23-admin-order-reschedule-design.md §6) ----
+    'ui.orders.delivery_status': _ui_tr('Delivery status', 'Yetkazib berish holati', 'Статус доставки'),
+    'ui.orders.reschedule': _ui_tr('Reschedule', "Ko'chirish", 'Перенести'),
+    'ui.orders.reschedule_title': _ui_tr('Reschedule delivery', "Yetkazib berishni ko'chirish", 'Перенос доставки'),
+    'ui.orders.reschedule_reason': _ui_tr('Reason (optional)', 'Sabab (ixtiyoriy)', 'Причина (необязательно)'),
+    'ui.orders.reschedule_reason_placeholder': _ui_tr(
+        'Staff only — never shown to the customer',
+        "Faqat xodimlar uchun — mijozga ko'rsatilmaydi",
+        'Только для сотрудников — клиенту не показывается',
+    ),
+    'ui.orders.reschedule_notifies_customer_telegram': _ui_tr(
+        'The customer will be notified of the new date in Telegram.',
+        'Mijozga yangi sana haqida Telegram orqali xabar yuboriladi.',
+        'Клиент получит уведомление о новой дате в Telegram.',
+    ),
+    'ui.orders.reschedule_notifies_customer_email': _ui_tr(
+        'The customer will be notified of the new date by email.',
+        'Mijozga yangi sana haqida elektron pochta orqali xabar yuboriladi.',
+        'Клиент получит уведомление о новой дате по электронной почте.',
+    ),
+    'ui.orders.reschedule_customer_unreachable': _ui_tr(
+        "The customer can't be notified automatically — tell them yourself.",
+        "Mijozga avtomatik xabar yuborib bo'lmaydi — unga o'zingiz ayting.",
+        'Клиента нельзя уведомить автоматически — сообщите ему сами.',
+    ),
+    'ui.orders.reschedule_driver_loses_stop': _ui_tr(
+        'Driver {{name}} will lose this stop.',
+        "Haydovchi {{name}} bu manzilni marshrutidan yo'qotadi.",
+        'Курьер {{name}} лишится этой точки маршрута.',
+    ),
+    'ui.orders.reschedule_success': _ui_tr('Delivery rescheduled', "Yetkazib berish ko'chirildi", 'Доставка перенесена'),
+    'ui.orders.reschedule_error.ORDER_NOT_RESCHEDULABLE': _ui_tr(
+        'This order is delivered, cancelled or returned, so it can no longer be rescheduled.',
+        "Bu buyurtma yetkazilgan, bekor qilingan yoki qaytarilgan, shuning uchun uni endi ko'chirib bo'lmaydi.",
+        'Этот заказ доставлен, отменён или возвращён, поэтому перенести его уже нельзя.',
+    ),
+    'ui.orders.reschedule_error.DELIVERY_NOT_RESCHEDULABLE': _ui_tr(
+        "This order's delivery is already delivered, cancelled or returned, so it can't be rescheduled.",
+        "Bu buyurtmaning yetkazib berilishi allaqachon yakunlangan, bekor qilingan yoki qaytarilgan, "
+        "shuning uchun uni ko'chirib bo'lmaydi.",
+        'Доставка этого заказа уже выполнена, отменена или возвращена, поэтому перенести её нельзя.',
+    ),
+    'ui.orders.reschedule_error.DELIVERY_DATE_REQUIRED': _ui_tr(
+        'Pick a delivery date: this order has already been released to drivers.',
+        'Yetkazib berish sanasini tanlang: bu buyurtma haydovchilarga allaqachon chiqarilgan.',
+        'Выберите дату доставки: этот заказ уже передан курьерам.',
+    ),
+    'ui.orders.reschedule_error.ORDER_RESCHEDULE_PAST_CONTRACT_END': _ui_tr(
+        "The customer's contract ends before that date. Pick an earlier date.",
+        'Mijozning shartnomasi bu sanadan oldin tugaydi. Oldinroq sanani tanlang.',
+        'Договор клиента заканчивается раньше этой даты. Выберите более раннюю дату.',
+    ),
+    # R24 (owner, 2026-09-24): DeliveryStatusHistory.reason is String(100).
+    'ui.orders.reschedule_error.ORDER_RESCHEDULE_REASON_TOO_LONG': _ui_tr(
+        'The reason can be at most 100 characters.',
+        "Sabab ko'pi bilan 100 belgidan iborat bo'lishi mumkin.",
+        'Причина — не более 100 символов.',
+    ),
 }
 
 ADMIN_UI_PRODUCT_TRANSLATIONS = {
@@ -7715,6 +7798,28 @@ ADMIN_UI_BACKFILL_TRANSLATIONS = {
     'ui.delivery.status_picked_up': _ui_tr('Picked up', 'Olindi', 'Забрано'),
     'ui.delivery.status_returned': _ui_tr('Returned', 'Qaytarildi', 'Возвращено'),
     'ui.delivery.status_scheduled': _ui_tr('Scheduled', 'Rejalashtirilgan', 'Запланировано'),
+    'ui.delivery.status_rescheduled': _ui_tr('Rescheduled', 'Ko\'chirildi', 'Перенесено'),
+    # The update action on a row with no status move (failed, delivered, cancelled,
+    # returned, held): the same form, for its notes only.
+    'ui.delivery.edit_notes': _ui_tr('Edit notes', 'Izohni tahrirlash', 'Изменить заметки'),
+    # R25: a re-dispatch before today's first shift lands `rescheduled` and waits
+    # for the shift start. The page fills {{time}} with it in local HH:mm.
+    'ui.delivery.redispatch_held': _ui_tr(
+        "Re-dispatched. Drivers will see it when today's shift opens at {{time}}.",
+        "Qayta yuborildi. Haydovchilar uni bugungi smena soat {{time}} da boshlanganda ko'radi.",
+        'Переотправлено. Водители увидят доставку, когда сегодня в {{time}} начнётся смена.',
+    ),
+    # Re-dispatch refusals the Delivery page explains itself (data.error_code).
+    'ui.delivery.redispatch_error.ORDER_NOT_RESCHEDULABLE': _ui_tr(
+        'This order is delivered, cancelled or returned, so its delivery can no longer be re-dispatched.',
+        "Bu buyurtma yetkazilgan, bekor qilingan yoki qaytarilgan, shuning uchun uni endi qayta yuborib bo'lmaydi.",
+        'Этот заказ уже доставлен, отменён или возвращён, поэтому доставку больше нельзя переотправить.',
+    ),
+    'ui.delivery.redispatch_error.STAFF_DELIVERY_NOT_REDISPATCHABLE': _ui_tr(
+        'This delivery is no longer failed, so there is nothing to re-dispatch. Refresh the list.',
+        "Bu yetkazib berish endi muvaffaqiyatsiz holatda emas, qayta yuboradigan narsa yo'q. Ro'yxatni yangilang.",
+        'Эта доставка больше не в статусе «Сбой», переотправлять нечего. Обновите список.',
+    ),
     'ui.delivery.time_slot': _ui_tr('Time Slot', 'Vaqt oralig\'i', 'Временной слот'),
     'ui.delivery.total_amount': _ui_tr('Total Amount', 'Jami summa', 'Общая сумма'),
     'ui.delivery.total_deliveries': _ui_tr('Total Deliveries', 'Jami yetkazib berishlar', 'Всего доставок'),

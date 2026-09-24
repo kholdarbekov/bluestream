@@ -51,12 +51,20 @@ class DeliveryKeyboards:
         order_id: int = None,
         can_mark_preparing: bool = False,
         back_callback: str = "staff_new_orders",
+        can_accept: bool = True,
     ) -> InlineKeyboardMarkup:
-        """Actions for pool order details."""
-        keyboard = [[InlineKeyboardButton(
-            f"✅ {i18n.get('staff.delivery.accept', language)}",
-            callback_data=f"staff_accept_order_{delivery_id}"
-        )]]
+        """Actions for pool order details.
+
+        ``can_accept`` is the backend's ``is_claimable`` for this delivery: a
+        detail view opened after the order was taken or moved to another day
+        offers no Accept, because the claim could only be refused.
+        """
+        keyboard = []
+        if can_accept:
+            keyboard.append([InlineKeyboardButton(
+                f"✅ {i18n.get('staff.delivery.accept', language)}",
+                callback_data=f"staff_accept_order_{delivery_id}"
+            )])
 
         if can_mark_preparing and order_id:
             keyboard.append([InlineKeyboardButton(

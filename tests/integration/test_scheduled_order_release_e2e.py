@@ -16,12 +16,13 @@ import pytest
 from flask_jwt_extended import create_access_token
 
 from business_app import db
-from business_app.models.delivery import Delivery, DeliveryPerson
+from business_app.models.delivery import Delivery, DeliveryPerson, DeliveryStatusHistory
 from business_app.models.order import Order
 from business_app.models.user import User, UserAddress
+from business_app.utils.delivery_window import window_slot_label
 from business_app.utils.password_security import hash_password
 from shared.business_config import MAX_SCHEDULE_HORIZON_DAYS
-from shared.enums import OrderStatus, UserRole
+from shared.enums import DeliveryStatus, OrderStatus, UserRole
 
 TZ = ZoneInfo("Asia/Tashkent")
 
@@ -121,6 +122,37 @@ def test_scheduled_order_is_invisible_then_released(app, client, driver_on_shift
 
     resp = client.get("/api/v1/staff/delivery/pool", headers={"Authorization": f"Bearer {token}"})
     assert order_id in [i["order_id"] for i in resp.get_json()["data"]["items"]]
+
+
+def test_release_stamps_the_new_row_and_offers_it_once(app, driver_on_shift, monkeypatch):
+    """The real release sweep → `create_delivery`, pinned before its stamping and
+    fan-out move into `stamp_schedule` / `offer_to_drivers` (spec §3.3). Every
+    enqueue is bound against the task's own signature and its exact payload is
+    asserted, so a fan-out that drifts during the extraction turns this red."""
+    from business_app.tasks import delivery_tasks, staff_tasks
+    from business_app.tasks.order_tasks import release_due_scheduled_orders
+    from tests.unit.test_delivery_service_business_rules import _task_spy
+
+    tomorrow = date.today() + timedelta(days=1)
+    order_id = _confirm_scheduled_order(app, driver_on_shift, tomorrow, time(12, 0), time(18, 0))
+    auto_assign = _task_spy(monkeypatch, delivery_tasks.auto_assign_delivery_task, "apply_async")
+    evaluator = _task_spy(monkeypatch, delivery_tasks.evaluate_pool_insertion_suggestions_task, "delay")
+    broadcast = _task_spy(monkeypatch, staff_tasks.notify_staff_new_order, "delay")
+
+    after = datetime.combine(tomorrow, time(8, 30), tzinfo=TZ).astimezone(timezone.utc)
+    with app.app_context(), \
+         patch("business_app.services.order_schedule_service.get_utc_now", return_value=after):
+        assert release_due_scheduled_orders()["released"] == 1
+        delivery = Delivery.query.filter_by(order_id=order_id).one()
+
+        assert delivery.status == DeliveryStatus.SCHEDULED
+        assert delivery.delivery_person_id is None
+        assert delivery.scheduled_date.date() == tomorrow
+        assert delivery.scheduled_time_slot == "12:00-18:00"
+        assert delivery.estimated_delivery_time is not None
+        assert auto_assign == [((delivery.id,), {}, {"countdown": 300})]
+        assert evaluator == [((delivery.id,), {})]
+        assert broadcast == []
 
 
 def test_sweep_catches_up_on_a_missed_day(app, driver_on_shift):
@@ -512,3 +544,243 @@ def test_pool_item_publishes_the_window(app, client, driver_on_shift):
     resp = client.get("/api/v1/staff/delivery/pool", headers={"Authorization": f"Bearer {token}"})
     item = next(i for i in resp.get_json()["data"]["items"] if i["order_id"] == order_id)
     assert item["delivery_window"] == {"start": "19:00", "end": None, "kind": "after", "label": "after 19:00"}
+
+
+# ---------------------------------------------------------------------------
+# A held (`rescheduled`) row: released to drivers once, then moved to a later
+# day (docs/superpowers/specs/2026-09-23-admin-order-reschedule-design.md
+# §3.5). The sweep brings it back on its new day's release moment, and the
+# screens that say "Scheduled" keep saying so until then.
+#
+# `_local_today()` and `_admin_headers(app, admin_user)` are the helpers
+# defined above, alongside the admin create-order tests.
+# ---------------------------------------------------------------------------
+
+
+def _hold(app, order_id):
+    """Park the order's delivery in `rescheduled`, the shape a reschedule to a
+    later day leaves (R3/R5): released once, driverless, no ETA, the order's
+    new date stamped on it, and the pull-back in its history.
+
+    Seeded directly rather than through PATCH /admin/orders/<id>/schedule, so
+    this file pins the RELEASE half on its own. The write half is covered in
+    test_admin_order_reschedule.py."""
+    with app.app_context():
+        order = Order.query.get(order_id)
+        delivery = Delivery(
+            order_id=order.id,
+            status=DeliveryStatus.RESCHEDULED,
+            delivery_person_id=None,
+            distance_km=2.4,
+            estimated_delivery_time=None,
+            scheduled_date=order.delivery_date,
+            scheduled_time_slot=window_slot_label(order.delivery_window_start, order.delivery_window_end),
+            delivery_attempts=1,
+        )
+        db.session.add(delivery)
+        db.session.flush()
+        db.session.add(
+            DeliveryStatusHistory(
+                delivery_id=delivery.id,
+                old_status=DeliveryStatus.FAILED,
+                new_status=DeliveryStatus.RESCHEDULED,
+                changed_by=None,
+                notes=f"Rescheduled to {order.delivery_date.isoformat()}",
+            )
+        )
+        db.session.commit()
+        return delivery.id
+
+
+def test_a_held_row_waits_for_its_new_morning_then_rejoins_the_pool(
+    app, client, admin_user, driver_on_shift, monkeypatch
+):
+    """At 06:00 on its new day the shift has not opened, so the row stays held.
+    The sweep counts it as `awaiting` and offers it to nobody. The Orders
+    page's "Scheduled" tag and the Dispatch board's `scheduled` bucket (both
+    asking `is_awaiting_release`) still show it as held, and the drivers' pool
+    does not list it.
+
+    At 08:30 the sweep flips it to `scheduled` and fires the offer fan-out
+    exactly once. A second tick finds nothing left to release, and the pool
+    lists the row.
+
+    Only the broker is replaced: `_task_spy` records each publish against the
+    task's own signature, so the real `offer_to_drivers` runs and its exact
+    payloads are asserted."""
+    from business_app.tasks import delivery_tasks
+    from business_app.tasks.order_tasks import release_due_scheduled_orders
+    from tests.unit.test_delivery_service_business_rules import _task_spy
+
+    new_day = _local_today() + timedelta(days=1)
+    order_id = _confirm_scheduled_order(app, driver_on_shift, new_day, window_end=time(18, 0))
+    delivery_id = _hold(app, order_id)
+    admin_headers = _admin_headers(app, admin_user)
+    with app.app_context():
+        driver_token = create_access_token(identity=str(driver_on_shift), additional_claims={"role": "delivery_driver"})
+    driver_headers = {"Authorization": f"Bearer {driver_token}"}
+    auto_assign = _task_spy(monkeypatch, delivery_tasks.auto_assign_delivery_task, "apply_async")
+    evaluator = _task_spy(monkeypatch, delivery_tasks.evaluate_pool_insertion_suggestions_task, "delay")
+    # `driver_on_shift` opens at 08:00 Tashkent.
+    opens_at = datetime.combine(new_day, time(8, 0), tzinfo=TZ).astimezone(timezone.utc)
+
+    def _pool_order_ids():
+        resp = client.get("/api/v1/staff/delivery/pool", headers=driver_headers)
+        assert resp.status_code == 200, resp.get_data(as_text=True)
+        return [i["order_id"] for i in resp.get_json()["data"]["items"]]
+
+    def _orders_row():
+        resp = client.get("/api/v1/admin/orders", headers=admin_headers)
+        assert resp.status_code == 200, resp.get_data(as_text=True)
+        return next(r for r in resp.get_json()["data"]["items"] if r["id"] == order_id)
+
+    # --- 06:00 on its new day: still held
+    before = datetime.combine(new_day, time(6, 0), tzinfo=TZ).astimezone(timezone.utc)
+    with app.app_context(), \
+         patch("business_app.services.order_schedule_service.get_utc_now", return_value=before):
+        assert release_due_scheduled_orders() == {"released": 0, "failed": 0, "awaiting": 1}
+        assert auto_assign == []
+        assert evaluator == []
+
+        row = _orders_row()
+        assert row["awaiting_release"] is True
+        assert row["release_at"] == opens_at.isoformat()
+        board = client.get(f"/api/v1/admin/dispatch/snapshot?date={new_day.isoformat()}", headers=admin_headers)
+        assert board.status_code == 200, board.get_data(as_text=True)
+        assert order_id in [s["order_id"] for s in board.get_json()["data"]["scheduled"]]
+        assert order_id not in [p["order_id"] for p in board.get_json()["data"]["pool"]]
+    assert order_id not in _pool_order_ids()
+
+    with app.app_context():
+        held = db.session.get(Delivery, delivery_id)
+        assert held.status == DeliveryStatus.RESCHEDULED
+        assert held.estimated_delivery_time is None
+
+    # --- 08:30: released, offered exactly once, and back in the pool
+    after = datetime.combine(new_day, time(8, 30), tzinfo=TZ).astimezone(timezone.utc)
+    with app.app_context(), \
+         patch("business_app.services.order_schedule_service.get_utc_now", return_value=after):
+        assert release_due_scheduled_orders() == {"released": 1, "failed": 0, "awaiting": 0}
+        # The row is `scheduled` now, so it is no longer a candidate at all.
+        assert release_due_scheduled_orders() == {"released": 0, "failed": 0, "awaiting": 0}
+        # Offered exactly once over both ticks, with the held row's own id.
+        assert auto_assign == [((delivery_id,), {}, {"countdown": 300})]
+        assert evaluator == [((delivery_id,), {})]
+
+        row = _orders_row()
+        assert row["awaiting_release"] is False and row["release_at"] is None
+    assert order_id in _pool_order_ids()
+
+    with app.app_context():
+        released = db.session.get(Delivery, delivery_id)
+        assert released.status == DeliveryStatus.SCHEDULED
+        assert released.delivery_person_id is None
+        assert released.estimated_delivery_time is not None
+        assert released.scheduled_date.date() == new_day
+        history = (
+            DeliveryStatusHistory.query.filter_by(delivery_id=delivery_id)
+            .order_by(DeliveryStatusHistory.id.asc())
+            .all()
+        )
+        assert [(h.old_status, h.new_status) for h in history] == [
+            (DeliveryStatus.FAILED, DeliveryStatus.RESCHEDULED),
+            (DeliveryStatus.RESCHEDULED, DeliveryStatus.SCHEDULED),
+        ]
+        assert history[-1].changed_by is None and history[-1].automatic is True
+
+
+def test_cancelling_the_order_cancels_its_held_delivery_and_nothing_is_released(
+    app, client, admin_user, driver_on_shift, monkeypatch
+):
+    """The admin's Cancel (PUT /admin/orders/<id>/status with the exact body
+    Orders.js sends) runs the order-cancel cascade. That cascade cancels any
+    non-terminal delivery, and `rescheduled` is not terminal. When its morning
+    comes, the sweep has nothing to release: a cancelled order is not a
+    candidate."""
+    from business_app.tasks import delivery_tasks
+    from business_app.tasks.order_tasks import release_due_scheduled_orders
+    from tests.unit.test_delivery_service_business_rules import _task_spy
+
+    new_day = _local_today() + timedelta(days=1)
+    order_id = _confirm_scheduled_order(app, driver_on_shift, new_day)
+    delivery_id = _hold(app, order_id)
+    auto_assign = _task_spy(monkeypatch, delivery_tasks.auto_assign_delivery_task, "apply_async")
+    evaluator = _task_spy(monkeypatch, delivery_tasks.evaluate_pool_insertion_suggestions_task, "delay")
+
+    resp = client.put(
+        f"/api/v1/admin/orders/{order_id}/status",
+        headers=_admin_headers(app, admin_user),
+        json={"status": "cancelled", "notes": "Cancelled by admin"},
+    )
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert resp.get_json()["data"]["order"]["status"] == "cancelled"
+
+    with app.app_context():
+        assert db.session.get(Delivery, delivery_id).status == DeliveryStatus.CANCELLED
+        last = (
+            DeliveryStatusHistory.query.filter_by(delivery_id=delivery_id)
+            .order_by(DeliveryStatusHistory.id.desc())
+            .first()
+        )
+        assert (last.old_status, last.new_status) == (DeliveryStatus.RESCHEDULED, DeliveryStatus.CANCELLED)
+
+    after = datetime.combine(new_day, time(8, 30), tzinfo=TZ).astimezone(timezone.utc)
+    with app.app_context(), \
+         patch("business_app.services.order_schedule_service.get_utc_now", return_value=after):
+        assert release_due_scheduled_orders() == {"released": 0, "failed": 0, "awaiting": 0}
+        assert db.session.get(Delivery, delivery_id).status == DeliveryStatus.CANCELLED
+    # Nothing was offered: neither by the cancel nor by the sweep.
+    assert auto_assign == []
+    assert evaluator == []
+
+
+def test_confirming_a_pending_order_releases_its_held_row(
+    app, client, admin_user, driver_on_shift, monkeypatch
+):
+    """R23's corollary, second half: a reschedule holds a still-PENDING order's
+    row even on a due date, and confirming the order is what releases it. The
+    admin's Confirm (PUT /admin/orders/<id>/status, the body Orders.js sends)
+    runs update_order_status -> ensure_delivery_if_due -> the held-row branch,
+    which flips the row into the pool and fires the offer fan-out once."""
+    from business_app.tasks import delivery_tasks
+    from tests.unit.test_delivery_service_business_rules import _task_spy
+
+    today = _local_today()
+    order_id = _confirm_scheduled_order(app, driver_on_shift, today)
+    with app.app_context():
+        order = Order.query.get(order_id)
+        order.status = OrderStatus.PENDING
+        db.session.commit()
+    delivery_id = _hold(app, order_id)
+    auto_assign = _task_spy(monkeypatch, delivery_tasks.auto_assign_delivery_task, "apply_async")
+    evaluator = _task_spy(monkeypatch, delivery_tasks.evaluate_pool_insertion_suggestions_task, "delay")
+
+    after_open = datetime.combine(today, time(8, 30), tzinfo=TZ).astimezone(timezone.utc)
+    with patch("business_app.services.order_schedule_service.get_utc_now", return_value=after_open):
+        resp = client.put(
+            f"/api/v1/admin/orders/{order_id}/status",
+            headers=_admin_headers(app, admin_user),
+            json={"status": "confirmed", "notes": "Confirmed by admin"},
+        )
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+
+    with app.app_context():
+        db.session.expire_all()
+        released = db.session.get(Delivery, delivery_id)
+        assert released.status == DeliveryStatus.SCHEDULED
+        assert released.delivery_person_id is None
+        assert released.estimated_delivery_time is not None
+        assert Delivery.query.filter_by(order_id=order_id).count() == 1
+        last = (
+            DeliveryStatusHistory.query.filter_by(delivery_id=delivery_id)
+            .order_by(DeliveryStatusHistory.id.desc())
+            .first()
+        )
+        assert (last.old_status, last.new_status, last.changed_by, last.automatic) == (
+            DeliveryStatus.RESCHEDULED,
+            DeliveryStatus.SCHEDULED,
+            None,
+            True,
+        )
+    assert auto_assign == [((delivery_id,), {}, {"countdown": 300})]
+    assert evaluator == [((delivery_id,), {})]

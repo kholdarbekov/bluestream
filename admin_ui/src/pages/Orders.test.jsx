@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildSchedulePayload } from './Orders';
+import { buildSchedulePayload } from '../components/orders/deliverySchedule';
 
 describe('buildSchedulePayload', () => {
   it('maps the Anytime preset to an open window', () => {

@@ -603,6 +603,32 @@ def serialize_user_admin(user, include_statistics: bool = False) -> Dict[str, An
         }
 
 
+def order_schedule_fields(order: Order, *, detail: bool) -> Dict[str, Any]:
+    """The delivery schedule and the reschedule answer, for BOTH admin order payloads.
+
+    `serialize_order_admin` (the list row, `detail=False`) and
+    `GET /admin/orders/<id>` (`detail=True`) publish this one dict. The detail
+    payload REPLACES the list row in Orders.js's `selectedOrder` while the
+    modal opens, so a field the two computed separately would change meaning
+    under the admin's cursor. The detail used to omit the window and the
+    release fields outright. `detail=False` adds no query per row; see
+    `OrderScheduleService.get_reschedule_metadata`.
+    """
+    # Lazy, like every cross-module import in `serialize_order_admin`: keeps
+    # this module importable before the service layer is wired up.
+    from business_app.services.order_schedule_service import OrderScheduleService
+
+    awaiting_release = OrderScheduleService.is_awaiting_release(order)
+    release_at = OrderScheduleService.published_release_at(order)
+    return {
+        "delivery_date": order.delivery_date.isoformat() if order.delivery_date else None,
+        "delivery_window": format_delivery_window(order.delivery_window_start, order.delivery_window_end),
+        "awaiting_release": awaiting_release,
+        "release_at": release_at.isoformat() if release_at else None,
+        **OrderScheduleService.get_reschedule_metadata(order, detail=detail),
+    }
+
+
 def serialize_order_admin(order: Order) -> Dict[str, Any]:
     """
     Serialize order for admin view
@@ -614,16 +640,10 @@ def serialize_order_admin(order: Order) -> Dict[str, Any]:
         Serialized order data for admin
     """
     try:
-        # Local import: order_schedule_service imports business_app.models.*
-        # only, so this is not a real cycle risk, but every other
-        # cross-service import in this function (see order_serializers below)
-        # is already lazy -- matching that keeps this module importable before
-        # the service layer is fully wired up.
+        # Local import: every other cross-module import in this function is
+        # already lazy -- matching that keeps this module importable before the
+        # service layer is fully wired up.
         from business_app.serializers.order_serializers import payability_fields
-        from business_app.services.order_schedule_service import OrderScheduleService
-
-        awaiting_release = OrderScheduleService.is_awaiting_release(order)
-        release_at = OrderScheduleService.release_at(order) if awaiting_release else None
 
         data = {
             "id": order.id,
@@ -644,15 +664,12 @@ def serialize_order_admin(order: Order) -> Dict[str, Any]:
             "payment_method": order.payment_method.value if order.payment_method else None,
             "is_subscription_order": bool(order.is_subscription_order),
             "subscription_id": order.subscription_id,
-            "delivery_date": order.delivery_date.isoformat() if order.delivery_date else None,
-            "delivery_window": format_delivery_window(order.delivery_window_start, order.delivery_window_end),
-            "awaiting_release": awaiting_release,
-            "release_at": release_at.isoformat() if release_at else None,
             "delivery_address": order.delivery_address.to_dict() if getattr(order, "delivery_address", None) else None,
             "special_instructions": getattr(order, "special_instructions", None),
             "created_at": order.created_at.isoformat() if order.created_at else None,
             "updated_at": order.updated_at.isoformat() if order.updated_at else None,
         }
+        data.update(order_schedule_fields(order, detail=False))
 
         # Add customer information
         if order.user:

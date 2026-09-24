@@ -50,6 +50,7 @@ VISITS_PAGE = REPO_ROOT / "admin_ui/src/pages/Visits.js"
 OUTLET_VOCABULARY = REPO_ROOT / "admin_ui/src/components/sales/outletVocabulary.js"
 ANALYTICS_PAGE = REPO_ROOT / "admin_ui/src/pages/Analytics.js"
 ANALYTICS_AGENT_TEST = REPO_ROOT / "admin_ui/src/__tests__/pages/Analytics.agentPerformance.test.js"
+DELIVERY_PAGE = REPO_ROOT / "admin_ui/src/pages/Delivery.js"
 
 _LINE_COMMENT = re.compile(r"//[^\n]*")
 _QUOTED = re.compile(r"'([^']*)'")
@@ -469,6 +470,39 @@ def test_outlets_page_mirrors_the_backend_enumerations():
         "business_app/models/sales_visits.py. The outcome filter sends free text straight to "
         "`GET /admin/sales/visits`, which 400s on a value the CHECK constraint never allowed."
     )
+
+
+def test_delivery_page_mirrors_every_delivery_status():
+    """`Delivery.js` hand-copies `DeliveryStatus` into DELIVERY_STATUSES. The status
+    filter, every label and the update dropdown's option names are built from it.
+
+    A status the enum gains and the page lacks is unfilterable and renders as its raw
+    value. `rescheduled` was exactly that: it needed its own filter option, label and
+    colour. A status the page offers but the enum lacks is a filter the backend 400s.
+    The page orders its list for reading, so only membership is pinned.
+
+    Each fallback label is the seeded `en` value, so a label reads the same before and
+    after the seed runs.
+    """
+    from scripts.seed_backend_translations import BACKEND_TRANSLATIONS
+    from shared.enums import DeliveryStatus
+
+    declared = _declared_array(DELIVERY_PAGE, "DELIVERY_STATUSES")
+
+    assert len(declared) == len(set(declared)), "DELIVERY_STATUSES lists a status twice"
+    assert set(declared) == {status.value for status in DeliveryStatus}, (
+        "\nDELIVERY_STATUSES in admin_ui/src/pages/Delivery.js no longer mirrors "
+        "shared/enums.py DeliveryStatus. Add the value there, with a fallback label in "
+        "DELIVERY_STATUS_FALLBACK_LABELS and a colour in deliveryStatusColors."
+    )
+
+    source = DELIVERY_PAGE.read_text(encoding="utf-8")
+    block = re.search(r"const DELIVERY_STATUS_FALLBACK_LABELS = \{(.*?)\};", source, re.DOTALL)
+    assert block, "DELIVERY_STATUS_FALLBACK_LABELS not found in admin_ui/src/pages/Delivery.js"
+    fallbacks = dict(re.findall(r"(\w+): '([^']*)'", _LINE_COMMENT.sub("", block.group(1))))
+    assert fallbacks == {
+        status.value: BACKEND_TRANSLATIONS[f"ui.delivery.status_{status.value}"]["en"] for status in DeliveryStatus
+    }
 
 
 def test_analytics_agent_columns_mirror_the_metric_keys():

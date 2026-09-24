@@ -1,7 +1,8 @@
 """Regression tests for driver workload consistency across admin and staff flows."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -10,6 +11,7 @@ from business_app.models.order import Order, OrderStatusHistory
 from business_app.models.user import User
 from business_app.services.admin_delivery_service import AdminDeliveryService
 from business_app.services.staff_service import StaffService
+from shared.constants import DISPLAY_TIMEZONE
 from shared.enums import DeliveryStatus, OrderStatus, PaymentMethod, UserRole, UserStatus, UserType
 from business_app.utils.exceptions import ConflictError, InvalidStateTransition, ValidationError
 from business_app.utils.password_security import hash_password
@@ -89,6 +91,27 @@ def _create_delivery(
     db.session.add(delivery)
     db.session.commit()
     return delivery
+
+
+@pytest.fixture
+def after_todays_release(monkeypatch):
+    """Pin the business clock to 12:00 Tashkent today, after every rostered shift start.
+
+    Re-dispatch is a reschedule to local today (R18 of
+    docs/superpowers/specs/2026-09-23-admin-order-reschedule-design.md), and the clock
+    decides where it lands: `scheduled` once today's release has passed, `rescheduled`
+    before it. Three seams read that clock: `delivery_window.local_now` (the "today" it
+    dates to), `local_windows.local_now` (it binds its own copy) and
+    `order_schedule_service.get_utc_now` (the `release_at <= now` test).
+    """
+    from business_app.services import order_schedule_service
+    from business_app.utils import delivery_window, local_windows
+
+    local_noon = datetime.combine(delivery_window.local_now().date(), time(12, 0), tzinfo=ZoneInfo(DISPLAY_TIMEZONE))
+    monkeypatch.setattr(delivery_window, "local_now", lambda: local_noon)
+    monkeypatch.setattr(local_windows, "local_now", lambda: local_noon)
+    monkeypatch.setattr(order_schedule_service, "get_utc_now", lambda: local_noon.astimezone(UTC))
+    return local_noon
 
 
 def test_accept_order_uses_live_count_instead_of_stale_cached_counter(db, sample_user, delivery_driver):
@@ -274,10 +297,17 @@ def test_assert_unassigned_for_pool_status_rejects_assigned_pool_delivery(db, sa
     assert_unassigned_for_pool_status(delivery, DeliveryStatus.SCHEDULED)
 
 
-def test_redispatch_failed_delivery_returns_it_to_pool(db, sample_user, delivery_driver, admin_user):
-    """Re-dispatching a FAILED delivery clears the driver, resets to SCHEDULED,
-    restores the order to pool-eligible, and surfaces it in the pool."""
-    _create_delivery_person(db, delivery_driver, current_active_deliveries=1)
+def test_redispatch_failed_delivery_returns_it_to_pool(
+    db, sample_user, delivery_driver, admin_user, after_todays_release
+):
+    """Re-dispatching a FAILED delivery is a reschedule to local today (R18). After
+    today's release it clears the driver, lands SCHEDULED, restores the order to
+    pool-eligible, dates it today, and surfaces it in the pool."""
+    profile = _create_delivery_person(db, delivery_driver, current_active_deliveries=1)
+    # The release instant is today + the earliest rostered shift start, so it is set
+    # here rather than left to the model default.
+    profile.working_hours_start = "08:00"
+    db.session.commit()
     order = _create_order(db, sample_user.id, "ORD-REDISPATCH-1")
     order.status = OrderStatus.OUT_FOR_DELIVERY
     db.session.commit()
@@ -295,6 +325,7 @@ def test_redispatch_failed_delivery_returns_it_to_pool(db, sample_user, delivery
     assert delivery.status == DeliveryStatus.SCHEDULED
     assert delivery.delivery_person_id is None
     assert order.status == OrderStatus.CONFIRMED
+    assert order.delivery_date == after_todays_release.date()
     pool_ids = {item.id for item in StaffService.get_delivery_pool()["items"]}
     assert delivery.id in pool_ids
 
@@ -345,7 +376,9 @@ def test_redispatch_rejects_delivery_whose_order_was_cancelled_independently(
     db, sample_user, delivery_driver, admin_user
 ):
     """Same guard via the redispatch_failed_delivery entry point (staff bot /
-    admin panel 'failed deliveries' list)."""
+    admin panel 'failed deliveries' list). Re-dispatch is a reschedule now, so the
+    refusal is the reschedule SSOT's own: 400 ORDER_NOT_RESCHEDULABLE (R1),
+    replacing the old 409 STAFF_ORDER_NOT_ACTIVE."""
     order = _create_order(db, sample_user.id, "ORD-DEADORDER-2")
     order.status = OrderStatus.CANCELLED
     db.session.commit()
@@ -353,9 +386,9 @@ def test_redispatch_rejects_delivery_whose_order_was_cancelled_independently(
         db, order.id, delivery_person_id=delivery_driver.id, status=DeliveryStatus.FAILED
     )
 
-    with pytest.raises(ConflictError) as exc_info:
+    with pytest.raises(ValidationError) as exc_info:
         StaffService.redispatch_failed_delivery(delivery.id, admin_user.id)
-    assert exc_info.value.error_code == "STAFF_ORDER_NOT_ACTIVE"
+    assert exc_info.value.error_code == "ORDER_NOT_RESCHEDULABLE"
 
     db.session.refresh(delivery)
     assert delivery.status == DeliveryStatus.FAILED
@@ -449,6 +482,24 @@ def test_monitor_stranded_deliveries_flags_only_assigned_pool_rows(db, sample_us
     assert result["delivery_ids"] == [stranded.id]
 
 
+def test_monitor_stranded_deliveries_flags_a_held_row_that_kept_its_driver(db, sample_user, delivery_driver):
+    """A `rescheduled` row is driverless by definition (DELIVERY_DRIVERLESS_STATES), so one that
+    kept a driver is stranded exactly like a pool row. SQLite has no CHECK, which is the only
+    reason this test can build the row Postgres refuses."""
+    from business_app.tasks.delivery_monitoring_tasks import monitor_stranded_deliveries
+
+    held_order = _create_order(db, sample_user.id, "ORD-STRANDED-HELD-1")
+    held = _create_delivery(
+        db, held_order.id, delivery_person_id=delivery_driver.id, status=DeliveryStatus.RESCHEDULED
+    )
+    healthy_held_order = _create_order(db, sample_user.id, "ORD-STRANDED-HELD-2")
+    _create_delivery(db, healthy_held_order.id, status=DeliveryStatus.RESCHEDULED)  # driverless: fine
+
+    result = monitor_stranded_deliveries()
+
+    assert result == {"stranded_count": 1, "delivery_ids": [held.id]}
+
+
 def test_admin_reassign_uses_live_workload_and_resyncs_cached_counters(
     db,
     sample_user,
@@ -494,3 +545,163 @@ def test_admin_reassign_uses_live_workload_and_resyncs_cached_counters(
     assert updated_delivery.delivery_person_id == new_driver.id
     assert old_profile.current_active_deliveries == 0
     assert new_profile.current_active_deliveries == 1
+
+
+# --------------------------------------------------------------------------- #
+# `_pull_back_delivery`: the core shared by "return to pool" and the admin
+# reschedule (docs/superpowers/specs/2026-09-23-admin-order-reschedule-design.md 3.3)
+# --------------------------------------------------------------------------- #
+
+
+def test_pull_back_parks_a_delivery_driverless_and_leaves_the_commit_to_the_caller(
+    db, sample_user, delivery_driver, admin_user
+):
+    """The reschedule runs this core inside its own transaction, beside the new
+    dates, so the core writes and never commits. A rollback must undo all of it."""
+    from business_app.models.delivery import DeliveryStatusHistory
+
+    _create_delivery_person(db, delivery_driver, current_active_deliveries=1)
+    order = _create_order(db, sample_user.id, "ORD-PULLBACK-1")
+    order.status = OrderStatus.OUT_FOR_DELIVERY
+    db.session.commit()
+    delivery = _create_delivery(
+        db, order.id, delivery_person_id=delivery_driver.id, status=DeliveryStatus.IN_TRANSIT
+    )
+    driver_id, admin_id = delivery_driver.id, admin_user.id
+
+    result = StaffService._pull_back_delivery(
+        delivery,
+        admin_id,
+        target_status=DeliveryStatus.RESCHEDULED,
+        reason="customer travelling",
+        notes="Rescheduled to 2026-09-25",
+    )
+
+    assert result == (DeliveryStatus.IN_TRANSIT, driver_id)
+    assert (delivery.status, delivery.delivery_person_id) == (DeliveryStatus.RESCHEDULED, None)
+    assert order.status == OrderStatus.CONFIRMED
+    (moved,) = DeliveryStatusHistory.query.filter_by(delivery_id=delivery.id).all()
+    assert (moved.old_status, moved.new_status, moved.changed_by, moved.reason, moved.notes) == (
+        DeliveryStatus.IN_TRANSIT,
+        DeliveryStatus.RESCHEDULED,
+        admin_id,
+        "customer travelling",
+        "Rescheduled to 2026-09-25",
+    )
+    (restored,) = OrderStatusHistory.query.filter_by(order_id=order.id).all()
+    assert (restored.old_status, restored.new_status, restored.notes) == (
+        OrderStatus.OUT_FOR_DELIVERY,
+        OrderStatus.CONFIRMED,
+        None,
+    )
+    assert DeliveryPerson.query.filter_by(user_id=driver_id).one().current_active_deliveries == 0
+
+    db.session.rollback()
+
+    assert (delivery.status, delivery.delivery_person_id) == (DeliveryStatus.IN_TRANSIT, driver_id)
+    assert order.status == OrderStatus.OUT_FOR_DELIVERY
+    assert DeliveryStatusHistory.query.filter_by(delivery_id=delivery.id).count() == 0
+    assert OrderStatusHistory.query.filter_by(order_id=order.id).count() == 0
+
+
+def test_pull_back_of_a_row_already_held_records_no_transition(db, sample_user, admin_user):
+    """Re-dating a delivery that is already waiting for its day is not a status
+    change: no DeliveryStatusHistory row, and the CONFIRMED order is left alone."""
+    from business_app.models.delivery import DeliveryStatusHistory
+
+    order = _create_order(db, sample_user.id, "ORD-PULLBACK-2")
+    delivery = _create_delivery(db, order.id, status=DeliveryStatus.RESCHEDULED)
+
+    result = StaffService._pull_back_delivery(
+        delivery,
+        admin_user.id,
+        target_status=DeliveryStatus.RESCHEDULED,
+        reason="moved again",
+        notes="Rescheduled to 2026-09-26",
+    )
+
+    assert result == (DeliveryStatus.RESCHEDULED, None)
+    assert DeliveryStatusHistory.query.filter_by(delivery_id=delivery.id).count() == 0
+    assert OrderStatusHistory.query.filter_by(order_id=order.id).count() == 0
+    assert order.status == OrderStatus.CONFIRMED
+
+
+def test_pull_back_with_restore_order_off_leaves_a_pending_order_untouched(db, sample_user, admin_user):
+    """R23: a reschedule never confirms an order. With the default the core would
+    take this PENDING (unpaid) order to CONFIRMED through `update_order_status`,
+    which runs the CONFIRMED side effects (inventory confirmation, the release
+    gate). `restore_order=False` leaves the order alone and still parks the
+    delivery."""
+    from business_app.models.delivery import DeliveryStatusHistory
+
+    order = _create_order(db, sample_user.id, "ORD-PULLBACK-PENDING")
+    order.status = OrderStatus.PENDING
+    db.session.commit()
+    delivery = _create_delivery(db, order.id, status=DeliveryStatus.SCHEDULED)
+
+    result = StaffService._pull_back_delivery(
+        delivery,
+        admin_user.id,
+        target_status=DeliveryStatus.RESCHEDULED,
+        reason="customer travelling",
+        notes="Rescheduled to 2026-09-25",
+        restore_order=False,
+    )
+
+    assert result == (DeliveryStatus.SCHEDULED, None)
+    assert (delivery.status, delivery.delivery_person_id) == (DeliveryStatus.RESCHEDULED, None)
+    assert order.status == OrderStatus.PENDING
+    assert OrderStatusHistory.query.filter_by(order_id=order.id).count() == 0
+    (moved,) = DeliveryStatusHistory.query.filter_by(delivery_id=delivery.id).all()
+    assert (moved.old_status, moved.new_status, moved.changed_by, moved.reason) == (
+        DeliveryStatus.SCHEDULED,
+        DeliveryStatus.RESCHEDULED,
+        admin_user.id,
+        "customer travelling",
+    )
+
+
+@pytest.mark.parametrize(
+    "target", [DeliveryStatus.PENDING, DeliveryStatus.ASSIGNED, DeliveryStatus.FAILED], ids=lambda s: s.value
+)
+def test_pull_back_parks_only_in_scheduled_or_rescheduled(db, sample_user, delivery_driver, admin_user, target):
+    order = _create_order(db, sample_user.id, f"ORD-PULLBACK-{target.value}")
+    delivery = _create_delivery(
+        db, order.id, delivery_person_id=delivery_driver.id, status=DeliveryStatus.ASSIGNED
+    )
+
+    with pytest.raises(ValueError):
+        StaffService._pull_back_delivery(delivery, admin_user.id, target_status=target)
+
+    assert (delivery.status, delivery.delivery_person_id) == (DeliveryStatus.ASSIGNED, delivery_driver.id)
+
+
+def test_return_to_pool_judges_the_locked_row_not_a_stale_copy(db, sample_user, delivery_driver, admin_user):
+    """`RouteEditService.return_stop_to_pool` loads the delivery unlocked before it
+    calls this, and an admin may have rescheduled it in between. `with_for_update()`
+    alone hands back the stale ASSIGNED instance, and the held stop would be
+    dragged into today's pool."""
+    from sqlalchemy import update
+
+    from business_app.models.delivery import DeliveryStatusHistory
+
+    order = _create_order(db, sample_user.id, "ORD-STALEPOOL-1")
+    delivery = _create_delivery(
+        db, order.id, delivery_person_id=delivery_driver.id, status=DeliveryStatus.ASSIGNED
+    )
+    assert delivery.status == DeliveryStatus.ASSIGNED  # loaded into this session
+    # The reschedule commits from another request: the row moves, this
+    # session's instance does not.
+    db.session.execute(
+        update(Delivery)
+        .where(Delivery.id == delivery.id)
+        .values(status=DeliveryStatus.RESCHEDULED, delivery_person_id=None),
+        execution_options={"synchronize_session": False},
+    )
+
+    with pytest.raises(ConflictError) as exc_info:
+        StaffService.return_delivery_to_pool(delivery.id, admin_user.id, reason="stale board")
+
+    assert exc_info.value.error_code == "STAFF_DELIVERY_NOT_POOLABLE"
+    assert (delivery.status, delivery.delivery_person_id) == (DeliveryStatus.RESCHEDULED, None)
+    assert DeliveryStatusHistory.query.filter_by(delivery_id=delivery.id).count() == 0

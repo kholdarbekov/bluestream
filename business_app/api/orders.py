@@ -29,6 +29,7 @@ from business_app.serializers.order_serializers import (
 from business_app.serializers.sales_serializers import AgentConfirmationPayload
 from business_app.services.sales.agent_order_confirmation_service import AgentOrderConfirmationService
 from business_app.utils.decorators import validate_json, rate_limit, require_verification
+from business_app.utils.delivery_window import schedule_date_bounds
 from business_app.utils.constants import NotificationType
 from shared.enums import OrderStatus, PaymentMethod
 from shared.status_transitions import order_transitions_as_strings
@@ -1055,22 +1056,33 @@ def create_subscription_order():
 @orders_bp.route("/statuses", methods=["GET"])
 def get_order_statuses():
     """
-    Get all available order statuses and the allowed transitions between them.
+    Get all available order statuses, the allowed transitions between them,
+    and the range of days a delivery may be scheduled for.
 
     Single source of truth for the admin UI dropdown — sourced from
     `shared.status_transitions` so backend, bots, and UI stay in lockstep.
 
+    `schedule_min_date` / `schedule_max_date` are Tashkent-local ISO dates from
+    `delivery_window.schedule_date_bounds`, the same range `validate_schedule`
+    checks. The admin date picker must read them fresh, never from a
+    long-cached copy of this response, or an overnight tab offers yesterday.
+
     Response shape:
         {
           "statuses": [{"value": "pending", "label": "Pending"}, ...],
-          "transitions": {"pending": ["confirmed", "cancelled"], ...}
+          "transitions": {"pending": ["confirmed", "cancelled"], ...},
+          "schedule_min_date": "2026-09-24",
+          "schedule_max_date": "2026-10-09"
         }
     """
     statuses = [{"value": status.value, "label": status.value.replace("_", " ").title()} for status in OrderStatus]
+    schedule_min_date, schedule_max_date = schedule_date_bounds()
     return success_response(
         data={
             "statuses": statuses,
             "transitions": order_transitions_as_strings(),
+            "schedule_min_date": schedule_min_date.isoformat(),
+            "schedule_max_date": schedule_max_date.isoformat(),
         },
         message=get_translation("api.orders.statuses_retrieved"),
     )

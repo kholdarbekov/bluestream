@@ -361,7 +361,7 @@ class StatusUpdateHandler(BaseHandler):
             # THIS method just submitted, so an invalid-transition refusal here
             # means it is already recorded: acknowledge it idempotently.
             if getattr(response, 'error_code', None) != 'STAFF_INVALID_STATUS_TRANSITION':
-                await self._handle_api_response_error(update, response, language)
+                await self._handle_api_response_error(update, response, language, context=context)
                 return ConversationHandler.END
             logger.warning(
                 "Delivery %s refused the 'delivered' transition (%s); treating it "
@@ -531,7 +531,7 @@ class StatusUpdateHandler(BaseHandler):
                 )
 
             if not response.success:
-                await self._handle_api_response_error(update, response, language)
+                await self._handle_api_response_error(update, response, language, context=context)
                 return
 
             # Success message
@@ -595,7 +595,7 @@ class StatusUpdateHandler(BaseHandler):
                 )
 
             if not response.success:
-                await self._handle_api_response_error(update, response, language)
+                await self._handle_api_response_error(update, response, language, context=context)
                 return
 
             reason_text = i18n.get(f'staff.delivery.reason.{reason}', language)

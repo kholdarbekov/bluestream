@@ -363,6 +363,28 @@ def send_delivery_update_task(self, history_id: int):
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=120, soft_time_limit=100)
+def send_delivery_rescheduled_notification_task(self, order_id: int):
+    """Tell the customer their delivery moved to a new date (admin order reschedule, spec §4.1).
+
+    Enqueued by OrderScheduleService AFTER the reschedule commits. Only the order id travels:
+    the service reads the order's date when this runs, so a correction made in between is what
+    goes out, and an order cancelled in between sends nothing.
+    """
+    try:
+        logger.info("Sending delivery-rescheduled notice for order %s", order_id)
+
+        notification_service = NotificationService()
+        result = notification_service.send_delivery_rescheduled_notification(order_id)
+
+        logger.info("Delivery-rescheduled notice processed for order %s", order_id)
+        return result
+
+    except Exception as exc:
+        logger.error("Failed to send delivery-rescheduled notice for order %s: %s", order_id, exc)
+        raise self.retry(exc=exc)
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=120, soft_time_limit=100)
 def send_payment_confirmation_task(self, payment_id: int, collection_state_token: str = None):
     """Send payment confirmation notification.
 

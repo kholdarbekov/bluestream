@@ -46,6 +46,7 @@ from business_app.utils.constants import (
     Priority,
 )
 from business_app.utils.telegram_tokens import get_staff_bot_token
+from business_app.utils.state_validators import ACTIVE_ORDER_STATUSES
 from shared.enums import (
     DeliveryStatus,
     UserRole,
@@ -184,6 +185,7 @@ class NotificationService:
         "delivery": [
             NotificationType.DELIVERY_UPDATE.value,
             NotificationType.DELIVERY_REMINDER.value,
+            NotificationType.DELIVERY_RESCHEDULED.value,
         ],
         "payment": [NotificationType.PAYMENT_CONFIRMATION.value],
         "promotion": [NotificationType.PROMOTIONAL.value],
@@ -224,6 +226,7 @@ class NotificationService:
             "failed": "Yetkazib berib bo'lmadi",
             "cancelled": "Bekor qilindi",
             "returned": "Qaytarildi",
+            "rescheduled": "Ko'chirildi",
         },
         "ru": {
             "scheduled": "Запланирован",
@@ -237,6 +240,7 @@ class NotificationService:
             "failed": "Не доставлен",
             "cancelled": "Отменен",
             "returned": "Возвращен",
+            "rescheduled": "Перенесён",
         },
         "en": {
             "scheduled": "Scheduled",
@@ -250,6 +254,7 @@ class NotificationService:
             "failed": "Failed",
             "cancelled": "Cancelled",
             "returned": "Returned",
+            "rescheduled": "Rescheduled",
         },
     }
 
@@ -751,6 +756,70 @@ class NotificationService:
             message,
         )
         raise RuntimeError(f"Bottle summary webhook failed for order {order.id}: {message}")
+
+    def send_delivery_rescheduled_notification(self, order_id: int) -> Dict[str, Any]:
+        """Tell the customer their delivery moved to a new date (spec §4.1; R13–R15).
+
+        Reads the order as it is NOW, not as it was when the reschedule enqueued this. An admin
+        who corrects a date a minute later must not have the first, wrong date reach the
+        customer after the right one. The same re-read drops the notice for an order that was
+        cancelled in between.
+
+        Telegram if the bot is connected, else email, else nothing (R14). The customer's
+        `delivery_telegram_status_updates` opt-out is NOT consulted: it silences the
+        in_transit/arrived milestone pings, and a moved date is not a milestone.
+
+        `order_id` in the payload is load-bearing twice: `_create_notification_record` copies
+        `Notification.order_id` only from it, and `OrderScheduleService.customer_already_notified`
+        (R13) finds the sent row by it.
+        """
+        from business_app.utils.helpers import format_datetime
+
+        order = Order.query.get(order_id)
+        if order is None:
+            logger.warning("Delivery-rescheduled notice skipped: order %s not found", order_id)
+            return {"success": False, "skipped": "order_not_found"}
+        if order.status not in ACTIVE_ORDER_STATUSES:
+            logger.info(
+                "Delivery-rescheduled notice skipped: order %s is %s", order_id, self._status_value(order.status)
+            )
+            return {"success": False, "skipped": "order_inactive"}
+        if order.delivery_date is None:
+            logger.info("Delivery-rescheduled notice skipped: order %s has no delivery date", order_id)
+            return {"success": False, "skipped": "no_delivery_date"}
+
+        user = User.query.get(order.user_id)
+        if user is None:
+            logger.warning(
+                "Delivery-rescheduled notice skipped: user %s of order %s not found", order.user_id, order_id
+            )
+            return {"success": False, "skipped": "user_not_found"}
+
+        channels = self._resolve_telegram_else_email(user)
+        if not channels:
+            logger.info(
+                "Delivery-rescheduled notice skipped: no deliverable channel: order_id=%s user_id=%s",
+                order_id,
+                user.id,
+            )
+            return {"success": False, "skipped": "no_channel"}
+
+        # The payment confirmation's language normalisation, so a `uz-UZ` profile still gets
+        # the dotted date its Uzbek copy expects (R15).
+        language = self._normalize_language_code(getattr(user, "preferred_language", "en") or "en")
+        delivery = order.delivery
+        template_data = {
+            "order_id": order.id,
+            "delivery_id": delivery.id if delivery is not None else None,
+            "order_number": order.order_number,
+            "new_date": format_datetime(order.delivery_date, format_type="date", language=language),
+            # Added by hand, as the delivery-status path does: without them
+            # `{company_phone}` goes out to the customer literally.
+            "company_name": self.company_name,
+            "company_phone": self.company_phone,
+            "company_email": self.company_email,
+        }
+        return self.send_notification(user.id, NotificationType.DELIVERY_RESCHEDULED, channels, template_data)
 
     def send_payment_notification(self, payment_id: int) -> Dict[str, Any]:
         """Send payment confirmation notification via Telegram (if user has telegram) or email"""
@@ -2865,6 +2934,7 @@ class NotificationService:
             NotificationType.ORDER_EDITED.value: [NotificationChannel.TELEGRAM],
             NotificationType.DELIVERY_UPDATE.value: [NotificationChannel.TELEGRAM],
             NotificationType.DELIVERY_REMINDER.value: [NotificationChannel.TELEGRAM],
+            NotificationType.DELIVERY_RESCHEDULED.value: [NotificationChannel.TELEGRAM],
             NotificationType.PAYMENT_CONFIRMATION.value: [NotificationChannel.EMAIL],
             NotificationType.SUBSCRIPTION_REMINDER.value: [NotificationChannel.EMAIL],
             NotificationType.SUBSCRIPTION_CREATED.value: [NotificationChannel.EMAIL, NotificationChannel.TELEGRAM],
@@ -3016,6 +3086,27 @@ class NotificationService:
         """Return True when the customer has an active linked Telegram bot."""
         return bool(getattr(user, "telegram_id", None) and getattr(user, "is_bot_active", False))
 
+    @staticmethod
+    def _resolve_telegram_else_email(user: User, *, telegram_allowed: bool = True) -> List[NotificationChannel]:
+        """ONE customer channel: Telegram when the bot is connected, else email, else none.
+
+        Never both, never SMS. `telegram_allowed=False` goes straight to email. The milestone
+        path passes the customer's `delivery_telegram_status_updates` setting here, so an
+        opted-out customer still gets the email
+        (test_resolve_delivery_status_channels_honors_explicit_delivery_telegram_disable). The
+        delivery-rescheduled notice keeps the default, because that opt-out governs the
+        milestone pings only (R14).
+
+        A staticmethod so OrderScheduleService can publish the channel a reschedule WOULD use
+        (`reschedule_customer_channel`) without constructing a NotificationService, whose
+        __init__ builds the SMS client.
+        """
+        if telegram_allowed and NotificationService._user_has_connected_telegram(user):
+            return [NotificationChannel.TELEGRAM]
+        if getattr(user, "email", None):
+            return [NotificationChannel.EMAIL]
+        return []
+
     def _resolve_loyalty_award_channels(self, user: User) -> List[NotificationChannel]:
         """Channels for an AquaCoins award notification.
 
@@ -3039,7 +3130,10 @@ class NotificationService:
 
         Business rule: delivery updates never use SMS. Only customer-facing
         milestones (in_transit / arrived) notify the customer — via Telegram
-        when a bot is connected, otherwise via email, otherwise not at all.
+        when a bot is connected and Telegram status updates are on, otherwise
+        via email, otherwise not at all. The Telegram-else-email half is
+        `_resolve_telegram_else_email`, shared with the delivery-rescheduled
+        notice; only the milestone gate and the opt-out live here.
         """
         if not self._should_force_delivery_status_telegram(status_value):
             # delivered / pending / failed / etc. — no customer notification.
@@ -3053,23 +3147,20 @@ class NotificationService:
         telegram_enabled = self.get_delivery_telegram_status_updates_setting(user.id)[
             "delivery_telegram_status_updates_enabled"
         ]
-        if telegram_enabled and self._user_has_connected_telegram(user):
-            return [NotificationChannel.TELEGRAM]
-
-        if getattr(user, "email", None):
+        channels = self._resolve_telegram_else_email(user, telegram_allowed=telegram_enabled)
+        if channels == [NotificationChannel.EMAIL]:
             logger.info(
                 "Delivery status update routed to email (no connected bot): user_id=%s status=%s",
                 user.id,
                 status_value,
             )
-            return [NotificationChannel.EMAIL]
-
-        logger.info(
-            "Delivery status update has no deliverable channel: user_id=%s status=%s",
-            user.id,
-            status_value,
-        )
-        return []
+        elif not channels:
+            logger.info(
+                "Delivery status update has no deliverable channel: user_id=%s status=%s",
+                user.id,
+                status_value,
+            )
+        return channels
 
     def _extract_delivery_status_code(self, template_data: Dict[str, Any]) -> Optional[str]:
         """Extract normalized delivery status from template payload."""
@@ -4063,6 +4154,7 @@ class NotificationService:
             NotificationType.ORDER_STATUS_UPDATE: [NotificationChannel.TELEGRAM],
             NotificationType.ORDER_EDITED: [NotificationChannel.TELEGRAM],
             NotificationType.DELIVERY_UPDATE: [NotificationChannel.TELEGRAM],
+            NotificationType.DELIVERY_RESCHEDULED: [NotificationChannel.TELEGRAM],
             NotificationType.PAYMENT_CONFIRMATION: [NotificationChannel.EMAIL],
             NotificationType.SUBSCRIPTION_REMINDER: [NotificationChannel.EMAIL],
             NotificationType.PROMOTIONAL: [NotificationChannel.EMAIL],
@@ -4354,6 +4446,23 @@ Tracking: {tracking_code}
 Статус: {delivery_status}
 Отслеживание: {tracking_code}
 """
+            },
+        },
+    },
+    # Delivery rescheduled - Telegram (admin order reschedule, spec §4.1). The DATE only: a
+    # moved delivery is re-planned from scratch, so any hour would be a promise nobody has
+    # made yet. `{new_date}` arrives already formatted in the customer's language (R15).
+    ("delivery_rescheduled", "telegram"): {
+        "name": "delivery_rescheduled_telegram",
+        "translations": {
+            "uz": {
+                "content": "📅 #{order_number} buyurtmangizni yetkazib berish {new_date} sanasiga ko'chirildi. Savollar bo'lsa: {company_phone}.",  # noqa: E501
+            },
+            "en": {
+                "content": "📅 Delivery of your order #{order_number} has been rescheduled to {new_date}. Questions? Call {company_phone}.",  # noqa: E501
+            },
+            "ru": {
+                "content": "📅 Доставка вашего заказа #{order_number} перенесена на {new_date}. Вопросы? Звоните: {company_phone}.",  # noqa: E501
             },
         },
     },

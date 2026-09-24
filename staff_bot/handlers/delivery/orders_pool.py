@@ -271,11 +271,19 @@ class OrdersPoolHandler(BaseHandler):
             text = '\n'.join(lines)
             order_id = order.get('order_id')
             status = order.get('status')
+            # The backend's answer (StaffService.is_delivery_claimable), never
+            # re-derived from `delivery_status` here. A card opened after the
+            # order was taken or moved to another day offers neither Accept (the
+            # claim can only be refused) nor Mark-preparing (not this driver's
+            # order to prepare). A missing key keeps today's buttons: the accept
+            # endpoint still refuses what it cannot honour.
+            is_claimable = order.get('is_claimable', True)
             keyboard = DeliveryKeyboards.order_detail_actions(
                 language=language,
                 delivery_id=delivery_id,
                 order_id=order_id,
-                can_mark_preparing=(status == 'confirmed'),
+                can_accept=is_claimable,
+                can_mark_preparing=is_claimable and status == 'confirmed',
                 back_callback="staff_new_orders",
             )
 

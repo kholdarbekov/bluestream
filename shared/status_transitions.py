@@ -46,6 +46,11 @@ DELIVERY_STATUS_TRANSITIONS: Dict[DeliveryStatus, List[DeliveryStatus]] = {
     DeliveryStatus.FAILED: [],
     DeliveryStatus.CANCELLED: [],
     DeliveryStatus.RETURNED: [DeliveryStatus.PENDING],
+    # Held for a later day (R3 of the 2026-09-23 reschedule spec). OrderScheduleService both puts
+    # a row here and releases it back to SCHEDULED by direct write, so no status above lists it
+    # as a successor and no driver or admin transition can reach it. The order-cancel cascade is
+    # the only way out through this table.
+    DeliveryStatus.RESCHEDULED: [DeliveryStatus.CANCELLED],
 }
 
 

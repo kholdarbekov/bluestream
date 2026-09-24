@@ -40,13 +40,57 @@ import {
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { formatDate, formatDateTimeShort } from '../utils/dateUtils';
+import { formatDate, formatDateTime, formatDateTimeShort } from '../utils/dateUtils';
 import adminService from '../services/adminService';
 import AssignDeliveryModal from '../components/AssignDeliveryModal';
 
 const { Option } = Select;
 const { RangePicker } = DatePicker;
 const { Step } = Steps;
+
+// Every `DeliveryStatus` in shared/enums.py, in the order the filter lists them. The
+// backend accepts each as `?status=` (AdminDeliveryService.STATUS_ALIASES is derived
+// from the enum). tests/unit/test_admin_ui_payload_fixture_contracts.py fails if this
+// list and the enum drift apart.
+const DELIVERY_STATUSES = ['scheduled', 'pending', 'rescheduled', 'assigned', 'picked_up', 'in_transit', 'arrived', 'delivered', 'failed', 'cancelled', 'returned'];
+
+// English fallbacks for the seeded `ui.delivery.status_<value>` rows, each the seed's
+// `en` value exactly (scripts/seed_backend_translations.py), so a label reads the same
+// before and after the seed runs.
+const DELIVERY_STATUS_FALLBACK_LABELS = {
+  scheduled: 'Scheduled',
+  pending: 'Pending',
+  rescheduled: 'Rescheduled',
+  assigned: 'Assigned',
+  picked_up: 'Picked up',
+  in_transit: 'In Transit',
+  arrived: 'Arrived',
+  delivered: 'Delivered',
+  failed: 'Failed',
+  cancelled: 'Cancelled',
+  returned: 'Returned'
+};
+
+// Re-dispatch refusals the page explains itself, in the admin's language:
+// `data.error_code` -> [translation key, English fallback]. The same Map is the list of
+// codes the page asks api.js not to toast, so every refusal is shown exactly once. A Map
+// because the lookup key comes off the wire (security/detect-object-injection).
+const REDISPATCH_ERROR_MESSAGES = new Map([
+  [
+    'ORDER_NOT_RESCHEDULABLE',
+    [
+      'ui.delivery.redispatch_error.ORDER_NOT_RESCHEDULABLE',
+      'This order is delivered, cancelled or returned, so its delivery can no longer be re-dispatched.',
+    ],
+  ],
+  [
+    'STAFF_DELIVERY_NOT_REDISPATCHABLE',
+    [
+      'ui.delivery.redispatch_error.STAFF_DELIVERY_NOT_REDISPATCHABLE',
+      'This delivery is no longer failed, so there is nothing to re-dispatch. Refresh the list.',
+    ],
+  ],
+]);
 
 const Delivery = () => {
   // Load delivery namespace for ui.delivery.* keys
@@ -62,33 +106,20 @@ const Delivery = () => {
   const [pagination, setPagination] = useState({ page: 1, per_page: DEFAULT_PAGE_SIZE });
   const [form] = Form.useForm();
   const selectedStatus = Form.useWatch('status', form);
+  // A failure reason belongs to a move to `failed`. Saving notes on a row that already
+  // failed (the status is kept, so the backend ignores a reason) asks for none.
+  const isRecordingFailure = selectedStatus === 'failed' && selectedStatus !== selectedDelivery?.status;
 
   const queryClient = useQueryClient();
 
-  const statusOptions = [
-    { value: 'scheduled', label: t('ui.delivery.status_scheduled', 'Scheduled') },
-    { value: 'pending', label: t('ui.delivery.status_pending') },
-    { value: 'assigned', label: t('ui.delivery.status_assigned') },
-    { value: 'picked_up', label: t('ui.delivery.status_picked_up') },
-    { value: 'in_transit', label: t('ui.delivery.status_in_transit') },
-    { value: 'arrived', label: t('ui.delivery.status_arrived', 'Arrived') },
-    { value: 'delivered', label: t('ui.delivery.status_delivered') },
-    { value: 'failed', label: t('ui.delivery.status_failed') },
-    { value: 'cancelled', label: t('ui.delivery.status_cancelled', 'Cancelled') },
-    { value: 'returned', label: t('ui.delivery.status_returned') }
-  ];
-  const statusTransitions = {
-    scheduled: ['scheduled', 'pending', 'returned'],
-    pending: ['pending', 'assigned', 'returned'],
-    assigned: ['assigned', 'picked_up', 'returned'],
-    picked_up: ['picked_up', 'in_transit', 'failed', 'returned'],
-    in_transit: ['in_transit', 'arrived', 'failed', 'returned'],
-    arrived: ['arrived', 'delivered', 'failed', 'returned'],
-    delivered: ['delivered'],
-    failed: ['failed'],
-    cancelled: ['cancelled'],
-    returned: ['returned']
-  };
+  // eslint-disable-next-line security/detect-object-injection
+  const statusLabel = (status) => t(`ui.delivery.status_${status}`, DELIVERY_STATUS_FALLBACK_LABELS[status] || status);
+  const statusOptions = DELIVERY_STATUSES.map((value) => ({ value, label: statusLabel(value) }));
+  // Every row opens the update form: a row with no status move (failed, delivered,
+  // cancelled, returned, held) still has notes to edit, so its action says that instead.
+  const updateActionLabel = (delivery) => (delivery.allowed_status_transitions?.length
+    ? t('ui.delivery.update_status')
+    : t('ui.delivery.edit_notes', 'Edit notes'));
 
   // Fetch deliveries
   const { data, isLoading } = useQuery({
@@ -124,25 +155,47 @@ const Delivery = () => {
     },
   });
 
-  // Re-dispatch a failed delivery back to the pool
+  // Re-dispatch = reschedule to today (R18). The page explains the refusals in
+  // REDISPATCH_ERROR_MESSAGES itself, so it tells api.js not to toast those too.
   const redispatchDeliveryMutation = useMutation({
-    mutationFn: (deliveryId) => adminService.redispatchDelivery(deliveryId),
+    mutationFn: (deliveryId) => adminService.redispatchDelivery(deliveryId, {
+      handledErrorCodes: [...REDISPATCH_ERROR_MESSAGES.keys()],
+    }),
 
     onSuccess: (response) => {
-      message.success(response?.message || t('ui.delivery.redispatch_success'));
+      // Before today's first shift it lands `rescheduled`, and drivers see it only at
+      // `data.release_at` (R25): say when, in local time. `release_at` is null when it
+      // went straight back to the pool, and the usual message stands. Both are the
+      // page's own keys: the backend's `message` is English whatever the admin reads.
+      const releaseAt = response?.data?.release_at;
+      if (releaseAt) {
+        message.success(t(
+          'ui.delivery.redispatch_held',
+          "Re-dispatched. Drivers will see it when today's shift opens at {{time}}.",
+          { time: formatDateTime(releaseAt, 'HH:mm') },
+        ));
+      } else {
+        message.success(t('ui.delivery.redispatch_success', 'Delivery re-dispatched to pool'));
+      }
       queryClient.invalidateQueries({
         queryKey: ['deliveries'],
       });
     },
 
     onError: (error) => {
-      message.error(error?.response?.data?.message || t('ui.delivery.redispatch_failed'));
+      // api.js has already toasted every failure except the refusals this page
+      // explains, so only those get a message here: one message per failure.
+      const known = REDISPATCH_ERROR_MESSAGES.get(error?.response?.data?.data?.error_code);
+      if (known) {
+        message.error(t(known[0], known[1]));
+      }
     },
   });
 
   const deliveryStatusColors = {
     scheduled: 'gold',
     pending: 'orange',
+    rescheduled: 'lime',
     assigned: 'blue',
     picked_up: 'cyan',
     in_transit: 'purple',
@@ -156,6 +209,7 @@ const Delivery = () => {
   const getStatusIcon = (status) => {
     switch (status) {
       case 'scheduled': return <CalendarOutlined />;
+      case 'rescheduled': return <CalendarOutlined />;
       case 'pending': return <ClockCircleOutlined />;
       case 'assigned': return <TruckOutlined />;
       case 'picked_up': return <EnvironmentOutlined />;
@@ -233,7 +287,7 @@ const Delivery = () => {
       render: (status) => (
         // eslint-disable-next-line security/detect-object-injection
         <Tag color={deliveryStatusColors[status] || 'default'} icon={getStatusIcon(status)}>
-          {t(`ui.delivery.status_${status}`, status)}
+          {statusLabel(status)}
         </Tag>
       )
     },
@@ -280,24 +334,28 @@ const Delivery = () => {
               },
               {
                 key: 'update',
-                label: t('ui.delivery.update_status'),
+                label: updateActionLabel(record),
                 icon: <EditOutlined />,
                 // eslint-disable-next-line no-use-before-define
                 onClick: () => handleUpdateDelivery(record)
               },
-              {
-                key: 'assign',
-                label: record.driver_id
-                  ? t('ui.delivery.reassign_driver', 'Reassign driver')
-                  : t('ui.delivery.assign_driver'),
-                icon: <UserOutlined />,
-                // eslint-disable-next-line no-use-before-define
-                onClick: () => handleAssignDelivery(record)
-              },
-              // Re-dispatch is only meaningful for a failed delivery: it clears
-              // the driver, returns it to the pool, and restores the order so a
-              // driver can re-claim it.
-              ...(record.status === 'failed'
+              // Each action below is offered exactly when the backend would accept it.
+              // The row publishes the answer (AdminDeliveryService.serialize_delivery),
+              // so the page re-derives no rule. A held (`rescheduled`) row offers none.
+              ...(record.can_assign
+                ? [{
+                    key: 'assign',
+                    label: record.driver_id
+                      ? t('ui.delivery.reassign_driver', 'Reassign driver')
+                      : t('ui.delivery.assign_driver'),
+                    icon: <UserOutlined />,
+                    // eslint-disable-next-line no-use-before-define
+                    onClick: () => handleAssignDelivery(record)
+                  }]
+                : []),
+              // Re-dispatch = reschedule to today (R18): a FAILED delivery whose order
+              // is still active.
+              ...(record.can_redispatch
                 ? [{
                     key: 'redispatch',
                     label: t('ui.delivery.redispatch_delivery'),
@@ -357,7 +415,7 @@ const Delivery = () => {
       status: values.status,
       notes: values.notes
     };
-    if (values.status === 'failed' && values.fail_reason) {
+    if (isRecordingFailure && values.fail_reason) {
       payload.fail_reason = values.fail_reason;
     }
     updateDeliveryMutation.mutate({
@@ -555,10 +613,17 @@ const Delivery = () => {
     ];
   };
 
-  const getUpdateStatusOptions = (currentStatus) => {
-    // eslint-disable-next-line security/detect-object-injection
-    const allowedValues = statusTransitions[currentStatus] || [currentStatus];
-    return statusOptions.filter((option) => allowedValues.includes(option.value));
+  // The current status is listed but disabled: the form opens on it, so a notes-only
+  // save keeps the status, yet it is never offered as a move. The moves are the
+  // backend's own list; the write path refuses anything else.
+  const getUpdateStatusOptions = (delivery) => {
+    if (!delivery) {
+      return [];
+    }
+    const allowed = new Set(delivery.allowed_status_transitions || []);
+    return statusOptions
+      .filter((option) => option.value === delivery.status || allowed.has(option.value))
+      .map((option) => ({ ...option, disabled: option.value === delivery.status }));
   };
 
   return (
@@ -622,6 +687,7 @@ const Delivery = () => {
               allowClear
               onChange={handleStatusFilter}
               style={{ width: 150 }}
+              data-testid="delivery-status-filter"
             >
               {statusOptions.map((option) => (
                 <Option key={option.value} value={option.value}>
@@ -689,7 +755,7 @@ const Delivery = () => {
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.delivery.status')}>
                 <Tag color={deliveryStatusColors[selectedDelivery.status]} icon={getStatusIcon(selectedDelivery.status)}>
-                  {t(`ui.delivery.status_${selectedDelivery.status}`, selectedDelivery.status)}
+                  {statusLabel(selectedDelivery.status)}
                 </Tag>
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.delivery.priority')}>
@@ -754,17 +820,19 @@ const Delivery = () => {
                 >
                   {t('ui.delivery.track_delivery')}
                 </Button>
-                <Button
-                  icon={<UserOutlined />}
-                  onClick={() => {
-                    setIsDetailModalVisible(false);
-                    handleAssignDelivery(selectedDelivery);
-                  }}
-                >
-                  {selectedDelivery.driver_id
-                    ? t('ui.delivery.reassign_driver', 'Reassign driver')
-                    : t('ui.delivery.assign_driver')}
-                </Button>
+                {selectedDelivery.can_assign && (
+                  <Button
+                    icon={<UserOutlined />}
+                    onClick={() => {
+                      setIsDetailModalVisible(false);
+                      handleAssignDelivery(selectedDelivery);
+                    }}
+                  >
+                    {selectedDelivery.driver_id
+                      ? t('ui.delivery.reassign_driver', 'Reassign driver')
+                      : t('ui.delivery.assign_driver')}
+                  </Button>
+                )}
                 <Button
                   icon={<EditOutlined />}
                   onClick={() => {
@@ -772,7 +840,7 @@ const Delivery = () => {
                     handleUpdateDelivery(selectedDelivery);
                   }}
                 >
-                  {t('ui.delivery.update_status')}
+                  {updateActionLabel(selectedDelivery)}
                 </Button>
                 <Button onClick={() => setIsDetailModalVisible(false)}>
                   {t('ui.delivery.close')}
@@ -794,7 +862,7 @@ const Delivery = () => {
           <div>
             <div style={{ marginBottom: 24 }}>
               <h4>{t('ui.delivery.current_status')}: <Tag color={deliveryStatusColors[selectedDelivery.status]}>
-                {t(`ui.delivery.status_${selectedDelivery.status}`, selectedDelivery.status)}
+                {statusLabel(selectedDelivery.status)}
               </Tag></h4>
               <p>
                 <strong>{t('ui.delivery.scheduled_date')}:</strong> {formatDateTimeShort(selectedDelivery.scheduled_date)}
@@ -867,16 +935,16 @@ const Delivery = () => {
             label={t('ui.delivery.status')}
             rules={[{ required: true, message: t('ui.delivery.select_status_required') }]}
           >
-            <Select>
-              {getUpdateStatusOptions(selectedDelivery?.status).map((option) => (
-                <Option key={option.value} value={option.value}>
+            <Select data-testid="delivery-update-status">
+              {getUpdateStatusOptions(selectedDelivery).map((option) => (
+                <Option key={option.value} value={option.value} disabled={option.disabled}>
                   {option.label}
                 </Option>
               ))}
             </Select>
           </Form.Item>
 
-          {selectedStatus === 'failed' && (
+          {isRecordingFailure && (
             <Form.Item
               name="fail_reason"
               label={t('ui.delivery.failure_reason', 'Failure reason')}

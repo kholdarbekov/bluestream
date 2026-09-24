@@ -100,11 +100,12 @@ pg_pool_in_use = Gauge(
 )
 
 # Data-integrity gauge sampled by the delivery monitoring Celery task. A
-# "stranded" delivery is in a pool status (scheduled/pending) yet still has a
-# driver assigned — invisible to both the driver active list and the pool.
+# "stranded" delivery is in a driverless status (scheduled/pending, or a held
+# rescheduled row) yet still has a driver assigned — invisible to both the
+# driver active list and the pool.
 stranded_deliveries = Gauge(
     "stranded_deliveries",
-    "Deliveries in a pool status (scheduled/pending) that still have a driver assigned.",
+    "Deliveries in a driverless status (scheduled/pending/rescheduled) that still have a driver assigned.",
     multiprocess_mode="liveall",
 )
 

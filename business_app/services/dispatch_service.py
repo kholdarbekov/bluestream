@@ -43,6 +43,7 @@ from business_app.services.route_optimization_service import (
     _driver_day_start_utc,
 )
 from business_app.utils.delivery_window import format_delivery_window
+from business_app.utils.helpers import get_warehouse_coordinates
 from business_app.utils.state_validators import DELIVERY_POOL_UNASSIGNED_STATES
 from shared.enums import OrderStatus, PaymentMethod
 
@@ -529,7 +530,14 @@ class DispatchService:
         # query either way, but this one cannot return a delivery that has
         # since moved to somebody else, and it DOES return one the driver owns
         # that nothing has sequenced yet.
+        #
+        # Today also takes every driver who owns live work but has no route row
+        # yet (the optimiser has not run for them, or cannot): the board must
+        # not hide it.
         driver_ids = list(newest.keys())
+        owner_filter = (
+            Delivery.delivery_person_id.isnot(None) if is_today else Delivery.delivery_person_id.in_(driver_ids)
+        )
         deliveries = (
             Delivery.query.options(
                 joinedload(Delivery.order).joinedload(Order.user),
@@ -545,12 +553,9 @@ class DispatchService:
                 # time. Only the collection hop switches to `selectinload`.
                 joinedload(Delivery.order).selectinload(Order.order_items).joinedload(OrderItem.product),
             )
-            .filter(
-                Delivery.delivery_person_id.in_(driver_ids),
-                Delivery.status.in_(ACTIVE_DELIVERY_STATUSES),
-            )
+            .filter(owner_filter, Delivery.status.in_(ACTIVE_DELIVERY_STATUSES))
             .all()
-            if driver_ids
+            if is_today or driver_ids
             else []
         )
         by_driver: Dict[int, List[Delivery]] = {}
@@ -558,13 +563,14 @@ class DispatchService:
             by_driver.setdefault(delivery.delivery_person_id, []).append(delivery)
 
         routes = []
-        for driver_id, row in newest.items():
-            pinned = {str(k): int(v) for k, v in (row.pinned_stops or {}).items()}
+        for driver_id in sorted(newest.keys() | by_driver.keys()):
+            row = newest.get(driver_id)
+            pinned = {str(k): int(v) for k, v in ((row.pinned_stops if row else None) or {}).items()}
             stops = []
             for position, delivery in enumerate(
                 cls._sequence_active_stops(
                     by_driver.get(driver_id, []),
-                    row.optimized_order,
+                    row.optimized_order if row else None,
                     # Appending an owned-but-unsequenced stop is a statement
                     # about the plan being executed right now — three of the
                     # four assign paths lag the sequence, and today's board must
@@ -591,6 +597,9 @@ class DispatchService:
                         **cls._items_fields(order),
                     }
                 )
+            if row is None:
+                routes.append({"driver_id": driver_id, **cls._unplanned_route_fields(), "stops": stops})
+                continue
             routes.append(
                 {
                     "route_id": row.id,
@@ -616,3 +625,20 @@ class DispatchService:
                 }
             )
         return routes
+
+    @staticmethod
+    def _unplanned_route_fields() -> Dict[str, Any]:
+        """Route fields for a driver with live work but no route row: nothing
+        measured yet, drawn from the warehouse (the optimiser's own fallback start)."""
+        start_lat, start_lng = get_warehouse_coordinates()
+        return {
+            "route_id": None,
+            "manual_override": False,
+            "overridden_by_name": None,
+            "overridden_at": None,
+            "total_distance_km": None,
+            "estimated_duration_minutes": None,
+            "metrics_stale": False,
+            "start_lat": start_lat,
+            "start_lng": start_lng,
+        }

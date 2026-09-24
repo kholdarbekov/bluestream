@@ -107,22 +107,17 @@ groups:
           summary: "Celery task failure rate > 5%"
           description: "More than 5% of Celery tasks are failing over a 10m window. Check worker logs and recent deploys."
 
-      # CEL-006: Tasks running longer than 30 minutes. p95 runtime threshold;
-      # most BlueStream tasks complete in seconds — anything sustained at 30m+
-      # is likely a hung worker, deadlocked DB call, or runaway loop.
-      - alert: CeleryTaskStuck
-        expr: |
-          histogram_quantile(
-            0.95,
-            sum by (le, name) (rate(celery_task_runtime_seconds_bucket[15m]))
-          ) > 1800
+      # Liveness: ops.celery_heartbeat is sent every 5 min and records when a worker
+      # ran it. Stale means no free worker slot, no worker, or no beat.
+      - alert: CeleryHeartbeatStale
+        expr: (time() - (max(bluestream_celery_heartbeat_timestamp_seconds) or vector(0))) > 900
         for: 5m
         labels:
-          severity: warning
+          severity: critical
           area: celery
         annotations:
-          summary: "Celery task {{ $labels.name }} stuck (p95 runtime > 30m)"
-          description: "Task {{ $labels.name }} p95 runtime exceeded 30 minutes over a 15m window. Inspect worker for hung threads / blocking I/O."
+          summary: "Celery heartbeat stale — background tasks are not running"
+          description: "No ops.celery_heartbeat has completed in over 15 minutes. Either every worker slot is busy/hung, the worker is down, or celery_beat is down. Check `docker logs --tail 50 bluestream-celery_worker-1` (time of last line) and celery_worker_tasks_active, then the beat container."
 
       # INF-008: backup health. The backup itself (pg_dump) rarely fails — the
       # usual culprit is the offsite copy to Google Drive (rclone). A 2026-06

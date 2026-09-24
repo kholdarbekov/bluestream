@@ -71,6 +71,7 @@ def make_celery(app=None):
             "business_app.tasks.inventory_tasks",
             "business_app.tasks.customer_link_tasks",
             "business_app.tasks.sales_agent_tasks",
+            "business_app.tasks.heartbeat_tasks",
         ],
     )
 
@@ -265,6 +266,13 @@ def make_celery(app=None):
             "task": "business_app.tasks.order_tasks.release_due_scheduled_orders",
             "schedule": crontab(minute=f"*/{business_config.SCHEDULED_RELEASE_SWEEP_MINUTES}"),
             "options": {"time_limit": 300},
+        },
+        # Liveness canary: proves beat → broker → a free worker slot end to end.
+        # CeleryHeartbeatStale and the worker healthcheck read what it writes.
+        "celery-heartbeat": {
+            "task": "ops.celery_heartbeat",
+            "schedule": crontab(minute="*/5"),
+            "options": {"expires": 300},
         },
         # Send subscription renewal reminders
         "subscription-renewal-reminders": {
@@ -534,6 +542,8 @@ celery.conf.task_routes = {
 celery.conf.task_default_priority = 5
 celery.conf.worker_prefetch_multiplier = 1
 celery.conf.task_acks_late = True
+# No task may hold a pool slot forever; tasks that need longer set their own limit.
+celery.conf.task_time_limit = 1800
 celery.conf.worker_disable_rate_limits = False
 
 # Per-task rate limits — prevents flooding external services (SMS, email, Telegram API)

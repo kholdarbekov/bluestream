@@ -143,6 +143,14 @@ last_db_backup_failure_timestamp = Gauge(
     multiprocess_mode="max",
 )
 
+# Celery liveness: when a worker last completed ops.celery_heartbeat (sent every
+# 5 min). A timestamp only moves forward, so "max" across processes is correct.
+celery_heartbeat_timestamp = Gauge(
+    "bluestream_celery_heartbeat_timestamp_seconds",
+    "Unix timestamp of the most recent completed Celery heartbeat task.",
+    multiprocess_mode="max",
+)
+
 # The freshness gauges change at most once a day, so we refresh them at most
 # once per this interval regardless of scrape cadence — keeps the per-scrape DB
 # query off the hot path even if /metrics is polled aggressively.
@@ -224,6 +232,23 @@ def _refresh_backup_freshness_gauges() -> None:
             pass
 
 
+def _refresh_celery_heartbeat_gauge() -> None:
+    """Copy the worker's heartbeat timestamp from Redis into the gauge.
+
+    Best-effort: a missing key, bad value or Redis error leaves the previous value;
+    the alert rule treats an absent gauge as stale.
+    """
+    from business_app import redis_client
+    from business_app.tasks.heartbeat_tasks import HEARTBEAT_KEY
+
+    try:
+        raw = redis_client.get(HEARTBEAT_KEY)
+        if raw is not None:
+            celery_heartbeat_timestamp.set(float(raw))
+    except Exception:  # pragma: no cover — defensive: liveness metrics are best-effort
+        pass
+
+
 def setup_prometheus_metrics(app) -> PrometheusMetrics:
     """Wire prometheus_flask_exporter into the Flask app.
 
@@ -263,6 +288,7 @@ def setup_prometheus_metrics(app) -> PrometheusMetrics:
         if request.path == "/metrics":
             _refresh_backup_freshness_gauges()
             _refresh_pending_payment_gauges()
+            _refresh_celery_heartbeat_gauge()
 
     return _flask_exporter
 

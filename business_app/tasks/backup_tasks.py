@@ -32,6 +32,7 @@ import logging
 import os
 import shutil
 import subprocess
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -270,7 +271,14 @@ def _build_pg_dump_env() -> tuple[list[str], dict]:
     return argv, env
 
 
-@shared_task(bind=True, name="backup.database", max_retries=2, default_retry_delay=600)
+# Hard limit stays under the broker's 1h visibility timeout, so a stuck run is
+# killed (and acked) before it can be redelivered into another worker slot.
+BACKUP_TASK_TIME_LIMIT_SECONDS = 1800
+
+
+@shared_task(
+    bind=True, name="backup.database", max_retries=2, default_retry_delay=600, time_limit=BACKUP_TASK_TIME_LIMIT_SECONDS
+)
 def backup_database_task(self):
     """Nightly Postgres backup — pg_dump → gzip → optional offsite ship."""
     try:
@@ -286,11 +294,15 @@ def backup_database_task(self):
         # Stream pg_dump's stdout through gzip into the target file. Avoids
         # writing an uncompressed intermediate to disk (could be many GB).
         logger.info("Starting database backup → %s", target)
-        with gzip.open(target, "wb") as out_fh:
-            proc = subprocess.Popen(argv, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        # stderr goes to a file, not a pipe: an undrained stderr pipe deadlocks
+        # once pg_dump's --verbose log outgrows the pipe buffer.
+        with gzip.open(target, "wb") as out_fh, tempfile.TemporaryFile() as err_fh:
+            proc = subprocess.Popen(argv, env=env, stdout=subprocess.PIPE, stderr=err_fh)
             assert proc.stdout is not None
             shutil.copyfileobj(proc.stdout, out_fh)
-            _, stderr_data = proc.communicate()
+            proc.wait()
+            err_fh.seek(0)
+            stderr_data = err_fh.read()
         if proc.returncode != 0:
             target.unlink(missing_ok=True)
             raise RuntimeError(f"pg_dump exited {proc.returncode}: {stderr_data[:2000]}")
@@ -341,7 +353,9 @@ def backup_database_task(self):
 # ---- Uploads backup --------------------------------------------------------
 
 
-@shared_task(bind=True, name="backup.uploads", max_retries=2, default_retry_delay=600)
+@shared_task(
+    bind=True, name="backup.uploads", max_retries=2, default_retry_delay=600, time_limit=BACKUP_TASK_TIME_LIMIT_SECONDS
+)
 def backup_uploads_task(self):
     """Weekly tar+gzip backup of UPLOAD_FOLDER → optional offsite ship."""
     try:

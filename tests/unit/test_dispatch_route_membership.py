@@ -28,6 +28,7 @@ import pytest
 from business_app.models.delivery import Delivery, DeliveryRoute
 from business_app.models.user import UserAddress
 from business_app.services.dispatch_service import DispatchService
+from business_app.utils.helpers import get_warehouse_coordinates
 from shared.enums import DeliveryStatus, OrderStatus
 
 
@@ -222,6 +223,54 @@ class TestSequenceStillComesFromOptimizedOrder:
         assert [s["position"] for s in stops] == [0, 1]
 
 
+class TestDriverWithoutARouteRowToday:
+    """A route row only exists once the optimiser has run for the driver today
+    (the morning sweep, a location ping, a manual re-solve). Until then — or
+    for good, when it cannot run — the driver's live work must still be on the
+    board.
+    """
+
+    def test_driver_owning_active_stops_is_listed_without_a_route_row(
+        self, db, sample_user, sample_order, delivery_driver
+    ):
+        first = _delivery(db, sample_user, sample_order, driver_id=delivery_driver.id, lat=41.31)
+        second = _delivery(db, sample_user, sample_order, driver_id=delivery_driver.id, lat=41.32)
+        db.session.commit()
+
+        routes = DispatchService.get_snapshot(DispatchService.today())["routes"]
+
+        assert [r["driver_id"] for r in routes] == [delivery_driver.id]
+        assert _stops_for(delivery_driver.id, {"routes": routes}) == [first.id, second.id]
+        assert routes[0]["route_id"] is None
+
+    def test_unplanned_route_starts_at_the_warehouse(self, db, sample_user, sample_order, delivery_driver):
+        """The map draws every route from its start point; it must be a real coordinate."""
+        _delivery(db, sample_user, sample_order, driver_id=delivery_driver.id)
+        db.session.commit()
+
+        route = DispatchService.get_snapshot(DispatchService.today())["routes"][0]
+
+        assert (route["start_lat"], route["start_lng"]) == get_warehouse_coordinates()
+        assert route["total_distance_km"] is None and route["estimated_duration_minutes"] is None
+        assert route["manual_override"] is False and route["metrics_stale"] is False
+
+    def test_driver_with_no_active_stops_and_no_route_is_not_listed(
+        self, db, sample_user, sample_order, delivery_driver
+    ):
+        _delivery(db, sample_user, sample_order, driver_id=delivery_driver.id, status=DeliveryStatus.DELIVERED)
+        db.session.commit()
+
+        assert DispatchService.get_snapshot(DispatchService.today())["routes"] == []
+
+    def test_another_days_board_does_not_invent_routes(self, db, sample_user, sample_order, delivery_driver):
+        _delivery(db, sample_user, sample_order, driver_id=delivery_driver.id)
+        db.session.commit()
+
+        yesterday = DispatchService.today() - timedelta(days=1)
+
+        assert DispatchService.get_snapshot(yesterday)["routes"] == []
+
+
 class TestGeometryUsesTheSameMembership:
     def test_route_stop_points_excludes_stops_the_driver_no_longer_owns(
         self, db, sample_user, sample_order, delivery_driver, second_delivery_driver
@@ -286,7 +335,7 @@ class TestTheSelectedDayAppliesToRoutesToo:
         today = DispatchService.get_snapshot(date.today())["routes"]
 
         assert [r["driver_id"] for r in yesterday] == [delivery_driver.id]
-        assert today == []
+        assert route.id not in [r["route_id"] for r in today]
 
     def test_a_stop_the_driver_picked_up_today_is_not_appended_to_an_older_route(
         self, db, sample_user, sample_order, delivery_driver

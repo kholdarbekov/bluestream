@@ -4,7 +4,12 @@ Patches are applied to module-local names (business_app.tasks.backup_tasks.*)
 because the module does `import subprocess`, `import shutil` and
 `from business_app.utils.audit_logger import audit_logger`.
 """
+import gzip
 import io
+import os
+import subprocess
+import sys
+import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -193,6 +198,58 @@ class TestBackupDatabaseTaskWiring:
         assert result["success"] is True
         assert result["remote"] is None
         assert not any(c.args[0][0] == "rclone" for c in run.call_args_list)
+
+
+@pytest.mark.unit
+class TestBackupDatabaseTaskDoesNotHang:
+    def test_stderr_larger_than_a_pipe_buffer_does_not_deadlock(self, app, tmp_path):
+        app.config["BACKUP_LOCAL_DIR"] = str(tmp_path)
+        app.config["BACKUP_RCLONE_REMOTE"] = None
+        # Like `pg_dump --verbose`: far more stderr than a pipe buffer holds, then the dump.
+        fake_pg_dump = [
+            sys.executable,
+            "-c",
+            "import sys; sys.stderr.write('pg_dump: dumping contents\\n' * 20000); sys.stdout.write('PGDMP')",
+        ]
+        spawned = []
+        real_popen = subprocess.Popen
+
+        def spy_popen(*args, **kwargs):
+            proc = real_popen(*args, **kwargs)
+            spawned.append(proc)
+            return proc
+
+        outcome = {}
+
+        def run_task():
+            with app.app_context():
+                outcome["result"] = backup_tasks.backup_database_task.run()
+
+        with (
+            patch("business_app.tasks.backup_tasks.shutil.which", return_value="/usr/bin/pg_dump"),
+            patch("business_app.tasks.backup_tasks._build_pg_dump_env", return_value=(fake_pg_dump, dict(os.environ))),
+            patch("business_app.tasks.backup_tasks.subprocess.Popen", side_effect=spy_popen),
+            patch("business_app.tasks.backup_tasks.audit_logger"),
+        ):
+            worker = threading.Thread(target=run_task, daemon=True)
+            worker.start()
+            worker.join(timeout=30)
+            hung = worker.is_alive()
+            for proc in spawned:  # unblock a deadlocked run so the thread can exit
+                proc.kill()
+            worker.join(timeout=5)
+
+        assert not hung, "backup deadlocked: pg_dump blocked writing stderr while stdout was being read"
+        result = outcome["result"]
+        assert result["success"] is True
+        with gzip.open(result["local"]) as fh:
+            assert fh.read() == b"PGDMP"
+
+    @pytest.mark.parametrize("task", [backup_tasks.backup_database_task, backup_tasks.backup_uploads_task])
+    def test_hard_time_limit_is_below_broker_redelivery(self, task):
+        # A stuck run must be killed before the Redis visibility timeout (1h) redelivers it
+        # into another worker slot.
+        assert task.time_limit is not None and 0 < task.time_limit < 3600
 
 
 @pytest.mark.unit

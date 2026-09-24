@@ -11,7 +11,7 @@
 # always restart nginx after any rebuild.
 #
 # Usage:
-#   scripts/deploy.sh             # build + up + restart nginx + smoke check
+#   scripts/deploy.sh             # build + up + restart nginx + smoke check + reload changed monitoring configs
 #   scripts/deploy.sh --no-build  # skip rebuild (e.g. nginx-config-only changes)
 
 set -euo pipefail
@@ -123,5 +123,19 @@ while :; do
     fi
     sleep 1
 done
+
+# `up -d` doesn't recreate a service whose mounted config file changed, so new
+# alert rules etc. would never load. Done after business_app is healthy, so any
+# metric a new rule reads already exists when the rule starts evaluating.
+log "checking monitoring configs against running services"
+stale_output=$(scripts/monitoring-config-drift.sh) || fail "monitoring config drift check failed"
+if [[ -n "$stale_output" ]]; then
+    mapfile -t stale_services <<< "$stale_output"
+    log "recreating services with changed config: ${stale_services[*]}"
+    "${COMPOSE[@]}" up -d --no-deps --force-recreate "${stale_services[@]}" \
+        || fail "could not recreate: ${stale_services[*]}"
+else
+    log "monitoring configs up to date"
+fi
 
 log "deploy complete — origin returning HTTP 200"

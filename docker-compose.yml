@@ -366,11 +366,13 @@ services:
     # celery-exporter can observe started/succeeded/failed/retried transitions.
     command: celery -A business_app.tasks.celery_app worker -E --loglevel=info -Q celery,payment,notifications,delivery,analytics,subscriptions,orders,maintenance,loyalty --concurrency=${CELERY_WORKER_CONCURRENCY:-4} --max-memory-per-child=${CELERY_WORKER_MAX_MEMORY_PER_CHILD:-200000} --max-tasks-per-child=${CELERY_WORKER_MAX_TASKS_PER_CHILD:-1000}
     healthcheck:
-      test: [ "CMD", "celery", "-A", "business_app.tasks.celery_app", "status" ]
+      # Healthy only if ops.celery_heartbeat ran in the last 15 min (sent every 5).
+      # `celery status` answered even with every pool slot hung.
+      test: [ "CMD", "python", "-c", "import os,sys,time,redis; v=redis.Redis.from_url(os.environ['REDIS_URL']).get('bluestream:celery:heartbeat'); sys.exit(0 if v and time.time()-float(v) < 900 else 1)" ]
       interval: 60s
-      timeout: 30s
+      timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 360s
     deploy:
       resources:
         limits:

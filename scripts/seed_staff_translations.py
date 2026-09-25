@@ -267,6 +267,13 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Tanlangan mijoz uchun bu tolov usuli mavjud emas.",
         "ru": "Этот способ оплаты недоступен для выбранного клиента.",
     },
+    # A geocoder OUTAGE on a typed address (5xx / transport), not "no such
+    # address": the pin step needs no lookup, so it points there.
+    "staff.operator.geocoder_down_use_pin": {
+        "en": "The address lookup isn't working right now. Send the location pin instead — it doesn't need the lookup.",
+        "uz": "Manzil qidirish hozir ishlamayapti. Uning o'rniga joylashuv pinini yuboring — unga qidiruv kerak emas.",
+        "ru": "Поиск адреса сейчас не работает. Отправьте геометку — ей поиск не нужен.",
+    },
     "staff.back": {"en": "Back", "uz": "Orqaga", "ru": "Назад"},
     "staff.confirm": {"en": "Confirm", "uz": "Tasdiqlash", "ru": "Подтвердить"},
     "staff.cancel": {"en": "Cancel", "uz": "Bekor qilish", "ru": "Отмена"},
@@ -898,15 +905,125 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Noto'gri malumot kiritildi. Iltimos, tuzatib qayta urinib koring.",
         "ru": "Некорректный ввод. Исправьте и повторите.",
     },
+    # Owner ruling 2026-09-24: an untranslated refusal shows the backend's own
+    # sentence (staff_bot/utils/api_errors.py::displayable_backend_reason).
+    "staff.error.api.backend_reason": {
+        "en": "Couldn't complete this: {reason}",
+        "uz": "Bajarib bo'lmadi: {reason}",
+        "ru": "Не удалось выполнить: {reason}",
+    },
     "staff.error.api.bottle_session_required": {
         "en": "You have no open bottle session. Open a new session to continue delivering this order.",
         "uz": "Sizda ochiq idish sessiyasi yoq. Bu buyurtmani davom ettirish uchun yangi sessiya oching.",
         "ru": "У вас нет открытой сессии по таре. Откройте новую сессию, чтобы продолжить доставку этого заказа.",
     },
+    # There is no "add bottles to an open session" in the bot: "Log bottles
+    # loaded" OPENS a session and refuses while one is open
+    # (staff.delivery.bottle_session_already_open). The one real way out is
+    # reloading at the warehouse; a transfer is no remedy, because the
+    # transfer picker (list_eligible_co_drivers) excludes every driver who
+    # already has an open session.
     "staff.error.api.bottle_session_capacity_exceeded": {
-        "en": "Your current bottle session does not have enough bottles for this order. Load more bottles, then try again.",
-        "uz": "Joriy sessiyangizda bu buyurtma uchun yetarli idish yoq. Avval idish yuklang, keyin qayta urinib koring.",
-        "ru": "В вашей текущей сессии недостаточно тары для этого заказа. Загрузите больше тары и повторите.",
+        "en": "Your bottle session doesn't have enough bottles for this order. Return to the warehouse to reload.",
+        "uz": "Idish sessiyangizda bu buyurtma uchun yetarli idish yo'q. Qayta yuklash uchun omborga qayting.",
+        "ru": "В вашей сессии недостаточно тары для этого заказа. Вернитесь на склад и загрузитесь заново.",
+    },
+    "staff.error.api.bottle_session_capacity_exceeded_detail": {
+        "en": "Your session has {available} bottle(s) left, but this order needs {required} — {shortfall} short. Return to the warehouse to reload.",
+        "uz": "Sessiyangizda {available} ta idish qolgan, bu buyurtmaga esa {required} ta kerak — {shortfall} ta yetishmayapti. Qayta yuklash uchun omborga qayting.",
+        "ru": "В сессии осталось {available} бут., а для заказа нужно {required} — не хватает {shortfall}. Вернитесь на склад и загрузитесь заново.",
+    },
+    # Bottle sessions, co-drivers and transfers (2026-09-24 audit): one sentence
+    # per refusal code, mapped in staff_bot/handlers/base.py.
+    "staff.error.api.no_open_bottle_session": {
+        "en": "You don't have an open bottle session right now. Open one from your bottle session screen.",
+        "uz": "Hozir ochiq idish sessiyangiz yo'q. Uni idish sessiyasi ekranidan oching.",
+        "ru": "Сейчас у вас нет открытой сессии по таре. Откройте её на экране сессии.",
+    },
+    "staff.error.api.bottle_session_gone": {
+        "en": "That session no longer exists. Pick another one from the list.",
+        "uz": "Bu sessiya endi mavjud emas. Ro'yxatdan boshqasini tanlang.",
+        "ru": "Этой сессии больше нет. Выберите другую из списка.",
+    },
+    "staff.error.api.bottle_session_closed": {
+        "en": "That session has just been closed. Pick another one from the list.",
+        "uz": "Bu sessiya hozirgina yopildi. Ro'yxatdan boshqasini tanlang.",
+        "ru": "Эта сессия только что закрыта. Выберите другую из списка.",
+    },
+    "staff.error.api.joined_session_closed": {
+        "en": "The session you joined has been closed by its owner.",
+        "uz": "Siz qo'shilgan sessiyani uning egasi yopdi.",
+        "ru": "Сессию, к которой вы присоединились, закрыл её владелец.",
+    },
+    "staff.error.api.open_session_to_invite": {
+        "en": "Open your own bottle session before inviting co-drivers.",
+        "uz": "Hamkor haydovchilarni taklif qilishdan oldin o'z idish sessiyangizni oching.",
+        "ru": "Откройте свою сессию по таре, прежде чем приглашать напарников.",
+    },
+    "staff.error.api.open_session_to_receive": {
+        "en": "Open a bottle session before accepting a transfer.",
+        "uz": "O'tkazmani qabul qilishdan oldin idish sessiyasini oching.",
+        "ru": "Откройте сессию по таре, прежде чем принимать перевод.",
+    },
+    "staff.error.api.close_own_session_to_join": {
+        "en": "Close your own bottle session before joining another driver's.",
+        "uz": "Boshqa haydovchining sessiyasiga qo'shilishdan oldin o'z idish sessiyangizni yoping.",
+        "ru": "Закройте свою сессию по таре, прежде чем присоединяться к чужой.",
+    },
+    "staff.error.api.invitee_has_session": {
+        "en": "This driver has their own open session, so they can't join yours.",
+        "uz": "Bu haydovchining o'z ochiq sessiyasi bor, shuning uchun u sizning sessiyangizga qo'shila olmaydi.",
+        "ru": "У этого водителя есть своя открытая сессия, поэтому он не может присоединиться к вашей.",
+    },
+    "staff.error.api.invitee_in_other_session": {
+        "en": "This driver is already in another driver's session.",
+        "uz": "Bu haydovchi allaqachon boshqa haydovchining sessiyasida.",
+        "ru": "Этот водитель уже в сессии другого водителя.",
+    },
+    "staff.error.api.already_in_session": {
+        "en": "You're already in another driver's session. Leave it before joining a new one.",
+        "uz": "Siz allaqachon boshqa haydovchining sessiyasidasiz. Yangisiga qo'shilishdan oldin undan chiqing.",
+        "ru": "Вы уже в сессии другого водителя. Выйдите из неё, прежде чем присоединяться к новой.",
+    },
+    "staff.error.api.not_in_session": {
+        "en": "You're not in anyone's bottle session right now.",
+        "uz": "Hozir siz hech kimning idish sessiyasida emassiz.",
+        "ru": "Сейчас вы не состоите ни в чьей сессии по таре.",
+    },
+    "staff.error.api.customer_left_address": {
+        "en": "This customer is no longer linked to that address. Search for the customer again.",
+        "uz": "Bu mijoz endi bu manzilga bog'lanmagan. Mijozni qayta qidiring.",
+        "ru": "Этот клиент больше не привязан к этому адресу. Найдите клиента заново.",
+    },
+    "staff.error.api.entry_already_submitted": {
+        "en": "This entry was already submitted with different numbers. Start it again from the beginning.",
+        "uz": "Bu yozuv allaqachon boshqa raqamlar bilan yuborilgan. Uni boshidan qayta boshlang.",
+        "ru": "Эта запись уже отправлена с другими числами. Начните её заново.",
+    },
+    "staff.error.api.transfer_exceeds_inventory": {
+        "en": "You don't have that many bottles on the truck. Check your bottle session and enter a smaller number.",
+        "uz": "Mashinada buncha idish yo'q. Idish sessiyangizni tekshirib, kichikroq son kiriting.",
+        "ru": "В машине нет столько тары. Проверьте сессию и введите меньшее число.",
+    },
+    "staff.error.api.transfer_exceeds_inventory_detail": {
+        "en": "You have {available} bottle(s) on the truck, so you can't transfer {requested}.",
+        "uz": "Mashinada {available} ta idish bor, shuning uchun {requested} ta o'tkaza olmaysiz.",
+        "ru": "В машине {available} бут., поэтому перевести {requested} нельзя.",
+    },
+    "staff.error.api.transfer_not_found": {
+        "en": "This transfer no longer exists.",
+        "uz": "Bu o'tkazma endi mavjud emas.",
+        "ru": "Этого перевода больше нет.",
+    },
+    "staff.error.api.transfer_not_yours": {
+        "en": "This transfer was sent to a different driver.",
+        "uz": "Bu o'tkazma boshqa haydovchiga yuborilgan.",
+        "ru": "Этот перевод отправлен другому водителю.",
+    },
+    "staff.error.api.transfer_already_handled": {
+        "en": "This transfer has already been handled.",
+        "uz": "Bu o'tkazma allaqachon ko'rib chiqilgan.",
+        "ru": "Этот перевод уже обработан.",
     },
     # Referenced at staff_bot/handlers/tryouts.py:138 since the delivery-zone
     # SSOT check landed, but never seeded under the `staff_bot` CATEGORY. It
@@ -1200,13 +1317,70 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Bu buyurtma allaqachon boshqa kuryer tomonidan olingan.",
         "ru": "Этот заказ уже принят другим курьером.",
     },
+    "staff.error.api.delivery_not_found": {
+        "en": "This delivery no longer exists. Open your deliveries list again.",
+        "uz": "Bu yetkazib berish endi mavjud emas. Yetkazib berishlar ro'yxatini qayta oching.",
+        "ru": "Этой доставки больше нет. Откройте список доставок заново.",
+    },
     # A claim on a delivery that stopped being claimable before the tap landed
-    # (STAFF_DELIVERY_NOT_CLAIMABLE): rescheduled to a later day, failed or
-    # cancelled. Not "already taken" -- nobody took it.
+    # (STAFF_DELIVERY_NOT_CLAIMABLE): taken by another driver, rescheduled to a
+    # later day, failed or cancelled.
+    # REPLACES the old "This order is no longer available.": a race lost to
+    # another driver arrives with this code too (ALREADY_TAKEN is unreachable).
     "staff.error.api.delivery_not_claimable": {
-        "en": "This order is no longer available.",
-        "uz": "Bu buyurtma endi mavjud emas.",
-        "ru": "Этот заказ больше недоступен.",
+        "en": "This order can't be accepted any more — another driver may have taken it, or it was moved, failed or cancelled. Refresh the list.",
+        "uz": "Bu buyurtmani endi qabul qilib bo'lmaydi — uni boshqa haydovchi olgan bo'lishi yoki u ko'chirilgan, bajarilmagan yoki bekor qilingan bo'lishi mumkin. Ro'yxatni yangilang.",
+        "ru": "Этот заказ больше нельзя принять — его мог взять другой водитель, или он перенесён, не выполнен или отменён. Обновите список.",
+    },
+    "staff.error.api.driver_profile_missing": {
+        "en": "Your driver profile isn't set up yet. Ask an administrator to activate it.",
+        "uz": "Haydovchi profilingiz hali sozlanmagan. Administratordan uni faollashtirishni so'rang.",
+        "ru": "Ваш профиль водителя ещё не настроен. Попросите администратора активировать его.",
+    },
+    "staff.error.api.order_changed_concurrently": {
+        "en": "Someone changed this order at the same moment. Nothing was saved — open it again and retry.",
+        "uz": "Kimdir bu buyurtmani aynan shu paytda o'zgartirdi. Hech narsa saqlanmadi — uni qayta ochib, yana urinib ko'ring.",
+        "ru": "Кто-то изменил этот заказ в тот же момент. Ничего не сохранено — откройте его заново и повторите.",
+    },
+    "staff.error.api.order_status_changed": {
+        "en": "This order's status was changed by someone else, so this step isn't possible. Nothing was recorded — tell the operator.",
+        "uz": "Bu buyurtma holatini boshqa kishi o'zgartirgan, shuning uchun bu qadam mumkin emas. Hech narsa yozilmadi — operatorga xabar bering.",
+        "ru": "Статус этого заказа изменил кто-то другой, поэтому этот шаг невозможен. Ничего не записано — сообщите оператору.",
+    },
+    "staff.error.api.inventory_confirmation_failed": {
+        "en": "Stock for this order couldn't be confirmed, so nothing was recorded. Tell the operator.",
+        "uz": "Bu buyurtma uchun ombor qoldig'ini tasdiqlab bo'lmadi, shuning uchun hech narsa yozilmadi. Operatorga xabar bering.",
+        "ru": "Не удалось подтвердить остатки по этому заказу, поэтому ничего не записано. Сообщите оператору.",
+    },
+    "staff.error.api.contract_needs_admin": {
+        "en": "An administrator must fix this customer's contracts — until then this can't be completed.",
+        "uz": "Bu mijozning shartnomalarini administrator to'g'rilashi kerak — shungacha buni yakunlab bo'lmaydi.",
+        "ru": "Договоры этого клиента должен исправить администратор — до этого действие нельзя завершить.",
+    },
+    "staff.error.api.not_redispatchable": {
+        "en": "Only failed deliveries can be re-dispatched — this one has already changed. Refresh the list.",
+        "uz": "Faqat bajarilmagan yetkazib berishlarni qayta yuborish mumkin — bunisi allaqachon o'zgargan. Ro'yxatni yangilang.",
+        "ru": "Повторно отправить можно только неудавшиеся доставки — эта уже изменилась. Обновите список.",
+    },
+    "staff.error.api.order_closed_for_redispatch": {
+        "en": "This order was cancelled or delivered, so it can't be re-dispatched.",
+        "uz": "Bu buyurtma bekor qilingan yoki yetkazib berilgan, shuning uchun uni qayta yuborib bo'lmaydi.",
+        "ru": "Этот заказ отменён или доставлен, поэтому его нельзя отправить повторно.",
+    },
+    "staff.error.api.past_contract_end": {
+        "en": "The customer's contract has ended, so this order can't be re-dispatched.",
+        "uz": "Mijozning shartnomasi tugagan, shuning uchun bu buyurtmani qayta yuborib bo'lmaydi.",
+        "ru": "Договор клиента закончился, поэтому этот заказ нельзя отправить повторно.",
+    },
+    "staff.error.api.not_preparable": {
+        "en": "Only confirmed orders can be marked as preparing — this one has already moved on. Refresh the list.",
+        "uz": "Faqat tasdiqlangan buyurtmalarni tayyorlanmoqda deb belgilash mumkin — bu buyurtma allaqachon keyingi bosqichga o'tgan. Ro'yxatni yangilang.",
+        "ru": "Отметить «готовится» можно только подтверждённый заказ — этот уже на другом этапе. Обновите список.",
+    },
+    "staff.error.api.order_not_found": {
+        "en": "This order no longer exists. Refresh the list.",
+        "uz": "Bu buyurtma endi mavjud emas. Ro'yxatni yangilang.",
+        "ru": "Этого заказа больше нет. Обновите список.",
     },
     # R20 (admin-order-reschedule spec): the delivery on the driver's card was
     # rescheduled, reassigned or returned to the pool after the card was drawn.
@@ -1215,6 +1389,20 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "This order is no longer assigned to you.",
         "uz": "Bu buyurtma endi sizga biriktirilmagan.",
         "ru": "Этот заказ больше не назначен вам.",
+    },
+    # STAFF_INVALID_STATUS_TRANSITION. The plain sentence is for an older
+    # backend that publishes no status; the detail one names the delivery's
+    # current status and is shown on the stale-card screen when that status is
+    # terminal (an order cancelled under the driver, 2026-09-24).
+    "staff.error.api.status_transition_refused": {
+        "en": "This delivery's status has changed, so this step is no longer possible. Open the delivery again.",
+        "uz": "Bu yetkazib berishning holati o'zgargan, shuning uchun bu qadam endi mumkin emas. Yetkazib berishni qayta oching.",
+        "ru": "Статус этой доставки изменился, этот шаг больше недоступен. Откройте доставку заново.",
+    },
+    "staff.error.api.status_transition_refused_detail": {
+        "en": "This delivery is now {current_status}, so it can't be marked {requested_status}. Nothing was recorded.",
+        "uz": "Bu yetkazib berish hozir {current_status} holatida, shuning uchun uni {requested_status} deb belgilab bo'lmaydi. Hech narsa yozilmadi.",
+        "ru": "Эта доставка сейчас в статусе {current_status}, поэтому её нельзя отметить как {requested_status}. Ничего не записано.",
     },
     "staff.error.api.driver_cod_blocked": {
         "en": "You cannot accept new cash-on-delivery orders until your pending cash reconciliation is resolved. Please complete Cash Reconciliation first.",
@@ -1225,6 +1413,157 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "This customer has reached the maximum number of unpaid cash-on-delivery debts and cannot take on more until earlier debts are settled.",
         "uz": "Bu mijoz to'lanmagan naqd to'lov qarzlarining maksimal soniga yetdi va eski qarzlar to'lanmagunicha yangi qarz olishi mumkin emas.",
         "ru": "Этот клиент достиг максимального количества непогашенных задолженностей по наложенному платежу — новые долги невозможны, пока не погашены прежние.",
+    },
+    "staff.error.api.cod_debt_limit_place_detail": {
+        "en": "Cash on delivery is blocked: the workplace at this address already has {count} unpaid cash debts. Choose a card payment.",
+        "uz": "Naqd to'lov bloklangan: bu manzildagi ish joyida allaqachon {count} ta to'lanmagan naqd qarz bor. Karta orqali to'lovni tanlang.",
+        "ru": "Оплата наличными заблокирована: у организации по этому адресу уже {count} неоплаченных долгов. Выберите оплату картой.",
+    },
+    "staff.error.api.cod_debt_limit_amount_detail": {
+        "en": "Cash on delivery is blocked: the customer owes {debt_total}, over the {debt_limit} limit. They must pay down the balance, or choose a card payment.",
+        "uz": "Naqd to'lov bloklangan: mijozning qarzi {debt_total}, bu {debt_limit} chegarasidan oshadi. Avval qarzni kamaytirishi yoki karta orqali to'lovni tanlashi kerak.",
+        "ru": "Оплата наличными заблокирована: долг клиента {debt_total} превышает лимит {debt_limit}. Нужно погасить долг или выбрать оплату картой.",
+    },
+    "staff.error.api.handoff_amount_not_positive": {
+        "en": "Enter an amount greater than 0.",
+        "uz": "0 dan katta summa kiriting.",
+        "ru": "Введите сумму больше 0.",
+    },
+    "staff.error.api.nothing_to_reconcile": {
+        "en": "You have no cash to hand over right now.",
+        "uz": "Hozir topshiradigan naqd pulingiz yo'q.",
+        "ru": "Сейчас у вас нет наличных для сдачи.",
+    },
+    "staff.error.api.customer_not_found": {
+        "en": "This customer account no longer exists.",
+        "uz": "Bu mijoz hisobi endi mavjud emas.",
+        "ru": "Этого клиента больше нет в системе.",
+    },
+    "staff.error.api.search_too_short": {
+        "en": "Type at least 2 characters to search.",
+        "uz": "Qidirish uchun kamida 2 ta belgi kiriting.",
+        "ru": "Для поиска введите минимум 2 символа.",
+    },
+    "staff.error.api.address_not_customers": {
+        "en": "That address doesn't belong to this customer. Pick the address again.",
+        "uz": "Bu manzil ushbu mijozga tegishli emas. Manzilni qayta tanlang.",
+        "ru": "Этот адрес не принадлежит клиенту. Выберите адрес заново.",
+    },
+    "staff.error.api.product_unavailable": {
+        "en": "One of the products is no longer available. Pick the products again.",
+        "uz": "Mahsulotlardan biri endi mavjud emas. Mahsulotlarni qayta tanlang.",
+        "ru": "Один из товаров больше недоступен. Выберите товары заново.",
+    },
+    "staff.error.api.address_required": {
+        "en": "Pick a delivery address for this order first.",
+        "uz": "Avval bu buyurtma uchun yetkazib berish manzilini tanlang.",
+        "ru": "Сначала выберите адрес доставки для этого заказа.",
+    },
+    "staff.error.api.account_inactive": {
+        "en": "Your staff account is not active. Ask an administrator to activate it.",
+        "uz": "Xodim hisobingiz faol emas. Administratordan uni faollashtirishni so'rang.",
+        "ru": "Ваша учётная запись сотрудника неактивна. Попросите администратора её активировать.",
+    },
+    "staff.error.api.telegram_already_linked": {
+        "en": "This Telegram account is already linked to another staff member. Ask an administrator.",
+        "uz": "Bu Telegram hisobi allaqachon boshqa xodimga bog'langan. Administratorga murojaat qiling.",
+        "ru": "Этот Telegram-аккаунт уже привязан к другому сотруднику. Обратитесь к администратору.",
+    },
+    # Task 11: sales agents and driver try-outs.
+    "staff.error.api.outlet_not_found": {
+        "en": "This outlet no longer exists.",
+        "uz": "Bu savdo nuqtasi endi mavjud emas.",
+        "ru": "Этой торговой точки больше нет.",
+    },
+    "staff.error.api.outlet_not_assigned": {
+        "en": "This outlet is assigned to another agent.",
+        "uz": "Bu savdo nuqtasi boshqa agentga biriktirilgan.",
+        "ru": "Эта торговая точка закреплена за другим агентом.",
+    },
+    "staff.error.api.visit_not_found": {
+        "en": "This visit no longer exists.",
+        "uz": "Bu tashrif endi mavjud emas.",
+        "ru": "Этого визита больше нет.",
+    },
+    "staff.error.api.visit_not_owned": {
+        "en": "This visit belongs to another agent.",
+        "uz": "Bu tashrif boshqa agentga tegishli.",
+        "ru": "Этот визит принадлежит другому агенту.",
+    },
+    "staff.error.api.agent_payment_method": {
+        "en": "Agents can take cash or business-account orders only.",
+        "uz": "Agentlar faqat naqd yoki biznes hisob orqali buyurtma qabul qila oladi.",
+        "ru": "Агент может принимать только заказы за наличные или через бизнес-счёт.",
+    },
+    "staff.error.api.stats_period_invalid": {
+        "en": "That period isn't available. Pick today, this week or this month.",
+        "uz": "Bu davr mavjud emas. Bugun, shu hafta yoki shu oyni tanlang.",
+        "ru": "Этот период недоступен. Выберите сегодня, эту неделю или этот месяц.",
+    },
+    "staff.error.api.order_min_amount": {
+        "en": "The order total is below the minimum. Add more products.",
+        "uz": "Buyurtma summasi eng kam miqdordan past. Yana mahsulot qo'shing.",
+        "ru": "Сумма заказа ниже минимальной. Добавьте товары.",
+    },
+    "staff.error.api.order_min_amount_detail": {
+        "en": "The order total must be at least {min_amount}. Add more products.",
+        "uz": "Buyurtma summasi kamida {min_amount} bo'lishi kerak. Yana mahsulot qo'shing.",
+        "ru": "Сумма заказа должна быть не меньше {min_amount}. Добавьте товары.",
+    },
+    "staff.error.api.stock_unavailable": {
+        "en": "Some products are out of stock right now. Change the basket and try again.",
+        "uz": "Ba'zi mahsulotlar hozir omborda yo'q. Savatni o'zgartirib, qayta urinib ko'ring.",
+        "ru": "Некоторых товаров сейчас нет в наличии. Измените корзину и повторите.",
+    },
+    "staff.error.api.tryout_task_not_found": {
+        "en": "This try-out task no longer exists. Refresh the list.",
+        "uz": "Bu sinov topshirig'i endi mavjud emas. Ro'yxatni yangilang.",
+        "ru": "Этой задачи пробника больше нет. Обновите список.",
+    },
+    "staff.error.api.tryout_not_found": {
+        "en": "This try-out no longer exists.",
+        "uz": "Bu sinov endi mavjud emas.",
+        "ru": "Этого пробника больше нет.",
+    },
+    "staff.error.api.tryout_task_taken": {
+        "en": "Another driver has already taken this task.",
+        "uz": "Bu topshiriqni boshqa haydovchi allaqachon olgan.",
+        "ru": "Эту задачу уже взял другой водитель.",
+    },
+    "staff.error.api.tryout_task_completed": {
+        "en": "This task has already been completed.",
+        "uz": "Bu topshiriq allaqachon bajarilgan.",
+        "ru": "Эта задача уже выполнена.",
+    },
+    "staff.error.api.tryout_pickup_exceeds": {
+        "en": "That's more bottles than this customer still has from the try-out. Check the number.",
+        "uz": "Bu mijozda sinovdan qolgan idishlardan ko'proq son kiritildi. Sonni tekshiring.",
+        "ru": "Это больше тары, чем осталось у клиента от пробника. Проверьте число.",
+    },
+    "staff.error.api.tryout_phone_invalid": {
+        "en": "A try-out needs an Uzbek mobile number for the contact. Fix the phone and try again.",
+        "uz": "Sinov uchun kontakt telefoni O'zbekiston mobil raqami bo'lishi kerak. Telefonni to'g'rilab, qayta urinib ko'ring.",
+        "ru": "Для пробника нужен узбекский мобильный номер контакта. Исправьте телефон и повторите.",
+    },
+    "staff.error.api.tryout_product_unavailable": {
+        "en": "One of the products can't be used for try-outs any more. Pick the products again.",
+        "uz": "Mahsulotlardan biri endi sinov uchun ishlatilmaydi. Mahsulotlarni qayta tanlang.",
+        "ru": "Один из товаров больше нельзя использовать для пробника. Выберите товары заново.",
+    },
+    "staff.sales.error.order_min_qty_detail": {
+        "en": "{product}: the minimum order is {minimum} (you entered {quantity}).",
+        "uz": "{product}: eng kam buyurtma {minimum} ta (siz {quantity} ta kiritdingiz).",
+        "ru": "{product}: минимальный заказ {minimum} шт. (вы ввели {quantity}).",
+    },
+    "staff.sales.error.order_qty_detail": {
+        "en": "{product}: at most {maximum} per line (you entered {quantity}).",
+        "uz": "{product}: bitta qatorda ko'pi bilan {maximum} ta (siz {quantity} ta kiritdingiz).",
+        "ru": "{product}: не больше {maximum} шт. в строке (вы ввели {quantity}).",
+    },
+    "staff.sales.error.stock_qty_detail": {
+        "en": "Enter a number from 0 to {maximum}.",
+        "uz": "0 dan {maximum} gacha son kiriting.",
+        "ru": "Введите число от 0 до {maximum}.",
     },
     "staff.error.api.invalid_invite": {
         "en": "Invite link is invalid or expired.",

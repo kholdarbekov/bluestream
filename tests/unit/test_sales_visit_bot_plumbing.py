@@ -127,8 +127,8 @@ PAYMENT_ROWS = [
 VISIT_ERROR_CODE_KEYS = {
     "SALES_VISIT_ALREADY_OPEN": "staff.sales.error.visit_open",
     "SALES_VISIT_NOT_OPEN": "staff.sales.error.visit_not_open",
-    "SALES_VISIT_NOT_FOUND": "staff.error.api.not_found",
-    "SALES_VISIT_NOT_OWNED": "staff.error.api.forbidden",
+    "SALES_VISIT_NOT_FOUND": "staff.error.api.visit_not_found",
+    "SALES_VISIT_NOT_OWNED": "staff.error.api.visit_not_owned",
     "SALES_VISIT_STEP_INVALID": "staff.sales.error.visit_step",
     "SALES_STOCK_QTY_INVALID": "staff.sales.error.stock_qty",
     "SALES_STOCK_PRODUCT_INVALID": "staff.sales.error.stock_product",
@@ -141,7 +141,7 @@ VISIT_ERROR_CODE_KEYS = {
     # screen instead of leaving the agent on the confirm card with a generic
     # 400.
     "SALES_DELIVERY_DATE_INVALID": "staff.sales.visit.day_invalid",
-    "SALES_PAYMENT_METHOD_INVALID": "staff.error.api.validation",
+    "SALES_PAYMENT_METHOD_INVALID": "staff.error.api.agent_payment_method",
     "SALES_VISIT_OUTCOME_REQUIRED": "staff.sales.error.outcome_required",
     "SALES_VISIT_OUTCOME_INVALID": "staff.error.api.validation",
     # D17: a non-image or an oversize file. The bot refuses a FORWARD before

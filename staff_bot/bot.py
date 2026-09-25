@@ -48,6 +48,8 @@ from staff_bot.config import config
 from staff_bot.database import db_manager, StaffUserRepository
 from staff_bot.i18n import i18n
 from staff_bot.api_client import api_client
+from staff_bot.utils import auth_refusals
+from staff_bot.utils.answered_callbacks import build_staff_bot
 from webhook_server import webhook_server
 from staff_bot.token_manager import TokenManager
 from staff_bot.handlers.start import StartHandler, SELECT_LANGUAGE
@@ -248,14 +250,17 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 
     if isinstance(update, Update) and update.effective_user:
         try:
+            from staff_bot.handlers.base import BaseHandler
+
             language = i18n.normalize_language(context.user_data.get('language'))
-            error_msg = i18n.get('staff.error_occurred', language)
-            if update.callback_query:
-                await update.callback_query.answer(error_msg, show_alert=True)
-            elif update.message:
-                await update.message.reply_text(error_msg)
+            await BaseHandler._notify_user(
+                BaseHandler.__new__(BaseHandler),
+                update,
+                i18n.get('staff.error_occurred', language),
+                show_alert=True,
+            )
         except Exception:
-            pass
+            logger.exception("Global error handler failed to notify the user")
 
 
 class TimedApplication(Application):
@@ -419,9 +424,16 @@ class StaffBot:
             self.application = (
                 Application.builder()
                 .application_class(TimedApplication)
-                .token(config.telegram.bot_token)
-                .request(request)
-                .get_updates_request(get_updates_request)
+                # StaffExtBot remembers answered taps so an error that arrives
+                # after the handler's bare `query.answer()` becomes a message
+                # instead of a second answer Telegram never displays.
+                # (`.bot()` replaces `.token/.request/.get_updates_request`;
+                # PTB refuses the combination.)
+                .bot(build_staff_bot(
+                    config.telegram.bot_token,
+                    request=request,
+                    get_updates_request=get_updates_request,
+                ))
                 .concurrent_updates(
                     PerChatSerialUpdateProcessor(
                         max_concurrent_updates=int(
@@ -2522,7 +2534,8 @@ class StaffBot:
                 if message is not None and not was_on_cooldown:
                     language = await self._language_handler._get_language(update, context)
                     await message.reply_text(
-                        i18n.get('staff.session_expired', language),
+                        # "Session expired", or why the backend refused it.
+                        i18n.get(auth_refusals.session_lost_key(update.effective_user.id), language),
                         # Drivers are driving: only the head-change alert is
                         # allowed to make a sound.
                         disable_notification=True,

@@ -159,6 +159,12 @@ class APIResponse:
     error: Optional[str] = None
     status_code: Optional[int] = None
     error_code: Optional[str] = None
+    # Failure-only, and ONLY what the backend's body said, kept apart from the
+    # client's own defaults ("Not found", "HTTP 400", "Request failed after
+    # retries") so the bot can tell a written reason from a placeholder.
+    details: Optional[Dict[str, Any]] = None
+    server_message: Optional[str] = None
+    error_type: Optional[str] = None
 
 
 class StaffAPIClient:
@@ -203,6 +209,26 @@ class StaffAPIClient:
             error_code = payload.get('error_code') or details.get('error_code')
             return error_message, error_code
         return default_message, None
+
+    @staticmethod
+    def _failure_context(payload: Any) -> Dict[str, Any]:
+        """The parts of a backend error body the bot may show.
+
+        `details` (the numbers behind a refusal), the backend's own `message`
+        and its error type (`error`, e.g. VALIDATION_ERROR; hand-built bodies put
+        a code there instead — harmless). Nothing from a body that is not a JSON
+        object.
+        """
+        if not isinstance(payload, dict):
+            return {"details": None, "server_message": None, "error_type": None}
+        details = payload.get('details')
+        message = payload.get('message')
+        error_type = payload.get('error')
+        return {
+            "details": details if isinstance(details, dict) else None,
+            "server_message": message.strip() if isinstance(message, str) and message.strip() else None,
+            "error_type": error_type if isinstance(error_type, str) else None,
+        }
 
     def _log_unsuccessful_response(
         self,
@@ -396,6 +422,7 @@ class StaffAPIClient:
                             error=error_message,
                             status_code=403,
                             error_code=error_code,
+                            **self._failure_context(payload),
                         )
                     elif response.status_code == 404:
                         error_message, error_code = self._extract_response_error(payload, "Not found")
@@ -411,6 +438,7 @@ class StaffAPIClient:
                             error=error_message,
                             status_code=404,
                             error_code=error_code,
+                            **self._failure_context(payload),
                         )
                     elif response.status_code == 409:
                         error_data = payload if isinstance(payload, dict) else {}
@@ -428,6 +456,7 @@ class StaffAPIClient:
                             status_code=409,
                             data=error_data,
                             error_code=error_code,
+                            **self._failure_context(payload),
                         )
                     else:
                         error_data = payload if isinstance(payload, dict) else {}
@@ -447,6 +476,7 @@ class StaffAPIClient:
                             error=error_message,
                             status_code=response.status_code,
                             error_code=error_code,
+                            **self._failure_context(payload),
                         )
 
                 except NEVER_DELIVERED_ERRORS as exc:

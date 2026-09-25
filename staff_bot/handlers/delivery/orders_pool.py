@@ -337,8 +337,10 @@ class OrdersPoolHandler(BaseHandler):
                 if response.status_code == 401:
                     await self._handle_auth_error(update, language)
                     return
-                if response.status_code == 409:
-                    # Already taken by another driver
+                if response.status_code == 409 and not getattr(response, 'error_code', None):
+                    # The session-bind race (bottle_tracking_service
+                    # `bind_order_to_session`): another accept won. Coded
+                    # 409s fall through to the resolver below.
                     await query.edit_message_text(
                         f"❌ {i18n.get('staff.delivery.already_taken', language)}",
                         reply_markup=CommonKeyboards.back_button(language, "staff_new_orders")
@@ -371,12 +373,7 @@ class OrdersPoolHandler(BaseHandler):
                 # STAFF_MAX_CONCURRENT_REACHED), replace the confirm screen with the
                 # resolved error message + a back button so the user can't re-click
                 # the stale confirm buttons.
-                error_msg = self._resolve_api_error_message(
-                    language,
-                    error=getattr(response, 'error', None),
-                    status_code=getattr(response, 'status_code', None),
-                    error_code=error_code,
-                )
+                error_msg = self._resolve_response_error(language, response, html=True)
                 await query.edit_message_text(
                     f"❌ {error_msg}",
                     reply_markup=CommonKeyboards.back_button(language, "staff_new_orders"),

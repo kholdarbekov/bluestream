@@ -786,6 +786,16 @@ class VisitHandler(SalesHubHandler):
             response = await client.sales_checkin(token, flow.get('visit_id'), payload)
         if not response.success:
             await self._handle_api_response_error(update, response, language)
+            gone = self._visit_is_gone(context, response)
+            if gone:
+                # The check-in reply keyboard is the one-shot location prompt
+                # (`_checkin_prompt`, no Cancel) -- it replaced the persistent
+                # main menu, and ending bare would leave the agent holding a
+                # phone with no menu on it. `_leave_to_menu` is the one exit
+                # that hands it back.
+                return await self._leave_to_menu(
+                    update, context, self._resolve_response_error(language, response, html=True), language
+                )
             # The one-shot keyboard collapsed when the pin was sent; without
             # this the agent has no button left to retry with.
             await self._say(
@@ -825,6 +835,15 @@ class VisitHandler(SalesHubHandler):
             response = await client.sales_checkin(token, flow.get('visit_id'), {'skipped': True})
         if not response.success:
             await self._handle_api_response_error(update, response, language)
+            gone = self._visit_is_gone(context, response)
+            if gone:
+                # Same trap as `receive_checkin`: this posts to the same
+                # `/checkin` endpoint from the same one-shot location
+                # keyboard, and staying on V_CHECKIN keeps both the dead
+                # draft and the menu-less reply keyboard.
+                return await self._leave_to_menu(
+                    update, context, self._resolve_response_error(language, response, html=True), language
+                )
             return V_CHECKIN
         await self._ack(update, V_CHECKIN)
         try:
@@ -2146,12 +2165,7 @@ class VisitHandler(SalesHubHandler):
             # staying would park the agent on a screen whose every button posts
             # to a visit that is over, with no draft behind any of them.
             gone = self._visit_is_gone(context, failure)
-            reason = self._resolve_api_error_message(
-                language,
-                error=getattr(failure, 'error', None),
-                status_code=getattr(failure, 'status_code', None),
-                error_code=getattr(failure, 'error_code', None),
-            )
+            reason = self._resolve_response_error(language, failure, html=True)
             lines.append(f"⚠️ {reason}")
         await self._say(update, '\n'.join(line for line in lines if line))
         if gone:
@@ -2228,6 +2242,16 @@ class VisitHandler(SalesHubHandler):
             response = await client.sales_abandon_visit(token, flow.get('visit_id'))
         if not response.success:
             await self._handle_api_response_error(update, response, language)
+            gone = self._visit_is_gone(context, response)
+            if gone:
+                # Abandon posts from EVERY screen, including check-in's own
+                # one-shot location keyboard (its inline Skip/Abandon pair).
+                # Staying there with `return None` would leave the agent
+                # holding a dead draft AND a reply keyboard with no menu on
+                # it -- the same trap `receive_checkin`/`skip_checkin` fix.
+                return await self._leave_to_menu(
+                    update, context, self._resolve_response_error(language, response, html=True), language
+                )
             return None
         data = response.data or {}
         visit = data.get('visit') or {}

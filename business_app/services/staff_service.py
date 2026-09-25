@@ -1681,6 +1681,10 @@ class StaffService:
         if new_status not in allowed:
             raise ValidationError(
                 f"Cannot transition from '{old_status_value}' to '{new_status}'. " f"Allowed transitions: {allowed}",
+                # The staff bot treats a refused "delivered" as an already-
+                # recorded replay ONLY when the delivery really is delivered;
+                # a cancelled/failed one must be reported, not celebrated.
+                details={"current_status": old_status_value, "requested_status": new_status},
                 error_code="STAFF_INVALID_STATUS_TRANSITION",
             )
 

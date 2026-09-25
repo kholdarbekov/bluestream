@@ -6,19 +6,22 @@ import base64
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Optional
-from telegram import Update
-from telegram.error import NetworkError, TelegramError, TimedOut
+from html import escape
+from typing import Dict, Optional, Set, Tuple
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
+from telegram.error import BadRequest, NetworkError, TelegramError, TimedOut
 from telegram.ext import ContextTypes
 
 from staff_bot.i18n import i18n
 from staff_bot.database import db_manager, StaffUserRepository
 from staff_bot.keyboards.common import CommonKeyboards
-from staff_bot.utils import flow_state
+from staff_bot.utils import auth_refusals, flow_state
 # Module-level so this module carries the same `api_client` seam every
 # handler module does — the guard below reads the backend, and a test that
 # swaps a handler module's client has to be able to swap this one too.
 from staff_bot.api_client import api_client
+from staff_bot.utils.answered_callbacks import callback_already_answered
+from staff_bot.utils.api_errors import ErrorDetailCopy, displayable_backend_reason, render_detail_copy
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +32,8 @@ class BaseHandler:
     MIN_TOKEN_TTL_SECONDS = 30
     TELEGRAM_RETRY_ATTEMPTS = 2
     TELEGRAM_RETRY_DELAY_SECONDS = 0.5
+    # Telegram refuses answerCallbackQuery text longer than this (400).
+    TELEGRAM_ALERT_MAX_CHARS = 200
     API_ERROR_CODE_KEY_MAP = {
         'STAFF_AUTH_REQUIRED': 'staff.error.api.auth_failed',
         'STAFF_TELEGRAM_ID_REQUIRED': 'staff.error.api.validation',
@@ -37,23 +42,46 @@ class BaseHandler:
         'STAFF_STATUS_REQUIRED': 'staff.error.api.validation',
         'STAFF_COORDINATES_REQUIRED': 'staff.error.api.validation',
         'STAFF_CLIENT_ID_REQUIRED': 'staff.error.api.validation',
-        'STAFF_USER_NOT_FOUND': 'staff.error.api.not_found',
-        'STAFF_DELIVERY_NOT_FOUND': 'staff.error.api.not_found',
-        'STAFF_ORDER_NOT_FOUND': 'staff.error.api.not_found',
-        'STAFF_CLIENT_NOT_FOUND': 'staff.error.api.not_found',
-        'STAFF_PRODUCT_NOT_FOUND': 'staff.error.api.not_found',
+        # The operator's client lookups (addresses, payment methods, add
+        # address) and the sales outlet link: the customer row is gone.
+        'STAFF_USER_NOT_FOUND': 'staff.error.api.customer_not_found',
+        'STAFF_DELIVERY_NOT_FOUND': 'staff.error.api.delivery_not_found',
+        # Mark-preparing on an order that was deleted under the card.
+        'STAFF_ORDER_NOT_FOUND': 'staff.error.api.order_not_found',
+        'STAFF_CLIENT_NOT_FOUND': 'staff.error.api.customer_not_found',
+        # A basket line whose product was deleted after the operator picked it.
+        'STAFF_PRODUCT_NOT_FOUND': 'staff.error.api.product_unavailable',
         'STAFF_DELIVERY_PERSON_NOT_FOUND': 'staff.error.api.not_found',
-        'STAFF_PHONE_EXISTS': 'staff.error.api.conflict',
+        'STAFF_PHONE_EXISTS': 'staff.operator.user_already_exists',
         'STAFF_EMAIL_EXISTS': 'staff.error.api.conflict',
         'STAFF_DELIVERY_PERSON_EXISTS': 'staff.error.api.conflict',
         'STAFF_EMPLOYEE_ID_EXISTS': 'staff.error.api.conflict',
         'STAFF_DELIVERY_ALREADY_TAKEN': 'staff.error.api.already_taken',
         # A claim (pool card, or a broadcast's Accept) on a delivery that stopped
-        # being claimable before the tap landed: moved to a later day, failed or
-        # cancelled (`assign_driver`'s claimable guard, a 400). Nobody took it,
-        # so `already_taken` would be false, and the generic 400 copy ("check
-        # the entered data") is addressed to a driver who typed nothing.
+        # being claimable before the tap landed (`assign_driver`'s claimable
+        # guard, a 400). That includes losing a race to another driver:
+        # `assign_driver` locks the row and judges its status BEFORE its owner,
+        # and a driver-held delivery is never claimable, so the second of two
+        # drivers arrives HERE, not at STAFF_DELIVERY_ALREADY_TAKEN (unreachable
+        # from the bot). The copy therefore names every cause: taken, moved to a
+        # later day, failed or cancelled. The generic 400 copy ("check the
+        # entered data") would be addressed to a driver who typed nothing.
         'STAFF_DELIVERY_NOT_CLAIMABLE': 'staff.error.api.delivery_not_claimable',
+        # `assign_driver` found no ACTIVE DeliveryPerson row for this user: the
+        # account has the role but its driver profile is missing or switched off.
+        'STAFF_DRIVER_NOT_FOUND': 'staff.error.api.driver_profile_missing',
+        # The order-status write lost a race (`OrderService` compare-and-set, a
+        # 409): the other writer's change stands and this one wrote nothing.
+        'ORDER_STATUS_CONFLICT': 'staff.error.api.order_changed_concurrently',
+        # The DELIVERY step was allowed but the ORDER refused to follow: someone
+        # moved the order itself (e.g. cancelled it) while the driver held it.
+        'ORDER_STATUS_TRANSITION_INVALID': 'staff.error.api.order_status_changed',
+        'INVENTORY_CONFIRMATION_FAILED': 'staff.error.api.inventory_confirmation_failed',
+        # Two active AMOUNT-mode contracts for one grocery customer: only an
+        # administrator can say which one applies. Reached both when a driver
+        # completes a delivery (the delivered charge) and when an operator
+        # creates an order (`reserve_for_order`), so the copy names no audience.
+        'CONTRACT_AMOUNT_MODE_AMBIGUOUS': 'staff.error.api.contract_needs_admin',
         # R20: the delivery a driver's card acts on was rescheduled, reassigned
         # or returned to the pool after the card was drawn. The three
         # delivery-status call sites render it as a stale card, not an alert
@@ -71,9 +99,10 @@ class BaseHandler:
         'STAFF_TELEGRAM_NOT_APPROVED': 'staff.error.api.forbidden',
         'STAFF_NO_ROLE': 'staff.error.api.forbidden',
         'STAFF_ACCOUNT_DEACTIVATED': 'staff.error.api.account_deactivated',
-        'STAFF_TELEGRAM_ALREADY_LINKED': 'staff.error.api.conflict',
+        'STAFF_ACCOUNT_INACTIVE': 'staff.error.api.account_inactive',
+        'STAFF_TELEGRAM_ALREADY_LINKED': 'staff.error.api.telegram_already_linked',
         'STAFF_OPERATOR_ROLE_REQUIRED': 'staff.error.api.forbidden',
-        'STAFF_SEARCH_QUERY_TOO_SHORT': 'staff.error.api.invalid_input',
+        'STAFF_SEARCH_QUERY_TOO_SHORT': 'staff.error.api.search_too_short',
         'STAFF_SEARCH_TYPE_INVALID': 'staff.error.api.invalid_input',
         'STAFF_PHONE_REQUIRED': 'staff.error.api.validation',
         'STAFF_FULL_NAME_PHONE_REQUIRED': 'staff.error.api.validation',
@@ -87,26 +116,61 @@ class BaseHandler:
         'STAFF_INVITE_PAYLOAD_USER_ID_REQUIRED': 'staff.error.api.invalid_input',
         'STAFF_INVALID_COORDINATES': 'staff.error.api.invalid_input',
         'STAFF_MAX_CONCURRENT_REACHED': 'staff.error.api.conflict',
-        'STAFF_INVALID_STATUS_TRANSITION': 'staff.error.api.invalid_input',
+        # A status step the delivery can no longer take: its status changed
+        # under the card. The plain sentence is for a backend that publishes no
+        # `current_status`; with it, API_ERROR_DETAIL_COPY names the status.
+        'STAFF_INVALID_STATUS_TRANSITION': 'staff.error.api.status_transition_refused',
         'STAFF_INVALID_FAIL_REASON': 'staff.error.api.invalid_input',
-        'STAFF_ORDER_STATUS_INVALID_FOR_PREPARING': 'staff.error.api.invalid_input',
+        # Mark-preparing on an order that already left CONFIRMED under the card.
+        'STAFF_ORDER_STATUS_INVALID_FOR_PREPARING': 'staff.error.api.not_preparable',
         # Re-dispatch is a reschedule to today (R18, admin-order-reschedule spec),
         # so its refusals are the reschedule's 400s. Every one an operator can meet
-        # means the row changed under their card: the order was cancelled or
-        # delivered, a colleague re-dispatched first, or the contract ran out. The
-        # 400 fallback would say "check the entered data" to someone who typed
-        # nothing; this is the sentence the old 409 STAFF_ORDER_NOT_ACTIVE produced.
-        'ORDER_NOT_RESCHEDULABLE': 'staff.error.api.conflict',
-        'DELIVERY_NOT_RESCHEDULABLE': 'staff.error.api.conflict',
-        'STAFF_DELIVERY_NOT_REDISPATCHABLE': 'staff.error.api.conflict',
-        'ORDER_RESCHEDULE_PAST_CONTRACT_END': 'staff.error.api.conflict',
+        # means the row changed under their card, and each cause gets its own
+        # sentence: the delivery is no longer FAILED (a colleague re-dispatched
+        # first), the order was cancelled or delivered, or the contract ran out.
+        # These used to share the generic conflict sentence, which never told the
+        # operator which of those happened, or that there was nothing to retry.
+        'ORDER_NOT_RESCHEDULABLE': 'staff.error.api.order_closed_for_redispatch',
+        'DELIVERY_NOT_RESCHEDULABLE': 'staff.error.api.order_closed_for_redispatch',
+        'STAFF_DELIVERY_NOT_REDISPATCHABLE': 'staff.error.api.not_redispatchable',
+        'ORDER_RESCHEDULE_PAST_CONTRACT_END': 'staff.error.api.past_contract_end',
         'STAFF_PHONE_FIRST_NAME_REQUIRED': 'staff.error.api.validation',
         'STAFF_ORDER_ITEMS_REQUIRED': 'staff.error.api.validation',
         'BOTTLE_SESSION_REQUIRED': 'staff.error.api.bottle_session_required',
         'BOTTLE_SESSION_CAPACITY_EXCEEDED': 'staff.error.api.bottle_session_capacity_exceeded',
+        # Bottle sessions, co-drivers and transfers. Each fact has its own code
+        # and sentence: "you have no open session" (the driver's OWN session,
+        # `_get_open_session_or_raise`) is not "the session you picked is gone"
+        # (join target) nor "open one first to invite / to receive".
+        'BOTTLE_SESSION_NOT_FOUND': 'staff.error.api.no_open_bottle_session',
+        'BOTTLE_SESSION_TARGET_NOT_FOUND': 'staff.error.api.bottle_session_gone',
+        # A JOIN on a session that closed after the list was drawn.
+        'BOTTLE_SESSION_NOT_OPEN': 'staff.error.api.bottle_session_closed',
+        # The member's own membership: the owner closed the session they joined.
+        'BOTTLE_SESSION_MEMBERSHIP_CLOSED': 'staff.error.api.joined_session_closed',
+        'BOTTLE_SESSION_REQUIRED_TO_INVITE': 'staff.error.api.open_session_to_invite',
+        'BOTTLE_SESSION_REQUIRED_TO_RECEIVE': 'staff.error.api.open_session_to_receive',
+        # Reached through JOIN only: the /open screen answers this code with its
+        # own bespoke copy before the resolver sees it (bottle_collection.py).
+        'BOTTLE_SESSION_ALREADY_OPEN': 'staff.error.api.close_own_session_to_join',
+        # The invite route re-words join_session's two refusals for the INVITER.
+        'BOTTLE_INVITEE_HAS_SESSION': 'staff.error.api.invitee_has_session',
+        'BOTTLE_INVITEE_IN_OTHER_SESSION': 'staff.error.api.invitee_in_other_session',
+        'BOTTLE_SESSION_MEMBERSHIP_ALREADY_ACTIVE': 'staff.error.api.already_in_session',
+        'BOTTLE_SESSION_MEMBERSHIP_NOT_FOUND': 'staff.error.api.not_in_session',
+        # A collection/fine at a place the customer is no longer a member of.
+        'BOTTLE_SCOPE_MEMBERSHIP_REQUIRED': 'staff.error.api.customer_left_address',
+        # The same retry token arrived with a different body: the entry that
+        # landed is not the one on screen, so the driver starts over.
+        'BOTTLE_IDEMPOTENCY_KEY_REUSED': 'staff.error.api.entry_already_submitted',
+        # With `requested`/`available`, API_ERROR_DETAIL_COPY names both numbers.
+        'BOTTLE_TRANSFER_EXCEEDS_INVENTORY': 'staff.error.api.transfer_exceeds_inventory',
+        'BOTTLE_TRANSFER_NOT_FOUND': 'staff.error.api.transfer_not_found',
+        'BOTTLE_TRANSFER_NOT_RECEIVER': 'staff.error.api.transfer_not_yours',
+        'BOTTLE_TRANSFER_NOT_PENDING': 'staff.error.api.transfer_already_handled',
         # Sales-agent outlet flows (business_app/api/staff_sales.py).
-        'SALES_OUTLET_NOT_FOUND': 'staff.error.api.not_found',
-        'SALES_OUTLET_NOT_ASSIGNED': 'staff.error.api.forbidden',
+        'SALES_OUTLET_NOT_FOUND': 'staff.error.api.outlet_not_found',
+        'SALES_OUTLET_NOT_ASSIGNED': 'staff.error.api.outlet_not_assigned',
         'SALES_OUTLET_DUPLICATE': 'staff.sales.error.duplicate',
         'SALES_OUTLET_OUTSIDE_ZONE': 'staff.operator.outside_delivery_area',
         'SALES_OUTLET_PIN_REQUIRED': 'staff.sales.error.pin_required',
@@ -134,26 +198,35 @@ class BaseHandler:
         # count that was never the problem. Same screen, different sentence.
         'SALES_VISIT_ALREADY_OPEN': 'staff.sales.error.visit_open',
         'SALES_VISIT_NOT_OPEN': 'staff.sales.error.visit_not_open',
-        'SALES_VISIT_NOT_FOUND': 'staff.error.api.not_found',
-        'SALES_VISIT_NOT_OWNED': 'staff.error.api.forbidden',
+        'SALES_VISIT_NOT_FOUND': 'staff.error.api.visit_not_found',
+        'SALES_VISIT_NOT_OWNED': 'staff.error.api.visit_not_owned',
         'SALES_VISIT_STEP_INVALID': 'staff.sales.error.visit_step',
         'SALES_STOCK_QTY_INVALID': 'staff.sales.error.stock_qty',
         'SALES_STOCK_PRODUCT_INVALID': 'staff.sales.error.stock_product',
         'SALES_OUTLET_NOT_ACTIVE': 'staff.sales.error.outlet_not_active',
         'SALES_VISIT_ORDER_EXISTS': 'staff.sales.error.order_exists',
-        # A 400, so the staff client keeps no error body (`data` survives on
-        # 409s only): the copy is generic on purpose, and the screen it lands
-        # back on is the basket, where each line prints its own floor.
+        # Since Task 2 the client keeps `details` on every status, not only
+        # 409s, so API_ERROR_DETAIL_COPY's own spec (below) usually renders
+        # first and names the product, the floor and what was entered. This
+        # plain key is the fallback for a raise site that publishes no
+        # `min_order_quantity` (an older backend) -- generic on purpose,
+        # because the screen it lands back on is the basket, where each line
+        # prints its own floor anyway.
         'SALES_ORDER_MIN_QTY': 'staff.sales.error.order_min_qty',
-        # M30's ceiling, the mirror of SALES_ORDER_MIN_QTY and generic for the
-        # same reason (a 400 leaves the bot the code alone).
+        # M30's ceiling, the mirror of SALES_ORDER_MIN_QTY -- same fallback
+        # role behind its own detail-copy spec below.
         'SALES_ORDER_QTY_INVALID': 'staff.sales.error.order_qty',
         # L47(4): the schedule branch of `place_order`. No NEW copy -- the day
         # screen already owns the sentence for an unusable date, and the
         # handler re-shows that screen rather than leaving the agent on the
         # confirm card reading the generic 400 sentence.
         'SALES_DELIVERY_DATE_INVALID': 'staff.sales.visit.day_invalid',
-        'SALES_PAYMENT_METHOD_INVALID': 'staff.error.api.validation',
+        'SALES_PAYMENT_METHOD_INVALID': 'staff.error.api.agent_payment_method',
+        # `AgentStatsService`'s own period guard (business_app/utils/local_windows.py):
+        # the agent's KPI card only ever sends today/week/month, so this is the
+        # backend refusing a value the bot did not offer -- an older bot build
+        # or a direct API call -- and the copy names the three it does accept.
+        'SALES_STATS_PERIOD_INVALID': 'staff.error.api.stats_period_invalid',
         'SALES_VISIT_OUTCOME_REQUIRED': 'staff.sales.error.outcome_required',
         'SALES_VISIT_OUTCOME_INVALID': 'staff.error.api.validation',
         # D17. The bot refuses a FORWARD client-side (a photo taken somewhere
@@ -169,6 +242,42 @@ class BaseHandler:
         # and the handler follows the alert with the screen that points there.
         'SALES_TRYOUT_PHONE_REQUIRED': 'staff.sales.error.phone_required',
         'SALES_TRYOUT_ITEMS_INVALID': 'staff.sales.error.tryout_items',
+        # Cash reconciliation (DriverReconciliationService.submit_session): a
+        # zero/negative manual amount, or "settle everything" on a session with
+        # nothing collected and no prior handoffs. Prod 2026-09-21: a driver
+        # typed 0 three times and read the generic "check the entered data".
+        'RECONCILIATION_AMOUNT_NOT_POSITIVE': 'staff.error.api.handoff_amount_not_positive',
+        'RECONCILIATION_NOTHING_TO_SUBMIT': 'staff.error.api.nothing_to_reconcile',
+        # CashCollectionService: the customer behind an at-door collection or a
+        # statement lookup was deleted/merged out from under the driver's card.
+        'COD_CUSTOMER_NOT_FOUND': 'staff.error.api.customer_not_found',
+        # Operator flows (StaffService.create_client_user / create_phone_order).
+        'STAFF_PHONE_INVALID': 'staff.operator.invalid_phone',
+        # The address on the order is not one of this client's (a stale picker).
+        'STAFF_INVALID_DELIVERY_ADDRESS': 'staff.error.api.address_not_customers',
+        # `assert_order_address_for_status`: a phone order opens as CONFIRMED,
+        # which needs a delivery address (the class default code,
+        # INVALID_STATE_TRANSITION, named no fact the operator could act on).
+        'ORDER_DELIVERY_ADDRESS_REQUIRED': 'staff.error.api.address_required',
+        # `OrderService.create_order`, reached from the sales visit's own
+        # order POST (`VisitService.place_order`) -- the same two refusals the
+        # customer bot and admin already hit, now coded. The plain key is the
+        # fallback; API_ERROR_DETAIL_COPY's spec below names the floor when
+        # the backend publishes `min_amount`.
+        'ORDER_MIN_AMOUNT': 'staff.error.api.order_min_amount',
+        'ORDER_STOCK_UNAVAILABLE': 'staff.error.api.stock_unavailable',
+        # Try-out task and pickup flows (TryoutService), reached both by a
+        # driver's own try-out screens and by the sales agent's field try-out
+        # (`OutletService` re-raises its OWN item refusals as
+        # SALES_TRYOUT_ITEMS_INVALID before these are ever seen -- see that
+        # code's comment above).
+        'TRYOUT_TASK_NOT_FOUND': 'staff.error.api.tryout_task_not_found',
+        'TRYOUT_NOT_FOUND': 'staff.error.api.tryout_not_found',
+        'TRYOUT_TASK_TAKEN': 'staff.error.api.tryout_task_taken',
+        'TRYOUT_TASK_COMPLETED': 'staff.error.api.tryout_task_completed',
+        'TRYOUT_PICKUP_EXCEEDS_OUTSTANDING': 'staff.error.api.tryout_pickup_exceeds',
+        'TRYOUT_PHONE_INVALID': 'staff.error.api.tryout_phone_invalid',
+        'TRYOUT_PRODUCT_UNAVAILABLE': 'staff.error.api.tryout_product_unavailable',
     }
     API_ERROR_MESSAGE_KEY_MAP = {
         'telegram_id is required': 'staff.error.api.validation',
@@ -197,6 +306,100 @@ class BaseHandler:
         'not found': 'staff.error.api.not_found',
         'conflict': 'staff.error.api.conflict',
     }
+
+    # Codes whose copy names the backend's numbers (`details`). Tried in order;
+    # the first spec whose fields are ALL present wins, so a code with two
+    # shapes lists both. Falls back to API_ERROR_CODE_KEY_MAP when none fits
+    # (an older backend, or a raise site that publishes no details).
+    API_ERROR_DETAIL_COPY: Dict[str, Tuple[ErrorDetailCopy, ...]] = {
+        'BOTTLE_SESSION_CAPACITY_EXCEEDED': (
+            ErrorDetailCopy(
+                'staff.error.api.bottle_session_capacity_exceeded_detail',
+                {'available': 'available', 'required': 'required', 'shortfall': 'shortfall'},
+            ),
+        ),
+        'STAFF_INVALID_STATUS_TRANSITION': (
+            ErrorDetailCopy(
+                'staff.error.api.status_transition_refused_detail',
+                {'current_status': 'current_status', 'requested_status': 'requested_status'},
+                {'current_status': 'delivery_status', 'requested_status': 'delivery_status'},
+            ),
+        ),
+        'BOTTLE_TRANSFER_EXCEEDS_INVENTORY': (
+            ErrorDetailCopy(
+                'staff.error.api.transfer_exceeds_inventory_detail',
+                {'requested': 'requested', 'available': 'available'},
+            ),
+        ),
+        # Two shapes for one code (CashCollectionService.validate_customer_can_use_cod):
+        # place scope publishes only a COUNT (the NET total is a coworker's
+        # money, spec §7 privacy boundary); person scope publishes the
+        # customer's own debt_total/debt_limit. Tried in order — a place-scope
+        # refusal never has debt_total/debt_limit, so it falls through to the
+        # count spec.
+        'COD_DEBT_LIMIT_REACHED': (
+            ErrorDetailCopy('staff.error.api.cod_debt_limit_place_detail', {'count': 'place_debt_count'}),
+            ErrorDetailCopy(
+                'staff.error.api.cod_debt_limit_amount_detail',
+                {'debt_total': 'debt_total', 'debt_limit': 'debt_limit'},
+                {'debt_total': 'money', 'debt_limit': 'money'},
+            ),
+        ),
+        'ORDER_MIN_AMOUNT': (
+            ErrorDetailCopy(
+                'staff.error.api.order_min_amount_detail',
+                {'min_amount': 'min_amount'},
+                {'min_amount': 'money'},
+            ),
+        ),
+        'SALES_ORDER_MIN_QTY': (
+            ErrorDetailCopy(
+                'staff.sales.error.order_min_qty_detail',
+                {'product': 'product_name', 'minimum': 'min_order_quantity', 'quantity': 'quantity'},
+            ),
+        ),
+        'SALES_ORDER_QTY_INVALID': (
+            ErrorDetailCopy(
+                'staff.sales.error.order_qty_detail',
+                {'product': 'product_name', 'maximum': 'max_quantity', 'quantity': 'quantity'},
+            ),
+        ),
+        'SALES_STOCK_QTY_INVALID': (
+            ErrorDetailCopy(
+                'staff.sales.error.stock_qty_detail', {'maximum': 'max'},
+            ),
+        ),
+    }
+
+    # A delivery in one of these can take no further step: a refusal naming
+    # one is a stale card, rendered like STAFF_DELIVERY_NOT_OWNED.
+    STALE_CARD_STATUSES = frozenset({'cancelled', 'failed', 'returned'})
+
+    # Codes staff can act on from a button: (emoji, label key, callback_data).
+    # A popup cannot carry buttons, so these always arrive as a chat message.
+    API_ERROR_REMEDY_BUTTONS: Dict[str, Tuple[str, str, str]] = {
+        # The accountability screen shows the open session with Return to
+        # warehouse / Transfer / Incoming transfers — the only ways to get more
+        # bottles onto the truck.
+        'BOTTLE_SESSION_CAPACITY_EXCEEDED': ('📊', 'staff.menu.my_bottle_accountability', 'staff_bottle_my_accountability'),
+        'BOTTLE_SESSION_REQUIRED': ('📊', 'staff.menu.my_bottle_accountability', 'staff_bottle_my_accountability'),
+        # No open session of the driver's own: the accountability screen is
+        # where "Log bottles loaded" opens one.
+        'BOTTLE_SESSION_NOT_FOUND': ('📊', 'staff.menu.my_bottle_accountability', 'staff_bottle_my_accountability'),
+        'BOTTLE_SESSION_REQUIRED_TO_INVITE': ('📊', 'staff.menu.my_bottle_accountability', 'staff_bottle_my_accountability'),
+        'BOTTLE_SESSION_REQUIRED_TO_RECEIVE': ('📊', 'staff.menu.my_bottle_accountability', 'staff_bottle_my_accountability'),
+    }
+
+    @classmethod
+    def error_copy_keys(cls) -> Set[str]:
+        """Every key the error renderer can reach — `/health`'s and the seed
+        guard's single source (staff_bot/i18n.py, test_staff_translation_catalog_complete)."""
+        keys = set(cls.API_ERROR_CODE_KEY_MAP.values())
+        for specs in cls.API_ERROR_DETAIL_COPY.values():
+            keys.update(spec.key for spec in specs)
+        keys.update(label for _emoji, label, _callback in cls.API_ERROR_REMEDY_BUTTONS.values())
+        keys.add('staff.error.api.backend_reason')
+        return keys
 
     def __init__(self):
         self.user_repo = StaffUserRepository(db_manager)
@@ -312,6 +515,9 @@ class BaseHandler:
             )
             if response.status_code in (401, 403, 404):
                 context.user_data['authenticated'] = False
+            # A switched-off account: "session expired" would send them to
+            # /start, which is refused the same way. Keep the real reason.
+            auth_refusals.remember(user_id, getattr(response, 'error_code', None))
             return None
 
         data = response.data or {}
@@ -325,6 +531,7 @@ class BaseHandler:
 
         staff_roles = self._normalize_staff_roles(user_data.get('staff_roles'))
 
+        auth_refusals.forget(user_id)
         context.user_data['authenticated'] = True
         context.user_data['access_token'] = access_token
         if user_data.get('id') is not None:
@@ -500,8 +707,8 @@ class BaseHandler:
 
         Acting on the snapshot that happens to be loaded is exactly the bug this
         guard exists to stop, so say so and send them back to the list.
-        ``text`` replaces the sentence when the backend said WHY (the
-        ``STAFF_DELIVERY_NOT_OWNED`` refusal in ``_handle_api_response_error``).
+        ``text`` replaces the sentence when the backend said WHY (the stale-card
+        refusals in ``_handle_api_response_error``).
         The screen and the way back stay the same.
         """
         text = text or i18n.get('staff.delivery.not_found', language)
@@ -516,9 +723,10 @@ class BaseHandler:
             )
 
     async def _handle_auth_error(self, update: Update, language: str):
-        """Handle authentication error."""
-        error_msg = i18n.get('staff.session_expired', language)
-        await self._notify_user(update, error_msg, show_alert=True)
+        """Tell the user their session is gone — and why, when the backend
+        refused to re-establish it because the account is switched off."""
+        key = auth_refusals.session_lost_key(getattr(update.effective_user, 'id', None))
+        await self._notify_user(update, i18n.get(key, language), show_alert=True)
 
     def _resolve_api_error_message(
         self,
@@ -526,20 +734,43 @@ class BaseHandler:
         error: Optional[str] = None,
         status_code: Optional[int] = None,
         error_code: Optional[str] = None,
+        *,
+        details=None,
+        server_message: Optional[str] = None,
+        error_type: Optional[str] = None,
+        html: bool = False,
     ) -> str:
-        """Resolve backend error into a localized staff bot message."""
+        """Resolve a backend refusal into the sentence staff read.
+
+        Order: copy with the backend's numbers → the code's copy → a legacy
+        message match → the backend's own reason (4xx business refusals only)
+        → a status-based sentence. Plain text; with ``html=True`` interpolated
+        values are escaped for a ``parse_mode='HTML'`` screen.
+        """
         if error_code:
-            key = self.API_ERROR_CODE_KEY_MAP.get(str(error_code))
+            code = str(error_code)
+            for spec in self.API_ERROR_DETAIL_COPY.get(code, ()):
+                rendered = render_detail_copy(spec, details, language, html=html)
+                if rendered is not None:
+                    return rendered
+            key = self.API_ERROR_CODE_KEY_MAP.get(code)
             if key:
                 return i18n.get(key, language)
 
-        normalized_error = (error or '').strip().lower()
+        normalized_error = (error or '').strip().lower() if isinstance(error, str) else ''
         if normalized_error:
             key = self.API_ERROR_MESSAGE_KEY_MAP.get(normalized_error)
             if key:
                 return i18n.get(key, language)
             if normalized_error.startswith('staff.'):
                 return i18n.get(normalized_error, language)
+
+        reason = displayable_backend_reason(status_code, error_type, server_message)
+        if reason:
+            return i18n.get(
+                'staff.error.api.backend_reason', language,
+                reason=escape(reason, quote=False) if html else reason,
+            )
 
         if status_code == 400:
             return i18n.get('staff.error.api.validation', language)
@@ -555,10 +786,44 @@ class BaseHandler:
             return i18n.get('staff.error.api.invalid_input', language)
         if status_code == 429:
             return i18n.get('staff.error.api.rate_limited', language)
-        if status_code and status_code >= 500:
+        if isinstance(status_code, int) and status_code >= 500:
             return i18n.get('staff.error.api.service_unavailable', language)
 
         return i18n.get('staff.error.api.unexpected', language)
+
+    def _resolve_response_error(self, language: str, response, *, html: bool = False) -> str:
+        """`_resolve_api_error_message` for an APIResponse — every field it has."""
+        return self._resolve_api_error_message(
+            language,
+            getattr(response, 'error', None),
+            status_code=getattr(response, 'status_code', None),
+            error_code=getattr(response, 'error_code', None),
+            details=getattr(response, 'details', None),
+            server_message=getattr(response, 'server_message', None),
+            error_type=getattr(response, 'error_type', None),
+            html=html,
+        )
+
+    def _remedy_keyboard(self, language: str, error_code) -> Optional[InlineKeyboardMarkup]:
+        spec = self.API_ERROR_REMEDY_BUTTONS.get(str(error_code)) if error_code else None
+        if not spec:
+            return None
+        emoji, label_key, callback_data = spec
+        return InlineKeyboardMarkup([[InlineKeyboardButton(
+            f"{emoji} {i18n.get(label_key, language)}", callback_data=callback_data,
+        )]])
+
+    def _with_remedy(self, language: str, error_code, markup=None):
+        """`markup` with the error code's remedy row (if it has one) placed
+        first — for error screens that edit in place with their own keyboard,
+        so the remedy rule lives only in API_ERROR_REMEDY_BUTTONS."""
+        remedy = self._remedy_keyboard(language, error_code)
+        if remedy is None:
+            return markup
+        rows = list(remedy.inline_keyboard)
+        if markup is not None:
+            rows += [list(row) for row in markup.inline_keyboard]
+        return InlineKeyboardMarkup(rows)
 
     async def _handle_api_error(
         self,
@@ -568,10 +833,38 @@ class BaseHandler:
         *,
         status_code: Optional[int] = None,
         error_code: Optional[str] = None,
+        details=None,
+        server_message: Optional[str] = None,
+        error_type: Optional[str] = None,
     ):
-        """Handle API error."""
-        error_msg = f"❌ {self._resolve_api_error_message(language, error, status_code, error_code)}"
-        await self._notify_user(update, error_msg, show_alert=True)
+        """Tell staff why the backend refused, with a way out when there is one."""
+        text = self._resolve_api_error_message(
+            language, error, status_code, error_code,
+            details=details, server_message=server_message, error_type=error_type,
+        )
+        await self._notify_user(
+            update, f"❌ {text}", show_alert=True,
+            reply_markup=self._remedy_keyboard(language, error_code),
+        )
+
+    @staticmethod
+    def _status_already_applied(response) -> bool:
+        """The status change was refused because the delivery is ALREADY in the
+        requested status: a replay, not a failure.
+
+        A double tap (updates in one chat are processed one at a time, so the
+        second PUT lands after the first committed) or the client's retry of a
+        PUT whose acknowledgement was lost. The backend names both statuses on
+        STAFF_INVALID_STATUS_TRANSITION (``StaffService.update_delivery_status``);
+        an older backend names neither, and this answers False.
+        """
+        if getattr(response, 'error_code', None) != 'STAFF_INVALID_STATUS_TRANSITION':
+            return False
+        details = getattr(response, 'details', None)
+        if not isinstance(details, dict):
+            return False
+        current = details.get('current_status')
+        return current is not None and current == details.get('requested_status')
 
     async def _handle_api_response_error(
         self,
@@ -584,9 +877,13 @@ class BaseHandler:
 
         ``context`` is passed by the three ``update_delivery_status`` call sites
         in ``StatusUpdateHandler``, the only screens that can meet
-        ``STAFF_DELIVERY_NOT_OWNED``. That refusal means a STALE CARD, not bad
-        input. Dispatch rescheduled, reassigned or pooled the delivery after the
-        driver opened it, and the backend wrote nothing. An alert alone would
+        ``STAFF_DELIVERY_NOT_OWNED``, or ``STAFF_INVALID_STATUS_TRANSITION``
+        naming a ``current_status`` in ``STALE_CARD_STATUSES``. Both refusals
+        mean a STALE CARD, not bad input. Dispatch rescheduled, reassigned or
+        pooled the delivery after the driver opened it, or the order was
+        cancelled under it (the cancel cascade leaves the CANCELLED delivery on
+        the driver, so the ownership check passes and only the transition guard
+        refuses), and the backend wrote nothing. An alert alone would
         leave ``current_delivery`` naming a stop the driver no longer holds. It
         would also leave the at-door cash flow armed, so the next amount they
         typed would be submitted again.
@@ -598,15 +895,26 @@ class BaseHandler:
         the active list. ``current_delivery`` is popped by hand because it is
         session state that ``clear_pending_flows`` deliberately keeps. Here the
         snapshot itself is what went stale. Every other caller keeps the alert.
+
+        A refusal naming current == requested is a replay of a change that DID
+        land (``_status_already_applied``), never a stale card; the callers
+        render it as the success it is before reaching here.
         """
         error_code = getattr(response, 'error_code', None)
-        if context is not None and error_code == 'STAFF_DELIVERY_NOT_OWNED':
+        details = getattr(response, 'details', None)
+        terminal = (
+            error_code == 'STAFF_INVALID_STATUS_TRANSITION'
+            and isinstance(details, dict)
+            and details.get('current_status') in self.STALE_CARD_STATUSES
+            and not self._status_already_applied(response)
+        )
+        if context is not None and (error_code == 'STAFF_DELIVERY_NOT_OWNED' or terminal):
             context.user_data.pop('current_delivery', None)
             await flow_state.clear_pending_flows(context, update)
             await self._refuse_stale_card(
                 update,
                 language,
-                text=self._resolve_api_error_message(language, error_code=error_code),
+                text=self._resolve_response_error(language, response, html=True),
             )
             return
         await self._handle_api_error(
@@ -615,6 +923,9 @@ class BaseHandler:
             language,
             status_code=getattr(response, 'status_code', None),
             error_code=error_code,
+            details=details,
+            server_message=getattr(response, 'server_message', None),
+            error_type=getattr(response, 'error_type', None),
         )
 
     async def _handle_error(self, update: Update, context: ContextTypes.DEFAULT_TYPE = None):
@@ -630,27 +941,63 @@ class BaseHandler:
 
         await self._notify_user(update, error_msg, show_alert=True)
 
-    async def _notify_user(self, update: Update, message: str, show_alert: bool = False):
-        """Send user feedback without propagating Telegram network exceptions."""
+    async def _notify_user(self, update: Update, message: str, show_alert: bool = False, *, reply_markup=None):
+        """Put ``message`` in front of the user: a popup when Telegram will still
+        show one, otherwise a chat message.
+
+        Telegram shows only the FIRST answer to a tap. Most handlers answer bare
+        on entry, so an error known later cannot be a popup any more — sending
+        it as one is how a driver tapped a refused "Picked up" 20 times on
+        2026-09-10 without ever seeing why. A popup also cannot carry buttons
+        (``reply_markup``) or exceed ``TELEGRAM_ALERT_MAX_CHARS``.
+        """
         callback_query = update.callback_query
         if callback_query:
-            if await self._safe_callback_answer(callback_query, message, show_alert=show_alert):
+            popup_possible = (
+                reply_markup is None
+                and len(message) <= self.TELEGRAM_ALERT_MAX_CHARS
+                and not callback_already_answered(callback_query)
+            )
+            if popup_possible and await self._safe_callback_answer(
+                callback_query, message, show_alert=show_alert
+            ):
                 return
-
+            # Stop the spinner if nobody has; a no-op when already answered.
+            await self._safe_callback_answer(callback_query, None, show_alert=False)
             fallback_message = callback_query.message
-            if fallback_message:
-                await self._safe_reply_text(fallback_message, message)
+            if isinstance(fallback_message, Message):
+                await self._safe_reply_text(fallback_message, message, reply_markup=reply_markup)
+            elif update.effective_chat:
+                # An InaccessibleMessage has no `reply_text` in PTB 22, but its
+                # chat is still there, and dropping the error is how a tap goes
+                # silent. (A tap with no message at all is an inline-message tap:
+                # PTB gives it no chat, so there is nowhere to send.)
+                await self._safe_send_to_chat(update.effective_chat, message, reply_markup=reply_markup)
             return
 
         if update.message:
-            await self._safe_reply_text(update.message, message)
+            await self._safe_reply_text(update.message, message, reply_markup=reply_markup)
 
     async def _safe_callback_answer(self, callback_query, message: str, show_alert: bool) -> bool:
-        """Attempt callback query answer with retries on transient network failures."""
+        """Answer a tap, retrying only transient network failures.
+
+        Returns False when ``message`` could not be shown as an answer, so the
+        caller can fall back to a chat message. A tap that is already answered
+        needs no further acknowledgement (True for ``message=None``) and cannot
+        show text (False).
+        """
+        if callback_already_answered(callback_query):
+            return message is None
         for attempt in range(1, self.TELEGRAM_RETRY_ATTEMPTS + 1):
             try:
                 await callback_query.answer(message, show_alert=show_alert)
                 return True
+            except BadRequest as e:
+                # Deterministic ("query is too old", "message is too long").
+                # BadRequest subclasses NetworkError in PTB 22, so without this
+                # clause it was retried after a pointless 0.5 s sleep.
+                logger.warning("Telegram refused the callback answer: %s", e)
+                break
             except (TimedOut, NetworkError) as e:
                 if attempt < self.TELEGRAM_RETRY_ATTEMPTS:
                     await asyncio.sleep(self.TELEGRAM_RETRY_DELAY_SECONDS * attempt)
@@ -664,11 +1011,27 @@ class BaseHandler:
                 break
         return False
 
-    async def _safe_reply_text(self, target_message, message: str):
-        """Attempt reply_text with retries on transient network failures."""
+    async def _safe_reply_text(self, target_message, message: str, reply_markup=None):
+        """Reply to ``target_message``, retrying transient network failures.
+
+        Silent (``disable_notification``), the bot's convention for
+        driver-facing messages (staff_bot/bot.py).
+        """
+        await self._send_with_retries(lambda: target_message.reply_text(
+            message, reply_markup=reply_markup, disable_notification=True,
+        ))
+
+    async def _safe_send_to_chat(self, chat, message: str, reply_markup=None):
+        """`_safe_reply_text` for a chat with no message to reply to."""
+        await self._send_with_retries(lambda: chat.send_message(
+            message, reply_markup=reply_markup, disable_notification=True,
+        ))
+
+    async def _send_with_retries(self, send):
+        """Await ``send()``, retrying transient network failures; log, never raise."""
         for attempt in range(1, self.TELEGRAM_RETRY_ATTEMPTS + 1):
             try:
-                await target_message.reply_text(message)
+                await send()
                 return
             except (TimedOut, NetworkError) as e:
                 if attempt < self.TELEGRAM_RETRY_ATTEMPTS:

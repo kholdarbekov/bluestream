@@ -118,7 +118,7 @@ class TryoutService:
             selectinload(ProductTryout.bottle_ledger_entries).joinedload(TryoutBottleLedger.product),
         ).get(tryout_id)
         if not tryout:
-            raise NotFoundError("Try-out not found")
+            raise NotFoundError("Try-out not found", error_code="TRYOUT_NOT_FOUND")
         return tryout
 
     @staticmethod
@@ -132,7 +132,7 @@ class TryoutService:
             .joinedload(TryoutBottleLedger.product),
         ).get(task_id)
         if not task:
-            raise NotFoundError("Try-out task not found")
+            raise NotFoundError("Try-out task not found", error_code="TRYOUT_TASK_NOT_FOUND")
         return task
 
     @staticmethod
@@ -143,7 +143,7 @@ class TryoutService:
 
         normalized_phone = normalize_phone_number(phone)
         if not normalized_phone:
-            raise ValidationError(get_translation("error.validation.invalid_phone"))
+            raise ValidationError(get_translation("error.validation.invalid_phone"), error_code="TRYOUT_PHONE_INVALID")
         phone = normalized_phone
 
         existing = TrialContact.query.filter_by(phone=phone).order_by(TrialContact.id.desc()).first()
@@ -275,9 +275,12 @@ class TryoutService:
             if not product:
                 raise NotFoundError(f"Product {item_payload['product_id']} not found")
             if not product.is_active:
-                raise ValidationError(f"Product {product.name} is not active")
+                raise ValidationError(f"Product {product.name} is not active", error_code="TRYOUT_PRODUCT_UNAVAILABLE")
             if not getattr(product, "is_tryout_eligible", True):
-                raise ValidationError(f"Product {product.name} is not eligible for try-outs")
+                raise ValidationError(
+                    f"Product {product.name} is not eligible for try-outs",
+                    error_code="TRYOUT_PRODUCT_UNAVAILABLE",
+                )
 
             quantity = int(item_payload["quantity"])
             if quantity < 1:
@@ -792,9 +795,9 @@ class TryoutService:
     def accept_task(task_id: int, driver_user_id: int) -> TryoutTask:
         task = TryoutService._load_task(task_id)
         if TryoutService._status_value(task.status) == TryoutTaskStatus.COMPLETED.value:
-            raise ConflictError("Completed task cannot be accepted")
+            raise ConflictError("Completed task cannot be accepted", error_code="TRYOUT_TASK_COMPLETED")
         if task.assigned_driver_user_id and task.assigned_driver_user_id != driver_user_id:
-            raise ConflictError("Task is already assigned to another driver")
+            raise ConflictError("Task is already assigned to another driver", error_code="TRYOUT_TASK_TAKEN")
         task.assigned_driver_user_id = driver_user_id
         task.status = TryoutTaskStatus.ASSIGNED
         db.session.commit()
@@ -813,7 +816,7 @@ class TryoutService:
         if TryoutService._status_value(task.task_type) != TryoutTaskType.PICKUP.value:
             raise ValidationError("Task is not a pickup task")
         if TryoutService._status_value(task.status) == TryoutTaskStatus.COMPLETED.value:
-            raise ConflictError("Pickup task already completed")
+            raise ConflictError("Pickup task already completed", error_code="TRYOUT_TASK_COMPLETED")
 
         task.assigned_driver_user_id = TryoutService._driver_user_id_or_actor(
             task.assigned_driver_user_id, actor_user_id
@@ -828,9 +831,15 @@ class TryoutService:
             if units <= 0:
                 raise ValidationError("Pickup units must be positive")
             if product_id not in outstanding:
-                raise ValidationError(f"Product {product_id} has no outstanding returnable bottles")
+                raise ValidationError(
+                    f"Product {product_id} has no outstanding returnable bottles",
+                    error_code="TRYOUT_PICKUP_EXCEEDS_OUTSTANDING",
+                )
             if units > outstanding[product_id]:
-                raise ValidationError(f"Pickup units for product {product_id} exceed outstanding bottles")
+                raise ValidationError(
+                    f"Pickup units for product {product_id} exceed outstanding bottles",
+                    error_code="TRYOUT_PICKUP_EXCEEDS_OUTSTANDING",
+                )
 
             line_idempotency_key = (
                 f"{idempotency_key}:product:{product_id}"

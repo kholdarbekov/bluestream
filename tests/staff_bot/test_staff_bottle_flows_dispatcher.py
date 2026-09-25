@@ -152,6 +152,10 @@ BOTTLE_KEYS = (
     "staff.operator.search_too_short",
     "staff.error.api.service_unavailable",
     "staff.error.api.validation",
+    "staff.error.api.transfer_exceeds_inventory_detail",
+    "staff.error.api.transfer_already_handled",
+    "staff.error.api.joined_session_closed",
+    "staff.error.api.open_session_to_invite",
     "staff.error_occurred",
     "staff.session_expired",
     "staff.cancelled",
@@ -1043,6 +1047,37 @@ async def test_a_backend_refusal_disarms_the_collection_so_the_next_message_is_n
     )
 
 
+async def test_a_failed_balance_read_is_reported_not_shown_as_no_bottles(driver):
+    """The statement screen reads the addresses once; the collect tap reads them
+    again. When that second read fails, the driver used to be told the customer
+    has no bottles — and walked away from a door that owed empties."""
+    await collection_backend(driver)
+    reads = {"count": 0}
+
+    def _addresses(_call):
+        reads["count"] += 1
+        return [PLACE_ROW] if reads["count"] == 1 else staff_backend_failure("boom", 500)
+
+    driver.backend.route("GET", CUSTOMER_ADDRESSES, _addresses)
+    driver_updates, labels = await sign_in(driver)
+    await open_cash_hub(driver, driver_updates, labels)
+    await driver.send(driver_updates.tap("staff_bottle_collect_menu"))
+    await driver.send(driver_updates.text("Kamola"))
+    await driver.send(driver_updates.tap(f"staff_bottle_customer_{CUSTOMER_ID}"))
+    driver.telegram.reset()
+
+    await driver.send(driver_updates.tap(f"staff_bottle_collect_{CUSTOMER_ID}_{ADDRESS_ID}"))
+
+    seen = [call.text for call in driver.telegram.shown] + [
+        call.params.get("text", "") for call in driver.telegram.visible_answers
+    ]
+    assert f"❌ {_curated('staff.error.api.service_unavailable')}" in seen, seen
+    assert not any(_curated("staff.delivery.no_bottle_balance") in text for text in seen)
+    assert driver.application.user_data[DEFAULT_DRIVER_TELEGRAM_ID].get(
+        "pending_bottle_collection_flow"
+    ) is None, "a collection stayed armed behind an error screen"
+
+
 async def test_a_double_tap_on_save_without_note_records_the_collection_exactly_once(driver):
     """Phones in vans get tapped twice. Inventory must not.
 
@@ -1528,6 +1563,62 @@ async def test_telegram_refusing_to_deliver_the_receipt_does_not_reopen_the_bott
     )
 
 
+async def test_a_transfer_the_truck_stopped_covering_names_both_numbers(monkeypatch):
+    """The picker said 9 on the truck; by the time the driver typed 4, other
+    deliveries had drained it to 2. The backend's refusal carries both numbers
+    and the driver reads them, not a generic "check the entered data"."""
+    harness = await build_driver(monkeypatch)
+    transfer_backend(harness, inventory=9)
+    harness.backend.route("POST", TRANSFERS, lambda _call: staff_backend_failure(
+        "Cannot transfer 4 bottle(s); sender only has 2 on truck.", 400,
+        error_code="BOTTLE_TRANSFER_EXCEEDS_INVENTORY",
+        details={"requested": 4, "available": 2, "validation_errors": []},
+        error_type="VALIDATION_ERROR",
+    ))
+    driver_updates, labels = await sign_in(harness)
+    await start_transfer(harness, driver_updates, labels)
+
+    await harness.send(driver_updates.text("4"))
+
+    assert harness.telegram.last_shown().text == "❌ " + _curated(
+        "staff.error.api.transfer_exceeds_inventory_detail"
+    ).format(available=2, requested=4)
+    assert harness.conversation_state("staff_bottle_transfer") is None
+
+
+async def test_a_refused_transfer_confirm_says_why_instead_of_a_fixed_failure(monkeypatch):
+    """The receiver taps Confirm on a transfer a second time (or on one already
+    confirmed from another phone). "Confirm failed" sent them hunting for a
+    fault; the refusal's own sentence tells them there is nothing left to do."""
+    harness = await build_driver(monkeypatch)
+    transfer_backend(harness)
+    harness.backend.route("GET", TRANSFERS_PENDING, lambda _call: [
+        {
+            "id": TRANSFER_ID,
+            "transfer_ref": "TRF-31-2026",
+            "declared_quantity": 4,
+            "sender_name": "Bekzod Rahimov",
+            "status": "pending",
+        },
+    ])
+    harness.backend.route("POST", TRANSFER_CONFIRM, lambda _call: staff_backend_failure(
+        "Transfer is already confirmed", 409, error_code="BOTTLE_TRANSFER_NOT_PENDING",
+    ))
+    driver_updates, labels = await sign_in(harness)
+    await open_cash_hub(harness, driver_updates, labels)
+    await harness.send(driver_updates.tap("staff_bottle_log_loaded"))
+    await harness.send(driver_updates.tap("staff_bottle_transfers_pending"))
+    harness.telegram.reset()
+
+    await harness.send(driver_updates.tap(f"staff_transfer_confirm_{TRANSFER_ID}_4"))
+
+    screen = harness.telegram.last_shown()
+    assert screen.text == f"❌ {_curated('staff.error.api.transfer_already_handled')}"
+    assert "staff_bottle_transfers_pending" in screen.callback_data(), (
+        "the refusal screen lost the session menu it always carried"
+    )
+
+
 # ===========================================================================
 # Sharing a session with a colleague (co-driver membership)
 # ===========================================================================
@@ -1648,3 +1739,57 @@ async def test_the_accountability_screen_still_offers_the_session_actions_it_alw
         assert expected in offered, (
             f"{expected} disappeared from the accountability screen: {offered}"
         )
+
+
+@pytest.mark.parametrize(
+    "error_code, message, expected_key",
+    [
+        ("BOTTLE_SESSION_MEMBERSHIP_NOT_FOUND", "No active co-driver session membership",
+         "staff.bottles.no_active_membership"),
+        ("BOTTLE_SESSION_MEMBERSHIP_CLOSED", "The session you joined is no longer open",
+         "staff.error.api.joined_session_closed"),
+    ],
+)
+async def test_only_not_being_a_member_reads_as_no_membership(driver, error_code, message, expected_key):
+    """Both answers are 404s. "You are not in a session" is the empty state; "the
+    owner closed the session you joined" is news the driver needs, and used to
+    be flattened into the empty state by the status code alone."""
+    driver.backend.route("GET", SESSION_CURRENT, lambda _call: open_session())
+    driver.backend.route(
+        "GET", SESSION_MEMBERSHIP,
+        lambda _call: staff_backend_failure(message, 404, error_code=error_code),
+    )
+    driver_updates, labels = await sign_in(driver)
+    await open_cash_hub(driver, driver_updates, labels)
+    await driver.send(driver_updates.tap("staff_bottle_my_accountability"))
+    driver.telegram.reset()
+
+    await driver.send(driver_updates.tap("bottles_membership_status"))
+
+    assert driver.telegram.last_shown().text == _curated(expected_key)
+
+
+async def test_an_invite_refused_for_want_of_a_session_offers_the_way_to_open_one(driver):
+    """A driver with no open session taps "Invite co-driver" from the
+    accountability screen. The refusal names the fix, and the screen carries the
+    button to it (the code's remedy) above the Back it always had — a sentence
+    telling them to open a session with only Back under it is a dead end."""
+    driver.backend.route(
+        "GET", AVAILABLE_DRIVERS,
+        lambda _call: staff_backend_failure(
+            "You must have an open bottle session to invite co-drivers", 409,
+            error_code="BOTTLE_SESSION_REQUIRED_TO_INVITE",
+        ),
+    )
+    driver_updates, labels = await sign_in(driver)
+    await open_cash_hub(driver, driver_updates, labels)
+    await driver.send(driver_updates.tap("staff_bottle_my_accountability"))
+    driver.telegram.reset()
+
+    await driver.send(driver_updates.tap("bottles_invite_driver"))
+
+    screen = driver.telegram.last_shown()
+    assert screen.text == f"❌ {_curated('staff.error.api.open_session_to_invite')}"
+    assert screen.callback_data() == ["staff_bottle_my_accountability", "staff_back_to_main"], (
+        f"the refusal does not offer the way to open a session: {screen.callback_data()}"
+    )

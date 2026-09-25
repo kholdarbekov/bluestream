@@ -1531,7 +1531,8 @@ class CorporateContractService:
             return None
         if len(amount_contracts) > 1:
             raise ValidationError(
-                f"User {user_id} has multiple active AMOUNT-mode contracts; resolve before continuing."
+                f"User {user_id} has multiple active AMOUNT-mode contracts; resolve before continuing.",
+                error_code="CONTRACT_AMOUNT_MODE_AMBIGUOUS",
             )
         return amount_contracts[0]
 

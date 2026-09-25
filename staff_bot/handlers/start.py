@@ -10,6 +10,7 @@ from staff_bot.handlers.base import BaseHandler
 from staff_bot.i18n import i18n
 from staff_bot.api_client import api_client
 from staff_bot.keyboards.menu import MenuKeyboards
+from staff_bot.utils import auth_refusals
 from shared.staff_constants import STAFF_BOT_ROLES
 
 logger = logging.getLogger(__name__)
@@ -211,15 +212,15 @@ class StartHandler(BaseHandler):
 
             return await self._complete_login(update, context, user_data, staff_roles)
         else:
-            error = self._resolve_api_error_message(
-                language,
-                response.error,
-                status_code=response.status_code,
-                error_code=getattr(response, 'error_code', None),
-            )
+            error = self._resolve_response_error(language, response)
+            code = getattr(response, 'error_code', None)
             if response.status_code in (403, 404):
-                if getattr(response, 'error_code', None) == 'STAFF_ACCOUNT_DEACTIVATED':
-                    login_message = i18n.get('staff.account_deactivated', language)
+                if code in auth_refusals.ACCOUNT_REFUSAL_CODES:
+                    # The same sentence the silent re-login and every other
+                    # refusal of this code shows: the map decides it.
+                    login_message = i18n.get(self.API_ERROR_CODE_KEY_MAP[code], language)
+                elif code == 'STAFF_INVALID_INVITE_TOKEN':
+                    login_message = i18n.get('staff.error.api.invalid_invite', language)
                 else:
                     login_message = i18n.get('staff.not_staff', language)
                 await update.message.reply_text(
@@ -240,6 +241,9 @@ class StartHandler(BaseHandler):
         context.user_data['language'] = language
         context.user_data.pop('invite_token', None)
 
+        # The backend let them in, so any remembered "account switched off"
+        # refusal is stale (an admin switched it back on).
+        auth_refusals.forget(update.effective_user.id)
         context.user_data['authenticated'] = True
         context.user_data['user_id'] = user_data.get('id')
         context.user_data['staff_roles'] = staff_roles

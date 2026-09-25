@@ -108,8 +108,11 @@ def test_scope_lock_timeout_resolves_ahead_of_the_status_code_fallback(monkeypat
 def test_a_claim_on_a_no_longer_claimable_delivery_maps_to_its_own_key():
     """STAFF_DELIVERY_NOT_CLAIMABLE is a 400. Unmapped, it fell through to
     `staff.error.api.validation`, "Please check the entered data", shown to a
-    driver who typed nothing. It is not `already_taken` either: nobody took the
-    order. Dispatch moved it to another day, or it failed or was cancelled."""
+    driver who typed nothing. It is not `already_taken` either: it covers every
+    reason the claim failed -- dispatch moved the order to another day, it
+    failed or was cancelled, or another driver won the race (a driver-held
+    delivery is never claimable, so the loser arrives here, not at
+    STAFF_DELIVERY_ALREADY_TAKEN)."""
     assert (
         BaseHandler.API_ERROR_CODE_KEY_MAP.get("STAFF_DELIVERY_NOT_CLAIMABLE")
         == "staff.error.api.delivery_not_claimable"
@@ -120,30 +123,31 @@ def test_delivery_not_claimable_copy_is_seeded_in_all_three_languages():
     from scripts.seed_staff_translations import STAFF_TRANSLATIONS as TRANSLATIONS
 
     assert TRANSLATIONS.get("staff.error.api.delivery_not_claimable") == {
-        "en": "This order is no longer available.",
-        "uz": "Bu buyurtma endi mavjud emas.",
-        "ru": "Этот заказ больше недоступен.",
+        "en": "This order can't be accepted any more — another driver may have taken it, or it was moved, failed or cancelled. Refresh the list.",
+        "uz": "Bu buyurtmani endi qabul qilib bo'lmaydi — uni boshqa haydovchi olgan bo'lishi yoki u ko'chirilgan, bajarilmagan yoki bekor qilingan bo'lishi mumkin. Ro'yxatni yangilang.",
+        "ru": "Этот заказ больше нельзя принять — его мог взять другой водитель, или он перенесён, не выполнен или отменён. Обновите список.",
     }
 
 
 @pytest.mark.parametrize(
-    "error_code",
+    "error_code, expected_key",
     [
-        "ORDER_NOT_RESCHEDULABLE",
-        "DELIVERY_NOT_RESCHEDULABLE",
-        "STAFF_DELIVERY_NOT_REDISPATCHABLE",
-        "ORDER_RESCHEDULE_PAST_CONTRACT_END",
+        ("ORDER_NOT_RESCHEDULABLE", "staff.error.api.order_closed_for_redispatch"),
+        ("DELIVERY_NOT_RESCHEDULABLE", "staff.error.api.order_closed_for_redispatch"),
+        ("STAFF_DELIVERY_NOT_REDISPATCHABLE", "staff.error.api.not_redispatchable"),
+        ("ORDER_RESCHEDULE_PAST_CONTRACT_END", "staff.error.api.past_contract_end"),
     ],
 )
-def test_redispatch_refusals_read_as_a_conflict_not_as_bad_input(error_code):
+def test_redispatch_refusals_name_their_cause_not_bad_input(error_code, expected_key):
     """Re-dispatch is a reschedule to today (R18), and its refusals are 400s.
 
     Unmapped, a 400 falls through to ``staff.error.api.validation`` ("check the
     entered data") for an operator who entered nothing: the row changed under
-    their card. The old cancelled-order code was a 409 and read as the conflict
-    sentence, and these codes keep it.
+    their card. They used to share the generic conflict sentence, which never
+    said WHICH change happened; each now names its own cause
+    (tests/unit/test_staff_error_copy_audit.py proves the copy is curated).
     """
-    assert BaseHandler.API_ERROR_CODE_KEY_MAP.get(error_code) == "staff.error.api.conflict"
+    assert BaseHandler.API_ERROR_CODE_KEY_MAP.get(error_code) == expected_key
 
 
 def test_not_owned_maps_to_its_own_key():

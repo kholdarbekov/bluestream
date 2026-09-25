@@ -236,7 +236,26 @@ def _every_site_says(
     )
     assert phone_order_resp.status_code in (201, 400), phone_order_resp.get_json()
     if phone_order_resp.status_code == 400:
-        assert phone_order_resp.get_json().get("error_code") == "COD_DEBT_LIMIT_REACHED", phone_order_resp.get_json()
+        phone_body = phone_order_resp.get_json()
+        assert phone_body.get("error_code") == "COD_DEBT_LIMIT_REACHED", phone_body
+        # Fix round 1: the write guard's `details` must name the SAME numbers
+        # site 3's `get_cod_restriction_context` (``ctx``, above) already read
+        # for this customer at this address -- a second, independent read of
+        # the SSOT, not a copy of what the route itself just computed. Only
+        # the PERSON arm publishes debt_total/debt_limit (the PLACE arm's own
+        # HTTP-endpoint coverage lives in
+        # ``test_place_arm_restricts_address_aware_sites_only`` below, where
+        # the same route's `details["place_debt_count"]` is pinned instead).
+        # This catches a swapped debt_total/debt_limit (the swap would fail
+        # against COD_DEBT_AMOUNT_THRESHOLD, which is orders of magnitude
+        # smaller than a genuinely over-cap balance) or a raw Decimal left
+        # uncast by ``validate_customer_can_use_cod``.
+        if ctx["restriction_scope"] == "person":
+            details = phone_body.get("details") or {}
+            assert isinstance(details.get("debt_total"), float), details
+            assert isinstance(details.get("debt_limit"), float), details
+            assert details["debt_total"] == ctx["cluster_net_open_cod_debt_total"], details
+            assert details["debt_limit"] == float(COD_DEBT_AMOUNT_THRESHOLD), details
     answers["staff_phone_order_refuses_cash"] = phone_order_resp.status_code == 400
 
     # 12 -- switching an EXISTING order onto cash mints a fresh COD obligation,
@@ -498,7 +517,17 @@ def test_place_arm_restricts_address_aware_sites_only(
         headers=_auth(app, operator_user.id),
     )
     assert phone_order_resp.status_code == 400, phone_order_resp.get_json()
-    assert phone_order_resp.get_json().get("error_code") == "COD_DEBT_LIMIT_REACHED", phone_order_resp.get_json()
+    phone_body = phone_order_resp.get_json()
+    assert phone_body.get("error_code") == "COD_DEBT_LIMIT_REACHED", phone_body
+    # Fix round 1: the PLACE arm of the write guard's `details` -- the count of
+    # the coworker's debts this test built at the shared address (``_LIMIT``,
+    # the same figure ``ctx["place_active_cod_debt_count"]`` above already
+    # read from the SSOT for this address), not a re-derivation. Also asserts
+    # the type: an un-cast value from the wrong branch (e.g. a Decimal/float
+    # money total swapped in for the count) would fail the `int` check.
+    place_details = phone_body.get("details") or {}
+    assert isinstance(place_details.get("place_debt_count"), int), place_details
+    assert place_details["place_debt_count"] == _LIMIT == ctx["place_active_cod_debt_count"], place_details
     place_arm_aware["staff_phone_order_refuses_cash"] = True
 
     assert set(place_arm_aware.values()) == {True}, place_arm_aware

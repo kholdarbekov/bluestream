@@ -431,22 +431,21 @@ class TestDoubleAnswerGuard:
         monkeypatch.setattr(mod, "api_client", api)
         update = _callback_update(data="staff_optimize_routes")
         # First call: optimize_routes's own "locked by dispatch" alert,
-        # succeeds. Second and third calls: show_active_deliveries's
-        # internal answer of the SAME query, rejected -- BadRequest is a
-        # NetworkError subclass in python-telegram-bot, so
-        # `_safe_callback_answer` retries it once (base.py
-        # TELEGRAM_RETRY_ATTEMPTS=2) before giving up; both attempts fail
-        # exactly like a real double-answer would.
+        # succeeds. Second call: show_active_deliveries's internal answer of
+        # the SAME query, rejected exactly like a real double-answer would
+        # be. BadRequest is deterministic, so `_safe_callback_answer` gives
+        # up on it at once instead of retrying (it is a NetworkError
+        # subclass in python-telegram-bot, which is why it used to be
+        # retried).
         update.callback_query.answer = AsyncMock(side_effect=[
             None,
-            BadRequest("Query is too old"),
             BadRequest("Query is too old"),
         ])
         ctx = _driver_ctx()
 
         asyncio.run(handler.optimize_routes(update, ctx))
 
-        assert update.callback_query.answer.await_count == 3
+        assert update.callback_query.answer.await_count == 2
         first_call_kwargs = update.callback_query.answer.await_args_list[0].kwargs
         assert first_call_kwargs.get("show_alert") is True  # the real alert, unharmed
         render.assert_awaited_once()  # show_active_deliveries's render still ran

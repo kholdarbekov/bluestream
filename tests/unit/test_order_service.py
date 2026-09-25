@@ -86,6 +86,34 @@ class TestOrderService:
                 user_id=sample_user.id,
             )
 
+    def test_create_order_below_the_floor_carries_the_code_and_the_floor(
+        self, db, sample_user, sample_product, user_address
+    ):
+        """The real `create_order` path (unmocked inventory: `sample_product`
+        has real stock), the same one the sales visit's order POST calls
+        through `VisitService.place_order`. Quantity 1 at the fixture's
+        15000 UZS base price is under MIN_ORDER_AMOUNT (20000) at this
+        address — the same arithmetic `test_subscription_order_parity.py`
+        already relies on to trip this exact refusal."""
+        service = OrderService()
+        with pytest.raises(ValidationError) as exc_info:
+            service.create_order(
+                sample_user.id,
+                {
+                    "items": [{"product_id": sample_product.id, "quantity": 1}],
+                    "delivery_address": {
+                        "delivery_address_id": user_address.id,
+                        "street": "1 Test St",
+                        "latitude": 41.3111,
+                        "longitude": 69.2797,
+                    },
+                    "payment_method": "cash",
+                },
+            )
+
+        assert exc_info.value.error_code == "ORDER_MIN_AMOUNT"
+        assert exc_info.value.details["min_amount"] == float(service.min_order_amount)
+
     def test_status_transition_rules(self, order_service):
         assert order_service._is_valid_status_transition(OrderStatus.PENDING, OrderStatus.CONFIRMED) is True
         assert order_service._is_valid_status_transition(OrderStatus.DELIVERED, OrderStatus.PENDING) is False

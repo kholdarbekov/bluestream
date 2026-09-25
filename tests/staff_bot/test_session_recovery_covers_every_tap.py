@@ -30,7 +30,10 @@ from __future__ import annotations
 
 import pytest
 
+from tests.staff_bot.ptb_harness import staff_backend_failure
 from tests.staff_bot.test_staff_operator_journey_dispatcher import (  # noqa: F401
+    LOGIN_ENDPOINT,
+    _login_payload,
     build_staff,
     menu_label,
     sign_in,
@@ -121,3 +124,77 @@ async def test_a_signed_in_operator_is_not_re_authenticated_on_every_tap(operato
     assert logins_now == logins_after_signin, (
         "a live session was re-authenticated anyway"
     )
+
+
+# ---------------------------------------------------------------------------
+# A recovery the backend REFUSES because the account is switched off
+# ---------------------------------------------------------------------------
+
+ACCOUNT_DEACTIVATED = _curated("staff.error.api.account_deactivated", "en")
+
+
+def refuse_login_as_deactivated(harness):
+    harness.backend.route("POST", LOGIN_ENDPOINT, lambda _c: staff_backend_failure(
+        "Your delivery account has been deactivated", 403, "STAFF_ACCOUNT_DEACTIVATED"
+    ))
+
+
+def seen_by(harness) -> list:
+    """Chat messages plus the popups Telegram would actually display."""
+    return texts(harness) + [c.params.get("text", "") for c in harness.telegram.visible_answers]
+
+
+async def test_a_switched_off_account_is_told_so_when_recovery_is_refused(operator):
+    """After a deploy the silent re-login is refused because an admin switched
+    the account off. "Session expired" sends them to /start, which fails the
+    same way, forever; they must read the real reason."""
+    ops, _labels = await sign_in(operator)
+    restart(operator)
+    refuse_login_as_deactivated(operator)
+
+    await operator.send(ops.tap("staff_op_add_addr_501"))
+
+    seen = seen_by(operator)
+    assert ACCOUNT_DEACTIVATED in seen, seen
+    assert SESSION_EXPIRED not in seen
+
+
+async def test_a_switched_off_account_tapping_a_menu_button_is_told_so_too(operator):
+    """The reply-keyboard text router explains a failed recovery itself
+    (bot.py `_handle_text_message`), so it must read the same reason as
+    `@require_auth` — or a Profile tap still says "session expired"."""
+    ops, labels = await sign_in(operator)
+    restart(operator)
+    refuse_login_as_deactivated(operator)
+
+    await operator.send(ops.text(menu_label(labels, "staff.menu.profile")))
+
+    seen = seen_by(operator)
+    assert ACCOUNT_DEACTIVATED in seen, seen
+    assert SESSION_EXPIRED not in seen
+
+
+async def test_a_re_activated_account_that_logs_in_again_is_not_told_the_old_reason(operator):
+    """The refusal is remembered per Telegram user; a successful /start login
+    must forget it. Otherwise, after the admin switches the account back on
+    and the staff member logs in, the next lost session still reads
+    "your account has been deactivated"."""
+    ops, _labels = await sign_in(operator)
+    restart(operator)
+    refuse_login_as_deactivated(operator)
+    await operator.send(ops.tap("staff_op_add_addr_501"))
+    assert ACCOUNT_DEACTIVATED in seen_by(operator)
+
+    # The admin switches the account back on; the staff member runs /start.
+    operator.backend.route("POST", LOGIN_ENDPOINT, lambda _c: _login_payload(["operator"], "en"))
+    await operator.send(ops.command("start"))
+    assert user_data(operator).get("authenticated"), "the /start login did not succeed"
+
+    # Another deploy. Recovery is still inside the refused attempt's cooldown,
+    # so the refusal message is the bot's memory alone.
+    restart(operator)
+    await operator.send(ops.tap("staff_op_add_addr_501"))
+
+    seen = seen_by(operator)
+    assert ACCOUNT_DEACTIVATED not in seen, seen
+    assert SESSION_EXPIRED in seen, seen

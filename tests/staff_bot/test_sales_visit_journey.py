@@ -480,7 +480,7 @@ async def test_a_resume_that_finds_no_open_visit_drops_the_stale_draft(monkeypat
         "No open visit", 404, error_code="SALES_VISIT_NOT_FOUND"))
     await harness.send(ops.tap("staff_sales_visit_resume"))
 
-    assert any(_curated("staff.error.api.not_found") in alert for alert in _alerts(harness))
+    assert any(_curated("staff.error.api.visit_not_found") in alert for alert in _alerts(harness))
     assert harness.conversation_state(CONV) is None
     assert FLOW_KEY not in harness.application.user_data[DEFAULT_DRIVER_TELEGRAM_ID]
 
@@ -548,6 +548,67 @@ async def test_abandoning_before_the_checkin_hands_the_main_menu_back(monkeypatc
     assert FLOW_KEY not in harness.application.user_data[DEFAULT_DRIVER_TELEGRAM_ID]
 
 
+async def test_a_check_in_refused_by_a_closed_visit_hands_the_main_menu_back(monkeypatch):
+    """SALES_VISIT_NOT_OPEN means the same thing here as on every other write -- the stale sweep,
+    a second device or an admin closed the visit under the agent while they stood at the door.
+
+    The check-in reply keyboard is the one-shot location prompt with no Cancel
+    (`_checkin_prompt`); ending bare on `_visit_is_gone` left the agent holding a phone with no
+    menu on it. `_leave_to_menu` is the same fix `test_abandoning_before_the_checkin_hands_the_
+    main_menu_back` proved for the success path, now proved for this refusal.
+    """
+    harness, ops, _labels = await _agent(monkeypatch)
+    await _start(harness, ops)
+    harness.backend.route(
+        "POST", CHECKIN, lambda _c: staff_backend_failure("visit closed", 409, "SALES_VISIT_NOT_OPEN")
+    )
+
+    await harness.send(ops.location(*DOOR, horizontal_accuracy=ACCURACY))
+
+    left = harness.telegram.last_shown()
+    assert _curated("staff.sales.error.visit_not_open") in left.text
+    assert _curated("staff.menu.my_outlets") in " ".join(left.button_labels())
+    assert harness.conversation_state(CONV) is None
+    assert FLOW_KEY not in harness.application.user_data[DEFAULT_DRIVER_TELEGRAM_ID]
+
+
+async def test_a_skip_check_in_refused_by_a_closed_visit_hands_the_main_menu_back(monkeypatch):
+    """The same trap through the OTHER door onto `/checkin`: Skip posts `{"skipped": true}` from
+    the same one-shot location keyboard, and was not guarded at all before this fix."""
+    harness, ops, _labels = await _agent(monkeypatch)
+    await _start(harness, ops)
+    harness.backend.route(
+        "POST", CHECKIN, lambda _c: staff_backend_failure("visit closed", 409, "SALES_VISIT_NOT_OPEN")
+    )
+
+    await harness.send(ops.tap("staff_sales_v_skipcheckin"))
+
+    left = harness.telegram.last_shown()
+    assert _curated("staff.sales.error.visit_not_open") in left.text
+    assert _curated("staff.menu.my_outlets") in " ".join(left.button_labels())
+    assert harness.conversation_state(CONV) is None
+    assert FLOW_KEY not in harness.application.user_data[DEFAULT_DRIVER_TELEGRAM_ID]
+
+
+async def test_an_abandon_refused_by_a_closed_visit_still_hands_the_main_menu_back(monkeypatch):
+    """Abandon posts from every screen, including check-in's own inline Skip/Abandon pair. A
+    stale tap here used to `return None` (state unchanged) and strand the agent on the same
+    menu-less reply keyboard the two tests above fix."""
+    harness, ops, _labels = await _agent(monkeypatch)
+    await _start(harness, ops)
+    harness.backend.route(
+        "POST", ABANDON, lambda _c: staff_backend_failure("visit closed", 409, "SALES_VISIT_NOT_OPEN")
+    )
+
+    await harness.send(ops.tap("staff_sales_v_abandon"))
+
+    left = harness.telegram.last_shown()
+    assert _curated("staff.sales.error.visit_not_open") in left.text
+    assert _curated("staff.menu.my_outlets") in " ".join(left.button_labels())
+    assert harness.conversation_state(CONV) is None
+    assert FLOW_KEY not in harness.application.user_data[DEFAULT_DRIVER_TELEGRAM_ID]
+
+
 async def test_back_to_main_from_the_checkin_screen_also_restores_the_menu(monkeypatch):
     """...and leaves the visit OPEN, which is the whole point of the button.
 
@@ -610,7 +671,7 @@ async def test_a_stale_resume_button_says_so_instead_of_opening_an_empty_flow(mo
     await harness.send(ops.tap("staff_sales_visit_resume"))
 
     assert harness.conversation_state(CONV) is None
-    assert f"❌ {_curated('staff.error.api.not_found')}" in _alerts(harness)
+    assert f"❌ {_curated('staff.error.api.visit_not_found')}" in _alerts(harness)
     assert FLOW_KEY not in harness.application.user_data[DEFAULT_DRIVER_TELEGRAM_ID]
 
 
@@ -795,8 +856,9 @@ async def test_a_failed_product_fetch_offers_a_retry_not_a_dead_end(monkeypatch)
 
     `_load_products` is only re-attempted on a fresh render and no button on
     this screen produced one, so a single failed fetch left the agent with
-    Abandon as the only move. The alert says what went wrong, the screen keeps
-    a Retry that re-fetches, and the Continue button is deliberately NOT drawn:
+    Abandon as the only move. A message says what went wrong (the tap was
+    already answered, so a popup would never show), the screen keeps a Retry
+    that re-fetches, and the Continue button is deliberately NOT drawn:
     posting `items: []` here would record "nothing on this shelf" for a shelf
     nobody managed to look at.
     """
@@ -807,9 +869,15 @@ async def test_a_failed_product_fetch_offers_a_retry_not_a_dead_end(monkeypatch)
         "POST", CHECKIN, lambda _c: {"visit": _visit(current_step="stock", checkin_skipped=True)}
     )
 
+    harness.telegram.reset()
     await harness.send(ops.tap("staff_sales_v_skipcheckin"))
 
-    assert any(_curated("staff.error.api.service_unavailable") in alert for alert in _alerts(harness))
+    assert any(
+        _curated("staff.error.api.service_unavailable") in text for text in harness.telegram.texts()
+    ), f"the agent never saw why the shelf is empty; they saw {harness.telegram.texts()}"
+    assert len(harness.telegram.of("answerCallbackQuery")) == 1, (
+        "a second answerCallbackQuery was spent on the error; Telegram never shows it"
+    )
     shelf = harness.telegram.last_shown()
     assert shelf.callback_data() == ["staff_sales_v_stockretry", "staff_sales_v_abandon"]
     assert _curated("staff.sales.visit.stock_no_products") not in shelf.text
@@ -918,7 +986,7 @@ async def test_a_stale_visit_button_with_nothing_open_says_so(monkeypatch):
     await harness.send(ops.tap("staff_sales_v_orderconfirm"))
 
     assert harness.conversation_state(CONV) is None
-    assert f"❌ {_curated('staff.error.api.not_found')}" in _alerts(harness)
+    assert f"❌ {_curated('staff.error.api.visit_not_found')}" in _alerts(harness)
     assert FLOW_KEY not in harness.application.user_data[DEFAULT_DRIVER_TELEGRAM_ID]
 
 

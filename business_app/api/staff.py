@@ -1484,9 +1484,11 @@ def get_current_session_membership():
         )
     session = service.get_open_session(membership.session_owner_id)
     if not session:
+        # Not BOTTLE_SESSION_NOT_OPEN: that one refuses a JOIN on a session that
+        # just closed ("pick another"); this is the member's own session gone.
         raise NotFoundError(
             "The session you joined is no longer open",
-            error_code="BOTTLE_SESSION_NOT_OPEN",
+            error_code="BOTTLE_SESSION_MEMBERSHIP_CLOSED",
         )
     return success_response(serialize_membership_session_info(membership, session))
 
@@ -1516,10 +1518,25 @@ def invite_driver_to_session():
     if not owner_session:
         raise ConflictError(
             "You must have an open bottle session to invite co-drivers",
-            error_code="BOTTLE_SESSION_NOT_FOUND",
+            error_code="BOTTLE_SESSION_REQUIRED_TO_INVITE",
         )
     # Reuse join_session from the member's perspective but initiated by owner
-    membership = service.join_session(int(member_driver_id), owner_session.id)
+    try:
+        membership = service.join_session(int(member_driver_id), owner_session.id)
+    except ConflictError as exc:
+        # join_session's refusals are worded for the JOINER; the inviter is
+        # reading this one. Same facts, the right person.
+        if exc.error_code == "BOTTLE_SESSION_ALREADY_OPEN":
+            raise ConflictError(
+                "The invited driver has their own open bottle session",
+                error_code="BOTTLE_INVITEE_HAS_SESSION",
+            ) from exc
+        if exc.error_code == "BOTTLE_SESSION_MEMBERSHIP_ALREADY_ACTIVE":
+            raise ConflictError(
+                "The invited driver is already in another driver's session",
+                error_code="BOTTLE_INVITEE_IN_OTHER_SESSION",
+            ) from exc
+        raise
     return success_response(serialize_session_membership(membership), status_code=201)
 
 

@@ -711,14 +711,19 @@ class BottleCollectionHandler(BaseHandler):
             # One place, one pool — grouped or not — so `place_balance` is the
             # only number there is: the empties standing at this door, whichever
             # member's account they sit on (spec 8).
-            place_balance = 0.0
             async with api_client as client:
                 addr_response = await client.get_customer_bottle_addresses(token, customer_id)
-            if addr_response.success and addr_response.data:
-                for addr in addr_response.data:
-                    if addr.get('address_id') == address_id:
-                        place_balance = float(addr.get('place_balance') or 0)
-                        break
+            if not addr_response.success:
+                # A failed read is not "no bottles": saying so sends the driver
+                # away from a door that owes empties.
+                await self._clear_flow(context, update)
+                await self._handle_api_response_error(update, addr_response, language)
+                return
+            place_balance = 0.0
+            for addr in addr_response.data or []:
+                if addr.get('address_id') == address_id:
+                    place_balance = float(addr.get('place_balance') or 0)
+                    break
 
             # Over-returned and empty are DIFFERENT states and must be branched
             # apart here — before `bottle_collection_qty_picker`, whose
@@ -1487,7 +1492,11 @@ class BottleCollectionHandler(BaseHandler):
         try:
             async with api_client as client:
                 response = await client.get_current_bottle_session(token)
-            if not (response.success and response.data):
+            if not response.success:
+                # A failed read is not "no open session": the resolver says why.
+                await self._handle_api_response_error(update, response, language)
+                return ConversationHandler.END
+            if not response.data:
                 await query.edit_message_text(
                     i18n.get('staff.delivery.no_active_bottle_session', language),
                     reply_markup=DeliveryKeyboards.bottle_session_menu(language),
@@ -1514,16 +1523,13 @@ class BottleCollectionHandler(BaseHandler):
         # Fetch list of drivers eligible to receive a transfer.
         # Reuses the same backend endpoint as session-invite (drivers who are
         # on shift / available); see api_client.get_drivers_available_to_invite.
-        try:
-            async with api_client as client:
-                drivers_response = await client.get_drivers_available_to_invite(token)
-
-            if drivers_response.success and drivers_response.data:
-                drivers = drivers_response.data
-            else:
-                drivers = []
-        except Exception:
-            drivers = []
+        # A failed read is not "no drivers on shift": the resolver says why.
+        async with api_client as client:
+            drivers_response = await client.get_drivers_available_to_invite(token)
+        if not drivers_response.success:
+            await self._handle_api_response_error(update, drivers_response, language)
+            return ConversationHandler.END
+        drivers = drivers_response.data or []
 
         if not drivers:
             await query.edit_message_text(
@@ -1770,14 +1776,20 @@ class BottleCollectionHandler(BaseHandler):
                 response = await client.confirm_bottle_transfer(token, transfer_id, qty)
 
             if not response.success:
+                # The reason, not a fixed "failed": already handled, sent to
+                # someone else and "open a session first" each need a
+                # different next step.
+                text = f"❌ {self._resolve_response_error(language, response)}"
                 if update.callback_query:
                     await update.callback_query.edit_message_text(
-                        i18n.get('staff.delivery.transfer_confirm_failed', language),
-                        reply_markup=DeliveryKeyboards.bottle_session_menu(language),
+                        text,
+                        reply_markup=self._with_remedy(
+                            language, response.error_code, DeliveryKeyboards.bottle_session_menu(language)
+                        ),
                     )
                 else:
                     await update.message.reply_text(
-                        i18n.get('staff.delivery.transfer_confirm_failed', language)
+                        text, reply_markup=self._with_remedy(language, response.error_code)
                     )
                 return
 

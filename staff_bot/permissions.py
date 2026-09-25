@@ -47,12 +47,32 @@ def _get_user_language(context: ContextTypes.DEFAULT_TYPE) -> str:
     return i18n.normalize_language(context.user_data.get('language'))
 
 
+async def _refused_user_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+    """The language to refuse someone in when their session is gone.
+
+    After a deploy `user_data` is empty, so the context alone answers with the
+    deployment default and a Russian-speaking driver reads the refusal in
+    Uzbek. `BaseHandler._get_language` (context, then the saved preference) is
+    the one rule for this; a DB hiccup falls back to the context's answer.
+    """
+    from staff_bot.handlers.base import BaseHandler  # handlers import this module
+
+    try:
+        return await BaseHandler.__new__(BaseHandler)._get_language(update, context)
+    except Exception as exc:  # noqa: BLE001 -- the refusal must still be sent
+        logger.warning("Could not read the saved language for a refused tap: %s", exc)
+        return _get_user_language(context)
+
+
 async def _send_unauthorized(update: Update, message: str):
-    """Send unauthorized message to user."""
-    if update.callback_query:
-        await update.callback_query.answer(message, show_alert=True)
-    elif update.message:
-        await update.message.reply_text(message)
+    """Send unauthorized message to user.
+
+    A popup while the tap still has its answer slot, otherwise a chat message:
+    the same rule every other staff refusal follows (`BaseHandler._notify_user`).
+    """
+    from staff_bot.handlers.base import BaseHandler  # handlers import this module
+
+    await BaseHandler._notify_user(BaseHandler.__new__(BaseHandler), update, message, show_alert=True)
 
 
 def require_auth(func):
@@ -69,8 +89,11 @@ def require_auth(func):
 
         if not context.user_data.get('authenticated'):
             from staff_bot.i18n import i18n
-            lang = _get_user_language(context)
-            await _send_unauthorized(update, i18n.get('staff.session_expired', lang))
+            from staff_bot.utils import auth_refusals
+
+            lang = await _refused_user_language(update, context)
+            key = auth_refusals.session_lost_key(getattr(update.effective_user, 'id', None))
+            await _send_unauthorized(update, i18n.get(key, lang))
             return
 
         return await func(self_or_update, *args, **kwargs)

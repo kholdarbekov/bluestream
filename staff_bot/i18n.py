@@ -193,7 +193,9 @@ class Translation:
         for role in STAFF_BOT_ROLES:
             keys.add(f"staff.role.{role}")
 
-        # The error map's TARGETS. `BaseHandler._resolve_api_error_message`
+        # The error renderer's TARGETS (`BaseHandler.error_copy_keys`: the code
+        # map, the detail copy, the remedy-button labels and the backend-reason
+        # frame). `BaseHandler._resolve_api_error_message`
         # resolves these at runtime out of a dict VALUE, so the literal
         # extractor's regex over literal `staff.*` arguments cannot see a
         # single one of them (and note that extractor scans COMMENTS too, so
@@ -206,7 +208,7 @@ class Translation:
         # time.
         from staff_bot.handlers.base import BaseHandler
 
-        keys.update(BaseHandler.API_ERROR_CODE_KEY_MAP.values())
+        keys.update(BaseHandler.error_copy_keys())
 
         # Sales events: webhook_server.sales_event_handler builds the key with
         # f'staff.sales.notify.{event}' from the backend-supplied event name,

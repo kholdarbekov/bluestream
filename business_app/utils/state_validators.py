@@ -151,6 +151,7 @@ def assert_order_address_for_status(
             from_state=current.value if current else None,
             to_state=target.value,
             missing_field="delivery_address_id",
+            error_code="ORDER_DELIVERY_ADDRESS_REQUIRED",
         )
 
 

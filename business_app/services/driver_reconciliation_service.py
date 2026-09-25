@@ -512,8 +512,10 @@ class DriverReconciliationService:
             # empty session has nothing to reconcile).
             if declared_cash is not None or prior_declared <= Decimal("0.00"):
                 if declared_cash is None:
-                    raise ValidationError("No cash to reconcile")
-                raise ValidationError("Handoff amount must be positive")
+                    raise ValidationError("No cash to reconcile", error_code="RECONCILIATION_NOTHING_TO_SUBMIT")
+                raise ValidationError(
+                    "Handoff amount must be positive", error_code="RECONCILIATION_AMOUNT_NOT_POSITIVE"
+                )
         else:
             handoff = DriverCashHandoff(
                 driver_cash_session_id=session.id,

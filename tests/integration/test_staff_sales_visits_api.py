@@ -817,6 +817,63 @@ def test_a_line_above_the_quantity_ceiling_is_refused_with_a_code_on_the_quote_a
     assert ok_order.status_code == 201, ok_order.get_data(as_text=True)
 
 
+def test_an_order_below_the_gross_minimum_is_refused_with_the_code_and_the_floor(
+    client, app, sales_agent_auth_headers, operator_auth_headers, flagged_product, db
+):
+    """The `OrderService.create_order` gate the customer bot and admin already hit, now coded and
+    reached through the sales visit's own order POST (`VisitService.place_order`).
+
+    `flagged_product`'s 15000 UZS base price for a single unit falls under the configured floor
+    at the outlet's own pin coordinates -- the same arithmetic
+    `tests/unit/test_subscription_order_parity.py` already relies on for the identical refusal,
+    and the same one `tests/unit/test_order_service.py` proves at the service level. This is the
+    HTTP door the staff bot's sales agent actually posts to.
+    """
+    outlet = _approved_outlet(client, sales_agent_auth_headers, operator_auth_headers)
+    visit_id = _at_order_step(client, sales_agent_auth_headers, outlet["id"], flagged_product)
+
+    response = client.post(
+        f"{VISITS}/{visit_id}/order",
+        json={"items": [{"product_id": flagged_product.id, "quantity": 1}], "payment_method": "cash"},
+        headers=sales_agent_auth_headers,
+    )
+
+    assert response.status_code == 400, response.get_data(as_text=True)
+    body = response.get_json()
+    assert body["error_code"] == "ORDER_MIN_AMOUNT"
+    assert isinstance(body["details"]["min_amount"], float)
+    assert body["details"]["min_amount"] == float(app.config["MIN_ORDER_AMOUNT"])
+    assert Order.query.filter_by(visit_id=visit_id).count() == 0
+
+
+def test_an_order_over_the_available_stock_is_refused_with_the_code(
+    client, app, sales_agent_auth_headers, operator_auth_headers, flagged_product, db
+):
+    """`OrderService._process_order_items`'s own availability check (order_service.py, the
+    "Inventory check failed" raise), reached through the sales visit's order POST exactly as the
+    customer bot and admin already reach it. `stock_quantity` is the WAREHOUSE column
+    `InventoryService.check_product_availability` gates on -- unrelated to the visit's own
+    `on_hand_qty` shelf count `_at_order_step` posted above, which is what the AGENT sees at the
+    shop, not what the company has to fulfil from.
+    """
+    flagged_product.stock_quantity = 1
+    db.session.commit()
+    outlet = _approved_outlet(client, sales_agent_auth_headers, operator_auth_headers)
+    visit_id = _at_order_step(client, sales_agent_auth_headers, outlet["id"], flagged_product)
+
+    response = client.post(
+        f"{VISITS}/{visit_id}/order",
+        # 5 units at 15000 UZS clears MIN_ORDER_AMOUNT (20000) so this refusal is
+        # unambiguously the stock check, not the floor above.
+        json={"items": [{"product_id": flagged_product.id, "quantity": 5}], "payment_method": "cash"},
+        headers=sales_agent_auth_headers,
+    )
+
+    assert response.status_code == 400, response.get_data(as_text=True)
+    assert response.get_json()["error_code"] == "ORDER_STOCK_UNAVAILABLE"
+    assert Order.query.filter_by(visit_id=visit_id).count() == 0
+
+
 def test_a_visit_with_nothing_to_count_still_reaches_the_order_screen(
     client, sales_agent_auth_headers, operator_auth_headers, db
 ):

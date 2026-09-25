@@ -67,7 +67,7 @@ KEYS = (
     "staff.sales.new.open_existing", "staff.sales.new.create_anyway", "staff.sales.new.created",
     "staff.confirm", "staff.cancel", "staff.cancelled", "staff.flow_timed_out",
     "staff.operator.invalid_phone", "staff.operator.outside_delivery_area",
-    "staff.operator.address_not_found",
+    "staff.operator.address_not_found", "staff.operator.geocoder_down_use_pin",
     # Phase 2a, Task 10: the due list and the visit block on the card. Every
     # key rendered has to be here — the harness serves translations from this
     # table and falls back to `humanise_key`, which never returns falsy, so a
@@ -147,6 +147,17 @@ KEYS = (
     # which is false for a visit the server is still holding open).
     "staff.sales.visit.order_min", "staff.sales.error.order_min_qty",
     "staff.sales.visit.timeout",
+    # Task 11: the backend has always published product/floor/quantity in
+    # `details` on this code; the client dropped them on every 400 until
+    # 2026-09-24. `test_sales_visit_orders_journey.py` asserts the RENDERED
+    # detail copy, not the plain fallback above.
+    "staff.sales.error.order_min_qty_detail",
+    # Task 11: SALES_VISIT_NOT_FOUND / SALES_VISIT_NOT_OWNED moved off the
+    # generic not_found/forbidden keys onto their own sentences, and
+    # SALES_STOCK_QTY_INVALID gained a detail-copy spec that now renders
+    # ahead of `error.stock_qty` whenever the backend publishes `max`.
+    "staff.error.api.visit_not_found", "staff.error.api.visit_not_owned",
+    "staff.sales.error.stock_qty_detail",
     # The backlog fixes (Task 7 renders them, Task 6 seeds them): the
     # rail-less outlet's own line, the labelled delivery window and the two
     # new coded refusals.
@@ -220,6 +231,10 @@ KEYS = (
     # and literally (R31), never the template.
     "staff.sales.card.account", "staff.sales.card.receivable_account",
     "staff.sales.card.bottles_branch", "staff.sales.new_outlet.sibling",
+    # Owner ruling 2026-09-24: a refusal with no mapped code shows the
+    # backend's own sentence inside this frame. Left out, it renders
+    # `humanise_key` ("Backend reason") and the reason is lost.
+    "staff.error.api.backend_reason",
 )
 
 

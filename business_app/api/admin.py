@@ -2042,7 +2042,10 @@ def create_order_for_user():
         return created_response(data=response_data, message="Order created successfully")
 
     except ValidationError as e:
-        return validation_error_response(e.errors)
+        # The sentence, not `e.errors`: that falls back to `details` (machine
+        # fields such as min_amount, published for the staff bot), which the
+        # admin modal would show verbatim as "min_amount: 20000.0".
+        return validation_error_response(e.validation_errors or [e.message], error_code=e.error_code)
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Create order for user error: {e}")

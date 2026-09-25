@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 from math import ceil
 from pathlib import Path
 
@@ -131,6 +132,11 @@ DELIVERY_KEYS = (
     "staff.error.api.conflict",
     "staff.error.api.service_unavailable",
     "staff.error.api.delivery_not_claimable",
+    "staff.error.api.scope_busy",
+    "staff.error.api.bottle_session_capacity_exceeded",
+    "staff.error.api.bottle_session_capacity_exceeded_detail",
+    "staff.error.api.status_transition_refused_detail",
+    "staff.menu.my_bottle_accountability",
     "staff.delivery.pool_empty",
     "staff.delivery.pool_title",
     "staff.delivery.pool_count",
@@ -175,6 +181,7 @@ DELIVERY_KEYS = (
     "staff.route.refresh",
     "staff.route.updated_at",
     "staff.route.navigate_all",
+    "staff.route.locked_by_dispatch",
     "staff.delivery.optimize_routes_button",
 )
 
@@ -187,6 +194,16 @@ def copy_for(key: str, language: str = "en") -> str:
         "production would render a humanised placeholder for it"
     )
     return value
+
+
+def literal_fragments(key: str) -> list[str]:
+    """The fixed words of ``key``'s copy with its ``{placeholders}`` cut out.
+
+    Enough to prove a sentence was NEVER shown, whatever it would have been
+    filled with — asserting against one formatted rendering only proves that
+    one rendering is absent.
+    """
+    return [part for part in re.split(r"\{[a-z_]+\}", copy_for(key)) if part.strip(" .,:")]
 
 
 def translation_table() -> dict:
@@ -458,36 +475,6 @@ def texts(harness) -> list[str]:
     return [call.text for call in harness.telegram.shown]
 
 
-def toasts(harness) -> list[str]:
-    return [call.params.get("text", "") for call in harness.telegram.of("answerCallbackQuery")]
-
-
-def reject_repeat_callback_answers(harness):
-    """Let the FIRST answerCallbackQuery through and reject every one after it.
-
-    That is Telegram's real behaviour — a callback query may be answered once —
-    and several handlers here answer immediately and then try to answer again
-    with an error alert. Scripting it is the only way to find out whether the
-    driver still learns what went wrong.
-    """
-    seen = {"count": 0}
-
-    def _answer(_params):
-        seen["count"] += 1
-        if seen["count"] == 1:
-            return 200, {"ok": True, "result": True}
-        return 400, {
-            "ok": False,
-            "error_code": 400,
-            "description": (
-                "Bad Request: query is too old and response timeout expired "
-                "or query ID is invalid"
-            ),
-        }
-
-    harness.telegram.failures["answerCallbackQuery"] = _answer
-
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -648,18 +635,22 @@ async def test_claiming_an_order_another_driver_already_took_refuses_and_disarms
     """Two drivers, one order, one van already on its way.
 
     The pool card on this driver's phone was rendered before the other driver
-    claimed it, so the backend 409 is the ONLY thing standing between them and a
-    double-assigned stop. The refusal must also take the Confirm button away:
-    leaving it on screen invites the frustrated re-tap that turns one refused
-    claim into a burst of them against a live endpoint.
+    claimed it, so the backend refusal is the ONLY thing standing between them
+    and a double-assigned stop. `assign_driver` locks the row and judges its
+    status before its owner, and a driver-held delivery is never claimable, so
+    the loser gets the 400 STAFF_DELIVERY_NOT_CLAIMABLE -- never
+    STAFF_DELIVERY_ALREADY_TAKEN -- and its copy must allow that another driver
+    took it. The refusal must also take the Confirm button away: leaving it on
+    screen invites the frustrated re-tap that turns one refused claim into a
+    burst of them against a live endpoint.
     """
     driver, labels = await sign_in(bot)
     bot.desk.pool = [pool_row(501, "BS-1001")]
     bot.desk.serve(501)
     bot.desk.accept_outcomes[501] = staff_backend_failure(
-        "This delivery has already been accepted by another driver",
-        status_code=409,
-        error_code="STAFF_DELIVERY_ALREADY_TAKEN",
+        "This delivery can no longer be assigned (status: assigned)",
+        status_code=400,
+        error_code="STAFF_DELIVERY_NOT_CLAIMABLE",
     )
 
     await bot.send(driver.text(menu_label(labels, "staff.menu.new_orders")))
@@ -668,11 +659,37 @@ async def test_claiming_an_order_another_driver_already_took_refuses_and_disarms
     await bot.send(driver.tap("staff_confirm_accept_501"))
 
     refusal = bot.telegram.last_shown()
-    assert refusal.text == f"❌ {copy_for('staff.delivery.already_taken')}"
+    assert refusal.text == f"❌ {copy_for('staff.error.api.delivery_not_claimable')}"
     assert refusal.callback_data() == ["staff_new_orders"], (
         "the refusal screen still offers Confirm — a stale claim button on a "
-        "screen that just said 'already taken' is an invitation to hammer it"
+        "screen that just said the order can't be accepted is an invitation to hammer it"
     )
+    assert len(backend_calls(bot, "POST", accept_endpoint(501))) == 1
+
+
+@pytest.mark.parametrize(
+    "error_code, message, expected_key",
+    [
+        # The one code-less 409 accept can produce: the bottle-session bind
+        # race (`BottleTrackingService.bind_order_to_session`), another accept won.
+        (None, "Order 9501 is already bound to session 7", "staff.delivery.already_taken"),
+        # Hypothetical: no CODED 409 is reachable from accept today. This pins
+        # that one added later reads its own copy through the resolver instead
+        # of being relabelled "already taken" (which every 409 used to be).
+        ("BOTTLE_SCOPE_LOCK_TIMEOUT", "Conflict", "staff.error.api.scope_busy"),
+    ],
+    ids=["code-less-bind-race", "coded-409"],
+)
+async def test_only_a_code_less_409_on_accept_reads_as_already_taken(bot, error_code, message, expected_key):
+    driver, _labels = await sign_in(bot)
+    bot.desk.serve(501)
+    bot.desk.accept_outcomes[501] = staff_backend_failure(message, status_code=409, error_code=error_code)
+
+    await bot.send(driver.tap("staff_confirm_accept_501"))
+
+    refusal = bot.telegram.last_shown()
+    assert refusal.text == f"❌ {copy_for(expected_key)}"
+    assert refusal.callback_data() == ["staff_new_orders"]
     assert len(backend_calls(bot, "POST", accept_endpoint(501))) == 1
 
 
@@ -725,7 +742,7 @@ async def test_accept_on_a_broadcast_for_an_order_moved_to_another_day_says_it_i
     """The new-order broadcast is still in the driver's chat with its Accept button
     (`staff_confirm_accept_<id>`) when dispatch moves the order to a later day. The
     backend refuses the claim with STAFF_DELIVERY_NOT_CLAIMABLE (a 400). The driver
-    must read that the order is no longer available, and the stale Confirm must go.
+    must read that the order can't be accepted any more, and the stale Confirm must go.
     """
     driver, _labels = await sign_in(bot)
     bot.desk.serve(501)
@@ -769,16 +786,10 @@ async def test_a_driver_deactivated_mid_shift_is_told_why_and_claims_nothing(bot
     assert refusal.callback_data() == ["staff_new_orders"]
 
 
-async def test_a_deactivated_driver_still_learns_why_when_telegram_drops_the_toast(bot):
-    """The deactivation notice has to survive Telegram's one-answer rule.
-
-    ``execute_status_change`` acknowledges the tap immediately (callback ids
-    expire in seconds), so when the backend then refuses, the error arrives as a
-    SECOND answer to the same query — which Telegram rejects outright. If that
-    rejection were the end of it, a deactivated driver would tap "Picked up",
-    see the spinner stop, see nothing change, and keep driving. The fallback
-    reply is what turns a swallowed toast into a message they can read.
-    """
+async def test_a_deactivated_driver_still_learns_why_after_the_tap_was_answered(bot):
+    """``execute_status_change`` answers the tap before calling the API, so the
+    refusal can no longer be a popup; it must arrive as a message, and no
+    invisible second answer may be spent on it."""
     driver, labels = await sign_in(bot)
     bot.desk.active = [active_row(501, "BS-1001")]
     bot.desk.serve(501)
@@ -790,27 +801,41 @@ async def test_a_deactivated_driver_still_learns_why_when_telegram_drops_the_toa
     await bot.send(driver.text(menu_label(labels, "staff.menu.active_deliveries")))
     await bot.send(driver.tap("staff_view_active_501"))
     await bot.send(driver.tap("staff_status_501_picked_up"))
-
-    reject_repeat_callback_answers(bot)
     bot.telegram.reset()
     await bot.send(driver.tap("staff_execute_status_501_picked_up"))
 
-    assert not errors, f"a rejected toast escaped as a handler error: {errors}"
+    assert not errors, f"the refusal raised: {errors}"
     expected = f"❌ {copy_for('staff.error.api.account_deactivated')}"
-    assert expected in toasts(bot), (
-        "the refusal was never even attempted as a toast — this test would then "
-        "be proving nothing about the fallback below it"
-    )
-    assert expected in texts(bot), (
-        "Telegram refused the second answer to this callback and nothing else "
-        f"reached the driver; they saw {texts(bot)}"
-    )
+    assert expected in texts(bot), f"the driver never saw why; they saw {texts(bot)}"
+    assert len(bot.telegram.of("answerCallbackQuery")) == 1
     assert not backend_calls(bot, "PUT", status_endpoint(501))[1:], (
         "the refused status change was retried; a deactivated driver's tap must "
         "hit the backend once and stop"
     )
-    assert not any(copy_for("staff.delivery.status_updated").split("{")[0] in text
-                   for text in texts(bot)), "a refused status change must never report success"
+
+
+async def test_a_route_locked_by_dispatch_is_still_explained_after_the_tap_was_answered(bot):
+    """The driver taps "Optimize route" on a route dispatch has locked: the
+    backend does nothing on purpose, and the alert is the only thing telling the
+    driver the button is not broken. When the tap's popup slot is already spent, Telegram drops a
+    second answer silently, so the sentence must arrive as a chat message."""
+    driver, labels = await sign_in(bot)
+    bot.desk.active = [active_row(501, "BS-1001")]
+    bot.backend.route("POST", f"{DELIVERY}/optimize-route", lambda _call: {"route_locked": True})
+    await bot.send(driver.text(menu_label(labels, "staff.menu.active_deliveries")))
+
+    tap = driver.tap("staff_optimize_routes")
+    await tap.callback_query.answer()  # the popup slot is spent before the handler runs
+    bot.telegram.reset()
+    await bot.send(tap)
+
+    locked = copy_for("staff.route.locked_by_dispatch")
+    assert locked in [call.text for call in bot.telegram.of("sendMessage")], (
+        f"the driver never read why nothing changed; they saw {texts(bot)}"
+    )
+    assert bot.telegram.of("answerCallbackQuery") == [], (
+        "an answer was spent on an already-answered tap; Telegram never shows it"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1386,4 +1411,225 @@ async def test_the_driver_can_tap_the_card_again_and_again_and_it_always_answers
         assert bot.telegram.of("sendMessage", "editMessageText"), (
             f"tap {tap} on the route card made no Telegram call; the driver sees "
             "a frozen bot and taps harder"
+        )
+
+
+def visible_answer_texts(harness) -> list[str]:
+    """What the driver could actually READ from callback answers: the first per tap."""
+    return [call.params.get("text", "") for call in harness.telegram.visible_answers]
+
+
+async def test_a_refused_pick_up_reaches_the_driver_although_the_tap_was_already_answered(bot):
+    """Replay of prod 2026-09-10, delivery 1388: 20 taps, nothing shown.
+
+    ``execute_status_change`` answers the tap bare before calling the API, so
+    the refusal can no longer be a popup — Telegram shows only the first answer
+    to a tap and silently drops the rest. The driver must get it as a message.
+    """
+    driver, labels = await sign_in(bot)
+    bot.desk.active = [active_row(1388, "BS-1388")]
+    bot.desk.serve(1388)
+    bot.desk.status_outcomes[1388] = staff_backend_failure(
+        "Session 178 only has 4 bottle(s) available; cannot deliver 5.",
+        status_code=400,
+        error_code="BOTTLE_SESSION_CAPACITY_EXCEEDED",
+    )
+    errors = capture_errors(bot)
+
+    await bot.send(driver.text(menu_label(labels, "staff.menu.active_deliveries")))
+    await bot.send(driver.tap("staff_view_active_1388"))
+    await bot.send(driver.tap("staff_status_1388_picked_up"))
+    bot.telegram.reset()
+    await bot.send(driver.tap("staff_execute_status_1388_picked_up"))
+
+    assert not errors, f"the refusal raised instead of reaching the driver: {errors}"
+    expected = f"❌ {copy_for('staff.error.api.bottle_session_capacity_exceeded')}"
+    seen = texts(bot) + visible_answer_texts(bot)
+    assert expected in seen, (
+        "the capacity refusal never reached the driver — it was spent on a second "
+        f"callback answer Telegram does not display. They saw: {seen}"
+    )
+    assert len(bot.telegram.of("answerCallbackQuery")) == 1, (
+        "a second answerCallbackQuery was sent for this tap; it is invisible in prod"
+    )
+    for fragment in literal_fragments("staff.delivery.status_updated"):
+        assert not any(fragment in text for text in seen), (
+            f"a refused pick-up told the driver the status was updated: {seen}"
+        )
+
+
+async def test_a_capacity_refusal_names_the_numbers_and_offers_the_session_screen(bot):
+    driver, labels = await sign_in(bot)
+    bot.desk.active = [active_row(1388, "BS-1388")]
+    bot.desk.serve(1388)
+    bot.desk.status_outcomes[1388] = staff_backend_failure(
+        "Session 178 only has 4 bottle(s) available; cannot deliver 5.",
+        status_code=400,
+        error_code="BOTTLE_SESSION_CAPACITY_EXCEEDED",
+        details={"available": 4, "required": 5, "shortfall": 1},
+    )
+
+    await bot.send(driver.text(menu_label(labels, "staff.menu.active_deliveries")))
+    await bot.send(driver.tap("staff_view_active_1388"))
+    await bot.send(driver.tap("staff_status_1388_picked_up"))
+    bot.telegram.reset()
+    await bot.send(driver.tap("staff_execute_status_1388_picked_up"))
+
+    refusal = bot.telegram.last_shown()
+    expected = "❌ " + copy_for("staff.error.api.bottle_session_capacity_exceeded_detail").format(
+        available=4, required=5, shortfall=1
+    )
+    assert refusal.text == expected
+    assert refusal.callback_data() == ["staff_bottle_my_accountability"], (
+        "the refusal must lead somewhere the driver can fix it"
+    )
+    assert "Session 178" not in refusal.text, "the internal session id leaked to the driver"
+
+
+@pytest.mark.parametrize("settle", ["full", "partial"])
+async def test_completing_a_delivery_that_was_cancelled_underneath_is_reported_not_celebrated(
+    stop_bot, settle
+):
+    """Before 2026-09-24 the at-door submit treated this refusal as an already-
+    recorded replay and told the driver "Delivered, cash recorded" — for an
+    order that was cancelled and a payment nobody took.
+
+    The at-door flow must also be disarmed: the partial route ARMS it (the typed
+    amount and note live in ``pending_delivery_cash_flow``), and a flow left
+    armed on a cancelled order reads the driver's next typed text as money for it.
+    """
+    driver, _detail = await open_the_stop(stop_bot)
+    await walk_to_the_door(stop_bot, driver)
+    await stop_bot.send(driver.tap("staff_status_501_delivered"))
+    stop_bot.desk.status_outcomes[501] = staff_backend_failure(
+        "Cannot transition from 'cancelled' to 'delivered'. Allowed transitions: []",
+        status_code=400, error_code="STAFF_INVALID_STATUS_TRANSITION",
+        details={"current_status": "cancelled", "requested_status": "delivered"},
+    )
+    user_data = stop_bot.application.user_data[DEFAULT_DRIVER_TELEGRAM_ID]
+
+    if settle == "partial":
+        await stop_bot.send(driver.tap("staff_cash_partial_501"))
+        await stop_bot.send(driver.text("120000"))
+        assert "pending_delivery_cash_flow" in user_data, "the partial route must arm the at-door flow"
+        stop_bot.telegram.reset()
+        await stop_bot.send(driver.text("Customer 30 000 short"))
+    else:
+        stop_bot.telegram.reset()
+        await stop_bot.send(driver.tap("staff_cash_full_501"))
+
+    assert "pending_delivery_cash_flow" not in stop_bot.application.user_data[DEFAULT_DRIVER_TELEGRAM_ID], (
+        "the refused completion left the at-door cash flow armed on a cancelled order"
+    )
+    shown = stop_bot.telegram.last_shown()
+    assert copy_for("staff.delivery.delivered_success") not in shown.text
+    assert copy_for("staff.error.api.status_transition_refused_detail").format(
+        current_status=f"❓ {copy_for('staff.delivery.status.cancelled')}",
+        requested_status=f"✅ {copy_for('staff.delivery.status.delivered')}",
+    ) in shown.text
+    assert shown.callback_data() == ["staff_active_deliveries"]
+
+
+async def test_a_replayed_delivered_without_details_is_still_acknowledged(stop_bot):
+    """An older backend (no `details`) keeps the replay-is-success rule — the
+    retried PUT whose first attempt committed (status_update.py comment)."""
+    driver, _detail = await open_the_stop(stop_bot)
+    await walk_to_the_door(stop_bot, driver)
+    await stop_bot.send(driver.tap("staff_status_501_delivered"))
+    stop_bot.desk.status_outcomes[501] = staff_backend_failure(
+        "Cannot transition from 'delivered' to 'delivered'.",
+        status_code=400, error_code="STAFF_INVALID_STATUS_TRANSITION",
+    )
+    stop_bot.telegram.reset()
+
+    await stop_bot.send(driver.tap("staff_cash_full_501"))
+
+    assert copy_for("staff.delivery.delivered_success") in stop_bot.telegram.last_shown().text
+
+
+async def test_a_replayed_delivered_the_backend_says_is_delivered_is_still_acknowledged(stop_bot):
+    """The same retried PUT against a backend that publishes the current status:
+    the delivery IS delivered, so the refusal is the replay and not a failure."""
+    driver, _detail = await open_the_stop(stop_bot)
+    await walk_to_the_door(stop_bot, driver)
+    await stop_bot.send(driver.tap("staff_status_501_delivered"))
+    stop_bot.desk.status_outcomes[501] = staff_backend_failure(
+        "Cannot transition from 'delivered' to 'delivered'. Allowed transitions: []",
+        status_code=400, error_code="STAFF_INVALID_STATUS_TRANSITION",
+        details={"current_status": "delivered", "requested_status": "delivered"},
+    )
+    stop_bot.telegram.reset()
+
+    await stop_bot.send(driver.tap("staff_cash_full_501"))
+
+    assert copy_for("staff.delivery.delivered_success") in stop_bot.telegram.last_shown().text
+
+
+# ---------------------------------------------------------------------------
+# A refusal that says "it is ALREADY in that status" is a replay, not a failure
+# ---------------------------------------------------------------------------
+# Updates in one chat are processed one at a time, so a double tap's second
+# PUT reaches the backend after the first one committed; the client's retry of
+# a PUT whose acknowledgement was lost does the same. Both are refused with
+# STAFF_INVALID_STATUS_TRANSITION naming current == requested. Before the fix
+# that edited the driver's success screen into "This delivery is now ❌ Failed,
+# so it can't be marked ❌ Failed. Nothing was recorded." — for a status that
+# WAS recorded.
+
+
+async def test_a_double_tapped_fail_reason_shows_the_failure_it_already_recorded(stop_bot):
+    driver, _detail = await open_the_stop(stop_bot)
+    errors = capture_errors(stop_bot)
+    await stop_bot.send(driver.tap("staff_status_501_failed"))
+    await stop_bot.send(driver.tap("staff_failed_reason_501_customer_unavailable"))
+    stop_bot.desk.status_outcomes[501] = staff_backend_failure(
+        "Cannot transition from 'failed' to 'failed'. Allowed transitions: []",
+        status_code=400, error_code="STAFF_INVALID_STATUS_TRANSITION",
+        details={"current_status": "failed", "requested_status": "failed"},
+    )
+    stop_bot.telegram.reset()
+
+    await stop_bot.send(driver.tap("staff_failed_reason_501_customer_unavailable"))
+
+    assert not errors, f"the replayed fail reason raised {errors}"
+    closing = stop_bot.telegram.last_shown()
+    assert f"❌ {copy_for('staff.delivery.marked_failed')}" in closing.text
+    assert (
+        f"{copy_for('staff.delivery.fail_reason_label')}: "
+        f"{copy_for('staff.delivery.reason.customer_unavailable')}"
+    ) in closing.text
+    assert closing.callback_data() == ["staff_active_deliveries"]
+    seen = texts(stop_bot) + visible_answer_texts(stop_bot)
+    for fragment in literal_fragments("staff.error.api.status_transition_refused_detail"):
+        assert not any(fragment in text for text in seen), (
+            f"the replay was reported as a refusal: {seen}"
+        )
+
+
+async def test_a_double_tapped_pick_up_shows_the_status_it_already_recorded(stop_bot):
+    driver, _detail = await open_the_stop(stop_bot)
+    errors = capture_errors(stop_bot)
+    await stop_bot.send(driver.tap("staff_status_501_picked_up"))
+    await stop_bot.send(driver.tap("staff_execute_status_501_picked_up"))
+    stop_bot.desk.status_outcomes[501] = staff_backend_failure(
+        "Cannot transition from 'picked_up' to 'picked_up'. Allowed transitions: ['in_transit']",
+        status_code=400, error_code="STAFF_INVALID_STATUS_TRANSITION",
+        details={"current_status": "picked_up", "requested_status": "picked_up"},
+    )
+    stop_bot.telegram.reset()
+
+    await stop_bot.send(driver.tap("staff_execute_status_501_picked_up"))
+
+    assert not errors, f"the replayed pick-up raised {errors}"
+    after = stop_bot.telegram.last_shown()
+    assert copy_for("staff.delivery.status_updated").format(
+        status=f"📦 {copy_for('staff.delivery.status.picked_up')}"
+    ) in after.text
+    assert "staff_status_501_in_transit" in after.callback_data(), (
+        "the replay must leave the driver on the next rung, as the first tap did"
+    )
+    seen = texts(stop_bot) + visible_answer_texts(stop_bot)
+    for fragment in literal_fragments("staff.error.api.status_transition_refused_detail"):
+        assert not any(fragment in text for text in seen), (
+            f"the replay was reported as a refusal: {seen}"
         )

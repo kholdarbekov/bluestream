@@ -402,7 +402,7 @@ class CreateOrderHandler(BaseHandler):
             product = products.get(str(product_id))
 
             if not product:
-                await query.answer(i18n.get('staff.error_occurred', language), show_alert=True)
+                await self._notify_user(update, i18n.get('staff.error_occurred', language), show_alert=True)
                 return
 
             context.user_data['selecting_product_id'] = product_id
@@ -502,9 +502,10 @@ class CreateOrderHandler(BaseHandler):
         items = order_data.get('items', [])
 
         if not items:
-            await query.answer(
+            await self._notify_user(
+                update,
                 i18n.get('staff.operator.no_items_selected', language),
-                show_alert=True
+                show_alert=True,
             )
             return
 
@@ -571,13 +572,14 @@ class CreateOrderHandler(BaseHandler):
             # Parse: staff_op_pay_{method}
             prefix = "staff_op_pay_"
             if not query.data.startswith(prefix):
-                await query.answer(i18n.get('staff.error_occurred', language), show_alert=True)
+                await self._notify_user(update, i18n.get('staff.error_occurred', language), show_alert=True)
                 return SELECT_PAYMENT
 
             method = query.data[len(prefix):]
             allowed_methods = set(context.user_data.get('new_order', {}).get('available_payment_methods') or [])
             if allowed_methods and method not in allowed_methods:
-                await query.answer(
+                await self._notify_user(
+                    update,
                     i18n.get('staff.operator.payment_unavailable', language),
                     show_alert=True,
                 )

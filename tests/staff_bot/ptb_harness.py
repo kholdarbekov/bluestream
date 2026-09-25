@@ -86,6 +86,7 @@ class FakeStaffBackend:
                 data=body.data if body.status_code == 409 else None,
                 error=body.error,
                 status_code=body.status_code, error_code=body.error_code,
+                **_failure_context(body),
             )
         return _staff_response(True, data=body)
 
@@ -109,9 +110,44 @@ class _StaffFailure:
     status_code: int = 500
     error_code: Optional[str] = None
     data: Optional[dict] = None
+    details: Optional[dict] = None
+    error_type: Optional[str] = None
+
+    def body(self) -> dict:
+        """The JSON error body the backend would send for this refusal.
+
+        `error` is the body's `message` and `error_type` its `error` field. On
+        a 409 `data` IS the body (the client hands it over as
+        `APIResponse.data`), so it is merged over the rest.
+        """
+        body = {"message": self.error, "error": self.error_type, "error_code": self.error_code}
+        if self.details is not None:
+            body["details"] = self.details
+        if self.status_code == 409 and self.data is not None:
+            body.update(self.data)
+        return body
 
 
-def staff_backend_failure(error: str, status_code: int = 500, error_code: str = None, data: dict = None):
+def _failure_context(failure: _StaffFailure) -> dict:
+    """`details` / `server_message` / `error_type` as the real client reads them.
+
+    The body goes through the client's own `StaffAPIClient._failure_context`,
+    so the harness cannot read an error body differently from production. A
+    401 and a transport failure (`status_code=None`) carry none of the three:
+    the client's 401 branch never reads the body, and a transport failure has
+    no body at all.
+    """
+    from staff_bot.api_client import StaffAPIClient
+
+    if failure.status_code in (None, 401):
+        return {"details": None, "server_message": None, "error_type": None}
+    return StaffAPIClient._failure_context(failure.body())
+
+
+def staff_backend_failure(
+    error: str, status_code: int = 500, error_code: str = None, data: dict = None,
+    details: dict = None, error_type: str = None,
+):
     """A refusal, optionally carrying the backend's error BODY.
 
     `data` is accepted on a 409 and REFUSED on anything else, because 409 is
@@ -131,6 +167,14 @@ def staff_backend_failure(error: str, status_code: int = 500, error_code: str = 
     (`staff_bot/api_client.py::_make_request`, NEVER_DELIVERED_ERRORS vs
     AMBIGUOUS_PHASE_ERRORS). Plan ruling 30's "the order may have been placed"
     branch is driven with the second; the first is an ordinary refusal.
+
+    `details` travels on ANY HTTP status (the client keeps the body's
+    `details` on every refusal since 2026-09-24). The refusal becomes the body
+    the backend would send (`_StaffFailure.body`: `error` is its `message`,
+    `error_type` its `error` field, e.g. VALIDATION_ERROR or INVALID_VALUE, and
+    on a 409 `data` is merged over it). The real client's reader then turns
+    that body into `APIResponse.details` / `.server_message` / `.error_type`, so
+    a 409 whose details live only in `data` still gets them.
     """
     if data is not None and status_code != 409:
         raise ValueError(
@@ -139,10 +183,16 @@ def staff_backend_failure(error: str, status_code: int = 500, error_code: str = 
             "(staff_bot/api_client.py:415-431). Drive this branch with a 409, or assert the copy "
             "the bot renders from `error`/`error_code` without a body."
         )
-    return _StaffFailure(error=error, status_code=status_code, error_code=error_code, data=data)
+    return _StaffFailure(
+        error=error, status_code=status_code, error_code=error_code, data=data,
+        details=details, error_type=error_type,
+    )
 
 
-def _staff_response(success, data=None, error=None, status_code=200, error_code=None):
+def _staff_response(
+    success, data=None, error=None, status_code=200, error_code=None,
+    details=None, server_message=None, error_type=None,
+):
     from staff_bot.api_client import APIResponse
 
     return APIResponse(
@@ -151,6 +201,9 @@ def _staff_response(success, data=None, error=None, status_code=200, error_code=
         error=error,
         status_code=status_code,
         error_code=error_code,
+        details=details,
+        server_message=server_message,
+        error_type=error_type,
     )
 
 
@@ -323,13 +376,20 @@ async def build_staff_harness(monkeypatch, *, translations=None, database=None) 
     # card already clears this; doing it here means no future one has to know.
     route_card_state._locks.clear()
 
+    # Module-level "why was this user's re-login refused" memory, keyed by
+    # Telegram id — every harness uses the same default id, so a refusal one
+    # test provokes must not greet the next test's staff member.
+    from staff_bot.utils import auth_refusals
+    auth_refusals.reset()
+
     from staff_bot.bot import StaffBot
+    from staff_bot.utils.answered_callbacks import build_staff_bot
 
     application = (
         ApplicationBuilder()
-        .token("424242:STAFF-TEST-TOKEN")
-        .request(telegram)
-        .get_updates_request(telegram)
+        .bot(build_staff_bot(
+            "424242:STAFF-TEST-TOKEN", request=telegram, get_updates_request=telegram
+        ))
         .build()
     )
 

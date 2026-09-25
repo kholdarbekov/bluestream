@@ -63,6 +63,12 @@ class DeliveryAssignmentService:
         from business_app.services.staff_service import StaffService
         from business_app.services.bottle_tracking_service import BottleTrackingService
 
+        # JWT identities arrive as str (`sub`); the columns compared below are
+        # int. Only a digit string is converted — None and anything else keep
+        # their old path (no DeliveryPerson → "Driver not found").
+        if isinstance(driver_user_id, str) and driver_user_id.isdigit():
+            driver_user_id = int(driver_user_id)
+
         # 1. Lock the delivery row -- and REFRESH it. `with_for_update()` alone
         #    re-selects the row but hands back the instance already in the
         #    session with its pre-lock attributes (measured; see

@@ -289,6 +289,25 @@ async def test_a_typed_address_the_geocoder_cannot_place_keeps_the_pin_step(monk
     assert _calls(harness, "GET", DEDUPE) == []
 
 
+async def test_a_geocoder_outage_on_a_typed_address_points_to_the_pin(monkeypatch):
+    """A 503 is the lookup being down, not the street being wrong. "Address not
+    found" sent the agent to retype a correct address; the pin needs no lookup,
+    so the refusal points there and the pin step stays open."""
+    harness, ops, labels = await _agent(monkeypatch)
+    await _walk_to_pin(harness, ops, labels)
+    harness.backend.route(
+        "POST", GEOCODE, lambda c: staff_backend_failure("Geocoding service temporarily unavailable", 503)
+    )
+
+    await harness.send(ops.text("Chilonzor 5-kvartal 12"))
+
+    shown = harness.telegram.last_shown()
+    assert _curated("staff.operator.geocoder_down_use_pin") in shown.text
+    assert _curated("staff.sales.new.share_pin_button") in shown.button_labels()
+    assert harness.conversation_state(CONV) == NO_PIN
+    assert _calls(harness, "GET", DEDUPE) == []
+
+
 async def test_a_failed_dedupe_lookup_is_not_read_as_no_duplicates(monkeypatch):
     """"We could not ask" is not "there are none".
 
@@ -447,12 +466,11 @@ async def test_the_duplicate_screen_survives_telegram_refusing_the_second_answer
     answers = harness.telegram.of("answerCallbackQuery")
     alerts = [c for c in answers if c.params.get("text")]
     assert len(alerts) == 1 and _curated("staff.sales.error.duplicate") in alerts[0].params["text"]
-    # The refused acknowledgement was attempted. Not pinned to a COUNT: PTB's
-    # `BadRequest` subclasses `NetworkError`, so `_safe_callback_answer`'s
-    # transient-retry branch catches it and tries twice. That is base-handler
-    # behaviour, not this flow's contract; what this flow owes the agent is the
-    # screen below.
-    assert len(answers) > len(alerts)
+    # The alert spent the tap's one answer, so the edit helper's bare
+    # acknowledgement is skipped rather than sent for Telegram to refuse.
+    assert answers == alerts, (
+        f"a second answerCallbackQuery was sent for an already-answered tap: {answers}"
+    )
     assert errors == [], f"the refused acknowledgement escaped the handler: {errors}"
 
     screen = harness.telegram.last_shown()

@@ -161,6 +161,7 @@ COPY_KEYS = (
     "staff.operator.share_location",
     "staff.operator.outside_delivery_area",
     "staff.operator.address_not_found",
+    "staff.operator.geocoder_down_use_pin",
     "staff.operator.location_received",
     "staff.operator.location_needs_address",
     "staff.menu.title",
@@ -174,6 +175,8 @@ COPY_KEYS = (
     "staff.error.api.validation",
     "staff.error.api.service_unavailable",
     "staff.error.api.conflict",
+    "staff.error.api.backend_reason",
+    "staff.error.api.account_deactivated",
     "staff.currency.uzs",
     "staff.common.not_available",
     "staff.addresses",
@@ -1103,8 +1106,11 @@ async def test_a_payment_method_the_backend_did_not_offer_is_refused_from_a_stal
     operator.telegram.reset()
     await operator.send(ops.tap("staff_op_pay_cash"))
 
-    assert _curated("staff.operator.payment_unavailable", "en") in alerts(operator), (
-        f"the refusal was silent; the operator sees only alerts: {alerts(operator)}"
+    assert _curated("staff.operator.payment_unavailable", "en") in texts(operator), (
+        f"the refusal was silent; the operator saw: {texts(operator)}"
+    )
+    assert len(operator.telegram.of("answerCallbackQuery")) == 1, (
+        "a second answerCallbackQuery was spent on the refusal; Telegram never shows it"
     )
     assert operator.conversation_state("staff_create_order") == SELECT_PAYMENT, (
         "a refused method must leave the operator on the payment screen"
@@ -1151,7 +1157,10 @@ async def test_an_order_the_backend_rejects_leaves_the_operator_on_the_confirm_s
     operator.telegram.reset()
     await operator.send(ops.tap("staff_op_confirm_order"))
 
-    assert f"❌ {_curated('staff.error.api.conflict', 'en')}" in alerts(operator)
+    assert f"❌ {_curated('staff.error.api.conflict', 'en')}" in texts(operator)
+    assert len(operator.telegram.of("answerCallbackQuery")) == 1, (
+        "a second answerCallbackQuery was spent on the refusal; Telegram never shows it"
+    )
     assert operator.conversation_state("staff_create_order") == CONFIRM_ORDER
     assert user_data(operator)["new_order"]["items"] == [
         {
@@ -1336,8 +1345,11 @@ async def test_an_address_the_backend_refuses_as_out_of_zone_is_never_reported_a
 
     ops, labels = await sign_in(operator)
     operator.world.addresses = []
+    # `geo_validation._OUTSIDE_AREA_FALLBACK`, raised with no error code: the
+    # operator reads the backend's own sentence.
+    reason = "The selected location is outside our delivery area (Tashkent)."
     operator.world.address_write = staff_backend_failure(
-        "The selected location is outside our delivery area (Tashkent).", status_code=400
+        reason, status_code=400, error_type="VALIDATION_ERROR"
     )
 
     await operator.send(ops.text(menu_label(labels, "staff.menu.create_order")))
@@ -1353,8 +1365,12 @@ async def test_an_address_the_backend_refuses_as_out_of_zone_is_never_reported_a
     operator.telegram.reset()
     await operator.send(ops.tap("staff_op_confirm_address"))
 
-    assert f"❌ {_curated('staff.error.api.validation', 'en')}" in alerts(operator), (
-        f"the operator was not told the address was refused; alerts: {alerts(operator)}"
+    refusal = _curated("staff.error.api.backend_reason", "en").format(reason=reason)
+    assert f"❌ {refusal}" in texts(operator), (
+        f"the operator was not told why the address was refused; they saw: {texts(operator)}"
+    )
+    assert len(operator.telegram.of("answerCallbackQuery")) == 1, (
+        "a second answerCallbackQuery was spent on the refusal; Telegram never shows it"
     )
     assert _curated("staff.operator.address_saved", "en") not in " ".join(texts(operator)), (
         "the bot claimed a refused address had been saved"
@@ -1550,9 +1566,11 @@ async def test_a_telegram_edit_failure_after_the_write_still_tells_the_operator_
     path is a phone lookup that now finds the row.
 
     The write and the redraw are different failures. Once the POST returns 2xx
-    the only honest thing to say is that the customer exists — so the alert,
+    the only honest thing to say is that the customer exists — so the notice,
     which is the only surface left when the edit is refused, carries the same
     seeded ``staff.operator.user_created`` line the screen would have shown.
+    The tap was already answered, so that notice is a chat message: a second
+    callback answer would be accepted by Telegram and never displayed.
     """
     ops, labels = await sign_in(operator)
     operator.world.search_result = []
@@ -1573,13 +1591,17 @@ async def test_a_telegram_edit_failure_after_the_write_still_tells_the_operator_
         "the customer really was created"
     )
     # Telegram refused the success edit, so the ONLY thing that reached the
-    # operator is this alert. It must not describe a write that succeeded as a
-    # failure.
-    assert alerts(operator) == [f"✅ {_curated('staff.operator.user_created', 'en')}"], (
-        f"the operator was told something other than 'created'. alerts={alerts(operator)}"
+    # operator is this message (`texts` would also list the refused edit, which
+    # nobody saw). It must not describe a write that succeeded as a failure.
+    sent = [call.text for call in operator.telegram.of("sendMessage")]
+    assert sent == [f"✅ {_curated('staff.operator.user_created', 'en')}"], (
+        f"the operator was told something other than 'created'. sent={sent}"
     )
-    assert _curated("staff.error_occurred", "en") not in alerts(operator), (
+    assert _curated("staff.error_occurred", "en") not in sent, (
         "a refused redraw is being reported as a failed creation again"
+    )
+    assert len(operator.telegram.of("answerCallbackQuery")) == 1, (
+        "a second answerCallbackQuery was spent on the success notice; Telegram never shows it"
     )
     assert operator.conversation_state("staff_create_user") is None
     assert "new_client" not in user_data(operator)
@@ -1839,4 +1861,28 @@ async def test_a_pin_whose_address_cannot_be_read_back_is_completed_by_typing_it
     assert writes[0].data["latitude"] == IN_ZONE_PIN[0]
     assert writes[0].data["longitude"] == IN_ZONE_PIN[1]
     assert writes[0].data["full_address"] == "Amir Temur ko'chasi 108, 3-qavat"
+    assert operator.errors == []
+
+
+async def test_a_geocoder_outage_on_a_typed_address_points_to_the_pin(operator):
+    """The street is real; the lookup is down. "Address not found" sent the
+    operator to retype a correct address. The pin needs no lookup."""
+    ops, labels = await sign_in(operator)
+    operator.world.addresses = []
+    operator.world.geocode = staff_backend_failure(
+        "Geocoding service temporarily unavailable", status_code=503
+    )
+
+    await operator.send(ops.text(menu_label(labels, "staff.menu.create_order")))
+    await operator.send(ops.text(CLIENT_PHONE))
+    await operator.send(ops.tap(f"staff_op_order_{CLIENT_ID}"))
+    await operator.send(ops.tap(f"staff_op_add_addr_{CLIENT_ID}"))
+    await operator.send(ops.text("Uy"))
+    operator.telegram.reset()
+
+    await operator.send(ops.text("Amir Temur ko'chasi 108"))
+
+    assert texts(operator)[-1] == _curated("staff.operator.geocoder_down_use_pin", "en")
+    assert operator.conversation_state("staff_add_address") == ENTER_ADDRESS
+    assert _curated("staff.operator.share_location", "en") in last_screen(operator).button_labels()
     assert operator.errors == []

@@ -200,8 +200,8 @@ class SalesHubHandler(BaseHandler):
         if not query or not isinstance(context.user_data.get(VISIT_FLOW_KEY), dict):
             return False
         language = await self._get_language(update, context)
-        await self._safe_callback_answer(
-            query, i18n.get('staff.sales.error.visit_open', language), show_alert=True
+        await self._notify_user(
+            update, i18n.get('staff.sales.error.visit_open', language), show_alert=True
         )
         return True
 

@@ -273,7 +273,7 @@ def require_staff_roles(*required_roles: str):
 
             status_value = user.status.value if hasattr(user.status, "value") else user.status
             if status_value != UserStatus.ACTIVE.value:
-                raise ForbiddenError("Staff account is not active", error_code="STAFF_NO_ROLE")
+                raise ForbiddenError("Staff account is not active", error_code="STAFF_ACCOUNT_INACTIVE")
 
             staff_roles = StaffService._extract_staff_roles(user)
             if required_roles and not any(role in staff_roles for role in required_roles):

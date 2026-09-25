@@ -2364,11 +2364,13 @@ class CashCollectionService:
                 # Spec §7 privacy boundary: only the place-scope COUNT may
                 # cross here — the NET total is a coworker's money at this
                 # shared address, never this customer's.
+                place_debt_count = context.get("place_active_cod_debt_count") or 0
                 raise ValidationError(
                     "Cash on delivery is unavailable: the workplace at this delivery "
-                    f"address has {context.get('place_active_cod_debt_count') or 0} "
+                    f"address has {place_debt_count} "
                     "outstanding COD debts. Please choose a card payment method.",
                     error_code="COD_DEBT_LIMIT_REACHED",
+                    details={"place_debt_count": place_debt_count},
                 )
             # Person scope: this NET total is the customer's OWN money, so the
             # actionable figure is safe — and useful — to state directly. Both
@@ -2381,6 +2383,10 @@ class CashCollectionService:
                 f"UZS, over the {business_config.COD_DEBT_AMOUNT_THRESHOLD:,} UZS limit. Please "
                 "pay down your balance or choose a card payment method.",
                 error_code="COD_DEBT_LIMIT_REACHED",
+                details={
+                    "debt_total": float(net_total),
+                    "debt_limit": float(business_config.COD_DEBT_AMOUNT_THRESHOLD),
+                },
             )
         return context
 
@@ -2401,7 +2407,7 @@ class CashCollectionService:
         """
         customer = User.query.get(customer_id)
         if not customer:
-            raise NotFoundError("Customer not found")
+            raise NotFoundError("Customer not found", error_code="COD_CUSTOMER_NOT_FOUND")
 
         payments = (
             Payment.query.join(Order, Payment.order_id == Order.id)
@@ -3107,7 +3113,7 @@ class CashCollectionService:
     ) -> CashCollectionEvent:
         customer = User.query.get(customer_id)
         if not customer:
-            raise NotFoundError("Customer not found")
+            raise NotFoundError("Customer not found", error_code="COD_CUSTOMER_NOT_FOUND")
 
         normalized_amount = self._to_decimal(amount)
         if normalized_amount < Decimal("0.00"):

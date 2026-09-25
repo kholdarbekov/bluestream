@@ -3521,11 +3521,15 @@ class BottleTrackingService:
           - ValidationError if the target session is not OPEN.
           - ValidationError if driver tries to join their own session.
         """
+        # JWT identities arrive as str (`sub`); every column compared below is int.
+        member_driver_id = int(member_driver_id)
         session = DriverBottleSession.query.get(session_id)
         if not session:
+            # The session the driver picked, not their own: its own code, so
+            # the bot never tells a joiner "you have no open session".
             raise NotFoundError(
                 "Bottle session not found",
-                error_code="BOTTLE_SESSION_NOT_FOUND",
+                error_code="BOTTLE_SESSION_TARGET_NOT_FOUND",
             )
         if session.driver_user_id == member_driver_id:
             raise ValidationError(
@@ -3619,7 +3623,7 @@ class BottleTrackingService:
         if not owner_session:
             raise ConflictError(
                 "You must have an open bottle session to invite co-drivers",
-                error_code="BOTTLE_SESSION_NOT_FOUND",
+                error_code="BOTTLE_SESSION_REQUIRED_TO_INVITE",
             )
 
         drivers = User.query.filter(
@@ -3736,12 +3740,21 @@ class BottleTrackingService:
 
     @staticmethod
     def assert_delivery_within_session_capacity(session: DriverBottleSession, bottles_to_deliver: int) -> None:
-        """Raise ValidationError if the session cannot cover this delivery."""
+        """Raise ValidationError if the session cannot cover this delivery.
+
+        `details` carries the three numbers the staff bot prints ("4 left, 5
+        needed, 1 short"); the message keeps the session id for the logs.
+        """
         available = session.current_inventory
         if bottles_to_deliver > available:
             raise ValidationError(
                 f"Session {session.id} only has {available} bottle(s) available; "
                 f"cannot deliver {bottles_to_deliver}.",
+                details={
+                    "available": int(available),
+                    "required": int(bottles_to_deliver),
+                    "shortfall": int(bottles_to_deliver - available),
+                },
                 error_code="BOTTLE_SESSION_CAPACITY_EXCEEDED",
             )
 
@@ -3965,6 +3978,9 @@ class BottleTrackingService:
         Raises ConflictError if sender has no open session.
         Raises ValidationError if quantity exceeds sender's current inventory.
         """
+        # JWT identities arrive as str (`sub`); every column compared below is int.
+        sender_driver_id = int(sender_driver_id)
+        receiver_driver_id = int(receiver_driver_id)
         if sender_driver_id == receiver_driver_id:
             raise ValidationError("Sender and receiver cannot be the same driver")
         if declared_quantity <= 0:
@@ -3975,7 +3991,12 @@ class BottleTrackingService:
         if declared_quantity > sender_session.current_inventory:
             raise ValidationError(
                 f"Cannot transfer {declared_quantity} bottle(s); "
-                f"sender only has {sender_session.current_inventory} on truck."
+                f"sender only has {sender_session.current_inventory} on truck.",
+                error_code="BOTTLE_TRANSFER_EXCEEDS_INVENTORY",
+                details={
+                    "requested": int(declared_quantity),
+                    "available": int(sender_session.current_inventory),
+                },
             )
 
         # Deduct immediately (pessimistic) to prevent over-delivery
@@ -4008,13 +4029,21 @@ class BottleTrackingService:
         Credits confirmed_quantity to receiver's open session.
         Receiver must have an open session before confirming.
         """
+        # JWT identities arrive as str (`sub`); every column compared below is int.
+        receiver_driver_id = int(receiver_driver_id)
         transfer = DriverBottleTransfer.query.get(transfer_id)
         if not transfer:
-            raise NotFoundError("Transfer not found")
+            raise NotFoundError("Transfer not found", error_code="BOTTLE_TRANSFER_NOT_FOUND")
         if transfer.receiver_driver_id != receiver_driver_id:
-            raise ConflictError("Only the designated receiver can confirm this transfer")
+            raise ConflictError(
+                "Only the designated receiver can confirm this transfer",
+                error_code="BOTTLE_TRANSFER_NOT_RECEIVER",
+            )
         if transfer.status != DriverBottleTransferStatus.PENDING:
-            raise ConflictError(f"Transfer is already {transfer.status.value}")
+            raise ConflictError(
+                f"Transfer is already {transfer.status.value}",
+                error_code="BOTTLE_TRANSFER_NOT_PENDING",
+            )
         if confirmed_quantity < 0:
             raise ValidationError("confirmed_quantity cannot be negative")
 
@@ -4022,7 +4051,7 @@ class BottleTrackingService:
         if not receiver_session:
             raise ConflictError(
                 "Receiver must have an open bottle session to accept a transfer. " "Open a session first.",
-                error_code="BOTTLE_SESSION_NOT_FOUND",
+                error_code="BOTTLE_SESSION_REQUIRED_TO_RECEIVE",
             )
 
         # Credit the receiver's session

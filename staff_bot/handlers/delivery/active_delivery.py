@@ -386,7 +386,8 @@ class ActiveDeliveryHandler(BaseHandler):
 
         `update` may have no `callback_query` (the post-location path), so every
         callback interaction here goes through `_safe_callback_answer` or is
-        guarded.
+        guarded. The two alerts are guarded AND go through `_notify_user`: when
+        the tap's popup slot is already spent, it sends them as a chat message.
 
         Carries the guard decorators even though its only callers are already
         guarded: `tests/unit/test_staff_handler_guards.py` AST-walks
@@ -411,8 +412,8 @@ class ActiveDeliveryHandler(BaseHandler):
                 and (response.error_code == "LOCATION_REQUIRED" or "LOCATION" in (response.error or "").upper())
             ):
                 if query is not None:
-                    await self._safe_callback_answer(
-                        query,
+                    await self._notify_user(
+                        update,
                         i18n.get('staff.delivery.share_location_first_toast', language),
                         show_alert=True,
                     )
@@ -446,8 +447,8 @@ class ActiveDeliveryHandler(BaseHandler):
             # otherwise reads as the button being broken.
             if (response.data or {}).get("route_locked"):
                 if query is not None:
-                    await self._safe_callback_answer(
-                        query,
+                    await self._notify_user(
+                        update,
                         i18n.get('staff.route.locked_by_dispatch', language),
                         show_alert=True,
                     )
@@ -513,9 +514,10 @@ class ActiveDeliveryHandler(BaseHandler):
             destination_lng = delivery_info.get('destination_lng')
 
             if destination_lat is None or destination_lng is None:
-                await query.answer(
+                await self._notify_user(
+                    update,
                     i18n.get('staff.delivery.no_address', language),
-                    show_alert=True
+                    show_alert=True,
                 )
                 return
 

@@ -740,14 +740,16 @@ async def test_a_409_that_names_the_order_reports_its_number(monkeypatch):
 
 
 def test_the_harness_refuses_an_error_body_production_would_drop():
-    """A 400 with a body is a screen the real bot can never render.
+    """`data=` on anything but a 409 is a body production would never hand over.
 
-    `_make_request` attaches the response payload to `APIResponse.data` on 409
-    ONLY (staff_bot/api_client.py:415-431); the 404 branch and the catch-all
-    `else` both leave it None. The harness matched that by dropping the
-    argument -- silently, which is the problem: a test written against
-    `details={"max_quantity": 500}` on a 400 stayed green while the handler
-    under test received no details at all, and the copy it renders was never
+    `_make_request` attaches the whole response body to `APIResponse.data` on
+    a 409 ONLY (staff_bot/api_client.py). On every other status the body reaches
+    the handler through `_failure_context` alone -- `details`, the backend's
+    `message` and its error type -- which tests drive with
+    `staff_backend_failure(details=...)`. The harness used to drop `data=`
+    silently, which was the problem: a test written against
+    `data={"details": {"max_quantity": 500}}` on a 400 stayed green while the
+    handler under test received none of it, and the copy it renders was never
     really exercised.
 
     Refusing at construction is loud at the line that is wrong.
@@ -1166,15 +1168,24 @@ async def test_a_refused_stock_check_leaves_the_counted_shelf_on_screen(monkeypa
     """A 400 on the counts must not clear them: the shelf was counted once."""
     harness, ops, _labels = await _agent(monkeypatch)
     await _to_stock(harness, ops)
-    harness.backend.route("POST", STOCK_CHECK,
-                          lambda c: staff_backend_failure("that count is not usable", 400))
+    # `VisitService._qty`'s refusal of the 4 counted below, on a deployment
+    # whose `SALES_STOCK_QTY_MAX` is 3. It takes the handler's plain "stay on
+    # the shelf" branch (SALES_STOCK_PRODUCT_INVALID re-fetches instead).
+    harness.backend.route("POST", STOCK_CHECK, lambda c: staff_backend_failure(
+        "on_hand_qty must be between 0 and 3", 400, "SALES_STOCK_QTY_INVALID",
+        details={"field": "on_hand_qty", "value": 4, "max": 3}, error_type="VALIDATION_ERROR",
+    ))
 
     await harness.send(ops.tap("staff_sales_v_stock_3"))
     await harness.send(ops.tap("staff_sales_v_qty_3_4"))
     await harness.send(ops.tap("staff_sales_v_stockback"))
     await harness.send(ops.tap("staff_sales_v_stockdone"))
 
-    assert any(_curated("staff.error.api.validation") in alert for alert in _alerts(harness))
+    # Since Task 2 the client keeps `details` on a 400, and Task 11 gave this
+    # code a detail-copy spec, so the `max` published above now renders the
+    # specific sentence rather than the generic fallback key.
+    expected = _curated("staff.sales.error.stock_qty_detail").format(maximum=3)
+    assert any(expected in alert for alert in _alerts(harness))
     shelf = harness.telegram.last_shown()
     assert _curated("staff.sales.visit.stock_title") in shelf.text
     assert f"Pure Water 19L — {_curated('staff.sales.visit.stock_row')}: 4" in shelf.text
@@ -1191,12 +1202,14 @@ async def test_a_refused_abandon_leaves_the_agent_on_the_order_screen(monkeypatc
     """
     harness, ops, _labels = await _agent(monkeypatch)
     await _to_order(harness, ops)
-    harness.backend.route("POST", ABANDON,
-                          lambda c: staff_backend_failure("this visit is not yours", 403))
+    # `VisitService.get_owned`'s refusal, exactly as the abandon route raises it.
+    harness.backend.route("POST", ABANDON, lambda c: staff_backend_failure(
+        "Visit belongs to another agent", 403, "SALES_VISIT_NOT_OWNED", error_type="FORBIDDEN",
+    ))
 
     await harness.send(ops.tap("staff_sales_v_abandon"))
 
-    assert any(_curated("staff.error.api.forbidden") in alert for alert in _alerts(harness))
+    assert any(_curated("staff.error.api.visit_not_owned") in alert for alert in _alerts(harness))
     screen = harness.telegram.last_shown()
     assert _curated("staff.sales.visit.order_title") in screen.text
     assert screen.callback_data() == [
@@ -1350,6 +1363,30 @@ async def test_the_order_post_refusing_the_minimum_also_lands_on_the_basket(monk
     assert _curated("staff.sales.visit.order_edit_title") in basket.text
     assert harness.conversation_state(CONV) == V_ORDER_EDIT
     assert len(_calls(harness, "POST", ORDER)) == 1
+
+
+async def test_a_minimum_quantity_refusal_names_the_product_and_the_floor(monkeypatch):
+    """The backend always published product, floor and quantity in `details`;
+    the client dropped them on every 400 until 2026-09-24."""
+    harness, ops, _labels = await _agent(monkeypatch)
+    _freeze_today(monkeypatch)
+    await _to_order(harness, ops)
+    harness.backend.route("POST", ORDER, lambda c: staff_backend_failure(
+        "Pure Water 19L: minimum order quantity is 40 (you ordered 20)", 400,
+        error_code="SALES_ORDER_MIN_QTY",
+        details={"product_name": "Pure Water 19L", "min_order_quantity": 40, "quantity": 20},
+    ))
+
+    await harness.send(ops.tap("staff_sales_v_ordersugg"))
+    await harness.send(ops.tap("staff_sales_v_day_tomorrow"))
+    await harness.send(ops.tap("staff_sales_v_skip_notes"))
+    await harness.send(ops.tap("staff_sales_v_orderconfirm"))
+
+    expected = _curated("staff.sales.error.order_min_qty_detail").format(
+        product="Pure Water 19L", minimum=40, quantity=20
+    )
+    assert any(expected in shown for shown in _alerts(harness) + [c.text for c in harness.telegram.shown])
+    assert harness.conversation_state(CONV) == V_ORDER_EDIT
 
 
 async def test_a_refused_delivery_date_re_asks_the_day(monkeypatch):

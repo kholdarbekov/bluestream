@@ -47,12 +47,7 @@ class BottleSessionMembershipHandler(BaseHandler):
                 response = await client.get_joinable_bottle_sessions(token)
 
             if not response.success:
-                error_msg = self._resolve_api_error_message(
-                    language,
-                    error=getattr(response, 'error', None),
-                    status_code=getattr(response, 'status_code', None),
-                    error_code=getattr(response, 'error_code', None),
-                )
+                error_msg = self._resolve_response_error(language, response, html=True)
                 text = f"❌ {error_msg}"
                 keyboard = CommonKeyboards.back_button(language, "staff_back_to_main")
                 if query:
@@ -121,8 +116,16 @@ class BottleSessionMembershipHandler(BaseHandler):
             async with api_client as client:
                 response = await client.get_joinable_bottle_sessions(token)
 
+            if not response.success:
+                # A failed read is not "session not found": say why.
+                await query.edit_message_text(
+                    f"❌ {self._resolve_response_error(language, response)}",
+                    reply_markup=CommonKeyboards.back_button(language, 'bottles_join_session'),
+                )
+                return
+
             session_info = None
-            if response.success and response.data:
+            if response.data:
                 session_info = next(
                     (s for s in response.data if s['session_id'] == session_id), None
                 )
@@ -180,12 +183,7 @@ class BottleSessionMembershipHandler(BaseHandler):
                 response = await client.join_bottle_session(token, session_id)
 
             if not response.success:
-                error_msg = self._resolve_api_error_message(
-                    language,
-                    error=getattr(response, 'error', None),
-                    status_code=getattr(response, 'status_code', None),
-                    error_code=getattr(response, 'error_code', None),
-                )
+                error_msg = self._resolve_response_error(language, response, html=True)
                 await query.edit_message_text(
                     f"❌ {error_msg}",
                     reply_markup=CommonKeyboards.back_button(language, 'bottles_join_session'),
@@ -234,12 +232,7 @@ class BottleSessionMembershipHandler(BaseHandler):
                 response = await client.leave_bottle_session(token)
 
             if not response.success:
-                error_msg = self._resolve_api_error_message(
-                    language,
-                    error=getattr(response, 'error', None),
-                    status_code=getattr(response, 'status_code', None),
-                    error_code=getattr(response, 'error_code', None),
-                )
+                error_msg = self._resolve_response_error(language, response, html=True)
                 await query.edit_message_text(
                     f"❌ {error_msg}",
                     reply_markup=CommonKeyboards.back_button(language, 'staff_back_to_main'),
@@ -274,15 +267,13 @@ class BottleSessionMembershipHandler(BaseHandler):
                 response = await client.get_current_session_membership(token)
 
             if not response.success:
-                if response.status_code == 404:
+                # Only "not a member" is the empty state. A closed session
+                # (BOTTLE_SESSION_MEMBERSHIP_CLOSED, also a 404) and every other
+                # refusal go through the resolver.
+                if getattr(response, 'error_code', None) == 'BOTTLE_SESSION_MEMBERSHIP_NOT_FOUND':
                     text = i18n.get('staff.bottles.no_active_membership', language)
                 else:
-                    text = self._resolve_api_error_message(
-                        language,
-                        error=getattr(response, 'error', None),
-                        status_code=getattr(response, 'status_code', None),
-                        error_code=getattr(response, 'error_code', None),
-                    )
+                    text = self._resolve_response_error(language, response)
                 keyboard = CommonKeyboards.back_button(language, 'staff_back_to_main')
                 if query:
                     await query.edit_message_text(text, reply_markup=keyboard)
@@ -344,14 +335,12 @@ class BottleSessionMembershipHandler(BaseHandler):
                 response = await client.get_drivers_available_to_invite(token)
 
             if not response.success:
-                error_msg = self._resolve_api_error_message(
-                    language,
-                    error=getattr(response, 'error', None),
-                    status_code=getattr(response, 'status_code', None),
-                    error_code=getattr(response, 'error_code', None),
-                )
+                error_msg = self._resolve_response_error(language, response, html=True)
                 text = f"❌ {error_msg}"
-                keyboard = CommonKeyboards.back_button(language, 'staff_back_to_main')
+                keyboard = self._with_remedy(
+                    language, response.error_code,
+                    CommonKeyboards.back_button(language, 'staff_back_to_main'),
+                )
                 if query:
                     await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
                 else:
@@ -414,8 +403,19 @@ class BottleSessionMembershipHandler(BaseHandler):
             async with api_client as client:
                 response = await client.get_drivers_available_to_invite(token)
 
+            if not response.success:
+                # A failed read is not "invite this driver anyway": say why.
+                await query.edit_message_text(
+                    f"❌ {self._resolve_response_error(language, response)}",
+                    reply_markup=self._with_remedy(
+                        language, response.error_code,
+                        CommonKeyboards.back_button(language, 'bottles_invite_driver'),
+                    ),
+                )
+                return
+
             driver_info = None
-            if response.success and response.data:
+            if response.data:
                 driver_info = next((d for d in response.data if d['user_id'] == driver_id), None)
 
             name = driver_info.get('name') if driver_info else i18n.get(
@@ -462,15 +462,13 @@ class BottleSessionMembershipHandler(BaseHandler):
                 response = await client.invite_driver_to_session(token, driver_id)
 
             if not response.success:
-                error_msg = self._resolve_api_error_message(
-                    language,
-                    error=getattr(response, 'error', None),
-                    status_code=getattr(response, 'status_code', None),
-                    error_code=getattr(response, 'error_code', None),
-                )
+                error_msg = self._resolve_response_error(language, response, html=True)
                 await query.edit_message_text(
                     f"❌ {error_msg}",
-                    reply_markup=CommonKeyboards.back_button(language, 'staff_back_to_main'),
+                    reply_markup=self._with_remedy(
+                        language, response.error_code,
+                        CommonKeyboards.back_button(language, 'staff_back_to_main'),
+                    ),
                     parse_mode='HTML',
                 )
                 return

@@ -137,12 +137,12 @@ class TestStaffTranslationCatalogIsComplete:
         unseeded = sorted(
             {
                 key
-                for key in BaseHandler.API_ERROR_CODE_KEY_MAP.values()
+                for key in BaseHandler.error_copy_keys()
                 if not module._curated_value(key, "en")
             }
         )
         assert not unseeded, (
-            "these BaseHandler.API_ERROR_CODE_KEY_MAP targets have no seeded English "
+            "these BaseHandler.error_copy_keys() targets have no seeded English "
             f"value, so the backend error they translate renders as a key tail: {unseeded}"
         )
 

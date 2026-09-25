@@ -162,7 +162,11 @@ class OrderService:
         # subscription whose basket sits just above the floor.
         gross_amount = subtotal + delivery_fee
         if gross_amount < self.min_order_amount:
-            raise ValidationError(f"Minimum order amount is {self.min_order_amount}")
+            raise ValidationError(
+                f"Minimum order amount is {self.min_order_amount}",
+                error_code="ORDER_MIN_AMOUNT",
+                details={"min_amount": float(self.min_order_amount)},
+            )
 
         discount_amount = Decimal("0.00")
         if subscription is not None and subscription.discount_percentage:
@@ -333,7 +337,17 @@ class OrderService:
                 )
                 logger.info(f"CREATE ORDER: reservation_result: {reservation_result}")
                 if not reservation_result["success"]:
-                    raise ValidationError(f"Inventory reservation failed: {reservation_result['reason']}")
+                    # `reserve_inventory` returns this exact reason only for its
+                    # own availability check (insufficient stock); any other
+                    # reason is the `except Exception` arm around the Redis
+                    # writes themselves (a transport/Redis failure) -- that is
+                    # an infrastructure problem, not "out of stock", so it
+                    # raises code-less exactly as it did before this task.
+                    is_stock_shortage = reservation_result.get("reason") == "Insufficient inventory"
+                    raise ValidationError(
+                        f"Inventory reservation failed: {reservation_result['reason']}",
+                        error_code="ORDER_STOCK_UNAVAILABLE" if is_stock_shortage else None,
+                    )
 
                 # Reserve corporate prepayment bottle units (DB writes participate
                 # in this transaction).
@@ -1019,7 +1033,11 @@ class OrderService:
         if not self._is_valid_status_transition(current_status, new_status):
             current_val = current_status.value if hasattr(current_status, "value") else str(current_status)
             new_val = new_status.value if hasattr(new_status, "value") else str(new_status)
-            raise ValidationError(f"Cannot change status from {current_val} to {new_val}")
+            raise ValidationError(
+                f"Cannot change status from {current_val} to {new_val}",
+                error_code="ORDER_STATUS_TRANSITION_INVALID",
+                details={"current_status": current_val, "requested_status": new_val},
+            )
 
         # ARCH-006: required FKs must be present before crossing into states
         # that imply downstream fulfilment (delivery flow needs an address).
@@ -1530,7 +1548,10 @@ class OrderService:
                 unavailable_items.append(f"{product_name}: {result.reason}")
 
         if unavailable_items:
-            raise ValidationError(f"Inventory check failed: {'; '.join(unavailable_items)}")
+            raise ValidationError(
+                f"Inventory check failed: {'; '.join(unavailable_items)}",
+                error_code="ORDER_STOCK_UNAVAILABLE",
+            )
 
         # Process items and calculate pricing
         from business_app.services.corporate_contract_service import CorporateContractService
@@ -2375,7 +2396,7 @@ class OrderService:
 
         except Exception as e:
             logger.exception("Error confirming inventory for order %s", order.id)
-            raise ValidationError(f"Failed to confirm inventory: {str(e)}")
+            raise ValidationError(f"Failed to confirm inventory: {str(e)}", error_code="INVENTORY_CONFIRMATION_FAILED")
 
     def _get_most_ordered_products(self, orders: List[Order]) -> List[Dict[str, Any]]:
         """Get most ordered products from order list"""

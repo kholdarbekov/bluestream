@@ -543,13 +543,23 @@ def test_the_operator_bot_says_when_a_held_redispatch_reaches_drivers(
     )
 
 
+# The sentence each refusal reads as on the operator's screen: its own cause, not the
+# generic conflict sentence they all used to share.
+REFUSAL_COPY = {
+    "order_cancelled_meanwhile": "staff.error.api.order_closed_for_redispatch",
+    "already_redispatched": "staff.error.api.not_redispatchable",
+}
+
+
 @pytest.mark.parametrize("case", sorted(REFUSALS))
-def test_the_operator_bot_reads_a_refused_redispatch_as_a_conflict(
+def test_the_operator_bot_reads_a_refused_redispatch_as_its_own_cause(
     app, db, http, operator_user, rostered_driver, sample_user, echo_i18n, monkeypatch, case
 ):
     """Every refusal an operator can meet here is a 400 now, and an unmapped 400 renders
     "check the entered data" to someone who typed nothing: the row changed under their
-    card. They get the conflict sentence, the one a 409 STAFF_ORDER_NOT_ACTIVE produced."""
+    card. Each reads as its own cause -- the order was closed, or a colleague
+    re-dispatched it first -- where they all used to share the generic conflict
+    sentence, which never said which."""
     frozen = _freeze_business_clock(monkeypatch, time(12, 0))
     delivery, _route = _failed_delivery(
         db, sample_user, rostered_driver, today=frozen.date(), number=f"ORD-RD-BOT-{case}"
@@ -563,7 +573,7 @@ def test_the_operator_bot_reads_a_refused_redispatch_as_a_conflict(
     asyncio.run(handler.redispatch_delivery(tap, context))
 
     assert bridge.answers == [("POST", STAFF_REDISPATCH.format(delivery.id), 400, REFUSALS[case])]
-    tap.callback_query.answer.assert_awaited_once_with("❌ staff.error.api.conflict", show_alert=True)
+    tap.callback_query.answer.assert_awaited_once_with(f"❌ {REFUSAL_COPY[case]}", show_alert=True)
     tap.callback_query.edit_message_text.assert_not_called()
 
 

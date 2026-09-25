@@ -14,6 +14,7 @@ from staff_bot.keyboards.menu import MenuKeyboards
 from staff_bot.keyboards.operator import OperatorKeyboards
 from staff_bot.permissions import require_auth, require_operator
 from staff_bot.i18n import i18n
+from staff_bot.utils.api_errors import GeocoderUnavailable, geocoder_down
 from staff_bot.utils.formatters import escape_html
 
 logger = logging.getLogger(__name__)
@@ -190,6 +191,10 @@ class ManageAddressHandler(BaseHandler):
         the delivery-zone SSOT can never speak about again, at this write or at
         any later edit of the row.
 
+        Raises `GeocoderUnavailable` when the lookup itself is down (5xx or
+        transport): that is not "no such address", and the caller points the
+        operator at the pin, which needs no lookup.
+
         The route itself belongs to `StaffAPIClient.geocode_address`, which is
         the same backend endpoint the CUSTOMER bot calls
         (`telegram_bot/api_client.geocode_address`) — so the two bots resolve an
@@ -197,6 +202,8 @@ class ManageAddressHandler(BaseHandler):
         """
         async with api_client as client:
             response = await client.geocode_address(token, address)
+        if geocoder_down(response):
+            raise GeocoderUnavailable(response)
 
         payload = response.data if response.success and isinstance(response.data, dict) else {}
         latitude = payload.get('latitude')
@@ -247,7 +254,15 @@ class ManageAddressHandler(BaseHandler):
                 await self._handle_auth_error(update, language)
                 return ConversationHandler.END
 
-            latitude, longitude = await self._geocode(token, address)
+            try:
+                latitude, longitude = await self._geocode(token, address)
+            except GeocoderUnavailable:
+                await update.message.reply_text(
+                    i18n.get('staff.operator.geocoder_down_use_pin', language),
+                    reply_markup=self._address_prompt_keyboard(language),
+                    parse_mode='HTML',
+                )
+                return ENTER_ADDRESS
 
             if latitude is None:
                 await update.message.reply_text(

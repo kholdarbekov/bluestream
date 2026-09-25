@@ -17,6 +17,7 @@ from staff_bot.i18n import i18n
 from staff_bot.keyboards.common import CommonKeyboards
 from staff_bot.keyboards.sales import SalesKeyboards
 from staff_bot.permissions import require_auth, require_sales_agent
+from staff_bot.utils.api_errors import geocoder_down
 from staff_bot.utils.formatters import escape_html
 from staff_bot.utils.validators import validate_phone
 
@@ -268,6 +269,12 @@ class NewOutletHandler(SalesHubHandler):
         text = (update.message.text or '').strip()
         async with api_client as client:
             response = await client.geocode_address(token, text)
+        if geocoder_down(response):
+            await update.message.reply_text(
+                i18n.get('staff.operator.geocoder_down_use_pin', language),
+                reply_markup=self._pin_prompt(language), parse_mode='HTML',
+            )
+            return NO_PIN
         payload = response.data if response.success and isinstance(response.data, dict) else {}
         latitude, longitude = payload.get('latitude'), payload.get('longitude')
         if latitude is None or longitude is None or not is_within_tashkent(latitude, longitude):

@@ -592,7 +592,7 @@ class CashCollectionHandler(BaseHandler):
         # through, so the offer below cannot be a number they have never seen.
         scope_address_id, total_outstanding = self._collect_offer(statement)
         if total_outstanding <= 0:
-            await query.answer(i18n.get('staff.delivery.no_cod_debt', language), show_alert=True)
+            await self._notify_user(update, i18n.get('staff.delivery.no_cod_debt', language), show_alert=True)
             return
 
         flow = {

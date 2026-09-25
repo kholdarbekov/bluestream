@@ -213,6 +213,25 @@ class FakeTelegramTransport(BaseRequest):
         """Everything the customer would actually see, in order."""
         return self.of("sendMessage", "sendPhoto", "editMessageText")
 
+    @property
+    def visible_answers(self) -> list[TelegramCall]:
+        """The answerCallbackQuery calls a user could SEE: the first per tap.
+
+        Telegram accepts a second answer to the same callback query (HTTP 200,
+        ``True``) and displays nothing — measured in the staff bot's prod logs on
+        2026-09-10. Counting every recorded answer as "shown" is how popups that
+        production drops stayed green here.
+        """
+        seen: set = set()
+        visible: list[TelegramCall] = []
+        for call in self.of("answerCallbackQuery"):
+            query_id = call.params.get("callback_query_id")
+            if query_id in seen:
+                continue
+            seen.add(query_id)
+            visible.append(call)
+        return visible
+
     def last_shown(self) -> TelegramCall:
         shown = self.shown
         assert shown, "the bot showed the customer nothing at all"

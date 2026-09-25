@@ -359,8 +359,23 @@ class StatusUpdateHandler(BaseHandler):
             # returns before the at-door flow is cleared, leaving it armed.
             # The transition the driver could reach on this screen is the one
             # THIS method just submitted, so an invalid-transition refusal here
-            # means it is already recorded: acknowledge it idempotently.
-            if getattr(response, 'error_code', None) != 'STAFF_INVALID_STATUS_TRANSITION':
+            # means it is already recorded: acknowledge it idempotently...
+            #
+            # ...but only when the delivery really IS delivered. An order-cancel
+            # cascade leaves a CANCELLED delivery on this driver, which passes
+            # the ownership check and is refused with the SAME code; before
+            # 2026-09-24 that was celebrated as "Delivered, cash recorded".
+            # The backend now publishes both statuses, and `_status_already_applied`
+            # (the rule every status screen shares) reads them; without them (an
+            # older backend) the replay rule stands as it was.
+            details = getattr(response, 'details', None)
+            current = details.get('current_status') if isinstance(details, dict) else None
+            legacy_no_details = (
+                getattr(response, 'error_code', None) == 'STAFF_INVALID_STATUS_TRANSITION'
+                and current is None
+            )
+            already_recorded = self._status_already_applied(response) or legacy_no_details
+            if not already_recorded:
                 await self._handle_api_response_error(update, response, language, context=context)
                 return ConversationHandler.END
             logger.warning(
@@ -531,8 +546,15 @@ class StatusUpdateHandler(BaseHandler):
                 )
 
             if not response.success:
-                await self._handle_api_response_error(update, response, language, context=context)
-                return
+                # A double tap or a retried PUT: the status already landed.
+                if not self._status_already_applied(response):
+                    await self._handle_api_response_error(update, response, language, context=context)
+                    return
+                logger.warning(
+                    "Delivery %s is already '%s' (%s); treating the refusal as a "
+                    "replay of a recorded change.",
+                    delivery_id, new_status, getattr(response, 'error', None),
+                )
 
             # Success message
             status_text = format_delivery_status(new_status, language)
@@ -595,8 +617,15 @@ class StatusUpdateHandler(BaseHandler):
                 )
 
             if not response.success:
-                await self._handle_api_response_error(update, response, language, context=context)
-                return
+                # A double tap or a retried PUT: the failure already landed.
+                if not self._status_already_applied(response):
+                    await self._handle_api_response_error(update, response, language, context=context)
+                    return
+                logger.warning(
+                    "Delivery %s is already 'failed' (%s); treating the refusal as a "
+                    "replay of a recorded change.",
+                    delivery_id, getattr(response, 'error', None),
+                )
 
             reason_text = i18n.get(f'staff.delivery.reason.{reason}', language)
             if context.user_data.get('current_delivery'):

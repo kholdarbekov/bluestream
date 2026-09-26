@@ -385,23 +385,19 @@ def send_delivery_rescheduled_notification_task(self, order_id: int):
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=120, soft_time_limit=100)
-def send_payment_confirmation_task(self, payment_id: int, collection_state_token: str = None):
+def send_payment_confirmation_task(
+    self, payment_id: int, collection_state_token: str = None, cash_collection_event_id: int = None
+):
     """Send payment confirmation notification.
 
-    ``collection_state_token`` distinguishes one real cash collection against
-    ``payment_id`` from a LATER, separate one (e.g. a shortfall today, the
-    remainder collected on the next delivery): `cash_collection_service.
-    _allocate_to_payment` now enqueues this task on every collection that
-    moves money, not only once ever per payment, so the 24h key below can no
-    longer be scoped to the payment alone — that would swallow every
-    genuine second collection that happens to land within the same 24h
-    window. Passing the post-allocation ``amount_collected`` as the token
-    keys the dedupe window to the SPECIFIC collection that triggered this
-    send: a Celery retry of this exact task instance carries the same token
-    and is still deduped, but a later, different collection gets its own
-    key. Callers that can only ever complete a payment exactly once (online
-    rails, via `PaymentService`) omit the token and keep the original
-    payment-only key, unchanged.
+    ``cash_collection_event_id`` names the cash collection being confirmed; when
+    present the message describes that collection alone and the dedupe key is
+    scoped to it, so a retry of the same collection is always swallowed.
+
+    Without an event, ``collection_state_token`` (the post-allocation
+    ``amount_collected``) keys the dedupe window, so a later collection against
+    the same payment is not swallowed by an earlier one's key. Online rails
+    (`PaymentService`) pass neither and keep the payment-only key.
     """
     try:
         logger.info(f"Sending payment confirmation for payment {payment_id}")
@@ -409,14 +405,22 @@ def send_payment_confirmation_task(self, payment_id: int, collection_state_token
         # Idempotency check via Redis
         from business_app import redis_client
 
-        key_suffix = f":{collection_state_token}" if collection_state_token is not None else ""
-        idempotency_key = f"notif:payment_confirm:{payment_id}{key_suffix}"
+        if cash_collection_event_id is not None:
+            idempotency_key = f"notif:payment_confirm:{payment_id}:event:{cash_collection_event_id}"
+        else:
+            key_suffix = f":{collection_state_token}" if collection_state_token is not None else ""
+            idempotency_key = f"notif:payment_confirm:{payment_id}{key_suffix}"
         if redis_client.get(idempotency_key):
             logger.info(f"Payment confirmation already sent for {payment_id}, skipping")
             return {"success": True, "skipped": True, "reason": "already_sent"}
 
         notification_service = NotificationService()
-        result = notification_service.send_payment_notification(payment_id)
+        if cash_collection_event_id is not None:
+            result = notification_service.send_payment_notification(
+                payment_id, cash_collection_event_id=cash_collection_event_id
+            )
+        else:
+            result = notification_service.send_payment_notification(payment_id)
 
         # Mark as sent with 24h TTL
         redis_client.setex(idempotency_key, 86400, "1")

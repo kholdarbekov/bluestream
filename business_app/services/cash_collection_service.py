@@ -4670,7 +4670,13 @@ class CashCollectionService:
                     queue_payment_confirmation,
                 )
 
-                queue_payment_confirmation(db.session, payment.id, str(payment.amount_collected))
+                queue_payment_confirmation(
+                    db.session,
+                    payment.id,
+                    str(payment.amount_collected),
+                    cash_collection_event_id=event.id,
+                    is_event_order=event.order_id is not None and payment.order_id == event.order_id,
+                )
             except Exception:
                 pass
 

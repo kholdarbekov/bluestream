@@ -42,18 +42,29 @@ PENDING_KEY = "pending_payment_confirmations"
 _REGISTERED = False
 
 
-def queue_payment_confirmation(session, payment_id: int, collection_state_token: str) -> None:
-    """Park one confirmation for ``payment_id``, to be sent iff this commits.
+def queue_payment_confirmation(
+    session,
+    payment_id: int,
+    collection_state_token: str,
+    *,
+    cash_collection_event_id: int,
+    is_event_order: bool = False,
+) -> None:
+    """Park one confirmation per collection event, to be sent iff this commits.
 
-    Keyed by payment id, last token wins: a single transaction can allocate to
-    the same payment more than once (a personal-card transfer that settles its
-    target and then spills, say), and the customer should hear about that
-    collection once, quoting its FINAL state — not once per allocation row.
-    Distinct collections arrive in distinct transactions and so still get their
-    own message, which is what "one message per real collection" means.
+    One collection can pay several orders; the customer hears about it once,
+    anchored on the event's own order when that received money, else on the
+    first order paid. Last token wins for the anchored payment.
     """
     pending = session.info.setdefault(PENDING_KEY, {})
-    pending[payment_id] = collection_state_token
+    current = pending.get(cash_collection_event_id)
+    if current and current["payment_id"] != payment_id and (current["is_event_order"] or not is_event_order):
+        return
+    pending[cash_collection_event_id] = {
+        "payment_id": payment_id,
+        "token": collection_state_token,
+        "is_event_order": is_event_order,
+    }
 
 
 def register_payment_confirmation_dispatch(db) -> None:
@@ -72,11 +83,15 @@ def register_payment_confirmation_dispatch(db) -> None:
         # Import lazily to avoid a circular import at module load time.
         from business_app.tasks.notification_tasks import send_payment_confirmation_task
 
-        for payment_id, token in pending.items():
+        for event_id, entry in pending.items():
             try:
-                send_payment_confirmation_task.delay(payment_id, collection_state_token=token)
+                send_payment_confirmation_task.delay(
+                    entry["payment_id"],
+                    collection_state_token=entry["token"],
+                    cash_collection_event_id=event_id,
+                )
             except Exception:  # best-effort — never break the committed request
-                logger.exception("Failed to dispatch payment confirmation for payment %s", payment_id)
+                logger.exception("Failed to dispatch payment confirmation for payment %s", entry["payment_id"])
 
     @event.listens_for(session_cls, "after_rollback")
     def _discard_on_rollback(session):  # noqa: ANN001

@@ -59,7 +59,7 @@ from business_app.services.bottle_tracking_service import (
     format_bottle_quantity,
 )
 from business_app.utils.bot_webhook import trigger_bot_webhook
-from business_app.utils.payment_projection import get_payment_projection
+from business_app.utils.payment_projection import get_payment_projection, net_open_receivable_amount
 from business_app import db, redis_client
 from sqlalchemy import func
 
@@ -294,14 +294,20 @@ class NotificationService:
         "business_account": "telegram.payment_business_account",
     }
 
+    # How the money of a cash-ledger collection actually arrived, which can
+    # differ from the order's rail (a card transfer settling a COD order).
+    # Unlisted sources fall back to the payment's rail.
+    _COLLECTION_SOURCE_LABEL_KEYS = {
+        "delivery_completion": "telegram.payment_cash",
+        "next_delivery": "telegram.payment_cash",
+        "standalone_meeting": "telegram.payment_cash",
+        "personal_card_transfer": "telegram.payment_card",
+    }
+
     # The opening line of the Telegram payment-confirmation message. Case-aware
-    # because "shortfall" is the ONE case where `payment.status` is
-    # PARTIALLY_PAID rather than COMPLETED (see
-    # `_build_payment_collection_breakdown`) — "Payment confirmed!" is false
-    # when a balance still remains, so that case gets its own, equally short
-    # header. The other three cases (exact/reserved/debt_settled) all mean the
-    # payment reached COMPLETED, so "confirmed" stays accurate for them and
-    # their rendered copy is unchanged.
+    # because "shortfall" means money is still left to collect (net of reserved
+    # prepaid credit) — "Payment confirmed!" is false then, so that case gets
+    # its own, equally short header.
     PAYMENT_STATUS_HEADERS = {
         "uz": {
             "confirmed": "✅ <b>To'lov tasdiqlandi!</b>",
@@ -324,6 +330,7 @@ class NotificationService:
     # variable number of orders — see `_render_payment_collection_details`.
     PAYMENT_COLLECTION_DETAIL_MESSAGES = {
         "uz": {
+            "covered_elsewhere": "Buyurtmaning {amount} so'mi avvalgi to'lovlaringiz hisobidan qoplandi.",
             "reserved": (
                 "Buyurtma summasi {order_total} so'm edi; ortiqcha {reserved} so'm "
                 "keyingi buyurtmalaringiz uchun hisobingizda saqlab qo'yildi."
@@ -341,6 +348,7 @@ class NotificationService:
             ),
         },
         "en": {
+            "covered_elsewhere": "{amount} UZS of the order was covered by your earlier payments.",
             "reserved": (
                 "Your order total was {order_total} UZS; the extra {reserved} UZS has been "
                 "saved as credit for your future orders."
@@ -358,6 +366,7 @@ class NotificationService:
             ),
         },
         "ru": {
+            "covered_elsewhere": "{amount} сум из суммы заказа покрыты вашими предыдущими платежами.",
             "reserved": (
                 "Сумма заказа составляла {order_total} сум; излишек {reserved} сум сохранён как "
                 "кредит для будущих заказов."
@@ -821,11 +830,27 @@ class NotificationService:
         }
         return self.send_notification(user.id, NotificationType.DELIVERY_RESCHEDULED, channels, template_data)
 
-    def send_payment_notification(self, payment_id: int) -> Dict[str, Any]:
-        """Send payment confirmation notification via Telegram (if user has telegram) or email"""
+    def send_payment_notification(
+        self, payment_id: int, cash_collection_event_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Send payment confirmation notification via Telegram (if user has telegram) or email.
+
+        ``cash_collection_event_id`` is the collection that triggered the message;
+        the message describes that collection alone.
+        """
         payment = Payment.query.get(payment_id)
         if not payment:
             raise NotificationError(get_translation("error.not_found"))
+
+        if cash_collection_event_id is not None:
+            event = CashCollectionEvent.query.get(cash_collection_event_id)
+            if event is None or event.voided_at is not None:
+                logger.info(
+                    "Skipping payment confirmation for payment %s: collection %s is voided or missing",
+                    payment_id,
+                    cash_collection_event_id,
+                )
+                return {"skipped": True, "reason": "collection_voided"}
 
         user = User.query.get(payment.user_id)
         if not user:
@@ -833,16 +858,14 @@ class NotificationService:
 
         language = self._normalize_language_code(getattr(user, "preferred_language", "en") or "en")
 
-        # SSOT: everything the customer needs to know about WHAT was actually
-        # handed over — as opposed to `payment.amount`, the order's own total
-        # — is read straight out of the cash-collection ledger. See
-        # `_build_payment_collection_breakdown`.
-        breakdown = self._build_payment_collection_breakdown(payment)
+        # What was handed over, and where it went, is read from the
+        # cash-collection ledger — see `_build_payment_collection_breakdown`.
+        breakdown = self._build_payment_collection_breakdown(payment, cash_collection_event_id=cash_collection_event_id)
 
         template_data = {
             "order_number": payment.order.order_number if payment.order else "N/A",
             "payment_amount": self._format_money(breakdown["received_total"]),
-            "payment_method": self._payment_method_label(payment.payment_method, language),
+            "payment_method": self._collection_method_label(breakdown["source"], payment.payment_method, language),
             "payment_reference": payment.payment_id,  # Use payment_id as reference
             "payment_follow_up_message": self._get_payment_follow_up_message(payment, language),
             "payment_details": self._render_payment_collection_details(breakdown, language),
@@ -3322,6 +3345,14 @@ class NotificationService:
             return value
         return get_translation(translation_key, language)
 
+    @classmethod
+    def _collection_method_label(cls, source: Optional[str], payment_method: Any, language: str) -> str:
+        """Label for how the collection's money arrived; the payment's rail when unknown."""
+        translation_key = cls._COLLECTION_SOURCE_LABEL_KEYS.get(source or "")
+        if translation_key:
+            return get_translation(translation_key, language)
+        return cls._payment_method_label(payment_method, language)
+
     @staticmethod
     def _order_delivered_at(order: Optional[Order]) -> Optional[datetime]:
         """The one place an order's delivery date lives. ``Order`` itself has no
@@ -3339,87 +3370,76 @@ class NotificationService:
 
         return format_datetime(delivered_at, format_type="date", language=language)
 
-    def _build_payment_collection_breakdown(self, payment: Payment) -> Dict[str, Any]:
-        """Classify what the cash-collection ledger says happened to the money
-        behind ``payment`` into exactly one of four cases: ``exact``,
-        ``reserved`` (surplus, no debt), ``debt_settled`` (surplus that cleared
-        one or more other orders' debt, maybe with a reserved remainder), or
-        ``shortfall``.
+    # Allocation modes that apply earlier-collected credit rather than record a
+    # new collection.
+    _CREDIT_ALLOCATION_MODES = ("prepaid_reservation", "prepaid_credit")
 
-        Every figure that the ledger already records is READ, never
-        recomputed: `payment.amount_collected` (via `get_payment_projection`,
-        which IS the running total `CashCollectionService._allocate_to_payment`
-        maintains from `cash_collection_allocations` — re-summing those rows
-        here would be a second expression of the same figure) for what this
-        order itself has collected, `CashCollectionEvent.amount` for what the
-        customer physically handed over, and `CashCollectionAllocation.
-        allocated_amount` for where every portion of it went. Reversed
-        allocations (`reversed_at IS NOT NULL`) are excluded throughout — they
-        never happened.
+    @classmethod
+    def _resolve_collection_event(
+        cls, payment: Payment, cash_collection_event_id: Optional[int]
+    ) -> Optional[CashCollectionEvent]:
+        """The collection a confirmation describes: the given event, else the
+        latest live collection applied to ``payment`` (None for online rails)."""
+        if cash_collection_event_id is not None:
+            return CashCollectionEvent.query.get(cash_collection_event_id)
+        latest = (
+            CashCollectionAllocation.query.join(
+                CashCollectionEvent,
+                CashCollectionEvent.id == CashCollectionAllocation.cash_collection_event_id,
+            )
+            .filter(
+                CashCollectionAllocation.payment_id == payment.id,
+                CashCollectionAllocation.reversed_at.is_(None),
+                CashCollectionAllocation.allocation_mode.notin_(cls._CREDIT_ALLOCATION_MODES),
+                CashCollectionEvent.voided_at.is_(None),
+            )
+            .order_by(CashCollectionAllocation.allocated_at.desc(), CashCollectionAllocation.id.desc())
+            .first()
+        )
+        return latest.cash_collection_event if latest else None
 
-        The ONE arithmetic operation performed here is
-        ``order_total - amount_collected`` for the shortfall case: nothing in
-        the ledger records "how much is still owed", because nothing was
-        collected for it yet — there is no ledger row to read instead.
+    def _build_payment_collection_breakdown(
+        self, payment: Payment, cash_collection_event_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Describe ONE collection (a cash-collection event) from the point of view
+        of ``payment``, as exactly one case: ``exact``, ``reserved`` (surplus kept
+        as credit), ``debt_settled`` (surplus cleared other delivered orders), or
+        ``shortfall`` (money still to collect).
 
-        Debt vs. reservation signal: a cross-order allocation is "debt being
-        cleared" when its target order has ALREADY BEEN DELIVERED (reusing
-        `_is_payment_order_delivered`, the same check this service already
-        uses to choose the follow-up message), and "money held for the
-        future" otherwise — matching `CashCollectionService._allocate_scoped`,
-        which only ever spills surplus onto another order's debt when that
-        order is DELIVERED (`_allocate_scoped`'s "other delivered COD debts"
-        pass), and only ever writes `allocation_mode="prepaid_reservation"`
-        against a PENDING order (`auto_reserve_against_pending_payments`,
-        gated on `RESERVABLE_ORDER_STATUSES`, which excludes DELIVERED).
-        Order status is used directly, rather than branching on
-        `allocation_mode`, because delivered-vs-pending is the real-world
-        distinction being reported ("has this order already happened"), while
-        `allocation_mode` is an artifact of which code path wrote the row — a
-        future write path could use a different mode string for the same
-        real-world fact, and status would still classify it correctly.
-        `unapplied_amount` left over on a funding event, and any allocation
-        with no delivered target, both fall into the same "reserved" bucket by
-        construction: neither is tied to a debt that has already come due.
+        Scoped to the event on purpose: a payment can also be funded by earlier
+        events (prepaid credit, a previous partial collection), and those were
+        already reported when they happened. Their contribution is stated only
+        as ``covered_elsewhere``. Figures are read from the ledger; reversed
+        allocations and voided events never count.
         """
         projection = get_payment_projection(payment)
         order_total = projection["amount"]
-        amount_collected = projection["amount_collected"]
 
-        this_payment_allocations = CashCollectionAllocation.query.filter(
-            CashCollectionAllocation.payment_id == payment.id,
-            CashCollectionAllocation.reversed_at.is_(None),
-        ).all()
-        funding_event_ids = {a.cash_collection_event_id for a in this_payment_allocations}
-
-        if not funding_event_ids:
-            # Nothing in the cash-collection ledger funds this payment at all —
-            # an online rail (Click/Payme/business account) that settles
-            # directly, never through `cash_collection_events`. Those rails
-            # can only ever be exactly paid once COMPLETED (see
-            # `is_settled_prepayment`), so the order total IS what was
-            # received.
+        event = self._resolve_collection_event(payment, cash_collection_event_id)
+        if event is None:
+            # Online rails settle outside the cash ledger and are only ever
+            # confirmed once COMPLETED, so the order total is what was received.
             return {
                 "case": "exact",
                 "received_total": order_total,
                 "order_total": order_total,
                 "shortfall": Decimal("0.00"),
                 "reserved_total": Decimal("0.00"),
+                "covered_elsewhere": Decimal("0.00"),
                 "debts": [],
+                "source": None,
             }
 
-        events = CashCollectionEvent.query.filter(CashCollectionEvent.id.in_(funding_event_ids)).all()
-        received_total = sum((self._to_decimal(event.amount) for event in events), Decimal("0.00"))
-
-        unapplied_remainder = sum((self._to_decimal(event.unapplied_amount) for event in events), Decimal("0.00"))
         other_allocations = CashCollectionAllocation.query.filter(
-            CashCollectionAllocation.cash_collection_event_id.in_(funding_event_ids),
+            CashCollectionAllocation.cash_collection_event_id == event.id,
             CashCollectionAllocation.payment_id != payment.id,
             CashCollectionAllocation.reversed_at.is_(None),
         ).all()
 
+        # Money on a delivered order is debt being cleared; money parked on an
+        # undelivered order, or left unapplied, is credit kept for later.
         debts_by_order: Dict[Any, Dict[str, Any]] = {}
-        reserved_total = unapplied_remainder
+        reserved_total = self._to_decimal(event.unapplied_amount)
         for allocation in other_allocations:
             target_payment = allocation.payment
             amount = self._to_decimal(allocation.allocated_amount)
@@ -3438,60 +3458,39 @@ class NotificationService:
             else:
                 reserved_total += amount
 
-        # The shortfall test comes AFTER the cross-order allocations are
-        # gathered, and carries them, because the two facts are not exclusive:
-        # `_allocate_scoped` pays the customer's OLDER delivered debts before
-        # the order at the door, so a customer who hands over the exact order
-        # total routinely leaves THIS order short while their earlier orders
-        # get settled from the same banknotes.
-        #
-        # Reconstructable from committed rows: event 27 = 90,000.00 handed over
-        # against TG_000066_26, whose total is 90,000.00. It paid 10,000 to
-        # TG_000059_26, 30,000 to TG_000060_26 and only 50,000 to this order,
-        # leaving payment 118 at 50,000/90,000 -> PARTIALLY_PAID. Returning
-        # `debts: []` here told that customer "40,000 short" and said nothing
-        # about the 40,000 that cleared their two older orders. Fourteen events
-        # in dev have this split shape; two of them (events 7 and 25) put NOTHING
-        # on the order at the door, so the message claimed the entire total was
-        # still owed while every banknote had in fact been applied.
-        if amount_collected < order_total:
-            return {
-                "case": "shortfall",
-                "received_total": received_total,
-                "order_total": order_total,
-                "shortfall": order_total - amount_collected,
-                "reserved_total": reserved_total,
-                "debts": list(debts_by_order.values()),
-            }
-
-        if debts_by_order:
-            return {
-                "case": "debt_settled",
-                "received_total": received_total,
-                "order_total": order_total,
-                "shortfall": Decimal("0.00"),
-                "reserved_total": reserved_total,
-                "debts": list(debts_by_order.values()),
-            }
-
-        if reserved_total > Decimal("0.00"):
-            return {
-                "case": "reserved",
-                "received_total": received_total,
-                "order_total": order_total,
-                "shortfall": Decimal("0.00"),
-                "reserved_total": reserved_total,
-                "debts": [],
-            }
-
-        return {
-            "case": "exact",
-            "received_total": received_total,
+        covered_elsewhere = self._to_decimal(
+            db.session.query(func.coalesce(func.sum(CashCollectionAllocation.allocated_amount), 0))
+            .join(CashCollectionEvent, CashCollectionEvent.id == CashCollectionAllocation.cash_collection_event_id)
+            .filter(
+                CashCollectionAllocation.payment_id == payment.id,
+                CashCollectionAllocation.cash_collection_event_id != event.id,
+                CashCollectionAllocation.reversed_at.is_(None),
+                CashCollectionEvent.voided_at.is_(None),
+            )
+            .scalar()
+        )
+        source = event.source.value if hasattr(event.source, "value") else event.source
+        breakdown = {
+            "received_total": self._to_decimal(event.amount),
             "order_total": order_total,
             "shortfall": Decimal("0.00"),
-            "reserved_total": Decimal("0.00"),
-            "debts": [],
+            "reserved_total": reserved_total,
+            "covered_elsewhere": covered_elsewhere,
+            "debts": list(debts_by_order.values()),
+            "source": source,
         }
+
+        # Net of reserved prepaid credit: a reservation is money the customer
+        # already handed over. Checked before debts because the allocator pays
+        # older debts first and can leave this order short.
+        still_owed = net_open_receivable_amount(payment)
+        if still_owed > Decimal("0.00"):
+            return {**breakdown, "case": "shortfall", "shortfall": still_owed}
+        if debts_by_order:
+            return {**breakdown, "case": "debt_settled"}
+        if reserved_total > Decimal("0.00"):
+            return {**breakdown, "case": "reserved"}
+        return {**breakdown, "case": "exact"}
 
     def _payment_status_header(self, case: str, language: Optional[str]) -> str:
         """The Telegram message's opening line — accurate to whether the
@@ -3504,38 +3503,38 @@ class NotificationService:
 
     def _render_payment_collection_details(self, breakdown: Dict[str, Any], language: Optional[str]) -> str:
         """The extra sentence(s) a payment-confirmation message needs, or ``""``
-        for the exact-payment case (which needs none). Prefixed with its own
-        blank-line separator so the base template's single
-        ``{payment_details}`` placeholder produces no stray blank line when
-        this returns empty — see `DEFAULT_TEMPLATES[("payment_confirmation", …)]`.
+        when there is nothing to add. Prefixed with its own blank-line separator
+        so the base template's single ``{payment_details}`` placeholder produces
+        no stray blank line when this returns empty — see
+        `DEFAULT_TEMPLATES[("payment_confirmation", …)]`.
         """
         lang = language if language in ("uz", "ru", "en") else "uz"
         copy = self.PAYMENT_COLLECTION_DETAIL_MESSAGES.get(lang, self.PAYMENT_COLLECTION_DETAIL_MESSAGES["uz"])
         case = breakdown["case"]
 
+        # Earlier money on this order first, so the amount received reconciles
+        # with the order total stated below.
+        lines: List[str] = []
+        covered_elsewhere = breakdown.get("covered_elsewhere") or Decimal("0.00")
+        if covered_elsewhere > Decimal("0.00"):
+            lines.append(copy["covered_elsewhere"].format(amount=self._format_money(covered_elsewhere)))
+
         if case == "reserved":
-            line = copy["reserved"].format(
-                order_total=self._format_money(breakdown["order_total"]),
-                reserved=self._format_money(breakdown["reserved_total"]),
+            lines.append(
+                copy["reserved"].format(
+                    order_total=self._format_money(breakdown["order_total"]),
+                    reserved=self._format_money(breakdown["reserved_total"]),
+                )
             )
-            return f"\n\n{line}"
-
-        if case == "debt_settled":
-            lines = self._render_debt_lines(breakdown, copy, lang)
-            return "\n\n" + "\n".join(lines)
-
-        if case == "shortfall":
-            # Where the money WENT comes first, then what is still owed. A
-            # customer who handed over the full order total and saw only
-            # "40,000 short" had no way to know their older orders had just been
-            # settled from the same cash — see the note in
-            # `_build_payment_collection_breakdown`. Same fragments as
+        elif case == "debt_settled":
+            lines.extend(self._render_debt_lines(breakdown, copy, lang))
+        elif case == "shortfall":
+            # Where the money went, then what is still owed — same fragments as
             # `debt_settled`, so the two cases can never word this differently.
-            lines = self._render_debt_lines(breakdown, copy, lang)
+            lines.extend(self._render_debt_lines(breakdown, copy, lang))
             lines.append(copy["shortfall"].format(shortfall=self._format_money(breakdown["shortfall"])))
-            return "\n\n" + "\n".join(lines)
 
-        return ""
+        return "\n\n" + "\n".join(lines) if lines else ""
 
     def _render_debt_lines(self, breakdown: Dict[str, Any], copy: Dict[str, str], lang: str) -> List[str]:
         """The "this payment settled order #N" sentence(s), plus any reserved

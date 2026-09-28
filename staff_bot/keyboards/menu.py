@@ -157,7 +157,7 @@ class MenuKeyboards:
                 ),
             ])
 
-        # Operator/dispatcher: re-dispatch a failed delivery back to the pool.
+        # Operator/dispatcher: the failed deliveries waiting for a new date.
         if is_operator:
             keyboard.append([
                 InlineKeyboardButton(

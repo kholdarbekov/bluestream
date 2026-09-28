@@ -8,6 +8,17 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 from staff_bot.i18n import i18n
 
+# One literal key per `FAILED_DELIVERY_REASONS` code, so no key is built at
+# runtime. test_every_failure_reason_has_exactly_one_seeded_label keeps the two
+# lists equal.
+_REASON_KEYS = {
+    'customer_unavailable': 'staff.delivery.reason.customer_unavailable',
+    'wrong_address': 'staff.delivery.reason.wrong_address',
+    'customer_refused': 'staff.delivery.reason.customer_refused',
+    'product_damaged': 'staff.delivery.reason.product_damaged',
+    'other': 'staff.delivery.reason.other',
+}
+
 
 def escape_html(value: Any) -> str:
     """Escape dynamic text inserted into Telegram HTML-formatted messages."""
@@ -411,6 +422,20 @@ def format_delivery_status(status: str, language: str) -> str:
 
     emoji, key = status_map.get(status, ('❓', f'staff.delivery.status.{status}'))
     return f"{emoji} {i18n.get(key, language)}"
+
+
+def format_fail_reason(reason: str, language: str) -> str:
+    """A failure reason in the reader's language (F9).
+
+    One wording for the operator's failed-deliveries list and the failure
+    alert, so both name a reason the same way. The backend accepts only
+    the codes `_REASON_KEYS` covers. A row written before that check is
+    shown as it was stored.
+    """
+    key = _REASON_KEYS.get(reason)
+    if key is not None:
+        return i18n.get(key, language)
+    return escape_html(reason)
 
 
 def format_delivery_stats(stats: Dict[str, Any], language: str) -> str:

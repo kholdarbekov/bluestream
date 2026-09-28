@@ -9,7 +9,7 @@ import logging
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 import asyncio
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import os
 
 from staff_bot.config import config
@@ -587,12 +587,28 @@ class StaffAPIClient:
             token=token
         )
 
-    async def redispatch_delivery(self, token: str, delivery_id: int) -> APIResponse:
-        """Operator: re-dispatch a FAILED delivery back to the pool"""
+    async def get_failed_delivery(self, token: str, delivery_id: int) -> APIResponse:
+        """Operator: one FAILED delivery with the date bounds the backend allows for it (F12)"""
+        return await self._make_request(
+            'GET',
+            f'{config.business_api.delivery_endpoint}/failed/{delivery_id}',
+            token=token
+        )
+
+    async def redispatch_delivery(
+        self, token: str, delivery_id: int, delivery_date: Optional[date] = None
+    ) -> APIResponse:
+        """Operator: re-date a FAILED delivery to `delivery_date` (F12).
+
+        The body carries the date only when there is one. The backend reads a
+        POST without it as local today, which is what a bot from before the
+        date step still sends.
+        """
         return await self._make_request(
             'POST',
             f'{config.business_api.delivery_endpoint}/redispatch/{delivery_id}',
-            token=token
+            token=token,
+            data={'delivery_date': delivery_date.isoformat()} if delivery_date is not None else None,
         )
 
     async def update_delivery_status(

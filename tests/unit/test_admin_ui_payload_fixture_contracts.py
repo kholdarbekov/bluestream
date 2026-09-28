@@ -51,6 +51,7 @@ OUTLET_VOCABULARY = REPO_ROOT / "admin_ui/src/components/sales/outletVocabulary.
 ANALYTICS_PAGE = REPO_ROOT / "admin_ui/src/pages/Analytics.js"
 ANALYTICS_AGENT_TEST = REPO_ROOT / "admin_ui/src/__tests__/pages/Analytics.agentPerformance.test.js"
 DELIVERY_PAGE = REPO_ROOT / "admin_ui/src/pages/Delivery.js"
+OPERATIONS_MAP_TEST = REPO_ROOT / "admin_ui/src/components/OperationsMap.test.jsx"
 
 _LINE_COMMENT = re.compile(r"//[^\n]*")
 _QUOTED = re.compile(r"'([^']*)'")
@@ -645,3 +646,66 @@ def test_the_branch_outlet_keys_are_trilingual_and_say_what_the_page_says():
             f"admin_ui/src/pages/Outlets.js — the seeded text wins in every language, so the "
             f"page would render one wording and its own source another."
         )
+
+
+@pytest.mark.integration
+def test_operations_map_order_entry_fixture_matches_the_live_snapshot(
+    client, db, admin_claim_headers, sample_user, delivery_driver
+):
+    """`GET /admin/dispatch/snapshot` `orders[]`: what every order pin on the dispatch map
+    (and the customer map's orders layer) is drawn from.
+
+    Every order fixture in `OperationsMap.test.jsx` is built with `orderEntry`, which throws on
+    a key outside `ORDER_ENTRY_KEYS`, and the F8 "needs a new date" pin turns on one published
+    flag, `awaiting_new_date`. Rename it in `DispatchService._order_entry` and the map goes back
+    to drawing a failed order as filled (a driver is bringing it) and ringed (it is late), while
+    every vitest case stays green on its hand-written fixture. Driven through the route with an
+    order that really awaits a new date, so the flag's value is pinned as well as its spelling.
+    """
+    from datetime import date, datetime, timezone
+
+    from business_app.models.delivery import Delivery
+    from business_app.models.order import Order
+    from business_app.models.user import UserAddress
+    from shared.enums import DeliveryStatus, OrderStatus
+
+    board_day = date(2026, 9, 25)
+    address = UserAddress(
+        user_id=sample_user.id, full_address="Chilonzor 9", city="Tashkent",
+        latitude=41.3111, longitude=69.2797,
+    )
+    db.session.add(address)
+    db.session.flush()
+    order = Order(
+        user_id=sample_user.id,
+        status=OrderStatus.CONFIRMED,
+        total_amount=42000,
+        delivery_address_id=address.id,
+        delivery_date=board_day,
+        order_source="admin",
+    )
+    db.session.add(order)
+    db.session.flush()
+    # A failed delivery keeps its driver: that is what the regular pin would have misread.
+    db.session.add(
+        Delivery(
+            order_id=order.id,
+            delivery_person_id=delivery_driver.id,
+            status=DeliveryStatus.FAILED,
+            failed_delivery_reason="customer_unavailable",
+            delivery_attempts=1,
+            scheduled_date=datetime(2026, 9, 25, 4, 0, tzinfo=timezone.utc),
+            scheduled_time_slot="09:00-12:00",
+        )
+    )
+    db.session.commit()
+
+    resp = client.get(f"/api/v1/admin/dispatch/snapshot?date={board_day.isoformat()}", headers=admin_claim_headers)
+    assert resp.status_code == 200, resp.get_json()
+    entry = next(o for o in resp.get_json()["data"]["orders"] if o["order_id"] == order.id)
+
+    assert entry["awaiting_new_date"] is True
+    assert entry["driver_id"] == delivery_driver.id
+    assert _declared_key_set(OPERATIONS_MAP_TEST, "ORDER_ENTRY_KEYS") == set(entry), _explain(
+        OPERATIONS_MAP_TEST, "ORDER_ENTRY_KEYS"
+    )

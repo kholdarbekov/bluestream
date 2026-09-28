@@ -823,7 +823,10 @@ class NotificationService:
             "order_number": order.order_number,
             "new_date": format_datetime(order.delivery_date, format_type="date", language=language),
             # Added by hand, as the delivery-status path does: without them
-            # `{company_phone}` goes out to the customer literally.
+            # `{company_phone}` goes out to the customer literally. The default
+            # copy no longer names the phone (F16). An active
+            # `notification_templates` row still overrides it and may still
+            # carry `{company_phone}`, so the value stays.
             "company_name": self.company_name,
             "company_phone": self.company_phone,
             "company_email": self.company_email,
@@ -4451,17 +4454,20 @@ Tracking: {tracking_code}
     # Delivery rescheduled - Telegram (admin order reschedule, spec §4.1). The DATE only: a
     # moved delivery is re-planned from scratch, so any hour would be a promise nobody has
     # made yet. `{new_date}` arrives already formatted in the customer's language (R15).
+    # A question goes to this chat, where the reply lands in the admin Support Inbox, never
+    # to the phone (2026-09-25 spec F16). An active `notification_templates` row for this
+    # type still wins over this default (`_get_notification_template`; that spec's §9).
     ("delivery_rescheduled", "telegram"): {
         "name": "delivery_rescheduled_telegram",
         "translations": {
             "uz": {
-                "content": "📅 #{order_number} buyurtmangizni yetkazib berish {new_date} sanasiga ko'chirildi. Savollar bo'lsa: {company_phone}.",  # noqa: E501
+                "content": "📅 #{order_number} buyurtmangizni yetkazib berish {new_date} sanasiga ko'chirildi. Savollar bo'lsa, shu chatda bizga yozing.",  # noqa: E501
             },
             "en": {
-                "content": "📅 Delivery of your order #{order_number} has been rescheduled to {new_date}. Questions? Call {company_phone}.",  # noqa: E501
+                "content": "📅 Delivery of your order #{order_number} has been rescheduled to {new_date}. Questions? Just write to us here in this chat.",  # noqa: E501
             },
             "ru": {
-                "content": "📅 Доставка вашего заказа #{order_number} перенесена на {new_date}. Вопросы? Звоните: {company_phone}.",  # noqa: E501
+                "content": "📅 Доставка вашего заказа #{order_number} перенесена на {new_date}. Вопросы? Просто напишите нам здесь, в этом чате.",  # noqa: E501
             },
         },
     },

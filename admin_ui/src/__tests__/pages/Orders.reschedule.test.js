@@ -76,6 +76,11 @@ const HANDLED = {
     'DELIVERY_DATE_REQUIRED',
     'ORDER_RESCHEDULE_PAST_CONTRACT_END',
     'ORDER_RESCHEDULE_REASON_TOO_LONG',
+    'ORDER_RESCHEDULE_DATE_IN_PAST',
+    'ORDER_RESCHEDULE_BEYOND_HORIZON',
+    'ORDER_RESCHEDULE_WINDOW_INVALID',
+    'ORDER_RESCHEDULE_WINDOW_PASSED',
+    'STAFF_DELIVERY_NOT_REDISPATCHABLE',
   ],
 };
 
@@ -475,4 +480,90 @@ it('refreshes the open detail modal and every cached delivery screen after a res
   }
   // The modal closed; the detail modal stays.
   expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
+});
+
+it('enables Save for a failed delivery put back on its own day and window (Review Focus 3, F11)', async () => {
+  // The delivery failed this morning. The admin re-dates it to today with the window untouched,
+  // even after that window has ended. The re-date is the change: it takes the delivery out of
+  // `failed` and back to drivers. The backend accepts the unchanged window (Task 5's PATCH tests).
+  // The Save rests on this one read saying the order awaits a new date, so the body says so too,
+  // and the backend re-checks it under its lock.
+  mount({
+    row: { delivery_date: TODAY, awaiting_new_date: true },
+    detail: { delivery: { id: 55, status: 'failed', tracking_number: 'TRK-55' }, reschedule_driver_losing_stop: null },
+  });
+  const modal = await openRescheduleFromRow();
+
+  expect(modal.querySelector('.ant-picker input')).toHaveValue(TODAY);
+  const save = within(modal).getByRole('button', { name: 'Save' });
+  await waitFor(() => expect(save).toBeEnabled());
+  fireEvent.click(save);
+
+  await waitFor(() => expect(adminService.rescheduleOrder).toHaveBeenCalledWith(321, {
+    delivery_date: TODAY,
+    delivery_window_start: '09:00',
+    delivery_window_end: '12:00',
+    expect_awaiting_new_date: true,
+  }, HANDLED));
+});
+
+it('sends no expectation when the admin moves an awaiting order to a different day', async () => {
+  // Failed two days ago, still on its old date: the form opens on today, a real change of date.
+  // That Save stands on its own, like any other reschedule, so it carries no expectation.
+  mount({
+    row: { delivery_date: day(-2), awaiting_new_date: true },
+    detail: { delivery: { id: 55, status: 'failed', tracking_number: 'TRK-55' }, reschedule_driver_losing_stop: null },
+  });
+  const modal = await openRescheduleFromRow();
+
+  expect(modal.querySelector('.ant-picker input')).toHaveValue(TODAY);
+  const save = within(modal).getByRole('button', { name: 'Save' });
+  await waitFor(() => expect(save).toBeEnabled());
+  fireEvent.click(save);
+
+  await waitFor(() => expect(adminService.rescheduleOrder).toHaveBeenCalledWith(321, {
+    delivery_date: TODAY,
+    delivery_window_start: '09:00',
+    delivery_window_end: '12:00',
+  }, HANDLED));
+});
+
+it('says once, inline, that someone else gave the delivery a new date first', async () => {
+  // F7 alerts operators and admins at once. The operator re-dated it from the bot between this
+  // modal's read and the admin's Save, so the backend refuses the stale same-day Save.
+  mount({
+    row: { delivery_date: TODAY, awaiting_new_date: true },
+    detail: { delivery: { id: 55, status: 'failed', tracking_number: 'TRK-55' }, reschedule_driver_losing_stop: null },
+  });
+  adminService.rescheduleOrder.mockRejectedValue(apiError(
+    ['Only failed deliveries can be re-dispatched (current status: scheduled)'],
+    'STAFF_DELIVERY_NOT_REDISPATCHABLE',
+  ));
+  const modal = await openRescheduleFromRow();
+  const save = within(modal).getByRole('button', { name: 'Save' });
+  await waitFor(() => expect(save).toBeEnabled());
+  fireEvent.click(save);
+
+  expect(await within(modal).findByText(
+    'Someone already gave this delivery a new date. Close and reopen to see it.',
+  )).toBeInTheDocument();
+  expect(within(modal).queryByText(/current status/)).toBeNull();
+  expect(message.error).not.toHaveBeenCalled();
+  expect(message.success).not.toHaveBeenCalled();
+});
+
+it.each([
+  ['ORDER_RESCHEDULE_DATE_IN_PAST', 'That date has already passed. Pick today or a later day.'],
+  ['ORDER_RESCHEDULE_BEYOND_HORIZON', 'That date is too far ahead. Pick a day the calendar offers.'],
+  ['ORDER_RESCHEDULE_WINDOW_INVALID', 'The delivery window must start before it ends.'],
+  ['ORDER_RESCHEDULE_WINDOW_PASSED', 'That delivery window has already ended today. Pick a later window or another day.'],
+])("explains the F10 refusal %s inline, in the admin's language, never as a toast", async (code, copy) => {
+  mount();
+  adminService.rescheduleOrder.mockRejectedValue(apiError(['server sentence'], code));
+  const modal = await openRescheduleFromRow();
+  await pickEveningAndSave(modal);
+
+  expect(await within(modal).findByText(copy)).toBeInTheDocument();
+  expect(within(modal).queryByText('server sentence')).toBeNull();
+  expect(message.error).not.toHaveBeenCalled();
 });

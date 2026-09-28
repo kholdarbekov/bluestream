@@ -51,8 +51,9 @@ class TestStateModel:
 
     def test_a_held_delivery_leaves_the_table_only_by_cancellation(self):
         assert DELIVERY_STATUS_TRANSITIONS[DeliveryStatus.RESCHEDULED] == [DeliveryStatus.CANCELLED]
-        # The staff bot's string-keyed view is derived from the same table.
-        assert STAFF_BOT_TRANSITIONS["rescheduled"] == ["cancelled"]
+        # The staff bot's string-keyed view is the driver view of the same table. It
+        # has no CANCELLED (F4), so a driver has no move at all on a held row.
+        assert STAFF_BOT_TRANSITIONS["rescheduled"] == []
 
     def test_no_transition_leads_into_a_held_delivery(self):
         leading_in = sorted(

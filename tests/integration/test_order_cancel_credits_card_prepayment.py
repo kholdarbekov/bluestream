@@ -28,6 +28,11 @@ That NOT_REQUIRED write is the single most dangerous item in B4 and the reason
 COMPLETED CLICK/CARD payments for SEVEN DAYS with no order filter, and whose
 ``process_click_fiscalization`` draws FRESH marking codes and files a tax
 receipt. B4 stops writing CANCELLED, so the brake has to become explicit.
+
+Since F5 (docs/superpowers/specs/2026-09-25-failed-delivery-awaits-new-date-design.md)
+a customer can no longer cancel a paid order themselves. The cancels below therefore go
+through the admin status route, and the customer's own attempt is pinned as a refusal
+that credits nothing.
 """
 
 from datetime import UTC, datetime
@@ -54,6 +59,10 @@ from shared.enums import (
 )
 
 CANCEL_URL = "/api/v1/orders/{order_id}/cancel"
+# The staff route that may still cancel a paid order. It carries the internal reason F6
+# requires there.
+ADMIN_STATUS_URL = "/api/v1/admin/orders/{order_id}/status"
+ADMIN_CANCEL = {"status": "cancelled", "reason": "Customer asked in the chat to cancel"}
 
 
 def _headers(app, user):
@@ -173,12 +182,14 @@ def gateway_is_a_landmine(monkeypatch):
 @pytest.mark.integration
 @pytest.mark.payment
 class TestCancelPaidClickOrderSettlesAsPrepaidCredit:
-    def test_customer_cancel_credits_the_money_and_never_calls_the_gateway(
-        self, app, client, db, paid_click_order, sample_user, gateway_is_a_landmine
+    def test_an_admin_cancel_credits_the_money_and_never_calls_the_gateway(
+        self, app, client, db, paid_click_order, sample_user, admin_claim_headers, gateway_is_a_landmine
     ):
         order, payment, code = paid_click_order
 
-        response = client.post(CANCEL_URL.format(order_id=order.id), headers=_headers(app, sample_user))
+        response = client.put(
+            ADMIN_STATUS_URL.format(order_id=order.id), json=ADMIN_CANCEL, headers=admin_claim_headers
+        )
         assert response.status_code == 200, response.get_json()
 
         db.session.expire_all()
@@ -209,8 +220,28 @@ class TestCancelPaidClickOrderSettlesAsPrepaidCredit:
         assert fiscalization is not None
         assert fiscalization.status is FiscalizationStatus.NOT_REQUIRED
 
-    def test_cancelling_twice_credits_exactly_once(
+    def test_the_customer_cannot_cancel_it_and_nothing_is_credited(
         self, app, client, db, paid_click_order, sample_user, gateway_is_a_landmine
+    ):
+        """F5: the order is paid, so it is no longer the customer's to cancel. The refusal
+        comes before any money moves: no credit, and the payment and reserved code are untouched."""
+        order, payment, code = paid_click_order
+
+        response = client.post(CANCEL_URL.format(order_id=order.id), headers=_headers(app, sample_user))
+        body = response.get_json()
+
+        assert response.status_code == 400, body
+        assert body["data"]["error_code"] == "ORDER_NOT_CUSTOMER_CANCELLABLE"
+        assert body["data"]["reason_code"] == "PAID"
+
+        db.session.expire_all()
+        assert _credit_events(sample_user.id) == []
+        assert type(order).query.get(order.id).status is OrderStatus.CONFIRMED
+        assert Payment.query.get(payment.id).status is PaymentStatus.COMPLETED
+        assert ProductMarkingCode.query.get(code.id).status is MarkingCodeStatus.RESERVED
+
+    def test_cancelling_twice_credits_exactly_once(
+        self, app, client, db, paid_click_order, sample_user, admin_claim_headers, gateway_is_a_landmine
     ):
         """Both defences at once: ``_claim_status_transition`` and the
         ``order-cancel-credit:{payment.id}`` idempotency key."""
@@ -218,10 +249,10 @@ class TestCancelPaidClickOrderSettlesAsPrepaidCredit:
 
         order, payment, _code = paid_click_order
 
-        first = client.post(CANCEL_URL.format(order_id=order.id), headers=_headers(app, sample_user))
+        first = client.put(ADMIN_STATUS_URL.format(order_id=order.id), json=ADMIN_CANCEL, headers=admin_claim_headers)
         assert first.status_code == 200, first.get_json()
 
-        second = client.post(CANCEL_URL.format(order_id=order.id), headers=_headers(app, sample_user))
+        second = client.put(ADMIN_STATUS_URL.format(order_id=order.id), json=ADMIN_CANCEL, headers=admin_claim_headers)
         assert second.status_code == 400, "a second cancel is refused, not re-settled"
 
         # And the direct service call an admin dropdown would make.
@@ -240,13 +271,15 @@ class TestCancelPaidClickOrderSettlesAsPrepaidCredit:
 @pytest.mark.payment
 class TestTheFiscalizationBrake:
     def test_seven_day_sweep_does_not_requeue_a_cancelled_order(
-        self, app, client, db, paid_click_order, sample_user, gateway_is_a_landmine, monkeypatch
+        self, app, client, db, paid_click_order, sample_user, admin_claim_headers, gateway_is_a_landmine, monkeypatch
     ):
         from business_app.tasks import payment_tasks
 
         order, payment, code = paid_click_order
 
-        response = client.post(CANCEL_URL.format(order_id=order.id), headers=_headers(app, sample_user))
+        response = client.put(
+            ADMIN_STATUS_URL.format(order_id=order.id), json=ADMIN_CANCEL, headers=admin_claim_headers
+        )
         assert response.status_code == 200, response.get_json()
 
         requeued = []
@@ -278,7 +311,7 @@ class TestTheFiscalizationBrake:
         assert ProductMarkingCode.query.get(code.id).status is MarkingCodeStatus.AVAILABLE
 
     def test_an_already_queued_task_landing_after_the_cancel_reserves_nothing(
-        self, app, client, db, paid_click_order, sample_user, gateway_is_a_landmine, monkeypatch
+        self, app, client, db, paid_click_order, sample_user, admin_claim_headers, gateway_is_a_landmine, monkeypatch
     ):
         """A ``process_click_fiscalization_task`` queued at payment-completion
         time and delivered after the cancel. Only the PREDICATE stops it — the
@@ -287,7 +320,9 @@ class TestTheFiscalizationBrake:
         ``reserve_required_marking_codes``."""
         order, payment, _code = paid_click_order
 
-        response = client.post(CANCEL_URL.format(order_id=order.id), headers=_headers(app, sample_user))
+        response = client.put(
+            ADMIN_STATUS_URL.format(order_id=order.id), json=ADMIN_CANCEL, headers=admin_claim_headers
+        )
         assert response.status_code == 200, response.get_json()
 
         reserved_calls = []
@@ -658,7 +693,7 @@ class TestAdminDeliveryReturnSettlesTheMoney:
         response = client.put(
             f"/api/v1/admin/deliveries/{delivery.id}",
             headers=self._admin_headers(app, admin_user),
-            json={"status": "returned"},
+            json={"status": "returned", "reason": "Customer refused the delivery"},
         )
         assert response.status_code == 200, response.get_json()
 

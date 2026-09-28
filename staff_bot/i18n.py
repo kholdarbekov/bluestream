@@ -186,7 +186,7 @@ class Translation:
         hand-written subset does not merely miss a translation — it makes the
         gap *undetectable*. That is exactly how `staff.delivery.status.cancelled`
         shipped: this list named six statuses, `DELIVERY_STATUS_TRANSITIONS`
-        offers CANCELLED as a successor of all four active statuses, and so
+        then offered CANCELLED as a successor of all four active statuses, and so
         every active-delivery card rendered an English "Cancelled" button while
         /health stayed green.
         """

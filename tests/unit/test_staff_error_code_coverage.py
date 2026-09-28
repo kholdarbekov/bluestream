@@ -64,6 +64,8 @@ NOT_STAFF_FACING: dict[str, str] = {
     # Customer ordering and payments.
     "ASL_BELGISI_UNAVAILABLE": f"{_NOT_ON_ROUTE} (api/orders.py:442, customer POST /orders card path)",
     "MARKING_CODES_POOL_SHORT": f"{_NOT_ON_ROUTE} (api/payments.py:326 /payments/create; admin payment-method edit)",
+    "ORDER_NOT_CUSTOMER_CANCELLABLE": f"{_NOT_ON_ROUTE} (order_service.py cancel_order_as_customer: customer "
+    "POST /orders/<id>/cancel)",
     "PAYMENT_NOT_CANCELLABLE": f"{_NOT_ON_ROUTE} (api/payments.py:694 /payments/<id>/cancel)",
     "PAYMENT_NOT_REFUNDABLE": f"{_NOT_ON_ROUTE} (api/payments.py:1196 /payments/refund)",
     "REPEAT_LEGACY_ORDER_UNSUPPORTED": f"{_NOT_ON_ROUTE} (order_service.py:812: customer /orders/repeat/<id>)",
@@ -76,6 +78,10 @@ NOT_STAFF_FACING: dict[str, str] = {
     "BOTTLE_SESSION_ACTIVE_CONFLICT": f"{_NOT_ON_ROUTE} (bottle_tracking_service.py:3404: admin order edit)",
     "BOTTLE_SESSION_NOT_REOPENABLE": f"{_NOT_ON_ROUTE} (bottle_tracking_service.py:3387: admin order edit)",
     "ORDER_EDIT_BLOCKED": f"{_NOT_ON_ROUTE} (order_edit_service.py:231: admin /orders/<id>/edit)",
+    "ADMIN_REASON_REQUIRED": f"{_NOT_ON_ROUTE} (order_service.py require_admin_reason: admin PUT "
+    "/orders/<id>/status cancel/return, admin PUT /deliveries/<id> return)",
+    "ADMIN_REASON_TOO_LONG": f"{_NOT_ON_ROUTE} (order_service.py require_admin_reason: admin PUT "
+    "/orders/<id>/status cancel/return, admin PUT /deliveries/<id> return)",
     "CASH_SESSION_ACTIVE_CONFLICT": f"{_NOT_ON_ROUTE} (driver_reconciliation_service.py:823: admin cash edit)",
     "CASH_SESSION_NOT_FORCE_CLOSEABLE": f"{_NOT_ON_ROUTE} (driver_reconciliation_service.py:729: admin force-close)",
     "INVALID_REPORT_TYPE": f"{_NOT_ON_ROUTE} (admin_report_service.py:75: admin /reports/generate)",
@@ -143,10 +149,11 @@ NOT_STAFF_FACING: dict[str, str] = {
     f"and amount (staff.py:683){_FALLBACK}",
     "STAFF_INVALID_ACCURACY": f"{_BOT_NEVER_SENDS}: horizontal_accuracy is Telegram's own 0-1500 m value, never "
     f"NaN or negative (staff_service.py:2069/2074){_FALLBACK}",
-    "DELIVERY_DATE_REQUIRED": f"{_BOT_NEVER_SENDS}: re-dispatch always reschedules to today "
-    f"(order_schedule_service.py:697, staff_service.py:1486){_FALLBACK}",
+    "DELIVERY_DATE_REQUIRED": f"{_BOT_NEVER_SENDS}: re-dispatch always passes a date, the one the operator tapped "
+    f"or local today when none is sent (order_schedule_service.py _apply_reschedule, staff_service.py "
+    f"redispatch_failed_delivery){_FALLBACK}",
     "ORDER_RESCHEDULE_REASON_TOO_LONG": f"{_BOT_NEVER_SENDS}: the re-dispatch POST carries no reason "
-    f"(order_schedule_service.py:612, api_client.redispatch_delivery){_FALLBACK}",
+    f"(order_schedule_service.py _normalize_reason, api_client.redispatch_delivery){_FALLBACK}",
     "SALES_CONTACT_ROLE_INVALID": f"{_BOT_NEVER_SENDS}: a new outlet's contact is always role 'owner' and the bot "
     f"never calls the agent contacts POST (outlet_service.py:516, new_outlet.py){_FALLBACK}",
     "SALES_OUTLET_CLASS_INVALID": f"{_BOT_NEVER_SENDS}: the class keyboard sends only A/B/C or nothing "
@@ -158,7 +165,13 @@ NOT_STAFF_FACING: dict[str, str] = {
     "SALES_WINDOW_INVALID": f"{_BOT_NEVER_SENDS}: raised by the outlet PUT (outlet_service.py:1044/1056), which "
     f"the bot never calls{_FALLBACK}",
     "ORDER_NOT_FOUND": f"{_RACE_ONLY}: re-dispatch reads the delivery first (STAFF_DELIVERY_NOT_FOUND); this needs "
-    f"an admin to delete the order inside the lock window (order_schedule_service.py:661){_FALLBACK}",
+    f"an admin to delete the order inside the lock window (order_schedule_service.py _apply_reschedule){_FALLBACK}",
+    "ORDER_RESCHEDULE_WINDOW_INVALID": f"{_RACE_ONLY}: the bot sends no window and re-dispatch passes the order's "
+    f"own, so a window is judged only if an admin changed it between the unlocked read and the lock, and that "
+    f"re-date already took the row out of FAILED (order_schedule_service.py _refuse_disallowed_schedule){_FALLBACK}",
+    "ORDER_RESCHEDULE_WINDOW_PASSED": f"{_RACE_ONLY}: the bot sends no window and re-dispatch passes the order's "
+    f"own, so a window is judged only if an admin changed it between the unlocked read and the lock, and that "
+    f"re-date already took the row out of FAILED (order_schedule_service.py _refuse_disallowed_schedule){_FALLBACK}",
 }
 
 

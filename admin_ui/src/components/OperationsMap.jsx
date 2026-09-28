@@ -22,6 +22,13 @@ const ORDER_STATUS_COLOR = {
   out_for_delivery: '#fa8c16',
 };
 
+// An order whose delivery failed and is waiting for a new date (the snapshot's
+// `awaiting_new_date`, decided by the backend). The failed row keeps its driver and its
+// old date, so the regular pin would draw it filled (someone is bringing it) and ringed
+// (it is late). Neither is true: it waits for an admin to re-date it. So it gets its own
+// shape and colour, never the ring, and its popup drops the Overdue tag for the reason.
+const NEEDS_NEW_DATE_COLOR = '#722ed1';
+
 // Field check-in colours. `in_radius` is the SERVER's verdict (VisitService.checkin compares
 // `distance_m` against SALES_GEOFENCE_RADIUS_M) — this layer renders it and never re-measures.
 // NULL is "not measurable", which is a different fact from "out of range": a skipped check-in,
@@ -44,6 +51,15 @@ const stopIcon = (position, color, pinned) => L.divIcon({
 });
 
 const orderIcon = (order) => {
+  if (order.awaiting_new_date) {
+    return L.divIcon({
+      className: '',
+      html: `<div style="width:12px;height:12px;transform:rotate(45deg);
+        background:#fff;border:3px solid ${NEEDS_NEW_DATE_COLOR}"></div>`,
+      iconSize: [14, 14],
+      iconAnchor: [7, 7],
+    });
+  }
   const color = ORDER_STATUS_COLOR[order.status] || '#8c8c8c';
   const unassigned = !order.driver_id;
   return L.divIcon({
@@ -198,7 +214,12 @@ const OperationsMap = ({
                 <Space size={4} wrap>
                   <Tag color={ORDER_STATUS_COLOR[o.status] ? undefined : 'default'}>{o.status}</Tag>
                   {!o.driver_id && <Tag>{t('delivery:ui.dispatch.unassigned', 'Unassigned')}</Tag>}
-                  {o.is_overdue && <Tag color="red">{t('delivery:ui.dispatch.overdue', 'Overdue')}</Tag>}
+                  {o.awaiting_new_date && (
+                    <Tag color="purple">
+                      {t('delivery:ui.orders.delivery_failed_needs_new_date', 'Delivery failed: needs a new date')}
+                    </Tag>
+                  )}
+                  {o.is_overdue && !o.awaiting_new_date && <Tag color="red">{t('delivery:ui.dispatch.overdue', 'Overdue')}</Tag>}
                   {o.is_cod && <Tag color="gold">COD</Tag>}
                 </Space>
                 <Text>{o.customer_name}</Text>

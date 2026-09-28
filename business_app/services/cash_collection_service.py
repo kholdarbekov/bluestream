@@ -31,6 +31,7 @@ from shared.enums import (
 )
 from business_app.utils.exceptions import NotFoundError, ValidationError
 from business_app.utils.payment_projection import (
+    MONEY_HELD_PAYMENT_STATUSES,
     ONLINE_PAYABLE_METHOD_VALUES,
     unpaid_after_delivery_clause,
     get_payment_projection,
@@ -1761,7 +1762,7 @@ class CashCollectionService:
             return None
         # The only two states in which a card/Click row is holding real money:
         # COMPLETED (paid in full) and PARTIALLY_PAID (paid, then repriced upward).
-        if payment.status not in {PaymentStatus.COMPLETED, PaymentStatus.PARTIALLY_PAID}:
+        if payment.status not in MONEY_HELD_PAYMENT_STATUSES:
             return None
 
         gross = get_payment_projection(payment)["amount_collected"]
@@ -4655,7 +4656,7 @@ class CashCollectionService:
         if (
             affect_payment_projection
             and trigger_completion_notification
-            and payment.status in (PaymentStatus.COMPLETED, PaymentStatus.PARTIALLY_PAID)
+            and payment.status in MONEY_HELD_PAYMENT_STATUSES
         ):
             # PARKED, never published inline. The worker starts in milliseconds
             # and reads under READ COMMITTED, so an inline publish lets its

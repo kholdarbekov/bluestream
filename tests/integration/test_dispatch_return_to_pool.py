@@ -5,9 +5,10 @@ Spec: docs/superpowers/specs/2026-09-23-admin-order-reschedule-design.md, sectio
 `_pull_back_delivery`, the same core the admin reschedule runs. For this button
 that changes two things:
 
-* It refuses (409 STAFF_DELIVERY_NOT_POOLABLE) a delivery that no driver holds or
-  failed. A board drawn before an admin moved the order to a later day still shows
-  the stop, and returning it would drag a RESCHEDULED row into today's pool.
+* It refuses (409 STAFF_DELIVERY_NOT_POOLABLE) a delivery that no driver holds. A
+  board drawn before an admin moved the order to a later day still shows the stop,
+  and returning it would drag a RESCHEDULED row into today's pool. It refuses a
+  FAILED one too (F2 of the 2026-09-25 failed-delivery spec), and says to reschedule.
 * Moving the order back to CONFIRMED leaves NO free-text note on the order's
   history. The customer bot prints every order-history note on its Track screen
   (telegram_bot/handlers/orders.py), so the old default "Returned to pool for
@@ -154,6 +155,48 @@ def test_return_to_pool_refuses_a_delivery_no_driver_holds_and_changes_nothing(
     assert (row.status, row.delivery_person_id) == (status, None)
     assert DeliveryStatusHistory.query.filter_by(delivery_id=delivery_id).count() == 0
     assert db.session.get(Order, order_id).status == OrderStatus.CONFIRMED
+    assert OrderStatusHistory.query.filter_by(order_id=order_id).count() == 0
+    pushed.assert_not_called()
+    assert unassigned == []
+
+
+def test_return_to_pool_refuses_a_failed_delivery_and_says_to_reschedule(
+    client, db, sample_user, admin_claim_headers, route_driver, monkeypatch
+):
+    """F2 (docs/superpowers/specs/2026-09-25-failed-delivery-awaits-new-date-design.md): a
+    failed delivery leaves `failed` only through a reschedule to a new date, or by
+    cancelling its order. Pooling it put the stop back in today's pool with no new date
+    and no customer notice. The board toasts the refusal's `message`, so the message
+    names the way out."""
+    delivery = _stop(
+        db, sample_user, "RTP-FAILED", order_status=OrderStatus.OUT_FOR_DELIVERY,
+        status=DeliveryStatus.FAILED, driver_id=route_driver.id,
+    )
+    delivery.delivery_attempts = 1
+    delivery.failed_delivery_reason = "customer_unavailable"
+    db.session.commit()
+    delivery_id, order_id, driver_id = delivery.id, delivery.order_id, route_driver.id
+    unassigned = _task_spy(monkeypatch, notify_staff_order_unassigned, "delay")
+
+    with patch("business_app.services.route_edit_service.notify_route_updated", autospec=True) as pushed:
+        resp = client.post(
+            UNASSIGN.format(id=delivery_id), json={"reason": "retry tomorrow"}, headers=admin_claim_headers
+        )
+
+    assert resp.status_code == 409, resp.get_data(as_text=True)
+    body = resp.get_json()
+    assert body["error_code"] == "STAFF_DELIVERY_NOT_POOLABLE"
+    assert body["message"] == (
+        f"Delivery {delivery_id} failed, so it cannot go back to the pool. "
+        "Reschedule the order to a new date instead."
+    )
+    db.session.expire_all()
+    row = db.session.get(Delivery, delivery_id)
+    assert (row.status, row.delivery_person_id, row.delivery_attempts, row.failed_delivery_reason) == (
+        DeliveryStatus.FAILED, driver_id, 1, "customer_unavailable",
+    )
+    assert DeliveryStatusHistory.query.filter_by(delivery_id=delivery_id).count() == 0
+    assert db.session.get(Order, order_id).status == OrderStatus.OUT_FOR_DELIVERY
     assert OrderStatusHistory.query.filter_by(order_id=order_id).count() == 0
     pushed.assert_not_called()
     assert unassigned == []

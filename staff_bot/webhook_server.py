@@ -17,9 +17,15 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from staff_bot.config import config
 from staff_bot.database import db_manager
 from staff_bot.i18n import i18n
+from staff_bot.keyboards.operator import OperatorKeyboards
 from staff_bot.keyboards.sales import LABEL_MAX, reject_reason_key
 from staff_bot.utils import flow_state
-from staff_bot.utils.formatters import escape_html, format_delivery_window_line, format_local_date
+from staff_bot.utils.formatters import (
+    escape_html,
+    format_delivery_window_line,
+    format_fail_reason,
+    format_local_date,
+)
 from shared.redis_failure import report_redis_failure
 from shared.staff_constants import SALES_EVENTS
 from shared.redis_keyspace import RedisKeyspace
@@ -232,6 +238,44 @@ def _render_morning_digest(payload: dict, language: str, recipient=None) -> Tupl
             recipient, len(text), DIGEST_TEXT_LIMIT,
         )
     return text, buttons
+
+
+def _render_delivery_failed_alert(
+    data: dict, delivery_id: int, language: str
+) -> Tuple[str, Optional[InlineKeyboardMarkup]]:
+    """The failure alert (spec F7): its text, and the operator keyboard or None.
+
+    Every value is the backend's; the bot decides nothing about the order. No
+    date travels with it: the operator keyboard's date step fetches the
+    delivery's own bounds when tapped, so a card read the next morning still
+    offers the right days. An admin or manager who is not an operator would be
+    refused every one of those buttons (`require_operator`), so they get no
+    keyboard, and instead a line saying where the re-date is done.
+    """
+    number = escape_html(data.get('order_number') or i18n.get('staff.common.not_available', language))
+    lines = [f"⚠️ <b>{i18n.get('staff.notification.delivery_failed', language, number=number)}</b>"]
+    customer = ' · '.join(
+        escape_html(value) for value in (data.get('customer_name'), data.get('customer_phone')) if value
+    )
+    if customer:
+        lines.append(f"👤 {customer}")
+    if data.get('address'):
+        lines.append(f"📍 {escape_html(data['address'])}")
+    reason = data.get('reason')
+    if reason:
+        label = format_fail_reason(reason, language)
+        lines.append(f"❗ {i18n.get('staff.notification.delivery_failed_reason', language, reason=label)}")
+    if data.get('driver_name'):
+        driver = escape_html(data['driver_name'])
+        lines.append(f"🚚 {i18n.get('staff.notification.delivery_failed_driver', language, name=driver)}")
+    if data.get('attempts'):
+        lines.append(
+            f"🔁 {i18n.get('staff.notification.delivery_failed_attempt', language, count=data['attempts'])}"
+        )
+    if data.get('is_operator'):
+        return '\n'.join(lines), OperatorKeyboards.redispatch_card(delivery_id, 1, language)
+    lines += ['', f"👉 {i18n.get('staff.notification.delivery_failed_admin_hint', language)}"]
+    return '\n'.join(lines), None
 
 
 class _TokenBucket:
@@ -495,6 +539,7 @@ class StaffWebhookServer:
             '/internal/order-reassigned': _TokenBucket(rate_per_sec=20, burst=60),
             '/internal/order-cancelled': _TokenBucket(rate_per_sec=20, burst=60),
             '/internal/order-unassigned': _TokenBucket(rate_per_sec=20, burst=60),
+            '/internal/delivery-failed': _TokenBucket(rate_per_sec=20, burst=60),
             '/internal/sales-event': _TokenBucket(rate_per_sec=20, burst=60),
             '/internal/route-updated': _TokenBucket(rate_per_sec=50, burst=120),
             '/internal/pool-insertion-suggestion': _TokenBucket(rate_per_sec=50, burst=120),
@@ -533,6 +578,7 @@ class StaffWebhookServer:
         self.app.router.add_post('/internal/order-reassigned', self.order_reassigned_handler)
         self.app.router.add_post('/internal/order-cancelled', self.order_cancelled_handler)
         self.app.router.add_post('/internal/order-unassigned', self.order_unassigned_handler)
+        self.app.router.add_post('/internal/delivery-failed', self.delivery_failed_handler)
         self.app.router.add_post('/internal/sales-event', self.sales_event_handler)
         self.app.router.add_post('/internal/reload-translations', reload_translations_handler)
         self.app.router.add_post('/internal/route-updated', self.route_updated_handler)
@@ -601,6 +647,26 @@ class StaffWebhookServer:
                 )
 
         return self._deduplicate(fallback_key)
+
+    async def _release_event(self, event_id: Optional[str], fallback_key: str) -> None:
+        """Give back the slot `_is_duplicate_event(event_id, fallback_key)` claimed.
+
+        For a handler whose send failed AFTER the claim: while the slot is held,
+        the producer's retry of the same event is "Already processed" and the
+        message is never sent. Both stores are cleared, because either may hold
+        the claim: Redis, or the in-memory fallback when Redis was down or failed
+        during the claim. Best-effort: if the Redis delete fails too, it is
+        reported, and the retry is refused as a duplicate, exactly as it was
+        before this helper existed.
+        """
+        self._processed_events.pop(fallback_key, None)
+        if event_id and self._redis_connected and self._redis:
+            try:
+                await self._redis.delete(RedisKeyspace.staff_bot_webhook_event(event_id))
+            except Exception as e:
+                report_redis_failure(
+                    "staff_bot.webhook_server.release_event", str(e), tier="reliability"
+                )
 
     async def stats_handler(self, _request):
         """Internal stats endpoint - GET /internal/stats"""
@@ -1008,6 +1074,81 @@ class StaffWebhookServer:
             return web.json_response({'success': True, 'message': 'Unassignment notification sent'})
         except Exception as e:
             logger.error(f"Error handling order unassigned notification: {e}", exc_info=True)
+            return web.json_response({'success': False, 'message': 'Internal server error'}, status=500)
+
+    async def delivery_failed_handler(self, request):
+        """Alert one operator, admin or manager that a delivery failed (spec F7).
+
+        POST /internal/delivery-failed
+          {event_id, telegram_id, delivery_id, order_id, order_number, reason,
+           driver_name, attempts, customer_name, customer_phone, address,
+           is_operator, language}
+
+        The guards are `order_unassigned_handler`'s; the send is not. The dedup
+        slot is claimed BEFORE the send, and `push_delivery_failed` retries only
+        on a non-200. So a failed send that kept its slot would be answered
+        "Already processed" on every retry: the alert lost, and reported
+        delivered. A recipient who can never be reached (blocked the bot, never
+        started it) is therefore a 200 that keeps the slot, because no retry can
+        change that. Any other send error gives the slot back and answers 502, so
+        the retry really re-sends. A timeout on a message Telegram did deliver can
+        then arrive twice. One duplicate alert is the accepted price of never
+        losing one.
+        """
+        try:
+            if not await verify_webhook_signature(request):
+                return web.json_response({'success': False, 'message': 'Invalid signature'}, status=401)
+            limited = await self._check_rate_limit(request)
+            if limited:
+                return limited
+            if not self.bot_app:
+                return web.json_response({'success': False, 'message': 'Bot not initialized'}, status=503)
+
+            data, parse_error = await _parse_json_body(request)
+            if parse_error:
+                return parse_error
+            try:
+                telegram_id = int(data.get('telegram_id'))
+                delivery_id = int(data.get('delivery_id'))
+            except (TypeError, ValueError):
+                return web.json_response(
+                    {'success': False, 'message': 'Missing or malformed telegram_id or delivery_id'},
+                    status=400,
+                )
+
+            # The recipient's language travels in the payload. The card is rendered
+            # before the slot is claimed, so the send is the only step that can
+            # fail while the slot is held.
+            language = i18n.normalize_language(data.get('language'))
+            text, keyboard = _render_delivery_failed_alert(data, delivery_id, language)
+
+            event_id = data.get('event_id')
+            # Used only when Redis is down. The attempt count is in it so that the
+            # SAME delivery failing again after a re-date is a new alert, not a
+            # replay of the first one inside the 24h dedup TTL.
+            fallback_key = f"delivery_failed:{telegram_id}:{delivery_id}:{data.get('attempts')}"
+            if await self._is_duplicate_event(event_id, fallback_key):
+                return web.json_response({'success': True, 'message': 'Already processed'})
+
+            try:
+                # F7: it plays a sound. Nobody is watching this chat when a
+                # delivery fails somewhere else.
+                await self.bot_app.bot.send_message(
+                    chat_id=telegram_id, text=text, parse_mode='HTML',
+                    reply_markup=keyboard, disable_notification=False,
+                )
+            except Exception as e:
+                _log_notify_failure(
+                    f"Failed to send the delivery-failed alert for delivery {delivery_id} to {telegram_id}", e
+                )
+                if _is_recipient_unreachable(e):
+                    return web.json_response({'success': False, 'message': 'Recipient unreachable'})
+                await self._release_event(event_id, fallback_key)
+                return web.json_response({'success': False, 'message': 'Send failed'}, status=502)
+
+            return web.json_response({'success': True, 'message': 'Notification sent'})
+        except Exception as e:
+            logger.error(f"Error handling delivery failed notification: {e}", exc_info=True)
             return web.json_response({'success': False, 'message': 'Internal server error'}, status=500)
 
     async def route_updated_handler(self, request):

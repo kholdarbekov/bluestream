@@ -410,3 +410,25 @@ def validate_list_request_params(
         result["end_date"] = end_date
 
     return result
+
+
+def strip_reason(reason: Optional[str], *, max_length: int, error_code: str) -> Optional[str]:
+    """The one strip-and-length step for a free-text reason bound for a history
+    row's `reason` column.
+
+    Blank is no reason (None). Longer than ``max_length`` is refused with
+    ``error_code``, never cut: the audit keeps the whole text, and a history row
+    quietly holding a prefix of it would be the same reason recorded two ways.
+
+    Whether a reason is REQUIRED is the caller's rule. It is optional for a
+    reschedule (`OrderScheduleService._normalize_reason`) and required for an
+    admin cancel or return (`OrderService.require_admin_reason`).
+
+    Takes text or None. Each caller refuses a non-text JSON value before it
+    gets here: the reschedule route with "reason must be a string", and
+    `require_admin_reason` with its own ADMIN_REASON_REQUIRED.
+    """
+    reason = (reason or "").strip() or None
+    if reason is not None and len(reason) > max_length:
+        raise ValidationError(f"The reason can be at most {max_length} characters", error_code=error_code)
+    return reason

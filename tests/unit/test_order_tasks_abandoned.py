@@ -12,10 +12,12 @@ from unittest import mock
 
 import pytest
 
+from business_app.models.delivery import Delivery
 from business_app.models.order import Order
 from business_app.models.payment import Payment
+from business_app.services.order_schedule_service import OrderScheduleService
 from business_app.tasks.order_tasks import cancel_abandoned_orders
-from shared.enums import OrderStatus, PaymentMethod, PaymentStatus
+from shared.enums import DeliveryStatus, OrderStatus, PaymentMethod, PaymentStatus
 
 
 @pytest.fixture(scope="module")
@@ -103,6 +105,35 @@ def test_spares_recent_order(app, db, sample_user):
         cancel_abandoned_orders()
         db.session.refresh(order)
         assert order.status is OrderStatus.PENDING
+
+
+def test_spares_an_order_that_awaits_a_new_date(app, db, sample_user):
+    """F1 of docs/superpowers/specs/2026-09-25-failed-delivery-awaits-new-date-design.md: a
+    failed delivery never ends its order, and only staff may close one that waits for a new
+    date. An unpaid PENDING order whose delivery failed is that order, whatever its age. A
+    plain abandoned order in the same sweep is still cancelled."""
+    with app.app_context():
+        awaiting = _aged_order(db, sample_user, hours=30)
+        db.session.add(
+            Delivery(
+                order_id=awaiting.id,
+                status=DeliveryStatus.FAILED,
+                failed_delivery_reason="customer_unavailable",
+                delivery_attempts=1,
+                scheduled_date=datetime.now(timezone.utc) - timedelta(hours=26),
+                scheduled_time_slot="anytime",
+            )
+        )
+        db.session.commit()
+        assert OrderScheduleService.awaiting_new_date(awaiting) is True
+        abandoned = _aged_order(db, sample_user, hours=30)
+
+        result = cancel_abandoned_orders()
+
+        db.session.expire_all()
+        assert db.session.get(Order, awaiting.id).status is OrderStatus.PENDING
+        assert db.session.get(Order, abandoned.id).status is OrderStatus.CANCELLED
+        assert result["cancelled_count"] == 1
 
 
 def test_is_scheduled_in_beat(celery_app_module):

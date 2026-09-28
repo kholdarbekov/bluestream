@@ -12,6 +12,12 @@ DISPLAY_TIMEZONE_OFFSET = os.environ.get("DISPLAY_TIMEZONE_OFFSET", "+05:00")
 
 # ─── Status Icon Mappings ───────────────────────────────────────────────
 
+# What customers are shown while an order's failed delivery waits for a staff-picked
+# date. A display status, not an `OrderStatus`: the order row keeps its real status,
+# and `OrderScheduleService.customer_display_status` is the only place that answers
+# with this.
+ORDER_DISPLAY_AWAITING_NEW_DATE = "awaiting_new_date"
+
 ORDER_STATUS_ICONS = {
     "created": "📝",
     "pending": "🕐",
@@ -21,6 +27,7 @@ ORDER_STATUS_ICONS = {
     "delivered": "📦",
     "cancelled": "❌",
     "returned": "↩️",
+    ORDER_DISPLAY_AWAITING_NEW_DATE: "⏳",
 }
 
 SUBSCRIPTION_STATUS_ICONS = {

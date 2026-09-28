@@ -54,6 +54,19 @@ DELIVERY_STATUS_TRANSITIONS: Dict[DeliveryStatus, List[DeliveryStatus]] = {
 }
 
 
+# The driver's view of the table above: the same moves without CANCELLED (F4 of the
+# 2026-09-25 failed-delivery spec). The staff bot draws one button per successor, and
+# StaffService.update_delivery_status refuses anything else. A driver who cannot complete
+# a stop marks it FAILED, and the order waits for a new date. A driver-cancelled delivery
+# on a live order could not be brought back: reschedule, re-dispatch and return to pool
+# all refuse a cancelled row. The table above keeps its CANCELLED edges, because
+# cancelling an order must still cancel its delivery.
+DRIVER_DELIVERY_STATUS_TRANSITIONS: Dict[DeliveryStatus, List[DeliveryStatus]] = {
+    current: [nxt for nxt in nxts if nxt is not DeliveryStatus.CANCELLED]
+    for current, nxts in DELIVERY_STATUS_TRANSITIONS.items()
+}
+
+
 def is_valid_order_transition(current: OrderStatus, new: OrderStatus) -> bool:
     return new in ORDER_STATUS_TRANSITIONS.get(current, [])
 
@@ -75,6 +88,7 @@ def order_transitions_as_strings() -> Dict[str, List[str]]:
     return {cur.value: [nxt.value for nxt in nxts] for cur, nxts in ORDER_STATUS_TRANSITIONS.items()}
 
 
-def delivery_transitions_as_strings() -> Dict[str, List[str]]:
-    """Serialised view for the staff bot (legacy string-keyed callers) and JSON APIs."""
-    return {cur.value: [nxt.value for nxt in nxts] for cur, nxts in DELIVERY_STATUS_TRANSITIONS.items()}
+def driver_delivery_transitions_as_strings() -> Dict[str, List[str]]:
+    """Serialised driver view, read through shared/staff_constants by the staff bot's
+    status buttons and StaffService.update_delivery_status's gate."""
+    return {cur.value: [nxt.value for nxt in nxts] for cur, nxts in DRIVER_DELIVERY_STATUS_TRANSITIONS.items()}

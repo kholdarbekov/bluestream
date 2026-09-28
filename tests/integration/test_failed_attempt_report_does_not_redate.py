@@ -1,32 +1,36 @@
-"""A reported failed attempt no longer re-dates the delivery behind dispatch's back (R19).
+"""A driver can no longer report a failed attempt through the legacy issue route (F2).
 
-`reschedule_failed_delivery_task` was a second, divergent re-dater. It reset a FAILED row
-to SCHEDULED for tomorrow and skipped:
-  * the unassign SSOT and the history row;
-  * the bottle unbind and the counter sync;
-  * `Order.delivery_date`.
-It then auto-assigned the row and sent a `delivery_rescheduled` notice that had no
-template. Re-dating now has one path, `OrderScheduleService.reschedule` (the admin
-Reschedule and both Re-dispatch buttons). So the task is gone, and so is its only
-producer: the `failed_attempt` branch of `handle_delivery_exception_task`, fed by
-`POST /api/v1/delivery/driver/report-issue/<id>`.
+`POST /api/v1/delivery/driver/report-issue/<id>` accepted `failed_attempt` and fed it to
+the `failed_attempt` branch of `handle_delivery_exception_task`. That branch was a second
+writer of `failed`, and it skipped what the real one does:
+  * the DeliveryStatusHistory row;
+  * the bottle-session unbind.
+It also sent the customer `delivery_failed_attempt`, although nothing may reach the
+customer at failure (F17). No client sends `failed_attempt`. A failed delivery is now
+recorded only by `StaffService.update_delivery_status`, and it leaves `failed` only
+through a reschedule or by cancelling its order.
 
-That endpoint's own failed-attempt write (no history, no unbind) is a known divergent path
-and is out of scope (spec §10). This file pins only that it no longer re-dates anything.
+The route stays, and still serves delay, vehicle_breakdown, customer_issue and
+address_issue.
 
-Spec: docs/superpowers/specs/2026-09-23-admin-order-reschedule-design.md (R19).
+The branch once published `reschedule_failed_delivery_task`, a second re-dater deleted by
+R19 of the 2026-09-23 reschedule spec. This file still pins that it is gone.
+
+Specs: docs/superpowers/specs/2026-09-25-failed-delivery-awaits-new-date-design.md (§3.2,
+F2, F17); docs/superpowers/specs/2026-09-23-admin-order-reschedule-design.md (R19).
 """
 
 import inspect
 from datetime import datetime, timezone
 from decimal import Decimal
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 from flask_jwt_extended import create_access_token
 
-from business_app.models.delivery import Delivery
+from business_app.models.delivery import Delivery, DeliveryStatusHistory
 from business_app.models.order import Order
+from business_app.services.notification_service import NotificationService
 from business_app.tasks import delivery_tasks
 from business_app.tasks.delivery_tasks import handle_delivery_exception_task
 from shared.enums import DeliveryStatus, OrderStatus, PaymentMethod
@@ -34,6 +38,7 @@ from tests.unit.test_delivery_service_business_rules import _unshadow_task_publi
 
 pytestmark = pytest.mark.integration
 
+REPORT = "/api/v1/delivery/driver/report-issue/{id}"
 REASON = "Customer not available"
 
 
@@ -90,39 +95,86 @@ def _delivery_at_the_door(db, customer, driver):
     return delivery
 
 
+def _driver_headers(app, driver):
+    with app.app_context():
+        token = create_access_token(identity=str(driver.id))
+    return {"Authorization": f"Bearer {token}"}
+
+
 def test_the_legacy_redater_task_is_gone():
     assert not hasattr(delivery_tasks, "reschedule_failed_delivery_task")
 
 
-def test_a_reported_failed_attempt_is_recorded_and_re_dates_nothing(
+def test_a_failed_attempt_report_is_refused_and_publishes_nothing(
     app, client, db, delivery_driver, sample_user, enqueued
 ):
     delivery = _delivery_at_the_door(db, sample_user, delivery_driver)
-    with app.app_context():
-        token = create_access_token(identity=str(delivery_driver.id))
+    delivery_id, order_id = delivery.id, delivery.order_id
+    headers = _driver_headers(app, delivery_driver)
+
+    refused = client.post(
+        REPORT.format(id=delivery_id),
+        json={"issue_type": "failed_attempt", "details": {"reason": REASON}},
+        headers=headers,
+    )
+    unknown = client.post(
+        REPORT.format(id=delivery_id), json={"issue_type": "teleported", "details": {}}, headers=headers
+    )
+
+    assert refused.status_code == 400, refused.get_data(as_text=True)
+    # The route's own invalid-issue-type refusal: the body an unknown type gets, word for word.
+    assert unknown.status_code == 400, unknown.get_data(as_text=True)
+    assert refused.get_json() == unknown.get_json()
+    assert set(refused.get_json()) == {"error"}
+    assert enqueued == []
+
+    db.session.expire_all()
+    row = db.session.get(Delivery, delivery_id)
+    assert (row.status, row.delivery_attempts, row.failed_delivery_reason, row.delivery_person_id) == (
+        DeliveryStatus.ARRIVED, 0, None, delivery_driver.id,
+    )
+    assert DeliveryStatusHistory.query.filter_by(delivery_id=delivery_id).count() == 0
+    assert db.session.get(Order, order_id).status == OrderStatus.OUT_FOR_DELIVERY
+
+
+@pytest.mark.parametrize("issue_type", ["delay", "vehicle_breakdown", "customer_issue", "address_issue"])
+def test_the_issue_types_the_route_still_serves_are_accepted_and_queued(
+    app, client, db, delivery_driver, sample_user, enqueued, issue_type
+):
+    delivery = _delivery_at_the_door(db, sample_user, delivery_driver)
+    delivery_id = delivery.id
+    details = {"note": f"{issue_type} at gate 3"}
 
     response = client.post(
-        f"/api/v1/delivery/driver/report-issue/{delivery.id}",
-        json={"issue_type": "failed_attempt", "details": {"reason": REASON}},
-        headers={"Authorization": f"Bearer {token}"},
+        REPORT.format(id=delivery_id),
+        json={"issue_type": issue_type, "details": details},
+        headers=_driver_headers(app, delivery_driver),
     )
 
     assert response.status_code == 200, response.get_data(as_text=True)
-    assert enqueued == [
-        (handle_delivery_exception_task.name, (delivery.id, "failed_attempt", {"reason": REASON}), {})
-    ]
+    body = response.get_json()
+    assert (body["issue_type"], body["delivery_id"]) == (issue_type, delivery_id)
+    assert enqueued == [(handle_delivery_exception_task.name, (delivery_id, issue_type, details), {})]
 
-    # Run what the endpoint enqueued, the way the worker would.
-    _name, args, kwargs = enqueued.pop()
-    result = handle_delivery_exception_task(*args, **kwargs)
 
-    assert result == {"success": True, "exception_type": "failed_attempt", "delivery_id": delivery.id}
-    # Before R19 this list held ("...reschedule_failed_delivery_task", (delivery.id,), {}).
-    # That task re-dated the delivery to tomorrow and auto-assigned it without any
-    # dispatcher being involved.
+def test_a_failed_attempt_queued_before_the_deploy_writes_nothing_and_tells_no_one(
+    app, db, delivery_driver, sample_user, enqueued
+):
+    """A message the old route published is picked up by a worker that already runs the
+    new task body. With the branch gone it falls through: nothing marks the delivery
+    FAILED behind the driver's back, and the customer gets no `delivery_failed_attempt`
+    (F17). `send_notification` is the customer-message boundary; the autospec keeps its
+    signature."""
+    delivery = _delivery_at_the_door(db, sample_user, delivery_driver)
+    delivery_id = delivery.id
+
+    with patch.object(NotificationService, "send_notification", autospec=True) as sent:
+        result = handle_delivery_exception_task(delivery_id, "failed_attempt", {"reason": REASON})
+
+    assert result == {"success": True, "exception_type": "failed_attempt", "delivery_id": delivery_id}
+    sent.assert_not_called()
     assert enqueued == []
     db.session.expire_all()
-    row = db.session.get(Delivery, delivery.id)
-    assert (row.status, row.delivery_attempts, row.failed_delivery_reason) == (DeliveryStatus.FAILED, 1, REASON)
-    assert row.delivery_person_id == delivery_driver.id
-    assert db.session.get(Order, delivery.order_id).delivery_date is None
+    row = db.session.get(Delivery, delivery_id)
+    assert (row.status, row.delivery_attempts, row.failed_delivery_reason) == (DeliveryStatus.ARRIVED, 0, None)
+    assert DeliveryStatusHistory.query.filter_by(delivery_id=delivery_id).count() == 0

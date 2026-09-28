@@ -46,12 +46,11 @@
 
         var reason = prompt(PAGE_DATA.i18n.prompt_reason);
 
-        fetch('/api/v1/orders/' + PAGE_DATA.order_id + '/cancel', {
+        // The shared helper sends the session cookies, the CSRF header and X-Platform.
+        // The web keeps its token in an httpOnly cookie, so a Bearer header read from
+        // localStorage was always "Bearer null" and this cancel never went through.
+        apiRequest('/orders/' + PAGE_DATA.order_id + '/cancel', {
             method: 'POST',
-            headers: {
-                'Authorization': 'Bearer ' + localStorage.getItem('access_token'),
-                'Content-Type': 'application/json'
-            },
             body: JSON.stringify({ reason: reason || 'Customer request' })
         })
         .then(function (response) { return response.json(); })

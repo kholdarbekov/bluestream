@@ -250,7 +250,9 @@ class TestRawOwnershipWritesAlsoClearTheSequence:
         route = _route(db, delivery_driver.id, [kept.id, returned.id])
         db.session.commit()
 
-        AdminDeliveryService.update_delivery(returned.id, {"status": "returned"}, actor_id=admin_user.id)
+        AdminDeliveryService.update_delivery(
+            returned.id, {"status": "returned", "reason": "Customer refused the delivery"}, actor_id=admin_user.id
+        )
 
         db.session.refresh(route)
         assert route.optimized_order == [kept.id]

@@ -326,12 +326,20 @@ def serialize_order(order: Order, include_items=False, include_delivery=False, i
     Returns:
         Serialized order data
     """
+    # Lazy, like the service imports in admin_serializers: keeps this module
+    # importable before the service layer is wired up.
+    from business_app.services.order_schedule_service import OrderScheduleService
+    from business_app.services.order_service import OrderService
+
     try:
         order_data = {
             "id": order.id,
             "order_number": order.order_number,
             "user_id": order.user_id,
             "status": order.status.value,
+            # F15: what the customer is shown, either the wait for a new date or the
+            # status itself. The bot and the web label this and never work the wait out.
+            "display_status": OrderScheduleService.customer_display_status(order),
             "tax_amount": float(getattr(order, "tax_amount", 0)),
             "delivery_fee": float(getattr(order, "delivery_fee", 0)),
             "discount_amount": float(getattr(order, "discount_amount", 0)),
@@ -353,6 +361,9 @@ def serialize_order(order: Order, include_items=False, include_delivery=False, i
             "updated_at": order.updated_at.isoformat() if order.updated_at else None,
             "confirmed_at": order.confirmed_at.isoformat() if getattr(order, "confirmed_at", None) else None,
             "delivered_at": order.delivered_at.isoformat() if getattr(order, "delivered_at", None) else None,
+            # F5: the one answer to "may the customer cancel this themselves". The bot
+            # and the web draw Cancel from it and keep no copy of the rule.
+            "can_customer_cancel": OrderService.customer_cancel_block_code(order) is None,
         }
 
         if include_items and hasattr(order, "order_items"):
@@ -378,8 +389,14 @@ def serialize_order(order: Order, include_items=False, include_delivery=False, i
             "order_number": order.order_number,
             "user_id": order.user_id,
             "status": str(order.status),
+            # The order's own status. A NULL status is one way to land here, so this
+            # read must not raise either.
+            "display_status": order.status.value if order.status is not None else None,
             "total_amount": float(order.total_amount),
             "created_at": order.created_at.isoformat(),
+            # Fail closed. Never re-run the predicate here: it reads relationships, and a
+            # second raise would turn this degraded answer into a 500.
+            "can_customer_cancel": False,
             "error": f"Partial serialization due to: {str(e)}",
         }
 

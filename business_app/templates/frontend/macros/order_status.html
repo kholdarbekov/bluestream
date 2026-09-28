@@ -1,0 +1,15 @@
+{#
+  The status label a customer sees on the server-rendered order pages (F15).
+  `display_status` is the backend's published answer
+  (OrderScheduleService.customer_display_status): the wait for a new date, or the
+  order's own status. The wait is not an order status, so it has its own copy. Every
+  other value is the status itself. Pages label the value and never work the wait out.
+  The JS pages carry the same copy in PAGE_DATA `i18n.status_labels`.
+#}
+{% macro order_status_label(display_status) -%}
+{%- if display_status == 'awaiting_new_date' -%}
+{{ 'Awaiting a new delivery date'|t }}
+{%- else -%}
+{{ display_status|replace('_', ' ')|title }}
+{%- endif -%}
+{%- endmacro %}

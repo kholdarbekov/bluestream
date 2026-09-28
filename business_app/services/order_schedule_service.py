@@ -10,10 +10,11 @@ moved to a later day). Every driver-facing surface keys off a claimable
 import logging
 from dataclasses import dataclass
 from datetime import date, datetime, time, timezone
-from typing import Any, Callable, Dict, FrozenSet, Optional, Tuple
+from typing import Any, Callable, Dict, FrozenSet, Iterable, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from flask import current_app, g, has_app_context
+from sqlalchemy import and_, func
 
 # `Delivery` is imported alongside `DeliveryPerson` (same module, already on
 # this file's import path) for the `ensure_delivery_if_due` return annotation
@@ -26,7 +27,7 @@ from business_app.models.order import Order
 from business_app.models.user import User
 from business_app.utils.state_validators import ACTIVE_ORDER_STATUSES
 from business_app.utils.timezone_utils import get_utc_now
-from shared.constants import DISPLAY_TIMEZONE
+from shared.constants import DISPLAY_TIMEZONE, ORDER_DISPLAY_AWAITING_NEW_DATE
 from shared.enums import DeliveryStatus, OrderStatus
 
 logger = logging.getLogger(__name__)
@@ -61,7 +62,25 @@ class RescheduleOutcome:
     old_driver_telegram_id: Optional[str]
     old_driver_order_info: Optional[dict]
     notify_customer: bool
+    customer_channel: Optional[str]
     audit: dict
+
+
+@dataclass(frozen=True)
+class RescheduleResult:
+    """What `OrderScheduleService.reschedule` hands its caller: the order, and the customer notice.
+
+    Both notice fields were decided under the locks, before the write. Never recompute them
+    after the call returns. By then the row is `scheduled` or `rescheduled`, so the status half
+    of R13 misses. The notice task has not marked anything sent yet either, so the other half
+    misses too, and a recompute would answer False for every first re-date.
+    """
+
+    order: Order
+    notify_customer: bool
+    # "telegram" or "email". None when no notice goes out, or when the customer has neither
+    # channel, in which case staff must contact them.
+    customer_channel: Optional[str]
 
 
 # `flask.g` attribute name for the request/app-context-scoped
@@ -86,10 +105,13 @@ class OrderScheduleService:
             DeliveryStatus.RESCHEDULED,
         }
     )
-    # R13: the driver was already on the way, so the customer is expecting them
-    # today and must hear the new date.
+    # R13, amended by F14 (docs/superpowers/specs/2026-09-25-failed-delivery-awaits-new-date-design.md).
+    # The customer must hear the new date when:
+    # - the driver was already on the way, so they are expecting them today;
+    # - an attempt failed. Nothing told them at the failure (F17), and the order
+    #   has been waiting on a new date since, so this notice is their answer.
     CUSTOMER_NOTICE_DELIVERY_STATUSES: FrozenSet[DeliveryStatus] = frozenset(
-        {DeliveryStatus.IN_TRANSIT, DeliveryStatus.ARRIVED}
+        {DeliveryStatus.IN_TRANSIT, DeliveryStatus.ARRIVED, DeliveryStatus.FAILED}
     )
     # R16: a driver holds the stop in these, so a reschedule takes it off their
     # route and tells them why.
@@ -196,7 +218,7 @@ class OrderScheduleService:
         """The release instant a payload may show: set only while the order is held.
 
         The ONE answer behind every published `release_at`: the admin order
-        payloads (`order_schedule_fields`) and both re-dispatch responses
+        payloads (`order_schedule_fields`) and the operator re-dispatch response
         (`StaffService.redispatch_release_at`). Once the order is released, or
         when nothing will release it at a known instant (a PENDING order waits
         for its confirmation), there is no "drivers will see it at" to quote.
@@ -251,6 +273,92 @@ class OrderScheduleService:
         if delivery is not None and delivery.status not in cls.RESCHEDULABLE_DELIVERY_STATUSES:
             return "DELIVERY_NOT_RESCHEDULABLE"
         return None
+
+    @classmethod
+    def awaiting_new_date(cls, order: Order) -> bool:
+        """The delivery failed and the order is still live, so it waits for a new date (F1).
+
+        F1 of docs/superpowers/specs/2026-09-25-failed-delivery-awaits-new-date-design.md:
+        a failure never changes the order's status, so this state is derived, and this
+        is the ONE place that derives it. `awaiting_new_date_filter` is its SQL twin.
+        The re-dispatch guard, the forward-move guard, the customer display and every
+        flag staff see ask one of the two, so no screen holds a copy of the rule.
+
+        Reads `order.status` and `order.delivery` only. The admin list and the customer
+        lists eager-load the delivery, so a page of rows costs no query.
+        """
+        delivery = order.delivery
+        return (
+            delivery is not None and delivery.status == DeliveryStatus.FAILED and order.status in ACTIVE_ORDER_STATUSES
+        )
+
+    @classmethod
+    def awaiting_new_date_filter(cls):
+        """`awaiting_new_date` as a bare SQL clause, for lists and counts.
+
+        The caller must already have `orders` AND `deliveries` in FROM through an
+        explicit join. An eager `joinedload(Order.delivery)` does not count: it joins an
+        anonymous alias, so this clause would pull a second, unjoined `deliveries` into
+        FROM. `deliveries.order_id` is unique, so the join never repeats an order.
+        """
+        return and_(Delivery.status == DeliveryStatus.FAILED, Order.status.in_(ACTIVE_ORDER_STATUSES))
+
+    @classmethod
+    def customer_display_status(cls, order: Order) -> str:
+        """The status a customer is shown (F15): the wait, or the order's own status.
+
+        Every customer surface publishes this as `display_status`, so no template, page
+        or bot works the wait out again. The order row keeps its real status either way.
+        """
+        if cls.awaiting_new_date(order):
+            return ORDER_DISPLAY_AWAITING_NEW_DATE
+        return order.status.value
+
+    @classmethod
+    def assert_can_advance(cls, order: Order) -> None:
+        """Refuse to move an order that awaits a new date forward (F18).
+
+        Operator "Mark preparing", the admin status route and bulk `process` call this
+        before they write. Each of them queues a customer status message once it has
+        written, and "preparing" for a delivery nobody has re-dated is a promise nobody
+        keeps.
+
+        Raises ValidationError(ORDER_AWAITING_NEW_DATE).
+        """
+        if not cls.awaiting_new_date(order):
+            return
+        from business_app.utils.exceptions import ValidationError
+
+        raise ValidationError(
+            f"Order {order.order_number}'s delivery failed and is waiting for a new date; "
+            "reschedule it before moving the order forward",
+            error_code="ORDER_AWAITING_NEW_DATE",
+        )
+
+    @classmethod
+    def failed_at_by_delivery(cls, delivery_ids: Iterable[int]) -> Dict[int, datetime]:
+        """When each delivery last failed, from its FAILED history rows, in one grouped query.
+
+        The latest one: a delivery re-dated and failed again has waited since its second
+        failure. A delivery with no FAILED row is absent, and the caller chooses its own
+        fallback. The operator's failed list and the customer timeline both read this,
+        so they quote one instant.
+        """
+        from business_app import db
+
+        ids = list(delivery_ids)
+        if not ids:
+            return {}
+        rows = (
+            db.session.query(DeliveryStatusHistory.delivery_id, func.max(DeliveryStatusHistory.changed_at))
+            .filter(
+                DeliveryStatusHistory.delivery_id.in_(ids),
+                DeliveryStatusHistory.new_status == DeliveryStatus.FAILED,
+            )
+            .group_by(DeliveryStatusHistory.delivery_id)
+            .all()
+        )
+        return {delivery_id: failed_at for delivery_id, failed_at in rows}
 
     @classmethod
     def reschedule_date_bounds(cls, order: Order) -> Tuple[date, date]:
@@ -316,14 +424,18 @@ class OrderScheduleService:
 
     @classmethod
     def will_notify_customer(cls, order: Order) -> bool:
-        """R13: a reschedule tells the customer when the driver was already on
-        the way, or when they were told about an earlier reschedule and are
-        waiting on the date we gave them.
+        """R13, amended by F14: a reschedule tells the customer when
+        - the driver was already on the way;
+        - an attempt failed, and the order has been waiting on a new date since; or
+        - they were told about an earlier reschedule and are waiting on the date
+          we gave them.
 
         Published as `reschedule_notifies_customer` AND read by `reschedule`
-        itself, so the modal's "the customer will be notified" and the notice
-        that is actually queued are one expression. The status test runs first
-        and short-circuits, so a delivery that is on its way costs no query.
+        itself, under its locks and before the write
+        (`RescheduleResult.notify_customer`). So the modal's "the customer will
+        be notified" and the notice that is actually queued are one expression.
+        The status test runs first and short-circuits, so a delivery that is on
+        its way or has failed costs no query.
         """
         delivery = order.delivery
         if delivery is not None and delivery.status in cls.CUSTOMER_NOTICE_DELIVERY_STATUSES:
@@ -331,13 +443,15 @@ class OrderScheduleService:
         return cls.customer_already_notified(order)
 
     @staticmethod
-    def _customer_notice_channel(order: Order) -> Optional[str]:
+    def customer_notice_channel(order: Order) -> Optional[str]:
         """The notice's channel: "telegram", "email", or None when the customer cannot be reached (R14).
 
         Resolved by the notification service's own rule, the one the send
-        uses, so the modal never promises a channel the notice will not take.
-        A staticmethod, called on the class: building a `NotificationService`
-        would build its SMS client for a read-only answer.
+        uses. The modal's `reschedule_customer_channel` and
+        `RescheduleResult.customer_channel` both come from here, so neither
+        the modal nor the operator's reply promises a channel the notice will
+        not take. A staticmethod, called on the class: building a
+        `NotificationService` would build its SMS client for a read-only answer.
         """
         from business_app.services.notification_service import NotificationService
 
@@ -379,7 +493,7 @@ class OrderScheduleService:
         metadata.update(
             {
                 "reschedule_notifies_customer": reschedulable and cls.will_notify_customer(order),
-                "reschedule_customer_channel": cls._customer_notice_channel(order),
+                "reschedule_customer_channel": cls.customer_notice_channel(order),
                 "reschedule_driver_losing_stop": losing_stop,
                 "reschedule_min_date": min_date.isoformat(),
                 "reschedule_max_date": max_date.isoformat(),
@@ -544,12 +658,13 @@ class OrderScheduleService:
         actor_user_id: int,
         reason: Optional[str] = None,
         expected_delivery_status: Optional[DeliveryStatus] = None,
-    ) -> Order:
+    ) -> RescheduleResult:
         """Move an order's delivery to another date and window. The ONE re-dater.
 
-        The admin PATCH, the admin Delivery-page re-dispatch and the staff-bot
-        re-dispatch all come here (spec 2026-09-23 §3.4), so eligibility, the
-        unassign, the landing status and the notices cannot differ by screen.
+        The admin PATCH (the Orders page's Reschedule, and since F13 the Delivery
+        page's too) and the staff-bot re-dispatch both come here (spec 2026-09-23
+        §3.4), so eligibility, the unassign, the landing status and the notices
+        cannot differ by screen.
 
         * No `Delivery` row yet: only the order's fields move, then the release
           gate runs, exactly as before.
@@ -565,12 +680,23 @@ class OrderScheduleService:
           confirmed.
 
         `reason` is stripped; longer than 100 characters is refused, never cut
-        (R24). `expected_delivery_status` is the re-dispatch guard. The caller saw a
-        FAILED row on an unlocked read; this re-checks it on the locked one.
+        (R24). `expected_delivery_status` is the re-dispatch guard, and the admin
+        modal's F11 same-day Save's. The caller saw a FAILED row on an unlocked read;
+        this re-checks it on the locked one.
+
+        The date and window are judged here, not by the callers (F10,
+        docs/superpowers/specs/2026-09-25-failed-delivery-awaits-new-date-design.md
+        §3.5): today up to the booking horizon, cut at a grocery contract's end,
+        and the window only when the caller changes it (`_refuse_disallowed_schedule`).
+
+        Returns a `RescheduleResult`: the order, and the customer-notice decision
+        made under the locks. See that class for why nobody may recompute it.
 
         Raises NotFoundError (ORDER_NOT_FOUND), or ValidationError with
         ORDER_NOT_RESCHEDULABLE, DELIVERY_NOT_RESCHEDULABLE,
-        DELIVERY_DATE_REQUIRED, ORDER_RESCHEDULE_PAST_CONTRACT_END,
+        DELIVERY_DATE_REQUIRED, ORDER_RESCHEDULE_DATE_IN_PAST,
+        ORDER_RESCHEDULE_BEYOND_HORIZON, ORDER_RESCHEDULE_PAST_CONTRACT_END,
+        ORDER_RESCHEDULE_WINDOW_INVALID, ORDER_RESCHEDULE_WINDOW_PASSED,
         ORDER_RESCHEDULE_REASON_TOO_LONG or STAFF_DELIVERY_NOT_REDISPATCHABLE.
         Nothing is written when it raises.
         """
@@ -596,22 +722,22 @@ class OrderScheduleService:
             actor_user_id,
         )
         cls._run_post_commit(outcome)
-        return db.session.get(Order, order_id)
+        return RescheduleResult(
+            order=db.session.get(Order, order_id),
+            notify_customer=outcome.notify_customer,
+            customer_channel=outcome.customer_channel,
+        )
 
     @staticmethod
     def _normalize_reason(reason: Optional[str]) -> Optional[str]:
-        """Blank is no reason. Longer than the history column is refused, not cut:
-        the audit event keeps the whole text, and a history row quietly holding a
-        prefix of it would be the same reason recorded two ways."""
-        from business_app.utils.exceptions import ValidationError
+        """Blank is no reason; longer than the history column is refused, not cut.
+        The strip-and-length step is shared with the admin cancel/return reason
+        (`strip_reason`); only the code differs, and here the reason stays optional."""
+        from business_app.utils.validation_helpers import strip_reason
 
-        reason = (reason or "").strip() or None
-        if reason is not None and len(reason) > RESCHEDULE_REASON_MAX_LENGTH:
-            raise ValidationError(
-                f"The reason can be at most {RESCHEDULE_REASON_MAX_LENGTH} characters",
-                error_code="ORDER_RESCHEDULE_REASON_TOO_LONG",
-            )
-        return reason
+        return strip_reason(
+            reason, max_length=RESCHEDULE_REASON_MAX_LENGTH, error_code="ORDER_RESCHEDULE_REASON_TOO_LONG"
+        )
 
     @staticmethod
     def _lock_delivery(order_id: int) -> Optional[Delivery]:
@@ -623,6 +749,66 @@ class OrderScheduleService:
         would be invisible to the decision made under the lock.
         """
         return Delivery.query.filter_by(order_id=order_id).with_for_update().populate_existing().one_or_none()
+
+    @classmethod
+    def _refuse_disallowed_schedule(
+        cls,
+        order: Order,
+        delivery_date: Optional[date],
+        window_start: Optional[time],
+        window_end: Optional[time],
+    ) -> None:
+        """The date and window rule of every re-date, as coded refusals (F10).
+
+        Called under the locks, on the locked order. The clock is read once, so
+        the date and the window are judged against the same moment. The rule is
+        `schedule_error_codes`, the one create-order and checkout answer to. This
+        maps its codes and never its English.
+
+        The window is judged only when the caller changes it. An unchanged window
+        is the customer's own, so moving a failed delivery to today after its
+        morning window has ended is allowed. A re-dispatch passes the order's own
+        window, so it never meets the window codes. An admin who changed the
+        window meanwhile re-dated the row out of `failed`, and
+        `expected_delivery_status` refuses first.
+        """
+        from business_app.utils.delivery_window import (
+            SCHEDULE_BEYOND_HORIZON,
+            SCHEDULE_DATE_IN_PAST,
+            SCHEDULE_WINDOW_INVALID,
+            SCHEDULE_WINDOW_PASSED,
+            local_now,
+            schedule_error_codes,
+        )
+        from business_app.utils.exceptions import ValidationError
+        from shared.business_config import MAX_SCHEDULE_HORIZON_DAYS
+
+        codes = schedule_error_codes(delivery_date, window_start, window_end, now_local=local_now())
+        if SCHEDULE_DATE_IN_PAST in codes:
+            raise ValidationError("The new delivery date is in the past", error_code="ORDER_RESCHEDULE_DATE_IN_PAST")
+        if SCHEDULE_BEYOND_HORIZON in codes:
+            raise ValidationError(
+                f"The new delivery date is more than {MAX_SCHEDULE_HORIZON_DAYS} days ahead",
+                error_code="ORDER_RESCHEDULE_BEYOND_HORIZON",
+            )
+        # Within the horizon, only a grocery contract's end can still cut the date
+        # short. `reschedule_date_bounds` reads the clock again, but a later read
+        # can only widen its horizon half, which was judged above.
+        if delivery_date is not None and delivery_date > cls.reschedule_date_bounds(order)[1]:
+            raise ValidationError(
+                "The new delivery date is after the customer's contract ends",
+                error_code="ORDER_RESCHEDULE_PAST_CONTRACT_END",
+            )
+        if (window_start, window_end) == (order.delivery_window_start, order.delivery_window_end):
+            return
+        if SCHEDULE_WINDOW_INVALID in codes:
+            raise ValidationError(
+                "The delivery window must start before it ends", error_code="ORDER_RESCHEDULE_WINDOW_INVALID"
+            )
+        if SCHEDULE_WINDOW_PASSED in codes:
+            raise ValidationError(
+                "That delivery window has already ended today", error_code="ORDER_RESCHEDULE_WINDOW_PASSED"
+            )
 
     @classmethod
     def _apply_reschedule(
@@ -696,11 +882,10 @@ class OrderScheduleService:
                     "A delivery date is required once the order has been released to drivers",
                     error_code="DELIVERY_DATE_REQUIRED",
                 )
-            if delivery_date is not None and delivery_date > cls.reschedule_date_bounds(order)[1]:
-                raise ValidationError(
-                    "The new delivery date is after the customer's contract ends",
-                    error_code="ORDER_RESCHEDULE_PAST_CONTRACT_END",
-                )
+            # F10, judged here and nowhere else, on the locked order. It comes
+            # after the re-dispatch guard, so a row a colleague already re-dated
+            # reads as that, never as a date or window refusal.
+            cls._refuse_disallowed_schedule(order, delivery_date, window_start, window_end)
 
             # The pre-write picture the post-commit notices need (step 4).
             old_driver_user_id = delivery.delivery_person_id if delivery is not None else None
@@ -714,6 +899,9 @@ class OrderScheduleService:
             # `order.delivery` was expired above and resolves to the locked row,
             # still in its pre-reschedule status.
             notify_customer = cls.will_notify_customer(order)
+            # Captured beside it for the same reason: after the write, nothing
+            # can tell any more whether this re-date notified anyone.
+            customer_channel = cls.customer_notice_channel(order) if notify_customer else None
             from_date = order.delivery_date
             from_start, from_end = order.delivery_window_start, order.delivery_window_end
 
@@ -768,6 +956,7 @@ class OrderScheduleService:
             old_driver_telegram_id=old_driver_telegram_id,
             old_driver_order_info=old_driver_order_info,
             notify_customer=notify_customer,
+            customer_channel=customer_channel,
             # JSON-safe values only: the audit row's column is JSON, and a
             # `date` in it is dropped with nothing but a log line.
             audit={

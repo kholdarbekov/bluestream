@@ -1,11 +1,12 @@
 """`GET /orders/statuses` publishes the schedule picker's bounds (spec §5).
 
 Driven over HTTP twice. First, the bounds are read the way the Create Order modal
-reads them. Then a real write path, `PATCH /admin/orders/<id>/schedule`, which
-validates through the same `parse_and_validate_schedule`, proves the published
-range is the accepted range, day for day. The JS `SCHEDULE_HORIZON_DAYS` copy and
-the browser clock allowed a picker that offers a day the write path refuses, or
-hides one it accepts.
+reads them. Then a real write path, `PATCH /admin/orders/<id>/schedule`, proves the
+published range is the accepted range, day for day. Its rule is the same
+`schedule_error_codes` behind every schedule check, judged inside
+`OrderScheduleService.reschedule`, and each refused side answers with its own code.
+The JS `SCHEDULE_HORIZON_DAYS` copy and the browser clock allowed a picker that
+offers a day the write path refuses, or hides one it accepts.
 """
 
 from datetime import date, datetime, timedelta
@@ -45,7 +46,9 @@ def test_the_bounds_are_tashkent_local_today_through_the_horizon(client, db, fro
     assert last == (date(2026, 9, 24) + timedelta(days=MAX_SCHEDULE_HORIZON_DAYS)).isoformat()
 
     data = client.get("/api/v1/orders/statuses").get_json()["data"]
-    assert set(data) == {"statuses", "transitions", "schedule_min_date", "schedule_max_date"}
+    assert set(data) == {
+        "statuses", "transitions", "schedule_min_date", "schedule_max_date", "reason_required_statuses",
+    }
 
 
 @pytest.mark.parametrize(
@@ -75,4 +78,8 @@ def test_the_write_path_accepts_exactly_the_published_range(
         assert sample_order.delivery_date == requested
     else:
         assert response.status_code == 400, response.get_data(as_text=True)
+        assert response.get_json()["data"]["error_code"] == {
+            "before_first": "ORDER_RESCHEDULE_DATE_IN_PAST",
+            "after_last": "ORDER_RESCHEDULE_BEYOND_HORIZON",
+        }[day]
         assert sample_order.delivery_date is None

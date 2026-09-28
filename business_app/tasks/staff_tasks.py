@@ -7,6 +7,7 @@ import logging
 import requests
 import os
 from datetime import datetime, timezone
+from typing import Optional
 from uuid import uuid4
 from celery import shared_task
 
@@ -242,3 +243,151 @@ def notify_staff_order_unassigned(self, telegram_id: str, order_info: dict):
             "order_info": order_info,
         },
     )
+
+
+def _delivery_awaiting_new_date(delivery_id: int):
+    """The delivery, read now, while it still awaits a new date (F1); otherwise None.
+
+    Both alert tasks ask this every time they run. A queued alert can wait behind a
+    re-date or an order cancel, and a card asking for a date that was already given
+    only sends an operator to a refusal.
+    """
+    from business_app import db
+    from business_app.models.delivery import Delivery
+    from business_app.services.order_schedule_service import OrderScheduleService
+
+    delivery = db.session.get(Delivery, delivery_id)
+    if delivery is None or delivery.order is None or not OrderScheduleService.awaiting_new_date(delivery.order):
+        return None
+    return delivery
+
+
+def _alert_chat_id(user) -> Optional[int]:
+    """The chat the staff bot addresses `user` at, or None for a Telegram id that holds no
+    number. Logged and skipped, so one bad row costs only its own alert."""
+    try:
+        return int(user.telegram_id)
+    except (TypeError, ValueError):
+        logger.warning("delivery-failed alert: user %s has an unusable telegram_id %r", user.id, user.telegram_id)
+        return None
+
+
+@shared_task(name="staff.notify_delivery_failed")
+def notify_delivery_failed(delivery_id: int, actor_user_id: Optional[int]):
+    """Alert the staff who can give a failed delivery a new date (F7).
+
+    Queued by `StaffService.update_delivery_status` once a failure commits, from the
+    driver bot and from the admin Delivery page alike. The admin panel has no push
+    channel, so the staff bot is the only one that reaches a person.
+
+    Recipients: operators the staff bot would let in, and active admins and managers,
+    each with a Telegram id. A person who holds both is one recipient and counts as an
+    operator, so they get the date buttons. The person who marked the failure already
+    knows and is left out. Each recipient gets one `push_delivery_failed`, in their own
+    language. Each recipient is isolated: a Telegram id that holds no number, or a publish
+    the broker drops, loses that person's alert and nobody else's.
+
+    The card carries no date bounds. The bot fetches them for the one delivery when an
+    operator taps.
+    """
+    from business_app.models.user import User
+    from business_app.services.staff_service import StaffService
+    from business_app.utils.exceptions import ForbiddenError
+    from shared.enums import UserRole
+
+    delivery = _delivery_awaiting_new_date(delivery_id)
+    if delivery is None:
+        logger.info("delivery-failed alert skipped for delivery %s: it no longer awaits a new date", delivery_id)
+        return {"success": False, "reason": "not_awaiting_new_date", "delivery_id": delivery_id}
+
+    # telegram_id -> (user, is_operator). Operators go first, so a manager who is also
+    # an operator keeps the operator's card.
+    recipients = {}
+    operators = (
+        User.query.filter(
+            StaffService.staff_role_member_filter(UserRole.OPERATOR.value),
+            User.status == "active",
+            User.telegram_id.isnot(None),
+        )
+        .order_by(User.id)
+        .all()
+    )
+    for operator in operators:
+        try:
+            # The staff bot's own door: an operator it refuses could not open the card.
+            StaffService.assert_staff_active(operator)
+        except ForbiddenError:
+            continue
+        chat_id = _alert_chat_id(operator)
+        if chat_id is not None:
+            recipients.setdefault(chat_id, (operator, True))
+    supervisors = (
+        User.query.filter(
+            User.role.in_([UserRole.ADMIN, UserRole.MANAGER]),
+            User.status == "active",
+            User.telegram_id.isnot(None),
+        )
+        .order_by(User.id)
+        .all()
+    )
+    for supervisor in supervisors:
+        chat_id = _alert_chat_id(supervisor)
+        if chat_id is not None:
+            recipients.setdefault(chat_id, (supervisor, False))
+
+    attempts = delivery.delivery_attempts or 0
+    alert = {
+        # Who and where, from the builder the operator's failed list uses too.
+        **StaffService.failed_delivery_card(delivery),
+        # A code: the staff bot words it in the reader's language.
+        "reason": delivery.failed_delivery_reason,
+        "attempts": attempts,
+    }
+    queued = 0
+    for telegram_id, (recipient, is_operator) in recipients.items():
+        if recipient.id == actor_user_id:
+            continue
+        try:
+            push_delivery_failed.delay(
+                delivery.id,
+                attempts,
+                telegram_id,
+                {
+                    **alert,
+                    # One id per failure and person. A retry collapses in the staff bot's
+                    # dedup, and a failure after a re-date alerts again.
+                    "event_id": f"delivery-failed:{delivery.id}:{attempts}:{telegram_id}",
+                    "telegram_id": telegram_id,
+                    "is_operator": is_operator,
+                    "language": recipient.preferred_language or "uz",
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 -- one recipient must not cost the rest their alert
+            logger.warning(
+                "delivery-failed alert for delivery %s not queued for user %s: %s", delivery.id, recipient.id, exc
+            )
+            continue
+        queued += 1
+    return {"success": True, "delivery_id": delivery_id, "recipients": queued}
+
+
+@shared_task(name="staff.push_delivery_failed", bind=True, max_retries=3, default_retry_delay=60)
+def push_delivery_failed(self, delivery_id: int, attempts: int, telegram_id: int, payload: dict):
+    """Send one delivery-failed alert to one staff member's chat (F7).
+
+    Modelled on `sales.push_sales_event`: a send the staff bot did not take is
+    retried. Celery replays the same arguments, so the retry carries the same
+    `event_id`, and the staff bot's dedup collapses it if the first send did land.
+
+    Re-checked on every run, retries included. Once the delivery has been re-dated,
+    its order closed, or it failed again, this alert is stale. A second failure queues
+    its own alert, with the new attempt count. A stale run sends nothing and is not
+    retried.
+    """
+    delivery = _delivery_awaiting_new_date(delivery_id)
+    if delivery is None or (delivery.delivery_attempts or 0) != attempts:
+        logger.info("delivery-failed alert for delivery %s, attempt %s, not sent: it is stale", delivery_id, attempts)
+        return {"success": False, "reason": "stale", "delivery_id": delivery_id}
+    if not _send_staff_webhook("/internal/delivery-failed", payload):
+        raise self.retry(exc=RuntimeError(f"delivery-failed webhook failed for delivery {delivery_id}"))
+    return {"success": True, "delivery_id": delivery_id}

@@ -30,6 +30,11 @@ ACTIVE_DELIVERY_STATUSES = {
 # delivery: the driver-driven steps and their two outcomes.
 ADMIN_DRIVER_REQUIRED_TARGETS = frozenset(ACTIVE_DELIVERY_STATUSES | {DeliveryStatus.DELIVERED, DeliveryStatus.FAILED})
 
+# F6: the admin moves that must name an internal reason, because a return closes the
+# order. `_apply_status_update` enforces it, and every row publishes it as
+# `reason_required_statuses`, so the Delivery page keeps no copy.
+ADMIN_DELIVERY_REASON_REQUIRED_STATUSES = frozenset({DeliveryStatus.RETURNED})
+
 
 class AdminDeliveryService:
     """Business/query logic for admin delivery management."""
@@ -167,6 +172,7 @@ class AdminDeliveryService:
                     notes=delivery.delivery_notes,
                     fail_reason=(payload.get("fail_reason") or "").strip() or None,
                     cash_collected=payload.get("cash_collected"),
+                    reason=payload.get("reason"),
                 )
                 status_changed = True
 
@@ -175,29 +181,6 @@ class AdminDeliveryService:
             db.session.commit()
 
         return AdminDeliveryService.serialize_delivery(delivery)
-
-    @staticmethod
-    def redispatch_delivery(delivery_id: int, actor_id: int, *, reason: Optional[str] = None) -> Dict[str, Any]:
-        """Re-dispatch a failed delivery (admin panel entry point): a reschedule
-        to today, window unchanged (R18). Delegates to
-        StaffService.redispatch_failed_delivery so the rule lives in a single
-        place.
-
-        Returns the route's payload: ``delivery``, the refreshed serialized
-        delivery for the admin UI, and ``release_at``, the ISO UTC instant
-        drivers will see a held (``rescheduled``) landing, or None when it went
-        straight back to the pool (R25, ``StaffService.redispatch_release_at``)."""
-        StaffService.redispatch_failed_delivery(delivery_id, actor_id, reason=reason)
-        delivery = Delivery.query.options(
-            joinedload(Delivery.order),
-            joinedload(Delivery.status_history).joinedload(DeliveryStatusHistory.changed_by_user),
-            joinedload(Delivery.delivery_person),
-        ).get(delivery_id)
-        release_at = StaffService.redispatch_release_at(delivery)
-        return {
-            "delivery": AdminDeliveryService.serialize_delivery(delivery),
-            "release_at": release_at.isoformat() if release_at else None,
-        }
 
     @staticmethod
     def reassign_delivery(delivery_id: int, new_person_id: int, actor_id: int) -> Delivery:
@@ -263,6 +246,8 @@ class AdminDeliveryService:
                 status.value for status in AdminDeliveryService.allowed_status_transitions(delivery)
             ],
             "can_redispatch": StaffService.redispatch_block_code(delivery) is None,
+            # The moves the Update form must send with a `reason`, behind a confirm (F6).
+            "reason_required_statuses": sorted(status.value for status in ADMIN_DELIVERY_REASON_REQUIRED_STATUSES),
             # AssignDeliveryModal takes Assign (POST /admin/staff/delivery/assign) for a
             # driverless row and Reassign (PUT .../reassign, the explicit admin
             # override) for an owned one.
@@ -348,6 +333,7 @@ class AdminDeliveryService:
         notes: Optional[str],
         fail_reason: Optional[str],
         cash_collected: Optional[Any],
+        reason: Optional[str] = None,
     ) -> None:
         current_status = delivery.status
         if current_status not in AdminDeliveryService.ADMIN_ALLOWED_TRANSITIONS:
@@ -383,6 +369,16 @@ class AdminDeliveryService:
             )
             return
 
+        # F6: a MOVE to returned names its reason. `update_delivery` calls this
+        # only when the status changes, so "Edit notes" on a row that is already
+        # returned never gets here and needs none. Checked before the first write
+        # below, so a refusal leaves the row, its driver, its route slot and the
+        # order as they were.
+        if new_status in ADMIN_DELIVERY_REASON_REQUIRED_STATUSES:
+            from business_app.services.order_service import OrderService
+
+            reason = OrderService.require_admin_reason(reason)
+
         now = datetime.now(UTC)
         old_status = delivery.status
         previous_driver_id = delivery.delivery_person_id
@@ -415,6 +411,7 @@ class AdminDeliveryService:
         if new_status == DeliveryStatus.RETURNED:
             AdminDeliveryService._release_driver_workload(delivery, driver_id=previous_driver_id)
             if delivery.order:
+                order_pre_status = delivery.order.status
                 delivery.order.status = OrderStatus.RETURNED
                 delivery.order.updated_at = now
 
@@ -449,6 +446,24 @@ class AdminDeliveryService:
                     updated_by=actor_id,
                 )
 
+                # The direct write above skips `update_order_status`, and with it
+                # the order's history row. Recorded here with the admin's reason
+                # and NO note: the customer bot prints every history note on its
+                # Track screen, and this delivery's notes are staff text (F6).
+                # Not when the Orders page already returned the order and this is
+                # the delivery catching up (spec §11): a second Returned row would
+                # show twice on the Track screen and replace the closing reason.
+                # The delivery's own history row below still keeps this reason.
+                if order_pre_status != OrderStatus.RETURNED:
+                    OrderService.record_status_history(
+                        delivery.order.id,
+                        order_pre_status,
+                        OrderStatus.RETURNED,
+                        actor_id,
+                        None,
+                        history_reason=reason,
+                    )
+
         history = DeliveryStatusHistory(
             delivery_id=delivery.id,
             old_status=old_status,
@@ -456,7 +471,9 @@ class AdminDeliveryService:
             changed_by=actor_id,
             changed_at=now,
             notes=notes or f"Updated via admin panel to {new_status.value}",
-            reason=fail_reason,
+            # A return's reason is the admin's (F6). A move to failed records its
+            # `fail_reason` through `StaffService.update_delivery_status` above.
+            reason=reason if new_status in ADMIN_DELIVERY_REASON_REQUIRED_STATUSES else None,
         )
         db.session.add(history)
         db.session.commit()

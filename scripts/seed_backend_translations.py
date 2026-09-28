@@ -292,6 +292,46 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Bu bosqichda buyurtmani bekor qilib bo\'lmaydi',
         'ru': 'Заказ не может быть отменен на этом этапе'
     },
+    # Customer self-cancel refusals, web wording (F5/F16 of
+    # docs/superpowers/specs/2026-09-25-failed-delivery-awaits-new-date-design.md).
+    # POST /orders/<id>/cancel renders api.orders.cancel_refused.<reason_code> and
+    # fills {bot_url} from COMPANY_TELEGRAM_BOT_URL. The customer bot shows its own
+    # telegram.orders.cancel_refused.* copy, picked by the same reason_code. Never a
+    # phone number: customers are sent to the bot chat.
+    'api.orders.cancel_refused.with_driver': {
+        'en': 'A driver has already taken your order, so it can\'t be cancelled here. '
+              'If you need to change it, message us in our Telegram bot: {bot_url}',
+        'uz': 'Buyurtmangizni haydovchi allaqachon olgan, shuning uchun uni bu yerda bekor qilib '
+              'bo\'lmaydi. Uni o\'zgartirish kerak bo\'lsa, Telegram botimizga yozing: {bot_url}',
+        'ru': 'Водитель уже взял ваш заказ, поэтому отменить его здесь нельзя. '
+              'Если нужно что-то изменить, напишите нам в Telegram-бот: {bot_url}'
+    },
+    # Never says a driver has the order: the delivery failed and a new date is being chosen.
+    'api.orders.cancel_refused.awaiting_new_date': {
+        'en': 'Your delivery didn\'t go through and we\'re choosing a new date, so the order '
+              'can\'t be cancelled here. If you need to change it, message us in our Telegram bot: {bot_url}',
+        'uz': 'Yetkazib berish amalga oshmadi, biz yangi sanani belgilayapmiz, shuning uchun '
+              'buyurtmani bu yerda bekor qilib bo\'lmaydi. Uni o\'zgartirish kerak bo\'lsa, '
+              'Telegram botimizga yozing: {bot_url}',
+        'ru': 'Доставка не состоялась, и мы подбираем новую дату, поэтому отменить заказ здесь '
+              'нельзя. Если нужно его изменить, напишите нам в Telegram-бот: {bot_url}'
+    },
+    'api.orders.cancel_refused.paid': {
+        'en': 'This order is already paid, so it can\'t be cancelled here. '
+              'Message us in our Telegram bot: {bot_url}',
+        'uz': 'Bu buyurtma allaqachon to\'langan, shuning uchun uni bu yerda bekor qilib '
+              'bo\'lmaydi. Telegram botimizga yozing: {bot_url}',
+        'ru': 'Этот заказ уже оплачен, поэтому отменить его здесь нельзя. '
+              'Напишите нам в Telegram-бот: {bot_url}'
+    },
+    'api.orders.cancel_refused.not_cancellable': {
+        'en': 'This order can no longer be cancelled. If you have a question about it, '
+              'message us in our Telegram bot: {bot_url}',
+        'uz': 'Bu buyurtmani endi bekor qilib bo\'lmaydi. Savolingiz bo\'lsa, '
+              'Telegram botimizga yozing: {bot_url}',
+        'ru': 'Этот заказ больше нельзя отменить. Если у вас есть вопрос, '
+              'напишите нам в Telegram-бот: {bot_url}'
+    },
     'api.orders.tax_committee_unavailable': {
         'en': 'Tax authority system (Asl belgisi) is temporarily unavailable. Please try again or choose cash payment.',
         'uz': '«Asl belgisi» tizimi hozirda mavjud emas. Iltimos, qayta urinib ko\'ring yoki naqd to\'lovni tanlang.',
@@ -4111,6 +4151,41 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Buyurtma muvaffaqiyatli bekor qilindi.',
         'ru': 'Заказ успешно отменен.'
     },
+    # The customer's own cancel, refused (F5/F16 of
+    # docs/superpowers/specs/2026-09-25-failed-delivery-awaits-new-date-design.md): one
+    # variant per `reason_code` of POST /orders/<id>/cancel. The bot shows these instead
+    # of the backend's web wording (api.orders.cancel_refused.*). They point to this
+    # chat, whose free text lands in the admin Support Inbox, and never to a phone.
+    'telegram.orders.cancel_refused.with_driver': {
+        'en': 'A driver has already taken your order. If you need to change it, '
+              'write to us here in the chat.',
+        'uz': 'Buyurtmangizni haydovchi allaqachon olgan. Uni o\'zgartirish kerak bo\'lsa, '
+              'shu chatda bizga yozing.',
+        'ru': 'Водитель уже взял ваш заказ. Если нужно что-то изменить, '
+              'напишите нам здесь, в этом чате.'
+    },
+    # Never says a driver has the order: the delivery failed and a new date is being chosen.
+    'telegram.orders.cancel_refused.awaiting_new_date': {
+        'en': 'Your delivery didn\'t go through and we\'re choosing a new date. '
+              'If you need to change the order, write to us here in the chat.',
+        'uz': 'Yetkazib berish amalga oshmadi, biz yangi sanani belgilayapmiz. '
+              'Buyurtmani o\'zgartirish kerak bo\'lsa, shu chatda bizga yozing.',
+        'ru': 'Доставка не состоялась, и мы подбираем новую дату. '
+              'Если нужно изменить заказ, напишите нам здесь, в этом чате.'
+    },
+    'telegram.orders.cancel_refused.paid': {
+        'en': 'This order is already paid, so it can\'t be cancelled here. '
+              'Write to us here in the chat.',
+        'uz': 'Bu buyurtma allaqachon to\'langan, shuning uchun uni bu yerda bekor qilib '
+              'bo\'lmaydi. Shu chatda bizga yozing.',
+        'ru': 'Этот заказ уже оплачен, поэтому отменить его здесь нельзя. '
+              'Напишите нам здесь, в этом чате.'
+    },
+    'telegram.orders.cancel_refused.not_cancellable': {
+        'en': 'This order can no longer be cancelled.',
+        'uz': 'Bu buyurtmani endi bekor qilib bo\'lmaydi.',
+        'ru': 'Этот заказ больше нельзя отменить.'
+    },
     'telegram.orders.tracking_title': {
         'en': 'Order Tracking',
         'uz': 'Buyurtmani kuzatish',
@@ -4165,6 +4240,30 @@ BACKEND_TRANSLATIONS = {
         'en': 'Returned',
         'uz': 'Qaytarildi',
         'ru': 'Возвращен'
+    },
+    # Not an order status: the backend's `display_status` while a failed delivery waits
+    # for a new date (F15). Named on the order detail line and as the Track screen's
+    # current step. Keep it worded like the web pages' label for the same state.
+    'telegram.orders.status_awaiting_new_date': {
+        'en': 'Awaiting a new delivery date',
+        'uz': 'Yangi yetkazib berish sanasi kutilmoqda',
+        'ru': 'Ожидает новой даты доставки'
+    },
+    # The heading of the order detail screen's status line ("📊 Status: ✅ …").
+    'telegram.orders.detail_status_label': {
+        'en': 'Status',
+        'uz': 'Holati',
+        'ru': 'Статус'
+    },
+    # The storefront's label for the backend's `display_status` while a failed delivery
+    # waits for a new date (F15). Rendered by frontend/macros/order_status.html and
+    # carried in PAGE_DATA `i18n.status_labels` on the orders page and the order modal.
+    # English source text as the key: the Jinja `|t` filter looks it up verbatim.
+    # Worded like the customer bot's `telegram.orders.status_awaiting_new_date`.
+    'Awaiting a new delivery date': {
+        'en': 'Awaiting a new delivery date',
+        'uz': 'Yangi yetkazib berish sanasi kutilmoqda',
+        'ru': 'Ожидает новой даты доставки'
     },
     'telegram.orders.estimated_remaining': {
         'en': 'Estimated remaining',
@@ -6757,7 +6856,6 @@ ADMIN_UI_ORDER_TRANSLATIONS = {
     'ui.orders.cancel_order': _ui_tr('Cancel Order'),
     'ui.orders.cancel_order_confirm': _ui_tr('Cancel order'),
     'ui.orders.cancel_order_title': _ui_tr('Cancel order'),
-    'ui.orders.cancelled_by_admin': _ui_tr('Cancelled by admin'),
     'ui.orders.click_callback_history': _ui_tr('Click Callback History'),
     'ui.orders.click_orders': _ui_tr('Click/Card Orders', 'Click/karta buyurtmalari', 'Заказы Click/карта'),
     'ui.orders.close': _ui_tr('Close'),
@@ -6811,7 +6909,6 @@ ADMIN_UI_ORDER_TRANSLATIONS = {
     'ui.orders.no_marking_code_activity': _ui_tr('No marking-code activity recorded for this order'),
     'ui.orders.no_payment_transactions': _ui_tr('No payment transactions recorded yet'),
     'ui.orders.notes': _ui_tr('Notes', 'Izohlar', 'Примечания'),
-    'ui.orders.notes_optional': _ui_tr('Notes (Optional)'),
     'ui.orders.notes_placeholder': _ui_tr('Notes'),
     'ui.orders.notes_required': _ui_tr('Notes are required'),
     'ui.orders.open_payment_link': _ui_tr('Open Payment Link', "To'lov havolasini ochish", 'Открыть ссылку оплаты'),
@@ -7192,6 +7289,100 @@ ADMIN_UI_ORDER_TRANSLATIONS = {
         'The reason can be at most 100 characters.',
         "Sabab ko'pi bilan 100 belgidan iborat bo'lishi mumkin.",
         'Причина — не более 100 символов.',
+    ),
+    # ---- A failed delivery awaits a new date (docs/superpowers/specs/2026-09-25-failed-delivery-awaits-new-date-design.md) ----
+    # Pinned by tests/unit/test_order_awaiting_new_date_ui_translations.py and
+    # tests/unit/test_order_reschedule_ui_translations.py.
+    # F10: OrderScheduleService.reschedule owns the date and window rule and refuses with these.
+    'ui.orders.reschedule_error.ORDER_RESCHEDULE_DATE_IN_PAST': _ui_tr(
+        'That date has already passed. Pick today or a later day.',
+        "Bu sana allaqachon o'tib ketgan. Bugungi yoki undan keyingi kunni tanlang.",
+        'Эта дата уже прошла. Выберите сегодняшний или более поздний день.',
+    ),
+    'ui.orders.reschedule_error.ORDER_RESCHEDULE_BEYOND_HORIZON': _ui_tr(
+        'That date is too far ahead. Pick a day the calendar offers.',
+        'Bu sana juda uzoqda. Kalendarda taklif qilingan kunlardan birini tanlang.',
+        'Эта дата слишком далеко. Выберите день, который предлагает календарь.',
+    ),
+    'ui.orders.reschedule_error.ORDER_RESCHEDULE_WINDOW_INVALID': _ui_tr(
+        'The delivery window must start before it ends.',
+        "Yetkazib berish vaqt oralig'i tugashidan oldin boshlanishi kerak.",
+        'Интервал доставки должен начинаться раньше, чем заканчивается.',
+    ),
+    'ui.orders.reschedule_error.ORDER_RESCHEDULE_WINDOW_PASSED': _ui_tr(
+        'That delivery window has already ended today. Pick a later window or another day.',
+        "Bu yetkazib berish vaqt oralig'i bugun allaqachon tugagan. Keyinroq oraliqni yoki boshqa kunni tanlang.",
+        'Этот интервал доставки сегодня уже закончился. Выберите более поздний интервал или другой день.',
+    ),
+    # F11's same-day Save, refused under the lock: an operator re-dated the delivery after the
+    # modal read it.
+    'ui.orders.reschedule_error.STAFF_DELIVERY_NOT_REDISPATCHABLE': _ui_tr(
+        'Someone already gave this delivery a new date. Close and reopen to see it.',
+        "Bu yetkazib berishga kimdir allaqachon yangi sana belgilagan. Ko'rish uchun oynani yopib, qayta oching.",
+        'Кто-то уже назначил этой доставке новую дату. Закройте окно и откройте снова, чтобы её увидеть.',
+    ),
+    # F6: the cancel/return confirmation and the Update Status modal.
+    'ui.orders.awaiting_new_date_notice': _ui_tr(
+        "This order's delivery failed and is waiting for a new date.",
+        "Bu buyurtmani yetkazib berib bo'lmadi, u yangi sanani kutmoqda.",
+        'Доставка этого заказа не удалась, заказ ждёт новую дату.',
+    ),
+    'ui.orders.reschedule_instead': _ui_tr('Reschedule instead', "Buning o'rniga ko'chirish", 'Лучше перенести'),
+    'ui.orders.reason_internal_label': _ui_tr(
+        'Reason (internal, not shown to the customer)',
+        "Sabab (ichki, mijozga ko'rsatilmaydi)",
+        'Причина (внутренняя, клиенту не показывается)',
+    ),
+    'ui.orders.notes_customer_visible': _ui_tr(
+        'Note to the customer (optional)',
+        'Mijoz uchun izoh (ixtiyoriy)',
+        'Комментарий для клиента (необязательно)',
+    ),
+    'ui.orders.return_order_title': _ui_tr(
+        'Mark order as returned',
+        'Buyurtmani qaytarilgan deb belgilash',
+        'Отметить заказ как возвращённый',
+    ),
+    'ui.orders.return_order_confirm': _ui_tr(
+        'Mark order {{number}} as returned?',
+        '{{number}} buyurtmasi qaytarilgan deb belgilansinmi?',
+        'Отметить заказ {{number}} как возвращённый?',
+    ),
+    'ui.orders.mark_returned': _ui_tr('Mark as returned', 'Qaytarilgan deb belgilash', 'Отметить как возвращённый'),
+    # F18 and F6: PUT /admin/orders/<id>/status refusals, by `data.error_code`.
+    'ui.orders.status_error.ORDER_AWAITING_NEW_DATE': _ui_tr(
+        "This order's delivery failed and is waiting for a new date. Reschedule it before moving it forward.",
+        "Bu buyurtmani yetkazib berib bo'lmadi, u yangi sanani kutmoqda. "
+        "Keyingi bosqichga o'tkazishdan oldin uni boshqa sanaga ko'chiring.",
+        'Доставка этого заказа не удалась, заказ ждёт новую дату. Перенесите его, прежде чем двигать дальше.',
+    ),
+    'ui.orders.status_error.ADMIN_REASON_REQUIRED': _ui_tr(
+        'Enter a reason for cancelling or returning this order.',
+        'Buyurtmani bekor qilish yoki qaytarish sababini kiriting.',
+        'Укажите причину отмены или возврата заказа.',
+    ),
+    # OrderStatusHistory.reason is String(100), like the DeliveryStatusHistory column above.
+    'ui.orders.status_error.ADMIN_REASON_TOO_LONG': _ui_tr(
+        'The reason can be at most 100 characters.',
+        "Sabab ko'pi bilan 100 belgidan iborat bo'lishi mumkin.",
+        'Причина — не более 100 символов.',
+    ),
+    # F8: the Alerts tag on the list row and the detail, and the list filter. The same wording as
+    # the staff-bot alert (Task 12) and the dispatch map pin (Task 19).
+    'ui.orders.delivery_failed_needs_new_date': _ui_tr(
+        'Delivery failed: needs a new date',
+        'Yetkazib berilmadi: yangi sana kerak',
+        'Доставка не удалась: нужна новая дата',
+    ),
+    # Quoted, in each language, by the staff-bot alert's admin hint
+    # (staff.notification.delivery_failed_admin_hint). tests/staff_bot/test_webhook_delivery_failed.py
+    # holds the two together: reword both or neither.
+    'ui.orders.delivery_failed_only': _ui_tr('Delivery failed', 'Yetkazib berilmadi', 'Доставка не удалась'),
+    # F19: the latest admin cancel or return, in the admin order detail only.
+    'ui.orders.closing_reason': _ui_tr(
+        'Internal reason: {{reason}}',
+        'Ichki sabab: {{reason}}',
+        'Внутренняя причина: {{reason}}',
     ),
 }
 
@@ -7712,27 +7903,6 @@ ADMIN_UI_BACKFILL_TRANSLATIONS = {
     'ui.delivery.cancelled_at': _ui_tr('Cancelled at', 'Bekor qilingan vaqt', 'Отменено в'),
     'ui.delivery.close': _ui_tr('Close', 'Yopish', 'Закрыть'),
     'ui.delivery.completion_rate': _ui_tr('Completion Rate', 'Bajarish darajasi', 'Доля выполненных'),
-    'ui.delivery.redispatch_delivery': _ui_tr('Re-dispatch', 'Qayta yuborish', 'Переотправить'),
-    'ui.delivery.redispatch_confirm_title': _ui_tr(
-        'Re-dispatch this delivery?',
-        'Yetkazib berishni qayta yuborilsinmi?',
-        'Переотправить эту доставку?',
-    ),
-    'ui.delivery.redispatch_confirm_message': _ui_tr(
-        'This returns the failed delivery to the pool (clears the driver) so it can be re-claimed.',
-        'Bu muvaffaqiyatsiz yetkazib berishni hovuzga qaytaradi (haydovchini bo‘shatadi), shunda uni qayta olish mumkin.',
-        'Доставка вернётся в пул (водитель будет снят), чтобы её можно было взять заново.',
-    ),
-    'ui.delivery.redispatch_success': _ui_tr(
-        'Delivery re-dispatched to pool',
-        'Yetkazib berish hovuzga qayta yuborildi',
-        'Доставка переотправлена в пул',
-    ),
-    'ui.delivery.redispatch_failed': _ui_tr(
-        'Failed to re-dispatch delivery',
-        'Yetkazib berishni qayta yuborib bo‘lmadi',
-        'Не удалось переотправить доставку',
-    ),
     'ui.delivery.create_delivery_coming_soon': _ui_tr('Create delivery — coming soon', 'Yetkazib berish yaratish — tez orada', 'Создание доставки — скоро'),
     'ui.delivery.current_status': _ui_tr('Current Status', 'Joriy holat', 'Текущий статус'),
     'ui.delivery.customer': _ui_tr('Customer', 'Mijoz', 'Клиент'),
@@ -7780,6 +7950,32 @@ ADMIN_UI_BACKFILL_TRANSLATIONS = {
     'ui.delivery.pending': _ui_tr('Pending', 'Kutilmoqda', 'В ожидании'),
     'ui.delivery.priority': _ui_tr('Priority', 'Ustuvorlik', 'Приоритет'),
     'ui.delivery.reassign_driver': _ui_tr('Reassign Driver', 'Haydovchini qayta tayinlash', 'Переназначить водителя'),
+    # F13: a failed row's Reschedule opens the Orders page's modal. Worded exactly as
+    # `ui.orders.reschedule`: one action, one name. Reword both or neither
+    # (tests/unit/test_backend_translation_seed_regressions.py holds them equal).
+    'ui.delivery.reschedule': _ui_tr('Reschedule', "Ko'chirish", 'Перенести'),
+    # F6: a move to Returned closes the order, so it is confirmed and names an
+    # internal reason. The page fills {{order}} with the order number. The button
+    # and the reason field are worded exactly as `ui.orders.mark_returned`,
+    # `ui.orders.reason_internal_label` and `ui.orders.reason_required`; reword
+    # both sides or neither.
+    'ui.delivery.return_confirm_title': _ui_tr(
+        'Mark this delivery as returned?',
+        'Yetkazib berish qaytarilgan deb belgilansinmi?',
+        'Отметить доставку как возвращённую?',
+    ),
+    'ui.delivery.return_confirm_message': _ui_tr(
+        'Order {{order}} will be closed as returned and its driver released.',
+        "{{order}} buyurtmasi qaytarilgan sifatida yopiladi va haydovchisi bo'shatiladi.",
+        'Заказ {{order}} будет закрыт как возвращённый, а водитель освобождён.',
+    ),
+    'ui.delivery.return_confirm_ok': _ui_tr('Mark as returned', 'Qaytarilgan deb belgilash', 'Отметить как возвращённый'),
+    'ui.delivery.return_reason_label': _ui_tr(
+        'Reason (internal, not shown to the customer)',
+        "Sabab (ichki, mijozga ko'rsatilmaydi)",
+        'Причина (внутренняя, клиенту не показывается)',
+    ),
+    'ui.delivery.return_reason_required': _ui_tr('Reason is required', 'Sabab kerak', 'Причина обязательна'),
     'ui.delivery.schedule_delivery': _ui_tr('Schedule Delivery', 'Yetkazib berishni rejalashtirish', 'Запланировать доставку'),
     'ui.delivery.scheduled': _ui_tr('Scheduled', 'Rejalashtirilgan', 'Запланировано'),
     'ui.delivery.scheduled_date': _ui_tr('Scheduled Date', 'Rejalashtirilgan sana', 'Дата планирования'),
@@ -7802,24 +7998,6 @@ ADMIN_UI_BACKFILL_TRANSLATIONS = {
     # The update action on a row with no status move (failed, delivered, cancelled,
     # returned, held): the same form, for its notes only.
     'ui.delivery.edit_notes': _ui_tr('Edit notes', 'Izohni tahrirlash', 'Изменить заметки'),
-    # R25: a re-dispatch before today's first shift lands `rescheduled` and waits
-    # for the shift start. The page fills {{time}} with it in local HH:mm.
-    'ui.delivery.redispatch_held': _ui_tr(
-        "Re-dispatched. Drivers will see it when today's shift opens at {{time}}.",
-        "Qayta yuborildi. Haydovchilar uni bugungi smena soat {{time}} da boshlanganda ko'radi.",
-        'Переотправлено. Водители увидят доставку, когда сегодня в {{time}} начнётся смена.',
-    ),
-    # Re-dispatch refusals the Delivery page explains itself (data.error_code).
-    'ui.delivery.redispatch_error.ORDER_NOT_RESCHEDULABLE': _ui_tr(
-        'This order is delivered, cancelled or returned, so its delivery can no longer be re-dispatched.',
-        "Bu buyurtma yetkazilgan, bekor qilingan yoki qaytarilgan, shuning uchun uni endi qayta yuborib bo'lmaydi.",
-        'Этот заказ уже доставлен, отменён или возвращён, поэтому доставку больше нельзя переотправить.',
-    ),
-    'ui.delivery.redispatch_error.STAFF_DELIVERY_NOT_REDISPATCHABLE': _ui_tr(
-        'This delivery is no longer failed, so there is nothing to re-dispatch. Refresh the list.',
-        "Bu yetkazib berish endi muvaffaqiyatsiz holatda emas, qayta yuboradigan narsa yo'q. Ro'yxatni yangilang.",
-        'Эта доставка больше не в статусе «Сбой», переотправлять нечего. Обновите список.',
-    ),
     'ui.delivery.time_slot': _ui_tr('Time Slot', 'Vaqt oralig\'i', 'Временной слот'),
     'ui.delivery.total_amount': _ui_tr('Total Amount', 'Jami summa', 'Общая сумма'),
     'ui.delivery.total_deliveries': _ui_tr('Total Deliveries', 'Jami yetkazib berishlar', 'Всего доставок'),

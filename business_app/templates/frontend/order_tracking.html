@@ -194,6 +194,12 @@
     color: #721c24;
 }
 
+/* Not an order status: a failed delivery waiting for staff to pick a new date (F15). */
+.status-badge.awaiting_new_date {
+    background: #fff3cd;
+    color: #856404;
+}
+
 .map-container {
     width: 100%;
     height: 400px;
@@ -317,6 +323,7 @@
 {% endblock %}
 
 {% block content %}
+{% from "frontend/macros/order_status.html" import order_status_label %}
 <section class="tracking-section">
     <div class="auto-container">
         <div class="tracking-content">
@@ -355,8 +362,17 @@
                             {{ 'Order Status'|t }}
                         </h3>
 
+                        {# F15: `active` reads display_status, so no step is current while the order
+                           waits for a new date. `completed` still reads the order's own status, so
+                           the steps it passed stay ticked. While it waits, the step it had reached
+                           is ticked too: a delivery can fail while the order is still pending,
+                           confirmed or preparing, and what failed was the delivery. Out for
+                           Delivery, where the attempt failed, is neither. Nothing is on its way and
+                           there is no new date yet, so "Delivery will start soon" and the failed
+                           attempt's "Estimated delivery" are hidden. #}
+                        {% set waiting_for_date = display_status == 'awaiting_new_date' %}
                         <!-- Pending -->
-                        <div class="timeline-item {% if order.status.value == 'pending' %}active{% elif order.status.value in ['confirmed', 'preparing', 'out_for_delivery', 'delivered'] %}completed{% endif %}">
+                        <div class="timeline-item {% if display_status == 'pending' %}active{% elif order.status.value in ['confirmed', 'preparing', 'out_for_delivery', 'delivered'] or (waiting_for_date and order.status.value == 'pending') %}completed{% endif %}">
                             <div class="timeline-icon">
                                 <i class="far fa-clock"></i>
                             </div>
@@ -366,7 +382,7 @@
                         </div>
 
                         <!-- Confirmed -->
-                        <div class="timeline-item {% if order.status.value == 'confirmed' %}active{% elif order.status.value in ['preparing', 'out_for_delivery', 'delivered'] %}completed{% endif %}">
+                        <div class="timeline-item {% if display_status == 'confirmed' %}active{% elif order.status.value in ['preparing', 'out_for_delivery', 'delivered'] or (waiting_for_date and order.status.value == 'confirmed') %}completed{% endif %}">
                             <div class="timeline-icon">
                                 <i class="far fa-check-circle"></i>
                             </div>
@@ -380,7 +396,7 @@
                         </div>
 
                         <!-- Preparing -->
-                        <div class="timeline-item {% if order.status.value == 'preparing' %}active{% elif order.status.value in ['out_for_delivery', 'delivered'] %}completed{% endif %}">
+                        <div class="timeline-item {% if display_status == 'preparing' %}active{% elif order.status.value in ['out_for_delivery', 'delivered'] or (waiting_for_date and order.status.value == 'preparing') %}completed{% endif %}">
                             <div class="timeline-icon">
                                 <i class="far fa-box"></i>
                             </div>
@@ -393,7 +409,7 @@
                         </div>
 
                         <!-- Out for Delivery -->
-                        <div class="timeline-item {% if order.status.value == 'out_for_delivery' %}active{% elif order.status.value == 'delivered' %}completed{% endif %}">
+                        <div class="timeline-item {% if display_status == 'out_for_delivery' %}active{% elif order.status.value == 'delivered' %}completed{% endif %}">
                             <div class="timeline-icon">
                                 <i class="far fa-truck"></i>
                             </div>
@@ -409,13 +425,13 @@
                             </div>
                             {% elif order.status.value == 'delivered' %}
                             <div class="timeline-description">{{ 'Delivery completed'|t }}</div>
-                            {% else %}
+                            {% elif not waiting_for_date %}
                             <div class="timeline-description">{{ 'Delivery will start soon'|t }}</div>
                             {% endif %}
                         </div>
 
                         <!-- Delivered -->
-                        <div class="timeline-item {% if order.status.value == 'delivered' %}active completed{% endif %}">
+                        <div class="timeline-item {% if display_status == 'delivered' %}active completed{% endif %}">
                             <div class="timeline-icon">
                                 <i class="far fa-check-double"></i>
                             </div>
@@ -425,7 +441,7 @@
                             <div class="timeline-time">{{ delivery.delivered_at.strftime('%B %d, %Y at %I:%M %p') }}</div>
                             {% endif %}
                             <div class="timeline-description">{{ 'Your order has been delivered successfully'|t }}</div>
-                            {% else %}
+                            {% elif not waiting_for_date %}
                             <div class="timeline-description">{{ 'Estimated delivery'|t }}: {{ order.delivery_date.strftime('%B %d, %Y') if order.delivery_date else 'TBD' }}</div>
                             {% endif %}
                         </div>
@@ -447,7 +463,7 @@
                         <div class="info-row">
                             <span class="info-label">{{ 'Status'|t }}:</span>
                             <span class="info-value">
-                                <span class="status-badge {{ order.status.value }}">{{ order.status.value|replace('_', ' ')|title }}</span>
+                                <span class="status-badge {{ display_status }}">{{ order_status_label(display_status) }}</span>
                             </span>
                         </div>
                         <div class="info-row">
@@ -505,7 +521,8 @@
 
                     <!-- Action Buttons -->
                     <div class="action-buttons">
-                        {% if order.status.value in ['pending', 'confirmed'] and order.can_be_cancelled() %}
+                        {# F5: the backend's answer, the one POST /orders/<id>/cancel enforces. #}
+                        {% if can_customer_cancel %}
                         <button data-action="cancel-order" class="theme-btn btn-three">
                             <i class="far fa-times"></i> {{ 'Cancel Order'|t }}
                         </button>

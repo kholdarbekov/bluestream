@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SEED_SCRIPT = ROOT / "scripts" / "seed_backend_translations.py"
@@ -133,31 +134,72 @@ def _assert_seeded_as_the_delivery_page_writes_it(expected):
         assert row["en"] in page, f"{key}: Delivery.js falls back to different English"
 
 
-def test_the_delivery_page_redispatch_copy_is_seeded_as_the_page_writes_it():
-    """R25 and the two re-dispatch refusals, as the Delivery page renders them."""
+def test_the_delivery_page_reschedule_and_return_copy_is_seeded_as_the_page_writes_it():
+    """F13's Reschedule row action, and F6's confirmed return with its internal reason, as the
+    Delivery page renders them."""
     from scripts.seed_backend_translations import BACKEND_TRANSLATIONS
 
     expected = {
-        "ui.delivery.redispatch_held": {
-            "en": "Re-dispatched. Drivers will see it when today's shift opens at {{time}}.",
-            "uz": "Qayta yuborildi. Haydovchilar uni bugungi smena soat {{time}} da boshlanganda ko'radi.",
-            "ru": "Переотправлено. Водители увидят доставку, когда сегодня в {{time}} начнётся смена.",
+        "ui.delivery.reschedule": {"en": "Reschedule", "uz": "Ko'chirish", "ru": "Перенести"},
+        "ui.delivery.return_confirm_title": {
+            "en": "Mark this delivery as returned?",
+            "uz": "Yetkazib berish qaytarilgan deb belgilansinmi?",
+            "ru": "Отметить доставку как возвращённую?",
         },
-        "ui.delivery.redispatch_error.ORDER_NOT_RESCHEDULABLE": {
-            "en": "This order is delivered, cancelled or returned, so its delivery can no longer be re-dispatched.",
-            "uz": "Bu buyurtma yetkazilgan, bekor qilingan yoki qaytarilgan, shuning uchun uni endi qayta yuborib bo'lmaydi.",
-            "ru": "Этот заказ уже доставлен, отменён или возвращён, поэтому доставку больше нельзя переотправить.",
+        "ui.delivery.return_confirm_message": {
+            "en": "Order {{order}} will be closed as returned and its driver released.",
+            "uz": "{{order}} buyurtmasi qaytarilgan sifatida yopiladi va haydovchisi bo'shatiladi.",
+            "ru": "Заказ {{order}} будет закрыт как возвращённый, а водитель освобождён.",
         },
-        "ui.delivery.redispatch_error.STAFF_DELIVERY_NOT_REDISPATCHABLE": {
-            "en": "This delivery is no longer failed, so there is nothing to re-dispatch. Refresh the list.",
-            "uz": "Bu yetkazib berish endi muvaffaqiyatsiz holatda emas, qayta yuboradigan narsa yo'q. Ro'yxatni yangilang.",
-            "ru": "Эта доставка больше не в статусе «Сбой», переотправлять нечего. Обновите список.",
+        "ui.delivery.return_confirm_ok": {
+            "en": "Mark as returned",
+            "uz": "Qaytarilgan deb belgilash",
+            "ru": "Отметить как возвращённый",
+        },
+        "ui.delivery.return_reason_label": {
+            "en": "Reason (internal, not shown to the customer)",
+            "uz": "Sabab (ichki, mijozga ko'rsatilmaydi)",
+            "ru": "Причина (внутренняя, клиенту не показывается)",
+        },
+        "ui.delivery.return_reason_required": {
+            "en": "Reason is required",
+            "uz": "Sabab kerak",
+            "ru": "Причина обязательна",
         },
     }
 
     _assert_seeded_as_the_delivery_page_writes_it(expected)
-    # The page fills {{time}}. A translation that drops the slot would show no time at all.
-    assert all("{{time}}" in text for text in BACKEND_TRANSLATIONS["ui.delivery.redispatch_held"].values())
+    # The page fills {{order}}. A translation that drops the slot would not say which order closes.
+    assert all("{{order}}" in text for text in BACKEND_TRANSLATIONS["ui.delivery.return_confirm_message"].values())
+
+
+@pytest.mark.parametrize(
+    "delivery_key, orders_key",
+    [
+        ("ui.delivery.reschedule", "ui.orders.reschedule"),
+        ("ui.delivery.return_confirm_ok", "ui.orders.mark_returned"),
+        ("ui.delivery.return_reason_label", "ui.orders.reason_internal_label"),
+        ("ui.delivery.return_reason_required", "ui.orders.reason_required"),
+    ],
+)
+def test_the_delivery_page_names_each_shared_action_as_the_orders_page_does(delivery_key, orders_key):
+    """The Delivery page's Reschedule, its return button and the internal-reason field are the Orders
+    page's own actions and field (F13, F6). Spec §7 keeps the page's copy under `ui.delivery.*`, so
+    each of these rows has an Orders twin, and a twin reworded on one side only would make one
+    action read two ways. Reword both or neither."""
+    from scripts.seed_backend_translations import BACKEND_TRANSLATIONS
+
+    assert BACKEND_TRANSLATIONS[delivery_key] == BACKEND_TRANSLATIONS[orders_key]
+
+
+def test_the_retired_redispatch_copy_is_neither_seeded_nor_rendered():
+    """F13 deleted the Delivery page's today-only Re-dispatch. Its copy went with it, so a stale
+    "returns the failed delivery to the pool" sentence can never reach an admin again."""
+    from scripts.seed_backend_translations import BACKEND_TRANSLATIONS
+
+    page = (ROOT / "admin_ui" / "src" / "pages" / "Delivery.js").read_text(encoding="utf-8")
+    assert sorted(key for key in BACKEND_TRANSLATIONS if key.startswith("ui.delivery.redispatch")) == []
+    assert "ui.delivery.redispatch" not in page
 
 
 def test_the_delivery_page_notes_action_is_seeded_as_the_page_writes_it():
@@ -173,3 +215,21 @@ def test_the_delivery_page_notes_action_is_seeded_as_the_page_writes_it():
             },
         }
     )
+
+
+def test_the_dispatch_map_says_the_orders_tag_sentence_from_the_same_row():
+    """F8: the popup on a "needs a new date" pin says why, in the Orders tag's own sentence and
+    from its own row, `ui.orders.delivery_failed_needs_new_date`. A `ui.dispatch.*` twin would
+    be a second row to check and correct, and the tag and the popup would drift apart. The map
+    looks keys up in its `delivery:` namespace, and a `ui` row reaches that lookup through
+    i18n.js `fallbackNS: ['common']`.
+
+    The Orders page's guard (tests/unit/test_order_awaiting_new_date_ui_translations.py) reads
+    a fallback only where a quote sits directly before `ui.`, so it cannot see this namespaced
+    call. The map's fallback must be the seeded English byte for byte, or an unseeded and a
+    seeded database show two different sentences."""
+    from scripts.seed_backend_translations import BACKEND_TRANSLATIONS
+
+    english = BACKEND_TRANSLATIONS["ui.orders.delivery_failed_needs_new_date"]["en"]
+    source = (ROOT / "admin_ui" / "src" / "components" / "OperationsMap.jsx").read_text(encoding="utf-8")
+    assert f"t('delivery:ui.orders.delivery_failed_needs_new_date', '{english}')" in source

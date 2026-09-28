@@ -1,9 +1,10 @@
 """Service regression tests for notification API boundary migration."""
 
+import inspect
 from datetime import UTC, datetime
 from decimal import Decimal
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, create_autospec, patch
 
 import pytest
 
@@ -533,14 +534,25 @@ def test_send_delivery_status_change_notification_dispatches_bottle_summary_for_
     assert result['dispatched'] is True
 
 
+@pytest.mark.parametrize(
+    'old_status,new_status',
+    [
+        (DeliveryStatus.SCHEDULED, DeliveryStatus.ASSIGNED),
+        # F17 of docs/superpowers/specs/2026-09-25-failed-delivery-awaits-new-date-design.md: the
+        # customer hears nothing when an attempt fails. They hear the new date once staff give one.
+        (DeliveryStatus.ARRIVED, DeliveryStatus.FAILED),
+    ],
+    ids=['assigned', 'failed'],
+)
 def test_send_delivery_status_change_notification_sends_nothing_for_non_target_status_with_default_channels(
-    db, sample_user, sample_order
+    db, sample_user, sample_order, monkeypatch, old_status, new_status
 ):
+    """A connected customer, with email too, so only the milestone gate can keep them silent."""
     sample_user.telegram_id = '998900001238'
     sample_user.is_bot_active = True
     delivery = Delivery(
         order_id=sample_order.id,
-        status=DeliveryStatus.ASSIGNED,
+        status=new_status,
         scheduled_date=datetime.now(UTC),
         scheduled_time_slot='09:00-12:00',
     )
@@ -548,25 +560,27 @@ def test_send_delivery_status_change_notification_sends_nothing_for_non_target_s
     db.session.flush()
     history = DeliveryStatusHistory(
         delivery_id=delivery.id,
-        old_status=DeliveryStatus.SCHEDULED,
-        new_status=DeliveryStatus.ASSIGNED,
+        old_status=old_status,
+        new_status=new_status,
         changed_at=datetime.now(UTC),
     )
     db.session.add(history)
     db.session.commit()
-
+    assert sample_user.email
+    # Bound against the real method's signature, so a call it would reject fails here too.
+    send = create_autospec(_REAL_SEND_NOTIFICATION, return_value={})
+    monkeypatch.setattr(NotificationService, 'send_notification', send)
     service = NotificationService()
-    captured = {}
-
-    def _fake_send_notification(user_id, notification_type, channels=None, template_data=None, priority='normal'):
-        captured['channels'] = channels
-        return {}
-
-    service.send_notification = _fake_send_notification
 
     service.send_delivery_status_change_notification(history.id)
 
-    assert captured['channels'] == []
+    send.assert_called_once()
+    bound = inspect.signature(_REAL_SEND_NOTIFICATION).bind(*send.call_args.args, **send.call_args.kwargs)
+    assert (bound.arguments['user_id'], bound.arguments['notification_type'], bound.arguments['channels']) == (
+        sample_user.id,
+        NotificationType.DELIVERY_UPDATE,
+        [],
+    )
 
 
 def test_send_delivery_status_change_notification_returns_error_for_missing_history(db):

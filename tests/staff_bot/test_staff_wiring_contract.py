@@ -117,6 +117,12 @@ def _sample_matching(pattern_source: str):
         body = body[:-1]
 
     body = body.replace(r"\d+", "7").replace(r"\d*", "7").replace(r"\w+", "x")
+    # A character class samples as its first member, and an optional group with no
+    # alternation samples as present: `_[01]` is `_0`, and so is `(_[01])?`, the
+    # longer and so the likelier to collide. Negated and escaped classes stay
+    # unreadable, as does `(next|all)`.
+    body = re.sub(r"\[([^\]\\^])[^\]]*\]", r"\1", body)
+    body = re.sub(r"\(([^()|]*)\)\?", r"\1", body)
     body = re.sub(r"\\(.)", r"\1", body)
 
     if re.search(r"[\[\](){}*+?|]", body):

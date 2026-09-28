@@ -3183,6 +3183,13 @@ def test_the_api_contract_snapshot_still_lists_the_merge_preview_route(db):
     # 613 -> 616: D30's contact routes on `admin_sales` behind `manager_or_higher_required` --
     # POST/PUT/DELETE /api/v1/admin/sales/outlets/<id>/contacts[/<contact_id>]. Unrelated to
     # place-merge; only the estate-wide count moved.
+    # 616 -> 617: the failed-delivery plan's Task 9 one-row read
+    # GET /api/v1/staff/delivery/failed/<int:delivery_id> (operator bot date step). Unrelated to
+    # place-merge; only the estate-wide count moved.
+    # 617 -> 616: the failed-delivery plan's Task 18 deletes
+    # POST /api/v1/admin/deliveries/<int:delivery_id>/redispatch (admin.redispatch_admin_delivery),
+    # the Delivery page's today-only Re-dispatch: its Reschedule now opens the Orders page's modal
+    # (F13). Unrelated to place-merge; only the estate-wide count moved.
     assert len(routes) == 616
     entry = next(r for r in routes if r["rule"] == "/api/v1/admin/place-groups/merge-preview")
     assert entry["methods"] == ["GET"]

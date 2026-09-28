@@ -218,9 +218,11 @@ def test_accept_order_rejects_non_claimable_status(db, sample_user, delivery_dri
 
 
 def test_return_delivery_to_pool_clears_driver_and_restores_order(db, sample_user, delivery_driver, admin_user):
-    """Returning a failed delivery to the pool must clear the driver, reset the
-    delivery to SCHEDULED, restore the order to a pool-eligible status, clear the
-    stale failure reason, preserve delivery_attempts, and record history."""
+    """Returning a stop the driver has reached to the pool must clear the driver, reset
+    the delivery to SCHEDULED, restore the order to a pool-eligible status and preserve
+    delivery_attempts. This is the stop's second attempt: the first failed and was
+    rescheduled, and the reschedule already cleared the failure reason. A FAILED row is
+    refused instead (test_return_delivery_to_pool_refuses_a_failed_delivery)."""
     _create_delivery_person(db, delivery_driver, current_active_deliveries=1)
     order = _create_order(db, sample_user.id, "ORD-RETURNPOOL-1")
     order.status = OrderStatus.OUT_FOR_DELIVERY
@@ -229,10 +231,9 @@ def test_return_delivery_to_pool_clears_driver_and_restores_order(db, sample_use
         db,
         order.id,
         delivery_person_id=delivery_driver.id,
-        status=DeliveryStatus.FAILED,
+        status=DeliveryStatus.ARRIVED,
     )
     delivery.delivery_attempts = 1
-    delivery.failed_delivery_reason = "customer_unavailable"
     db.session.commit()
 
     returned = StaffService.return_delivery_to_pool(delivery.id, admin_user.id, reason="retry")
@@ -241,12 +242,44 @@ def test_return_delivery_to_pool_clears_driver_and_restores_order(db, sample_use
     db.session.refresh(order)
     assert returned.delivery_person_id is None
     assert returned.status == DeliveryStatus.SCHEDULED
-    assert returned.failed_delivery_reason is None
     assert returned.delivery_attempts == 1  # preserved
     assert order.status == OrderStatus.CONFIRMED  # restored to pool-eligible
     # It now satisfies the pool query (unassigned + scheduled/pending + order confirmed).
     pool_ids = {item.id for item in StaffService.get_delivery_pool()["items"]}
     assert delivery.id in pool_ids
+
+
+def test_return_delivery_to_pool_refuses_a_failed_delivery(db, sample_user, delivery_driver, admin_user):
+    """F2 (docs/superpowers/specs/2026-09-25-failed-delivery-awaits-new-date-design.md): a
+    failed delivery leaves `failed` only through a reschedule to a new date, or by
+    cancelling its order. It is refused on its status, and nothing moves: not the
+    delivery, not its driver, not the order."""
+    from business_app.models.delivery import DeliveryStatusHistory
+
+    order = _create_order(db, sample_user.id, "ORD-RETURNPOOL-FAILED")
+    order.status = OrderStatus.OUT_FOR_DELIVERY
+    db.session.commit()
+    delivery = _create_delivery(
+        db, order.id, delivery_person_id=delivery_driver.id, status=DeliveryStatus.FAILED
+    )
+    delivery.delivery_attempts = 1
+    delivery.failed_delivery_reason = "customer_unavailable"
+    db.session.commit()
+
+    with pytest.raises(ConflictError) as exc_info:
+        StaffService.return_delivery_to_pool(delivery.id, admin_user.id, reason="retry")
+    assert exc_info.value.error_code == "STAFF_DELIVERY_NOT_POOLABLE"
+
+    db.session.refresh(delivery)
+    db.session.refresh(order)
+    assert (
+        delivery.status,
+        delivery.delivery_person_id,
+        delivery.failed_delivery_reason,
+        delivery.delivery_attempts,
+    ) == (DeliveryStatus.FAILED, delivery_driver.id, "customer_unavailable", 1)
+    assert order.status == OrderStatus.OUT_FOR_DELIVERY
+    assert DeliveryStatusHistory.query.filter_by(delivery_id=delivery.id).count() == 0
 
 
 def test_admin_return_clears_driver_assignment(db, sample_user, delivery_driver, admin_user):
@@ -271,6 +304,7 @@ def test_admin_return_clears_driver_assignment(db, sample_user, delivery_driver,
         notes=None,
         fail_reason=None,
         cash_collected=None,
+        reason="Customer refused the delivery",
     )
 
     db.session.refresh(delivery)
@@ -345,20 +379,23 @@ def test_redispatch_rejects_non_failed_delivery(db, sample_user, delivery_driver
     assert delivery.status == DeliveryStatus.IN_TRANSIT  # unchanged
 
 
-def test_return_delivery_to_pool_rejects_order_cancelled_independently(
+def test_return_delivery_to_pool_rejects_order_returned_independently(
     db, sample_user, delivery_driver, admin_user
 ):
-    """A delivery can sit FAILED for months after its order is cancelled through
-    a completely separate flow — the two are not kept in lockstep once the
-    delivery reaches a terminal status. Returning such a delivery to the pool
-    must not resurrect the dead order. This is the exact mechanism behind the
-    prod incident where TG_000116_26 and TG_000280_26 reappeared as
-    'confirmed' months after being cancelled."""
+    """The order and its delivery are not kept in lockstep. An admin can move an order
+    that is out for delivery to RETURNED, and that does not pull its delivery back: the
+    driver still holds it. Returning such a delivery to the pool must not resurrect the
+    dead order. The prod incident behind this guard came through a FAILED row:
+    TG_000116_26 and TG_000280_26 reappeared as 'confirmed' months after being
+    cancelled. A FAILED row is now refused on its status alone (F2), and a cancel cannot
+    leave a held delivery behind, because it cascades the delivery to CANCELLED. So the
+    order check is pinned here with the pair the app can still produce: a RETURNED order
+    whose stop a driver holds."""
     order = _create_order(db, sample_user.id, "ORD-DEADORDER-1")
-    order.status = OrderStatus.CANCELLED
+    order.status = OrderStatus.RETURNED
     db.session.commit()
     delivery = _create_delivery(
-        db, order.id, delivery_person_id=delivery_driver.id, status=DeliveryStatus.FAILED
+        db, order.id, delivery_person_id=delivery_driver.id, status=DeliveryStatus.IN_TRANSIT
     )
 
     with pytest.raises(ConflictError) as exc_info:
@@ -367,16 +404,16 @@ def test_return_delivery_to_pool_rejects_order_cancelled_independently(
 
     db.session.refresh(delivery)
     db.session.refresh(order)
-    assert delivery.status == DeliveryStatus.FAILED  # unchanged
+    assert delivery.status == DeliveryStatus.IN_TRANSIT  # unchanged
     assert delivery.delivery_person_id == delivery_driver.id  # unchanged
-    assert order.status == OrderStatus.CANCELLED  # unchanged — never resurrected
+    assert order.status == OrderStatus.RETURNED  # unchanged — never resurrected
 
 
 def test_redispatch_rejects_delivery_whose_order_was_cancelled_independently(
     db, sample_user, delivery_driver, admin_user
 ):
-    """Same guard via the redispatch_failed_delivery entry point (staff bot /
-    admin panel 'failed deliveries' list). Re-dispatch is a reschedule now, so the
+    """Same guard via the redispatch_failed_delivery entry point (the operator
+    staff-bot flow). Re-dispatch is a reschedule now, so the
     refusal is the reschedule SSOT's own: 400 ORDER_NOT_RESCHEDULABLE (R1),
     replacing the old 409 STAFF_ORDER_NOT_ACTIVE."""
     order = _create_order(db, sample_user.id, "ORD-DEADORDER-2")

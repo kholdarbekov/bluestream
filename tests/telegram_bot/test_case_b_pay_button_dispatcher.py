@@ -33,7 +33,7 @@ ORDER_ID = 1125
 CLICK_URL = "https://my.click.uz/services/pay?id=1&t=CASE-B"
 
 
-def _order(*, status, is_paid, payment_method, payment_status, is_payable):
+def _order(*, status, is_paid, payment_method, payment_status, is_payable, can_customer_cancel):
     """What GET /api/v1/orders/<id> really returns for this order."""
     return {
         "id": ORDER_ID,
@@ -43,6 +43,10 @@ def _order(*, status, is_paid, payment_method, payment_status, is_payable):
         "payment_method": payment_method,
         "total_amount": 18000,
         "order_items": [],
+        # `serialize_order`'s answer to "may the customer cancel this themselves"
+        # (F5). The bot draws Cancel from it alone, so the Cancel assertions below
+        # read it from here.
+        "can_customer_cancel": can_customer_cancel,
         "payment_info": {
             "id": 1229,
             "payment_method": payment_method,
@@ -64,6 +68,7 @@ CASE_B = _order(
     payment_method="click",
     payment_status="pending",
     is_payable=True,
+    can_customer_cancel=False,
 )
 
 CANCELLED = _order(
@@ -72,6 +77,7 @@ CANCELLED = _order(
     payment_method="click",
     payment_status="cancelled",
     is_payable=False,
+    can_customer_cancel=False,
 )
 
 PENDING_CASH = _order(
@@ -83,6 +89,7 @@ PENDING_CASH = _order(
     # ONLINE" — but the customer may still move it onto Click, and
     # POST /payments/create owns that flip and its marking-code pool guard.
     is_payable=False,
+    can_customer_cancel=True,
 )
 
 
@@ -157,15 +164,16 @@ class TestCaseBIsOfferedAPayButtonThatWorks:
     async def test_a_delivered_order_still_offers_no_self_cancel(self, monkeypatch):
         """Widening payability must NOT widen self-cancel.
 
-        `OrderService.cancel_order` refuses DELIVERED/CANCELLED, so a Cancel
-        button here is a button that can only fail.
+        Self-cancel is the backend's `can_customer_cancel`, false for a
+        delivered order (F5), and the bot draws Cancel from that field alone.
         """
         harness = await build_bot_harness(monkeypatch)
         _serve_order(harness, CASE_B)
 
         await harness.send(harness.updates().tap(f"order_{ORDER_ID}"))
 
-        assert f"cancel_order_{ORDER_ID}" not in _callback_data(harness)
+        drawn = f"cancel_order_{ORDER_ID}" in _callback_data(harness)
+        assert drawn is CASE_B["can_customer_cancel"]
 
 
 class TestADeadOrderIsNotOfferedAPayButton:
@@ -282,9 +290,10 @@ class TestTheRecoveryScreenObeysTheSameSplit:
 
     Before B3 a DELIVERED order could never reach this screen. It can now:
     `retry_payment` renders it on ANY create failure, and case B is exactly the
-    population B3 newly routes here. `OrderService.cancel_order` refuses
-    DELIVERED, so an unconditional Cancel button hands an Uzbek reader the
-    backend's raw English "Order cannot be cancelled".
+    population B3 newly routes here. Cancel is drawn only from the order's
+    published `can_customer_cancel` (F5, `OrderService.customer_cancel_block_code`),
+    false for a delivered order, and a stale tap gets the coded refusal in the
+    customer's language.
     """
 
     async def test_a_case_b_recovery_screen_offers_no_self_cancel(self, monkeypatch):
@@ -294,8 +303,9 @@ class TestTheRecoveryScreenObeysTheSameSplit:
 
         await harness.send(harness.updates().tap(f"payment_retry_{ORDER_ID}"))
 
-        assert f"cancel_order_{ORDER_ID}" not in _callback_data(harness), (
-            "cancel_order refuses DELIVERED — this button can only fail, in English"
+        drawn = f"cancel_order_{ORDER_ID}" in _callback_data(harness)
+        assert drawn is CASE_B["can_customer_cancel"], (
+            "the recovery screen draws Cancel from the order's published can_customer_cancel"
         )
         assert "menu_orders" in _callback_data(harness), (
             "the screen must still answer 'does my order exist?'"
@@ -308,7 +318,8 @@ class TestTheRecoveryScreenObeysTheSameSplit:
 
         await harness.send(harness.updates().tap(f"payment_retry_{ORDER_ID}"))
 
-        assert f"cancel_order_{ORDER_ID}" in _callback_data(harness)
+        drawn = f"cancel_order_{ORDER_ID}" in _callback_data(harness)
+        assert drawn is PENDING_CASH["can_customer_cancel"]
 
 
 class TestSwitchMethodIsGoneFromTheRecoveryScreen:

@@ -24,8 +24,10 @@ Fix round 1 reshaped the refusal into REASON + " " + ADVICE:
     is gated on `COMPLETED and rail in {CLICK, CARD}`, because telling a cash
     customer that "a card or Click payment is never refunded" is simply false.
   * advice — what the customer can actually DO, which is a property of the
-    ORDER. Never advises cancelling an order that `OrderService.cancel_order`
-    would refuse with ConflictError.
+    ORDER. Never advises cancelling an order the customer's own cancel
+    (`POST /orders/<id>/cancel`) would refuse. Since F5 that includes a paid
+    order: its money is in, so the customer is told the order can no longer be
+    cancelled rather than to cancel it.
 
 Because the test DB carries no translation rows, `get_translation` returns the
 key — which makes the response message a space-joined list of the keys the
@@ -33,12 +35,15 @@ handler chose. `_english()` maps those back through the canonical seeder, so the
 assertions below run against the real customer-facing English sentence.
 """
 
+from datetime import UTC, datetime
+
 import pytest
 from flask_jwt_extended import create_access_token
 
+from business_app.models.delivery import Delivery
 from business_app.models.order import Order
 from business_app.models.payment import Payment
-from shared.enums import OrderStatus, PaymentMethod, PaymentStatus
+from shared.enums import DeliveryStatus, OrderStatus, PaymentMethod, PaymentStatus
 
 CANCEL_URL = "/api/v1/payments/{payment_id}/cancel"
 
@@ -128,7 +133,9 @@ class TestCancelPaymentEndpointRefuses:
     def test_completed_click_payment_is_refused_with_the_fiscal_receipt_reason(
         self, app, client, db, sample_order, sample_user
     ):
-        """(b) A COMPLETED Click payment — fiscalized, so never reversible here."""
+        """(b) A COMPLETED Click payment — fiscalized, so never reversible here. The order
+        is therefore paid, and since F5 the customer cannot cancel it either: the advice
+        says so instead of sending them into a refused cancel."""
         sample_order.status = OrderStatus.CONFIRMED
         db.session.commit()
         payment = _seed_payment(db, sample_order, sample_user, PaymentStatus.COMPLETED)
@@ -136,13 +143,14 @@ class TestCancelPaymentEndpointRefuses:
         response, body = _post(client, app, sample_user, payment.id)
 
         assert response.status_code == 400, f"expected a clean refusal, got {response.status_code}: {body}"
-        assert body["message"] == f"{R_FISCALIZED} {A_CANCEL_ORDER}"
+        assert body["message"] == f"{R_FISCALIZED} {A_NOT_CANCELLABLE}"
         assert body["data"]["error_code"] == CODE
+        assert body["data"]["order_cancellable"] is False
         assert body["message"] != f"{R_PENDING} {A_CANCEL_ORDER}", "the two refusals must not collapse"
 
         english = _english(body["message"])
         assert "fiscal receipt" in english
-        assert "cancel the order" in english
+        assert "cancel the order" not in english
 
         db.session.refresh(payment)
         assert payment.status == PaymentStatus.COMPLETED, "a paid payment must never be cancelled"
@@ -184,8 +192,10 @@ class TestRefusalCopyIsRailAndStatusAccurate:
 
         The old single message told this customer that "a card or Click payment
         that has gone through is never cancelled or refunded" (wrong rail) and
-        then told them to cancel the order — which `OrderService.cancel_order`
-        refuses with ConflictError. Advice that cannot be followed.
+        then told them to cancel the order — which the customer's own cancel
+        (`POST /orders/<id>/cancel`) refuses, because
+        `OrderService.customer_cancel_block_code` answers NOT_CANCELLABLE for a
+        delivered order. Advice that cannot be followed.
         """
         sample_order.status = OrderStatus.DELIVERED
         sample_order.payment_method = PaymentMethod.CASH
@@ -249,18 +259,19 @@ class TestRefusalCopyIsRailAndStatusAccurate:
         assert "prepaid balance" in english, "the customer must be told the money is not lost"
 
     @pytest.mark.parametrize(
-        "payment_status,expected_reason",
+        "payment_status,expected_reason,expected_advice",
         [
-            (PaymentStatus.FAILED, R_ENDED),
-            (PaymentStatus.CANCELLED, R_ENDED),
-            (PaymentStatus.REFUNDED, R_ENDED),
-            (PaymentStatus.PARTIALLY_REFUNDED, R_ENDED),
-            (PaymentStatus.PROCESSING, R_IN_PROGRESS),
-            (PaymentStatus.PARTIALLY_PAID, R_IN_PROGRESS),
+            (PaymentStatus.FAILED, R_ENDED, A_CANCEL_ORDER),
+            (PaymentStatus.CANCELLED, R_ENDED, A_CANCEL_ORDER),
+            (PaymentStatus.REFUNDED, R_ENDED, A_CANCEL_ORDER),
+            (PaymentStatus.PARTIALLY_REFUNDED, R_ENDED, A_CANCEL_ORDER),
+            (PaymentStatus.PROCESSING, R_IN_PROGRESS, A_CANCEL_ORDER),
+            # Part of the money is in, so the order is paid for F5 and not the customer's to cancel.
+            (PaymentStatus.PARTIALLY_PAID, R_IN_PROGRESS, A_NOT_CANCELLABLE),
         ],
     )
     def test_non_completed_statuses_get_status_accurate_copy(
-        self, app, client, db, sample_order, sample_user, payment_status, expected_reason
+        self, app, client, db, sample_order, sample_user, payment_status, expected_reason, expected_advice
     ):
         """No money paragraph for a payment that never took money, and a
         PROCESSING payment has not "gone through"."""
@@ -272,7 +283,7 @@ class TestRefusalCopyIsRailAndStatusAccurate:
         english = _english(body["message"])
 
         assert response.status_code == 400
-        assert body["message"] == f"{expected_reason} {A_CANCEL_ORDER}"
+        assert body["message"] == f"{expected_reason} {expected_advice}"
         assert "fiscal receipt" not in english, "only a COMPLETED card/Click payment has one filed"
         assert "gone through" not in english
 
@@ -308,32 +319,43 @@ class TestRefusalCopyIsRailAndStatusAccurate:
 @pytest.mark.integration
 @pytest.mark.payment
 class TestOrderCancellabilityAgreesWithTheRealCancelPath:
-    """The advice must agree with what `cancel_order` ACTUALLY does.
+    """The advice must agree with what the customer's own cancel ACTUALLY does.
 
-    `_order_cancel_advice_key` asks `shared/status_transitions.py` — the same
-    SSOT `OrderService.update_order_status` asks — rather than re-enumerating a
-    set of statuses. This drives the REAL service for every OrderStatus and
-    fails the moment the answers diverge.
+    `_order_cancel_advice_key` asks `OrderService.customer_cancel_block_code`, the
+    predicate `POST /orders/<id>/cancel` enforces and `serialize_order` publishes
+    as `can_customer_cancel` (F5), rather than working the rule out again. This
+    drives BOTH customer routes for every OrderStatus, crossed with the money and
+    delivery states that predicate reads, and fails the moment the answers diverge.
 
-    It earned its keep immediately: an enumerated {DELIVERED, CANCELLED} mirror
-    of `cancel_order`'s own explicit guard (order_service.py:1054) passed that
-    guard for RETURNED and then died deeper with "Cannot change status from
+    Its first version earned its keep immediately: an enumerated
+    {DELIVERED, CANCELLED} mirror of `cancel_order`'s own explicit guard passed
+    that guard for RETURNED and then died deeper with "Cannot change status from
     returned to cancelled" — so a RETURNED order would still have been told to
     "cancel the order instead" and sent into a 400.
     """
 
-    @pytest.mark.parametrize("order_status", list(OrderStatus))
-    def test_advice_agrees_with_order_service_for_every_status(
-        self, app, db, sample_user, order_status
-    ):
-        from business_app.api.payments import _order_cancel_advice_key, A_CANCEL_ORDER_KEY
-        from business_app.services.order_service import OrderService
-        from business_app.utils.exceptions import ConflictError, ValidationError
+    # One row per input the predicate reads besides the order status: the payment,
+    # `order.is_paid`, and whether the delivery is driverless, taken, or failed.
+    MONEY_AND_DELIVERY = [
+        pytest.param(PaymentStatus.PENDING, False, None, id="unpaid-no-delivery"),
+        pytest.param(PaymentStatus.COMPLETED, True, None, id="paid"),
+        pytest.param(PaymentStatus.PARTIALLY_PAID, False, None, id="partially-paid"),
+        pytest.param(PaymentStatus.PENDING, False, DeliveryStatus.SCHEDULED, id="driverless-delivery"),
+        pytest.param(PaymentStatus.PENDING, False, DeliveryStatus.ASSIGNED, id="driver-has-it"),
+        pytest.param(PaymentStatus.PENDING, False, DeliveryStatus.FAILED, id="delivery-failed"),
+    ]
 
+    @pytest.mark.parametrize("payment_status,is_paid,delivery_status", MONEY_AND_DELIVERY)
+    @pytest.mark.parametrize("order_status", list(OrderStatus), ids=[status.value for status in OrderStatus])
+    def test_advice_agrees_with_the_customer_cancel_for_every_state(
+        self, app, client, db, sample_user, delivery_driver, order_status, payment_status, is_paid, delivery_status
+    ):
         order = Order(
             user_id=sample_user.id,
             order_number=f"ORD-MIRROR-{order_status.value}",
             status=order_status,
+            payment_method=PaymentMethod.CLICK,
+            is_paid=is_paid,
             subtotal=15000,
             delivery_fee=3000,
             discount_amount=0,
@@ -342,21 +364,31 @@ class TestOrderCancellabilityAgreesWithTheRealCancelPath:
         )
         db.session.add(order)
         db.session.commit()
+        payment = _seed_payment(db, order, sample_user, payment_status)
+        if delivery_status is not None:
+            db.session.add(
+                Delivery(
+                    order_id=order.id,
+                    status=delivery_status,
+                    # A pool row never carries a driver; a taken or failed one keeps its driver.
+                    delivery_person_id=None if delivery_status is DeliveryStatus.SCHEDULED else delivery_driver.id,
+                    scheduled_date=datetime.now(UTC),
+                    scheduled_time_slot="09:00-12:00",
+                )
+            )
+            db.session.commit()
 
-        we_say_cancellable = _order_cancel_advice_key(order) == A_CANCEL_ORDER_KEY
+        _advice_response, advice = _post(client, app, sample_user, payment.id)
+        cancel = client.post(f"/api/v1/orders/{order.id}/cancel", headers=_headers(app, sample_user))
+        cancel_body = cancel.get_json()
 
-        try:
-            OrderService().cancel_order(order.id, sample_user.id, process_payment_refund=False)
-            service_allows = True
-        except (ConflictError, ValidationError):
-            # BOTH count as a refusal. `cancel_order`'s own guard raises
-            # ConflictError; the transition table underneath raises
-            # ValidationError. A customer sent into either gets a 400.
-            service_allows = False
-
-        assert we_say_cancellable is service_allows, (
-            f"{order_status.value}: the refusal advises cancellable={we_say_cancellable} "
-            f"but the real cancel path allows={service_allows}"
+        # A refusal must be the coded F5 answer, never a 500 or some other 400.
+        assert cancel.status_code == 200 or (
+            cancel.status_code == 400 and cancel_body["data"]["error_code"] == "ORDER_NOT_CUSTOMER_CANCELLABLE"
+        ), cancel_body
+        assert advice["data"]["order_cancellable"] is (cancel.status_code == 200), (
+            f"{order_status.value}/{payment_status.value}/{delivery_status}: the refusal advises "
+            f"cancellable={advice['data']['order_cancellable']} but the customer cancel answered {cancel.status_code}"
         )
 
     def test_a_returned_order_is_told_something_true_not_to_cancel_it(

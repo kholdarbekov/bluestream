@@ -710,7 +710,7 @@ def test_cancelling_the_order_cancels_its_held_delivery_and_nothing_is_released(
     resp = client.put(
         f"/api/v1/admin/orders/{order_id}/status",
         headers=_admin_headers(app, admin_user),
-        json={"status": "cancelled", "notes": "Cancelled by admin"},
+        json={"status": "cancelled", "reason": "Customer asked to cancel"},
     )
     assert resp.status_code == 200, resp.get_data(as_text=True)
     assert resp.get_json()["data"]["order"]["status"] == "cancelled"

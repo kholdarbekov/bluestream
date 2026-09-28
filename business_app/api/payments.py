@@ -32,7 +32,7 @@ from business_app.utils.decorators import validate_json, rate_limit
 from business_app.utils.constants import PaymeErrors, PaymentMethodType
 from shared.enums import PaymentStatus, PaymentMethod, OrderStatus
 from shared.payment_methods import canonical_rail, normalize_payment_method
-from shared.status_transitions import is_valid_order_transition
+from business_app.services.order_service import OrderService
 from business_app.utils.validation_helpers import (
     validate_list_request_params,
     FilterValidator,
@@ -583,9 +583,10 @@ def _payment_refusal_reason_key(payment):
 def _order_cancel_advice_key(order):
     """What the customer can actually do about the ORDER — or ``None``.
 
-    Never advises an action ``OrderService.cancel_order`` would refuse: telling a
+    Never advises an action the customer's own cancel (``POST /orders/<id>/cancel``,
+    decided by ``OrderService.customer_cancel_block_code``) would refuse: telling a
     customer with a DELIVERED order to "cancel the order instead" sends them into
-    a ConflictError 400, which is worse than saying nothing.
+    a 400, which is worse than saying nothing.
     """
     if order is None:
         return None
@@ -598,15 +599,14 @@ def _order_cancel_advice_key(order):
             # Unknown status: say nothing rather than something false.
             return None
 
-    # NOT a second copy of the cancellability rule: this asks the same
-    # ``shared/status_transitions.py`` SSOT that ``OrderService.update_order_status``
-    # asks (via ``_is_valid_status_transition``), so the advice cannot drift from
-    # what the cancel path will actually accept. An enumerated
-    # {DELIVERED, CANCELLED} mirror of ``cancel_order``'s explicit guard looked
-    # right and was wrong: RETURNED passes that guard and then dies deeper with
-    # "Cannot change status from returned to cancelled", so the customer would
-    # still have been sent into a 400.
-    if is_valid_order_transition(status, OrderStatus.CANCELLED):
+    # NOT a second copy of the cancellability rule: this asks
+    # ``OrderService.customer_cancel_block_code``, the predicate the customer
+    # cancel route enforces and ``serialize_order`` publishes as
+    # ``can_customer_cancel`` (F5). So ``order_cancellable`` equals that field,
+    # and the advice cannot drift from what the cancel will accept. A paid order
+    # is no longer the customer's to cancel, so, like any other refusal, it gets
+    # one of the status sentences below.
+    if OrderService.customer_cancel_block_code(order) is None:
         return A_CANCEL_ORDER_KEY
 
     # Not cancellable — pick the most specific TRUE thing we can say.
@@ -662,9 +662,10 @@ def cancel_payment(payment_id):
       a FAILED payment about money that was never taken, and told a PROCESSING
       payment it had "gone through".
     * ADVICE is a function of the ORDER. "Cancel the order instead" is only
-      offered when ``OrderService.cancel_order`` would actually accept it;
-      a DELIVERED or already-CANCELLED order gets a true statement instead of
-      advice that dead-ends in a 400.
+      offered when the customer's own cancel (``POST /orders/<id>/cancel``,
+      decided by ``OrderService.customer_cancel_block_code``) would actually
+      accept it; a DELIVERED, already-CANCELLED or paid order gets a true
+      statement instead of advice that dead-ends in a 400.
 
     Whole sentences joined by a space — never an inline placeholder — so the
     composition survives translation word order.
@@ -1157,6 +1158,11 @@ def request_refund():
     because the fiscal receipt filed for it cannot be undone. Cancel the ORDER
     instead; the money then settles as prepaid customer balance
     (``CashCollectionService.credit_customer_for_dead_order_prepayment``).
+    Since F5 that advice is offered only while the customer may still cancel
+    the order themselves (``OrderService.customer_cancel_block_code``, the rule
+    ``POST /orders/<id>/cancel`` enforces). A paid order is no longer theirs to
+    cancel, so a COMPLETED card/Click payment gets the not-cancellable sentence,
+    and only staff can cancel that order.
 
     WHY THIS ROUTE IS KEPT WHILE THE ADMIN ONE IS DELETED. This is a public
     ``jwt_required`` surface with no first-party caller but possible in-flight or
@@ -1165,8 +1171,8 @@ def request_refund():
     admin surface (``POST /admin/payments/<id>/refund``) has only first-party
     callers, admin_ui provably never called it, and keeping it as a refusal would
     leave exactly the escape hatch the owner ruled out: still listed, still
-    discoverable, one ``if`` from working. The admin's lawful lever is the same
-    as the customer's — cancel the order.
+    discoverable, one ``if`` from working. The admin's lawful lever is to cancel
+    the order.
 
     Same REASON + ADVICE construction as ``cancel_payment``, sharing its
     vocabulary: one true statement about the PAYMENT, one about what can be DONE

@@ -12,8 +12,8 @@ required-key set from the SAME hardcoded tuple the bug lives in:
 `/health` asks the first one, and
 `tests/unit/test_staff_translation_catalog_complete.py` asks both. So when
 `keyboards/delivery.py` started rendering a seventh status
-(`DeliveryStatus.CANCELLED`, which `DELIVERY_STATUS_TRANSITIONS` lists as a
-successor of EVERY active status), nothing noticed: the renderer asked for
+(`DeliveryStatus.CANCELLED`, which `DELIVERY_STATUS_TRANSITIONS` then listed as
+a successor of EVERY active status), nothing noticed: the renderer asked for
 `staff.delivery.status.cancelled`, the key set never claimed to need it, and
 `Translation.get` silently fell through to its humanise branch and printed the
 English word "Cancelled" on every active-delivery card in every language.

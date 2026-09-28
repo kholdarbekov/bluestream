@@ -695,7 +695,7 @@ def test_published_release_at_is_the_instant_only_while_the_order_is_held(
     app, db, order_status, row_status, expected
 ):
     """The one answer behind every published `release_at` (the admin order payloads and
-    both re-dispatch responses). The clock is the evening before, so the release instant
+    the operator re-dispatch response). The clock is the evening before, so the release instant
     is still ahead in every case, and only the order and its row decide."""
     with app.app_context():
         _driver(db, shift_start="08:00", suffix="pub")

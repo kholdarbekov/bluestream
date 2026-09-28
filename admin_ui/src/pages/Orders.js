@@ -60,6 +60,11 @@ import DeliverySchedulePicker from '../components/orders/DeliverySchedulePicker'
 import { buildSchedulePayload, formatDeliveryWindowLabel } from '../components/orders/deliverySchedule';
 import useScheduleBounds from '../hooks/useScheduleBounds';
 import RescheduleOrderModal from '../components/orders/RescheduleOrderModal';
+import CloseOrderDialog, {
+  ADMIN_REASON_ERROR_MESSAGES,
+  AdminReasonField,
+  AwaitingNewDateNotice,
+} from '../components/orders/CloseOrderDialog';
 
 const { Option } = Select;
 const { RangePicker } = DatePicker;
@@ -124,6 +129,24 @@ const getOrderStatusColor = (status) => {
   }
 };
 
+// PUT /admin/orders/<id>/status refusals the page explains itself, in the admin's language:
+// `data.error_code` -> [translation key, English fallback]. The same Map names the codes the
+// request asks api.js not to toast, so each refusal is shown once. A Map because the lookup key
+// comes off the wire (security/detect-object-injection).
+const STATUS_ERROR_MESSAGES = new Map([
+  [
+    // F18: Preparing or Out for delivery while the delivery waits for a new date. The page keeps
+    // no list of blocked moves. The backend refuses, and this says why.
+    'ORDER_AWAITING_NEW_DATE',
+    [
+      'ui.orders.status_error.ORDER_AWAITING_NEW_DATE',
+      "This order's delivery failed and is waiting for a new date. Reschedule it before moving it forward.",
+    ],
+  ],
+  // F6: the reason refusals, shared with the Delivery page's Returned.
+  ...ADMIN_REASON_ERROR_MESSAGES,
+]);
+
 const getMarkingActionColor = (action) => {
   switch (action) {
     case 'reserved':
@@ -166,6 +189,7 @@ const Orders = () => {
   const [statusFilter, setStatusFilter] = useState('');
   const [dateRange, setDateRange] = useState(null);
   const [fiscalizationFailedOnly, setFiscalizationFailedOnly] = useState(false);
+  const [deliveryFailedOnly, setDeliveryFailedOnly] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [isDetailModalVisible, setIsDetailModalVisible] = useState(false);
   const [isStatusModalVisible, setIsStatusModalVisible] = useState(false);
@@ -216,6 +240,8 @@ const Orders = () => {
   const [pendingPaymentMethodPayload, setPendingPaymentMethodPayload] = useState(null);
   // The order the Reschedule modal is open for; null = closed.
   const [rescheduleOrderId, setRescheduleOrderId] = useState(null);
+  // The admin cancel or return waiting for confirmation (CloseOrderDialog); null = none.
+  const [closeRequest, setCloseRequest] = useState(null);
 
   const { isAdmin } = usePermissions();
 
@@ -246,7 +272,7 @@ const Orders = () => {
   }, [selectedOrder, watchedBypassCodCheck]);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['orders', pagination, searchText, statusFilter, dateRange, fiscalizationFailedOnly],
+    queryKey: ['orders', pagination, searchText, statusFilter, dateRange, fiscalizationFailedOnly, deliveryFailedOnly],
 
     queryFn: () =>
       adminService.getOrders({
@@ -257,6 +283,7 @@ const Orders = () => {
         start_date: dateRange?.[0]?.format('YYYY-MM-DD'),
         end_date: dateRange?.[1]?.format('YYYY-MM-DD'),
         ...(fiscalizationFailedOnly ? { fiscalization_failed: 'true' } : {}),
+        ...(deliveryFailedOnly ? { delivery_failed: 'true' } : {}),
       }),
 
     placeholderData: keepPreviousData,
@@ -338,6 +365,12 @@ const Orders = () => {
   });
   const orderStatuses = statusesData?.data?.statuses || [];
   const statusTransitions = statusesData?.data?.transitions || {};
+  // F6: the statuses whose PUT must carry an internal reason, behind a confirm, as the backend
+  // publishes them. The route asks a reason of every PUT that carries one, changed or not, so
+  // the form asks whenever the route will. Refusing stays the backend's job (ADMIN_REASON_REQUIRED).
+  const reasonRequiredStatuses = statusesData?.data?.reason_required_statuses || [];
+  const closesOrder = (status) => reasonRequiredStatuses.includes(status);
+  const isClosingStatus = closesOrder(watchedStatusValue);
   const allowedNextStatuses = selectedOrder?.status
     ? new Set(statusTransitions[selectedOrder.status] || [])
     : null;
@@ -348,7 +381,11 @@ const Orders = () => {
   const createScheduleBounds = useScheduleBounds(isCreateModalVisible);
 
   const updateOrderMutation = useMutation({
-    mutationFn: ({ orderId, status, notes, bottles_returned }) => adminService.updateOrderStatus(orderId, status, notes, { bottles_returned }),
+    mutationFn: ({ orderId, status, notes, bottles_returned, reason }) => adminService.updateOrderStatus(orderId, status, notes, {
+      bottles_returned,
+      reason,
+      handledErrorCodes: [...STATUS_ERROR_MESSAGES.keys()],
+    }),
 
     onSuccess: () => {
       message.success(t('ui.orders.status_updated_success', 'Order status updated successfully'));
@@ -356,10 +393,18 @@ const Orders = () => {
         queryKey: ['orders'],
       });
       setIsStatusModalVisible(false);
+      setCloseRequest(null);
       statusForm.resetFields();
     },
 
     onError: (error) => {
+      // A code this page explains was named in handledErrorCodes, so api.js stayed silent. This is
+      // its one message, and the dialog stays open for the admin to act on it.
+      const known = STATUS_ERROR_MESSAGES.get(error?.response?.data?.data?.error_code);
+      if (known) {
+        message.error(t(known[0], known[1]));
+        return;
+      }
       const errors = extractApiErrorMessages(error, t('ui.orders.status_update_failed', 'Failed to update order status'));
       message.error(errors[0]);
     },
@@ -959,22 +1004,32 @@ const Orders = () => {
     statusForm.setFieldsValue({
       status: order.status,
       notes: '',
+      reason: '',
     });
     setIsStatusModalVisible(true);
   };
 
   const handleCancelOrder = (order) => {
-    Modal.confirm({
-      title: t('ui.orders.cancel_order_title', 'Cancel order'),
-      content: `${t('ui.orders.cancel_order_confirm', 'Cancel order')} ${order.order_number}?`,
-      onOk: () => {
-        updateOrderMutation.mutate({
-          orderId: order.id,
-          status: 'cancelled',
-          notes: t('ui.orders.cancelled_by_admin', 'Cancelled by admin'),
-        });
-      },
+    setCloseRequest({ order, status: 'cancelled' });
+  };
+
+  // CloseOrderDialog's confirm, for both of its callers. The reason goes in `reason`, which only
+  // admins read. `notes` is the Update Status modal's customer note; the row menu sends none (F6).
+  const handleConfirmClose = (reason) => {
+    updateOrderMutation.mutate({
+      orderId: closeRequest.order.id,
+      status: closeRequest.status,
+      notes: closeRequest.notes,
+      reason,
     });
+  };
+
+  // "Reschedule instead" (F6): drop the cancel or return, and open the re-date the order is
+  // waiting for.
+  const handleRescheduleInstead = (order) => {
+    setCloseRequest(null);
+    setIsStatusModalVisible(false);
+    setRescheduleOrderId(order.id);
   };
 
   // After a reschedule opened from the detail footer, refresh the detail modal the way every
@@ -1113,6 +1168,14 @@ const Orders = () => {
           tags.push(
             <Tag key="fisc" color="red" icon={<WarningOutlined />} style={{ margin: '0 4px 2px 0' }}>
               {t('ui.orders.fiscalization_retries_exhausted', 'Fiscalization Failed')}
+            </Tag>,
+          );
+        }
+        // F8: the backend's `awaiting_new_date` (F1 predicate), published on every row.
+        if (record.awaiting_new_date) {
+          tags.push(
+            <Tag key="awaiting" color="red" icon={<CalendarOutlined />} style={{ margin: '0 4px 2px 0' }}>
+              {t('ui.orders.delivery_failed_needs_new_date', 'Delivery failed: needs a new date')}
             </Tag>,
           );
         }
@@ -1281,6 +1344,20 @@ const Orders = () => {
                 }}
               />
             </Space>
+            {/* F8: orders whose delivery failed and wait for a new date. The backend selects them
+                with the SQL twin of the predicate that raises the Alerts tag. */}
+            <Space size={6}>
+              <CalendarOutlined style={{ color: deliveryFailedOnly ? '#cf1322' : '#bfbfbf' }} />
+              <span>{t('ui.orders.delivery_failed_only', 'Delivery failed')}</span>
+              <Switch
+                aria-label={t('ui.orders.delivery_failed_only', 'Delivery failed')}
+                checked={deliveryFailedOnly}
+                onChange={(checked) => {
+                  setDeliveryFailedOnly(checked);
+                  setPagination((current) => ({ ...current, page: 1 }));
+                }}
+              />
+            </Space>
           </Space>
 
           <Space>
@@ -1341,6 +1418,26 @@ const Orders = () => {
                   <Tag color="gold" style={{ marginLeft: 4 }}>
                     🎁 {t('ui.orders.reward', 'Reward')}
                   </Tag>
+                ) : null}
+                {/* F19: the latest admin cancel or return, with its internal reason. Admin-only:
+                    no customer read carries it. */}
+                {selectedOrder.closing_reason ? (
+                  <div style={{ marginTop: 4 }}>
+                    <div>
+                      {t('ui.orders.closing_reason', 'Internal reason: {{reason}}', {
+                        reason: selectedOrder.closing_reason.reason,
+                      })}
+                    </div>
+                    <small style={{ color: '#666' }}>
+                      {[
+                        t(`ui.orders.status_${selectedOrder.closing_reason.status}`, selectedOrder.closing_reason.status),
+                        selectedOrder.closing_reason.changed_by_name,
+                        selectedOrder.closing_reason.changed_at
+                          ? formatDateTimeShort(selectedOrder.closing_reason.changed_at)
+                          : null,
+                      ].filter(Boolean).join(' · ')}
+                    </small>
+                  </div>
                 ) : null}
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.orders.customer', 'Customer')}>
@@ -1414,6 +1511,11 @@ const Orders = () => {
                 {selectedOrder.delivery?.status ? (
                   <Tag>{t(`ui.delivery.status_${selectedOrder.delivery.status}`, selectedOrder.delivery.status)}</Tag>
                 ) : '—'}
+                {selectedOrder.awaiting_new_date ? (
+                  <Tag color="red" icon={<CalendarOutlined />}>
+                    {t('ui.orders.delivery_failed_needs_new_date', 'Delivery failed: needs a new date')}
+                  </Tag>
+                ) : null}
               </Descriptions.Item>
             </Descriptions>
 
@@ -2097,6 +2199,12 @@ const Orders = () => {
         footer={null}
       >
         <Form form={statusForm} layout="vertical" onFinish={(values) => {
+          // F6: a cancel or return is confirmed first. CloseOrderDialog sends it, with the reason
+          // typed here.
+          if (closesOrder(values.status)) {
+            setCloseRequest({ order: selectedOrder, status: values.status, reason: values.reason, notes: values.notes });
+            return;
+          }
           updateOrderMutation.mutate({
             orderId: selectedOrder.id,
             status: values.status,
@@ -2106,6 +2214,9 @@ const Orders = () => {
               : {}),
           });
         }}>
+          {selectedOrder?.awaiting_new_date ? (
+            <AwaitingNewDateNotice onRescheduleInstead={() => handleRescheduleInstead(selectedOrder)} />
+          ) : null}
           <Form.Item
             name="status"
             label={t('ui.orders.new_status', 'New Status')}
@@ -2138,19 +2249,40 @@ const Orders = () => {
               <InputNumber min={0} style={{ width: '100%' }} placeholder="0" />
             </Form.Item>
           )}
-          <Form.Item name="notes" label={t('ui.orders.notes_optional', 'Notes (Optional)')}>
+          {isClosingStatus ? <AdminReasonField /> : null}
+          {/* Whatever the status, this text is written to the history `notes`, which the
+              customer's order timeline prints. */}
+          <Form.Item name="notes" label={t('ui.orders.notes_customer_visible', 'Note to the customer (optional)')}>
             <Input.TextArea rows={3} placeholder={t('ui.orders.notes_placeholder', 'Notes')} />
           </Form.Item>
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
               <Button onClick={() => setIsStatusModalVisible(false)}>{t('ui.orders.close', 'Close')}</Button>
-              <AsyncButton type="primary" htmlType="submit" loading={updateOrderMutation.isPending}>
+              {/* While the order waits for a new date, Reschedule instead is the primary action. */}
+              <AsyncButton
+                type={selectedOrder?.awaiting_new_date ? 'default' : 'primary'}
+                htmlType="submit"
+                loading={updateOrderMutation.isPending}
+              >
                 {t('ui.orders.update_status', 'Update Status')}
               </AsyncButton>
             </Space>
           </Form.Item>
         </Form>
       </Modal>
+
+      {/* Mounted per open, like RescheduleOrderModal above. Its portal is appended after the Update
+          Status modal's, so the confirmation stacks on top of the modal that asked for it, and
+          each open starts with an empty reason. */}
+      {closeRequest ? (
+        <CloseOrderDialog
+          request={closeRequest}
+          loading={updateOrderMutation.isPending}
+          onConfirm={handleConfirmClose}
+          onRescheduleInstead={() => handleRescheduleInstead(closeRequest.order)}
+          onClose={() => setCloseRequest(null)}
+        />
+      ) : null}
 
       <Modal
         title={t('ui.orders.create_order', 'Create Order')}

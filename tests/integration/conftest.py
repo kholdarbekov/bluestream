@@ -276,3 +276,33 @@ def two_line_order_with_one_short_pool(db):
         return product_a, product_b
 
     return _apply
+
+
+# --------------------------------------------------------------------------- #
+# The frozen clock every re-date test runs under (used by
+# test_admin_order_reschedule.py and test_customer_sees_awaiting_new_date.py).
+# Kept here so a clock added to the list reaches every module that re-dates.
+# --------------------------------------------------------------------------- #
+
+@pytest.fixture
+def local_noon():
+    """Noon in Tashkent on the real local date, on every clock the reschedule path reads.
+
+    The real DATE, frozen only to noon: `RouteOptimizationService.current_route` finds today's
+    route row against the real wall clock, so an invented date would lose the route the
+    reschedule tests check. The container runs in UTC and the app in Tashkent, hence three
+    patches (2026-09-23 reschedule spec §7).
+    """
+    from datetime import datetime, time, timezone
+    from unittest.mock import patch
+    from zoneinfo import ZoneInfo
+
+    tz = ZoneInfo("Asia/Tashkent")
+    now_local = datetime.combine(datetime.now(tz).date(), time(12, 0), tzinfo=tz)
+    with patch("business_app.utils.delivery_window.local_now", return_value=now_local), patch(
+        "business_app.utils.local_windows.local_now", return_value=now_local
+    ), patch(
+        "business_app.services.order_schedule_service.get_utc_now",
+        return_value=now_local.astimezone(timezone.utc),
+    ):
+        yield now_local

@@ -2,7 +2,9 @@
 
 The owner's rule (2026-08-24): a card/Click payment is never returned, because
 the fiscal receipt filed for it cannot be undone. Cancel the ORDER instead; the
-money settles as prepaid customer balance.
+money settles as prepaid customer balance. Since F5 the refusal offers that only
+while the customer's own cancel would accept it. A paid order is no longer the
+customer's to cancel, so it gets the not-cancellable sentence instead.
 
 WHY THE ROUTE IS KEPT RATHER THAN DELETED, when the ADMIN refund route beside it
 is deleted outright: this is a public ``jwt_required`` surface with no
@@ -42,6 +44,7 @@ R_SETTLED = "api.payments.error.lifecycle.reason_already_settled"
 R_ENDED = "api.payments.error.lifecycle.reason_already_ended"
 A_CANCEL_ORDER = "api.payments.error.lifecycle.advice_cancel_order"
 A_DELIVERED = "api.payments.error.lifecycle.advice_order_delivered"
+A_NOT_CANCELLABLE = "api.payments.error.lifecycle.advice_order_not_cancellable"
 
 
 def _english(message: str) -> str:
@@ -86,6 +89,8 @@ class TestRefundEndpointRefuses:
     def test_completed_click_payment_is_refused_with_the_fiscal_receipt_reason(
         self, app, client, db, sample_order, sample_user
     ):
+        """The order is paid, so since F5 the customer cannot cancel it either. The advice
+        is shared with the cancel route and says so, rather than pointing at a refused cancel."""
         sample_order.status = OrderStatus.CONFIRMED
         db.session.commit()
         payment = _seed_payment(db, sample_order, sample_user, PaymentStatus.COMPLETED)
@@ -94,15 +99,14 @@ class TestRefundEndpointRefuses:
 
         assert response.status_code == 400, f"expected a clean refusal, got {response.status_code}: {body}"
         assert body["success"] is False
-        assert body["message"] == f"{R_FISCALIZED} {A_CANCEL_ORDER}"
+        assert body["message"] == f"{R_FISCALIZED} {A_NOT_CANCELLABLE}"
         assert body["data"]["error_code"] == CODE
-        assert body["data"]["order_cancellable"] is True
+        assert body["data"]["order_cancellable"] is False
         assert body["data"]["order_id"] == sample_order.id
 
         english = _english(body["message"])
         assert "fiscal receipt" in english
-        assert "cancel the order" in english
-        assert "prepaid balance" in english
+        assert "cancel the order" not in english
 
         db.session.refresh(payment)
         assert payment.status is PaymentStatus.COMPLETED, "the refusal must not touch the payment"
@@ -126,7 +130,8 @@ class TestRefundEndpointRefuses:
 
     def test_a_delivered_order_is_not_told_to_cancel_it(self, app, client, db, sample_order, sample_user):
         """Advice is a property of the ORDER, so a refund refusal inherits B2's
-        rule: never advise a cancellation ``cancel_order`` would refuse."""
+        rule: never advise a cancellation the customer's own cancel
+        (``POST /orders/<id>/cancel``, ``customer_cancel_block_code``) would refuse."""
         sample_order.status = OrderStatus.DELIVERED
         sample_order.payment_method = PaymentMethod.CASH
         sample_order.is_paid = True

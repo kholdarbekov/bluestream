@@ -39,13 +39,16 @@ class DeliveryAssignmentService:
 
         * a held (`rescheduled`) row: never, not even through an explicit admin
           reassign (R22). Rescheduling it to today is the only early release;
+        * a failed row: never either (F2). It leaves `failed` only through a
+          reschedule to a new date, or by cancelling its order. A reassign kept
+          it FAILED under a new driver who had nothing to deliver;
         * a pool row (SCHEDULED/PENDING): always;
         * anything else: only through an explicit admin reassign
           (``allow_in_progress``).
         """
         from business_app.services.staff_service import StaffService
 
-        if status == DeliveryStatus.RESCHEDULED:
+        if status in (DeliveryStatus.RESCHEDULED, DeliveryStatus.FAILED):
             return False
         return allow_in_progress or status in StaffService.CLAIMABLE_DELIVERY_STATUSES
 
@@ -94,7 +97,7 @@ class DeliveryAssignmentService:
         #    reassign (allow_in_progress); a held RESCHEDULED row never, not even
         #    then (spec R22). It waits for its new day and is released by its
         #    date, never by hand; an admin who wants it out today reschedules it
-        #    to today.
+        #    to today. A FAILED row never either (F2): it is re-dated, not handed on.
         if not DeliveryAssignmentService.is_assignable(delivery.status, allow_in_progress=allow_in_progress):
             raise ValidationError(
                 f"This delivery can no longer be assigned (status: {delivery.status.value})",

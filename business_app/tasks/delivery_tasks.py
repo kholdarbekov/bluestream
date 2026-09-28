@@ -712,30 +712,6 @@ def handle_delivery_exception_task(self, delivery_id: int, exception_type: str, 
                 },
             )
 
-        elif exception_type == "failed_attempt":
-            # Handle failed delivery attempt
-            attempt_reason = details.get("reason", "Customer not available")
-
-            # Update delivery status and increment attempts
-            delivery.status = DeliveryStatus.FAILED
-            delivery.delivery_attempts += 1
-            delivery.failed_delivery_reason = attempt_reason
-            delivery.updated_at = datetime.now(timezone.utc)
-
-            # Notify the customer. There is no automatic re-date: re-dating has
-            # one path, OrderScheduleService.reschedule, reached from the admin
-            # Reschedule and the Re-dispatch buttons (R19 of
-            # docs/superpowers/specs/2026-09-23-admin-order-reschedule-design.md).
-            notification_service.send_notification(
-                delivery.order.user_id,
-                "delivery_failed_attempt",
-                template_data={
-                    "order_number": delivery.order.order_number,
-                    "failure_reason": attempt_reason,
-                    "retry_info": "We will contact you to reschedule delivery",
-                },
-            )
-
         elif exception_type == "vehicle_breakdown":
             # Reassign to another driver
             auto_assign_delivery_task.delay(delivery_id)

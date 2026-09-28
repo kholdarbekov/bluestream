@@ -3,7 +3,7 @@ Staff-specific constants for the Water Business Platform.
 Used by staff bot, backend, and admin UI.
 """
 
-from shared.status_transitions import delivery_transitions_as_strings
+from shared.status_transitions import driver_delivery_transitions_as_strings
 
 # Staff notification types (used in Notification model's notification_type field)
 STAFF_NOTIFICATION_TYPES = {
@@ -33,10 +33,13 @@ STAFF_ACTIONS = {
     'VISIT_PHOTO_ADDED': 'visit_photo_added',
 }
 
-# Delivery status transitions allowed from staff bot.
-# Derived from shared.status_transitions (single source of truth) — do not edit
-# this dict directly. Update shared/status_transitions.py instead.
-DELIVERY_STATUS_TRANSITIONS = delivery_transitions_as_strings()
+# Delivery status transitions a driver may make. The staff bot draws its status
+# buttons from this, and StaffService.update_delivery_status refuses anything else
+# with STAFF_INVALID_STATUS_TRANSITION. The admin Delivery page reaches that gate
+# too, but only with moves this view keeps. It is the driver view in
+# shared.status_transitions (single source of truth), which has no CANCELLED (F4).
+# Do not edit this dict directly. Update shared/status_transitions.py instead.
+DELIVERY_STATUS_TRANSITIONS = driver_delivery_transitions_as_strings()
 
 # Order status sync when delivery status changes
 DELIVERY_TO_ORDER_STATUS_SYNC = {

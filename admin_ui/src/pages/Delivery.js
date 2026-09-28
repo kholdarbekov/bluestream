@@ -35,14 +35,15 @@ import {
   CheckCircleOutlined,
   ExclamationCircleOutlined,
   ExportOutlined,
-  CalendarOutlined,
-  RedoOutlined
+  CalendarOutlined
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { formatDate, formatDateTime, formatDateTimeShort } from '../utils/dateUtils';
+import { formatDate, formatDateTimeShort } from '../utils/dateUtils';
 import adminService from '../services/adminService';
 import AssignDeliveryModal from '../components/AssignDeliveryModal';
+import { ADMIN_REASON_ERROR_MESSAGES, AdminReasonField } from '../components/orders/CloseOrderDialog';
+import RescheduleOrderModal from '../components/orders/RescheduleOrderModal';
 
 const { Option } = Select;
 const { RangePicker } = DatePicker;
@@ -71,27 +72,6 @@ const DELIVERY_STATUS_FALLBACK_LABELS = {
   returned: 'Returned'
 };
 
-// Re-dispatch refusals the page explains itself, in the admin's language:
-// `data.error_code` -> [translation key, English fallback]. The same Map is the list of
-// codes the page asks api.js not to toast, so every refusal is shown exactly once. A Map
-// because the lookup key comes off the wire (security/detect-object-injection).
-const REDISPATCH_ERROR_MESSAGES = new Map([
-  [
-    'ORDER_NOT_RESCHEDULABLE',
-    [
-      'ui.delivery.redispatch_error.ORDER_NOT_RESCHEDULABLE',
-      'This order is delivered, cancelled or returned, so its delivery can no longer be re-dispatched.',
-    ],
-  ],
-  [
-    'STAFF_DELIVERY_NOT_REDISPATCHABLE',
-    [
-      'ui.delivery.redispatch_error.STAFF_DELIVERY_NOT_REDISPATCHABLE',
-      'This delivery is no longer failed, so there is nothing to re-dispatch. Refresh the list.',
-    ],
-  ],
-]);
-
 const Delivery = () => {
   // Load delivery namespace for ui.delivery.* keys
   const { t } = useTranslation('delivery');
@@ -103,12 +83,19 @@ const Delivery = () => {
   const [isTrackingModalVisible, setIsTrackingModalVisible] = useState(false);
   const [isUpdateModalVisible, setIsUpdateModalVisible] = useState(false);
   const [assignmentTarget, setAssignmentTarget] = useState(null);
+  const [rescheduleOrderId, setRescheduleOrderId] = useState(null);
   const [pagination, setPagination] = useState({ page: 1, per_page: DEFAULT_PAGE_SIZE });
   const [form] = Form.useForm();
   const selectedStatus = Form.useWatch('status', form);
   // A failure reason belongs to a move to `failed`. Saving notes on a row that already
   // failed (the status is kept, so the backend ignores a reason) asks for none.
   const isRecordingFailure = selectedStatus === 'failed' && selectedStatus !== selectedDelivery?.status;
+  // The same for a return, which closes the order (F6): only a MOVE to a status the row
+  // publishes in `reason_required_statuses` is confirmed and names its reason. The page
+  // keeps no copy of that list. "Edit notes" on a row already returned sends the
+  // unchanged status, which the backend saves as notes only.
+  const needsReason = (selectedDelivery?.reason_required_statuses || []).includes(selectedStatus)
+    && selectedStatus !== selectedDelivery?.status;
 
   const queryClient = useQueryClient();
 
@@ -139,7 +126,9 @@ const Delivery = () => {
 
   // Update delivery mutation
   const updateDeliveryMutation = useMutation({
-    mutationFn: ({ deliveryId, data }) => adminService.updateDelivery(deliveryId, data),
+    mutationFn: ({ deliveryId, data }) => adminService.updateDelivery(deliveryId, data, {
+      handledErrorCodes: [...ADMIN_REASON_ERROR_MESSAGES.keys()],
+    }),
 
     onSuccess: (response) => {
       message.success(response?.message || t('ui.delivery.updated_success'));
@@ -151,44 +140,14 @@ const Delivery = () => {
     },
 
     onError: (error) => {
-      message.error(error?.response?.data?.message || t('ui.delivery.update_failed'));
-    },
-  });
-
-  // Re-dispatch = reschedule to today (R18). The page explains the refusals in
-  // REDISPATCH_ERROR_MESSAGES itself, so it tells api.js not to toast those too.
-  const redispatchDeliveryMutation = useMutation({
-    mutationFn: (deliveryId) => adminService.redispatchDelivery(deliveryId, {
-      handledErrorCodes: [...REDISPATCH_ERROR_MESSAGES.keys()],
-    }),
-
-    onSuccess: (response) => {
-      // Before today's first shift it lands `rescheduled`, and drivers see it only at
-      // `data.release_at` (R25): say when, in local time. `release_at` is null when it
-      // went straight back to the pool, and the usual message stands. Both are the
-      // page's own keys: the backend's `message` is English whatever the admin reads.
-      const releaseAt = response?.data?.release_at;
-      if (releaseAt) {
-        message.success(t(
-          'ui.delivery.redispatch_held',
-          "Re-dispatched. Drivers will see it when today's shift opens at {{time}}.",
-          { time: formatDateTime(releaseAt, 'HH:mm') },
-        ));
-      } else {
-        message.success(t('ui.delivery.redispatch_success', 'Delivery re-dispatched to pool'));
-      }
-      queryClient.invalidateQueries({
-        queryKey: ['deliveries'],
-      });
-    },
-
-    onError: (error) => {
-      // api.js has already toasted every failure except the refusals this page
-      // explains, so only those get a message here: one message per failure.
-      const known = REDISPATCH_ERROR_MESSAGES.get(error?.response?.data?.data?.error_code);
+      // A return's reason refusal was named in handledErrorCodes, so api.js stayed silent: this is
+      // its one message, in the words the Orders page uses (F6).
+      const known = ADMIN_REASON_ERROR_MESSAGES.get(error?.response?.data?.data?.error_code);
       if (known) {
         message.error(t(known[0], known[1]));
+        return;
       }
+      message.error(error?.response?.data?.message || t('ui.delivery.update_failed'));
     },
   });
 
@@ -353,15 +312,14 @@ const Delivery = () => {
                     onClick: () => handleAssignDelivery(record)
                   }]
                 : []),
-              // Re-dispatch = reschedule to today (R18): a FAILED delivery whose order
-              // is still active.
+              // A FAILED delivery whose order awaits a new date: the Orders page's own
+              // Reschedule modal, on this row's order (F13).
               ...(record.can_redispatch
                 ? [{
-                    key: 'redispatch',
-                    label: t('ui.delivery.redispatch_delivery'),
-                    icon: <RedoOutlined />,
-                    // eslint-disable-next-line no-use-before-define
-                    onClick: () => handleRedispatchDelivery(record)
+                    key: 'reschedule',
+                    label: t('ui.delivery.reschedule', 'Reschedule'),
+                    icon: <CalendarOutlined />,
+                    onClick: () => setRescheduleOrderId(record.order_id)
                   }]
                 : [])
             ]
@@ -389,25 +347,15 @@ const Delivery = () => {
     form.setFieldsValue({
       status: delivery.status,
       notes: delivery.notes,
-      fail_reason: delivery.failed_delivery_reason || undefined
+      fail_reason: delivery.failed_delivery_reason || undefined,
+      // A reason typed for another row's return, then cancelled, never carries over.
+      reason: undefined
     });
     setIsUpdateModalVisible(true);
   };
 
   const handleAssignDelivery = (delivery) => {
     setAssignmentTarget(delivery);
-  };
-
-  const handleRedispatchDelivery = (delivery) => {
-    Modal.confirm({
-      title: t('ui.delivery.redispatch_confirm_title'),
-      content: t('ui.delivery.redispatch_confirm_message'),
-      okText: t('ui.delivery.redispatch_delivery'),
-      cancelText: t('common:cancel'),
-      onOk() {
-        redispatchDeliveryMutation.mutate(delivery.id);
-      }
-    });
   };
 
   const handleUpdateSubmit = (values) => {
@@ -418,9 +366,28 @@ const Delivery = () => {
     if (isRecordingFailure && values.fail_reason) {
       payload.fail_reason = values.fail_reason;
     }
-    updateDeliveryMutation.mutate({
+    const save = () => updateDeliveryMutation.mutate({
       deliveryId: selectedDelivery.id,
       data: payload
+    });
+    if (!needsReason) {
+      save();
+      return;
+    }
+    // Staff-only: the backend files it on the order's and the delivery's history `reason`,
+    // never in a note the customer's Track screen prints.
+    payload.reason = values.reason.trim();
+    Modal.confirm({
+      title: t('ui.delivery.return_confirm_title', 'Mark this delivery as returned?'),
+      content: t(
+        'ui.delivery.return_confirm_message',
+        'Order {{order}} will be closed as returned and its driver released.',
+        { order: selectedDelivery.order_number }
+      ),
+      okText: t('ui.delivery.return_confirm_ok', 'Mark as returned'),
+      okButtonProps: { danger: true },
+      cancelText: t('ui.delivery.cancel'),
+      onOk: save
     });
   };
 
@@ -960,6 +927,16 @@ const Delivery = () => {
             </Form.Item>
           )}
 
+          {/* The Orders page's reason field (required, not blank, the history column's
+              length), under this page's copy. Only a move the row publishes as needing a
+              reason (a return) asks for it. */}
+          {needsReason && (
+            <AdminReasonField
+              label={t('ui.delivery.return_reason_label', 'Reason (internal, not shown to the customer)')}
+              requiredMessage={t('ui.delivery.return_reason_required', 'Reason is required')}
+            />
+          )}
+
           <Form.Item
             name="notes"
             label={t('ui.delivery.notes')}
@@ -997,6 +974,15 @@ const Delivery = () => {
           });
         }}
       />
+      {/* Mounted per open, as on the Orders page, so each open re-reads the order. The modal
+          refreshes this list itself: it invalidates ['deliveries']. */}
+      {rescheduleOrderId != null ? (
+        <RescheduleOrderModal
+          orderId={rescheduleOrderId}
+          open
+          onClose={() => setRescheduleOrderId(null)}
+        />
+      ) : null}
     </div>
   );
 };

@@ -569,6 +569,7 @@ def order_confirmation():
     """Order confirmation page"""
     from business_app.models.order import Order
     from business_app.models.delivery import Delivery
+    from business_app.services.order_schedule_service import OrderScheduleService
 
     current_user_id = get_jwt_identity()
     order_id = request.args.get("order_id", type=int)
@@ -587,7 +588,14 @@ def order_confirmation():
     # Get delivery information
     delivery = Delivery.query.filter_by(order_id=order.id).first()
 
-    return render_template("frontend/order_confirmation.html", order=order, delivery=delivery)
+    return render_template(
+        "frontend/order_confirmation.html",
+        order=order,
+        delivery=delivery,
+        # F15: the wait for a new date, or the status itself. The page labels it and
+        # never works the wait out from the order and its delivery.
+        display_status=OrderScheduleService.customer_display_status(order),
+    )
 
 
 @frontend_bp.route("/payment/success")
@@ -664,6 +672,8 @@ def order_tracking():
     """Order tracking page with real-time status"""
     from business_app.models.order import Order
     from business_app.models.delivery import Delivery
+    from business_app.services.order_schedule_service import OrderScheduleService
+    from business_app.services.order_service import OrderService
 
     current_user_id = get_jwt_identity()
     order_id = request.args.get("order_id", type=int)
@@ -692,6 +702,10 @@ def order_tracking():
         delivery=delivery,
         map_provider=map_provider,
         maps_api_key=maps_api_key,
+        # The backend's answers, published as the API publishes them (F15, F5). The page
+        # labels the one and draws Cancel from the other, and works out neither.
+        display_status=OrderScheduleService.customer_display_status(order),
+        can_customer_cancel=OrderService.customer_cancel_block_code(order) is None,
     )
 
 
@@ -745,11 +759,15 @@ def my_subscriptions():
 @jwt_required()
 def my_account():
     """User account dashboard"""
+    from business_app.services.order_schedule_service import OrderScheduleService
+
     current_user_id = get_jwt_identity()
     user = User.query.get(current_user_id)
 
     # Get recent orders
     recent_orders = Order.query.filter_by(user_id=current_user_id).order_by(desc(Order.created_at)).limit(5).all()
+    # F15: what each row is labelled, the wait for a new date or the status itself.
+    display_statuses = {order.id: OrderScheduleService.customer_display_status(order) for order in recent_orders}
 
     # Get active subscriptions
     active_subscriptions = Subscription.query.filter_by(user_id=current_user_id, status="active").all()
@@ -775,6 +793,7 @@ def my_account():
         "frontend/my_account.html",
         user=user,
         recent_orders=recent_orders,
+        display_statuses=display_statuses,
         active_subscriptions=active_subscriptions,
         loyalty_account=loyalty_account,
         loyalty_stats=loyalty_stats,
@@ -1464,7 +1483,7 @@ def inject_global_vars():
     )
     instagram_url = current_app.config.get("COMPANY_INSTAGRAM_URL", "https://www.instagram.com/aqua_element.uz")
     telegram_channel_url = current_app.config.get("COMPANY_TELEGRAM_CHANNEL_URL", "https://t.me/aqua_element_uz")
-    telegram_bot_url = current_app.config.get("COMPANY_TELEGRAM_BOT_URL", "https://t.me/aqua_element_bot")
+    telegram_bot_url = current_app.config["COMPANY_TELEGRAM_BOT_URL"]
     wikidata_id = current_app.config.get("COMPANY_WIKIDATA_ID", "")
     same_as_links = [
         link
@@ -2173,7 +2192,7 @@ def public_products_feed():
         },
         "orderChannels": {
             "web": company_website,
-            "telegramBot": current_app.config.get("COMPANY_TELEGRAM_BOT_URL", "https://t.me/aqua_element_bot"),
+            "telegramBot": current_app.config["COMPANY_TELEGRAM_BOT_URL"],
             "phone": current_app.config.get("COMPANY_PHONE", ""),
         },
         "supportedLanguages": ["uz", "ru", "en"],
@@ -2264,7 +2283,7 @@ def public_loyalty_feed():
         "supportedLanguages": ["uz", "ru", "en"],
         "orderChannels": {
             "web": company_website,
-            "telegramBot": current_app.config.get("COMPANY_TELEGRAM_BOT_URL", "https://t.me/aqua_element_bot"),
+            "telegramBot": current_app.config["COMPANY_TELEGRAM_BOT_URL"],
             "phone": current_app.config.get("COMPANY_PHONE", ""),
         },
     }

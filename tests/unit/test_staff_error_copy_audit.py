@@ -88,6 +88,14 @@ AUDIT: list[tuple[str, str]] = [
     ("TRYOUT_PICKUP_EXCEEDS_OUTSTANDING", "staff.error.api.tryout_pickup_exceeds"),
     ("TRYOUT_PHONE_INVALID", "staff.error.api.tryout_phone_invalid"),
     ("TRYOUT_PRODUCT_UNAVAILABLE", "staff.error.api.tryout_product_unavailable"),
+    # Failed delivery awaits a new date (2026-09-25 spec), F18: mark-preparing on an
+    # order whose delivery failed.
+    ("ORDER_AWAITING_NEW_DATE", "staff.error.api.awaiting_new_date"),
+    # Failed delivery awaits a new date (2026-09-25 spec), F10: the re-date's own date rule.
+    ("ORDER_RESCHEDULE_DATE_IN_PAST", "staff.error.api.reschedule_date_in_past"),
+    ("ORDER_RESCHEDULE_BEYOND_HORIZON", "staff.error.api.reschedule_beyond_horizon"),
+    # Failed delivery awaits a new date (2026-09-25 spec), F12: a re-dispatch date that does not parse.
+    ("STAFF_REDISPATCH_DATE_INVALID", "staff.error.api.redispatch_date_invalid"),
 ]
 
 

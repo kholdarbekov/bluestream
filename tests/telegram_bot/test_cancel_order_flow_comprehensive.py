@@ -488,6 +488,9 @@ CANCELLABLE_ORDER = {
     "created_at": "2026-08-20T10:00:00",
     "total_amount": 42000,
     "status": "pending",
+    # `serialize_order`'s answer (F5). The bot draws Cancel from this field
+    # alone, so without it this order is not cancellable on screen.
+    "can_customer_cancel": True,
     "order_items": [],
 }
 

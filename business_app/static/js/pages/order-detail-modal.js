@@ -30,6 +30,15 @@
         return str.charAt(0).toUpperCase() + str.slice(1).replace(/_/g, ' ');
     }
 
+    // F15: label the status the backend publishes. The wait for a new date is not an
+    // order status, so PAGE_DATA carries its copy; any other value is the status itself.
+    // Tolerant of the deploy window (spec §9): this script goes live at `git pull`, before
+    // the template that publishes `status_labels` and the API that publishes `display_status`.
+    function statusLabel(order) {
+        return (PAGE_DATA.i18n.status_labels || {})[order.display_status] ||
+            capitalizeStatus(order.display_status || order.status);
+    }
+
     function initOrderDeliveryMap(lat, lng, label) {
         if (orderDeliveryMap) {
             orderDeliveryMap.remove();
@@ -81,7 +90,8 @@
         var cancelBtn = document.getElementById('cancelOrderBtn');
 
         reorderBtn.style.display = order.status === 'delivered' ? 'inline-block' : 'none';
-        cancelBtn.style.display = ['pending', 'confirmed'].includes(order.status) ? 'inline-block' : 'none';
+        // F5: the backend's answer, the one POST /orders/<id>/cancel enforces.
+        cancelBtn.style.display = order.can_customer_cancel ? 'inline-block' : 'none';
 
         reorderBtn.onclick = function () { reorderItems(order.id); };
         cancelBtn.onclick = function () { cancelOrder(order.id); };
@@ -145,7 +155,7 @@
             '<p class="text-muted mb-0"><i class="far fa-calendar-alt mr-1"></i>' + escapeHtml(PAGE_DATA.i18n.placed_on) + ' ' + escapeHtml(formatOrderDate(order.created_at)) + '</p>' +
             '</div>' +
             '<div class="col-md-4 text-right">' +
-            '<span class="order-status status-' + escapeHtml(order.status) + '">' + escapeHtml(capitalizeStatus(order.status)) + '</span>' +
+            '<span class="order-status status-' + escapeHtml(order.display_status) + '">' + escapeHtml(statusLabel(order)) + '</span>' +
             '</div></div>' +
             '<div class="order-items-section mb-4">' +
             '<h5 class="mb-3"><i class="far fa-box mr-2"></i>' + escapeHtml(PAGE_DATA.i18n.order_items) + '</h5>' +

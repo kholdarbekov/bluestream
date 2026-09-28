@@ -390,6 +390,12 @@ class DispatchService:
             "delivery_id": delivery.id if delivery else None,
             "delivery_status": cls._value(delivery.status) if delivery else None,
             "driver_id": delivery.delivery_person_id if delivery else None,
+            # The "needs a new date" pin (F8). A failed row keeps its driver, so the map
+            # would otherwise draw it in that driver's colour as a live stop. The answer
+            # is published so the map never works the wait out from `status` and
+            # `delivery_status`. `get_snapshot` eager-loads the delivery, so this adds
+            # no query.
+            "awaiting_new_date": OrderScheduleService.awaiting_new_date(order),
             "lat": float(address.latitude) if address and address.latitude is not None else None,
             "lng": float(address.longitude) if address and address.longitude is not None else None,
             "address_label": cls._address_label(address),

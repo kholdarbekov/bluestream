@@ -80,6 +80,44 @@ export const RESCHEDULE_ERROR_MESSAGES = new Map([
       'The reason can be at most 100 characters.',
     ],
   ],
+  // F10: `reschedule` owns the date and window rule, and it refuses with the codes below.
+  [
+    'ORDER_RESCHEDULE_DATE_IN_PAST',
+    [
+      'ui.orders.reschedule_error.ORDER_RESCHEDULE_DATE_IN_PAST',
+      'That date has already passed. Pick today or a later day.',
+    ],
+  ],
+  [
+    'ORDER_RESCHEDULE_BEYOND_HORIZON',
+    [
+      'ui.orders.reschedule_error.ORDER_RESCHEDULE_BEYOND_HORIZON',
+      'That date is too far ahead. Pick a day the calendar offers.',
+    ],
+  ],
+  [
+    'ORDER_RESCHEDULE_WINDOW_INVALID',
+    [
+      'ui.orders.reschedule_error.ORDER_RESCHEDULE_WINDOW_INVALID',
+      'The delivery window must start before it ends.',
+    ],
+  ],
+  [
+    'ORDER_RESCHEDULE_WINDOW_PASSED',
+    [
+      'ui.orders.reschedule_error.ORDER_RESCHEDULE_WINDOW_PASSED',
+      'That delivery window has already ended today. Pick a later window or another day.',
+    ],
+  ],
+  [
+    // F11's same-day Save rests on this modal's one read of `awaiting_new_date`. An operator
+    // re-dated the delivery since, and the backend refused the stale Save under its lock.
+    'STAFF_DELIVERY_NOT_REDISPATCHABLE',
+    [
+      'ui.orders.reschedule_error.STAFF_DELIVERY_NOT_REDISPATCHABLE',
+      'Someone already gave this delivery a new date. Close and reopen to see it.',
+    ],
+  ],
 ]);
 
 /** Translated copy for a known fence code, else null. */
@@ -132,6 +170,11 @@ const sameSchedule = (order, schedule) =>
   && schedule.delivery_window_start === (order.delivery_window?.start ?? null)
   && schedule.delivery_window_end === (order.delivery_window?.end ?? null);
 
+// F11: re-dating a failed delivery to the day and window it already has is a real action. It
+// takes the delivery out of `failed` and back to drivers. So an unchanged schedule is "nothing to
+// save" only while the order is not awaiting a new date (the backend's `awaiting_new_date`).
+const nothingToSave = (order, schedule) => !order.awaiting_new_date && sameSchedule(order, schedule);
+
 // What the customer will hear, exactly as the backend decided it (R13/R14). The modal never
 // promises a notice the backend has no channel for (Review Focus 5).
 const customerNotice = (order, t) => {
@@ -166,7 +209,7 @@ const RescheduleForm = ({ order, onClose, onRescheduled }) => {
     window_start: Form.useWatch('window_start', form),
     window_end: Form.useWatch('window_end', form),
   });
-  const canSave = Boolean(schedule) && !sameSchedule(order, schedule);
+  const canSave = Boolean(schedule) && !nothingToSave(order, schedule);
 
   const mutation = useMutation({
     mutationFn: (payload) => adminService.rescheduleOrder(order.id, payload, {
@@ -194,9 +237,18 @@ const RescheduleForm = ({ order, onClose, onRescheduled }) => {
     const payload = scheduleFromValues(values);
     // The disabled Save is not the only way to submit a form (Enter in a field). An unchanged
     // schedule is never sent: it would still unassign the driver and could message the customer.
-    if (!payload || sameSchedule(order, payload)) return;
+    // The one exception is putting a failed delivery back on its own day (F11).
+    if (!payload || nothingToSave(order, payload)) return;
     const reason = (values.reason || '').trim();
-    mutation.mutate(reason ? { ...payload, reason } : payload);
+    // That exception is decided from this modal's one read. Saying so lets the backend check it
+    // again under its lock, so a Save that someone else's re-date has overtaken is refused rather
+    // than unassigning a driver or messaging the customer a second time.
+    const expectAwaiting = Boolean(order.awaiting_new_date) && sameSchedule(order, payload);
+    mutation.mutate({
+      ...payload,
+      ...(reason ? { reason } : {}),
+      ...(expectAwaiting ? { expect_awaiting_new_date: true } : {}),
+    });
   };
 
   const notice = customerNotice(order, t);
@@ -285,8 +337,11 @@ const RescheduleBody = ({ orderId, onClose, onRescheduled }) => {
 };
 
 /**
- * Move a not-yet-delivered order to another day and window (spec §6, R1–R17). Opened from the
- * Orders row action and the detail footer, both gated on the published `can_reschedule`.
+ * Move a not-yet-delivered order to another day and window (spec §6, R1–R17). Opened from:
+ * - the Orders row action and the detail footer, both gated on the order's published
+ *   `can_reschedule`;
+ * - the Delivery page's row Reschedule, on the row's `order_id`, gated on the delivery row's
+ *   published `can_redispatch` (a failed delivery whose order awaits a new date, F13).
  *
  * The body renders only while `open`. It unmounts on close, and with `gcTime: 0` its detail
  * query goes with it, so the next open can never seed the form from an older read.

@@ -557,7 +557,7 @@ class VisitService:
         # "fix this line" screen rather than with create_order's code-less 400.
         VisitService._assert_line_quantities(items)
 
-        # The schedule goes through the ONE validator every write path shares, so a sales order
+        # The schedule goes through the web checkout's own validator, so a sales order
         # can never carry a schedule the web checkout would have refused. `delivery_date` is
         # passed through unchanged — the "Tomorrow" default lives in the bot, not here. The clock
         # is read ONCE and injected, so the fallback below and the validator cannot disagree

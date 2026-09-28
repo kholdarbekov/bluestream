@@ -205,9 +205,9 @@ class OrderEstimatePayload(_Payload):
 
 
 class PlaceOrderPayload(_Payload):
-    # The window is two "HH:MM" strings, not `time`s: `parse_and_validate_schedule` — the ONE
-    # validator every write path shares — parses strings, and a pre-parsed `time` dies inside
-    # `parse_window_time` on `.strip()`.
+    # The window is two "HH:MM" strings, not `time`s: `parse_and_validate_schedule` — the same
+    # parser and validator the web checkout uses — parses strings, and a pre-parsed `time` dies
+    # inside `parse_window_time` on `.strip()`.
     items: List[OrderItemPayload] = Field(..., min_length=1)
     payment_method: str
     delivery_date: Optional[date] = None

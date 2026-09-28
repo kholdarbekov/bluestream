@@ -837,7 +837,11 @@ def _keyboard_callbacks(lang: str = "uz") -> list[tuple[str, str]]:
 
     # -- payments ------------------------------------------------------------
     add("PaymentKeyboards.payment_success", PaymentKeyboards.payment_success(51, lang))
-    add("PaymentKeyboards.payment_failed", PaymentKeyboards.payment_failed(51, lang))
+    # Both buttons on, so every callback this keyboard can emit is checked.
+    add(
+        "PaymentKeyboards.payment_failed",
+        PaymentKeyboards.payment_failed(51, lang, may_pay=True, may_cancel=True),
+    )
     add("PaymentKeyboards.payment_link", PaymentKeyboards.payment_link("https://pay.example/1", lang))
 
     return out

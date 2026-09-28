@@ -6,8 +6,8 @@ operator actions, and staff analytics.
 
 import json
 import math
-from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, Optional, List, Tuple
+from datetime import date, datetime, timezone, timedelta
+from typing import TYPE_CHECKING, Dict, Any, Optional, List, Tuple
 from flask import current_app
 import redis
 from sqlalchemy import or_, func
@@ -23,6 +23,7 @@ from business_app.services.cod_collect_ceiling import (
     place_widening_applies,
     resolve_collect_scope,
 )
+from business_app.utils.address_helpers import get_address_line
 from business_app.utils.delivery_window import window_slot_label
 from business_app.utils.exceptions import ValidationError, NotFoundError, ForbiddenError, ConflictError
 from business_app.utils.order_totals import compute_order_total
@@ -51,6 +52,9 @@ from shared.staff_constants import (
 from shared.redis_keyspace import RedisKeyspace
 from business_app import db
 
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from business_app.services.order_schedule_service import RescheduleResult
+
 
 class StaffService:
     """Service for staff bot operations"""
@@ -63,11 +67,13 @@ class StaffService:
     )
 
     # Where the dispatch map's "Return to pool" may start from: a stop a driver
-    # holds, or one they failed. Anything else is refused with
-    # STAFF_DELIVERY_NOT_POOLABLE. SCHEDULED/PENDING are in the pool already,
-    # and a RESCHEDULED row is waiting for its new day: a board drawn before the
-    # reschedule must not drag it into today's pool (R22).
-    POOL_RETURNABLE_DELIVERY_STATUSES = ACTIVE_DELIVERY_STATUSES + (DeliveryStatus.FAILED,)
+    # holds. Anything else is refused with STAFF_DELIVERY_NOT_POOLABLE.
+    # SCHEDULED/PENDING are in the pool already, and a RESCHEDULED row is
+    # waiting for its new day: a board drawn before the reschedule must not drag
+    # it into today's pool (R22). A FAILED row leaves `failed` only through a
+    # reschedule to a new date, or by cancelling its order (F2): pooling it put
+    # the stop back in today's pool with no new date and no customer notice.
+    POOL_RETURNABLE_DELIVERY_STATUSES = ACTIVE_DELIVERY_STATUSES
 
     # Statuses an unassigned delivery may be in while sitting in the pool waiting
     # to be claimed. Only these can be accepted by a driver — accepting anything
@@ -1193,10 +1199,11 @@ class StaffService:
         reason: Optional[str] = None,
         notes: Optional[str] = None,
     ) -> Delivery:
-        """Return a delivery a driver holds (or failed) to the unassigned pool.
+        """Return a delivery a driver holds to the unassigned pool.
 
-        The dispatch map's "Return to pool". (Failed-delivery re-dispatch is
-        a reschedule to today since R18; see redispatch_failed_delivery.)
+        The dispatch map's "Return to pool". A failed delivery is refused (F2):
+        it is re-dated through ``OrderScheduleService.reschedule`` (the admin
+        Reschedule, or the operator's redispatch_failed_delivery), never pooled.
         The work itself is ``_pull_back_delivery`` with a SCHEDULED
         target, the same core the admin reschedule runs. This wrapper adds only
         what an immediate return needs: the lock, two refusals, and the commit.
@@ -1221,18 +1228,25 @@ class StaffService:
             raise NotFoundError("Delivery not found", error_code="STAFF_DELIVERY_NOT_FOUND")
 
         if delivery.status not in StaffService.POOL_RETURNABLE_DELIVERY_STATUSES:
-            raise ConflictError(
-                f"Delivery {delivery.id} is {delivery.status.value}; only a stop a driver holds "
-                "or has failed can be returned to the pool.",
-                error_code="STAFF_DELIVERY_NOT_POOLABLE",
-            )
+            if delivery.status == DeliveryStatus.FAILED:
+                # The dispatch map toasts this sentence, so it names the way out.
+                message = (
+                    f"Delivery {delivery.id} failed, so it cannot go back to the pool. "
+                    "Reschedule the order to a new date instead."
+                )
+            else:
+                message = (
+                    f"Delivery {delivery.id} is {delivery.status.value}; only a stop a driver holds "
+                    "can be returned to the pool."
+                )
+            raise ConflictError(message, error_code="STAFF_DELIVERY_NOT_POOLABLE")
 
-        # The order and its delivery are not kept in lockstep once the delivery
-        # reaches a terminal status (FAILED) — an order can be cancelled (or
-        # delivered/returned some other way) independently, hours or months
-        # later, while the delivery still sits FAILED. Refuse to pool a
-        # delivery whose order already left the active lifecycle instead of
-        # forcing it back to CONFIRMED underneath that order.
+        # The order and its delivery are not kept in lockstep: an order can
+        # leave the active lifecycle while its delivery still reads as held by
+        # a driver (the Orders-page "Returned" does not pull the delivery back).
+        # Refuse to pool a delivery whose order already left the active
+        # lifecycle instead of forcing it back to CONFIRMED underneath that
+        # order.
         if delivery.order is not None and delivery.order.status not in ACTIVE_ORDER_STATUSES:
             raise ConflictError(
                 f"Order {delivery.order.order_number} is {delivery.order.status.value}; "
@@ -1410,60 +1424,46 @@ class StaffService:
     def redispatch_block_code(delivery: Delivery) -> Optional[str]:
         """Why ``delivery`` cannot be re-dispatched now, or None if it can.
 
-        The ONE statement of the re-dispatch rule (R18): the delivery is FAILED
-        and its order may still be rescheduled (`OrderScheduleService.
-        reschedule_block_code`, which means the order is still active).
+        The ONE statement of the re-dispatch rule (R18): its order awaits a new
+        date (`OrderScheduleService.awaiting_new_date`, F1 of
+        docs/superpowers/specs/2026-09-25-failed-delivery-awaits-new-date-design.md).
+        `get_failed_deliveries` lists by that predicate's SQL twin, so the operator
+        is offered exactly the rows this accepts. A refusal keeps its code: a row
+        that is not FAILED names the delivery, and a FAILED row whose order left the
+        active lifecycle gets `reschedule_block_code`'s answer.
         `redispatch_failed_delivery` refuses with this code, and the admin
-        Delivery page publishes `can_redispatch` from it, so the button is
-        offered exactly when the endpoint would accept it. `reschedule`
-        re-checks both halves on the locked row.
+        Delivery page publishes `can_redispatch` from it, which offers the row's
+        Reschedule (the Orders page's modal, F13) exactly on these rows.
+        `reschedule` re-checks both halves on the locked row.
         """
         if delivery.status != DeliveryStatus.FAILED:
             return "STAFF_DELIVERY_NOT_REDISPATCHABLE"
         from business_app.services.order_schedule_service import OrderScheduleService
 
-        return OrderScheduleService.reschedule_block_code(delivery.order)
+        order = delivery.order
+        if OrderScheduleService.awaiting_new_date(order):
+            return None
+        return OrderScheduleService.reschedule_block_code(order)
 
     @staticmethod
-    def redispatch_failed_delivery(
-        delivery_id: int,
-        actor_id: int,
-        *,
-        reason: Optional[str] = None,
-    ) -> Delivery:
-        """Re-dispatch a FAILED delivery: reschedule its order to local today (R18).
+    def get_failed_delivery(delivery_id: int) -> Delivery:
+        """The delivery ``delivery_id``, while it still awaits a new date (F12).
 
-        This is the shared entry point for the admin Delivery-page button and the operator
-        staff-bot flow. It is a reschedule to today with the customer's window unchanged,
-        so a re-dispatch and an admin Reschedule are one code path
-        (``OrderScheduleService.reschedule``). They cannot disagree on the unassign,
-        history, bottle unbind, route and counter cleanup, the order's date, or who is
-        told.
-
-        The check below (`redispatch_block_code`: FAILED, and an order that may still
-        be rescheduled) is a FAST PATH only, read unlocked so the common mistake is
-        refused without taking a lock. ``expected_delivery_status`` makes
-        ``reschedule`` re-check FAILED on the row it has locked, and that check is the
-        one that counts. The landing follows R5. Once today's release has passed, the
-        delivery is ``scheduled`` and offered to drivers at once. Before that it is
-        ``rescheduled`` until the day's first shift starts (``redispatch_release_at``
-        says when). A still-PENDING order's row is held until the order is confirmed,
-        which has no instant to quote, so ``redispatch_release_at`` is None for it.
-
-        The window is passed through as it is. It is the customer's original preference,
-        not new admin input, so the endpoint validator's "same-day window already past"
-        rule does not apply to it.
+        The operator's one-row read (``GET /staff/delivery/failed/<id>``) and the first
+        step of ``redispatch_failed_delivery``. The bot therefore draws a date step only
+        for a delivery the re-dispatch would still take, and the read refuses with the
+        same code the re-dispatch would. Read unlocked: ``reschedule`` re-checks on the
+        row it locks.
 
         Raises:
-            NotFoundError: If the delivery is not found.
-            ValidationError: STAFF_DELIVERY_NOT_REDISPATCHABLE (not FAILED, here or
-                under the lock), ORDER_NOT_RESCHEDULABLE (the order left the active
-                lifecycle, here or under the lock), or any other ``reschedule`` refusal.
+            NotFoundError: STAFF_DELIVERY_NOT_FOUND.
+            ValidationError: ``redispatch_block_code``'s code. STAFF_DELIVERY_NOT_REDISPATCHABLE
+                means the delivery is no longer FAILED (a colleague re-dated it first).
+                ORDER_NOT_RESCHEDULABLE means its order left the active lifecycle.
         """
         delivery = Delivery.query.get(delivery_id)
         if not delivery:
             raise NotFoundError("Delivery not found", error_code="STAFF_DELIVERY_NOT_FOUND")
-        # Fast path on an unlocked read; `reschedule` re-checks under the lock.
         block_code = StaffService.redispatch_block_code(delivery)
         if block_code == "STAFF_DELIVERY_NOT_REDISPATCHABLE":
             raise ValidationError(
@@ -1476,29 +1476,86 @@ class StaffService:
                 "its delivery can no longer be re-dispatched.",
                 error_code=block_code,
             )
+        return delivery
+
+    @staticmethod
+    def redispatch_failed_delivery(
+        delivery_id: int,
+        actor_id: int,
+        *,
+        reason: Optional[str] = None,
+        delivery_date: Optional[date] = None,
+    ) -> Tuple[Delivery, "RescheduleResult"]:
+        """Re-date a FAILED delivery: reschedule its order to ``delivery_date`` (R18, F12).
+
+        ``delivery_date`` is the day the operator tapped. None means local today, which
+        is all a bot from before the date step sends.
+
+        This is the operator staff-bot flow's entry point. The admin Delivery page re-dates
+        the same rows through the Orders page's Reschedule modal (F13). It is a reschedule
+        with the customer's window unchanged, so a re-dispatch and an admin Reschedule are
+        one code path
+        (``OrderScheduleService.reschedule``). They cannot disagree on the unassign,
+        history, bottle unbind, route and counter cleanup, the order's date, the date
+        rule, or who is told. The date is judged there, on the locked order (F10). The
+        bot draws its buttons from the bounds ``get_failed_delivery`` publishes. A card
+        drawn before local midnight and tapped after it therefore carries a date that is
+        in the past by then, and is refused with ORDER_RESCHEDULE_DATE_IN_PAST.
+
+        ``get_failed_delivery`` (`redispatch_block_code`: FAILED, on an order that still
+        awaits a new date) is a FAST PATH only, read unlocked so the common mistake is
+        refused without taking a lock. ``expected_delivery_status`` makes ``reschedule``
+        re-check FAILED on the row it has locked, and that check is the one that counts.
+
+        The landing follows R5:
+        - A later day, or today before its release, lands ``rescheduled`` until that
+          day's first shift starts (``redispatch_release_at`` says when).
+        - Today after its release lands ``scheduled``, offered to drivers at once.
+        - A still-PENDING order's row is held until the order is confirmed. That has no
+          instant to quote, so ``redispatch_release_at`` is None for it.
+
+        The window is passed through as it is. It is the customer's own preference, not
+        new input, and ``reschedule`` judges a window only when the caller changes it
+        (F10), so a morning window that has already ended does not block a re-dispatch
+        to today.
+
+        Returns ``(delivery, result)``: the re-dated row, and the ``RescheduleResult``
+        whose customer-notice decision was made under the locks. The operator's reply is
+        built from ``result``. See ``RescheduleResult`` for why nobody may recompute it.
+
+        Raises:
+            NotFoundError: If the delivery is not found.
+            ValidationError: STAFF_DELIVERY_NOT_REDISPATCHABLE (not FAILED, here or
+                under the lock), ORDER_NOT_RESCHEDULABLE (the order left the active
+                lifecycle, here or under the lock), a date ``reschedule`` refuses
+                (ORDER_RESCHEDULE_DATE_IN_PAST, ORDER_RESCHEDULE_BEYOND_HORIZON,
+                ORDER_RESCHEDULE_PAST_CONTRACT_END), or any other ``reschedule`` refusal.
+        """
+        # Fast path on an unlocked read; `reschedule` re-checks under the lock.
+        delivery = StaffService.get_failed_delivery(delivery_id)
 
         from business_app.services.order_schedule_service import OrderScheduleService
         from business_app.utils import delivery_window
 
         order = delivery.order
-        rescheduled = OrderScheduleService.reschedule(
+        result = OrderScheduleService.reschedule(
             order.id,
-            delivery_date=delivery_window.local_now().date(),
+            delivery_date=delivery_date if delivery_date is not None else delivery_window.local_now().date(),
             window_start=order.delivery_window_start,
             window_end=order.delivery_window_end,
             actor_user_id=actor_id,
             reason=reason,
             expected_delivery_status=DeliveryStatus.FAILED,
         )
-        return rescheduled.delivery
+        return result.order.delivery, result
 
     @staticmethod
     def redispatch_release_at(delivery: Delivery) -> Optional[datetime]:
         """When drivers will see a re-dispatched delivery, or None if there is no such instant (R25).
 
         A re-dispatch made before today's first shift lands ``rescheduled`` and is held
-        until that shift starts (R5/R18). Both re-dispatch endpoints publish this
-        instant, so the operator is told when instead of "a driver can now re-claim
+        until that shift starts (R5/R18). The operator re-dispatch endpoint publishes
+        this instant, so the operator is told when instead of "a driver can now re-claim
         it". It asks ``OrderScheduleService.published_release_at``, the answer
         ``order_schedule_fields`` publishes as ``release_at``, so a row held only
         because its order is still PENDING (R23 corollary) quotes no instant that
@@ -1509,26 +1566,35 @@ class StaffService:
         return OrderScheduleService.published_release_at(delivery.order)
 
     @staticmethod
+    def _awaiting_new_date_deliveries():
+        """Deliveries whose order awaits a new date, joined the way the SQL twin requires.
+
+        `awaiting_new_date_filter` is the SQL form of `redispatch_block_code(delivery)
+        is None`, so the operator list and its count offer exactly the rows the
+        re-dispatch accepts. Pinned by tests/unit/test_awaiting_new_date_predicate.py.
+        """
+        from business_app.services.order_schedule_service import OrderScheduleService
+
+        return Delivery.query.join(Order, Delivery.order_id == Order.id).filter(
+            OrderScheduleService.awaiting_new_date_filter()
+        )
+
+    @staticmethod
     def get_failed_deliveries(limit: int = 25) -> List[Delivery]:
-        """List recent FAILED deliveries available for operator re-dispatch,
-        newest first.
+        """List recent deliveries awaiting a new date (operator re-dispatch), newest first.
 
         Excludes deliveries whose order already left the active lifecycle
         (cancelled / delivered / returned) independently of the delivery — a
         FAILED delivery can outlive its order by months, and such a row must
         never surface as a redispatch candidate (the re-dispatch itself refuses
-        it with ORDER_NOT_RESCHEDULABLE, see OrderScheduleService.reschedule)."""
+        it with ORDER_NOT_RESCHEDULABLE, see OrderScheduleService.reschedule).
+
+        The driver comes with the page: the failed branch keeps
+        `delivery_person_id`, so it names who attempted the door on every card."""
         return (
-            Delivery.query.join(Order, Delivery.order_id == Order.id)
-            # The SQL form of `StaffService.redispatch_block_code(delivery) is None`
-            # (FAILED, order still active). The operator bot must offer exactly the rows
-            # the re-dispatch accepts, so change the two together. Pinned by
-            # tests/integration/test_admin_delivery_page_actions.py.
-            .filter(
-                Delivery.status == DeliveryStatus.FAILED,
-                Order.status.in_(ACTIVE_ORDER_STATUSES),
-            )
+            StaffService._awaiting_new_date_deliveries()
             .options(
+                joinedload(Delivery.delivery_person),
                 joinedload(Delivery.order).joinedload(Order.order_items).joinedload(OrderItem.product),
                 joinedload(Delivery.order).joinedload(Order.delivery_address),
                 joinedload(Delivery.order).joinedload(Order.user),
@@ -1537,6 +1603,43 @@ class StaffService:
             .limit(limit)
             .all()
         )
+
+    @staticmethod
+    def count_failed_deliveries() -> int:
+        """How many deliveries await a new date: the whole set `get_failed_deliveries` pages.
+
+        The operator list says "showing 15 of N" (F9). N is this, never the length
+        of the capped page.
+        """
+        return StaffService._awaiting_new_date_deliveries().count()
+
+    @staticmethod
+    def failed_delivery_card(delivery: Delivery) -> Dict[str, Any]:
+        """Who and where, for a failed delivery: the fields every staff card of it shows.
+
+        The operator's failed list (`api/staff.py::_failed_delivery_row`) and the
+        delivery-failed alert (`staff_tasks.notify_delivery_failed`) both start from this,
+        so the alert and the list card never name different people.
+        - `driver_name` is the delivery's own driver: the failed branch keeps
+          `delivery_person_id`. It is never whoever marked the failure, who is an admin
+          when the Delivery page did it. `""` when the row has no driver.
+        - `customer_name` is `User.full_name`, so a customer with one name on file reads
+          as that name, not "None".
+
+        A delivery always has its order (`deliveries.order_id` is NOT NULL).
+        """
+        order = delivery.order
+        customer = order.user
+        driver = delivery.delivery_person
+        return {
+            "delivery_id": delivery.id,
+            "order_id": order.id,
+            "order_number": order.order_number,
+            "customer_name": customer.full_name if customer else "",
+            "customer_phone": customer.phone if customer else "",
+            "address": get_address_line(order.delivery_address),
+            "driver_name": driver.full_name if driver else "",
+        }
 
     @staticmethod
     def update_delivery_status(
@@ -1750,8 +1853,10 @@ class StaffService:
                 # bottle-session binding so it stops counting as an "open" order
                 # and the driver can close their session (the prod session-72
                 # lockup — BOTTLE_SESSION_HAS_OPEN_ORDERS — came from this gap).
-                # The order stays FAILED for operator re-dispatch and re-binds
-                # when re-accepted. Mirrors return_delivery_to_pool's unbind.
+                # The order's status is not changed at failure. The delivery
+                # stays FAILED until someone reschedules it (it re-binds when a
+                # driver accepts it again), or the order is cancelled. Mirrors
+                # return_delivery_to_pool's unbind.
                 if delivery.order_id:
                     from business_app.services.bottle_tracking_service import BottleTrackingService
 
@@ -1927,6 +2032,22 @@ class StaffService:
                 delivery.id,
                 notify_exc,
             )
+
+        # The staff alert (F7), in its own guard. `failed` is terminal, so a broker
+        # outage that turned this committed failure into a 500 would leave the
+        # driver a re-tap the backend only refuses. On the driver route
+        # `staff_user_id` is the JWT identity, a str; the task takes the users.id.
+        if new_status == "failed":
+            try:
+                from business_app.tasks.staff_tasks import notify_delivery_failed
+
+                notify_delivery_failed.delay(delivery.id, int(staff_user_id))
+            except Exception as exc:  # noqa: BLE001 — best-effort; the transition is already committed
+                current_app.logger.warning(
+                    "Failed to enqueue delivery-failed alert for delivery %s: %s",
+                    delivery.id,
+                    exc,
+                )
 
         # Re-optimize on the transitions that MOVE the anchor:
         #  - picked_up / in_transit: the driver just committed to a stop —
@@ -2344,6 +2465,12 @@ class StaffService:
                 f"Order must be in 'confirmed' status to mark as preparing. " f"Current status: {status_value}",
                 error_code="STAFF_ORDER_STATUS_INVALID_FOR_PREPARING",
             )
+
+        # F18: a confirmed order whose delivery failed is waiting for a new date.
+        # Refused before the write, so no "being prepared" notice is queued.
+        from business_app.services.order_schedule_service import OrderScheduleService
+
+        OrderScheduleService.assert_can_advance(order)
 
         order.status = OrderStatus.PREPARING
         order.updated_at = datetime.now(timezone.utc)

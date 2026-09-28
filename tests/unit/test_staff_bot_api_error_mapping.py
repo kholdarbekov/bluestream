@@ -136,6 +136,8 @@ def test_delivery_not_claimable_copy_is_seeded_in_all_three_languages():
         ("DELIVERY_NOT_RESCHEDULABLE", "staff.error.api.order_closed_for_redispatch"),
         ("STAFF_DELIVERY_NOT_REDISPATCHABLE", "staff.error.api.not_redispatchable"),
         ("ORDER_RESCHEDULE_PAST_CONTRACT_END", "staff.error.api.past_contract_end"),
+        ("ORDER_RESCHEDULE_DATE_IN_PAST", "staff.error.api.reschedule_date_in_past"),
+        ("ORDER_RESCHEDULE_BEYOND_HORIZON", "staff.error.api.reschedule_beyond_horizon"),
     ],
 )
 def test_redispatch_refusals_name_their_cause_not_bad_input(error_code, expected_key):

@@ -17,7 +17,10 @@ from keyboards import (
 )
 from api_client import api_client
 from database import db_manager, BotUserRepository
-from utils import user_middleware, format_price, MessageBuilder, get_auth_token, arm_location_request
+from utils import (
+    user_middleware, format_price, MessageBuilder, get_auth_token, arm_location_request,
+    ORDER_STATUS_LABEL_KEYS,
+)
 from shared.constants import ORDER_STATUS_ICONS, DEFAULT_STATUS_ICON, DISPLAY_TIMEZONE
 from shared.business_config import COD_DEBT_AMOUNT_THRESHOLD, MIN_ORDER_AMOUNT
 from handlers.base import BaseHandler
@@ -53,6 +56,30 @@ _PAYABLE_ICONS = {
     'business_account': '🏦',
     'payme': '💳',
 }
+
+# The customer's own cancel is refused with a `reason_code` (F5). The backend's
+# `message` is the WEB wording, which sends the customer to the bot link. Inside
+# the bot, each code gets its own chat copy instead, pointing to this chat and
+# never to a phone. A code missing here (a newer backend) falls back to `message`.
+_CANCEL_REFUSED_KEYS = {
+    'NOT_CANCELLABLE': 'telegram.orders.cancel_refused.not_cancellable',
+    'AWAITING_NEW_DATE': 'telegram.orders.cancel_refused.awaiting_new_date',
+    'PAID': 'telegram.orders.cancel_refused.paid',
+    'WITH_DRIVER': 'telegram.orders.cancel_refused.with_driver',
+}
+
+
+def _cancel_refusal_code(response) -> str | None:
+    """The `reason_code` a refused customer cancel carries, or None when it has none.
+
+    DEPTH MATTERS: the route answers through `error_response(..., data={...})`,
+    so the code sits at `data.reason_code` of the body, and `_make_request` hands
+    the whole error body back as `APIResponse.data`.
+    """
+    body = getattr(response, 'data', None)
+    detail = body.get('data') if isinstance(body, dict) else None
+    reason_code = detail.get('reason_code') if isinstance(detail, dict) else None
+    return reason_code if isinstance(reason_code, str) and reason_code else None
 
 
 def _cancel_confirmation_callback(order_id: int, decision: str) -> str:
@@ -677,8 +704,29 @@ class OrderHandlers(BaseHandler):
                     await self._ack(query, i18n.get('telegram.orders.cancel_success', language))
                     # Redirect to orders list
                     await self.orders_menu(update, context)
-                else:
+                    return
+
+                reason_code = _cancel_refusal_code(response)
+                if reason_code is None:
                     await self._handle_api_error(update, response.error, language)
+                    return
+
+                # The backend refused the customer's own cancel (F5). A card drawn
+                # while the order was still theirs to cancel lands here once it has
+                # moved on: order 1277's was tapped after its delivery failed. The
+                # refusal replaces the stale Yes/No, so it stays readable and
+                # leaves nothing stale to tap again, only the Track screen's way
+                # back: to the order, whose fresh read offers no Cancel, or to the
+                # list. A code with no chat copy here (a newer backend) shows the
+                # backend's `message` the same way, never as a toast: Telegram
+                # refuses a callback answer over 200 characters, and the web
+                # wording with the bot link runs past it.
+                refused_key = _CANCEL_REFUSED_KEYS.get(reason_code)
+                text = i18n.get(refused_key, language) if refused_key else response.error
+                await self._edit_or_replace_callback_message(
+                    query, text, reply_markup=OrderKeyboards.order_tracking(order_id, language),
+                )
+                await self._ack(query)
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="cancel_order_confirm_yes")
@@ -732,16 +780,11 @@ class OrderHandlers(BaseHandler):
 
             status_icons = ORDER_STATUS_ICONS
 
-            # Status labels mapping
+            # Status labels mapping: the one map the order detail line reads too. It
+            # names `awaiting_new_date`, the step the backend marks current while a
+            # failed delivery waits for a new date (F15); this loop only renders it.
             status_labels = {
-                'created': i18n.get('telegram.orders.status_created', language),
-                'pending': i18n.get('telegram.orders.status_pending', language),
-                'confirmed': i18n.get('telegram.orders.status_confirmed', language),
-                'preparing': i18n.get('telegram.orders.status_preparing', language),
-                'out_for_delivery': i18n.get('telegram.orders.status_out_for_delivery', language),
-                'delivered': i18n.get('telegram.orders.status_delivered', language),
-                'cancelled': i18n.get('telegram.orders.status_cancelled', language),
-                'returned': i18n.get('telegram.orders.status_returned', language)
+                status: i18n.get(key, language) for status, key in ORDER_STATUS_LABEL_KEYS.items()
             }
 
             # Build tracking message header
@@ -1412,6 +1455,11 @@ class OrderHandlers(BaseHandler):
                     'status': order.get('status'),
                     'is_paid': order.get('is_paid', False),
                     'payment_info': order.get('payment_info'),
+                    # And Cancel from `customer_may_cancel`, which reads only the
+                    # backend's `can_customer_cancel` off the POST /orders
+                    # response. Without it Cancel vanishes here: a missing field
+                    # fails closed.
+                    'can_customer_cancel': order.get('can_customer_cancel'),
                 }
 
                 # Send external payment link.

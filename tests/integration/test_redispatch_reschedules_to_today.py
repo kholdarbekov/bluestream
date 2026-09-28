@@ -1,16 +1,17 @@
-"""Re-dispatch is a reschedule to today (R18), driven through both of its buttons.
+"""Re-dispatch is a reschedule (R18), driven through the operator's staff-bot route.
 
-The admin Delivery page (`POST /api/v1/admin/deliveries/<id>/redispatch`) and the
-operator staff-bot flow (`POST /api/v1/staff/delivery/redispatch/<id>`) both reach
-`StaffService.redispatch_failed_delivery`, which is now
-`OrderScheduleService.reschedule(date=local today, window unchanged,
-expected_delivery_status=FAILED)`. It shares one code path with the admin Reschedule, so
-the two cannot disagree on the unassign, the history row, the route, the order's date or
-who is told.
+The operator flow (`POST /api/v1/staff/delivery/redispatch/<id>`) reaches
+`StaffService.redispatch_failed_delivery`, which is
+`OrderScheduleService.reschedule(date=the day tapped, or local today when none is sent,
+window unchanged, expected_delivery_status=FAILED)`. It shares one code path with the
+admin Reschedule, so the two cannot disagree on the unassign, the history row, the route,
+the order's date or who is told. The admin Delivery page has no re-dispatch of its own any
+more: its Reschedule opens the Orders page's modal (F13, pinned in
+tests/integration/test_admin_delivery_page_actions.py).
 
 Where it lands follows R5. After today's release (today + the earliest rostered shift
 start) it is `scheduled` and offered to drivers at once. Before it, the delivery is
-`rescheduled` and held until the shift starts, and both responses say when (R25). The
+`rescheduled` and held until the shift starts, and the response says when (R25). The
 business clock is frozen on the three seams that read it (spec §7). The rostered
 driver's `working_hours_start` is set explicitly, because it IS the release instant.
 
@@ -19,18 +20,20 @@ task's own signature. The bot tests run the real `RedispatchHandler` against the
 route through `_Bridge` (tests/integration/test_staff_bot_place_full_e2e.py). Telegram is
 a MagicMock, and i18n echoes keys and records what each call interpolated.
 
-Spec: docs/superpowers/specs/2026-09-23-admin-order-reschedule-design.md (R5, R18, R25, §3.6).
+Spec: docs/superpowers/specs/2026-09-23-admin-order-reschedule-design.md (R5, R18, R25, §3.6),
+amended by docs/superpowers/specs/2026-09-25-failed-delivery-awaits-new-date-design.md (F12, F13).
 """
 
 import asyncio
 import inspect
 from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, MagicMock, Mock, call
 from zoneinfo import ZoneInfo
 
 import pytest
 from flask_jwt_extended import create_access_token
+from telegram import Message
 
 from business_app.models.delivery import Delivery, DeliveryPerson, DeliveryRoute, DeliveryStatusHistory
 from business_app.models.order import Order
@@ -40,10 +43,12 @@ from business_app.tasks.delivery_tasks import (
     auto_assign_delivery_task,
     evaluate_pool_insertion_suggestions_task,
 )
+from business_app.tasks.notification_tasks import send_delivery_rescheduled_notification_task
 from business_app.utils.exceptions import ValidationError
 from business_app.utils.password_security import hash_password
 from shared.constants import DISPLAY_TIMEZONE
 from shared.enums import DeliveryStatus, OrderStatus, PaymentMethod, UserRole, UserType
+from staff_bot.api_client import api_client as staff_api_client
 from staff_bot.handlers.operator import redispatch as redispatch_module
 from staff_bot.handlers.operator.redispatch import RedispatchHandler
 from tests.integration.test_staff_bot_place_full_e2e import _Bridge
@@ -53,8 +58,8 @@ from tests.unit.test_staff_bot_place_surfaces import _make_update_context, _patc
 pytestmark = pytest.mark.integration
 
 TZ = ZoneInfo(DISPLAY_TIMEZONE)
-ADMIN_REDISPATCH = "/api/v1/admin/deliveries/{}/redispatch"
 STAFF_REDISPATCH = "/api/v1/staff/delivery/redispatch/{}"
+STAFF_FAILED_ONE = "/api/v1/staff/delivery/failed/{}"
 POOL = "/api/v1/staff/delivery/pool"
 REASON = "Customer is home after 18:00"
 CUSTOMER_WINDOW = (time(9, 0), time(11, 0))
@@ -162,10 +167,11 @@ def rostered_driver(db):
 
 
 class _OperatorBridge(_Bridge):
-    """`_Bridge` plus the operator's re-dispatch call. It also keeps what the backend answered.
+    """`_Bridge` as the real `StaffAPIClient`'s transport. It also keeps what the backend answered.
 
-    The path is spelled out rather than rebuilt from `staff_bot.config`, because it IS the
-    contract with business_app (the same reason as test_staff_delivery_journey_dispatcher.py).
+    The real client writes every path and body. The tests spell the expected path out
+    rather than rebuilding it from `staff_bot.config`, because it IS the contract with
+    business_app (the same reason as test_staff_delivery_journey_dispatcher.py).
     """
 
     def __init__(self, http, token):
@@ -177,8 +183,30 @@ class _OperatorBridge(_Bridge):
         self.answers.append((method, path, response.status_code, response.error_code))
         return response
 
-    async def redispatch_delivery(self, token, delivery_id):
-        return self._request("POST", STAFF_REDISPATCH.format(delivery_id))
+    async def make_request(
+        self, method, endpoint, token=None, data=None, params=None, headers=None, sign=False
+    ):
+        """`StaffAPIClient._make_request`, with its signature, so a client call that drifted
+        from it fails here. The route gets the client's own path and body, with this
+        bridge's operator token."""
+        assert params is None and not sign, "the failed-delivery calls send no query and are not signed"
+        return self._request(method, endpoint, data)
+
+
+def _through_the_real_client(monkeypatch, handler, bridge):
+    """Run `handler` on the real module-level `api_client`, with only its transport swapped.
+
+    `start`/`aclose` are no-ops, as in tests/staff_bot/ptb_harness.py, so no httpx client
+    is opened. `_patch_handler` still pins the language and the token.
+    """
+
+    async def _no_client(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(staff_api_client, "_make_request", bridge.make_request)
+    monkeypatch.setattr(staff_api_client, "start", _no_client)
+    monkeypatch.setattr(staff_api_client, "aclose", _no_client)
+    _patch_handler(monkeypatch, handler, redispatch_module, staff_api_client)
 
 
 def _token(app, user):
@@ -207,7 +235,8 @@ def _freeze_business_clock(monkeypatch, local_time):
 
 
 def _published_release(today):
-    """Today's 08:00 Tashkent shift start as both routes publish it: UTC, ISO 8601."""
+    """The given day's 08:00 Tashkent shift start as the API publishes a release instant:
+    UTC, ISO 8601."""
     return datetime.combine(today, SHIFT_START, tzinfo=TZ).astimezone(timezone.utc).isoformat()
 
 
@@ -315,28 +344,35 @@ def _pool_ids(client, app, driver):
 # --------------------------------------------------------------------------- #
 
 
-def test_admin_redispatch_after_todays_release_puts_it_back_in_the_pool_dated_today(
-    app, client, db, admin_claim_headers, admin_user, rostered_driver, sample_user, enqueued, monkeypatch
+def test_operator_redispatch_after_todays_release_puts_it_back_in_the_pool_dated_today(
+    app, client, db, operator_auth_headers, operator_user, rostered_driver, sample_user, enqueued, monkeypatch
 ):
     frozen = _freeze_business_clock(monkeypatch, time(12, 0))  # after the 08:00 shift start
     today = frozen.date()
-    delivery, route = _failed_delivery(db, sample_user, rostered_driver, today=today, number="ORD-RD-ADMIN")
+    delivery, route = _failed_delivery(db, sample_user, rostered_driver, today=today, number="ORD-RD-AFTER")
     delivery_id, order_id = delivery.id, delivery.order_id
 
-    response = client.post(ADMIN_REDISPATCH.format(delivery_id), json={"reason": REASON}, headers=admin_claim_headers)
+    response = client.post(STAFF_REDISPATCH.format(delivery_id), json={"reason": REASON}, headers=operator_auth_headers)
 
     assert response.status_code == 200, response.get_data(as_text=True)
-    data = response.get_json()["data"]
-    assert (data["delivery"]["status"], data["delivery"]["driver_id"]) == ("scheduled", None)
-    # Drivers can see it now, so there is no "when" to publish (R25).
-    assert data["release_at"] is None
+    # No date in the body, so it is today (F12). Drivers can see it now, so there is no "when"
+    # to publish (R25). The customer is told (F14), by email, because `sample_user` has no bot.
+    assert response.get_json()["data"] == {
+        "delivery_id": delivery_id,
+        "status": "scheduled",
+        "message": "Delivery rescheduled",
+        "delivery_date": today.isoformat(),
+        "release_at": None,
+        "notifies_customer": True,
+        "customer_channel": "email",
+    }
 
     db.session.expire_all()
     delivery = db.session.get(Delivery, delivery_id)
     order = db.session.get(Order, order_id)
     # Re-dated to local today. The window is the customer's and is kept, although
-    # 09:00-11:00 is already behind the 12:00 clock: the "same-day window already past"
-    # check is endpoint input validation, and nobody typed this window now (§3.6).
+    # 09:00-11:00 is already behind the 12:00 clock: `reschedule` judges a window only
+    # when the caller changes it (F10).
     assert order.delivery_date == today
     assert (order.delivery_window_start, order.delivery_window_end) == CUSTOMER_WINDOW
     # OUT_FOR_DELIVERY -> CONFIRMED is the one order move a reschedule makes (R6, R23).
@@ -349,19 +385,21 @@ def test_admin_redispatch_after_todays_release_puts_it_back_in_the_pool_dated_to
     assert (last.old_status, last.new_status, last.changed_by, last.reason) == (
         DeliveryStatus.FAILED,
         DeliveryStatus.SCHEDULED,
-        admin_user.id,
+        operator_user.id,
         REASON,
     )
     db.session.refresh(route)
     assert route.optimized_order == []
 
     # Offered to drivers at once: the auto-assign timer and the pool evaluator, which
-    # itself produces the new-order broadcast. Nobody else is told. A FAILED delivery
-    # is on no driver's live route and owes the customer no notice (R13, R16).
+    # itself produces the new-order broadcast. The customer is told the new date: the
+    # order has been waiting on one since the attempt failed (F14, amending R13). No
+    # driver is told, because a FAILED delivery is on no driver's live route (R16).
     assert sorted(enqueued) == sorted(
         [
             (auto_assign_delivery_task.name, (delivery_id,), {}),
             (evaluate_pool_insertion_suggestions_task.name, (delivery_id,), {}),
+            (send_delivery_rescheduled_notification_task.name, (order_id,), {}),
         ]
     )
     assert delivery_id in _pool_ids(client, app, rostered_driver)
@@ -380,10 +418,17 @@ def test_operator_redispatch_before_todays_release_holds_it_until_the_shift_star
     )
 
     assert response.status_code == 200, response.get_data(as_text=True)
-    data = response.get_json()["data"]
-    assert data["status"] == "rescheduled"
-    # When drivers will see it: today's 08:00 shift start, in UTC (R25).
-    assert data["release_at"] == _published_release(today)
+    # The request carried no date, so it is today (F12). It is held until today's 08:00 shift
+    # start, in UTC (R25). The customer is told (F14), by email, because `sample_user` has no bot.
+    assert response.get_json()["data"] == {
+        "delivery_id": delivery_id,
+        "status": "rescheduled",
+        "message": "Delivery rescheduled",
+        "delivery_date": today.isoformat(),
+        "release_at": _published_release(today),
+        "notifies_customer": True,
+        "customer_channel": "email",
+    }
 
     db.session.expire_all()
     delivery = db.session.get(Delivery, delivery_id)
@@ -404,8 +449,9 @@ def test_operator_redispatch_before_todays_release_holds_it_until_the_shift_star
     db.session.refresh(route)
     assert route.optimized_order == []
 
-    # Held: nothing is offered to anyone until the release tick at 08:00 (R5).
-    assert enqueued == []
+    # Held: nothing is offered to drivers until the release tick at 08:00 (R5). The
+    # customer is still told the new date (F14).
+    assert enqueued == [(send_delivery_rescheduled_notification_task.name, (order_id,), {})]
     assert delivery_id not in _pool_ids(client, app, rostered_driver)
 
 
@@ -414,95 +460,113 @@ def test_operator_redispatch_before_todays_release_holds_it_until_the_shift_star
     [(time(7, 0), "rescheduled", True), (time(12, 0), "scheduled", False)],
     ids=["before-todays-release", "after-todays-release"],
 )
-@pytest.mark.parametrize("endpoint", ["admin", "operator"])
-def test_both_redispatch_responses_say_when_drivers_will_see_it(
-    request, client, db, rostered_driver, sample_user, enqueued, monkeypatch, endpoint, clock, landed, held
+def test_the_redispatch_response_says_when_drivers_will_see_it(
+    client, db, operator_auth_headers, rostered_driver, sample_user, enqueued, monkeypatch, clock, landed, held
 ):
-    """R25, on both buttons. Before today's first shift the delivery is held, and "a driver
-    can re-claim it now" would be false, so each response carries the instant drivers see
-    it. After release it is in the pool already, and `release_at` is null. The key is
-    always present: null means "now", never "unknown"."""
+    """R25. Before today's first shift the delivery is held, and "a driver can re-claim it now"
+    would be false, so the response carries the instant drivers see it. After release it is in
+    the pool already, and `release_at` is null. The key is always present: null means "now",
+    never "unknown"."""
     frozen = _freeze_business_clock(monkeypatch, clock)
     delivery, _route = _failed_delivery(
-        db, sample_user, rostered_driver, today=frozen.date(), number=f"ORD-RD-WHEN-{endpoint}-{landed}"
+        db, sample_user, rostered_driver, today=frozen.date(), number=f"ORD-RD-WHEN-{landed}"
     )
 
-    if endpoint == "admin":
-        response = client.post(
-            ADMIN_REDISPATCH.format(delivery.id), json={}, headers=request.getfixturevalue("admin_claim_headers")
-        )
-        assert response.status_code == 200, response.get_data(as_text=True)
-        data = response.get_json()["data"]
-        status = data["delivery"]["status"]
-    else:
-        response = client.post(
-            STAFF_REDISPATCH.format(delivery.id), json={}, headers=request.getfixturevalue("operator_auth_headers")
-        )
-        assert response.status_code == 200, response.get_data(as_text=True)
-        data = response.get_json()["data"]
-        status = data["status"]
+    response = client.post(STAFF_REDISPATCH.format(delivery.id), json={}, headers=operator_auth_headers)
 
-    assert status == landed
+    assert response.status_code == 200, response.get_data(as_text=True)
+    data = response.get_json()["data"]
+    assert data["status"] == landed
     assert "release_at" in data
     assert data["release_at"] == (_published_release(frozen.date()) if held else None)
 
 
 # --------------------------------------------------------------------------- #
-# 2. Refusals carry their code on both routes and write nothing
+# 2. Refusals carry their code and write nothing
 # --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize("case", sorted(REFUSALS))
-@pytest.mark.parametrize("endpoint", ["admin", "operator"])
 def test_a_refused_redispatch_answers_its_code_and_writes_nothing(
-    request, client, db, rostered_driver, sample_user, enqueued, monkeypatch, endpoint, case
+    client, db, operator_auth_headers, rostered_driver, sample_user, enqueued, monkeypatch, case
 ):
     frozen = _freeze_business_clock(monkeypatch, time(12, 0))
     delivery, _route = _failed_delivery(
-        db, sample_user, rostered_driver, today=frozen.date(), number=f"ORD-RD-{endpoint}-{case}"
+        db, sample_user, rostered_driver, today=frozen.date(), number=f"ORD-RD-{case}"
     )
     _make_stale(db, delivery, case)
     before = _snapshot(delivery)
 
-    if endpoint == "admin":
-        response = client.post(
-            ADMIN_REDISPATCH.format(delivery.id), json={}, headers=request.getfixturevalue("admin_claim_headers")
-        )
-        code = (response.get_json().get("data") or {}).get("error_code")
-    else:
-        response = client.post(
-            STAFF_REDISPATCH.format(delivery.id), json={}, headers=request.getfixturevalue("operator_auth_headers")
-        )
-        code = response.get_json().get("error_code")
+    response = client.post(STAFF_REDISPATCH.format(delivery.id), json={}, headers=operator_auth_headers)
 
     assert response.status_code == 400, response.get_data(as_text=True)
-    assert code == REFUSALS[case]
+    assert response.get_json().get("error_code") == REFUSALS[case]
     db.session.expire_all()
     assert _snapshot(db.session.get(Delivery, delivery.id)) == before
     assert enqueued == []
 
 
 # --------------------------------------------------------------------------- #
-# 3. The operator's staff-bot button, against the real route
+# 3. The operator's staff-bot date step, against the real route
 # --------------------------------------------------------------------------- #
+
+
+def test_the_operator_bot_day_grid_is_drawn_from_the_bounds_the_route_published(
+    app, db, http, operator_user, rostered_driver, sample_user, echo_i18n, monkeypatch
+):
+    """F12 through the real route. The grid runs from the backend's local today (the
+    frozen business clock) to the last day `reschedule_date_bounds` allows. It is read
+    with one GET for this delivery, and its Back returns to the date step."""
+    frozen = _freeze_business_clock(monkeypatch, time(12, 0))
+    delivery, _route = _failed_delivery(
+        db, sample_user, rostered_driver, today=frozen.date(), number="ORD-RD-BOT-GRID"
+    )
+    first, last = OrderScheduleService.reschedule_date_bounds(delivery.order)
+    bridge = _OperatorBridge(http, _token(app, operator_user))
+    handler = RedispatchHandler()
+    _through_the_real_client(monkeypatch, handler, bridge)
+    tap, context = _make_update_context(callback_data=f"staff_redispatch_pick_{delivery.id}_0")
+    tap.callback_query.edit_message_reply_markup = AsyncMock()
+
+    asyncio.run(handler.show_day_grid(tap, context))
+
+    assert bridge.answers == [("GET", STAFF_FAILED_ONE.format(delivery.id), 200, None)]
+    assert first == frozen.date()
+    markup = tap.callback_query.edit_message_reply_markup.await_args.kwargs["reply_markup"]
+    days = [first + timedelta(days=offset) for offset in range((last - first).days + 1)]
+    assert [button.callback_data for row in markup.inline_keyboard for button in row] == [
+        f"staff_redispatch_on_{delivery.id}_{day:%Y%m%d}" for day in days
+    ] + [f"staff_redispatch_do_{delivery.id}_0"]
 
 
 def test_the_operator_bot_redispatch_reaches_the_reschedule(
     app, db, http, operator_user, rostered_driver, sample_user, echo_i18n, monkeypatch
 ):
+    """Today's date tap, after today's release: the POST carries that day, the delivery
+    is back in the pool, and the operator reads the customer line the route published
+    (`sample_user` has an email and no Telegram)."""
     frozen = _freeze_business_clock(monkeypatch, time(12, 0))
     delivery, _route = _failed_delivery(db, sample_user, rostered_driver, today=frozen.date(), number="ORD-RD-BOT")
     bridge = _OperatorBridge(http, _token(app, operator_user))
     handler = RedispatchHandler()
-    _patch_handler(monkeypatch, handler, redispatch_module, bridge)
-    tap, context = _make_update_context(callback_data=f"staff_redispatch_do_{delivery.id}")
+    _through_the_real_client(monkeypatch, handler, bridge)
+    tap, context = _make_update_context(callback_data=f"staff_redispatch_on_{delivery.id}_{frozen:%Y%m%d}")
+    tap.callback_query.edit_message_reply_markup = AsyncMock()
+    # A card the bot can still reply under: the handler checks for a real `Message`.
+    tap.callback_query.message = MagicMock(spec=Message)
+    tap.callback_query.message.reply_text = AsyncMock()
 
     asyncio.run(handler.redispatch_delivery(tap, context))
 
     assert bridge.answers == [("POST", STAFF_REDISPATCH.format(delivery.id), 200, None)]
-    # After release it is in the pool, so the existing copy is true and stays.
-    assert tap.callback_query.edit_message_text.await_args.args[0] == "✅ staff.redispatch.success"
-    assert ("staff.redispatch.success", {}) in echo_i18n
+    assert bridge.calls[-1]["payload"] == {"delivery_date": frozen.date().isoformat()}
+    # The card keeps naming the order and only loses its buttons; the reply goes under it.
+    tap.callback_query.edit_message_text.assert_not_called()
+    tap.callback_query.edit_message_reply_markup.assert_awaited_once_with(reply_markup=None)
+    assert tap.callback_query.message.reply_text.await_args.args[0] == (
+        "✅ staff.redispatch.success\nstaff.redispatch.success_in_pool\n📧 staff.redispatch.customer_notified_email"
+    )
+    assert ("staff.redispatch.success", {"date": f"{frozen:%d.%m}"}) in echo_i18n
     assert "staff.redispatch.success_held" not in [key for key, _ in echo_i18n]
     db.session.expire_all()
     row = db.session.get(Delivery, delivery.id)
@@ -516,24 +580,33 @@ def test_the_operator_bot_redispatch_reaches_the_reschedule(
 def test_the_operator_bot_says_when_a_held_redispatch_reaches_drivers(
     app, db, http, operator_user, rostered_driver, sample_user, echo_i18n, monkeypatch
 ):
-    """R25. At 07:00 the delivery lands `rescheduled` until the 08:00 shift start. The
-    operator is told that time, in Tashkent, from the UTC `release_at` the route
-    published, instead of "a driver can now re-claim it"."""
+    """R25, amended by F12. At 07:00 the delivery lands `rescheduled` until the 08:00
+    shift start. The operator is told the day and the time, in Tashkent, from the UTC
+    `release_at` the route published."""
     frozen = _freeze_business_clock(monkeypatch, time(7, 0))
     delivery, _route = _failed_delivery(
         db, sample_user, rostered_driver, today=frozen.date(), number="ORD-RD-BOT-HELD"
     )
     bridge = _OperatorBridge(http, _token(app, operator_user))
     handler = RedispatchHandler()
-    _patch_handler(monkeypatch, handler, redispatch_module, bridge)
-    tap, context = _make_update_context(callback_data=f"staff_redispatch_do_{delivery.id}")
+    _through_the_real_client(monkeypatch, handler, bridge)
+    tap, context = _make_update_context(callback_data=f"staff_redispatch_on_{delivery.id}_{frozen:%Y%m%d}")
+    tap.callback_query.edit_message_reply_markup = AsyncMock()
+    # A card the bot can still reply under: the handler checks for a real `Message`.
+    tap.callback_query.message = MagicMock(spec=Message)
+    tap.callback_query.message.reply_text = AsyncMock()
 
     asyncio.run(handler.redispatch_delivery(tap, context))
 
     assert bridge.answers == [("POST", STAFF_REDISPATCH.format(delivery.id), 200, None)]
-    assert tap.callback_query.edit_message_text.await_args.args[0] == "✅ staff.redispatch.success_held"
-    assert ("staff.redispatch.success_held", {"time": "08:00"}) in echo_i18n
-    assert "staff.redispatch.success" not in [key for key, _ in echo_i18n]
+    assert bridge.calls[-1]["payload"] == {"delivery_date": frozen.date().isoformat()}
+    tap.callback_query.edit_message_text.assert_not_called()
+    tap.callback_query.edit_message_reply_markup.assert_awaited_once_with(reply_markup=None)
+    assert tap.callback_query.message.reply_text.await_args.args[0] == (
+        "✅ staff.redispatch.success\nstaff.redispatch.success_held\n📧 staff.redispatch.customer_notified_email"
+    )
+    assert ("staff.redispatch.success_held", {"date": f"{frozen:%d.%m}", "time": "08:00"}) in echo_i18n
+    assert "staff.redispatch.success_in_pool" not in [key for key, _ in echo_i18n]
     db.session.expire_all()
     row = db.session.get(Delivery, delivery.id)
     assert (row.status, row.delivery_person_id, row.order.delivery_date) == (
@@ -555,11 +628,16 @@ REFUSAL_COPY = {
 def test_the_operator_bot_reads_a_refused_redispatch_as_its_own_cause(
     app, db, http, operator_user, rostered_driver, sample_user, echo_i18n, monkeypatch, case
 ):
-    """Every refusal an operator can meet here is a 400 now, and an unmapped 400 renders
+    """Every refusal an operator can meet here is a 400, and an unmapped 400 renders
     "check the entered data" to someone who typed nothing: the row changed under their
-    card. Each reads as its own cause -- the order was closed, or a colleague
-    re-dispatched it first -- where they all used to share the generic conflict
-    sentence, which never said which."""
+    card. Each reads as its own cause -- the order was closed, or a colleague re-dated
+    it first. A date tap never edits its refusal over the card: after a double tap the
+    card already shows the re-date that went through.
+
+    The tap is answered bare on entry. A MagicMock tap never reads as answered
+    (`callback_already_answered` trusts only a `StaffExtBot`), so here the refusal
+    takes the popup branch of `_notify_user`. With the real bot it is the message
+    under the card that the dispatcher journeys pin."""
     frozen = _freeze_business_clock(monkeypatch, time(12, 0))
     delivery, _route = _failed_delivery(
         db, sample_user, rostered_driver, today=frozen.date(), number=f"ORD-RD-BOT-{case}"
@@ -567,13 +645,17 @@ def test_the_operator_bot_reads_a_refused_redispatch_as_its_own_cause(
     _make_stale(db, delivery, case)
     bridge = _OperatorBridge(http, _token(app, operator_user))
     handler = RedispatchHandler()
-    _patch_handler(monkeypatch, handler, redispatch_module, bridge)
-    tap, context = _make_update_context(callback_data=f"staff_redispatch_do_{delivery.id}")
+    _through_the_real_client(monkeypatch, handler, bridge)
+    tap, context = _make_update_context(callback_data=f"staff_redispatch_on_{delivery.id}_{frozen:%Y%m%d}")
 
     asyncio.run(handler.redispatch_delivery(tap, context))
 
     assert bridge.answers == [("POST", STAFF_REDISPATCH.format(delivery.id), 400, REFUSALS[case])]
-    tap.callback_query.answer.assert_awaited_once_with(f"❌ {REFUSAL_COPY[case]}", show_alert=True)
+    assert bridge.calls[-1]["payload"] == {"delivery_date": frozen.date().isoformat()}
+    assert tap.callback_query.answer.await_args_list == [
+        call(None, show_alert=False),
+        call(f"❌ {REFUSAL_COPY[case]}", show_alert=True),
+    ]
     tap.callback_query.edit_message_text.assert_not_called()
 
 

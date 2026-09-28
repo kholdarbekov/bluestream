@@ -4,11 +4,17 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from business_app.utils.delivery_window import (
+    SCHEDULE_BEYOND_HORIZON,
+    SCHEDULE_DATE_IN_PAST,
+    SCHEDULE_WINDOW_INVALID,
+    SCHEDULE_WINDOW_PASSED,
     format_delivery_window,
     local_now,
     parse_and_validate_schedule,
+    parse_schedule,
     parse_window_time,
     schedule_date_bounds,
+    schedule_error_codes,
     validate_schedule,
     window_kind,
     window_slot_label,
@@ -145,16 +151,17 @@ def test_an_already_parsed_date_is_accepted_as_well_as_an_iso_string():
     assert from_string == from_date == (date(2026, 8, 20), None, None, [])
 
 
-@pytest.mark.parametrize(
-    "raw_date,raw_start,raw_end",
-    [
-        ("20-08-2026", None, None),   # wrong order
-        ("2026-13-01", None, None),   # not a real month
-        ("2026-08-20", "25:99", None),  # not a real time
-        ("2026-08-20", None, "noon"),   # not a time at all
-        (12345, None, None),            # not even a string
-    ],
-)
+MALFORMED_SCHEDULES = [
+    ("20-08-2026", None, None),   # wrong order
+    ("2026-13-01", None, None),   # not a real month
+    ("2026-08-20", "25:99", None),  # not a real time
+    ("2026-08-20", None, "noon"),   # not a time at all
+    (12345, None, None),            # not even a string
+    ("2026-08-20", 900, None),      # a number where "HH:MM" belongs: AttributeError, not ValueError
+]
+
+
+@pytest.mark.parametrize("raw_date,raw_start,raw_end", MALFORMED_SCHEDULES)
 def test_malformed_input_is_an_error_string_never_an_exception(raw_date, raw_start, raw_end):
     """A typo in an operator's form must surface as a 400, not a 500: this
     helper is what stands between `fromisoformat` and the endpoint's blanket
@@ -189,6 +196,92 @@ def test_the_clock_defaults_to_business_local_time_when_not_injected():
         (today_local + timedelta(days=1)).isoformat(), None, None
     )
     assert ok == []
+
+
+# --- parse_schedule / schedule_error_codes: the two halves (F10) ----------------
+#
+# The reschedule PATCH parses with `parse_schedule` alone, and `reschedule` maps
+# `schedule_error_codes` to its own coded refusals
+# (docs/superpowers/specs/2026-09-25-failed-delivery-awaits-new-date-design.md §3.5).
+
+AFTERNOON = datetime(2026, 8, 19, 14, 0, tzinfo=TZ)
+
+
+def test_parse_schedule_types_the_three_values_and_blank_means_not_set():
+    assert parse_schedule("2026-08-20", "12:00", "18:00") == (date(2026, 8, 20), time(12, 0), time(18, 0))
+    assert parse_schedule(date(2026, 8, 20), None, "10:00") == (date(2026, 8, 20), None, time(10, 0))
+    assert parse_schedule("", "", "") == (None, None, None)
+    assert parse_schedule(None, None, None) == (None, None, None)
+
+
+def test_parse_schedule_judges_nothing():
+    """Parsing only. A past date and an inverted window both parse: the PATCH hands them to
+    `reschedule`, which refuses them with codes the modal can put into words."""
+    assert parse_schedule("2020-01-01", "18:00", "12:00") == (date(2020, 1, 1), time(18, 0), time(12, 0))
+
+
+@pytest.mark.parametrize("raw_date,raw_start,raw_end", MALFORMED_SCHEDULES)
+def test_parse_schedule_raises_one_value_error_for_anything_malformed(raw_date, raw_start, raw_end):
+    """One exception type, so the PATCH's `except ValueError` answers every typo with a 400. An
+    `AttributeError` or `TypeError` escaping from here would reach the endpoint's 500."""
+    with pytest.raises(ValueError) as excinfo:
+        parse_schedule(raw_date, raw_start, raw_end)
+    assert str(excinfo.value).startswith("Invalid delivery schedule: ")
+
+
+def test_the_codes_are_the_contracted_strings():
+    assert (SCHEDULE_DATE_IN_PAST, SCHEDULE_BEYOND_HORIZON, SCHEDULE_WINDOW_INVALID, SCHEDULE_WINDOW_PASSED) == (
+        "DATE_IN_PAST",
+        "BEYOND_HORIZON",
+        "WINDOW_INVALID",
+        "WINDOW_PASSED",
+    )
+
+
+@pytest.mark.parametrize(
+    "days,start,end,codes",
+    [
+        (1, None, None, []),
+        (0, time(19, 0), None, []),  # "after 19:00" today at 14:00 is late at worst, not impossible
+        (MAX_SCHEDULE_HORIZON_DAYS, None, None, []),  # the last bookable day
+        (-1, None, None, [SCHEDULE_DATE_IN_PAST]),
+        (MAX_SCHEDULE_HORIZON_DAYS + 1, None, None, [SCHEDULE_BEYOND_HORIZON]),
+        (1, time(18, 0), time(12, 0), [SCHEDULE_WINDOW_INVALID]),
+        (1, time(12, 0), time(12, 0), [SCHEDULE_WINDOW_INVALID]),
+        (0, None, time(14, 0), [SCHEDULE_WINDOW_PASSED]),  # a deadline of exactly now has passed
+        (0, time(9, 0), time(12, 0), [SCHEDULE_WINDOW_PASSED]),
+        (0, time(13, 0), time(12, 0), [SCHEDULE_WINDOW_INVALID, SCHEDULE_WINDOW_PASSED]),
+        (-1, time(18, 0), time(12, 0), [SCHEDULE_DATE_IN_PAST, SCHEDULE_WINDOW_INVALID]),
+    ],
+)
+def test_schedule_error_codes_names_every_broken_rule_in_rule_order(days, start, end, codes):
+    delivery_date = AFTERNOON.date() + timedelta(days=days)
+    assert schedule_error_codes(delivery_date, start, end, now_local=AFTERNOON) == codes
+
+
+def test_schedule_error_codes_without_a_date_judges_only_the_window_shape():
+    assert schedule_error_codes(None, None, None, now_local=AFTERNOON) == []
+    # No day, so no window can have ended yet.
+    assert schedule_error_codes(None, time(9, 0), time(12, 0), now_local=AFTERNOON) == []
+    assert schedule_error_codes(None, time(18, 0), time(12, 0), now_local=AFTERNOON) == [SCHEDULE_WINDOW_INVALID]
+
+
+def test_validate_schedule_words_each_code_exactly_as_before():
+    """Create-order, checkout, `order_validators`, the outlet PUT and the sales visit order match
+    these sentences, and tests across the suite pin them. Mapping codes to them must not reword one."""
+    today = AFTERNOON.date()
+    assert validate_schedule(today - timedelta(days=1), time(13, 0), time(12, 0), now_local=AFTERNOON) == [
+        "delivery_date cannot be in the past",
+        "window_start must be before window_end",
+    ]
+    too_far = today + timedelta(days=MAX_SCHEDULE_HORIZON_DAYS + 1)
+    assert validate_schedule(too_far, None, None, now_local=AFTERNOON) == [
+        f"delivery_date cannot be more than {MAX_SCHEDULE_HORIZON_DAYS} days in the future"
+    ]
+    assert validate_schedule(today, time(13, 0), time(12, 0), now_local=AFTERNOON) == [
+        "window_start must be before window_end",
+        "delivery window has already passed for today",
+    ]
 
 
 # --- schedule_date_bounds: the one statement of the horizon ---------------------

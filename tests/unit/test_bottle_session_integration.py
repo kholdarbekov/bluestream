@@ -1465,8 +1465,10 @@ def test_failed_delivery_releases_session_binding_so_session_can_close(
     Reproduces the prod session-72 lockup (2026-06-26 & 2026-06-28): a failed
     delivery left its order bound and non-terminal (out_for_delivery), so
     close_bottle_session kept raising BOTTLE_SESSION_HAS_OPEN_ORDERS until an
-    operator re-dispatched it. The order stays FAILED for operator review; only
-    the bottle-session binding is released here.
+    operator re-dispatched it. The order's status is not changed at failure. The
+    delivery stays FAILED until someone reschedules it (it re-binds when a driver
+    accepts it again), or the order is cancelled. Only the bottle-session binding
+    is released here.
     """
     from business_app.services.staff_service import StaffService
     from business_app.models.bottle import DriverBottleSessionOrder

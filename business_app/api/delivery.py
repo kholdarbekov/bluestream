@@ -614,11 +614,13 @@ def report_delivery_issue(delivery_id):
             return jsonify({"error": get_translation("api.delivery.error.not_found_or_not_assigned")}), 404
 
         data = request.get_json()
-        issue_type = data.get("issue_type")  # delay, failed_attempt, vehicle_breakdown, customer_issue
+        issue_type = data.get("issue_type")  # delay, vehicle_breakdown, customer_issue
         details = data.get("details", {})
 
-        # Valid issue types
-        valid_issues = ["delay", "failed_attempt", "vehicle_breakdown", "customer_issue", "address_issue"]
+        # Valid issue types. There is no "failed_attempt" (F2): a failed delivery
+        # is recorded only by StaffService.update_delivery_status, which writes
+        # the history row and releases the bottle session.
+        valid_issues = ["delay", "vehicle_breakdown", "customer_issue", "address_issue"]
         if issue_type not in valid_issues:
             return jsonify({"error": get_translation("api.delivery.error.invalid_issue_type")}), 400
 

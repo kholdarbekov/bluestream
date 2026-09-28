@@ -218,6 +218,10 @@ class Shop:
         ]
         self.payment_restrictions: dict = {}
         self.order_response = None  # None -> succeed
+        # What `serialize_order` publishes as `can_customer_cancel` on the created
+        # order (F5). True is the backend's answer for a fresh unpaid pending
+        # order. A test flips it to prove the failure screen reads the field.
+        self.order_can_customer_cancel = True
 
         # (METHOD, endpoint) -> a whole APIResponse, returned untouched.
         # `FakeBackend.route` can only express success-with-body or
@@ -388,6 +392,7 @@ class Shop:
             "order_number": f"BS-{self.next_order_id}",
             "total_amount": float(self.cart_envelope()["data"]["cart"]["subtotal"]),
             "status": "pending",
+            "can_customer_cancel": self.order_can_customer_cancel,
             "created_at": "2026-08-21T09:15:00+00:00",
             "order_items": [
                 {"product_id": item["product_id"], "quantity": item["quantity"]}
@@ -1345,6 +1350,40 @@ async def test_a_refused_edit_on_a_failed_payment_link_still_leaves_one_screen(
         "menu_orders",
         f"cancel_order_{order['id']}",
     ], "the surviving screen must still carry the recovery keyboard"
+    assert_no_swallowed_crash(bot)
+
+
+async def test_a_failed_payment_link_offers_cancel_only_when_the_order_says_so(
+    bot, shop, user
+):
+    """The link-failure screen draws Cancel from the created order's own answer.
+
+    `POST /api/v1/orders` answers with `serialize_order`, which publishes
+    `can_customer_cancel` (F5). `confirm_order` hands the failure screen a
+    hand-built copy of that order, so the field has to ride along, or Cancel
+    vanishes from the one screen whose job is recovery (the two tests above).
+    And when the backend says no, the screen must not overrule it from the
+    status: this order is pending and unpaid, which the bot's old local rule
+    offered Cancel for.
+    """
+    shop.order_can_customer_cancel = False
+    add_address(bot, 900, "Uy", "Chilonzor 15")
+    await fill_cart(bot, user, BOTTLE_19L, quantity=3)
+    await reach_confirmation(bot, user, 900, payment="card")
+
+    bot.backend.route(
+        "POST", "/api/v1/payments/create",
+        lambda call: backend_failure("Click gateway timeout", 502),
+    )
+
+    await bot.send(user.tap("confirm_order"))
+
+    (order,) = shop.orders
+    failure = bot.telegram.last_shown()
+    assert failure.text == (
+        f"Order BS-{order['id']} is placed. We could not create the payment link."
+    )
+    assert failure.callback_data() == [f"payment_retry_{order['id']}", "menu_orders"]
     assert_no_swallowed_crash(bot)
 
 

@@ -123,10 +123,14 @@ class BaseHandler:
         'STAFF_INVALID_FAIL_REASON': 'staff.error.api.invalid_input',
         # Mark-preparing on an order that already left CONFIRMED under the card.
         'STAFF_ORDER_STATUS_INVALID_FOR_PREPARING': 'staff.error.api.not_preparable',
-        # Re-dispatch is a reschedule to today (R18, admin-order-reschedule spec),
-        # so its refusals are the reschedule's 400s. Every one an operator can meet
+        # F18: mark-preparing on a confirmed order whose delivery failed. It is
+        # waiting for a new date, and no writer may move it forward until then.
+        'ORDER_AWAITING_NEW_DATE': 'staff.error.api.awaiting_new_date',
+        # Giving a failed delivery a new date is a reschedule (R18 of the
+        # admin-order-reschedule spec, F12 of the failed-delivery spec), so its
+        # refusals are the reschedule's 400s. Every one an operator can meet
         # means the row changed under their card, and each cause gets its own
-        # sentence: the delivery is no longer FAILED (a colleague re-dispatched
+        # sentence: the delivery is no longer FAILED (someone gave it a date
         # first), the order was cancelled or delivered, or the contract ran out.
         # These used to share the generic conflict sentence, which never told the
         # operator which of those happened, or that there was nothing to retry.
@@ -134,6 +138,17 @@ class BaseHandler:
         'DELIVERY_NOT_RESCHEDULABLE': 'staff.error.api.order_closed_for_redispatch',
         'STAFF_DELIVERY_NOT_REDISPATCHABLE': 'staff.error.api.not_redispatchable',
         'ORDER_RESCHEDULE_PAST_CONTRACT_END': 'staff.error.api.past_contract_end',
+        # The re-date's own date rule (F10, failed-delivery spec). A date drawn on
+        # a card before local midnight is in the past once it lands. A date past
+        # the booking horizon needs the horizon shortened after the card was
+        # drawn. Neither is bad input, so neither may read as "check the data".
+        'ORDER_RESCHEDULE_DATE_IN_PAST': 'staff.error.api.reschedule_date_in_past',
+        'ORDER_RESCHEDULE_BEYOND_HORIZON': 'staff.error.api.reschedule_beyond_horizon',
+        # F12: the date a re-dispatch button carried did not parse. The bot builds
+        # it from the bounds the backend published, so this is a damaged or
+        # hand-made callback, never the operator's typo, and must not read as
+        # "check the entered data". Nothing moved.
+        'STAFF_REDISPATCH_DATE_INVALID': 'staff.error.api.redispatch_date_invalid',
         'STAFF_PHONE_FIRST_NAME_REQUIRED': 'staff.error.api.validation',
         'STAFF_ORDER_ITEMS_REQUIRED': 'staff.error.api.validation',
         'BOTTLE_SESSION_REQUIRED': 'staff.error.api.bottle_session_required',

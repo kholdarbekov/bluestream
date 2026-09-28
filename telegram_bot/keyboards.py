@@ -38,9 +38,9 @@ def customer_may_pay(order: Optional[Dict[str, Any]]) -> bool:
       its marking-code pool guard (`MARKING_CODES_POOL_SHORT`). Without this
       disjunct B3 would DELETE the Pay button from every cash order, i.e.
       narrow a change whose entire purpose is to widen. It is deliberately
-      spelled `status == 'pending'` and not "any live order": `cancel_order`
-      and the rail flip are both checkout-window affordances, and widening past
-      the window is a separate decision nobody has made.
+      spelled `status == 'pending'` and not "any live order": the rail flip is
+      a checkout-window affordance, and widening it past the window is a
+      separate decision nobody has made.
 
     Unpaid is required on both sides — `is_payable` already excludes a settled
     order, and offering a second payment on a paid one is how double-payments
@@ -66,22 +66,15 @@ def customer_may_pay(order: Optional[Dict[str, Any]]) -> bool:
 def customer_may_cancel(order: Optional[Dict[str, Any]]) -> bool:
     """May this customer cancel THIS order themselves?
 
-    A SIBLING of :func:`customer_may_pay`, never folded into it. The two used to
-    be one `order_status == 'pending'` test and B3 split them because payability
-    now runs THROUGH delivery while `OrderService.cancel_order`
-    (`order_service.py:1050`) still refuses DELIVERED/CANCELLED. Written down
-    once here so both screens that offer Cancel ask the same question.
+    The backend's answer, read verbatim: ``can_customer_cancel``, which
+    ``serialize_order`` publishes from ``OrderService.customer_cancel_block_code``,
+    the predicate ``POST /orders/<id>/cancel`` enforces (F5). The bot holds no
+    copy of the rule, so a payload without the field fails closed: no Cancel.
 
-    Deliberately still the checkout window and not "anything cancel_order would
-    accept": widening customer self-cancel to CONFIRMED / PREPARING /
-    OUT_FOR_DELIVERY orders is a business decision nobody has made. This helper
-    exists so that decision has exactly one place to land.
+    A SIBLING of :func:`customer_may_pay`, never folded into it: payability runs
+    through delivery (case B), self-cancel does not.
     """
-    if not order:
-        return False
-    if order.get('is_paid'):
-        return False
-    return (order.get('status') or '').lower() == 'pending'
+    return bool((order or {}).get('can_customer_cancel'))
 
 
 def get_product_display_price(product: Dict[str, Any]) -> Any:
@@ -833,7 +826,9 @@ class OrderKeyboards:
         buttons = []
 
         for order in orders:
-            icon = ORDER_STATUS_ICONS.get(order['status'], DEFAULT_STATUS_ICON)
+            # The backend's customer-facing status (F15), so an order awaiting a new
+            # delivery date does not wear its unchanged order status's icon.
+            icon = ORDER_STATUS_ICONS.get(order.get('display_status') or order['status'], DEFAULT_STATUS_ICON)
             date = order['created_at'][:10] if 'created_at' in order else ''
 
             buttons.append([{
@@ -873,10 +868,10 @@ class OrderKeyboards:
             }])
 
         # PAY and CANCEL were one `order_status == 'pending'` block and had to
-        # SPLIT. Payability now runs through delivery (case B), but
-        # `OrderService.cancel_order` still refuses DELIVERED/CANCELLED, so
-        # widening the pair wholesale would have granted customers a self-cancel
-        # button on an out-for-delivery order that can only fail.
+        # SPLIT. Payability runs through delivery (case B). Cancel is drawn only
+        # from the order's published `can_customer_cancel` (F5,
+        # `OrderService.customer_cancel_block_code`), passed in as `may_cancel`;
+        # a stale tap on a Cancel drawn earlier gets the coded refusal.
         if may_pay:
             buttons.append([{
                 'text': i18n.get('telegram.payment.pay_now', language),
@@ -904,7 +899,10 @@ class OrderKeyboards:
 
     @staticmethod
     def order_tracking(order_id: int, language: str = 'en') -> InlineKeyboardMarkup:
-        """Order tracking view buttons - just a back button to return to order details"""
+        """The way back from one order's screen: to its details, or to the orders list.
+
+        The Track screen's buttons, and the refused cancel's (F5), which would otherwise leave
+        the customer on a card with nothing to tap."""
         buttons = [
             [{
                 'text': f"⬅️ {i18n.get('telegram.back_to_order', language)}",
@@ -1471,8 +1469,9 @@ class PaymentKeyboards:
     def payment_failed(
         order_id: int,
         language: str = 'en',
-        may_pay: bool = True,
-        may_cancel: bool = True,
+        *,
+        may_pay: bool,
+        may_cancel: bool,
     ) -> InlineKeyboardMarkup:
         """Recovery options for an order that exists but is not paid.
 
@@ -1489,15 +1488,11 @@ class PaymentKeyboards:
         and it belongs here for the same reason. Before B3 a DELIVERED order
         could never reach this screen; it can now, because `retry_payment`
         renders it on any link-creation failure and case B is precisely the
-        population B3 routes here. `OrderService.cancel_order` still refuses
-        DELIVERED, so an unconditional Cancel button hands a customer reading
-        Uzbek the backend's raw English "Order cannot be cancelled".
-
-        Both default True for the one caller that holds no order —
-        `cancel_payment`, whose screen by construction runs on an order whose
-        payment attempt just ended without money moving — so that caller's
-        behaviour is unchanged rather than fail-closed into a recovery screen
-        with nothing to recover with.
+        population B3 routes here. Cancel is drawn only from the order's
+        published `can_customer_cancel` (F5,
+        `OrderService.customer_cancel_block_code`), and a stale tap gets the
+        coded refusal. Both are required: every caller holds the order, so
+        every caller decides.
 
         SWITCH METHOD IS DELIBERATELY ABSENT. `payment_switch_{id}` parsed the
         order id, logged it, and then rendered `OrderKeyboards.payment_methods`,

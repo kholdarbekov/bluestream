@@ -625,6 +625,11 @@ def order_schedule_fields(order: Order, *, detail: bool) -> Dict[str, Any]:
         "delivery_window": format_delivery_window(order.delivery_window_start, order.delivery_window_end),
         "awaiting_release": awaiting_release,
         "release_at": release_at.isoformat() if release_at else None,
+        # The delivery failed and the order waits for a staff-picked date (F8). The
+        # Orders tag, the rows behind the "Delivery failed" filter and the Reschedule
+        # modal's same-date save (F11) all read this one answer. It reads the delivery
+        # the list already eager-loads, so it adds no query per row.
+        "awaiting_new_date": OrderScheduleService.awaiting_new_date(order),
         **OrderScheduleService.get_reschedule_metadata(order, detail=detail),
     }
 

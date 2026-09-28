@@ -226,7 +226,9 @@ def test_is_assignable_is_the_status_guard_for_every_status(allow_in_progress):
     """`assign_driver`'s status guard, as the one predicate the Delivery page will
     publish as `can_assign`. A pool row may always be given a driver. Any other row
     only through an explicit admin reassign. A held row never, not even then (R22):
-    it is released by its date, or by a reschedule to today."""
+    it is released by its date, or by a reschedule to today. A failed row never
+    either (F2): it leaves `failed` only through a reschedule or by cancelling its
+    order."""
     assignable = {
         status
         for status in DeliveryStatus
@@ -234,6 +236,6 @@ def test_is_assignable_is_the_status_guard_for_every_status(allow_in_progress):
     }
 
     if allow_in_progress:
-        assert assignable == set(DeliveryStatus) - {DeliveryStatus.RESCHEDULED}
+        assert assignable == set(DeliveryStatus) - {DeliveryStatus.RESCHEDULED, DeliveryStatus.FAILED}
     else:
         assert assignable == {DeliveryStatus.SCHEDULED, DeliveryStatus.PENDING}

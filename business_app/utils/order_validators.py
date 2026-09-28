@@ -368,8 +368,8 @@ class OrderInputValidator:
 
         Parsing is local (this class owns its own "must be a string" / "must be
         ISO" message contract), but the past-date and horizon DECISIONS are
-        delegated to `delivery_window.validate_schedule` — the one place that
-        rule lives.
+        delegated to `delivery_window.validate_schedule`, which words
+        `schedule_error_codes`, the one statement of that rule.
 
         This class has no production caller today, so nothing is broken either
         way. Delegation is the point: the version this replaced re-derived the

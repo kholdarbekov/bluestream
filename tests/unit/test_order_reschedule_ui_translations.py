@@ -37,6 +37,7 @@ UI_FILES = (
     "src/components/orders/deliverySchedule.js",
     "src/components/orders/DeliverySchedulePicker.jsx",
     "src/components/orders/RescheduleOrderModal.jsx",
+    "src/components/orders/CloseOrderDialog.jsx",
 )
 
 # Rendered by the Create Order picker and the list column since the scheduled-orders feature,
@@ -73,6 +74,15 @@ RESCHEDULE_KEYS = {
     "ui.orders.reschedule_error.DELIVERY_DATE_REQUIRED",
     "ui.orders.reschedule_error.ORDER_RESCHEDULE_PAST_CONTRACT_END",
     "ui.orders.reschedule_error.ORDER_RESCHEDULE_REASON_TOO_LONG",
+    # docs/superpowers/specs/2026-09-25-failed-delivery-awaits-new-date-design.md: F6's way out of
+    # a cancel or return, and the F10 refusals `reschedule` now answers with.
+    "ui.orders.reschedule_instead",
+    "ui.orders.reschedule_error.ORDER_RESCHEDULE_DATE_IN_PAST",
+    "ui.orders.reschedule_error.ORDER_RESCHEDULE_BEYOND_HORIZON",
+    "ui.orders.reschedule_error.ORDER_RESCHEDULE_WINDOW_INVALID",
+    "ui.orders.reschedule_error.ORDER_RESCHEDULE_WINDOW_PASSED",
+    # F11's same-day Save, refused under the lock because an operator re-dated it first.
+    "ui.orders.reschedule_error.STAFF_DELIVERY_NOT_REDISPATCHABLE",
 }
 
 ALL_KEYS = sorted(SCHEDULE_KEYS | RESCHEDULE_KEYS)

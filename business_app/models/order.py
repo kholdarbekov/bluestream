@@ -214,10 +214,6 @@ class Order(db.Model, TimestampMixin):
 
         return self.total_amount
 
-    def can_be_cancelled(self):
-        """Check if order can be cancelled"""
-        return self.status in [OrderStatus.PENDING, OrderStatus.CONFIRMED]
-
     def to_dict(self):
         return {
             "id": self.id,

@@ -464,7 +464,7 @@ describe('AdminService', () => {
   });
 
   describe('updateOrderStatus', () => {
-    it('updates order status successfully', async () => {
+    it('updates order status successfully, with no reason unless one is given', async () => {
       const mockResponse = { message: 'Order status updated' };
       api.put.mockResolvedValue({ data: mockResponse });
 
@@ -473,8 +473,27 @@ describe('AdminService', () => {
       expect(api.put).toHaveBeenCalledWith('/admin/orders/1/status', {
         status: 'shipped',
         notes: 'Package shipped via FedEx'
-      });
+      }, { handledErrorCodes: undefined });
+      expect(api.put.mock.calls[0][1]).not.toHaveProperty('reason');
       expect(result).toEqual(mockResponse);
+    });
+
+    it('sends the internal reason apart from the notes, and hands api.js the codes its caller explains', async () => {
+      const envelope = { success: true, message: 'Order status updated' };
+      api.put.mockResolvedValue({ data: envelope });
+      const handledErrorCodes = ['ORDER_AWAITING_NEW_DATE', 'ADMIN_REASON_REQUIRED', 'ADMIN_REASON_TOO_LONG'];
+
+      const result = await adminService.updateOrderStatus(9, 'cancelled', undefined, {
+        reason: 'Customer moved away',
+        handledErrorCodes
+      });
+
+      const [url, body, config] = api.put.mock.calls[0];
+      expect(url).toBe('/admin/orders/9/status');
+      // What axios serialises: the undefined `notes` is dropped, so the customer gets no note.
+      expect(JSON.parse(JSON.stringify(body))).toStrictEqual({ status: 'cancelled', reason: 'Customer moved away' });
+      expect(config).toStrictEqual({ handledErrorCodes });
+      expect(result).toEqual(envelope);
     });
   });
 
@@ -979,6 +998,20 @@ describe('AdminService', () => {
     });
   });
 
+  describe('updateDelivery', () => {
+    it('PUTs the delivery with the body as built and the codes its caller explains', async () => {
+      const envelope = { success: true, message: 'Delivery updated successfully' };
+      api.put.mockResolvedValue({ data: envelope });
+      const body = { status: 'returned', notes: 'Ring twice', reason: 'Refused at the door' };
+      const handledErrorCodes = ['ADMIN_REASON_REQUIRED', 'ADMIN_REASON_TOO_LONG'];
+
+      const result = await adminService.updateDelivery(5, body, { handledErrorCodes });
+
+      expect(api.put).toHaveBeenCalledWith('/admin/deliveries/5', body, { handledErrorCodes });
+      expect(result).toEqual(envelope);
+    });
+  });
+
   describe('rescheduleOrder', () => {
     it('PATCHes the schedule route with the payload as built and the codes its caller explains', async () => {
       const envelope = { success: true, data: { order: { id: 321 } } };
@@ -994,23 +1027,6 @@ describe('AdminService', () => {
       const result = await adminService.rescheduleOrder(321, payload, { handledErrorCodes });
 
       expect(api.patch).toHaveBeenCalledWith('/admin/orders/321/schedule', payload, { handledErrorCodes });
-      expect(result).toEqual(envelope);
-    });
-  });
-
-  describe('redispatchDelivery', () => {
-    it('POSTs an empty body and hands api.js the codes its caller explains', async () => {
-      const envelope = {
-        success: true,
-        message: 'Delivery re-dispatched to pool',
-        data: { delivery: { id: 7, status: 'scheduled' }, release_at: null }
-      };
-      api.post.mockResolvedValue({ data: envelope });
-      const handledErrorCodes = ['ORDER_NOT_RESCHEDULABLE', 'STAFF_DELIVERY_NOT_REDISPATCHABLE'];
-
-      const result = await adminService.redispatchDelivery(7, { handledErrorCodes });
-
-      expect(api.post).toHaveBeenCalledWith('/admin/deliveries/7/redispatch', {}, { handledErrorCodes });
       expect(result).toEqual(envelope);
     });
   });

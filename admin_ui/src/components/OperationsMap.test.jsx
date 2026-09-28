@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 
 // react-leaflet renders to a real DOM canvas we don't need; stub it down to
@@ -9,8 +9,12 @@ vi.mock('react-leaflet', () => ({
   CircleMarker: ({ children, ...props }) => (
     <div data-testid="circle-marker" data-key={props['data-key']} data-color={props.pathOptions?.color}>{children}</div>
   ),
+  // `data-icon` is the divIcon's HTML. An order pin's whole style (fill, border, overdue
+  // ring) lives only there, so that is what the pin tests read.
   Marker: ({ children, ...props }) => (
-    <div data-testid="marker" data-kind={props['data-kind']}>{children}</div>
+    <div data-testid="marker" data-kind={props['data-kind']} data-icon={props.icon?.options?.html ?? ''}>
+      {children}
+    </div>
   ),
   // Positions and dashArray are what Defect-1 (depot point) and Important-1
   // (empty-geometry-must-still-dash) actually turn on, so the mock has to
@@ -27,8 +31,28 @@ vi.mock('./HeatLayer', () => ({ default: () => null }));
 
 import OperationsMap from './OperationsMap';
 
+// Every key `DispatchService._order_entry` publishes in `GET /admin/dispatch/snapshot` `orders[]`,
+// pinned against the live route by tests/unit/test_admin_ui_payload_fixture_contracts.py
+// (`test_operations_map_order_entry_fixture_matches_the_live_snapshot`), which parses this set
+// straight out of this file. Every order fixture in this file is built with `orderEntry`: each
+// published key starts as `null`, so a fixture has the snapshot's full shape, and a key the
+// snapshot never publishes throws.
+const ORDER_ENTRY_KEYS = new Set([
+  'order_id', 'order_number', 'status', 'delivery_id', 'delivery_status', 'driver_id', 'lat', 'lng',
+  'address_label', 'customer_name', 'customer_phone', 'user_id', 'total_amount', 'payment_method', 'is_cod',
+  'delivery_window', 'delivery_date', 'is_overdue', 'items', 'items_total_count', 'items_hidden_count',
+  'awaiting_new_date',
+]);
+const orderEntry = (overrides) => {
+  const invented = Object.keys(overrides).filter((key) => !ORDER_ENTRY_KEYS.has(key));
+  if (invented.length) {
+    throw new Error(`Order-entry fixture invents keys the snapshot never publishes: ${invented.join(', ')}`);
+  }
+  return { ...Object.fromEntries([...ORDER_ENTRY_KEYS].map((key) => [key, null])), ...overrides };
+};
+
 const ORDERS = [
-  { order_id: 1, order_number: 'A-1', status: 'confirmed', lat: 41.3, lng: 69.2, delivery_id: 11, driver_id: null, is_overdue: false, customer_name: 'C', address_label: 'x', total_amount: 0 },
+  orderEntry({ order_id: 1, order_number: 'A-1', status: 'confirmed', lat: 41.3, lng: 69.2, delivery_id: 11, driver_id: null, is_overdue: false, customer_name: 'C', address_label: 'x', total_amount: 0 }),
 ];
 const DRIVERS = [
   { driver_id: 5, full_name: 'Ali', lat: 41.31, lng: 69.21, location_status: 'fresh', active_count: 2, phone: '' },
@@ -170,5 +194,77 @@ describe('OperationsMap check-in layer', () => {
   it('draws nothing when the check-ins layer is off', () => {
     render(<OperationsMap {...checkinProps} visibleLayers={{ customers: false, orders: false, drivers: false }} />);
     expect(screen.queryAllByTestId('circle-marker')).toHaveLength(0);
+  });
+});
+
+describe('OperationsMap order pins', () => {
+  // Orders 21 and 22 are both held by driver 7 and both past their date. The only difference
+  // is the backend's `awaiting_new_date`: order 22's delivery failed and is waiting to be re-dated.
+  const LATE_ON_ROUTE = orderEntry({
+    order_id: 21, order_number: 'TG_000021_26', status: 'out_for_delivery', delivery_id: 31,
+    delivery_status: 'in_transit', driver_id: 7, lat: 41.3111, lng: 69.2797, address_label: 'Chilonzor 9',
+    customer_name: 'Dilnoza Rahimova', total_amount: 42000, is_cod: false, is_overdue: true,
+    awaiting_new_date: false,
+  });
+  const AWAITING_NEW_DATE = orderEntry({
+    order_id: 22, order_number: 'TG_000022_26', status: 'out_for_delivery', delivery_id: 32,
+    delivery_status: 'failed', driver_id: 7, lat: 41.3222, lng: 69.2888, address_label: 'Yunusobod 4',
+    customer_name: 'Bekzod Tursunov', total_amount: 38000, is_cod: false, is_overdue: true,
+    awaiting_new_date: true,
+  });
+  const WAITING_IN_POOL = orderEntry({
+    order_id: 23, order_number: 'TG_000023_26', status: 'confirmed', delivery_id: 33,
+    delivery_status: 'pending', driver_id: null, lat: 41.2555, lng: 69.1888, address_label: 'Sergeli 2',
+    customer_name: 'Nodira Karimova', total_amount: 27000, is_cod: true, is_overdue: false,
+    awaiting_new_date: false,
+  });
+  const pinProps = {
+    customers: [], drivers: [], routes: [], geometry: {},
+    visibleLayers: { customers: false, orders: true, drivers: false },
+  };
+  const onlyOrderPin = () => {
+    const pins = screen.getAllByTestId('marker').filter((n) => n.dataset.kind === 'order');
+    expect(pins).toHaveLength(1);
+    return pins[0];
+  };
+
+  it('draws an order awaiting a new date as its own pin, with no status fill and no overdue ring', () => {
+    render(<OperationsMap {...pinProps} orders={[AWAITING_NEW_DATE]} />);
+    const icon = onlyOrderPin().dataset.icon;
+    expect(icon).toContain('border:3px solid #722ed1');
+    expect(icon).toContain('rotate(45deg)');
+    // The failed row keeps its driver and its old date. Drawn the regular way, it would be
+    // filled in its status colour (someone is bringing it) and ringed red (it is late).
+    expect(icon).not.toContain('#fa8c16');
+    expect(icon).not.toContain('rgba(255,77,79,.55)');
+  });
+
+  it('says in the popup why the pin needs a new date, and does not call it overdue', () => {
+    render(<OperationsMap {...pinProps} orders={[AWAITING_NEW_DATE]} />);
+    const pin = onlyOrderPin();
+    expect(within(pin).getByText('TG_000022_26')).toBeInTheDocument();
+    expect(within(pin).getByText('Delivery failed: needs a new date')).toBeInTheDocument();
+    expect(within(pin).queryByText('Overdue')).not.toBeInTheDocument();
+  });
+
+  it('keeps a late order on a route filled in its status colour, ringed and labelled Overdue', () => {
+    render(<OperationsMap {...pinProps} orders={[LATE_ON_ROUTE]} />);
+    const pin = onlyOrderPin();
+    expect(pin.dataset.icon).toContain('background:#fa8c16');
+    expect(pin.dataset.icon).toContain('border:2px solid #fa8c16');
+    expect(pin.dataset.icon).toContain('box-shadow:0 0 0 3px rgba(255,77,79,.55)');
+    expect(pin.dataset.icon).not.toContain('#722ed1');
+    expect(within(pin).getByText('Overdue')).toBeInTheDocument();
+    expect(within(pin).queryByText('Delivery failed: needs a new date')).not.toBeInTheDocument();
+  });
+
+  it('keeps an unassigned order hollow and dashed, unringed and labelled Unassigned', () => {
+    render(<OperationsMap {...pinProps} orders={[WAITING_IN_POOL]} />);
+    const pin = onlyOrderPin();
+    expect(pin.dataset.icon).toContain('background:transparent');
+    expect(pin.dataset.icon).toContain('border:2px dashed #1677ff');
+    expect(pin.dataset.icon).toContain('box-shadow:none');
+    expect(within(pin).getByText('Unassigned')).toBeInTheDocument();
+    expect(within(pin).queryByText('Delivery failed: needs a new date')).not.toBeInTheDocument();
   });
 });

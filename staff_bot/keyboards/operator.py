@@ -1,6 +1,8 @@
 """
 Operator-related keyboards for Staff Bot
 """
+from datetime import date, timedelta
+
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from typing import List, Dict
 
@@ -160,3 +162,75 @@ class OperatorKeyboards:
                 callback_data="staff_back_to_main"
             )]
         ])
+
+    @staticmethod
+    def redispatch_card(delivery_id: int, origin: int, language: str) -> InlineKeyboardMarkup:
+        """A failed delivery's card: a list card (`origin=0`) or the failure alert (`origin=1`).
+
+        `origin` rides in every date-step callback, so Back can redraw the card
+        a tap came from without asking the backend (F12).
+        """
+        rows = [[InlineKeyboardButton(
+            f"📅 {i18n.get('staff.redispatch.button', language)}",
+            callback_data=f"staff_redispatch_do_{delivery_id}_{origin}"
+        )]]
+        if origin == 1:
+            rows.append([InlineKeyboardButton(
+                f"📋 {i18n.get('staff.redispatch.all_failed', language)}",
+                callback_data="staff_redispatch_failed_new"
+            )])
+        return InlineKeyboardMarkup(rows)
+
+    @staticmethod
+    def redispatch_date_step(
+        delivery_id: int, origin: int, min_date: date, max_date: date, language: str
+    ) -> InlineKeyboardMarkup:
+        """[Today] [Tomorrow] / [Pick a day] / [Back], from the bounds the backend
+        published for this delivery, never from the bot's clock (F12). Tomorrow
+        is left out when the backend allows only one day."""
+        first_row = [InlineKeyboardButton(
+            f"{i18n.get('staff.redispatch.today', language)} · {min_date:%d.%m}",
+            callback_data=f"staff_redispatch_on_{delivery_id}_{min_date:%Y%m%d}"
+        )]
+        tomorrow = min_date + timedelta(days=1)
+        if tomorrow <= max_date:
+            first_row.append(InlineKeyboardButton(
+                f"{i18n.get('staff.redispatch.tomorrow', language)} · {tomorrow:%d.%m}",
+                callback_data=f"staff_redispatch_on_{delivery_id}_{tomorrow:%Y%m%d}"
+            ))
+        return InlineKeyboardMarkup([
+            first_row,
+            [InlineKeyboardButton(
+                f"🗓 {i18n.get('staff.redispatch.pick_day', language)}",
+                callback_data=f"staff_redispatch_pick_{delivery_id}_{origin}"
+            )],
+            [InlineKeyboardButton(
+                f"⬅️ {i18n.get('staff.redispatch.back', language)}",
+                callback_data=f"staff_redispatch_back_{delivery_id}_{origin}"
+            )],
+        ])
+
+    @staticmethod
+    def redispatch_day_grid(
+        delivery_id: int, origin: int, min_date: date, max_date: date, language: str
+    ) -> InlineKeyboardMarkup:
+        """Every day the backend allows, first to last, three to a row as `dd.mm`.
+
+        Back returns to the date step, which reads the bounds again.
+        """
+        days = [min_date + timedelta(days=offset) for offset in range((max_date - min_date).days + 1)]
+        rows = [
+            [
+                InlineKeyboardButton(
+                    f"{day:%d.%m}",
+                    callback_data=f"staff_redispatch_on_{delivery_id}_{day:%Y%m%d}"
+                )
+                for day in days[start:start + 3]
+            ]
+            for start in range(0, len(days), 3)
+        ]
+        rows.append([InlineKeyboardButton(
+            f"⬅️ {i18n.get('staff.redispatch.back', language)}",
+            callback_data=f"staff_redispatch_do_{delivery_id}_{origin}"
+        )])
+        return InlineKeyboardMarkup(rows)

@@ -1,5 +1,14 @@
 """The customer's "your delivery moved to a new date" notice (spec §4.1; R13–R15).
 
+Where it sends a question (docs/superpowers/specs/2026-09-25-failed-delivery-awaits-new-date-design.md
+§4.2, F16):
+- Telegram: this bot chat, whose replies land in the admin Support Inbox;
+- email: the bot link;
+- never the phone.
+
+No `notification_templates` row exists here, so the Telegram copy pinned is the bundled
+default. An active row overrides it (that spec's §9 pre-deploy check).
+
 Drives the REAL path a reschedule enqueues: `send_delivery_rescheduled_notification_task`
 -> `NotificationService.send_delivery_rescheduled_notification` -> `send_notification` ->
 `_send_telegram_notification` / `_send_email_notification` -> `_create_notification_record`.
@@ -38,6 +47,14 @@ COMPANY_PHONE = "+998712000000"
 ORDER_NUMBER = "TG_000512_26"
 NEW_DATE = date(2026, 9, 25)
 CUSTOMER_CHAT_ID = "810000001"
+# Distinct from the shipped default, so a render that kept a link of its own would show that one.
+BOT_URL = "https://t.me/aqua_resched_test_bot"
+# F16: the last sentence of the Telegram notice, word for word.
+CHAT_LINE = {
+    "uz": "Savollar bo'lsa, shu chatda bizga yozing.",
+    "ru": "Вопросы? Просто напишите нам здесь, в этом чате.",
+    "en": "Questions? Just write to us here in this chat.",
+}
 # A clock time anywhere in the text would be an hour nobody has promised (spec §1: date only).
 _CLOCK_TIME = re.compile(r"\b\d{1,2}:\d{2}\b")
 
@@ -51,6 +68,7 @@ def live_send(app, monkeypatch):
     monkeypatch.setitem(app.config, "BREVO_SENDER_EMAIL", "noreply@aqua-element.uz")
     monkeypatch.setitem(app.config, "COMPANY_NAME", "Aqua Element")
     monkeypatch.setitem(app.config, "COMPANY_PHONE", COMPANY_PHONE)
+    monkeypatch.setitem(app.config, "COMPANY_TELEGRAM_BOT_URL", BOT_URL)
     response = Mock(status_code=200)
     # One body answers both providers: Telegram reads `ok`/`result`, Brevo reads `messageId`.
     response.json.return_value = {"ok": True, "result": {"message_id": 501}, "messageId": "<brevo-501>"}
@@ -98,24 +116,21 @@ def _sent_rows():
     return Notification.query.filter_by(notification_type=NotificationType.DELIVERY_RESCHEDULED.value).all()
 
 
+def _notice_body(html):
+    """What the notice itself says: the base layout's body block, without its footer.
+
+    The shared footer still lists the company phone on every customer email (the 2026-09-25
+    spec's §11 leaves that sweep to the owner). So "no phone" is checked on the notice's own words."""
+    start = html.index('<div class="email-body">')
+    return html[start : html.index("<!-- Footer -->", start)]
+
+
 @pytest.mark.parametrize(
     "language, expected",
     [
-        (
-            "uz",
-            f"📅 #{ORDER_NUMBER} buyurtmangizni yetkazib berish 25.09.2026 sanasiga ko'chirildi. "
-            f"Savollar bo'lsa: {COMPANY_PHONE}.",
-        ),
-        (
-            "ru",
-            f"📅 Доставка вашего заказа #{ORDER_NUMBER} перенесена на 25.09.2026. "
-            f"Вопросы? Звоните: {COMPANY_PHONE}.",
-        ),
-        (
-            "en",
-            f"📅 Delivery of your order #{ORDER_NUMBER} has been rescheduled to 09/25/2026. "
-            f"Questions? Call {COMPANY_PHONE}.",
-        ),
+        ("uz", f"📅 #{ORDER_NUMBER} buyurtmangizni yetkazib berish 25.09.2026 sanasiga ko'chirildi. {CHAT_LINE['uz']}"),
+        ("ru", f"📅 Доставка вашего заказа #{ORDER_NUMBER} перенесена на 25.09.2026. {CHAT_LINE['ru']}"),
+        ("en", f"📅 Delivery of your order #{ORDER_NUMBER} has been rescheduled to 09/25/2026. {CHAT_LINE['en']}"),
     ],
 )
 def test_a_connected_customer_gets_the_new_date_on_telegram(db, sample_user, live_send, language, expected):
@@ -133,6 +148,8 @@ def test_a_connected_customer_gets_the_new_date_on_telegram(db, sample_user, liv
     sent = live_send.call_args.kwargs["json"]["text"]
     assert "{" not in sent
     assert not _CLOCK_TIME.search(sent)
+    # F16: a question goes to this chat, never to a phone.
+    assert COMPANY_PHONE not in sent
 
 
 def test_the_sent_notice_is_recorded_against_the_order(db, sample_user, live_send):
@@ -173,6 +190,10 @@ def test_a_customer_who_blocked_the_bot_gets_the_notice_by_email(db, sample_user
     assert f"#{ORDER_NUMBER}" in email["htmlContent"]
     assert "09/25/2026" in email["htmlContent"]
     assert NotificationService._unrendered_placeholders(email["htmlContent"]) == []
+    body = _notice_body(email["htmlContent"])
+    assert f'<a href="{BOT_URL}">{BOT_URL}</a>' in body
+    assert "tel:" not in body
+    assert COMPANY_PHONE not in body
     [row] = _sent_rows()
     assert (row.channel, row.recipient_email, row.order_id, row.is_sent) == (
         NotificationChannel.EMAIL,
@@ -240,7 +261,7 @@ def test_the_notice_carries_the_date_the_order_has_when_it_sends(db, sample_user
     send_delivery_rescheduled_notification_task.run(order.id)
 
     assert live_send.call_args.kwargs["json"]["text"] == (
-        f"📅 Доставка вашего заказа #{ORDER_NUMBER} перенесена на 27.09.2026. Вопросы? Звоните: {COMPANY_PHONE}."
+        f"📅 Доставка вашего заказа #{ORDER_NUMBER} перенесена на 27.09.2026. {CHAT_LINE['ru']}"
     )
 
 
@@ -309,8 +330,12 @@ def test_one_channel_telegram_else_email(telegram_id, is_bot_active, email, tele
         ("en", f"Delivery rescheduled: order #{ORDER_NUMBER} - Aqua Element", "has been rescheduled to", "09/25/2026"),
     ],
 )
-def test_the_email_names_the_new_date_in_each_language(app, language, subject, marker, rendered_date):
-    """Each language renders its OWN file (the marker), not a fallback, and no field leaks."""
+def test_the_email_names_the_new_date_in_each_language(app, monkeypatch, language, subject, marker, rendered_date):
+    """Each language renders its OWN file (the marker), not a fallback, and no field leaks.
+
+    The data is hand-built with no bot link in it, as a caller's would be. The link comes from
+    `get_common_context`, which reads the configured `COMPANY_TELEGRAM_BOT_URL` (F16)."""
+    monkeypatch.setitem(app.config, "COMPANY_TELEGRAM_BOT_URL", BOT_URL)
     rendered = get_email_template_service().render_notification_email(
         NotificationType.DELIVERY_RESCHEDULED.value,
         language,
@@ -332,7 +357,10 @@ def test_the_email_names_the_new_date_in_each_language(app, language, subject, m
     assert marker in content
     assert f"#{ORDER_NUMBER}" in content
     assert rendered_date in content
-    assert COMPANY_PHONE in content
+    body = _notice_body(content)
+    assert f'<a href="{BOT_URL}">{BOT_URL}</a>' in body
+    assert "tel:" not in body
+    assert COMPANY_PHONE not in body
     assert NotificationService._unrendered_placeholders(content) == []
     assert "None" not in content
 

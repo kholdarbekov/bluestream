@@ -60,47 +60,118 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "ru": "Новая точка",
     },
     "staff.menu.redispatch_failed": {
-        "en": "Re-dispatch Failed",
-        "uz": "Muvaffaqiyatsizni qayta yuborish",
-        "ru": "Переотправить неуданые",
+        "en": "Failed deliveries",
+        "uz": "Muvaffaqiyatsiz yetkazishlar",
+        "ru": "Неудачные доставки",
     },
     "staff.redispatch.title": {
-        "en": "Re-dispatch Failed Delivery",
-        "uz": "Muvaffaqiyatsiz yetkazishni qayta yuborish",
-        "ru": "Переотправка неудачной доставки",
+        "en": "Failed deliveries — waiting for a new date",
+        "uz": "Muvaffaqiyatsiz yetkazishlar — yangi sana kutilmoqda",
+        "ru": "Неудачные доставки — ждут новой даты",
     },
     "staff.redispatch.pick": {
-        "en": "Pick a failed delivery to return to the pool:",
-        "uz": "Hovuzga qaytarish uchun muvaffaqiyatsiz yetkazishni tanlang:",
-        "ru": "Выберите неудачную доставку для возврата в пул:",
+        "en": "Pick a new delivery date for each order below:",
+        "uz": "Quyidagi har bir buyurtma uchun yangi yetkazish sanasini tanlang:",
+        "ru": "Выберите новую дату доставки для каждого заказа ниже:",
+    },
+    # The list is capped (F9); this says how many it left out.
+    "staff.redispatch.showing": {
+        "en": "Showing the {shown} most recent of {total}.",
+        "uz": "Jami {total} tadan eng so'nggi {shown} tasi ko'rsatilmoqda.",
+        "ru": "Показаны {shown} последних из {total}.",
+    },
+    "staff.redispatch.driver": {
+        "en": "Driver",
+        "uz": "Haydovchi",
+        "ru": "Водитель",
+    },
+    "staff.redispatch.failed_at": {
+        "en": "Failed at",
+        "uz": "Muvaffaqiyatsiz bo'lgan vaqt",
+        "ru": "Время неудачи",
     },
     "staff.redispatch.none": {
-        "en": "There are no failed deliveries to re-dispatch.",
-        "uz": "Qayta yuboriladigan muvaffaqiyatsiz yetkazishlar yo‘q.",
-        "ru": "Нет неудачных доставок для переотправки.",
+        "en": "No failed deliveries are waiting for a new date.",
+        "uz": "Yangi sanani kutayotgan muvaffaqiyatsiz yetkazishlar yo‘q.",
+        "ru": "Нет неудачных доставок, ожидающих новой даты.",
     },
     "staff.redispatch.button": {
-        "en": "Re-dispatch to pool",
-        "uz": "Hovuzga qayta yuborish",
-        "ru": "Вернуть в пул",
+        "en": "Pick a new date",
+        "uz": "Yangi sana tanlash",
+        "ru": "Выбрать новую дату",
+    },
+    # The failure alert's second button (F7): the whole list, below the alert.
+    "staff.redispatch.all_failed": {
+        "en": "All failed deliveries",
+        "uz": "Barcha muvaffaqiyatsiz yetkazishlar",
+        "ru": "Все неудачные доставки",
+    },
+    # The date step (F12). Today/Tomorrow carry the day, dd.mm, after them.
+    "staff.redispatch.today": {
+        "en": "Today",
+        "uz": "Bugun",
+        "ru": "Сегодня",
+    },
+    "staff.redispatch.tomorrow": {
+        "en": "Tomorrow",
+        "uz": "Ertaga",
+        "ru": "Завтра",
+    },
+    "staff.redispatch.pick_day": {
+        "en": "Pick a day",
+        "uz": "Kunni tanlash",
+        "ru": "Выбрать день",
+    },
+    # The short notice Telegram shows while the day grid opens.
+    "staff.redispatch.pick_day_prompt": {
+        "en": "Pick the new delivery day",
+        "uz": "Yangi yetkazish kunini tanlang",
+        "ru": "Выберите новый день доставки",
+    },
+    "staff.redispatch.back": {
+        "en": "Back",
+        "uz": "Orqaga",
+        "ru": "Назад",
     },
     "staff.redispatch.attempts": {
         "en": "Attempts",
         "uz": "Urinishlar",
         "ru": "Попытки",
     },
+    # The success reply (F12): the day it landed on ({date}, dd.mm), then one of
+    # the next two lines, then the customer line.
     "staff.redispatch.success": {
-        "en": "Delivery re-dispatched to the pool. A driver can now re-claim it.",
-        "uz": "Yetkazish hovuzga qayta yuborildi. Endi haydovchi uni qayta olishi mumkin.",
-        "ru": "Доставка возвращена в пул. Теперь водитель может взять её снова.",
+        "en": "Rescheduled to {date}.",
+        "uz": "Yetkazish {date} sanasiga ko'chirildi.",
+        "ru": "Доставка перенесена на {date}.",
     },
-    # A re-dispatch before today's first shift is held until that shift starts
-    # (R25 of docs/superpowers/specs/2026-09-23-admin-order-reschedule-design.md).
-    # {time} is the local HH:MM.
+    # Held until its day's first shift (R25, amended by F12): {date} is dd.mm,
+    # {time} the local HH:MM.
     "staff.redispatch.success_held": {
-        "en": "Re-dispatched. Drivers will see it when today's shift opens at {time}.",
-        "uz": "Qayta yuborildi. Haydovchilar uni bugungi smena soat {time} da boshlanganda ko'radi.",
-        "ru": "Доставка переотправлена. Водители увидят её, когда в {time} начнётся сегодняшняя смена.",
+        "en": "Drivers will see it on {date} from {time}.",
+        "uz": "Haydovchilar uni {date} kuni soat {time} dan boshlab ko'radi.",
+        "ru": "Водители увидят её {date} с {time}.",
+    },
+    "staff.redispatch.success_in_pool": {
+        "en": "Back in today's pool.",
+        "uz": "Bugungi havzaga qaytdi.",
+        "ru": "Снова в сегодняшнем пуле.",
+    },
+    # The customer line: the admin modal's three-way rule.
+    "staff.redispatch.customer_notified_telegram": {
+        "en": "Customer notified in Telegram.",
+        "uz": "Mijozga Telegram orqali xabar berildi.",
+        "ru": "Клиент уведомлён в Телеграме.",
+    },
+    "staff.redispatch.customer_notified_email": {
+        "en": "Customer notified by email.",
+        "uz": "Mijozga elektron pochta orqali xabar berildi.",
+        "ru": "Клиент уведомлён по электронной почте.",
+    },
+    "staff.redispatch.customer_unreachable": {
+        "en": "The customer can't be notified automatically. Contact them yourself.",
+        "uz": "Mijozga avtomatik xabar berib bo'lmaydi. U bilan o'zingiz bog'laning.",
+        "ru": "Клиента нельзя уведомить автоматически. Свяжитесь с ним сами.",
     },
     "staff.menu.new_orders_view": {
         "en": "New Orders (View)",
@@ -471,6 +542,36 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "📅 {number}-buyurtma dispetcher tomonidan {date} sanasiga ko'chirildi va marshrutingizdan olib tashlandi.",
         "ru": "📅 Заказ {number} перенесён диспетчером на {date} и снят с вашего маршрута.",
         "en": "📅 Order {number} was rescheduled to {date} by dispatch and removed from your route.",
+    },
+    # The failed-delivery alert (spec 2026-09-25-failed-delivery-awaits-new-date §4.1, F7),
+    # sent to operators, admins and managers by `webhook_server._render_delivery_failed_alert`.
+    # `{reason}` arrives already translated from the failure-reason family; `{name}` is the
+    # driver the delivery failed with. The admin hint quotes the admin UI's own labels (the
+    # Orders menu and its "Delivery failed" filter toggle), so it changes when they do.
+    "staff.notification.delivery_failed": {
+        "en": "Delivery failed: order #{number} needs a new date",
+        "uz": "Yetkazib berilmadi: #{number} buyurtmaga yangi sana kerak",
+        "ru": "Доставка не удалась: заказу #{number} нужна новая дата",
+    },
+    "staff.notification.delivery_failed_reason": {
+        "en": "Reason: {reason}",
+        "uz": "Sabab: {reason}",
+        "ru": "Причина: {reason}",
+    },
+    "staff.notification.delivery_failed_driver": {
+        "en": "Driver: {name}",
+        "uz": "Haydovchi: {name}",
+        "ru": "Водитель: {name}",
+    },
+    "staff.notification.delivery_failed_attempt": {
+        "en": "Attempt: {count}",
+        "uz": "Urinish: {count}",
+        "ru": "Попытка: {count}",
+    },
+    "staff.notification.delivery_failed_admin_hint": {
+        "en": 'Set a new date in Admin → Orders → "Delivery failed".',
+        "uz": 'Yangi sanani belgilang: Admin panel → Buyurtmalar → "Yetkazib berilmadi".',
+        "ru": "Назначьте новую дату: Админ-панель → Заказы → «Доставка не удалась».",
     },
     "staff.delivery.next_stop": {
         "en": "Next stop",
@@ -1358,24 +1459,52 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "ru": "Договоры этого клиента должен исправить администратор — до этого действие нельзя завершить.",
     },
     "staff.error.api.not_redispatchable": {
-        "en": "Only failed deliveries can be re-dispatched — this one has already changed. Refresh the list.",
-        "uz": "Faqat bajarilmagan yetkazib berishlarni qayta yuborish mumkin — bunisi allaqachon o'zgargan. Ro'yxatni yangilang.",
-        "ru": "Повторно отправить можно только неудавшиеся доставки — эта уже изменилась. Обновите список.",
+        "en": "This delivery is no longer waiting for a new date — it already has one. Nothing was changed.",
+        "uz": "Bu yetkazish endi yangi sanani kutmayapti — unga allaqachon sana belgilangan. Hech narsa o'zgartirilmadi.",
+        "ru": "Эта доставка больше не ждёт новой даты — дата уже назначена. Ничего не изменено.",
     },
     "staff.error.api.order_closed_for_redispatch": {
-        "en": "This order was cancelled or delivered, so it can't be re-dispatched.",
-        "uz": "Bu buyurtma bekor qilingan yoki yetkazib berilgan, shuning uchun uni qayta yuborib bo'lmaydi.",
-        "ru": "Этот заказ отменён или доставлен, поэтому его нельзя отправить повторно.",
+        "en": "This order was cancelled or delivered, so it can't get a new date.",
+        "uz": "Bu buyurtma bekor qilingan yoki yetkazib berilgan, shuning uchun unga yangi sana belgilab bo'lmaydi.",
+        "ru": "Этот заказ отменён или доставлен, поэтому назначить ему новую дату нельзя.",
     },
     "staff.error.api.past_contract_end": {
-        "en": "The customer's contract has ended, so this order can't be re-dispatched.",
-        "uz": "Mijozning shartnomasi tugagan, shuning uchun bu buyurtmani qayta yuborib bo'lmaydi.",
-        "ru": "Договор клиента закончился, поэтому этот заказ нельзя отправить повторно.",
+        "en": "That date is after the customer's contract ends. Nothing was saved. Open the failed deliveries again and pick an earlier date.",
+        "uz": "Bu sana mijoz shartnomasi tugaganidan keyin. Hech narsa saqlanmadi. Muvaffaqiyatsiz yetkazishlarni qayta oching va oldinroq sanani tanlang.",
+        "ru": "Эта дата позже окончания договора клиента. Ничего не сохранено. Откройте неудачные доставки заново и выберите более раннюю дату.",
+    },
+    # ORDER_RESCHEDULE_DATE_IN_PAST / ORDER_RESCHEDULE_BEYOND_HORIZON (F10): the
+    # date an operator tapped is no longer bookable. Nothing moved, so each says
+    # so and sends them back to pick again.
+    "staff.error.api.reschedule_date_in_past": {
+        "en": "That date has already passed — the day changed after this card was shown. Nothing was saved. Open the failed deliveries again and pick a date.",
+        "uz": "Bu sana allaqachon o'tib ketdi — karta ko'rsatilgandan keyin kun almashdi. Hech narsa saqlanmadi. Muvaffaqiyatsiz yetkazishlarni qayta oching va sana tanlang.",
+        "ru": "Эта дата уже прошла — день сменился после того, как карточка была показана. Ничего не сохранено. Откройте неудачные доставки заново и выберите дату.",
+    },
+    "staff.error.api.reschedule_beyond_horizon": {
+        "en": "That date is further ahead than a delivery can be booked. Nothing was saved. Open the failed deliveries again and pick a date.",
+        "uz": "Bu sana yetkazib berishni belgilash mumkin bo'lgan muddatdan uzoqroq. Hech narsa saqlanmadi. Muvaffaqiyatsiz yetkazishlarni qayta oching va sana tanlang.",
+        "ru": "Эта дата дальше, чем можно назначить доставку. Ничего не сохранено. Откройте неудачные доставки заново и выберите дату.",
+    },
+    # STAFF_REDISPATCH_DATE_INVALID (F12): the date on a re-dispatch button did not
+    # parse. The operator typed nothing and nothing moved, so it sends them back to
+    # pick again from a fresh card.
+    "staff.error.api.redispatch_date_invalid": {
+        "en": "The date on this button couldn't be read, so nothing was saved. Open the failed deliveries again and pick a date.",
+        "uz": "Bu tugmadagi sanani o'qib bo'lmadi, shuning uchun hech narsa saqlanmadi. Muvaffaqiyatsiz yetkazishlarni qayta oching va sana tanlang.",
+        "ru": "Не удалось прочитать дату на этой кнопке, поэтому ничего не сохранено. Откройте неудачные доставки заново и выберите дату.",
     },
     "staff.error.api.not_preparable": {
         "en": "Only confirmed orders can be marked as preparing — this one has already moved on. Refresh the list.",
         "uz": "Faqat tasdiqlangan buyurtmalarni tayyorlanmoqda deb belgilash mumkin — bu buyurtma allaqachon keyingi bosqichga o'tgan. Ro'yxatni yangilang.",
         "ru": "Отметить «готовится» можно только подтверждённый заказ — этот уже на другом этапе. Обновите список.",
+    },
+    # ORDER_AWAITING_NEW_DATE (F18): mark-preparing on an order whose delivery
+    # failed. A driver meets it only on a stale pool card, so it names no menu.
+    "staff.error.api.awaiting_new_date": {
+        "en": "This order's delivery failed and it is waiting for a new date, so it can't be marked as preparing. Nothing was changed — it can move on once it has a new date.",
+        "uz": "Bu buyurtmani yetkazib berish amalga oshmadi va u yangi sanani kutmoqda, shuning uchun uni tayyorlanmoqda deb belgilab bo'lmaydi. Hech narsa o'zgartirilmadi — yangi sana belgilangach, buyurtma davom etadi.",
+        "ru": "Доставка этого заказа не состоялась, и он ждёт новую дату, поэтому его нельзя отметить «готовится». Ничего не изменено — заказ продолжится, когда ему назначат новую дату.",
     },
     "staff.error.api.order_not_found": {
         "en": "This order no longer exists. Refresh the list.",
@@ -2272,10 +2401,12 @@ ROLE_TRANSLATIONS = {
 }
 
 # MUST cover every `shared.enums.DeliveryStatus` value, not just the ones a
-# driver can move a delivery INTO. `keyboards/delivery.py:95` labels a button
-# for every successor in `DELIVERY_STATUS_TRANSITIONS` — and CANCELLED is a
-# successor of all four active statuses — while `formatters.py:358` falls
-# through to `staff.delivery.status.{status}` for anything outside its own map.
+# driver can move a delivery INTO. `keyboards/delivery.py::active_delivery_actions`
+# labels a button for every successor in `DELIVERY_STATUS_TRANSITIONS`, while
+# `formatters.py::format_delivery_status` falls through to
+# `staff.delivery.status.{status}` for anything outside its own map — including
+# the CANCELLED a refusal names when an order was cancelled under the driver, a
+# status no driver button offers since F4.
 # Both are fed straight from the enum, so a narrower catalog here prints the
 # humanised English key tail on a driver's screen. `_add_dynamic_keys` derives
 # from the enum for exactly this reason; keep the two in step.

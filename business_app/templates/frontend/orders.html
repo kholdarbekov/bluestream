@@ -68,6 +68,9 @@
 .status-delivered { background: #28a745; color: #fff; border: 1px solid #1e7e34; }
 .status-cancelled { background: #f8d7da; color: #721c24; border: 1px solid #dc3545; }
 .status-returned { background: #e2e3e5; color: #383d41; border: 1px solid #6c757d; }
+/* Not an order status: a failed delivery waiting for a new date (F15). The label is a
+   sentence, so it is not capitalized word by word like the one-word statuses. */
+.status-awaiting_new_date { background: #fff3cd; color: #856404; border: 1px solid #ffc107; text-transform: none; }
 
 .order-item {
     display: flex;
@@ -480,6 +483,7 @@
         'cancel_confirm': 'Are you sure you want to cancel this order?' | t,
         'cancel_success': 'Order cancelled successfully' | t,
         'cancel_failed': 'Failed to cancel order' | t,
+        'status_labels': {'awaiting_new_date': 'Awaiting a new delivery date' | t},
     },
 }) }}
 <script src="{{ url_for('static', filename='js/pages/orders.js') }}"></script>

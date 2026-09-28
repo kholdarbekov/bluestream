@@ -171,6 +171,17 @@ FISCALIZED_RAILS = frozenset({PaymentMethod.CLICK, PaymentMethod.CARD})
 ONLINE_PAYABLE_METHOD_VALUES = {method.value for method in FISCALIZED_RAILS}
 
 
+# The payment statuses in which the row is holding real money: COMPLETED (paid in
+# full) and PARTIALLY_PAID (part of it is in, after a shortfall at the door or an
+# upward reprice). The customer-cancel rule (F5) and CashCollectionService's
+# dead-order credit and per-collection notice all ask this, so it is written once.
+#
+# 🔴 NOT ``api/payments.py::_MONEY_IS_IN_STATUSES``. That set only picks which
+# refusal sentence to show, and it deliberately files PARTIALLY_PAID under
+# "in progress".
+MONEY_HELD_PAYMENT_STATUSES = frozenset({PaymentStatus.COMPLETED, PaymentStatus.PARTIALLY_PAID})
+
+
 def order_is_payable_online(order: Any, payment: Any) -> bool:
     """May the customer still pay this order's gateway link RIGHT NOW?
 

@@ -343,6 +343,7 @@
 {% endblock %}
 
 {% block cabinet_content %}
+{% from "frontend/macros/order_status.html" import order_status_label %}
 <!-- Welcome Section -->
 <div class="welcome-section mb-4">
     <div class="card bg-gradient-primary text-white">
@@ -442,12 +443,15 @@
                     </thead>
                     <tbody>
                         {% for order in recent_orders %}
+                        {# The view that publishes display_statuses may still be the old one for a
+                           moment after `git pull` (spec §9); the order's own status then stands in. #}
+                        {% set display_status = display_statuses[order.id] if display_statuses is defined else order.status.value %}
                         <tr>
                             <td><strong>#{{ order.order_number }}</strong></td>
                             <td>{{ order.created_at.strftime('%Y-%m-%d') }}</td>
                             <td>
-                                <span class="badge badge-{{ 'success' if order.status.value == 'delivered' else 'primary' if order.status.value == 'confirmed' else 'warning' }}">
-                                    {{ order.status.value|title }}
+                                <span class="badge badge-{{ 'success' if display_status == 'delivered' else 'primary' if display_status == 'confirmed' else 'warning' }}">
+                                    {{ order_status_label(display_status) }}
                                 </span>
                             </td>
                             <td>{{ "{:,.0f}".format(order.total_amount)|replace(",", " ") }} UZS</td>

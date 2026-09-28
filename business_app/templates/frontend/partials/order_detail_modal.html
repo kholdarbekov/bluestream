@@ -29,6 +29,9 @@
 .order-status.status-out_for_delivery { background: #d4edda; color: #155724; }
 .order-status.status-delivered { background: #28a745; color: #fff; }
 .order-status.status-cancelled { background: #f8d7da; color: #721c24; }
+/* Not an order status: a failed delivery waiting for a new date (F15). The label is a
+   sentence, so it is not capitalized word by word like the one-word statuses. */
+.order-status.status-awaiting_new_date { background: #fff3cd; color: #856404; text-transform: none; }
 
 /* Modal Order Items Styling */
 .modal-order-items {
@@ -332,6 +335,7 @@
         'adding_to_cart': 'Adding items to cart...' | t,
         'items_added': 'Items added to cart!' | t,
         'add_failed': 'Failed to add items to cart' | t,
+        'status_labels': {'awaiting_new_date': 'Awaiting a new delivery date' | t},
     },
 }, element_id='order-detail-modal-data') }}
 <script src="{{ url_for('static', filename='js/pages/order-detail-modal.js') }}"></script>

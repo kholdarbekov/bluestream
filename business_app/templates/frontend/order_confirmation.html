@@ -262,6 +262,7 @@
 {% endblock %}
 
 {% block content %}
+{% from "frontend/macros/order_status.html" import order_status_label %}
         <!-- confirmation-section -->
         <section class="confirmation-section">
             <div class="auto-container">
@@ -289,8 +290,11 @@
                                 <i class="far fa-truck"></i>
                                 {{ 'Delivery Information'|t }}
                             </h5>
+                            {# F15: the old date belonged to the attempt that failed, and there is no new one yet. #}
+                            {% if display_status != 'awaiting_new_date' %}
                             <p><strong>{{ 'Estimated Delivery'|t }}:</strong> {{ order.delivery_date.strftime('%B %d, %Y') if order.delivery_date else 'TBD' }}</p>
-                            <p><strong>{{ 'Status'|t }}:</strong> {{ order.status|title }}</p>
+                            {% endif %}
+                            <p><strong>{{ 'Status'|t }}:</strong> {{ order_status_label(display_status) }}</p>
                             <p><strong>{{ 'Tracking'|t }}:</strong> {{ 'We will notify you when your order is on the way'|t }}</p>
                         </div>
 

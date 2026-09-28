@@ -218,6 +218,7 @@ class EmailTemplateService:
             company_email = current_app.config.get("COMPANY_EMAIL", "")
             company_address = current_app.config.get("COMPANY_ADDRESS", "")
             company_website = current_app.config.get("COMPANY_WEBSITE", "")
+            company_telegram_bot_url = current_app.config["COMPANY_TELEGRAM_BOT_URL"]
         except RuntimeError:
             # Outside Flask context
             company_name = os.environ.get("COMPANY_NAME", "BlueStream")
@@ -225,6 +226,10 @@ class EmailTemplateService:
             company_email = os.environ.get("COMPANY_EMAIL", "")
             company_address = os.environ.get("COMPANY_ADDRESS", "")
             company_website = os.environ.get("COMPANY_WEBSITE", "")
+            # The config class's own value, so the link is never built a second way.
+            from business_app.config.base import BaseConfig
+
+            company_telegram_bot_url = BaseConfig.COMPANY_TELEGRAM_BOT_URL
 
         return {
             "company_name": company_name,
@@ -232,6 +237,10 @@ class EmailTemplateService:
             "company_email": company_email,
             "company_address": company_address,
             "company_website": company_website,
+            # Where a customer email sends a question (F16): the bot chat, whose replies land in
+            # the admin Support Inbox. In the common context, so every render has it, hand-built
+            # data included.
+            "company_telegram_bot_url": company_telegram_bot_url,
             "current_year": datetime.now(UTC).year,
         }
 

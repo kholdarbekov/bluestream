@@ -1887,6 +1887,22 @@ def get_orders():
                 .filter(PaymentFiscalization.retries_exhausted_at.isnot(None))
             )
 
+        if request.args.get("delivery_failed", "").lower() in ("1", "true", "yes"):
+            from business_app.services.order_schedule_service import OrderScheduleService
+
+            # The "Delivery failed" toggle (F8): orders whose delivery failed and that
+            # wait for a new date. It filters by the SQL twin of the predicate each row
+            # publishes as `awaiting_new_date`.
+            # - The clause needs `deliveries` joined explicitly. The eager
+            #   `joinedload(Order.delivery)` below joins an anonymous alias, so
+            #   without this join every live order would pair with every failed delivery.
+            # - It comes after `filter_by(status=...)`, which binds to the last
+            #   joined entity.
+            # - `deliveries.order_id` is unique, so no order repeats in the page or in `total`.
+            query = query.join(Delivery, Delivery.order_id == Order.id).filter(
+                OrderScheduleService.awaiting_new_date_filter()
+            )
+
         # Apply sorting
         if sort_by == "total_amount":
             order_field = Order.total_amount
@@ -1973,7 +1989,7 @@ def create_order_for_user():
         consume_marking_codes = bool(data.get("consume_marking_codes", False))
 
         # A future date + an open-ended window. Parsed and validated by the one
-        # helper every write path shares, so the operator screen and the web
+        # helper the web checkout uses too, so the operator screen and the web
         # checkout can never disagree about what a legal schedule is.
         from business_app.utils.delivery_window import parse_and_validate_schedule
 
@@ -2057,7 +2073,11 @@ def create_order_for_user():
 @validate_admin_action(["manage_orders", "update_orders"])
 @validate_json(["status"])
 def update_order_status(order_id):
-    """Update order status"""
+    """Update order status.
+
+    Body: `{status, notes?, reason?}`. `notes` is shown to the customer on the
+    order timeline. `reason` is required for `cancelled`/`returned` and is
+    staff-only (F6)."""
     try:
         current_user_id = get_jwt_identity()
         data = request.get_json()
@@ -2076,11 +2096,19 @@ def update_order_status(order_id):
             return validation_error_response("Invalid status value")
 
         # Use OrderService to properly handle status transitions and inventory
-        from business_app.services.order_service import OrderService
+        from business_app.services.order_service import ADMIN_REASON_REQUIRED_STATUSES, OrderService
 
         order_service = OrderService()
 
         try:
+            # F6: an admin cancel or return names its reason, kept on the history
+            # row's staff-only `reason`. `notes` keeps its routing below and is
+            # still shown to the customer.
+            history_reason = (
+                OrderService.require_admin_reason(data.get("reason"))
+                if order_status in ADMIN_REASON_REQUIRED_STATUSES
+                else None
+            )
             if order_status == OrderStatus.CANCELLED:
                 # Route cancellation through cancel_order so the FULL cascade
                 # runs (stock restoration, inventory-reservation release,
@@ -2091,6 +2119,7 @@ def update_order_status(order_id):
                     order_id=order_id,
                     actor_user_id=current_user_id,
                     reason=notes or None,
+                    history_reason=history_reason,
                 )
             else:
                 order = order_service.update_order_status(
@@ -2099,11 +2128,14 @@ def update_order_status(order_id):
                     updated_by=current_user_id,
                     notes=notes,
                     bottles_returned=bottles_returned,
+                    history_reason=history_reason,
                 )
 
             return success_response(
                 data={"order": serialize_order_admin(order)}, message="Order status updated successfully"
             )
+        except ValidationError as e:
+            return validation_error_response(e.message, error_code=e.error_code)
         except Exception as e:
             current_app.logger.error(f"Failed to update order status: {e}")
             return validation_error_response(str(e))
@@ -2129,19 +2161,29 @@ def reschedule_order(order_id):
     offered to drivers) or `rescheduled` (held until its new release time, or
     for a still-pending order until it is confirmed).
     Every rule and side effect lives in `OrderScheduleService.reschedule`,
-    because both re-dispatch paths go through it too.
+    because the operator re-dispatch goes through it too. The admin Delivery
+    page's Reschedule is this route (F13).
 
     Body: {delivery_date: "YYYY-MM-DD" | null, delivery_window_start?,
-    delivery_window_end?, reason?}. `reason` is for the audit trail and the
-    delivery's history; the customer never sees it. At most 100 characters
-    after stripping (R24), refused with ORDER_RESCHEDULE_REASON_TOO_LONG, never
-    cut. Answers the order with the same schedule block and reschedule
-    metadata `GET /admin/orders/<id>` publishes, so the modal re-renders from
-    it. Every refusal answers 400 with `data.error_code`.
+    delivery_window_end?, reason?, expect_awaiting_new_date?}. `reason` is for
+    the audit trail and the delivery's history; the customer never sees it. At
+    most 100 characters after stripping (R24), refused with
+    ORDER_RESCHEDULE_REASON_TOO_LONG, never cut. `expect_awaiting_new_date: true`
+    is the modal's F11 Save of an unchanged schedule, sent because its one read
+    said the order awaits a new date. An operator may have given it one since
+    (F7 alerts both at once), so `reschedule` re-checks it on the locked row and
+    refuses a delivery no longer failed with STAFF_DELIVERY_NOT_REDISPATCHABLE,
+    exactly as it does the operator's own re-dispatch. Answers the order with
+    the same schedule block and reschedule metadata `GET /admin/orders/<id>`
+    publishes, so the modal re-renders from it. A missing `delivery_date` key,
+    a non-string `reason`, a non-boolean `expect_awaiting_new_date` or a value
+    that does not parse answers an uncoded 400, and an unknown order a 404.
+    Every other refusal from `reschedule`, the F10 date and window rule's
+    included, answers 400 with `data.error_code`.
     """
     try:
         from business_app.services.order_schedule_service import OrderScheduleService
-        from business_app.utils.delivery_window import parse_and_validate_schedule
+        from business_app.utils.delivery_window import parse_schedule
 
         data = request.get_json(silent=True) or {}
 
@@ -2159,39 +2201,50 @@ def reschedule_order(order_id):
         reason = data.get("reason")
         if reason is not None and not isinstance(reason, str):
             return validation_error_response("reason must be a string")
+        expect_awaiting = data.get("expect_awaiting_new_date", False)
+        if not isinstance(expect_awaiting, bool):
+            return validation_error_response("expect_awaiting_new_date must be true or false")
 
-        # The ONE parse+validate helper every write path shares (create,
-        # checkout, reschedule) -- never call parse_window_time/validate_schedule
-        # separately here, that would be a second copy of the rule. It defaults
-        # its own clock, so `now_local` is deliberately not passed.
-        delivery_date, window_start, window_end, schedule_errors = parse_and_validate_schedule(
-            data.get("delivery_date"),
-            data.get("delivery_window_start"),
-            data.get("delivery_window_end"),
-        )
-        if schedule_errors:
-            return validation_error_response(schedule_errors)
+        # Parse only (F10). Whether the date and window are allowed is
+        # `reschedule`'s rule. Only it holds the locked order, so only it can
+        # tell a changed window from the customer's own, which is never judged
+        # again, and it answers every refusal with a code the modal maps. A
+        # value that does not parse is still the uncoded 400 it always was.
+        try:
+            delivery_date, window_start, window_end = parse_schedule(
+                data.get("delivery_date"),
+                data.get("delivery_window_start"),
+                data.get("delivery_window_end"),
+            )
+        except ValueError as exc:
+            return validation_error_response([str(exc)])
 
-        order = OrderScheduleService.reschedule(
+        result = OrderScheduleService.reschedule(
             order_id,
             delivery_date=delivery_date,
             window_start=window_start,
             window_end=window_end,
             actor_user_id=int(get_jwt_identity()),
             reason=reason,
+            # A locked FAILED row on an order `reschedule_block_code` found active IS
+            # `awaiting_new_date` under the lock.
+            expected_delivery_status=DeliveryStatus.FAILED if expect_awaiting else None,
         )
         # The detail payload's own helper, not a second assembly of it: the
         # modal re-renders from exactly what `GET /admin/orders/<id>` would
-        # have said.
-        payload = {**serialize_order_admin(order), **order_schedule_fields(order, detail=True)}
+        # have said. Its `reschedule_notifies_customer` forecasts the NEXT
+        # re-date; what this one decided is `result.notify_customer`.
+        payload = {**serialize_order_admin(result.order), **order_schedule_fields(result.order, detail=True)}
         return success_response(data={"order": payload}, message="Schedule updated")
     except NotFoundError as e:
         return not_found_response(resource_type="Order", message=str(e))
     except ValidationError as e:
         # Every service refusal carries its code (ORDER_NOT_RESCHEDULABLE,
-        # DELIVERY_NOT_RESCHEDULABLE, DELIVERY_DATE_REQUIRED,
-        # ORDER_RESCHEDULE_PAST_CONTRACT_END, ORDER_RESCHEDULE_REASON_TOO_LONG);
-        # the modal maps it to text.
+        # DELIVERY_NOT_RESCHEDULABLE, DELIVERY_DATE_REQUIRED, the F10 date and
+        # window codes ORDER_RESCHEDULE_DATE_IN_PAST / _BEYOND_HORIZON /
+        # _PAST_CONTRACT_END / _WINDOW_INVALID / _WINDOW_PASSED,
+        # ORDER_RESCHEDULE_REASON_TOO_LONG, and STAFF_DELIVERY_NOT_REDISPATCHABLE
+        # for an F11 Save someone else beat); the modal maps it to text.
         return validation_error_response(str(e), error_code=e.error_code)
     except Exception as e:
         current_app.logger.error(f"Reschedule order error: {e}", exc_info=True)
@@ -2796,6 +2849,12 @@ def get_order_details(order_id):
         # feeds the list row, so the Reschedule button cannot mean one thing on
         # the row and another in the modal (see `order_schedule_fields`).
         order_data.update(order_schedule_fields(order, detail=True))
+
+        # F19: the latest admin cancel or return and its internal reason. Admin
+        # only; the customer's order reads never carry a history `reason`.
+        from business_app.services.order_service import OrderService
+
+        order_data["closing_reason"] = OrderService.closing_reason(order)
 
         return success_response(data={"order": order_data})
 
@@ -3978,43 +4037,10 @@ def update_admin_delivery(delivery_id):
     except NotFoundError as e:
         return not_found_response(str(e))
     except ValidationError as e:
-        return validation_error_response(str(e))
+        return validation_error_response(e.message, error_code=e.error_code)
     except Exception as e:
         current_app.logger.error(f"Update admin delivery error: {e}")
         return internal_error_response("Failed to update delivery")
-
-
-@admin_bp.route("/deliveries/<int:delivery_id>/redispatch", methods=["POST"])
-@jwt_required()
-@validate_admin_action(["manage_delivery"])
-def redispatch_admin_delivery(delivery_id):
-    """Re-dispatch a FAILED delivery: reschedule it to today, window unchanged (R18).
-
-    It lands `scheduled` and is offered to drivers once today's release has passed.
-    Before that it lands `rescheduled` until the day's first shift starts, and
-    `data.release_at` says when (R25)."""
-    try:
-        payload = request.get_json(silent=True) or {}
-        reason = (payload.get("reason") or "").strip() or None
-        result = AdminDeliveryService.redispatch_delivery(
-            delivery_id,
-            int(get_jwt_identity()),
-            reason=reason,
-        )
-        return success_response(
-            data=result,
-            message="Delivery re-dispatched to pool",
-        )
-    except NotFoundError as e:
-        return not_found_response(str(e))
-    except ValidationError as e:
-        # The code is the contract and the prose is not: ORDER_NOT_RESCHEDULABLE
-        # (the order left the active lifecycle), STAFF_DELIVERY_NOT_REDISPATCHABLE
-        # (no longer FAILED), or another reschedule refusal.
-        return validation_error_response(str(e), error_code=e.error_code)
-    except Exception as e:
-        current_app.logger.error(f"Redispatch admin delivery error: {e}")
-        return internal_error_response("Failed to re-dispatch delivery")
 
 
 @admin_bp.route("/delivery-personnel", methods=["GET"])

@@ -13,6 +13,7 @@ from business_app.models.review import Review
 from business_app.models.subscription import Subscription
 from business_app.models.user import User
 from business_app.services.delivery_service import DeliveryService
+from business_app.utils.exceptions import ValidationError
 from shared.enums import OrderStatus, SubscriptionStatus, UserRole, UserStatus
 from shared.status_transitions import is_valid_order_transition
 
@@ -191,6 +192,17 @@ class AdminBulkActionService:
 
                 elif action == "process":
                     if order.status == OrderStatus.CONFIRMED:
+                        from business_app.services.order_schedule_service import OrderScheduleService
+
+                        # F18: the one forward-move rule. A refusal is this arm's own
+                        # failed item, not the loop's except, which would log an
+                        # expected refusal as a crash.
+                        try:
+                            OrderScheduleService.assert_can_advance(order)
+                        except ValidationError as refusal:
+                            failed_count += 1
+                            errors.append({"order_id": order_id, "error": refusal.message})
+                            continue
                         order.status = OrderStatus.PREPARING
                     else:
                         failed_count += 1

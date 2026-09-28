@@ -8,14 +8,16 @@ from decimal import Decimal
 from flask import Blueprint, request, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
+from business_app.services.order_schedule_service import OrderScheduleService
 from business_app.services.staff_service import StaffService
 from business_app.utils.service_factory import get_corporate_contract_service
 from business_app.utils.address_helpers import get_address_label, get_address_line
 from business_app.utils.decorators import require_staff_roles, verify_webhook_signature
-from business_app.utils.delivery_window import format_delivery_window
+from business_app.utils.delivery_window import format_delivery_window, parse_schedule
 from business_app.utils.error_handlers import handle_api_exception
 from business_app.utils.api_responses import success_response
 from business_app.utils.exceptions import ValidationError
+from business_app.utils.timezone_utils import ensure_utc
 
 staff_bp = Blueprint("staff", __name__)
 
@@ -498,36 +500,77 @@ def get_active_deliveries():
     )
 
 
+def _failed_delivery_row(delivery, failed_at) -> dict:
+    """One delivery awaiting a new date, as the operator bot shows it (F9, F12).
+
+    The ONE shape of a failed row. The list and the one-row read both build it here,
+    so a card drawn from an alert and a card drawn from the list cannot disagree.
+    - `driver_name` is the driver who attempted the door. The failed branch keeps
+      `delivery_person_id`, and F2 stops a reassign from moving it. It is never the
+      history row's `changed_by`: that is the admin when the Delivery page marked the
+      failure.
+    - `failed_at` is the delivery's latest FAILED history row, which the caller loads
+      for its whole page (`OrderScheduleService.failed_at_by_delivery`). A row with
+      none falls back to its last update. It is published in UTC with its offset:
+      SQLite drops the zone on read and Postgres keeps it, and the bot parses one format.
+    - `reschedule_min_date`/`reschedule_max_date` are `reschedule_date_bounds`, the
+      bounds the admin Reschedule modal is given and `reschedule` enforces. The bot
+      draws its date buttons from these, never from its own clock.
+
+    A delivery always has its order (`deliveries.order_id` is NOT NULL), and both
+    callers reach it through the re-dispatch rule.
+    """
+    order = delivery.order
+    failed_at = failed_at or delivery.updated_at
+    min_date, max_date = OrderScheduleService.reschedule_date_bounds(order)
+    return {
+        **StaffService.failed_delivery_card(delivery),
+        "status": delivery.status.value if hasattr(delivery.status, "value") else delivery.status,
+        "total_amount": float(order.total_amount) if order.total_amount else 0,
+        "failed_delivery_reason": delivery.failed_delivery_reason,
+        "delivery_attempts": delivery.delivery_attempts or 0,
+        "failed_at": ensure_utc(failed_at).isoformat() if failed_at else None,
+        "reschedule_min_date": min_date.isoformat(),
+        "reschedule_max_date": max_date.isoformat(),
+    }
+
+
 @staff_bp.route("/delivery/failed", methods=["GET"])
 @handle_api_exception
 @jwt_required()
 @require_staff_roles("operator")
 def get_failed_deliveries():
-    """Operator: list recent FAILED deliveries available for re-dispatch."""
+    """Operator: deliveries awaiting a new date, newest first, one capped page (F9).
+
+    `total` is the whole set (`count_failed_deliveries`), never the length of the
+    page, so the bot says "showing 15 of N" instead of silently dropping rows.
+    """
     deliveries = StaffService.get_failed_deliveries()
+    failed_at = OrderScheduleService.failed_at_by_delivery([delivery.id for delivery in deliveries])
+    return success_response(
+        {
+            "items": [_failed_delivery_row(delivery, failed_at.get(delivery.id)) for delivery in deliveries],
+            "total": StaffService.count_failed_deliveries(),
+        }
+    )
 
-    items = []
-    for delivery in deliveries:
-        order = delivery.order
-        address = order.delivery_address if order else None
-        items.append(
-            {
-                "delivery_id": delivery.id,
-                "order_id": order.id if order else None,
-                "order_number": order.order_number if order else None,
-                "status": delivery.status.value if hasattr(delivery.status, "value") else delivery.status,
-                "customer_name": (
-                    f"{order.user.first_name} {order.user.last_name or ''}".strip() if order and order.user else ""
-                ),
-                "customer_phone": order.user.phone if order and order.user else "",
-                "address": get_address_line(address),
-                "total_amount": float(order.total_amount) if order and order.total_amount else 0,
-                "failed_delivery_reason": delivery.failed_delivery_reason,
-                "delivery_attempts": delivery.delivery_attempts or 0,
-            }
-        )
 
-    return success_response({"items": items, "total": len(items)})
+@staff_bp.route("/delivery/failed/<int:delivery_id>", methods=["GET"])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles("operator")
+def get_failed_delivery(delivery_id):
+    """Operator: one delivery awaiting a new date, with the days it may move to (F12).
+
+    The bot asks this on every tap that draws dates, so a date button always comes
+    from bounds published for this delivery at that moment, never from the bot's
+    clock or an old card. There is no cap, because an alert can name a delivery below
+    the list's page. It refuses with the re-dispatch's own code once the delivery no
+    longer awaits a new date.
+    """
+    delivery = StaffService.get_failed_delivery(delivery_id)
+    failed_at = OrderScheduleService.failed_at_by_delivery([delivery.id]).get(delivery.id)
+    return success_response({"delivery": _failed_delivery_row(delivery, failed_at)})
 
 
 @staff_bp.route("/delivery/redispatch/<int:delivery_id>", methods=["POST"])
@@ -535,20 +578,43 @@ def get_failed_deliveries():
 @jwt_required()
 @require_staff_roles("operator")
 def redispatch_failed_delivery(delivery_id):
-    """Operator: re-dispatch a FAILED delivery, i.e. reschedule it to today (R18)."""
+    """Operator: re-date a FAILED delivery to the day tapped (F12, R18).
+
+    Body: `{"delivery_date"?: "YYYY-MM-DD", "reason"?: str}`. Without a date it goes
+    to local today, so a bot from before the date step keeps working. A non-string
+    `reason` or a date that does not parse is refused here (the former uncoded, like
+    the admin reschedule route). Whether a date is allowed is `reschedule`'s rule
+    (F10), and it answers with its own codes.
+    """
+    from business_app.utils.api_responses import validation_error_response
+
     actor_id = int(get_jwt_identity())
     payload = request.get_json(silent=True) or {}
-    reason = (payload.get("reason") or "").strip() or None
-    delivery = StaffService.redispatch_failed_delivery(delivery_id, actor_id, reason=reason)
-    # Set only when it landed `rescheduled` before today's first shift, so the bot
-    # can say when drivers will see it (R25).
+    raw_reason = payload.get("reason")
+    if raw_reason is not None and not isinstance(raw_reason, str):
+        return validation_error_response("reason must be a string")
+    reason = (raw_reason or "").strip() or None
+    try:
+        delivery_date = parse_schedule(payload.get("delivery_date"), None, None)[0]
+    except ValueError as exc:
+        raise ValidationError(str(exc), error_code="STAFF_REDISPATCH_DATE_INVALID") from exc
+    delivery, result = StaffService.redispatch_failed_delivery(
+        delivery_id, actor_id, reason=reason, delivery_date=delivery_date
+    )
+    # Set only while it is held (`rescheduled`) until its day's first shift, so the
+    # bot can say when drivers will see it (R25).
     release_at = StaffService.redispatch_release_at(delivery)
     return success_response(
         {
             "delivery_id": delivery.id,
             "status": delivery.status.value if hasattr(delivery.status, "value") else delivery.status,
-            "message": "Delivery re-dispatched to pool",
+            "message": "Delivery rescheduled",
+            "delivery_date": result.order.delivery_date.isoformat(),
             "release_at": release_at.isoformat() if release_at else None,
+            # Decided under the locks, before the write (`RescheduleResult`). The bot's
+            # customer line reads these two and works nothing out itself.
+            "notifies_customer": result.notify_customer,
+            "customer_channel": result.customer_channel,
         }
     )
 

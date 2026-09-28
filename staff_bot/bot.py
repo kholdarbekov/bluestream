@@ -984,7 +984,14 @@ class StaffBot:
             CallbackQueryHandler(manage_address_handler.show_addresses, pattern=r"^staff_op_addresses_\d+$"),
             CallbackQueryHandler(recent_orders_handler.show_recent_orders, pattern="^staff_recent_orders$"),
             CallbackQueryHandler(redispatch_handler.show_failed_deliveries, pattern="^staff_redispatch_failed$"),
-            CallbackQueryHandler(redispatch_handler.redispatch_delivery, pattern=r"^staff_redispatch_do_\d+$"),
+            # The failure alert's list, posted under the alert, never over it (F12).
+            CallbackQueryHandler(redispatch_handler.show_failed_deliveries_from_alert, pattern="^staff_redispatch_failed_new$"),
+            # The date step. `_0`/`_1` names the card a tap came from; a bare
+            # `_do_<id>` is a list card drawn before the step existed.
+            CallbackQueryHandler(redispatch_handler.show_date_step, pattern=r"^staff_redispatch_do_\d+(_[01])?$"),
+            CallbackQueryHandler(redispatch_handler.show_day_grid, pattern=r"^staff_redispatch_pick_\d+_[01]$"),
+            CallbackQueryHandler(redispatch_handler.restore_card, pattern=r"^staff_redispatch_back_\d+_[01]$"),
+            CallbackQueryHandler(redispatch_handler.redispatch_delivery, pattern=r"^staff_redispatch_on_\d+_\d+$"),
 
             # --- Common handlers ---
             CallbackQueryHandler(profile_handler.show_profile, pattern="^staff_profile$"),

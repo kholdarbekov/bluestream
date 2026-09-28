@@ -29,8 +29,9 @@ from shared.enums import (  # noqa: E402
     SubscriptionFrequency,
     UserRole,
 )
+from shared.constants import ORDER_DISPLAY_AWAITING_NEW_DATE  # noqa: E402
 from shared.status_transitions import is_valid_order_transition  # noqa: E402
-from business_app.utils.payment_projection import FISCALIZED_RAILS  # noqa: E402
+from business_app.utils.payment_projection import FISCALIZED_RAILS, MONEY_HELD_PAYMENT_STATUSES  # noqa: E402
 from shared.payment_methods import (  # noqa: E402
     UnknownPaymentMethodError,
     UnsupportedPaymentMethodError,
@@ -39,14 +40,38 @@ from shared.payment_methods import (  # noqa: E402
     resolve_repeatable_payment_method,
 )
 from business_app.utils.translations import get_translation  # noqa: E402
+from business_app.utils.validation_helpers import strip_reason  # noqa: E402
 from business_app.models.order import OrderStatusHistory  # noqa: E402
 from business_app.models.delivery import DeliveryStatusHistory  # noqa: E402
 from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity  # noqa: E402
 from business_app.utils.state_validators import (  # noqa: E402
+    ACTIVE_ORDER_STATUSES,
+    DELIVERY_DRIVERLESS_STATES,
     assert_order_address_for_status,
     assert_order_creator_for_source,
 )
 from business_app import db  # noqa: E402
+
+# Why a customer may not cancel their own order (F5, spec
+# docs/superpowers/specs/2026-09-25-failed-delivery-awaits-new-date-design.md
+# §3.3). Published as the `reason_code` of the ORDER_NOT_CUSTOMER_CANCELLABLE
+# refusal; each client picks its own copy by it.
+CUSTOMER_CANCEL_NOT_CANCELLABLE = "NOT_CANCELLABLE"
+CUSTOMER_CANCEL_AWAITING_NEW_DATE = "AWAITING_NEW_DATE"
+CUSTOMER_CANCEL_PAID = "PAID"
+CUSTOMER_CANCEL_WITH_DRIVER = "WITH_DRIVER"
+
+# F6: an admin cancel or return names its reason. It is stored on the order's
+# history row and, for a Delivery-page return, on the delivery's too. Both
+# `reason` columns are String(100). Read from the models, never restated, so a
+# migration that widens them widens this with them.
+ADMIN_REASON_MAX_LENGTH = min(
+    OrderStatusHistory.__table__.c.reason.type.length,
+    DeliveryStatusHistory.__table__.c.reason.type.length,
+)
+# F6: the admin status moves that must name that reason. The admin status route
+# enforces it, and GET /orders/statuses publishes it so the Orders page keeps no copy.
+ADMIN_REASON_REQUIRED_STATUSES = frozenset({OrderStatus.CANCELLED, OrderStatus.RETURNED})
 
 
 class OrderService:
@@ -488,12 +513,28 @@ class OrderService:
 
         Returns a list of timeline entries in chronological order,
         starting with order creation and including all status changes.
+
+        Customer-only (`GET /orders/<id>` and `/orders/<id>/track`), so no entry
+        carries the history row's `reason`: that column holds an admin's internal
+        cancel/return reason (F6). `notes` IS shown; the customer bot prints it
+        on its Track screen.
+
+        While the order awaits a new date (F15), the wait is the current step.
+        No entry above it is current, and a final `awaiting_new_date` entry
+        carries when the delivery last failed. A failure writes no order
+        history, so without this the last row would read as current beside
+        the awaiting label. That row is usually `confirmed`, because the pickup
+        sync writes none. The entry is derived, never stored, so a reschedule
+        takes it away.
         """
+        from business_app.services.order_schedule_service import OrderScheduleService
+
         # First, get the order itself for the creation timestamp
         order = Order.query.get(order_id)
         if not order:
             return []
 
+        awaiting = OrderScheduleService.awaiting_new_date(order)
         timeline = []
 
         # Add order creation as the first entry
@@ -502,8 +543,7 @@ class OrderService:
                 "status": "created",
                 "timestamp": order.created_at.isoformat() if order.created_at else None,
                 "notes": None,
-                "reason": None,
-                "is_current": order.status == OrderStatus.PENDING,
+                "is_current": order.status == OrderStatus.PENDING and not awaiting,
             }
         )
 
@@ -519,12 +559,53 @@ class OrderService:
                     "status": entry.new_status.value,
                     "timestamp": entry.changed_at.isoformat() if entry.changed_at else None,
                     "notes": entry.notes,
-                    "reason": entry.reason,
-                    "is_current": is_last,  # Mark the last entry as current
+                    "is_current": is_last and not awaiting,  # Mark the last entry as current
+                }
+            )
+
+        if awaiting:
+            delivery = order.delivery
+            failed_at = OrderScheduleService.failed_at_by_delivery([delivery.id]).get(delivery.id)
+            timeline.append(
+                {
+                    "status": ORDER_DISPLAY_AWAITING_NEW_DATE,
+                    # Dated as the operator's failed list dates it (spec §3.5): the latest
+                    # FAILED history row, else the row's last update. The removed legacy
+                    # issue writer set `failed` with no history row but stamped `updated_at`.
+                    "timestamp": (failed_at or delivery.updated_at).isoformat(),
+                    "notes": None,
+                    "is_current": True,
                 }
             )
 
         return timeline
+
+    @staticmethod
+    def closing_reason(order: Order) -> Optional[Dict[str, Any]]:
+        """F19: the latest cancel or return that carries a reason, as the admin
+        order detail shows it; None when there is none.
+
+        Only an admin cancel or return writes `OrderStatusHistory.reason` (F6).
+        A customer's, Payme's or a sweep's cancel has nothing to show. Admin-only:
+        the customer timeline never publishes `reason`."""
+        row = (
+            OrderStatusHistory.query.options(joinedload(OrderStatusHistory.changed_by_user))
+            .filter(
+                OrderStatusHistory.order_id == order.id,
+                OrderStatusHistory.new_status.in_(ADMIN_REASON_REQUIRED_STATUSES),
+                OrderStatusHistory.reason.isnot(None),
+            )
+            .order_by(OrderStatusHistory.changed_at.desc(), OrderStatusHistory.id.desc())
+            .first()
+        )
+        if row is None:
+            return None
+        return {
+            "status": row.new_status.value,
+            "reason": row.reason,
+            "changed_by_name": row.changed_by_user.full_name if row.changed_by_user else None,
+            "changed_at": row.changed_at.isoformat() if row.changed_at else None,
+        }
 
     def get_user_orders(
         self, user_id: int, status: OrderStatus = None, page: int = 1, per_page: int = 20
@@ -830,11 +911,19 @@ class OrderService:
 
     def get_order_tracking_for_user(self, order_id: int, user_id: int) -> Dict[str, Any]:
         """Get tracking payload for a user-owned order."""
+        from business_app.services.order_schedule_service import OrderScheduleService
+
         order = self.get_order(order_id, user_id=user_id)
         timeline = self.get_order_timeline(order_id)
 
         time_remaining = None
-        if order.delivery and order.delivery.estimated_delivery_time:
+        # F15: a failed tap leaves the attempt's ETA on the row. Nothing is on its
+        # way until staff pick a new date, so there is nothing to count down to.
+        if (
+            order.delivery
+            and order.delivery.estimated_delivery_time
+            and not OrderScheduleService.awaiting_new_date(order)
+        ):
             estimated_time = order.delivery.estimated_delivery_time
             if estimated_time.tzinfo is None:
                 estimated_time = estimated_time.replace(tzinfo=timezone.utc)
@@ -852,6 +941,9 @@ class OrderService:
             "delivery": order.delivery,
             "timeline": timeline,
             "estimated_time_remaining": time_remaining,
+            # F15: what the customer is shown. `track_order` publishes it on its
+            # hand-built order dict, so no client works out the wait itself.
+            "display_status": OrderScheduleService.customer_display_status(order),
         }
 
     def perform_bulk_action(self, action: str, order_ids: List[int], actor_user_id: int) -> List[Dict[str, Any]]:
@@ -999,6 +1091,30 @@ class OrderService:
 
         return get_subscription_service().create_subscription(payload, items_data)
 
+    @staticmethod
+    def require_admin_reason(reason: Optional[str]) -> str:
+        """F6: every admin cancel, and every admin MOVE to returned, names its reason.
+
+        Stripped. A blank reason is refused (ADMIN_REASON_REQUIRED), and so is
+        anything the history columns cannot hold (ADMIN_REASON_TOO_LONG); it is
+        never cut. The caller stores it on the history row's `reason`, never in
+        `notes`, which the customer bot prints on its Track screen.
+
+        `cancel_order` and `update_order_status` do not call this. Their other
+        callers (the abandoned-order sweep, the subscription cascade, Payme, the
+        customer's own cancel, the agent-order decline) have no admin reason.
+
+        The value comes straight from a JSON body, so a number, list or object
+        is possible. It is no usable reason either: refused with
+        ADMIN_REASON_REQUIRED before `strip_reason` (which takes text) sees it,
+        so neither admin route answers a 500 or Python's own error text."""
+        if reason is not None and not isinstance(reason, str):
+            raise ValidationError("The reason must be text", error_code="ADMIN_REASON_REQUIRED")
+        reason = strip_reason(reason, max_length=ADMIN_REASON_MAX_LENGTH, error_code="ADMIN_REASON_TOO_LONG")
+        if reason is None:
+            raise ValidationError("A reason is required", error_code="ADMIN_REASON_REQUIRED")
+        return reason
+
     def update_order_status(
         self,
         order_id: int,
@@ -1007,6 +1123,8 @@ class OrderService:
         notes: str = None,
         bottles_returned: int = None,
         commit: bool = True,
+        *,
+        history_reason: Optional[str] = None,
     ) -> Order:
         """Update order status.
 
@@ -1014,6 +1132,9 @@ class OrderService:
         the status change and any side-effects spawned by
         ``_handle_status_change_actions`` are flushed but not committed,
         so a downstream failure rolls the whole sequence back.
+
+        ``notes`` lands on the history row the customer's Track screen prints.
+        ``history_reason`` lands on its staff-only ``reason`` (F6).
         """
         order = Order.query.get(order_id)
         if not order:
@@ -1043,6 +1164,16 @@ class OrderService:
         # that imply downstream fulfilment (delivery flow needs an address).
         assert_order_address_for_status(order, new_status)
 
+        # F18: an order whose delivery failed is waiting for a new date. Moving
+        # it forward would queue the customer "being prepared" / "out for
+        # delivery" while nobody is coming. Refused before the claim below, so
+        # nothing is written and nothing is queued. `assert_can_advance` is the
+        # one rule; the operator's mark-preparing and bulk `process` call it too.
+        if new_status in (OrderStatus.PREPARING, OrderStatus.OUT_FOR_DELIVERY):
+            from business_app.services.order_schedule_service import OrderScheduleService
+
+            OrderScheduleService.assert_can_advance(order)
+
         # Update order
         old_status = current_status
 
@@ -1070,7 +1201,7 @@ class OrderService:
         self._update_status_fields(order, new_status)
 
         # Create status history
-        self._create_status_history(order_id, old_status, new_status, updated_by, notes)
+        self.record_status_history(order_id, old_status, new_status, updated_by, notes, history_reason=history_reason)
 
         db.session.flush()
 
@@ -1101,8 +1232,13 @@ class OrderService:
         *,
         actor_user_id: int = None,
         process_payment_refund: bool = True,
+        history_reason: Optional[str] = None,
     ) -> Order:
-        """Cancel an order"""
+        """Cancel an order.
+
+        ``reason`` is the history NOTE, shown to the customer; the tax-committee
+        rescue reads its own marker back out of it. ``history_reason`` is an
+        admin's internal reason (F6), stored on the history row's ``reason``."""
         from shared.enums import PaymentMethod
 
         order = self.get_order(order_id, user_id)
@@ -1148,7 +1284,9 @@ class OrderService:
         # `stock_was_deducted` is computed above from the PRE-transition
         # status, so moving the work does not change what it decides.
         # Cancel order
-        order = self.update_order_status(order_id, OrderStatus.CANCELLED, actor_id, reason)
+        order = self.update_order_status(
+            order_id, OrderStatus.CANCELLED, actor_id, reason, history_reason=history_reason
+        )
 
         if stock_was_deducted:
             # Restore stock quantities for confirmed orders
@@ -1205,6 +1343,84 @@ class OrderService:
         # admin status dropdown's direct update_order_status call — frees them.
 
         return order
+
+    @staticmethod
+    def customer_cancel_block_code(order: Order) -> Optional[str]:
+        """Why the customer may not cancel this order themselves, or None when they may (F5).
+
+        The ONE answer. `serialize_order` publishes it as `can_customer_cancel`, the
+        payment refusal routes' advice asks it, and `cancel_order_as_customer` enforces it
+        on locked rows, so the Cancel a customer is shown and the write it sends cannot
+        disagree. The checks run in this order and the first match wins. Awaiting a new
+        date comes before the driver check because a `failed` delivery is outside
+        DELIVERY_DRIVERLESS_STATES, and WITH_DRIVER would otherwise swallow it.
+
+        Reads `order.status`, `order.is_paid`, `order.payment` and `order.delivery` only.
+        The customer order list eager-loads both relationships.
+        """
+        from business_app.services.order_schedule_service import OrderScheduleService
+
+        if order.status not in ACTIVE_ORDER_STATUSES:
+            return CUSTOMER_CANCEL_NOT_CANCELLABLE
+        if OrderScheduleService.awaiting_new_date(order):
+            return CUSTOMER_CANCEL_AWAITING_NEW_DATE
+        payment = order.payment
+        # The payment can go through before `order.is_paid` is stamped; the money is in all the same.
+        if order.is_paid or (payment is not None and payment.status in MONEY_HELD_PAYMENT_STATUSES):
+            return CUSTOMER_CANCEL_PAID
+        delivery = order.delivery
+        if order.status in (OrderStatus.PREPARING, OrderStatus.OUT_FOR_DELIVERY) or (
+            order.status == OrderStatus.CONFIRMED
+            and delivery is not None
+            and delivery.status not in DELIVERY_DRIVERLESS_STATES
+        ):
+            return CUSTOMER_CANCEL_WITH_DRIVER
+        return None
+
+    def cancel_order_as_customer(self, order_id: int, user_id: int, reason: Optional[str] = None) -> Order:
+        """The customer's own cancel: refused unless `customer_cancel_block_code` says None (F5).
+
+        The answer is decided on locked rows, taken in the codebase's documented order,
+        Delivery first and then Order, the sequence `OrderScheduleService._apply_reschedule`
+        uses. A driver's accept (`DeliveryAssignmentService.assign_driver`) locks only the
+        Delivery. With an Order-only lock, an accept could commit between this check and the
+        cancel cascade, and the cascade would then cancel the delivery the driver had just
+        taken.
+
+        The rule cannot live inside `cancel_order`. The store declining an agent order also
+        passes the customer's `user_id`, and staff, Payme and the abandoned-order task must
+        keep cancelling orders the customer may not.
+
+        Raises NotFoundError for a missing or foreign order. A refusal raises ValidationError
+        (ORDER_NOT_CUSTOMER_CANCELLABLE, with `details["reason_code"]` one of the
+        CUSTOMER_CANCEL_* codes). Nothing is written when it raises.
+        """
+        from business_app.services.order_schedule_service import OrderScheduleService
+
+        delivery = OrderScheduleService._lock_delivery(order_id)
+        order = db.session.get(Order, order_id, with_for_update=True, populate_existing=True)
+        if order is None or order.user_id != user_id:
+            db.session.rollback()
+            raise NotFoundError("Order not found")
+        if delivery is None:
+            # A release may have committed after the first read and before the Order
+            # lock. With the Order held, nothing else can create the row, so this read
+            # is final.
+            OrderScheduleService._lock_delivery(order_id)
+        # `order.delivery` may still hold what an earlier read saw. Expire it so the
+        # predicate reads the row locked above.
+        db.session.expire(order, ["delivery"])
+
+        block_code = self.customer_cancel_block_code(order)
+        if block_code is not None:
+            message = f"Order {order.order_number} cannot be cancelled by the customer: {block_code}"
+            db.session.rollback()
+            raise ValidationError(
+                message,
+                details={"reason_code": block_code},
+                error_code="ORDER_NOT_CUSTOMER_CANCELLABLE",
+            )
+        return self.cancel_order(order_id, user_id=user_id, reason=reason)
 
     def rescue_order_after_psp_failure(self, cancelled_order_id: int, user_id: int) -> Order:
         """Clone a tax-committee-cancelled order into a new PENDING cash order.
@@ -1697,16 +1913,28 @@ class OrderService:
         elif new_status == OrderStatus.CANCELLED:
             order.cancelled_at = now
 
-    def _create_status_history(
-        self, order_id: int, old_status: OrderStatus, new_status: OrderStatus, updated_by: int = None, notes: str = None
+    @staticmethod
+    def record_status_history(
+        order_id: int,
+        old_status: OrderStatus,
+        new_status: OrderStatus,
+        updated_by: int = None,
+        notes: str = None,
+        *,
+        history_reason: Optional[str] = None,
     ):
-        """Create order status history record"""
+        """Create order status history record.
+
+        Public because a writer that sets `order.status` directly records its
+        row here too (`AdminDeliveryService._apply_status_update`'s return).
+        `notes` is shown to the customer; `history_reason` is staff-only (F6)."""
         history = OrderStatusHistory(
             order_id=order_id,
             old_status=old_status,
             new_status=new_status,
             changed_by=updated_by,
             notes=notes,
+            reason=history_reason,
             changed_at=datetime.now(timezone.utc),
         )
 

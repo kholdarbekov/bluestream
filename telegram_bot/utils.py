@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from functools import wraps
 import json
 
-from shared.constants import DISPLAY_TIMEZONE
+from shared.constants import DISPLAY_TIMEZONE, ORDER_DISPLAY_AWAITING_NEW_DATE
 
 import redis.asyncio as aioredis
 import sentry_sdk
@@ -858,6 +858,24 @@ async def is_business_hours() -> bool:
     return business_start <= current_hour < business_end
 
 
+# One status -> label-key map for every customer screen that names an order's
+# status: the order detail line (`MessageBuilder.build_order_summary`) and the
+# Track timeline (`OrderHandlers.track_order`). `awaiting_new_date` is not an
+# order status. It is the backend's `display_status` while a failed delivery
+# waits for a new date, and the Track timeline's synthetic current step (F15).
+ORDER_STATUS_LABEL_KEYS = {
+    'created': 'telegram.orders.status_created',
+    'pending': 'telegram.orders.status_pending',
+    'confirmed': 'telegram.orders.status_confirmed',
+    'preparing': 'telegram.orders.status_preparing',
+    'out_for_delivery': 'telegram.orders.status_out_for_delivery',
+    'delivered': 'telegram.orders.status_delivered',
+    'cancelled': 'telegram.orders.status_cancelled',
+    'returned': 'telegram.orders.status_returned',
+    ORDER_DISPLAY_AWAITING_NEW_DATE: 'telegram.orders.status_awaiting_new_date',
+}
+
+
 class MessageBuilder:
     """Helper class for building formatted messages"""
 
@@ -903,7 +921,13 @@ class MessageBuilder:
 
         if order.get('status'):
             from shared.constants import ORDER_STATUS_ICONS, DEFAULT_STATUS_ICON
-            icon = ORDER_STATUS_ICONS.get(order['status'], DEFAULT_STATUS_ICON)
-            lines.append(f"📊 Status: {icon} {order['status'].replace('_', ' ').title()}")
+            # The backend's customer-facing status (F15): `awaiting_new_date` while a
+            # failed delivery waits for a new date, the order status otherwise.
+            status = order.get('display_status') or order['status']
+            icon = ORDER_STATUS_ICONS.get(status, DEFAULT_STATUS_ICON)
+            label_key = ORDER_STATUS_LABEL_KEYS.get(status)
+            label = i18n.get(label_key, language) if label_key else status.replace('_', ' ').title()
+            heading = i18n.get('telegram.orders.detail_status_label', language)
+            lines.append(f"📊 {heading}: {icon} {label}")
 
         return '\n'.join(lines)

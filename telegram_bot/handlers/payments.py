@@ -474,10 +474,29 @@ class PaymentHandlers(BaseHandler):
 
             await self._ack(query)
 
+            # Only stale `payment_cancel_<id>` buttons reach this handler: nothing
+            # has drawn one since 553472c, but the messages stay in the chat. The
+            # order may have moved on since, so Retry and Cancel come from THIS
+            # order's published answers, fetched the way `retry_payment` fetches
+            # it. A failed fetch leaves `order` None, and both helpers fail
+            # closed on it: neither button, with My Orders still one tap away.
+            order = None
+            async with api_client as client:
+                user_token = await get_auth_token(update, context, client)
+                if user_token:
+                    response = await client.get_order(user_token, order_id)
+                    if response.success:
+                        order = response.data.get('data', {}).get('order', {})
+
             # Show cancellation options
             cancelled_text = i18n.get('telegram.payment.cancelled_message', language)
 
-            keyboard = PaymentKeyboards.payment_failed(order_id, language)
+            keyboard = PaymentKeyboards.payment_failed(
+                order_id,
+                language,
+                may_pay=customer_may_pay(order),
+                may_cancel=customer_may_cancel(order),
+            )
 
             await query.edit_message_text(
                 text=f"❌ {cancelled_text}",

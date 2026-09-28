@@ -519,10 +519,15 @@ class AdminService {
     return response.data;
   }
 
-  async updateOrderStatus(orderId, status, notes, { bottles_returned } = {}) {
+  // `notes` is customer-visible: the customer's order timeline prints it. `reason` is the internal
+  // reason every admin cancel or return must give (F6). It is stored for admins only, and sent
+  // only when given. `handledErrorCodes`: refusal codes the caller explains itself (see
+  // rescheduleOrder).
+  async updateOrderStatus(orderId, status, notes, { bottles_returned, reason, handledErrorCodes } = {}) {
     const body = { status, notes };
     if (bottles_returned != null) body.bottles_returned = bottles_returned;
-    const response = await api.put(`/admin/orders/${orderId}/status`, body);
+    if (reason != null) body.reason = reason;
+    const response = await api.put(`/admin/orders/${orderId}/status`, body, { handledErrorCodes });
     return response.data;
   }
 
@@ -814,15 +819,8 @@ class AdminService {
     return response.data;
   }
 
-  async updateDelivery(deliveryId, data) {
-    const response = await api.put(`/admin/deliveries/${deliveryId}`, data);
-    return response.data;
-  }
-
-  // `handledErrorCodes`: refusal codes (`data.error_code`) the caller explains itself, in
-  // the admin's language. api.js does not toast those, so the admin reads one message.
-  async redispatchDelivery(deliveryId, { handledErrorCodes } = {}) {
-    const response = await api.post(`/admin/deliveries/${deliveryId}/redispatch`, {}, { handledErrorCodes });
+  async updateDelivery(deliveryId, data, { handledErrorCodes } = {}) {
+    const response = await api.put(`/admin/deliveries/${deliveryId}`, data, { handledErrorCodes });
     return response.data;
   }
 

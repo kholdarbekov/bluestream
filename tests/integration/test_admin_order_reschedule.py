@@ -15,6 +15,7 @@ Celery tasks and the staff-bot route-updated webhook they stand in for.
 
 import inspect
 import json
+from dataclasses import FrozenInstanceError
 from datetime import date, datetime, time, timedelta, timezone
 from typing import NamedTuple, Optional
 from unittest.mock import patch
@@ -36,6 +37,7 @@ from business_app.services.order_schedule_service import OrderScheduleService
 from business_app.utils.audit_logger import AuditEventType, AuditLogger, AuditSeverity, audit_logger
 from business_app.utils.constants import NotificationChannel, NotificationStatus, NotificationType
 from business_app.utils.password_security import hash_password
+from shared.business_config import MAX_SCHEDULE_HORIZON_DAYS
 from shared.enums import (
     CorporateContractTrackingMode,
     DeliveryStatus,
@@ -45,6 +47,12 @@ from shared.enums import (
     PaymentMethod,
     UserRole,
     UserType,
+)
+from tests.unit.test_delivery_rescheduled_notification import (  # noqa: F401 -- live_send is a fixture
+    CHAT_LINE,
+    CUSTOMER_CHAT_ID,
+    TELEGRAM_URL,
+    live_send,
 )
 
 S = DeliveryStatus
@@ -115,24 +123,6 @@ class Seeded(NamedTuple):
     delivery_id: Optional[int]
     route_id: Optional[int]
     original_date: date
-
-
-@pytest.fixture
-def local_noon():
-    """Noon in Tashkent on the real local date, on every clock the reschedule path reads.
-
-    The real DATE, frozen only to noon: `RouteOptimizationService.current_route` finds today's
-    route row against the real wall clock, so an invented date would lose the route these tests
-    check. The container runs in UTC and the app in Tashkent, hence three patches (spec §7).
-    """
-    now_local = datetime.combine(datetime.now(TZ).date(), time(12, 0), tzinfo=TZ)
-    with patch("business_app.utils.delivery_window.local_now", return_value=now_local), patch(
-        "business_app.utils.local_windows.local_now", return_value=now_local
-    ), patch(
-        "business_app.services.order_schedule_service.get_utc_now",
-        return_value=now_local.astimezone(timezone.utc),
-    ):
-        yield now_local
 
 
 @pytest.fixture
@@ -292,8 +282,10 @@ def _seed(address, driver, delivery_status, today, *, order_status=None) -> Seed
     return Seeded(order_id, order_number, delivery_id, route_id, original_date)
 
 
-def _reschedule(client, headers, order_id, target, window=(None, None), *, reason=REASON):
-    """The body the Reschedule modal sends: the `delivery_date` key is always present (spec §6)."""
+def _reschedule(client, headers, order_id, target, window=(None, None), *, reason=REASON, expect_awaiting=False):
+    """The body the Reschedule modal sends: the `delivery_date` key is always present (spec §6).
+    `expect_awaiting` adds the flag the modal sends with an unchanged schedule on an order it read
+    as awaiting a new date (F11)."""
     body = {
         "delivery_date": target.isoformat() if target is not None else None,
         "delivery_window_start": window[0],
@@ -301,6 +293,8 @@ def _reschedule(client, headers, order_id, target, window=(None, None), *, reaso
     }
     if reason is not None:
         body["reason"] = reason
+    if expect_awaiting:
+        body["expect_awaiting_new_date"] = True
     return client.patch(SCHEDULE_URL.format(order_id), headers=headers, json=body)
 
 
@@ -571,12 +565,16 @@ def test_a_released_order_cannot_have_its_date_cleared(
     assert _rescheduled_events(audit_events) == []
 
 
+@pytest.mark.parametrize("pre_status", [S.SCHEDULED, S.FAILED])
 def test_a_date_after_the_grocery_contract_ends_is_refused(
-    client, db, admin_claim_headers, user_address, rostered_driver, local_noon, audit_events
+    client, db, admin_claim_headers, user_address, rostered_driver, local_noon, audit_events, pre_status
 ):
     """R11: a grocery store's AMOUNT contract ends in three days. A delivery after that would be
     charged against a contract that no longer exists; the contract's last day is still fine, and
-    it is exactly the `reschedule_max_date` the modal was given."""
+    it is exactly the `reschedule_max_date` the modal was given.
+
+    A failed delivery answers to the same cut (F10). A date past the booking horizon now has its
+    own code, so this one means only that a real contract ends."""
     today = local_noon.date()
     store = db.session.get(User, user_address.user_id)
     store.user_type = UserType.ENTITY
@@ -594,7 +592,7 @@ def test_a_date_after_the_grocery_contract_ends_is_refused(
     contract.tracking_mode = CorporateContractTrackingMode.AMOUNT
     db.session.add(contract)
     db.session.commit()
-    seed = _seed(user_address, rostered_driver, S.SCHEDULED, today)
+    seed = _seed(user_address, rostered_driver, pre_status, today)
 
     past_end = _reschedule(client, admin_claim_headers, seed.order_id, today + timedelta(days=5), ("14:00", "18:00"))
 
@@ -602,7 +600,7 @@ def test_a_date_after_the_grocery_contract_ends_is_refused(
     assert _error_code(past_end) == "ORDER_RESCHEDULE_PAST_CONTRACT_END"
     db.session.expire_all()
     assert db.session.get(Order, seed.order_id).delivery_date == today
-    assert db.session.get(Delivery, seed.delivery_id).status == S.SCHEDULED
+    assert db.session.get(Delivery, seed.delivery_id).status == pre_status
     assert _rescheduled_events(audit_events) == []
 
     last_day = _reschedule(client, admin_claim_headers, seed.order_id, today + timedelta(days=3), ("14:00", "18:00"))
@@ -679,6 +677,339 @@ def test_admins_and_managers_may_reschedule_operators_and_drivers_may_not(
         assert (delivery.status, delivery.delivery_person_id) == (S.ASSIGNED, rostered_driver.id)
         assert db.session.get(Order, seed.order_id).delivery_date == today
         assert _rescheduled_events(audit_events) == []
+
+
+# ---------------------------------------------------------------------------
+# The re-date rule (F10, F11; docs/superpowers/specs/2026-09-25-failed-delivery-awaits-new-date-design.md
+# §3.5). A failed delivery, re-dated through the PATCH the Orders modal sends. The date and the window
+# are judged inside `reschedule`, under its locks, and every refusal carries a code the modal maps.
+# ---------------------------------------------------------------------------
+
+# Ended an hour before the frozen local noon.
+ENDED_WINDOW = ("09:00", "11:00")
+NO_WINDOW = (None, None)
+
+
+def _as_times(window):
+    return tuple(time.fromisoformat(value) if value else None for value in window)
+
+
+def _seed_failed(user_address, driver, today, window=NO_WINDOW) -> Seeded:
+    """A delivery that failed today as `_seed` leaves it (the order out for delivery, the driver
+    still on the row, one attempt), on an order whose window is `window`."""
+    seed = _seed(user_address, driver, S.FAILED, today)
+    order = db.session.get(Order, seed.order_id)
+    order.delivery_window_start, order.delivery_window_end = _as_times(window)
+    db.session.commit()
+    return seed
+
+
+def _assert_still_failed(seed, driver, window):
+    """A refused re-date leaves the failed delivery and its order exactly as they were."""
+    db.session.expire_all()
+    order = db.session.get(Order, seed.order_id)
+    assert (order.status, order.delivery_date) == (OrderStatus.OUT_FOR_DELIVERY, seed.original_date)
+    assert (order.delivery_window_start, order.delivery_window_end) == _as_times(window)
+    delivery = db.session.get(Delivery, seed.delivery_id)
+    assert (delivery.status, delivery.delivery_person_id) == (S.FAILED, driver.id)
+    assert len(_history(seed.delivery_id)) == 1
+
+
+@pytest.mark.parametrize("expect_awaiting", [True, False], ids=["the-modal-with-its-flag", "a-body-without-the-flag"])
+def test_a_failed_delivery_redated_to_the_date_it_already_has_lands(
+    client, db, admin_claim_headers, admin_user, user_address, rostered_driver, local_noon, audit_events, expect_awaiting
+):
+    """F11: re-dating a failed delivery to its current date is a real action. The date does not
+    change, but the row leaves `failed` for today's pool and the driver it failed with comes off
+    it, so the endpoint must take it (the modal's Save is Task 17). The modal sends it with
+    `expect_awaiting_new_date`, which a row still failed satisfies; a body without the flag (a
+    tab still on the older bundle) is taken as before."""
+    today = local_noon.date()
+    seed = _seed_failed(user_address, rostered_driver, today)
+    assert seed.original_date == today
+
+    resp = _reschedule(client, admin_claim_headers, seed.order_id, today, expect_awaiting=expect_awaiting)
+
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert resp.get_json()["data"]["order"]["delivery_date"] == today.isoformat()
+    db.session.expire_all()
+    delivery = db.session.get(Delivery, seed.delivery_id)
+    assert (delivery.status, delivery.delivery_person_id) == (S.SCHEDULED, None)
+    assert db.session.get(Order, seed.order_id).status == OrderStatus.CONFIRMED
+    newest = _history(seed.delivery_id)[-1]
+    assert (newest.old_status, newest.new_status, newest.changed_by) == (S.FAILED, S.SCHEDULED, admin_user.id)
+    assert len(_rescheduled_events(audit_events)) == 1
+
+
+@pytest.mark.parametrize(
+    "order_window,days,sent_window,error_code",
+    [
+        (NO_WINDOW, -1, NO_WINDOW, "ORDER_RESCHEDULE_DATE_IN_PAST"),
+        # One day past the booking horizon, for a customer with no contract. This used to be
+        # refused as "contract ended"; that code now means only a real contract end.
+        (NO_WINDOW, MAX_SCHEDULE_HORIZON_DAYS + 1, NO_WINDOW, "ORDER_RESCHEDULE_BEYOND_HORIZON"),
+        # A changed window is judged: one typed in for today after it has ended...
+        (NO_WINDOW, 0, ENDED_WINDOW, "ORDER_RESCHEDULE_WINDOW_PASSED"),
+        # ...or the customer's ended window swapped for another one that has also ended.
+        (ENDED_WINDOW, 0, ("09:00", "10:00"), "ORDER_RESCHEDULE_WINDOW_PASSED"),
+        (NO_WINDOW, 2, ("18:00", "12:00"), "ORDER_RESCHEDULE_WINDOW_INVALID"),
+        (ENDED_WINDOW, 2, ("12:00", "12:00"), "ORDER_RESCHEDULE_WINDOW_INVALID"),
+        # The date is judged first: a past date with an inverted window reports the date.
+        (NO_WINDOW, -1, ("18:00", "12:00"), "ORDER_RESCHEDULE_DATE_IN_PAST"),
+    ],
+    ids=[
+        "yesterday",
+        "past-the-horizon",
+        "ended-window-typed-in-for-today",
+        "another-ended-window-for-today",
+        "inverted-window",
+        "zero-width-window",
+        "past-date-reported-before-the-window",
+    ],
+)
+def test_a_date_or_window_the_rule_refuses_answers_its_own_code_and_moves_nothing(
+    client,
+    db,
+    admin_claim_headers,
+    user_address,
+    rostered_driver,
+    local_noon,
+    audit_events,
+    order_window,
+    days,
+    sent_window,
+    error_code,
+):
+    """F10: the re-date rule lives in `reschedule`, so the modal gets a code it can put into words
+    instead of the endpoint's English sentences. Nothing moves on a refusal: the delivery stays
+    failed with its driver, and no reschedule is audited."""
+    today = local_noon.date()
+    seed = _seed_failed(user_address, rostered_driver, today, order_window)
+
+    resp = _reschedule(client, admin_claim_headers, seed.order_id, today + timedelta(days=days), sent_window)
+
+    assert resp.status_code == 400, resp.get_data(as_text=True)
+    assert _error_code(resp) == error_code
+    _assert_still_failed(seed, rostered_driver, order_window)
+    assert _rescheduled_events(audit_events) == []
+
+
+def test_today_with_the_customers_own_window_is_accepted_after_that_window_has_ended(
+    client, db, admin_claim_headers, user_address, rostered_driver, local_noon, audit_events
+):
+    """Review Focus 3. The delivery failed this morning, and the customer's 09:00-11:00 window
+    ended an hour ago. Re-dating it to today with that window untouched is accepted, and it lands
+    in today's pool: the window is the customer's own, and `reschedule` judges a window only when
+    the caller changes it (F10). Before this, the endpoint judged every window it was sent, so
+    "Today" was refused every afternoon."""
+    today = local_noon.date()
+    seed = _seed_failed(user_address, rostered_driver, today, ENDED_WINDOW)
+
+    resp = _reschedule(client, admin_claim_headers, seed.order_id, today, ENDED_WINDOW)
+
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert resp.get_json()["data"]["order"]["delivery_window"] == {
+        "start": "09:00",
+        "end": "11:00",
+        "kind": "between",
+        "label": "09:00-11:00",
+    }
+    db.session.expire_all()
+    order = db.session.get(Order, seed.order_id)
+    assert (order.delivery_date, order.delivery_window_start, order.delivery_window_end) == (
+        today,
+        *_as_times(ENDED_WINDOW),
+    )
+    delivery = db.session.get(Delivery, seed.delivery_id)
+    assert (delivery.status, delivery.delivery_person_id) == (S.SCHEDULED, None)
+    assert delivery.scheduled_date.date() == today
+    assert len(_rescheduled_events(audit_events)) == 1
+    # In today's pool, as the driver's own pool screen asks for it.
+    driver_token = create_access_token(identity=str(rostered_driver.id))
+    pool = client.get("/api/v1/staff/delivery/pool", headers={"Authorization": f"Bearer {driver_token}"})
+    assert pool.status_code == 200, pool.get_data(as_text=True)
+    assert seed.delivery_id in [item["delivery_id"] for item in pool.get_json()["data"]["items"]]
+
+
+@pytest.mark.parametrize(
+    "operator_days,driver_took_it",
+    [(0, True), (1, False)],
+    ids=["operator-re-dated-it-to-today-and-a-driver-took-it", "operator-picked-tomorrow"],
+)
+def test_a_same_day_save_from_a_modal_read_before_someone_else_re_dated_it_is_refused(
+    client,
+    db,
+    admin_claim_headers,
+    operator_auth_headers,
+    user_address,
+    rostered_driver,
+    local_noon,
+    audit_events,
+    fanout,
+    operator_days,
+    driver_took_it,
+):
+    """F7 alerts operators and admins at the same moment, so two people acting on one failure is
+    the expected case. The admin opens Reschedule on the failed order: its read says it awaits a
+    new date, so the untouched Save is enabled (F11). Before the admin clicks it, the operator
+    gives the delivery a date from the bot, and the customer is told.
+
+    The stale Save carries `expect_awaiting_new_date`, which `reschedule` checks on the locked
+    row, as it does the operator's own re-dispatch. So it is refused with the operator's own
+    code, and moves nothing. Without it a driver who had taken the stop would lose it, the
+    customer would get a second notice, and the operator's "tomorrow" would silently turn back
+    into today."""
+    today = local_noon.date()
+    seed = _seed_failed(user_address, rostered_driver, today)
+    modal_read = client.get(f"/api/v1/admin/orders/{seed.order_id}", headers=admin_claim_headers)
+    assert modal_read.status_code == 200, modal_read.get_data(as_text=True)
+    assert modal_read.get_json()["data"]["order"]["awaiting_new_date"] is True
+
+    picked = today + timedelta(days=operator_days)
+    redated = client.post(
+        f"/api/v1/staff/delivery/redispatch/{seed.delivery_id}",
+        json={"delivery_date": picked.isoformat()},
+        headers=operator_auth_headers,
+    )
+    assert redated.status_code == 200, redated.get_data(as_text=True)
+    if driver_took_it:
+        driver_token = create_access_token(identity=str(rostered_driver.id))
+        accepted = client.post(
+            f"/api/v1/staff/delivery/accept/{seed.delivery_id}", headers={"Authorization": f"Bearer {driver_token}"}
+        )
+        assert accepted.status_code == 200, accepted.get_data(as_text=True)
+    db.session.expire_all()
+    delivery = db.session.get(Delivery, seed.delivery_id)
+    before = (delivery.status, delivery.delivery_person_id, len(_history(seed.delivery_id)))
+    assert before[:2] == ((S.ASSIGNED, rostered_driver.id) if driver_took_it else (S.RESCHEDULED, None))
+    # The operator's re-date told the customer once. Nobody else has been told anything yet.
+    assert fanout.calls["customer"] == [{"order_id": seed.order_id}]
+    told_before = {seam: list(calls) for seam, calls in fanout.calls.items()}
+    audited_before = len(_rescheduled_events(audit_events))
+
+    resp = _reschedule(client, admin_claim_headers, seed.order_id, today, expect_awaiting=True)
+
+    assert resp.status_code == 400, resp.get_data(as_text=True)
+    assert _error_code(resp) == "STAFF_DELIVERY_NOT_REDISPATCHABLE"
+    db.session.expire_all()
+    delivery = db.session.get(Delivery, seed.delivery_id)
+    assert (delivery.status, delivery.delivery_person_id, len(_history(seed.delivery_id))) == before
+    assert db.session.get(Order, seed.order_id).delivery_date == picked
+    # No second customer notice, no "you lost this stop" to the driver, no re-broadcast.
+    assert fanout.calls == told_before
+    assert len(_rescheduled_events(audit_events)) == audited_before
+
+
+@pytest.mark.parametrize("flag", ["true", 1, None], ids=["a-string", "a-number", "null"])
+def test_an_expectation_that_is_not_a_boolean_is_an_uncoded_400_that_moves_nothing(
+    client, db, admin_claim_headers, user_address, rostered_driver, local_noon, audit_events, flag
+):
+    """`expect_awaiting_new_date` is a yes/no the modal echoes from the order's published
+    `awaiting_new_date`. Anything else is a caller bug, refused before `reschedule` runs."""
+    today = local_noon.date()
+    seed = _seed_failed(user_address, rostered_driver, today)
+
+    resp = client.patch(
+        SCHEDULE_URL.format(seed.order_id),
+        headers=admin_claim_headers,
+        json={
+            "delivery_date": today.isoformat(),
+            "delivery_window_start": None,
+            "delivery_window_end": None,
+            "expect_awaiting_new_date": flag,
+        },
+    )
+
+    assert resp.status_code == 400, resp.get_data(as_text=True)
+    assert "data" not in resp.get_json()
+    _assert_still_failed(seed, rostered_driver, NO_WINDOW)
+    assert _rescheduled_events(audit_events) == []
+
+
+@pytest.mark.parametrize(
+    "raw_date,raw_start,raw_end",
+    [
+        ("2026-13-01", None, None),
+        ("tomorrow", None, None),
+        ("2026-09-30", "noon", None),
+        ("2026-09-30", None, 900),
+    ],
+    ids=["month-13", "a-word-for-a-date", "a-word-for-a-time", "a-number-for-a-time"],
+)
+def test_malformed_input_is_still_an_uncoded_400_that_moves_nothing(
+    client,
+    db,
+    admin_claim_headers,
+    user_address,
+    rostered_driver,
+    local_noon,
+    audit_events,
+    raw_date,
+    raw_start,
+    raw_end,
+):
+    """The PATCH still parses before it calls `reschedule`, and a value it cannot parse is the
+    uncoded 400 it always was: there is no rule to name, only a typo. A number where "HH:MM"
+    belongs raises AttributeError deep in the parser. It must still come out as this 400, not as
+    the endpoint's 500."""
+    seed = _seed_failed(user_address, rostered_driver, local_noon.date())
+
+    resp = client.patch(
+        SCHEDULE_URL.format(seed.order_id),
+        headers=admin_claim_headers,
+        json={"delivery_date": raw_date, "delivery_window_start": raw_start, "delivery_window_end": raw_end},
+    )
+
+    assert resp.status_code == 400, resp.get_data(as_text=True)
+    body = resp.get_json()
+    assert "data" not in body
+    assert len(body["errors"]) == 1 and body["errors"][0].startswith("Invalid delivery schedule")
+    _assert_still_failed(seed, rostered_driver, NO_WINDOW)
+    assert _rescheduled_events(audit_events) == []
+
+
+@pytest.mark.parametrize(
+    "pre_status,notify_customer,customer_channel",
+    [(S.IN_TRANSIT, True, "telegram"), (S.ASSIGNED, False, None)],
+    ids=["driver-on-the-way", "driver-not-yet-left"],
+)
+def test_reschedule_returns_the_notice_it_decided_on_before_the_write(
+    db,
+    admin_user,
+    sample_user,
+    user_address,
+    rostered_driver,
+    local_noon,
+    fanout,
+    pre_status,
+    notify_customer,
+    customer_channel,
+):
+    """`reschedule` returns a `RescheduleResult`: the order, plus what it decided about the customer
+    notice under the locks. The operator endpoint publishes those two (spec §3.5, Task 9); the
+    PATCH has no use for them. Asking again afterwards gets another answer. The row is no longer
+    in transit, and the notice task has not marked anything sent yet, so a recompute would say
+    "not notified" for every first re-date. A customer who gets no notice gets no channel, even
+    with Telegram connected."""
+    from business_app.services.order_schedule_service import RescheduleResult
+
+    sample_user.telegram_id = "700100300"
+    sample_user.is_bot_active = True
+    db.session.commit()
+    today = local_noon.date()
+    seed = _seed(user_address, rostered_driver, pre_status, today)
+    target = today + timedelta(days=2)
+
+    result = OrderScheduleService.reschedule(seed.order_id, delivery_date=target, actor_user_id=admin_user.id)
+
+    assert isinstance(result, RescheduleResult)
+    assert (result.order.id, result.order.delivery_date) == (seed.order_id, target)
+    assert (result.notify_customer, result.customer_channel) == (notify_customer, customer_channel)
+    # The notice that was queued is the one the result reports.
+    assert fanout.calls["customer"] == ([{"order_id": seed.order_id}] if notify_customer else [])
+    assert OrderScheduleService.will_notify_customer(result.order) is False
+    with pytest.raises(FrozenInstanceError):
+        result.notify_customer = not notify_customer
 
 
 # ---------------------------------------------------------------------------
@@ -926,8 +1257,9 @@ def test_clearing_the_schedule_of_a_confirmed_order_still_releases_it(app, clien
 # imported DRIVER_NOTICE_DELIVERY_STATUSES would pass whatever that set said.
 # ---------------------------------------------------------------------------
 
-# R13: the customer is told only when the delivery was already on its way.
-CUSTOMER_TOLD = frozenset({S.IN_TRANSIT, S.ARRIVED})
+# R13, amended by F14 (2026-09-25 spec): the customer is told when the delivery was already on its
+# way, or when an attempt failed and the order has been waiting on a new date since.
+CUSTOMER_TOLD = frozenset({S.IN_TRANSIT, S.ARRIVED, S.FAILED})
 # R16: the driver who loses a stop off their live route. Not a failed row, not a pool row.
 DRIVER_TOLD = frozenset({S.ASSIGNED, S.PICKED_UP, S.IN_TRANSIT, S.ARRIVED})
 
@@ -1094,6 +1426,60 @@ def test_a_customer_told_of_an_earlier_reschedule_is_told_of_the_next(
 
     assert resp.status_code == 200, resp.get_data(as_text=True)
     assert fanout.calls == {"offer": [], "customer": [{"order_id": seed.order_id}], "driver": [], "route": []}
+
+
+def test_a_failed_delivery_re_dated_from_the_modal_tells_the_customer_in_the_bot_chat(
+    client, db, admin_claim_headers, sample_user, user_address, rostered_driver, local_noon, live_send, monkeypatch
+):
+    """F14 and F16, from the admin's Save to the customer's Telegram, with no template row.
+
+    1. The driver could not deliver. The customer heard nothing then (F17).
+    2. The admin opens Reschedule. The detail promises a notice, in Telegram.
+    3. Save queues exactly that one notice, for this order. Nothing is sent before the worker
+       runs it.
+    4. The worker sends the new date with no hour. It points the customer to this chat,
+       where a reply lands in the admin Support Inbox, never to a phone.
+
+    Only the broker and the outbound HTTP are replaced."""
+    from business_app.tasks.notification_tasks import send_delivery_rescheduled_notification_task
+    from tests.unit.test_delivery_service_business_rules import _task_spy
+
+    sample_user.telegram_id = CUSTOMER_CHAT_ID
+    sample_user.is_bot_active = True
+    sample_user.preferred_language = "uz"
+    db.session.commit()
+    today = local_noon.date()
+    seed = _seed(user_address, rostered_driver, S.FAILED, today)
+    target = today + timedelta(days=2)
+
+    detail = client.get(f"/api/v1/admin/orders/{seed.order_id}", headers=admin_claim_headers)
+    assert detail.status_code == 200, detail.get_data(as_text=True)
+    promised = detail.get_json()["data"]["order"]
+    assert (promised["reschedule_notifies_customer"], promised["reschedule_customer_channel"]) == (True, "telegram")
+
+    notices = _task_spy(monkeypatch, send_delivery_rescheduled_notification_task, "delay")
+    resp = _reschedule(client, admin_claim_headers, seed.order_id, target)
+
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert notices == [((seed.order_id,), {})]
+    live_send.assert_not_called()
+
+    [(args, kwargs)] = notices
+    result = send_delivery_rescheduled_notification_task.run(*args, **kwargs)
+
+    assert result == {"telegram": {"success": True, "message_id": 501}}
+    live_send.assert_called_once_with(
+        TELEGRAM_URL,
+        json={
+            "chat_id": CUSTOMER_CHAT_ID,
+            "text": (
+                f"📅 #{seed.order_number} buyurtmangizni yetkazib berish {target:%d.%m.%Y} sanasiga ko'chirildi. "
+                f"{CHAT_LINE['uz']}"
+            ),
+            "parse_mode": "HTML",
+        },
+        timeout=15,
+    )
 
 
 @pytest.mark.parametrize("failing", _FanOut.SEAMS)

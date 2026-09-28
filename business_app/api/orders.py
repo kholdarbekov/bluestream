@@ -30,6 +30,7 @@ from business_app.serializers.sales_serializers import AgentConfirmationPayload
 from business_app.services.sales.agent_order_confirmation_service import AgentOrderConfirmationService
 from business_app.utils.decorators import validate_json, rate_limit, require_verification
 from business_app.utils.delivery_window import schedule_date_bounds
+from business_app.services.order_service import ADMIN_REASON_REQUIRED_STATUSES
 from business_app.utils.constants import NotificationType
 from shared.enums import OrderStatus, PaymentMethod
 from shared.status_transitions import order_transitions_as_strings
@@ -597,9 +598,9 @@ def cancel_order(order_id):
         current_user_id = get_jwt_identity()
         data = request.get_json(silent=True) or {}
 
-        order = get_order_service().cancel_order(
+        order = get_order_service().cancel_order_as_customer(
             order_id=order_id,
-            user_id=current_user_id,
+            user_id=int(current_user_id),
             reason=data.get("reason"),
         )
 
@@ -617,6 +618,24 @@ def cancel_order(order_id):
 
     except NotFoundError:
         return not_found_response(message=get_translation("api.orders.not_found"))
+    except ValidationError as e:
+        _rollback_session()
+        if e.error_code != "ORDER_NOT_CUSTOMER_CANCELLABLE":
+            # Nothing else in the customer cancel raises one; keep today's 500 for it.
+            current_app.logger.error(f"Cancel order error: {e}")
+            return internal_error_response(message=get_translation("error.server_error"))
+        # `error_response`, not `validation_error_response`, which would replace
+        # `message`. The web shows `message`; the bot shows its own copy picked by
+        # `reason_code`, so the backend never has to know which client is calling.
+        reason_code = e.details["reason_code"]
+        return error_response(
+            message=get_translation(
+                f"api.orders.cancel_refused.{reason_code.lower()}",
+                bot_url=current_app.config["COMPANY_TELEGRAM_BOT_URL"],
+            ),
+            status_code=400,
+            data={"error_code": e.error_code, "reason_code": reason_code, "can_customer_cancel": False},
+        )
     except ConflictError:
         return error_response(message=get_translation("api.orders.cannot_cancel"), status_code=400)
     except Exception as e:
@@ -873,6 +892,7 @@ def track_order(order_id):
                     "id": order.id,
                     "order_number": order.order_number,
                     "status": order.status.value,
+                    "display_status": tracking["display_status"],
                     "total_amount": order.total_amount,
                     "created_at": order.created_at.isoformat(),
                     "payment_info": serialize_order_payment(order.payment) if getattr(order, "payment", None) else None,
@@ -1067,12 +1087,16 @@ def get_order_statuses():
     checks. The admin date picker must read them fresh, never from a
     long-cached copy of this response, or an overnight tab offers yesterday.
 
+    `reason_required_statuses` are the statuses whose admin PUT must carry a
+    reason (F6), so the Orders page asks for one exactly when the route will.
+
     Response shape:
         {
           "statuses": [{"value": "pending", "label": "Pending"}, ...],
           "transitions": {"pending": ["confirmed", "cancelled"], ...},
           "schedule_min_date": "2026-09-24",
-          "schedule_max_date": "2026-10-09"
+          "schedule_max_date": "2026-10-09",
+          "reason_required_statuses": ["cancelled", "returned"]
         }
     """
     statuses = [{"value": status.value, "label": status.value.replace("_", " ").title()} for status in OrderStatus]
@@ -1083,6 +1107,7 @@ def get_order_statuses():
             "transitions": order_transitions_as_strings(),
             "schedule_min_date": schedule_min_date.isoformat(),
             "schedule_max_date": schedule_max_date.isoformat(),
+            "reason_required_statuses": sorted(status.value for status in ADMIN_REASON_REQUIRED_STATUSES),
         },
         message=get_translation("api.orders.statuses_retrieved"),
     )

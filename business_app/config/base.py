@@ -229,6 +229,11 @@ class BaseConfig:
         return get_secret("telegram_bot_token", "TELEGRAM_BOT_TOKEN", required=True)
 
     TELEGRAM_BOT_USERNAME = os.environ.get("TELEGRAM_BOT_USERNAME", "aqua_element_bot")
+    # The customer bot's public link: where every customer surface (emails, web pages,
+    # the public feeds) sends someone with a question, instead of the phone. `or`, not
+    # a get() default: .env.example ships the key empty, and an empty link would render
+    # as href="".
+    COMPANY_TELEGRAM_BOT_URL = os.environ.get("COMPANY_TELEGRAM_BOT_URL") or f"https://t.me/{TELEGRAM_BOT_USERNAME}"
     WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
     TELEGRAM_ADMIN_CHAT_ID = os.environ.get("TELEGRAM_ADMIN_CHAT_ID")
 

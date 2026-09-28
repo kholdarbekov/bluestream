@@ -899,10 +899,11 @@ async def test_a_delivery_walks_to_the_door_one_status_at_a_time(stop_bot):
     driver, detail = await open_the_stop(stop_bot)
     errors = capture_errors(stop_bot)
 
+    # No Cancel: a driver who cannot complete a stop marks it failed, and the order
+    # waits for a new date (F4).
     assert detail.callback_data() == [
         "staff_status_501_picked_up",
         "staff_status_501_failed",
-        "staff_status_501_cancelled",
         "staff_navigate_501",
         "staff_active_deliveries",
     ]
@@ -954,6 +955,45 @@ async def test_a_delivery_walks_to_the_door_one_status_at_a_time(stop_bot):
         "staff_cash_partial_501",
         "staff_cash_none_501",
     ]
+
+
+async def test_a_cancel_left_on_a_card_drawn_before_the_change_is_refused_in_words(stop_bot):
+    """Drivers lost Cancel (F4 of the 2026-09-25 failed-delivery spec), but a stop card
+    drawn before the deploy still carries the button. The backend refuses the tap with
+    STAFF_INVALID_STATUS_TRANSITION and writes nothing. The tap was answered before the
+    PUT, so the refusal must arrive as a message naming both statuses, and nothing may
+    tell the driver the delivery was cancelled.
+    """
+    driver, detail = await open_the_stop(stop_bot)
+    assert "staff_status_501_cancelled" not in detail.callback_data()
+    stop_bot.desk.status_outcomes[501] = staff_backend_failure(
+        "Cannot transition from 'assigned' to 'cancelled'. Allowed transitions: ['picked_up', 'failed']",
+        status_code=400,
+        error_code="STAFF_INVALID_STATUS_TRANSITION",
+        details={"current_status": "assigned", "requested_status": "cancelled"},
+    )
+    errors = capture_errors(stop_bot)
+
+    await stop_bot.send(driver.tap("staff_status_501_cancelled"))
+    assert "staff_execute_status_501_cancelled" in stop_bot.telegram.last_shown().callback_data()
+    stop_bot.telegram.reset()
+    await stop_bot.send(driver.tap("staff_execute_status_501_cancelled"))
+
+    assert not errors, f"the refused cancel raised {errors}"
+    assert status_writes(stop_bot) == [(status_endpoint(501), {"status": "cancelled"})]
+    expected = "❌ " + copy_for("staff.error.api.status_transition_refused_detail").format(
+        current_status=f"📋 {copy_for('staff.delivery.status.assigned')}",
+        requested_status=f"❓ {copy_for('staff.delivery.status.cancelled')}",
+    )
+    seen = texts(stop_bot) + visible_answer_texts(stop_bot)
+    assert expected in texts(stop_bot), f"the driver never read why; they saw {seen}"
+    assert len(stop_bot.telegram.of("answerCallbackQuery")) == 1, (
+        "a second answerCallbackQuery was sent for this tap; it is invisible in prod"
+    )
+    for fragment in literal_fragments("staff.delivery.status_updated"):
+        assert not any(fragment in text for text in seen), (
+            f"a refused cancel was reported as a status change: {seen}"
+        )
 
 
 async def test_the_cash_screen_records_what_the_driver_counted_not_what_was_owed(stop_bot):

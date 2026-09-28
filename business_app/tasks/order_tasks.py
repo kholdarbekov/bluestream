@@ -155,6 +155,7 @@ def cancel_abandoned_orders():
 
         # Local import: the service imports the tasks package for its push hook.
         from business_app.services.sales.agent_order_confirmation_service import AgentOrderConfirmationService
+        from business_app.services.order_schedule_service import OrderScheduleService
 
         # Use FOR UPDATE SKIP LOCKED to prevent concurrent workers from processing same orders.
         # Order.payment is a relationship(uselist=False) — it has no .is_() and no
@@ -174,6 +175,11 @@ def cancel_abandoned_orders():
                 # CANCELS, releasing the prepayment and telling the shop "no payment received
                 # within 24 hours" about an order it was never asked to pay online.
                 AgentOrderConfirmationService.pending_request_filter(),
+                # F1 (docs/superpowers/specs/2026-09-25-failed-delivery-awaits-new-date-design.md):
+                # a failed delivery never ends its order. One that waits for a new date is
+                # staff's to re-date or close, never this sweep's, however old. The predicate's
+                # SQL twin, correlated to this order through its delivery.
+                ~Order.delivery.has(OrderScheduleService.awaiting_new_date_filter()),
             )
             .with_for_update(skip_locked=True)
             .all()

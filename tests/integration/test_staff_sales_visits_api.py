@@ -684,13 +684,15 @@ def test_the_losing_tap_of_the_real_race_gets_the_409_and_leaves_no_orphan_order
 
     real_create_order = OrderService.create_order
 
-    def create_order_after_the_winner_lands(self, user_id, order_data):
+    # `staff_approval_hold` is `place_order`'s own keyword (compensation spec C14), passed through
+    # untouched: the rewound winner has no `visit_id` when the same-day rule runs, so it is None.
+    def create_order_after_the_winner_lands(self, user_id, order_data, *, staff_approval_hold=None):
         db.session.execute(
             text("UPDATE orders SET visit_id = :visit WHERE id = :id"),
             {"visit": visit_id, "id": winner_id},
         )
         db.session.commit()
-        return real_create_order(self, user_id, order_data)
+        return real_create_order(self, user_id, order_data, staff_approval_hold=staff_approval_hold)
 
     monkeypatch.setattr(OrderService, "create_order", create_order_after_the_winner_lands)
 

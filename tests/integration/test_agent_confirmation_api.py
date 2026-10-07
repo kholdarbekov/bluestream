@@ -41,7 +41,7 @@ def linked_outlet(db, agent):
         UserAddress(user_id=customer.id, full_address="Chilonzor 5", latitude=PIN[0], longitude=PIN[1], is_default=True)
     )
     db.session.commit()
-    return OutletService.create(agent.id, {**GROCERY, "contact": None}, link_user_id=customer.id)
+    return OutletService.create(agent.id, dict(GROCERY), link_user_id=customer.id)
 
 
 @pytest.fixture

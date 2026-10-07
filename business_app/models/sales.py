@@ -1,6 +1,7 @@
 """Sales-agent domain models: agent profile, outlets, contacts, stage history.
 
-Outlets are deliberately NOT users: a prospect has no phone or contract yet.
+Outlets are deliberately NOT users: a prospect has a contact phone (required at creation since
+D31) but no customer account or contract yet.
 An outlet links to a User/UserAddress only once approved (see OutletService).
 """
 
@@ -68,7 +69,18 @@ class SalesAgentProfile(db.Model, TimestampMixin):
     """Activation, territory hints and targets for a user holding the sales_agent role."""
 
     __tablename__ = "sales_agent_profiles"
-    __table_args__ = (UniqueConstraint("user_id", name="uq_sales_agent_profiles_user_id"),)
+    __table_args__ = (
+        UniqueConstraint("user_id", name="uq_sales_agent_profiles_user_id"),
+        CheckConstraint(
+            "employment_end_date IS NULL OR employment_start_date IS NULL "
+            "OR employment_end_date >= employment_start_date",
+            name="ck_sales_agent_profiles_employment_dates_order",
+        ),
+        CheckConstraint(
+            "(employment_set_at IS NULL) = (employment_set_by_user_id IS NULL)",
+            name="ck_sales_agent_profiles_employment_set_pair",
+        ),
+    )
 
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id", name="fk_sales_agent_profiles_user_id"), nullable=False)
@@ -80,6 +92,16 @@ class SalesAgentProfile(db.Model, TimestampMixin):
     created_by_user_id = Column(
         Integer, ForeignKey("users.id", name="fk_sales_agent_profiles_created_by"), nullable=True
     )
+    # Pay reads these: the worked days of a month, and whether a negative month carries forward
+    # (still employed next month) or is owed. NULL on agents nobody has configured for pay yet.
+    # The admin pay route is the only writer, and it stamps who set them and when: a
+    # self-decision reads that actor. Suspension (`is_active`) is independent of the end date.
+    employment_start_date = Column(Date, nullable=True)
+    employment_end_date = Column(Date, nullable=True)
+    employment_set_by_user_id = Column(
+        Integer, ForeignKey("users.id", name="fk_sales_agent_profiles_employment_set_by_user_id"), nullable=True
+    )
+    employment_set_at = Column(DateTime(timezone=True), nullable=True)
 
     user = db.relationship("User", foreign_keys=[user_id], backref=db.backref("sales_agent_profile", uselist=False))
 

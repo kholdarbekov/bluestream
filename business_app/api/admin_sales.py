@@ -2,10 +2,15 @@
 
 from flask import Blueprint, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
-from pydantic import ValidationError as PydanticValidationError
 
+from business_app.serializers.sales_pay_serializers import to_wire
 from business_app.serializers.sales_serializers import (
+    AGENT_ORDER_APPROVAL_STATUSES,
     AdminExceptionsQuery,
+    AgentOrderApprovalQuery,
+    _ApproveAgentOrderPayload,
+    _RejectAgentOrderPayload,
+    serialize_agent_order_approval,
     AdminVisitsQuery,
     ApprovePayload,
     AssignPayload,
@@ -29,6 +34,7 @@ from business_app.serializers.sales_serializers import (
 )
 from business_app.services.sales.agent_account_service import SalesAgentAccountService
 from business_app.services.sales.agent_metrics_service import AgentMetricsService
+from business_app.services.sales.agent_order_approval_service import AgentOrderApprovalService
 from business_app.services.sales.day_plan_service import AgentDayPlanService
 from business_app.services.sales.exception_feed_service import EXCEPTION_TYPES, ExceptionFeedService
 from business_app.services.sales.outlet_service import OutletService
@@ -38,12 +44,11 @@ from business_app.utils.api_responses import (
     paginated_response,
     pagination_meta,
     success_response,
-    validation_error_response,
 )
 from business_app.utils.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from business_app.utils.decorators import manager_or_higher_required
 from business_app.utils.error_handlers import handle_api_exception
-from business_app.utils.request_helpers import parse_bool_arg
+from business_app.utils.request_helpers import parse_bool_arg, validated_json_payload
 
 
 admin_sales_bp = Blueprint("admin_sales", __name__)
@@ -51,22 +56,6 @@ admin_sales_bp = Blueprint("admin_sales", __name__)
 
 def _actor_id() -> int:
     return int(get_jwt_identity())
-
-
-def _validated_payload(schema_cls):
-    payload = request.get_json() or {}
-    try:
-        # exclude_unset, NOT exclude_none: a field the client never mentioned is dropped, but a
-        # null it deliberately sent survives, so emptying an input in the admin UI actually clears
-        # the column instead of returning a success toast that wrote nothing.
-        #
-        # The rule the services then apply: an explicit null CLEARS a nullable column, and a
-        # NOT-NULL column REFUSES it (`outlets.preferred_language` keeps its truthiness guard;
-        # `outlets.payment_terms` 400s with SALES_PAYMENT_TERMS_INVALID). Both halves are pinned in
-        # tests/integration/test_admin_sales_outlets_api.py.
-        return schema_cls(**payload).model_dump(exclude_unset=True)
-    except PydanticValidationError as exc:
-        return validation_error_response(exc.errors())
 
 
 # --- Sales agents ---
@@ -95,7 +84,7 @@ def list_sales_agents():
 @jwt_required()
 @manager_or_higher_required
 def create_sales_agent():
-    payload = _validated_payload(CreateSalesAgentPayload)
+    payload = validated_json_payload(CreateSalesAgentPayload)
     if not isinstance(payload, dict):
         return payload
     user = StaffService.create_sales_agent(payload, created_by=_actor_id())
@@ -115,7 +104,7 @@ def get_sales_agent(user_id):
 @jwt_required()
 @manager_or_higher_required
 def update_sales_agent(user_id):
-    payload = _validated_payload(UpdateSalesAgentPayload)
+    payload = validated_json_payload(UpdateSalesAgentPayload)
     if not isinstance(payload, dict):
         return payload
     StaffService.update_sales_agent(user_id, payload, updated_by=_actor_id())
@@ -127,7 +116,7 @@ def update_sales_agent(user_id):
 @jwt_required()
 @manager_or_higher_required
 def set_sales_agent_active(user_id):
-    payload = _validated_payload(SetActivePayload)
+    payload = validated_json_payload(SetActivePayload)
     if not isinstance(payload, dict):
         return payload
     agent = SalesAgentAccountService.set_active(user_id, payload["is_active"], actor_id=_actor_id())
@@ -243,7 +232,8 @@ def list_outlets():
 @manager_or_higher_required
 def get_outlet_admin(outlet_id):
     outlet = OutletService.get(outlet_id)
-    return success_response(data={"outlet": OutletService.card(outlet), "stage_history": _serialize_history(outlet)})
+    outlet_card = OutletService.card(outlet, viewer_user_id=_actor_id())
+    return success_response(data={"outlet": outlet_card, "stage_history": _serialize_history(outlet)})
 
 
 @admin_sales_bp.route("/sales/outlets/<int:outlet_id>", methods=["PUT"])
@@ -251,7 +241,7 @@ def get_outlet_admin(outlet_id):
 @jwt_required()
 @manager_or_higher_required
 def update_outlet_admin(outlet_id):
-    payload = _validated_payload(UpdateOutletPayload)
+    payload = validated_json_payload(UpdateOutletPayload)
     if not isinstance(payload, dict):
         return payload
     outlet = OutletService.update(OutletService.get(outlet_id), payload, _actor_id())
@@ -263,7 +253,7 @@ def update_outlet_admin(outlet_id):
 @jwt_required()
 @manager_or_higher_required
 def add_outlet_contact_admin(outlet_id):
-    payload = _validated_payload(ContactPayload)
+    payload = validated_json_payload(ContactPayload)
     if not isinstance(payload, dict):
         return payload
     contact = OutletService.add_contact(OutletService.get(outlet_id), payload)
@@ -275,7 +265,7 @@ def add_outlet_contact_admin(outlet_id):
 @jwt_required()
 @manager_or_higher_required
 def update_outlet_contact_admin(outlet_id, contact_id):
-    payload = _validated_payload(UpdateContactPayload)
+    payload = validated_json_payload(UpdateContactPayload)
     if not isinstance(payload, dict):
         return payload
     outlet = OutletService.get(outlet_id)
@@ -298,7 +288,7 @@ def delete_outlet_contact_admin(outlet_id, contact_id):
 @jwt_required()
 @manager_or_higher_required
 def approve_outlet_admin(outlet_id):
-    payload = _validated_payload(ApprovePayload)
+    payload = validated_json_payload(ApprovePayload)
     if not isinstance(payload, dict):
         return payload
     outlet = OutletService.approve(
@@ -315,7 +305,7 @@ def approve_outlet_admin(outlet_id):
 @jwt_required()
 @manager_or_higher_required
 def reject_outlet_admin(outlet_id):
-    payload = _validated_payload(RejectPayload)
+    payload = validated_json_payload(RejectPayload)
     if not isinstance(payload, dict):
         return payload
     outlet = OutletService.reject(outlet_id, actor_id=_actor_id(), reason=payload["reason"])
@@ -327,7 +317,7 @@ def reject_outlet_admin(outlet_id):
 @jwt_required()
 @manager_or_higher_required
 def assign_outlet_admin(outlet_id):
-    payload = _validated_payload(AssignPayload)
+    payload = validated_json_payload(AssignPayload)
     if not isinstance(payload, dict):
         return payload
     outlet = OutletService.assign(outlet_id, payload.get("agent_user_id"), actor_id=_actor_id())
@@ -339,7 +329,7 @@ def assign_outlet_admin(outlet_id):
 @jwt_required()
 @manager_or_higher_required
 def mark_outlet_lost_admin(outlet_id):
-    payload = _validated_payload(MarkLostPayload)
+    payload = validated_json_payload(MarkLostPayload)
     if not isinstance(payload, dict):
         return payload
     outlet = OutletService.mark_lost(
@@ -353,7 +343,7 @@ def mark_outlet_lost_admin(outlet_id):
 @jwt_required()
 @manager_or_higher_required
 def bulk_assign_outlets_admin():
-    payload = _validated_payload(BulkAssignPayload)
+    payload = validated_json_payload(BulkAssignPayload)
     if not isinstance(payload, dict):
         return payload
     updated = OutletService.bulk_assign_by_district(payload["district"], payload["agent_user_id"], actor_id=_actor_id())
@@ -527,4 +517,77 @@ def list_sales_exceptions():
             # the list living in JavaScript.
             "types": list(EXCEPTION_TYPES),
         }
+    )
+
+
+# --- Same-day hold: the order-approval queue (compensation spec C14, §5.7) ---
+
+
+def _approval_response(row):
+    """OA2 / OA3's `{approval: ApprovalRow}`, loaded and serialized exactly as a queue row."""
+    page = AgentOrderApprovalService.decision_page(row, viewer_id=_actor_id())
+    return success_response(
+        data=to_wire({"approval": serialize_agent_order_approval(row, earlier=page.earlier, viewer=page.viewer)})
+    )
+
+
+@admin_sales_bp.route("/sales/order-approvals", methods=["GET"])
+@handle_api_exception
+@jwt_required()
+@manager_or_higher_required
+def list_order_approvals():
+    # `model_validate` over the dict, the house way (`list_sales_exceptions`): the ints are
+    # pre-parsed so `?page=abc` lands on the default. An unknown `status` is refused by the schema.
+    params = AgentOrderApprovalQuery.model_validate(
+        {
+            **request.args.to_dict(),
+            "agent_id": request.args.get("agent_id", type=int),
+            "page": request.args.get("page", 1, type=int),
+            "per_page": request.args.get("per_page", DEFAULT_PAGE_SIZE, type=int),
+        }
+    )
+    page = AgentOrderApprovalService.list_rows(
+        viewer_id=_actor_id(),
+        status=params.status,
+        agent_user_id=params.agent_id,
+        page=params.page,
+        per_page=params.per_page,
+    )
+    # `meta` rides INSIDE `data` (the visits precedent); the vocabulary travels with the rows, so
+    # the page's status filter has no JavaScript copy of it.
+    return success_response(
+        data=to_wire(
+            {
+                "items": [
+                    serialize_agent_order_approval(row, earlier=page.earlier, viewer=page.viewer) for row in page.rows
+                ],
+                "meta": pagination_meta(page=params.page, per_page=params.per_page, total=page.total),
+                "statuses": list(AGENT_ORDER_APPROVAL_STATUSES),
+                "pending_count": page.pending_count,
+            }
+        )
+    )
+
+
+@admin_sales_bp.route("/sales/order-approvals/<int:order_id>/approve", methods=["POST"])
+@handle_api_exception
+@jwt_required()
+@manager_or_higher_required
+def approve_agent_order(order_id: int):
+    payload = validated_json_payload(_ApproveAgentOrderPayload)
+    if not isinstance(payload, dict):
+        return payload
+    return _approval_response(AgentOrderApprovalService.approve(order_id, actor_id=_actor_id()))
+
+
+@admin_sales_bp.route("/sales/order-approvals/<int:order_id>/reject", methods=["POST"])
+@handle_api_exception
+@jwt_required()
+@manager_or_higher_required
+def reject_agent_order(order_id: int):
+    payload = validated_json_payload(_RejectAgentOrderPayload)
+    if not isinstance(payload, dict):
+        return payload
+    return _approval_response(
+        AgentOrderApprovalService.reject(order_id, actor_id=_actor_id(), reason=payload.get("reason"))
     )

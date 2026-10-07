@@ -11,7 +11,14 @@ import staffService from '../../services/staffService';
 vi.mock('../../services/salesService');
 vi.mock('../../services/staffService');
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key, opts) => (typeof opts === 'string' ? opts : opts?.defaultValue) || key }),
+  useTranslation: () => ({
+    t: (key, opts) => {
+      const text = (typeof opts === 'string' ? opts : opts?.defaultValue) || key;
+      return opts && typeof opts === 'object'
+        ? text.replace(/\{\{(\w+)\}\}/g, (_, name) => String(opts[name] ?? ''))
+        : text;
+    },
+  }),
 }));
 // The page's contract with the Leaflet band is the `checkins` prop it hands over; the marker
 // colours are pinned in src/components/OperationsMap.test.jsx. Stubbing the component (not
@@ -61,15 +68,17 @@ const SKIPPED_VISIT = visitRow({
   checkin_skipped: true, outcome: 'owner_absent', outlet_name: 'Chorsu kiosk', agent_name: 'Sardor Alimov',
 });
 
+// `counted` and `day_status` (C11): counted is the verified-visit numerator, deliberately 3 here
+// against 4 completed, so a cell that read `completed` would show the wrong number.
 const PLAN_ROWS = [
-  { agent_user_id: 41, agent_name: 'Sardor Alimov', day: '2026-09-14', due: 6, completed: 4, unplanned: 1, strike_rate_pct: 74.5, plan_source: 'snapshot' },
-  { agent_user_id: 77, agent_name: 'Nodira Karimova', day: '2026-09-13', due: null, completed: 2, unplanned: 2, strike_rate_pct: null, plan_source: 'none' },
+  { agent_user_id: 41, agent_name: 'Sardor Alimov', day: '2026-09-14', due: 6, counted: 3, completed: 4, unplanned: 1, strike_rate_pct: 74.5, plan_source: 'snapshot', day_status: 'worked' },
+  { agent_user_id: 77, agent_name: 'Nodira Karimova', day: '2026-09-13', due: null, counted: 0, completed: 2, unplanned: 2, strike_rate_pct: null, plan_source: 'none', day_status: 'holiday' },
 ];
 
 // The feed's vocabulary as the route publishes it (R8) — the page must read THIS, not a copy.
 const EXCEPTION_TYPES = [
   'out_of_range_checkin', 'skipped_checkin', 'short_visit', 'declined_agent_order',
-  'duplicate_photo', 'unvisited', 'duplicate_open_tryout',
+  'rejected_agent_order', 'duplicate_photo', 'unvisited', 'duplicate_open_tryout',
 ];
 const EXCEPTIONS = [
   { type: 'out_of_range_checkin', occurred_at: '2026-09-14T06:16:00+00:00', agent_user_id: 77, agent_name: 'Nodira Karimova', outlet_id: 6, outlet_name: 'Yunus shop', visit_id: 502, detail: { distance_m: 640, radius_m: 250 } },
@@ -156,8 +165,21 @@ it('shows a day with no plan snapshot as "No plan", never as a zero due count', 
   // `due: null` + `plan_source: "none"` means the nightly 01:20 snapshot has no row for that
   // day (R1) — the backend ships `plan_source` precisely so this table never has to guess, and
   // rendering a 0 there would read as "nothing was due", which is a different claim.
-  expect(within(rows[1]).getAllByRole('cell').map((c) => c.textContent)).toEqual(['2026-09-14', 'Sardor Alimov', '6', '4', '1', '74.5%']);
-  expect(within(rows[2]).getAllByRole('cell').map((c) => c.textContent)).toEqual(['2026-09-13', 'Nodira Karimova', 'No plan', '2', '2', '—']);
+  expect(within(rows[1]).getAllByRole('cell').map((c) => c.textContent)).toEqual(['2026-09-14', 'Sardor Alimov', '6', '3', '4', '1', '74.5%']);
+  expect(within(rows[2]).getAllByRole('cell').map((c) => c.textContent)).toEqual(['2026-09-13Not counted: holiday', 'Nodira Karimova', 'No plan', '0', '2', '2', '—']);
+});
+
+it('counts only worked days: any other day is muted and says why', async () => {
+  render(<Visits />, { wrapper: createWrapper() });
+  const planCard = await screen.findByTestId('plan-vs-fact');
+  await within(planCard).findByText('2026-09-14');
+  const rows = within(planCard).getAllByRole('row');
+
+  expect(within(planCard).getByRole('columnheader', { name: 'Counted' })).toBeInTheDocument();
+  expect(rows[1]).not.toHaveTextContent('Not counted');
+  expect(rows[1]).not.toHaveStyle({ opacity: '0.55' });
+  expect(rows[2]).toHaveTextContent('Not counted: holiday');
+  expect(rows[2]).toHaveStyle({ opacity: '0.55' });
 });
 
 it('narrows to one agent and to out-of-range check-ins, returning to page 1', async () => {
@@ -210,7 +232,7 @@ it('switches to the exceptions feed and filters it by a type the route published
   const row = await within(table).findByRole('row', { name: /Yunus shop/ });
   expect(row).toHaveTextContent('out_of_range_checkin');
   // `detail` is rendered generically — the page owns no per-type branch, so the day the feed
-  // gains an eighth type it renders instead of going blank.
+  // gains a ninth type it renders instead of going blank.
   expect(row).toHaveTextContent('distance_m: 640 · radius_m: 250');
   expect(within(table).getByRole('row', { name: /duplicate_open_tryout/ })).toHaveTextContent('tryout_ids: 91,88');
 
@@ -219,9 +241,9 @@ it('switches to the exceptions feed and filters it by a type the route published
   }));
 
   // The picker is built from the response's `types`, not from a JS copy of EXCEPTION_TYPES — so
-  // it offers the EIGHTH type this page has never heard of, and can send it.
+  // it offers the NINTH type this page has never heard of, and can send it.
   fireEvent.mouseDown(screen.getByTestId('filter-exception-type').querySelector('.ant-select-selector'));
-  expect(document.querySelectorAll('.ant-select-item-option')).toHaveLength(8);
+  expect(document.querySelectorAll('.ant-select-item-option')).toHaveLength(9);
   fireEvent.click(await screen.findByTitle(FUTURE_TYPE));
   await waitFor(() => expect(salesService.getExceptions).toHaveBeenLastCalledWith(expect.objectContaining({ type: FUTURE_TYPE, page: 1 })));
 });

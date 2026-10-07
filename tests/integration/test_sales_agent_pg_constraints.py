@@ -1,7 +1,8 @@
 """Postgres-only guarantees of migrations c3d9e5f1a7b2 (phase 1), d4e7f9a2b6c1
 (phase 2a), f1a2b3c4d5e6 (the delivered-history index), b7c8d9e0f1a2 (phase 2b:
 visit photos, the try-out's outlet link), d8e9f0a1b2c3 (phase 3: the agent
-day-plan snapshot) and e0f1a2b3c4d5 (branch outlets) — SQLite cannot see them.
+day-plan snapshot), e0f1a2b3c4d5 (branch outlets) and b7e3c1a95d42 (the same-day
+approval hold) — SQLite cannot see them.
 
 The SQLite suite builds its schema from the models with ``db.create_all()``, so
 every CHECK / partial-unique that only the migration writes is invisible there.
@@ -26,6 +27,7 @@ from business_app.models.sales_visits import (
     VISIT_OUTCOMES,
     VISIT_STATUSES,
     VISIT_STEPS,
+    AgentOrderApproval,
     OrderConfirmationRequest,
     SalesAgentDayPlan,
     Visit,
@@ -1000,3 +1002,57 @@ def test_the_account_index_is_live_and_the_account_unique_is_gone(pg_db):
     assert _constraint_def(pg_db, "outlets", "uq_outlets_user_id") is None
     # Negative control: the helper really does answer None for something absent.
     assert _index_def(pg_db, "ix_outlets_no_such_index") is None
+
+
+# --------------------------------------------------------------------------- #
+# C14 — the same-day staff approval hold
+# --------------------------------------------------------------------------- #
+
+
+def _hold(**kwargs):
+    fields = {"status": "pending", "requested_at": datetime.now(UTC)}
+    fields.update(kwargs)
+    return AgentOrderApproval(**fields)
+
+
+def test_the_approval_hold_state_matrix_is_enforced_by_name(pg_db):
+    """The five §10.5 proofs of `agent_order_approvals`, each one broken cell of the matrix.
+
+    Pinned by name because `downgrade()` drops by name, and because the queue, the automatic
+    confirmers and the CANCELLED cascade all trust these cells.
+    """
+    agent, outlet = _agent_and_outlet(pg_db, phone="+998900000016", outlet_name="Sixteenth Shop")
+    customer = User(phone="+998900000116", password_hash="not-a-real-hash", first_name="Store")
+    pg_db.session.add(customer)
+    pg_db.session.commit()
+    first = _order(pg_db, user_id=customer.id, order_source="sales_agent", created_by_staff_id=agent.id)
+    second = _order(pg_db, user_id=customer.id, order_source="sales_agent", created_by_staff_id=agent.id)
+    pg_db.session.add_all([first, second])
+    pg_db.session.commit()
+    first_id, second_id, agent_id, outlet_id = first.id, second.id, agent.id, outlet.id
+    now = datetime.now(UTC)
+
+    def _held(order_id, **kwargs):
+        return _hold(order_id=order_id, outlet_id=outlet_id, agent_user_id=agent_id, earlier_order_ids=[first_id], **kwargs)
+
+    pg_db.session.add(_held(second_id))
+    pg_db.session.commit()
+
+    _rollback_on_named_integrity(pg_db, _held(second_id), "uq_agent_order_approvals_order_id")
+    _rollback_on_named_integrity(
+        pg_db, _held(first_id, status="approved", decided_at=now), "ck_agent_order_approvals_decider"
+    )
+    _rollback_on_named_integrity(
+        pg_db,
+        _held(first_id, status="rejected", decided_at=now, decided_by_user_id=agent_id),
+        "ck_agent_order_approvals_reason",
+    )
+    _rollback_on_named_integrity(pg_db, _held(first_id, decided_at=now), "ck_agent_order_approvals_decided")
+    _rollback_on_named_integrity(
+        pg_db, _held(first_id, decided_by_user_id=agent_id), "ck_agent_order_approvals_decider"
+    )
+
+    # A hold cancelled by a system path has no decider, and lands.
+    pg_db.session.add(_held(first_id, status="cancelled", decided_at=now))
+    pg_db.session.commit()
+    assert AgentOrderApproval.query.count() == 2

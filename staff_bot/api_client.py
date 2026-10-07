@@ -72,9 +72,9 @@ TRANSPORT_AMBIGUOUS_ERROR_CODE = "TRANSPORT_AMBIGUOUS"
 
 # The only verbs this client may re-send after an ambiguous failure.
 #
-# PUT IS INCLUDED, and that is a verified claim, not an RFC assumption. The two
-# PUTs this client issues are guarded state-machine transitions whose guard runs
-# BEFORE any write:
+# PUT IS INCLUDED, and that is a verified claim, not an RFC assumption. Two of
+# the three PUTs this client issues are guarded state-machine transitions whose
+# guard runs BEFORE any write:
 #   * PUT /staff/delivery/{id}/status  -> business_app/services/staff_service.py
 #     :1162-1167 raises STAFF_INVALID_STATUS_TRANSITION, and NO status in
 #     shared/status_transitions.py:30-49 lists itself as an allowed next, so
@@ -88,6 +88,16 @@ TRANSPORT_AMBIGUOUS_ERROR_CODE = "TRANSPORT_AMBIGUOUS"
 # it is the idempotent acknowledgement that stops a completed at-door delivery
 # from being reported to the driver as a failure. Removing PUT from this set
 # re-opens that bug.
+# The third is an idempotent SET, safe to replay for a different reason:
+#   * PUT /staff/sales/outlets/{id}/primary-phone -> `OutletService.
+#     set_primary_phone` writes the number onto the outlet's primary contact
+#     and creates a contact only when the outlet has none, so a replay that
+#     arrives after the first call committed finds the row it wrote and leaves
+#     it as it was: the same 200 and still exactly one contact (D31). Only an
+#     OVERLAP is not covered: two first calls on an outlet with no contact (a
+#     retry landing while the timed-out original is still running) can each
+#     create one, as nothing locks the outlet row. The duplicate is benign --
+#     both rows carry the number the agent sent.
 #
 # POST is excluded, with NO per-endpoint exception list (owner ruling): the
 # rule stays a pure function of the verb so no future endpoint can opt into
@@ -844,6 +854,19 @@ class StaffAPIClient:
             token=token, data={}
         )
 
+    async def sales_set_primary_phone(self, token: str, outlet_id: int, phone: str) -> APIResponse:
+        """Set the outlet's contact phone (D31). The reply is the outlet card.
+
+        A PUT because it SETS the primary contact's number rather than adding a
+        contact, so sending it again after it landed leaves the same single row
+        -- which is what puts it among the verbs `RETRY_SAFE_METHODS` may replay
+        (see the note there for the one overlap that does not converge).
+        """
+        return await self._make_request(
+            'PUT', f'/api/v1/staff/sales/outlets/{outlet_id}/primary-phone',
+            token=token, data={'phone': phone}
+        )
+
     async def sales_list_activation_requests(self, token: str) -> APIResponse:
         """List outlets awaiting activation (approver view)."""
         return await self._make_request(
@@ -1023,6 +1046,28 @@ class StaffAPIClient:
         return await self._make_request(
             'GET', '/api/v1/staff/sales/me/stats', token=token, params={'period': period}
         )
+
+    async def sales_my_earnings(self, token):
+        """S1: the caller's own pay estimate, months under review, last statement, pipeline
+        and penalties (compensation spec §5.4). No query: the token says whose."""
+        return await self._make_request('GET', '/api/v1/staff/sales/me/earnings', token=token)
+
+    async def sales_my_earnings_lines(self, token, *, month: str, page: int = 1):
+        """S2: one page of a month's credited lines. `month` is "YYYY-MM", exactly as S1
+        published it; the page size is the backend's (`EARNINGS_PAGE_SIZE`)."""
+        return await self._make_request('GET', '/api/v1/staff/sales/me/earnings/lines', token=token,
+                                        params={'month': month, 'page': page})
+
+    async def sales_my_statements(self, token):
+        """S3: the caller's own approved and paid statements, newest first, as many as the
+        backend lists (`AGENT_STATEMENTS_SIZE`). No query: the token says whose."""
+        return await self._make_request('GET', '/api/v1/staff/sales/me/statements', token=token)
+
+    async def sales_my_statement(self, token, month: str):
+        """S4: one approved or paid statement in full. `month` is "YYYY-MM", exactly as S1, S3 or
+        the approval push's payload published it; any other month is refused with
+        SALES_PAY_STATEMENT_NOT_AVAILABLE."""
+        return await self._make_request('GET', f'/api/v1/staff/sales/me/statements/{month}', token=token)
 
     # --- Shared Operations ---
 

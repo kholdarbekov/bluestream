@@ -7,7 +7,8 @@ re-derived (CLAUDE.md "full scope", spec D15):
     "due")`, the exact query behind the hub's *Due today & overdue* row — split by the
     `overdue_days` number the card and the list buttons already print, so the digest can
     never call an outlet overdue that the list one tap later shows without a "+Nd";
-  * *unvisited* is the admin Outlets filter's own predicate (`OutletService.unvisited_filter`);
+  * *unvisited* is the admin Outlets filter's own predicate (`OutletService.unvisited_filter`)
+    over the outlets the due list is built from (`OutletService.agent_due_filter`, Q10);
   * *open visit* is `VisitService.current`, the lookup the hub and the card already share.
 
 Nothing here commits, sends or formats: `build` returns a payload and the staff bot renders
@@ -96,10 +97,15 @@ class AgentDigestService:
         `days` is None for an outlet that has never been visited at all — the honest
         answer, and the reason the sort key puts those first: "never" is not a number the
         backend may invent from `created_at` and then print under a 21-day heading.
+
+        Whose nudge it is follows OWNERSHIP (`agent_due_filter`, the due list's own filter, Q10),
+        not reach: once a manager hands a shop to another agent, a silence there is the new
+        owner's to fix. The admin exception feed files the same row under the same owner
+        (`OutletService.due_owner_id`, the filter's Python twin), unassigned shops included.
         """
         threshold = int(current_app.config["SALES_UNVISITED_ALERT_DAYS"])
         outlets = Outlet.query.filter(
-            OutletService.agent_outlet_filter(agent_user_id),
+            OutletService.agent_due_filter(agent_user_id),
             OutletService.unvisited_filter(threshold, now=now),
         ).all()
         # Sorted here rather than in SQL: NULLS FIRST is dialect-specific and the suite runs

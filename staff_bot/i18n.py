@@ -13,6 +13,12 @@ from shared.staff_constants import (
     FAILED_DELIVERY_REASONS,
     RECONCILIATION_RISK_FLAGS,
     SALES_EVENTS,
+    SALES_PAY_DIFFERENCE_CAUSES,
+    SALES_PAY_LEDGER_KINDS,
+    SALES_PAY_PENALTY_STATUSES,
+    SALES_PAY_PERIOD_STATUSES,
+    SALES_PAY_PIPELINE_WAITING,
+    SALES_PAY_REVERSAL_CAUSES,
     STAFF_BOT_ROLES,
 )
 from shared.i18n_rendering import humanise_key, render_translation
@@ -286,6 +292,26 @@ class Translation:
         # literals the extractor finds on its own.
         for period in STATS_PERIODS:
             keys.add(f"staff.sales.stats.period_{period}")
+
+        # My earnings (compensation spec §8.4): five label families the earnings screens
+        # build with f-strings from BACKEND-published values -- a month's status, a ledger
+        # line's kind and cause, a pipeline order's wait, a penalty's status. Each loops
+        # over the shared tuple the backend's own CHECKs and serializers use, so there is
+        # no hand copy to drift; the seed script's `_add_dynamic_keys` loops the same five.
+        for status in SALES_PAY_PERIOD_STATUSES:
+            keys.add(f"staff.sales.earnings.status.{status}")
+
+        for kind in SALES_PAY_LEDGER_KINDS:
+            keys.add(f"staff.sales.earnings.kind.{kind}")
+
+        for waiting in SALES_PAY_PIPELINE_WAITING:
+            keys.add(f"staff.sales.earnings.waiting.{waiting}")
+
+        for status in SALES_PAY_PENALTY_STATUSES:
+            keys.add(f"staff.sales.earnings.penalty_status.{status}")
+
+        for cause in SALES_PAY_REVERSAL_CAUSES + SALES_PAY_DIFFERENCE_CAUSES:
+            keys.add(f"staff.sales.earnings.cause.{cause}")
 
         for status in DeliveryStatus:
             keys.add(f"staff.delivery.status.{status.value}")

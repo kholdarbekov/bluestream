@@ -11,6 +11,7 @@ from sqlalchemy.orm import joinedload, selectinload
 from business_app import db
 from business_app.models.delivery import DeliveryPerson
 from business_app.models.product import Product
+from business_app.models.sales import Outlet
 from business_app.models.tryout import (
     ProductTryout,
     ProductTryoutItem,
@@ -30,7 +31,7 @@ from shared.enums import (
     TryoutTaskStatus,
     TryoutTaskType,
 )
-from business_app.utils.exceptions import ConflictError, NotFoundError, ValidationError
+from business_app.utils.exceptions import ConflictError, ForbiddenError, NotFoundError, ValidationError
 from business_app.utils.translations import get_translation
 from business_app.utils.validators import normalize_phone_number
 
@@ -1034,6 +1035,24 @@ class TryoutService:
         return TryoutService._load_tryout(tryout.id)
 
     @staticmethod
+    def can_convert(tryout: ProductTryout, viewer_id: int) -> bool:
+        """Whether `viewer_id` may convert this try-out: never the onboarder of its outlet.
+
+        Converting is the linked outlet's first activation (`job_tryout_converted`, spec §4.12),
+        so it is the same decision as approving that outlet and asks the same predicate. A
+        try-out with no outlet (the admin- and operator-made ones) has no onboarder.
+        `convert_tryout` refuses exactly when this is False, and the admin reads publish it as
+        `can_convert`, so the Convert button and the refusal cannot disagree.
+        """
+        if tryout.outlet_id is None:
+            return True
+        # Lazy, as `OutletService.create_tryout_from_field` imports this module lazily.
+        from business_app.services.sales.outlet_service import OutletService
+
+        outlet = db.session.get(Outlet, tryout.outlet_id)
+        return outlet is None or not OutletService.is_self_approval(outlet, viewer_id)
+
+    @staticmethod
     def convert_tryout(tryout_id: int, actor_user_id: int) -> Dict[str, Any]:
         tryout = TryoutService._load_tryout(tryout_id)
         if tryout.converted_user_id:
@@ -1043,6 +1062,14 @@ class TryoutService:
                 "action": "already_converted",
                 "user": loaded_tryout.converted_user,
             }
+        # After the idempotent return, before any account is created or linked: a refusal
+        # leaves nothing behind (spec §4.12).
+        if not TryoutService.can_convert(tryout, int(actor_user_id)):
+            raise ForbiddenError(
+                "You cannot approve an outlet you onboarded",
+                error_code="SALES_OUTLET_SELF_APPROVAL",
+                details={"outlet_id": tryout.outlet_id},
+            )
 
         contact = tryout.trial_contact
         normalized_contact_phone = normalize_phone_number(contact.phone)
@@ -1174,6 +1201,7 @@ class AdminTryoutService:
         end_date: Optional[str] = None,
         due_start_date: Optional[str] = None,
         due_end_date: Optional[str] = None,
+        viewer_user_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         query = ProductTryout.query.options(
             joinedload(ProductTryout.trial_contact),
@@ -1228,6 +1256,12 @@ class AdminTryoutService:
         start = max(page - 1, 0) * per_page
         end = start + per_page
         page_items = serialized[start:end]
+        # Per viewer, like the outlet card (spec §4.12). The due-reminder task and the CSV export
+        # have no viewer and publish no flag.
+        if viewer_user_id is not None:
+            by_id = {row.id: row for row in rows}
+            for item in page_items:
+                item["can_convert"] = TryoutService.can_convert(by_id[item["id"]], viewer_user_id)
 
         summary = {
             "total_tryouts": total,
@@ -1249,8 +1283,12 @@ class AdminTryoutService:
         }
 
     @staticmethod
-    def get_tryout(tryout_id: int) -> Dict[str, Any]:
-        return TryoutService.serialize_tryout(TryoutService.get_tryout(tryout_id))
+    def get_tryout(tryout_id: int, *, viewer_user_id: int) -> Dict[str, Any]:
+        tryout = TryoutService.get_tryout(tryout_id)
+        return {
+            **TryoutService.serialize_tryout(tryout),
+            "can_convert": TryoutService.can_convert(tryout, viewer_user_id),
+        }
 
     @staticmethod
     def get_due_reminder_candidates() -> Dict[str, List[Dict[str, Any]]]:

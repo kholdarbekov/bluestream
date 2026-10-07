@@ -33,8 +33,11 @@ import {
   ShopOutlined,
   SyncOutlined
 } from '@ant-design/icons';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '../../stores/authStore';
 import { useRealTimeWithFallback } from '../../hooks/useRealTimeUpdates';
+import salesPayService from '../../services/salesPayService';
+import salesService from '../../services/salesService';
 import useResponsive from '../../hooks/useResponsive';
 import LanguageSwitcher from '../common/LanguageSwitcher';
 import { useTranslation } from 'react-i18next';
@@ -49,8 +52,31 @@ const AdminLayout = ({ children }) => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, logout } = useAuthStore();
+  const { user, logout, hasPermission } = useAuthStore();
   const responsive = useResponsive();
+  const queryClient = useQueryClient();
+  // §6.1: the Compensation child and its badge are an admin's (C13). The badge is A1's
+  // `pending_penalty_count`, read through the Months tab's own query key, so the two share one
+  // cache entry; a manager never fires it.
+  const canManagePay = hasPermission('can_manage_sales_pay');
+  const { data: payPeriods } = useQuery({
+    queryKey: ['salesPay', 'periods'],
+    queryFn: () => salesPayService.getPeriods(),
+    enabled: canManagePay,
+    staleTime: 60_000,
+  });
+  const canReviewAgentOrders = hasPermission('can_review_agent_orders');
+  // C14 (§6.1): OA1's `pending_count`. A held order keeps a delivery waiting, so the count
+  // refreshes every minute while the admin UI is open. A decision on the queue page invalidates
+  // `['orderApprovals']`, which this key shares.
+  const { data: orderApprovalsBadge } = useQuery({
+    queryKey: ['orderApprovals', 'pendingCount'],
+    queryFn: () => salesService.listOrderApprovals({ status: 'pending', perPage: 1 }),
+    enabled: canReviewAgentOrders,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  });
+  const pendingApprovals = orderApprovalsBadge?.pending_count || 0;
 
   // Initialize real-time updates
   const { isConnected, connectionType } = useRealTimeWithFallback({
@@ -197,7 +223,30 @@ const AdminLayout = ({ children }) => {
         {
           key: '/sales/visits',
           label: t('ui.nav.visits', 'Visits')
-        }
+        },
+        ...(canManagePay ? [{
+          key: '/sales/compensation',
+          label: (
+            <span>
+              {t('ui.nav.sales_compensation', 'Compensation')}{' '}
+              <Badge count={payPeriods?.pending_penalty_count || 0} size="small" />
+            </span>
+          )
+        }] : []),
+        // Everyone who is not a pay administrator proposes penalties here (§6.1, move M6).
+        ...(canManagePay ? [] : [{
+          key: '/sales/penalty-proposals',
+          label: t('ui.nav.sales_penalty_proposals', 'Penalty proposals'),
+        }]),
+        ...(canReviewAgentOrders ? [{
+          key: '/sales/order-approvals',
+          label: (
+            <Space size={6}>
+              {t('ui.nav.sales_order_approvals', 'Order approvals')}
+              <Badge count={pendingApprovals} size="small" />
+            </Space>
+          ),
+        }] : []),
       ]
     },
     {
@@ -263,6 +312,8 @@ const AdminLayout = ({ children }) => {
   }, [navigate, responsive.shouldUseDrawerNavigation]);
 
   function handleLogout() {
+    // Review gaming F10: cached pay figures must not survive a user switch on a shared PC.
+    queryClient.clear();
     logout();
     navigate('/login');
   }
@@ -315,10 +366,14 @@ const AdminLayout = ({ children }) => {
     </div>
   );
 
-  // Navigation menu component
-  const NavigationMenu = ({ mode = "inline" }) => (
+  // Navigation menu (spec §6.1 note): a plain element, not a component defined in this render
+  // body. `AdminLayout` now re-renders whenever `payPeriods` resolves (the Compensation badge),
+  // and a locally-defined component type is a NEW type on every such render, which remounts
+  // antd's <Menu> and collapses whatever submenu the admin just opened. The element below keeps
+  // <Menu>'s own identity stable across re-renders, so only its props (the badge count) update.
+  const navigationMenu = (
     <Menu
-      mode={mode}
+      mode="inline"
       selectedKeys={[location.pathname]}
       items={menuItems}
       onClick={handleMenuClick}
@@ -343,7 +398,7 @@ const AdminLayout = ({ children }) => {
           width={280}
           className="mobile-navigation-drawer"
         >
-          <NavigationMenu />
+          {navigationMenu}
         </Drawer>
       )}
 
@@ -362,7 +417,7 @@ const AdminLayout = ({ children }) => {
           }}
         >
           <LogoComponent collapsed={sidebarCollapsed} />
-          <NavigationMenu />
+          {navigationMenu}
         </Sider>
       )}
 

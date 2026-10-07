@@ -1421,6 +1421,27 @@
     "rule": "/api/v1/admin/sales/exceptions"
   },
   {
+    "endpoint": "admin_sales.list_order_approvals",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/sales/order-approvals"
+  },
+  {
+    "endpoint": "admin_sales.approve_agent_order",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/sales/order-approvals/<int:order_id>/approve"
+  },
+  {
+    "endpoint": "admin_sales.reject_agent_order",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/sales/order-approvals/<int:order_id>/reject"
+  },
+  {
     "endpoint": "admin_sales.list_outlets",
     "methods": [
       "GET"
@@ -1510,6 +1531,209 @@
       "POST"
     ],
     "rule": "/api/v1/admin/sales/outlets/import-existing-customers"
+  },
+  {
+    "endpoint": "admin_sales_pay.set_agent_employment",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/sales/pay/agents/<int:agent_user_id>/employment"
+  },
+  {
+    "endpoint": "admin_sales_pay.add_agent_pay_terms",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/sales/pay/agents/<int:agent_user_id>/terms"
+  },
+  {
+    "endpoint": "admin_sales_pay.get_agent_pay_terms",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/sales/pay/agents/<int:agent_user_id>/terms"
+  },
+  {
+    "endpoint": "admin_sales_pay.create_pay_penalty",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/sales/pay/penalties"
+  },
+  {
+    "endpoint": "admin_sales_pay.list_pay_penalties",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/sales/pay/penalties"
+  },
+  {
+    "endpoint": "admin_sales_pay.cancel_pay_penalty",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/sales/pay/penalties/<int:penalty_id>/cancel"
+  },
+  {
+    "endpoint": "admin_sales_pay.confirm_pay_penalty",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/sales/pay/penalties/<int:penalty_id>/confirm"
+  },
+  {
+    "endpoint": "admin_sales_pay.reject_pay_penalty",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/sales/pay/penalties/<int:penalty_id>/reject"
+  },
+  {
+    "endpoint": "admin_sales_pay.create_pay_penalty_type",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/sales/pay/penalty-types"
+  },
+  {
+    "endpoint": "admin_sales_pay.list_pay_penalty_types",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/sales/pay/penalty-types"
+  },
+  {
+    "endpoint": "admin_sales_pay.update_pay_penalty_type",
+    "methods": [
+      "PATCH"
+    ],
+    "rule": "/api/v1/admin/sales/pay/penalty-types/<int:type_id>"
+  },
+  {
+    "endpoint": "admin_sales_pay.list_pay_periods",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/sales/pay/periods"
+  },
+  {
+    "endpoint": "admin_sales_pay.get_pay_period",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/sales/pay/periods/<month>"
+  },
+  {
+    "endpoint": "admin_sales_pay.get_pay_statement",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/sales/pay/periods/<month>/agents/<int:agent_user_id>"
+  },
+  {
+    "endpoint": "admin_sales_pay.create_pay_adjustment",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/sales/pay/periods/<month>/agents/<int:agent_user_id>/adjustments"
+  },
+  {
+    "endpoint": "admin_sales_pay.list_pay_statement_lines",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/sales/pay/periods/<month>/agents/<int:agent_user_id>/lines"
+  },
+  {
+    "endpoint": "admin_sales_pay.set_pay_unpaid_days",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/sales/pay/periods/<month>/agents/<int:agent_user_id>/unpaid-days"
+  },
+  {
+    "endpoint": "admin_sales_pay.approve_pay_period",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/sales/pay/periods/<month>/approve"
+  },
+  {
+    "endpoint": "admin_sales_pay.close_pay_period",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/sales/pay/periods/<month>/close"
+  },
+  {
+    "endpoint": "admin_sales_pay.set_pay_period_holidays",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/sales/pay/periods/<month>/holidays"
+  },
+  {
+    "endpoint": "admin_sales_pay.mark_pay_period_paid",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/sales/pay/periods/<month>/mark-paid"
+  },
+  {
+    "endpoint": "admin_sales_pay.recalculate_pay_period",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/sales/pay/periods/<month>/recalculate"
+  },
+  {
+    "endpoint": "admin_sales_pay.create_pay_plan",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/sales/pay/plans"
+  },
+  {
+    "endpoint": "admin_sales_pay.list_pay_plans",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/sales/pay/plans"
+  },
+  {
+    "endpoint": "admin_sales_pay.create_pay_plan_version",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/sales/pay/plans/<int:plan_id>/versions"
+  },
+  {
+    "endpoint": "admin_sales_pay.get_pay_plan_version",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/sales/pay/plans/<int:plan_id>/versions/<int:version_id>"
+  },
+  {
+    "endpoint": "admin_sales_pay.start_pay",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/sales/pay/start"
+  },
+  {
+    "endpoint": "admin_sales_pay.create_penalty_proposal",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/sales/penalty-proposals"
+  },
+  {
+    "endpoint": "admin_sales_pay.list_penalty_proposals",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/sales/penalty-proposals"
   },
   {
     "endpoint": "admin_sales.plan_vs_fact_admin",
@@ -3935,6 +4159,34 @@
     "rule": "/api/v1/staff/sales/activation-requests"
   },
   {
+    "endpoint": "staff_sales.my_earnings",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/sales/me/earnings"
+  },
+  {
+    "endpoint": "staff_sales.my_earnings_lines",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/sales/me/earnings/lines"
+  },
+  {
+    "endpoint": "staff_sales.my_statements",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/sales/me/statements"
+  },
+  {
+    "endpoint": "staff_sales.my_statement",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/sales/me/statements/<month>"
+  },
+  {
     "endpoint": "staff_sales.my_stats",
     "methods": [
       "GET"
@@ -3996,6 +4248,13 @@
       "GET"
     ],
     "rule": "/api/v1/staff/sales/outlets/<int:outlet_id>/payment-methods"
+  },
+  {
+    "endpoint": "staff_sales.set_outlet_primary_phone",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/staff/sales/outlets/<int:outlet_id>/primary-phone"
   },
   {
     "endpoint": "staff_sales.reject_outlet",

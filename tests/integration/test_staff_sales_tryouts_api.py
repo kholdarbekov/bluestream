@@ -10,7 +10,7 @@ the pool endpoint, with a driver's own token.
 import pytest
 from flask_jwt_extended import create_access_token
 
-from business_app.models.sales import Outlet, OutletStageHistory, SalesAgentProfile
+from business_app.models.sales import Outlet, OutletContact, OutletStageHistory, SalesAgentProfile
 from business_app.models.staff import StaffActivityLog
 from business_app.models.tryout import ProductTryout
 from business_app.services.sales.replenishment_service import effective_line_qty_max
@@ -104,21 +104,33 @@ def test_a_field_tryout_is_built_from_the_outlet_and_lands_in_the_driver_pool(
     assert logged[0].metadata_ == {"outlet_id": outlet["id"], "stage": "trial", "item_count": 1}
 
 
-def test_a_tryout_needs_the_outlets_contact_phone(client, db, sales_agent_auth_headers, sample_product):
+def test_a_tryout_needs_the_outlets_contact_phone(
+    client, db, sales_agent_auth_headers, sales_agent_user, sample_product
+):
     """Spec *Failure modes*: "Try-out for a prospect without a phone -> SALES_TRYOUT_PHONE_REQUIRED".
 
     Try-outs upsert their contact BY PHONE (`TryoutService._get_or_create_contact`), so a
     phone-less shop cannot have one at all. Refused where the agent can still walk to the counter
     and ask, with the code Task 7 renders as "add a phone to this outlet first".
+
+    The row is built directly: `POST /outlets` refuses a contact with no phone since D31 (R1), but
+    an outlet created before that -- or one whose phone an admin cleared -- still gets here.
     """
-    outlet = _prospect(
-        client,
-        sales_agent_auth_headers,
-        payload={**BOT_PAYLOAD, "contact": {"name": "Olim aka", "role": "owner"}},
+    outlet = Outlet(
+        name=BOT_PAYLOAD["name"],
+        outlet_type="grocery_store",
+        stage="prospect",
+        latitude=PIN[0],
+        longitude=PIN[1],
+        assigned_agent_user_id=sales_agent_user.id,
+        onboarded_by_user_id=sales_agent_user.id,
+        contacts=[OutletContact(name="Olim aka", role="owner", is_primary=True)],
     )
+    db.session.add(outlet)
+    db.session.commit()
 
     refused = client.post(
-        _tryouts(outlet["id"]),
+        _tryouts(outlet.id),
         json={"items": [{"product_id": sample_product.id, "quantity": 1}]},
         headers=sales_agent_auth_headers,
     )
@@ -128,7 +140,7 @@ def test_a_tryout_needs_the_outlets_contact_phone(client, db, sales_agent_auth_h
     # Nothing was written: no try-out, no hand-off task for a driver to drive to, and the outlet
     # is exactly where the agent left it.
     assert ProductTryout.query.count() == 0
-    assert Outlet.query.get(outlet["id"]).stage == "prospect"
+    assert Outlet.query.get(outlet.id).stage == "prospect"
 
 
 def test_an_empty_or_unusable_basket_is_refused_with_one_code_the_bot_can_branch_on(

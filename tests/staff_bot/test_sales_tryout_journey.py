@@ -81,8 +81,11 @@ async def _open_tryout(harness, ops, *, catalogue=None, stage="prospect"):
 async def test_happy_path_posts_the_exact_payload_and_renders_the_receipt(monkeypatch):
     harness, ops, _labels = await _agent(monkeypatch)
     # Task 5's 201 shape: the try-out AND the outlet card the transition just
-    # produced, so the receipt can be the card.
-    harness.backend.route("POST", TRYOUTS, lambda c: {"tryout": _tryout(), "outlet": _card(stage="trial")})
+    # produced, so the receipt can be the card. A trial shop with a phone and a
+    # pin, so that card publishes `can_request_activation` true (D31).
+    harness.backend.route("POST", TRYOUTS, lambda c: {
+        "tryout": _tryout(), "outlet": _card(stage="trial", can_request_activation=True),
+    })
     await _open_tryout(harness, ops)
 
     picker = harness.telegram.last_shown()

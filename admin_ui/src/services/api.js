@@ -1,6 +1,6 @@
 import axios from 'axios';
 import toast from 'react-hot-toast';
-import { extractApiErrorMessage } from '../utils/apiError';
+import { apiErrorCode, extractApiErrorMessage } from '../utils/apiError';
 
 // Create axios instance with cookie support
 console.log('API URL:', import.meta.env.VITE_API_URL);
@@ -167,24 +167,26 @@ api.interceptors.response.use(
       // message), and a Blob body leaves `message` as axios's bare "Request failed with status
       // code 404". One toast per request turned an outlet with 20 dead photos into 20 toasts.
       // After the 401 branch on purpose: a thumbnail still refreshes an expired session.
+    } else if (error.config?.handledErrorCodes?.includes(apiErrorCode(error))) {
+      // The request named this code as one its caller explains itself, in the
+      // admin's language, so a toast here would show the same refusal twice.
+      // Per request and per code: nothing is silenced for a request that names
+      // no codes, and any other failure of this request still toasts below.
+      // Ahead of the 403/5xx branches (spec §6.5): a self-decision or
+      // self-approval refusal is a 403 its modal explains. Both envelopes:
+      // `handle_api_exception` puts `error_code` at the top of the body, older
+      // routes under `data`. The promise still rejects.
     } else if (error.response?.status === 403) {
       toast.error('Access denied. Insufficient permissions.');
     } else if (error.response?.status >= 500) {
       toast.error('Server error. Please try again later.');
     } else if (
-      error.response?.data?.data?.error_code === 'impact_confirmation_required' ||
-      error.response?.data?.data?.error_code === 'threshold_gap'
+      ['impact_confirmation_required', 'threshold_gap'].includes(apiErrorCode(error))
     ) {
       // Invariant: a response the caller resolves interactively (e.g. a confirm
       // dialog) must not also self-announce as a toast error. Scoped to these
       // two error_codes only — do not widen to all 409s/422s or all error_codes.
       // The promise still rejects below so each mutation's onError still runs.
-    } else if (error.config?.handledErrorCodes?.includes(error.response?.data?.data?.error_code)) {
-      // The request named this code as one its caller explains itself, in the
-      // admin's language, so a toast here would show the same refusal twice.
-      // Per request and per code: nothing is silenced for a request that names
-      // no codes, and any other failure of this request still toasts below.
-      // The promise still rejects.
     } else {
       toast.error(message);
     }

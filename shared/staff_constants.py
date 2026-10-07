@@ -85,6 +85,55 @@ SALES_EVENT_AGENT_ORDER_CONFIRMED = 'agent_order_confirmed'
 SALES_EVENT_AGENT_ORDER_DECLINED = 'agent_order_declined'
 SALES_EVENT_MORNING_DIGEST = 'morning_digest'
 
+# ---- SALES PAY ----
+# The sales-agent pay vocabulary. One block with many readers: the pay models build their
+# CHECKs from these tuples, the pay services and serializers publish them, and the staff bot,
+# `staff_bot/i18n.py` and the staff seed build key families from them. Migration b7e3c1a95d42
+# keeps frozen literal copies, as every migration must, so a member added here also needs a
+# migration that widens its CHECK.
+SALES_PAY_PERIOD_STATUSES = ('open', 'closed', 'approved', 'paid')
+SALES_PAY_PERIOD_ACTIONS = ('close', 'recalculate', 'approve', 'mark_paid')
+SALES_PAY_RATE_MODES = ('per_unit', 'percent')
+SALES_PAY_LEDGER_KINDS = ('commission_credit', 'commission_reversal', 'commission_difference', 'new_outlet_bonus')
+SALES_PAY_COMMISSION_KINDS = SALES_PAY_LEDGER_KINDS[:3]
+# A reversal takes the order's units out of its month's count. A difference moves the order's
+# level: the money level fell / rose, or a credited product's counted units fell / rose (OQ-B3,
+# I-41); pay_rules.difference_cause picks one. v5 retired 'plan_changed': rates apply at month level.
+SALES_PAY_REVERSAL_CAUSES = ('not_delivered', 'nothing_received')
+SALES_PAY_DIFFERENCE_CAUSES = ('received_reduced', 'received_restored', 'units_reduced', 'units_restored')
+SALES_PAY_PENALTY_STATUSES = ('proposed', 'confirmed', 'rejected', 'cancelled')
+SALES_PAY_PENALTY_ORIGINS = ('proposal', 'direct')
+SALES_PAY_ADJUSTMENT_SOURCES = ('admin', 'carry_forward')
+# Where a statement's carry-in came from: last month's carried shortfall, or an owed balance
+# this month nets.
+SALES_PAY_CARRY_IN_SOURCES = ('carry_forward', 'owed')
+SALES_PAY_OUTLET_CHECK_STATUSES = ('tracking', 'qualified', 'prior_customer', 'not_eligible', 'expired')
+SALES_PAY_BONUS_RULES = ('orders_with_total', 'orders_any')
+SALES_PAY_GATE_RULES = ('band', 'below_min_due')
+# 'non_working' is unreachable under the seven-day default (C2, I-37); it stays for a narrowed week.
+SALES_PAY_DAY_STATUSES = ('worked', 'non_working', 'holiday', 'unpaid', 'not_employed')
+# 'approval' is an order held for a manager by the same-day approval hold.
+SALES_PAY_PIPELINE_WAITING = ('approval', 'delivery', 'payment')
+# A self-decision (an admin deciding about their own pay) names the input it touched and
+# what was done to it; the statement is tagged with both.
+SALES_PAY_SELF_DECISION_INPUTS = ('terms', 'employment', 'unpaid_day', 'adjustment', 'penalty', 'order_approval')
+SALES_PAY_SELF_DECISION_ACTIONS = ('added', 'set', 'created', 'proposed', 'confirmed', 'cancelled', 'approved')
+SALES_PAY_REASON_MIN_LENGTH = 5
+# Named so producers pass a member (ruling 66). Each joins SALES_EVENTS together with its
+# producer and its seeded row, never before: a member without its row fails /health.
+SALES_EVENT_PAY_PENALTY_CONFIRMED = 'pay_penalty_confirmed'
+SALES_EVENT_PAY_STATEMENT_APPROVED = 'pay_statement_approved'
+
+# The states `place_order` reports for an agent's order, which the staff bot's receipt line
+# renders. 'awaiting_staff_approval' is the same-day hold: an agent's second order at one
+# outlet on one local day waits for a manager or an admin.
+SALES_AGENT_ORDER_STATES = ('auto_confirmed', 'pending_confirmation', 'confirmed', 'awaiting_staff_approval')
+SALES_EVENT_AGENT_ORDER_APPROVED = 'agent_order_approved'
+SALES_EVENT_AGENT_ORDER_REJECTED = 'agent_order_rejected'
+
+# Every sales push the staff bot's `/internal/sales-event` door accepts, in producer order: the six
+# phase-2 events, then the same-day hold's two outcomes (C14), then the two pay pushes (§7.5).
+# Defined HERE, below the pay block, because the C14 and pay names are defined in it.
 SALES_EVENTS = (
     SALES_EVENT_OUTLET_APPROVED,
     SALES_EVENT_OUTLET_REJECTED,
@@ -92,6 +141,10 @@ SALES_EVENTS = (
     SALES_EVENT_AGENT_ORDER_CONFIRMED,
     SALES_EVENT_AGENT_ORDER_DECLINED,
     SALES_EVENT_MORNING_DIGEST,
+    SALES_EVENT_AGENT_ORDER_APPROVED,
+    SALES_EVENT_AGENT_ORDER_REJECTED,
+    SALES_EVENT_PAY_PENALTY_CONFIRMED,
+    SALES_EVENT_PAY_STATEMENT_APPROVED,
 )
 
 # Risk flags a driver cash-reconciliation session can carry.

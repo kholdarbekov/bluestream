@@ -1,5 +1,8 @@
 """Field onboarding of an outlet:
-type → name → contact name → contact phone → pin (or typed address) → class → notes → dedupe → confirm.
+type → name → contact name (or skip) → contact phone → pin (or typed address) → class (or skip) → notes (or skip) → dedupe → confirm.
+
+The phone and the pin have no Skip (D31.1): `OutletService.create` refuses an outlet
+without either, and the phone is the number the customer account is opened on.
 
 One working dict lives under user_data['new_outlet'] (registered in flow_state so a
 menu tap, /start or the timeout clears it). Every step re-validates the flow.
@@ -126,6 +129,9 @@ class NewOutletHandler(SalesHubHandler):
     async def start_new_outlet(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         language = await self._get_language(update, context)
         context.user_data.pop(FLOW_KEY, None)
+        # D31: "New outlet" is taken here before the 📞 phone screen can see it,
+        # so that screen's draft goes now (`_drop_other_sales_drafts` says why).
+        self._drop_other_sales_drafts(context, FLOW_KEY)
         context.user_data[FLOW_KEY] = {}
         await self._say(update, i18n.get('staff.sales.new.choose_type', language), SalesKeyboards.outlet_type(language))
         return NO_TYPE
@@ -170,7 +176,7 @@ class NewOutletHandler(SalesHubHandler):
         if flow is None:
             return ConversationHandler.END
         flow['contact_name'] = (update.message.text or '').strip()[:100] or None
-        await self._say(update, i18n.get('staff.sales.new.enter_contact_phone', language), SalesKeyboards.skip(language, 'contact_phone'))
+        await self._say(update, i18n.get('staff.sales.new.enter_contact_phone', language))
         return NO_CONTACT_PHONE
 
     @require_auth
@@ -183,16 +189,13 @@ class NewOutletHandler(SalesHubHandler):
         if self._skipped_step(update) != 'contact_name':
             return await self._stay(update, NO_CONTACT_NAME)
         flow['contact_name'] = None
-        await self._say(update, i18n.get('staff.sales.new.enter_contact_phone', language), SalesKeyboards.skip(language, 'contact_phone'))
+        await self._say(update, i18n.get('staff.sales.new.enter_contact_phone', language))
         return NO_CONTACT_PHONE
 
     async def _ask_pin(self, update: Update, language: str) -> int:
-        if update.callback_query:
-            await update.callback_query.answer()
-            await update.callback_query.edit_message_text(i18n.get('staff.sales.new.share_pin', language), parse_mode='HTML')
-            await update.effective_message.reply_text(i18n.get('staff.sales.new.share_pin_hint', language), reply_markup=self._pin_prompt(language), parse_mode='HTML', disable_notification=True)
-        else:
-            await update.message.reply_text(i18n.get('staff.sales.new.share_pin', language), reply_markup=self._pin_prompt(language), parse_mode='HTML', disable_notification=True)
+        # Only a typed, valid phone leads here (the phone has no Skip, D31.1),
+        # so the update is always a message.
+        await update.message.reply_text(i18n.get('staff.sales.new.share_pin', language), reply_markup=self._pin_prompt(language), parse_mode='HTML', disable_notification=True)
         return NO_PIN
 
     @require_auth
@@ -204,7 +207,7 @@ class NewOutletHandler(SalesHubHandler):
             return ConversationHandler.END
         is_valid, result = validate_phone((update.message.text or '').strip())
         if not is_valid:
-            await self._say(update, i18n.get('staff.operator.invalid_phone', language), SalesKeyboards.skip(language, 'contact_phone'))
+            await self._say(update, i18n.get('staff.sales.error.mobile_required', language))
             return NO_CONTACT_PHONE
         flow['contact_phone'] = result
         return await self._ask_pin(update, language)
@@ -212,14 +215,25 @@ class NewOutletHandler(SalesHubHandler):
     @require_auth
     @require_sales_agent
     async def skip_contact_phone(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """A Skip tapped while the walk-in waits for the phone, which has none (D31.1).
+
+        Still registered because Skips outlive their step on screen: after a
+        TYPED contact name the name prompt keeps its live Skip one message up,
+        and a phone Skip drawn before D31 can sit further up the chat. Neither
+        may move the walk-in. A phone Skip is told why through `_notify_user` --
+        a popup on this still-unanswered tap, a chat message if the popup slot
+        is spent, never an invisible second answer. Any other suffix is
+        acknowledged by `_stay`. Both keep NO_CONTACT_PHONE, so the next text
+        is still read as the phone.
+        """
         language = await self._get_language(update, context)
         flow = await self._flow(update, context)
         if flow is None:
             return ConversationHandler.END
         if self._skipped_step(update) != 'contact_phone':
             return await self._stay(update, NO_CONTACT_PHONE)
-        flow['contact_phone'] = None
-        return await self._ask_pin(update, language)
+        await self._notify_user(update, i18n.get('staff.sales.error.phone_required', language), show_alert=True)
+        return NO_CONTACT_PHONE
 
     async def _after_pin(self, update: Update, context, flow: Dict, language: str) -> int:
         # The location request replaced the agent's main menu with a one-shot

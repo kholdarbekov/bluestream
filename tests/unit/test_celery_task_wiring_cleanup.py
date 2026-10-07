@@ -21,7 +21,7 @@ import pytest
 
 from business_app.models.analytics import AnalyticsReport, UserBehavior
 from business_app.models.payment import PaymentTransaction
-from business_app.tasks import analytics_tasks, payment_tasks, session_tasks, inventory_tasks
+from business_app.tasks import analytics_tasks, payment_tasks, sales_agent_tasks, session_tasks, inventory_tasks
 
 
 @pytest.fixture(scope="module")
@@ -236,3 +236,35 @@ class TestBeatScheduleWiring:
                 f"cleanup_old_analytics_data must stay unwired until its SalesMetric.date bug is fixed "
                 f"(found wired under beat_schedule key {key!r})"
             )
+
+
+@pytest.mark.unit
+class TestSalesPayLedgerSync:
+    """sales_agent_tasks.sync_pay_ledger: the nightly sales-pay ledger sync (spec §4.14).
+
+    Addressed by `name="sales.sync_pay_ledger"`, so `TestBeatScheduleWiring`'s dotted-path
+    import cannot resolve it: tests/unit/test_sales_beat_entries.py pins its name and
+    schedule against the registry, and this class pins the rest of this file's contract.
+    """
+
+    def test_runs_clean_before_pay_has_started(self, db):
+        result = sales_agent_tasks.sync_pay_ledger.run()
+
+        assert result == {
+            "success": True,
+            "agents": 0,
+            "credited": 0,
+            "reversed": 0,
+            "differences": 0,
+            "bonuses": 0,
+            "skipped_no_terms": [],
+            "skipped_future": [],
+            "failed": [],
+            "conflicts": 0,
+            "skipped": "not_started",
+        }
+
+    def test_its_beat_entry_carries_a_time_limit(self, celery_app_module):
+        entry = celery_app_module.celery.conf.beat_schedule["sync-sales-pay-ledger"]
+
+        assert entry["options"] == {"time_limit": 900}

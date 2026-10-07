@@ -12,7 +12,19 @@ localized string from `start`/`end` instead of reading `label` or the legacy
 import pytest
 
 from staff_bot.i18n import i18n
-from staff_bot.utils.formatters import format_delivery_window_line, format_local_date, format_order_card
+from staff_bot.utils.formatters import (
+    MINUS_SIGN,
+    format_currency,
+    format_delivery_window_line,
+    format_local_date,
+    format_number,
+    format_order_card,
+    format_pay_amount,
+    format_pay_month,
+    format_pay_product_name,
+    signed_currency,
+    signed_deduction,
+)
 
 
 def _seed_window_translations(monkeypatch, language="en"):
@@ -147,3 +159,72 @@ def test_format_local_date_does_not_move_a_bare_date_behind_a_negative_offset(mo
     # The datetime path still converts — and the patched zone is really in play:
     # 02:00Z is 22:00 on the 9th in New York.
     assert format_local_date("2026-09-10T02:00:00+00:00") == "09.09.2026"
+
+
+# ---- sales-agent pay (compensation spec §7.2) -----------------------------------------
+
+
+def _seed_currency(monkeypatch, language="en", word="UZS"):
+    """The one row these helpers read, served the way this suite serves `{time}` above."""
+    merged = {**i18n.translations.get(language, {}), "staff.currency.uzs": word}
+    monkeypatch.setitem(i18n.translations, language, merged)
+
+
+def test_signed_currency_prints_the_true_minus_before_the_absolute_amount(monkeypatch):
+    """U+2212, never the ASCII hyphen: "-20,000" next to a grouped figure reads as a dash."""
+    _seed_currency(monkeypatch)
+    assert MINUS_SIGN == "−"
+    assert signed_currency(-20000, "en") == "−20,000 UZS"
+    assert signed_currency(-2250.0, "en") == "−2,250 UZS"
+    assert signed_currency(200000, "en") == "+200,000 UZS"
+    assert signed_currency(0, "en") == "+0 UZS"
+    assert "-" not in signed_currency(-1, "en")
+
+
+def test_a_penalty_the_backend_publishes_positive_prints_as_the_deduction_it_is(monkeypatch):
+    _seed_currency(monkeypatch)
+    assert signed_deduction(150000, "en") == "−150,000 UZS"
+    assert signed_deduction(150000.0, "en") == signed_currency(-150000, "en")
+
+
+def test_a_normally_positive_figure_is_plain_until_it_goes_below_zero(monkeypatch):
+    """C1 v3: nothing is floored, so a negative variable pay prints with its minus."""
+    _seed_currency(monkeypatch)
+    assert format_pay_amount(760000.0, "en") == "760,000 UZS"
+    assert format_pay_amount(0, "en") == "0 UZS"
+    assert format_pay_amount(-300000.0, "en") == "−300,000 UZS"
+
+
+def test_the_russian_money_word_is_the_currency_row_not_a_literal(monkeypatch):
+    _seed_currency(monkeypatch, "ru", "сум")
+    assert signed_currency(-20000, "ru") == "−20,000 сум"
+
+
+def test_a_pay_month_on_the_wire_reads_as_month_dot_year():
+    assert format_pay_month("2026-10") == "10.2026"
+    assert format_pay_month("2027-01") == "01.2027"
+    assert format_pay_month(None) == ""
+    assert format_pay_month("") == ""
+
+
+def test_a_figure_is_grouped_once_with_or_without_a_currency(monkeypatch):
+    """D-BANDS: tier bounds, unit counts and a tier's figures print without a currency, grouped
+    the way money is. `format_currency` groups through `format_number`, so "1,001" on a tier row
+    and "1,001 UZS" on a money row cannot drift, and money prints exactly as before: 0 for a
+    missing figure, junk echoed rather than raised."""
+    _seed_currency(monkeypatch)
+    assert [format_number(v) for v in (1001, 12500000.0, 2000.0, 0, None, "n/a")] == [
+        "1,001", "12,500,000", "2,000", "0", "0", "n/a",
+    ]
+    assert [format_currency(v, language="en") for v in (1001, 2800000.0, -20000, None, "n/a")] == [
+        "1,001 UZS", "2,800,000 UZS", "-20,000 UZS", "0 UZS", "n/a UZS",
+    ]
+
+
+def test_a_product_is_named_in_the_agents_language_else_english_and_escaped():
+    """§7.2: `product_name[language]`, falling back to `en`, through `escape_html` like every
+    backend string placed in an HTML message."""
+    names = {"en": "19L <b>promo</b> & co", "ru": "19 л"}
+    assert format_pay_product_name(names, "ru") == "19 л"
+    assert format_pay_product_name(names, "uz") == "19L &lt;b&gt;promo&lt;/b&gt; &amp; co"
+    assert format_pay_product_name(None, "en") == ""

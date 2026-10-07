@@ -96,6 +96,15 @@ AUDIT: list[tuple[str, str]] = [
     ("ORDER_RESCHEDULE_BEYOND_HORIZON", "staff.error.api.reschedule_beyond_horizon"),
     # Failed delivery awaits a new date (2026-09-25 spec), F12: a re-dispatch date that does not parse.
     ("STAFF_REDISPATCH_DATE_INVALID", "staff.error.api.redispatch_date_invalid"),
+    # Sales-agent compensation (2026-09-28 spec), §4.12 and §7.4: Approve or Attach tapped on a
+    # stale card by the operator who registered the outlet as an agent.
+    ("SALES_OUTLET_SELF_APPROVAL", "staff.sales.error.approval_self"),
+    # D31 (mandatory phone): both sales doors that raise it, the create and PUT primary-phone,
+    # mean "not an Uzbek mobile" -- its own sentence, no longer the operator flows' format copy.
+    ("SALES_CONTACT_PHONE_INVALID", "staff.sales.error.mobile_required"),
+    # Agent statements (2026-10-07): S4 refuses a month with no approved or paid statement, which
+    # only a stale button reaches -- it says when the statement appears, never "not found".
+    ("SALES_PAY_STATEMENT_NOT_AVAILABLE", "staff.sales.earnings.statement_unavailable"),
 ]
 
 

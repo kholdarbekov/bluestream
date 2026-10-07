@@ -197,6 +197,8 @@ class BaseHandler:
         # in. Reuses the existing seeded key: no new `/health` requirement.
         'SALES_NEARBY_PIN_REQUIRED': 'staff.sales.error.pin_required',
         'SALES_ACTIVATION_PHONE_REQUIRED': 'staff.sales.error.phone_required',
+        # D31 R1: an outlet created without a contact phone. Same sentence, already seeded: no new `/health` key.
+        'SALES_OUTLET_PHONE_REQUIRED': 'staff.sales.error.phone_required',
         'SALES_OUTLET_STAGE_INVALID': 'staff.sales.error.stage_invalid',
         'SALES_APPROVAL_STEP_FAILED': 'staff.sales.error.approval_failed',
         'SALES_APPROVAL_PHONE_TAKEN': 'staff.sales.error.phone_taken',
@@ -204,7 +206,15 @@ class BaseHandler:
         # Its own sentence, not `phone_taken`'s: nothing is taken, there is simply nothing to
         # join, and the operator's next move is plain Approve.
         'SALES_ATTACH_NO_ACCOUNT': 'staff.sales.error.attach_no_account',
-        'SALES_CONTACT_PHONE_INVALID': 'staff.operator.invalid_phone',
+        # Compensation spec §4.12, §7.4: Approve or Attach on an outlet this operator registered
+        # as an agent. The queue draws neither door for them (`can_approve`), so only a stale or
+        # forwarded card reaches it. Its own sentence, never the generic "forbidden", which
+        # reads as a permissions fault to take to an admin.
+        'SALES_OUTLET_SELF_APPROVAL': 'staff.sales.error.approval_self',
+        # D31: the two sales doors the bot calls that raise it, the create and PUT primary-phone,
+        # refuse a number that is not an Uzbek mobile (`OutletService._require_primary_phone`).
+        # The contacts POST also raises it, and the bot never calls that one.
+        'SALES_CONTACT_PHONE_INVALID': 'staff.sales.error.mobile_required',
         'SALES_DISTRICT_INVALID': 'staff.sales.error.district_invalid',
         # Sales-agent visit loop (business_app/api/staff_sales.py, phase 2a).
         # `SALES_STOCK_PRODUCT_INVALID` has its OWN copy (M14): an admin
@@ -257,6 +267,8 @@ class BaseHandler:
         # and the handler follows the alert with the screen that points there.
         'SALES_TRYOUT_PHONE_REQUIRED': 'staff.sales.error.phone_required',
         'SALES_TRYOUT_ITEMS_INVALID': 'staff.sales.error.tryout_items',
+        # Sales-agent pay (business_app/api/staff_sales.py S4): a stale button for a month not yet approved.
+        'SALES_PAY_STATEMENT_NOT_AVAILABLE': 'staff.sales.earnings.statement_unavailable',
         # Cash reconciliation (DriverReconciliationService.submit_session): a
         # zero/negative manual amount, or "settle everything" on a session with
         # nothing collected and no prior handoffs. Prod 2026-09-21: a driver

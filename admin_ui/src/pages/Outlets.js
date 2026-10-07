@@ -11,7 +11,7 @@ import staffService from '../services/staffService';
 import api from '../services/api';
 import { fetchAllPages } from '../utils/pagination';
 import { BULK_LOAD_PAGE_SIZE, DEFAULT_PAGE_SIZE } from '../utils/constants';
-import { extractApiErrorMessage } from '../utils/apiError';
+import { apiErrorCode, extractApiErrorMessage } from '../utils/apiError';
 import OutletEditModal from '../components/sales/OutletEditModal';
 import OutletContactsTab from '../components/sales/OutletContactsTab';
 import OutletPhotosTab from '../components/sales/OutletPhotosTab';
@@ -145,7 +145,15 @@ const Outlets = () => {
       queryClient.invalidateQueries({ queryKey: ['outlet', selectedId] });
     }
   };
-  const onError = (err) => message.error(extractApiErrorMessage(err, t('ui.common.error_occurred', 'An error occurred')));
+  const onError = (err) => {
+    // I1: the plan writes name this refusal (salesService OUTLET_PLAN_HANDLED_CODES), so the page,
+    // not the interceptor, explains it, in words about the outlet rather than about pay.
+    if (apiErrorCode(err) === 'SALES_PAY_SELF_DECISION') {
+      message.error(t('sales_agents:outlets.error.sales_pay_self_decision', 'This outlet is on your own visit plan, so another manager or an administrator has to change it.'));
+      return;
+    }
+    message.error(extractApiErrorMessage(err, t('ui.common.error_occurred', 'An error occurred')));
+  };
 
   const approveMutation = useMutation({ mutationFn: ({ id, contractNumber, attach }) => salesService.approveOutlet(id, { contract_number: contractNumber, attach }), onSuccess: () => { message.success(t('sales_agents:outlet_approved', 'Outlet activated')); setApproveOpen(false); refresh(); }, onError });
   const rejectMutation = useMutation({ mutationFn: ({ id, reason }) => salesService.rejectOutlet(id, reason), onSuccess: () => { message.success(t('sales_agents:outlet_rejected', 'Request rejected')); setRejectOpen(false); rejectForm.resetFields(); refresh(); }, onError });
@@ -171,7 +179,10 @@ const Outlets = () => {
   ];
 
   const outlet = detail?.outlet;
-  const canApprove = outlet && ['activation_requested', 'prospect', 'trial'].includes(outlet.stage);
+  // The backend's answer (OutletService.can_approve, C12): the approvable stage AND "not the
+  // viewer's own onboarding" (C5). A stage list here was a second copy of the rule, and it drew
+  // Approve for a self-approval the backend then refused.
+  const canApprove = outlet?.can_approve === true;
   // D25 branch mode, read ONCE from what the backend published. `is_branch` IS
   // `OutletService.is_branch` — the same answer the staff bot's card gates on — so neither
   // renderer re-derives the rule from `branch_count` (two derivations with two different null

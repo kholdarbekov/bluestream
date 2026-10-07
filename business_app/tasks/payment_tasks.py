@@ -84,8 +84,15 @@ def process_payment_confirmation(self, payment_id: int):
                 logger.info(f"Order for payment {payment_id} already confirmed, skipping")
                 return {"success": True, "skipped": True, "reason": "already_confirmed"}
 
+            # C14: a held agent order's payment completed, but a manager confirms the order (OA2).
+            # Asking first keeps the guard's 409 from turning this into three retries that never
+            # send the payment notification.
+            from business_app.services.sales.agent_order_approval_service import AgentOrderApprovalService
+
+            awaiting = order is not None and AgentOrderApprovalService.is_awaiting(order.id)
+
             # Update order status
-            if order and order.status == OrderStatus.PENDING:
+            if order and order.status == OrderStatus.PENDING and not awaiting:
                 from business_app.services.order_service import OrderService
 
                 order_service = OrderService()
@@ -95,6 +102,9 @@ def process_payment_confirmation(self, payment_id: int):
             notification_service = NotificationService()
             notification_service.send_payment_notification(payment_id)
 
+            if awaiting:
+                logger.info(f"Order for payment {payment_id} awaits staff approval; left pending")
+                return {"success": True, "skipped": True, "reason": "awaiting_staff_approval"}
             logger.info(f"Payment confirmation processed for payment {payment_id}")
             return {"success": True, "payment_id": payment_id}
 

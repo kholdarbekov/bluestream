@@ -73,6 +73,11 @@ NOT_STAFF_FACING: dict[str, str] = {
     "/orders/<id>/agent-confirmation)",
     "SALES_CONFIRMATION_NOT_PENDING": f"{_NOT_ON_ROUTE} (agent_order_confirmation_service.py:210: customer "
     "/orders/<id>/agent-confirmation)",
+    # The same-day hold (compensation spec C14).
+    "ORDER_AWAITING_STAFF_APPROVAL": f"{_NOT_ON_ROUTE} (order_service.update_order_status guard: a held order "
+    "has no delivery, so no staff-bot route confirms one)",
+    "SALES_ORDER_APPROVAL_NOT_FOUND": f"{_NOT_ON_ROUTE} (api/admin_sales.py: order-approval queue)",
+    "SALES_ORDER_APPROVAL_NOT_PENDING": f"{_NOT_ON_ROUTE} (api/admin_sales.py: order-approval queue)",
     # Admin order edits, cash corrections, reports.
     "BOTTLE_CORRECTION_SCOPE_NOT_LIVE": f"{_NOT_ON_ROUTE} (order_edit_service.py:962: admin /orders/<id>/edit)",
     "BOTTLE_SESSION_ACTIVE_CONFLICT": f"{_NOT_ON_ROUTE} (bottle_tracking_service.py:3404: admin order edit)",
@@ -132,6 +137,29 @@ NOT_STAFF_FACING: dict[str, str] = {
     "SALES_VISIT_PHOTO_FILTER_INVALID": f"{_NOT_ON_ROUTE} (visit_service.py:860: admin /sales/visits)",
     "STAFF_INVALID_EMPLOYMENT_TYPE": f"{_NOT_ON_ROUTE} (staff_service.py:780: admin /staff/sales-agents)",
     "STAFF_SALES_AGENT_EXISTS": f"{_NOT_ON_ROUTE} (staff_service.py:792: admin POST /staff/sales-agents)",
+    # Admin sales pay: the plan, terms and period services behind api/admin_sales_pay.py.
+    "SALES_PAY_ALREADY_STARTED": f"{_NOT_ON_ROUTE} (api/admin_sales_pay.py: admin pay)",
+    "SALES_PAY_AMOUNT_INVALID": f"{_NOT_ON_ROUTE} (api/admin_sales_pay.py: admin pay)",
+    "SALES_PAY_DATE_INVALID": f"{_NOT_ON_ROUTE} (api/admin_sales_pay.py: admin pay)",
+    "SALES_PAY_MONTH_LOCKED": f"{_NOT_ON_ROUTE} (api/admin_sales_pay.py: admin pay)",
+    "SALES_PAY_NOT_FOUND": f"{_NOT_ON_ROUTE} (api/admin_sales_pay.py: admin pay)",
+    "SALES_PAY_PLAN_INVALID": f"{_NOT_ON_ROUTE} (api/admin_sales_pay.py: admin pay)",
+    "SALES_PAY_SYNC_INCOMPLETE": f"{_NOT_ON_ROUTE} (api/admin_sales_pay.py: admin pay)",
+    "SALES_PAY_TERMS_MISSING": f"{_NOT_ON_ROUTE} (api/admin_sales_pay.py: admin pay)",
+    "SALES_PAY_NOT_STARTED": f"{_NOT_ON_ROUTE} (api/admin_sales_pay.py: admin pay)",
+    "SALES_PAY_REASON_REQUIRED": f"{_NOT_ON_ROUTE} (api/admin_sales_pay.py: admin pay)",
+    "SALES_PAY_PERIOD_NOT_ENDED": f"{_NOT_ON_ROUTE} (api/admin_sales_pay.py: admin pay)",
+    "SALES_PAY_PREVIOUS_PERIOD_NOT_APPROVED": f"{_NOT_ON_ROUTE} (api/admin_sales_pay.py: admin pay)",
+    "SALES_PAY_PREVIOUS_PERIOD_OPEN": f"{_NOT_ON_ROUTE} (api/admin_sales_pay.py: admin pay)",
+    "SALES_PAY_STATE_INVALID": f"{_NOT_ON_ROUTE} (api/admin_sales_pay.py: admin pay)",
+    "SALES_PAY_TERMS_INVALID": f"{_NOT_ON_ROUTE} (api/admin_sales_pay.py: admin pay)",
+    # Sales-agent pay (spec 2026-09-28): the admin pay routes and the pure pay rules.
+    "SALES_PAY_MONTH_INVALID": f"{_BOT_NEVER_SENDS} (GET /staff/sales/me/earnings/lines ?month= and "
+    f"/staff/sales/me/statements/<month>: the bot only echoes months the backend gave it){_FALLBACK}",
+    # The admin outlet-plan routes too (final-review I1); the staff outlet PUT never carries class or cadence.
+    "SALES_PAY_SELF_DECISION": f"{_NOT_ON_ROUTE} (pay_rules.check_self_decision: M2, OA2/OA3, admin outlet plan)",
+    # Sales-agent pay: a retired penalty type (compensation spec §4.16).
+    "SALES_PAY_PENALTY_TYPE_INACTIVE": f"{_NOT_ON_ROUTE} (api/admin_sales_pay.py: admin pay)",
     # Staff routes the bot reaches, but never with the input or timing these need.
     "BOTTLE_IDEMPOTENCY_KEY_INVALID": f"{_BOT_NEVER_SENDS}: the retry token is uuid4().hex, always inside the "
     f"pattern (bottle_tracking_service.py:285, bottle_collection.py _new_intent_token){_FALLBACK}",

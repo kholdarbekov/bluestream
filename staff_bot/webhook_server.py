@@ -21,13 +21,25 @@ from staff_bot.keyboards.operator import OperatorKeyboards
 from staff_bot.keyboards.sales import LABEL_MAX, reject_reason_key
 from staff_bot.utils import flow_state
 from staff_bot.utils.formatters import (
+    TELEGRAM_TEXT_LIMIT,
     escape_html,
     format_delivery_window_line,
     format_fail_reason,
     format_local_date,
+    format_pay_amount,
+    format_pay_balance_note,
+    format_pay_carry_in,
+    format_pay_month,
+    format_pay_tiers,
+    signed_currency,
+    signed_deduction,
 )
 from shared.redis_failure import report_redis_failure
-from shared.staff_constants import SALES_EVENTS
+from shared.staff_constants import (
+    SALES_EVENT_PAY_PENALTY_CONFIRMED,
+    SALES_EVENT_PAY_STATEMENT_APPROVED,
+    SALES_EVENTS,
+)
 from shared.redis_keyspace import RedisKeyspace
 
 logger = logging.getLogger(__name__)
@@ -75,9 +87,9 @@ def _log_notify_failure(description: str, exc: Exception) -> None:
         logger.error("%s: %s", description, exc)
 
 
-# Telegram's own ceiling for one `sendMessage`. Past it the send raises a 400,
-# `push_sales_event` retries three times and every retry raises identically.
-DIGEST_TEXT_LIMIT = 4096
+# The morning digest's budget is Telegram's own ceiling, under a name of its own so a test can
+# narrow it for the digest alone.
+DIGEST_TEXT_LIMIT = TELEGRAM_TEXT_LIMIT
 
 
 # The morning digest (D21/R6) is the one sales event that is a LIST. The
@@ -238,6 +250,196 @@ def _render_morning_digest(payload: dict, language: str, recipient=None) -> Tupl
             recipient, len(text), DIGEST_TEXT_LIMIT,
         )
     return text, buttons
+
+
+# ---- the two pay pushes (compensation spec §7.5) ------------------------------------------------
+#
+# The backend publishes every figure (C24: whole UZS, "YYYY-MM" months, "YYYY-MM-DD" dates). These
+# render them through the formatters' pay block, the one home the My earnings screens share, so a
+# figure cannot read one way in the push and another on the screen its button opens. Nothing here
+# adds, compares or decides. A missing field skips its line and never raises: the vocabulary test
+# drives both with the generic payload every other sales event carries. Glyphs are code-side
+# (§8.5); the button callbacks are literals so the routing guard can check them.
+
+def _render_pay_penalty_confirmed(payload: dict, language: str) -> Tuple[str, InlineKeyboardButton]:
+    """⚠️ A confirmed penalty: its type, day, amount, the month it counts in, and why.
+
+    The button opens the penalties screen, registered in group 0 so it works from a cold chat.
+    """
+    lines = [f"⚠️ {i18n.get('staff.sales.notify.pay_penalty_confirmed', language)}"]
+    type_name = (payload.get('type_names') or {}).get(language)
+    if type_name:
+        lines.append(f"{i18n.get('staff.sales.notify.penalty_type', language)}: {escape_html(type_name)}")
+    day = format_local_date(payload.get('incident_date'))
+    if day:
+        lines.append(f"{i18n.get('staff.sales.notify.penalty_date', language)}: {day}")
+    if payload.get('amount') is not None:
+        lines.append(
+            f"{i18n.get('staff.sales.notify.penalty_amount', language)}: "
+            f"{signed_deduction(payload['amount'], language)}"
+        )
+    month = format_pay_month(payload.get('month'))
+    if month:
+        counts_in = i18n.get('staff.sales.notify.counts_in', language, month=month)
+        if payload.get('is_late'):
+            # Its incident month had already closed, so it counts in a later open one (§4.5).
+            counts_in = f"{counts_in} ({i18n.get('staff.sales.notify.late', language)})"
+        lines.append(counts_in)
+    if payload.get('reason'):
+        lines.append(f"{i18n.get('staff.sales.earnings.reason', language)}: {escape_html(payload['reason'])}")
+    button = InlineKeyboardButton(
+        # `_xn`, not the screen's `_x`: the push stays in the chat and the screen opens under it (M9).
+        f"💰 {i18n.get('staff.sales.notify.open_earnings', language)}", callback_data='staff_sales_earn_xn',
+    )
+    return '\n'.join(lines), button
+
+
+def _render_pay_statement_approved(payload: dict, language: str) -> Tuple[str, InlineKeyboardButton]:
+    """✅ An approved statement: the summary's frozen figures, the commission per product and
+    tier (the summary's own rows, without a next tier), the paid total in bold.
+
+    A trial (shadow) month says it is not paid; its headline is a LITERAL key, so /health
+    requires it, and the push ends with the trial note. The optional rows follow the summary's
+    rule: corrections, new outlets, adjustments and penalties only when non-zero. A carried-in
+    row goes before the total, labelled by its published `source`; a carried shortfall or an
+    owed balance goes after it (I-28: on this push `owed` is the agent's new outstanding
+    balance). The button opens the announced month's Statement.
+
+    Telegram refuses a message over `TELEGRAM_TEXT_LIMIT`, and every retry the same way, which
+    would lose the month's news for good. A push past it prints each product's line alone, the
+    summary's first "Length" step (§7.2): only the tier rows go, never a figure of the formula.
+    """
+    text = _pay_statement_text(payload, language, tiers=True)
+    if len(text) > TELEGRAM_TEXT_LIMIT:
+        text = _pay_statement_text(payload, language, tiers=False)
+    month_key = str(payload.get('month') or '').replace('-', '')
+    button = InlineKeyboardButton(
+        # `_sn_`, not the screen's own `_s_`: tapping it must not overwrite this approved month's
+        # breakdown, so that month's Statement opens as a new message under it (M9).
+        f"📄 {i18n.get('staff.sales.notify.open_statement', language)}",
+        callback_data=f"staff_sales_earn_sn_{month_key}",
+    )
+    return text, button
+
+
+def _pay_statement_text(payload: dict, language: str, *, tiers: bool) -> str:
+    """The approval push's text, each product with its tier rows or, without `tiers`, its
+    product line alone (`format_pay_tiers`' first row)."""
+    month = format_pay_month(payload.get('month'))
+    if payload.get('is_shadow'):
+        headline = i18n.get('staff.sales.notify.pay_statement_approved_shadow', language, month=month)
+    else:
+        headline = i18n.get('staff.sales.notify.pay_statement_approved', language, month=month)
+    lines = [f"✅ {headline}"]
+    if payload.get('base') is not None:
+        lines.append(
+            f"{i18n.get('staff.sales.earnings.base', language)}: "
+            f"{format_pay_amount(payload['base'], language)}"
+        )
+    commission = payload.get('commission') or {}
+    if commission.get('gross') is not None:
+        lines.append(
+            f"{i18n.get('staff.sales.earnings.commission', language)}: "
+            f"{format_pay_amount(commission['gross'], language)}"
+        )
+        for product in commission.get('products') or []:
+            # The summary's own tier rows (§7.5). A frozen statement has no next tier.
+            rows = format_pay_tiers(product, language, with_next=False)
+            lines.extend(rows if tiers else rows[:1])
+    if payload.get('commission_after_gate') is not None:
+        lines.append(
+            f"{i18n.get('staff.sales.earnings.commission_after_gate', language)}: "
+            f"{format_pay_amount(payload['commission_after_gate'], language)}"
+        )
+    if payload.get('late'):
+        lines.append(
+            f"{i18n.get('staff.sales.earnings.late', language)}: "
+            f"{signed_currency(payload['late'], language)}"
+        )
+    if payload.get('new_outlets'):
+        lines.append(
+            f"{i18n.get('staff.sales.earnings.new_outlets', language)}: "
+            f"{signed_currency(payload['new_outlets'], language)}"
+        )
+    if payload.get('adjustments'):
+        lines.append(
+            f"{i18n.get('staff.sales.earnings.adjustments', language)}: "
+            f"{signed_currency(payload['adjustments'], language)}"
+        )
+    if payload.get('penalties'):
+        lines.append(
+            f"{i18n.get('staff.sales.earnings.penalties', language)}: "
+            f"{signed_deduction(payload['penalties'], language)}"
+        )
+    carry_in = format_pay_carry_in(payload.get('carry_in'), language)
+    if carry_in:
+        lines.append(carry_in)
+    if payload.get('total') is not None:
+        lines.append(
+            f"<b>{i18n.get('staff.sales.earnings.total', language)}: "
+            f"{format_pay_amount(payload['total'], language)}</b>"
+        )
+    note = format_pay_balance_note(payload.get('carry_out'), payload.get('owed'), language)
+    if note:
+        lines.append(note)
+    if payload.get('is_shadow'):
+        # The trial month's own note, as My earnings prints it (I-16): the headline says "not
+        # paid", this says how pay is made instead.
+        lines.append(i18n.get('staff.sales.earnings.shadow_note', language))
+    return '\n'.join(lines)
+
+
+def _render_sales_event(
+    event: str, payload: dict, language: str, recipient,
+) -> Tuple[str, Optional[InlineKeyboardMarkup], bool]:
+    """One sales event as `(text, keyboard, silent)`.
+
+    Three events make a sound: the morning digest (it starts the agent's day, and a silent 08:30
+    message is a digest nobody reads) and the two pay pushes (pay news arrives while the phone is
+    in a pocket, §7.5). Every other sales event arrives while the phone is already in hand and
+    stays silent. C14's `agent_order_approved` / `agent_order_rejected` take the generic branch
+    with no code of their own (§7.6): their rows carry their own leading glyph (§8.5's second
+    exception).
+    """
+    if event == 'morning_digest':
+        text, buttons = _render_morning_digest(payload, language, recipient)
+        keyboard = InlineKeyboardMarkup([[button] for button in buttons]) if buttons else None
+        return text, keyboard, False
+    if event == SALES_EVENT_PAY_PENALTY_CONFIRMED:
+        text, button = _render_pay_penalty_confirmed(payload, language)
+        return text, InlineKeyboardMarkup([[button]]), False
+    if event == SALES_EVENT_PAY_STATEMENT_APPROVED:
+        text, button = _render_pay_statement_approved(payload, language)
+        return text, InlineKeyboardMarkup([[button]]), False
+    # The backend stores `Outlet.rejected_reason` as the plain ENGLISH
+    # text the operator's button carried (SSOT: `REJECT_REASONS`), so
+    # injecting it verbatim put an English phrase inside an otherwise
+    # localized sentence on the agent's phone. Map it back to its key
+    # and render the label in the AGENT's language. `reject_reason_key`
+    # is the one place that reversal lives; a miss is expected (the
+    # admin UI rejects with free text) and the raw string is echoed.
+    raw_reason = str(payload.get('reason') or '')
+    reason_key = reject_reason_key(raw_reason)
+    reason = (
+        i18n.get(f'staff.sales.approvals.reason.{reason_key}', language)
+        if reason_key else raw_reason
+    )
+    text = i18n.get(
+        f'staff.sales.notify.{event}', language,
+        outlet_name=escape_html(str(payload.get('outlet_name') or '')),
+        reason=escape_html(reason),
+        order_number=escape_html(str(payload.get('order_number') or '')),
+    )
+    if event == 'activation_requested':
+        button = InlineKeyboardButton(
+            i18n.get('staff.sales.notify.open_requests', language), callback_data='staff_sales_approvals'
+        )
+    else:
+        button = InlineKeyboardButton(
+            i18n.get('staff.sales.notify.open_outlet', language),
+            callback_data=f"staff_sales_outlet_{payload.get('outlet_id')}",
+        )
+    return text, InlineKeyboardMarkup([[button]]), True
 
 
 def _render_delivery_failed_alert(
@@ -824,9 +1026,13 @@ class StaffWebhookServer:
         agent or the approvers; the two agent-order events are the store's
         answer to an order the agent placed on their behalf.
 
+        The two pay pushes (compensation spec §7.5) carry C24's payloads and
+        render through their own branches.
+
         POST /internal/sales-event
-          {telegram_id, event,
-           payload{outlet_id, outlet_name, reason, order_id, order_number}}
+          {telegram_id, event, event_id,
+           payload{outlet_id, outlet_name, reason, order_id, order_number}
+                  | pay_penalty_confirmed_payload | pay_statement_approved_payload}
         """
         try:
             if not await verify_webhook_signature(request):
@@ -853,62 +1059,43 @@ class StaffWebhookServer:
             # would swallow the second as a duplicate of the first. Outlet
             # events carry no order_id, so they fall back to outlet_id exactly
             # as before.
-            # The digest carries neither an order nor an outlet, so it keys on
-            # its DAY. With a constant key and a 24-hour dedup TTL, a producer
-            # that sent no `event_id` would have tomorrow's digest swallowed
-            # as a duplicate of today's.
-            entity_id = payload.get('order_id') or payload.get('outlet_id') or payload.get('date')
-            if await self._is_duplicate_event(
-                data.get('event_id'), f"sales:{event}:{telegram_id}:{entity_id}"
-            ):
+            # The two pay pushes key on their own row (compensation spec §7.5):
+            # neither carries an order, an outlet or a `date`, so without these
+            # two penalties confirmed on one day collapse into one when Redis is
+            # down.
+            # The digest carries none of those, so it keys on its DAY. With a
+            # constant key and a 24-hour dedup TTL, a producer that sent no
+            # `event_id` would have tomorrow's digest swallowed as a duplicate of
+            # today's.
+            entity_id = (
+                payload.get('order_id') or payload.get('outlet_id') or payload.get('penalty_id')
+                or payload.get('statement_id') or payload.get('date')
+            )
+            event_id = data.get('event_id')
+            fallback_key = f"sales:{event}:{telegram_id}:{entity_id}"
+            if await self._is_duplicate_event(event_id, fallback_key):
                 return web.json_response({'success': True, 'message': 'Already processed'})
 
             language = await i18n.get_user_language(int(telegram_id))
-            if event == 'morning_digest':
-                # The one push that makes a sound: it starts the agent's day,
-                # and a silent 08:30 message is a digest nobody reads. Every
-                # other sales event arrives while the phone is already in
-                # hand and stays silent.
-                text, digest_buttons = _render_morning_digest(payload, language, telegram_id)
+            text, keyboard, silent = _render_sales_event(event, payload, language, telegram_id)
+            try:
                 await self.bot_app.bot.send_message(
                     chat_id=telegram_id, text=text, parse_mode='HTML',
-                    reply_markup=InlineKeyboardMarkup([[button] for button in digest_buttons])
-                    if digest_buttons else None,
-                    disable_notification=False,
+                    reply_markup=keyboard, disable_notification=silent,
                 )
-                return web.json_response({'success': True, 'message': 'Notification sent'})
-            # The backend stores `Outlet.rejected_reason` as the plain ENGLISH
-            # text the operator's button carried (SSOT: `REJECT_REASONS`), so
-            # injecting it verbatim put an English phrase inside an otherwise
-            # localized sentence on the agent's phone. Map it back to its key
-            # and render the label in the AGENT's language. `reject_reason_key`
-            # is the one place that reversal lives; a miss is expected (the
-            # admin UI rejects with free text) and the raw string is echoed.
-            raw_reason = str(payload.get('reason') or '')
-            reason_key = reject_reason_key(raw_reason)
-            reason = (
-                i18n.get(f'staff.sales.approvals.reason.{reason_key}', language)
-                if reason_key else raw_reason
-            )
-            text = i18n.get(
-                f'staff.sales.notify.{event}', language,
-                outlet_name=escape_html(str(payload.get('outlet_name') or '')),
-                reason=escape_html(reason),
-                order_number=escape_html(str(payload.get('order_number') or '')),
-            )
-            if event == 'activation_requested':
-                button = InlineKeyboardButton(
-                    i18n.get('staff.sales.notify.open_requests', language), callback_data='staff_sales_approvals'
-                )
-            else:
-                button = InlineKeyboardButton(
-                    i18n.get('staff.sales.notify.open_outlet', language),
-                    callback_data=f"staff_sales_outlet_{payload.get('outlet_id')}",
-                )
-            await self.bot_app.bot.send_message(
-                chat_id=telegram_id, text=text, parse_mode='HTML',
-                reply_markup=InlineKeyboardMarkup([[button]]), disable_notification=True,
-            )
+            except Exception as e:
+                # Compensation spec §7.5 point 3 (S-18), for EVERY sales event: the
+                # slot was claimed above, and `push_sales_event` retries only on a
+                # non-200. Kept, the retry is "Already processed" and the message is
+                # lost while reported sent. The `delivery_failed_handler` pattern:
+                # nobody can reach a recipient who blocked the bot, so that is a 200
+                # that keeps the slot; anything else frees it and answers 502, and
+                # the retry delivers.
+                _log_notify_failure(f"Failed to send sales event {event} to {telegram_id}", e)
+                if _is_recipient_unreachable(e):
+                    return web.json_response({'success': False, 'message': 'Recipient unreachable'})
+                await self._release_event(event_id, fallback_key)
+                return web.json_response({'success': False, 'message': 'Send failed'}, status=502)
             return web.json_response({'success': True, 'message': 'Notification sent'})
         except Exception as e:
             logger.error(f"Error handling sales event: {e}", exc_info=True)

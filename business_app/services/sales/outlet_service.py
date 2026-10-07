@@ -30,7 +30,7 @@ from business_app.models.sales import (
 )
 from business_app.models.tryout import ProductTryout
 from business_app.models.user import User, UserAddress
-from business_app.services.sales import notifications
+from business_app.services.sales import notifications, pay_rules
 from business_app.services.staff_service import StaffService
 from business_app.utils.delivery_window import local_now, parse_window_time, validate_schedule
 from business_app.utils.exceptions import ConflictError, ForbiddenError, NotFoundError, ValidationError
@@ -41,8 +41,19 @@ from shared.constants import TASHKENT_DISTRICTS
 from shared.enums import EntitySubtype, OrderStatus, UserRole, UserStatus, UserType
 from shared.staff_constants import SALES_EVENT_OUTLET_APPROVED, SALES_EVENT_OUTLET_REJECTED, STAFF_ACTIONS
 from shared.user_search import expand_name_variants
+from shared.validators import normalize_phone_number
 
 PROSPECT_STAGES = ("prospect", "trial", "activation_requested")
+# The stages `approve` accepts an outlet FROM (C5, S-9). Same members as PROSPECT_STAGES, different
+# question: that tuple is "which unassigned outlets an agent of the district may open", this one
+# is "which outlets an approver may activate". `approve` and `can_approve` both read it, so the
+# published button and the refusal cannot drift apart.
+APPROVABLE_STAGES = ("activation_requested", "prospect", "trial")
+# The stages an agent may ask to have an outlet activated FROM (R5, D31), and so the ones in which
+# it may still set the phone (R4, D31.2: "before activation"). Not APPROVABLE_STAGES: an approver
+# may still activate an outlet that is already awaiting activation, but an agent cannot ask twice.
+# `_pre_activation_refusal` reads it; the card publishes the answer.
+REQUESTABLE_STAGES = ("prospect", "trial")
 # Which stages can appear on TODAY'S WORK LIST. Deliberately NOT
 # `replenishment_service.DUE_WHEN_NEVER_VISITED_STAGES`: that one answers "which never-visited
 # outlet is due NOW" (a trial store is not, it has its own agent date), while this one answers
@@ -378,13 +389,7 @@ class OutletService:
 
         if name and latitude is not None and longitude is not None:
             radius_km = current_app.config["SALES_DEDUPE_RADIUS_M"] / 1000.0
-            # SQL pre-filter before the geodesic check. Derived from the configured radius, never
-            # hardcoded: a fixed box would silently cap SALES_DEDUPE_RADIUS_M (a degree of longitude
-            # is only ~836 m at Tashkent's latitude), so widening the radius would stop widening.
-            lat_delta = radius_km / 111.32
-            lng_delta = radius_km / (111.32 * max(math.cos(math.radians(latitude)), 0.01))
-            lat_lo, lat_hi = latitude - lat_delta, latitude + lat_delta
-            lng_lo, lng_hi = longitude - lng_delta, longitude + lng_delta
+            lat_lo, lat_hi, lng_lo, lng_hi = OutletService._dedupe_box(latitude, longitude)
 
             nearby_outlets = Outlet.query.filter(
                 Outlet.latitude.between(lat_lo, lat_hi), Outlet.longitude.between(lng_lo, lng_hi)
@@ -454,15 +459,15 @@ class OutletService:
         if not name:
             raise ValidationError("name is required", error_code="SALES_OUTLET_NAME_REQUIRED")
         latitude, longitude = payload.get("latitude"), payload.get("longitude")
-        if (latitude is None) != (longitude is None):
-            raise ValidationError(
-                "latitude and longitude must be given together", error_code="SALES_OUTLET_PIN_REQUIRED"
-            )
-        if latitude is not None:
-            try:
-                ensure_within_delivery_zone(float(latitude), float(longitude))
-            except ValidationError as exc:
-                raise ValidationError(exc.message, error_code="SALES_OUTLET_OUTSIDE_ZONE") from exc
+        # D31 R3: both coordinates, not "neither or both". The walk-in could already not skip its
+        # pin step (a shared location, or a typed address that geocodes inside Tashkent); now the
+        # API refuses the same. `create` is the only caller -- the import builds its rows itself.
+        if latitude is None or longitude is None:
+            raise ValidationError("A location pin is required", error_code="SALES_OUTLET_PIN_REQUIRED")
+        try:
+            ensure_within_delivery_zone(float(latitude), float(longitude))
+        except ValidationError as exc:
+            raise ValidationError(exc.message, error_code="SALES_OUTLET_OUTSIDE_ZONE") from exc
         # Canonicalised HERE, in the one place every outlet write passes through, rather than by
         # each caller: the staff bot forwards what the reverse-geocoder said, the admin UI sends a
         # key, and an import copies an address's free text. A second copy of this rule in the bot
@@ -490,8 +495,8 @@ class OutletService:
             "outlet_type": outlet_type,
             "name": name[:200],
             "channel": (payload.get("channel") or None),
-            "latitude": float(latitude) if latitude is not None else None,
-            "longitude": float(longitude) if longitude is not None else None,
+            "latitude": float(latitude),
+            "longitude": float(longitude),
             "address_text": (payload.get("address_text") or "").strip() or None,
             "district": district,
             "outlet_class": outlet_class,
@@ -522,12 +527,38 @@ class OutletService:
         }
 
     @staticmethod
+    def _require_primary_phone(raw: Optional[str]) -> str:
+        """The primary contact's phone as E.164, or the coded refusal (D31 R1, R2).
+
+        Required, and an Uzbek MOBILE number by `normalize_phone_number`, the shared rule the
+        staff bot already types against. The customer account is opened on this number (at
+        approval, or at once for an individual), and account creation refuses a fixed line, so a
+        landline let in here would only fail later. Asked of the RAW value, so blank after
+        `strip()` is "required", never "invalid", at every door that asks. Not
+        `_format_optional_phone`: that one also serves the admin Contacts tab, which keeps
+        name-only and non-mobile contacts (D30).
+        """
+        if not (raw or "").strip():
+            raise ValidationError("A contact phone is required", error_code="SALES_OUTLET_PHONE_REQUIRED")
+        phone = normalize_phone_number(raw)
+        if phone is None:
+            raise ValidationError("Phone must be an Uzbek mobile number", error_code="SALES_CONTACT_PHONE_INVALID")
+        return phone
+
+    @staticmethod
     def create(
         agent_user_id: int, payload: Dict[str, Any], *, force: bool = False, link_user_id: Optional[int] = None
     ) -> Outlet:
         fields = OutletService._validate_common(payload)
-        contact = OutletService._contact_fields(payload.get("contact"), fields["name"])
-        contact_phone = contact["phone"] if contact else None
+        # D31 R1/R2, read from the RAW payload phone and ahead of three things that would otherwise
+        # answer first: `_contact_fields`, whose shared (D30) format check calls a blank number
+        # "invalid"; the 🔗 Link branch; and `find_duplicates`. Neither `force` nor a Link reaches
+        # past a missing or non-mobile phone, so the bot is never offered "Create anyway" for a body
+        # that is refused regardless. `_contact_fields` keeps the name fallback and the role check,
+        # and stores the rule's own E.164 answer.
+        raw_contact = payload.get("contact") or {}
+        contact_phone = OutletService._require_primary_phone(raw_contact.get("phone"))
+        contact = OutletService._contact_fields({**raw_contact, "phone": contact_phone}, fields["name"])
 
         link_user: Optional[User] = None
         candidates: List[Dict[str, Any]] = []
@@ -580,9 +611,8 @@ class OutletService:
         )
         db.session.add(outlet)
         db.session.flush()
-        if contact:
-            db.session.add(OutletContact(outlet_id=outlet.id, is_primary=True, **contact))
-            db.session.flush()
+        db.session.add(OutletContact(outlet_id=outlet.id, is_primary=True, **contact))
+        db.session.flush()
 
         # The birth row is written BEFORE any linking. _create_customer commits this session, so an
         # outlet that reaches the database at stage=prospect must already carry the history row that
@@ -592,7 +622,7 @@ class OutletService:
         try:
             if link_user is not None:
                 OutletService._link_customer(outlet, link_user, agent_user_id)
-            elif fields["outlet_type"] == "individual" and contact_phone:
+            elif fields["outlet_type"] == "individual":
                 OutletService._activate_individual(outlet, contact["name"], contact_phone, agent_user_id)
         except Exception:
             # Non-request callers (Celery, scripts) keep this session; never leave a half-built
@@ -624,6 +654,49 @@ class OutletService:
         db.session.add(contact)
         db.session.commit()
         return contact
+
+    @staticmethod
+    def can_set_phone(outlet: Outlet) -> bool:
+        """`set_primary_phone`'s outlet refusal in check mode (R4, D31.2), published on the card for
+        every viewer so no client re-derives it: True exactly when `_pre_activation_refusal` finds
+        none. R4 has no gate of its own: "before activation" is R5's first two conditions, so the
+        card's phone button, `set_primary_phone` and `request_activation` all read that one helper."""
+        return OutletService._pre_activation_refusal(outlet) is None
+
+    @staticmethod
+    def set_primary_phone(outlet: Outlet, phone: Optional[str]) -> Outlet:
+        """Set or fix the outlet's phone (D31.4), behind `PUT /staff/sales/outlets/<id>/primary-phone`.
+
+        Refused first by `_pre_activation_refusal` (R4: only a prospect or trial shop or workplace;
+        after activation the phone is the customer's login, which only an admin changes), then by
+        `_require_primary_phone` (R1/R2: missing, then not an Uzbek mobile). Nothing is written
+        until both pass.
+
+        The number goes onto `outlet.primary_contact`, the contact `request_activation`, `approve`,
+        `account_candidate` and the field try-out all read, and that contact keeps its name. An
+        outlet with no contact gets one named after the outlet, as `_contact_fields` names a
+        phone-only contact. The contact written is then the ONLY primary: a legacy outlet whose
+        contacts carry no flag reads `contacts[0]` as primary, and the flag is now stored.
+
+        Idempotent, because the staff client retries a PUT: the same number again rewrites the same
+        row and adds none. Never touches `users.phone`. Not `add_contact`: that one adds a
+        NON-primary row once the outlet has a contact, so a name-only primary would keep blocking
+        activation.
+        """
+        refusal = OutletService._pre_activation_refusal(outlet)
+        if refusal is not None:
+            raise refusal
+        formatted = OutletService._require_primary_phone(phone)
+        contact = outlet.primary_contact
+        if contact is None:
+            contact = OutletContact(is_primary=True, name=outlet.name[:100], role="owner", phone=formatted)
+            outlet.contacts.append(contact)
+        else:
+            contact.phone = formatted
+        for other in outlet.contacts:
+            other.is_primary = other is contact
+        db.session.commit()
+        return outlet
 
     @staticmethod
     def get_contact(outlet: Outlet, contact_id: int) -> OutletContact:
@@ -712,6 +785,21 @@ class OutletService:
         return distance_km if distance_km <= current_app.config["SALES_DEDUPE_RADIUS_M"] / 1000.0 else None
 
     @staticmethod
+    def _dedupe_box(latitude: float, longitude: float) -> Tuple[float, float, float, float]:
+        """`(lat_lo, lat_hi, lng_lo, lng_hi)` around a pin: the SQL pre-filter before the geodesic
+        `_km_within_dedupe_radius` check, read by `find_duplicates` and the new-outlet bonus's
+        nearby-orders flag.
+
+        Derived from the configured radius, never hardcoded: a fixed box would silently cap
+        SALES_DEDUPE_RADIUS_M (a degree of longitude is only ~836 m at Tashkent's latitude), so
+        widening the radius would stop widening.
+        """
+        radius_km = current_app.config["SALES_DEDUPE_RADIUS_M"] / 1000.0
+        lat_delta = radius_km / 111.32
+        lng_delta = radius_km / (111.32 * max(math.cos(math.radians(latitude)), 0.01))
+        return latitude - lat_delta, latitude + lat_delta, longitude - lng_delta, longitude + lng_delta
+
+    @staticmethod
     def _same_place_outlets(
         user_id: int, latitude: Optional[float], longitude: Optional[float]
     ) -> List[Dict[str, Any]]:
@@ -720,8 +808,9 @@ class OutletService:
         The 🔗 Link path skips `find_duplicates` — the agent has already picked the account — so
         this is its whole duplicate check: an outlet of the SAME account within
         SALES_DEDUPE_RADIUS_M is this shop, already linked, not a new branch. The account's
-        outlets anywhere else are branches and never block (R8). A pin-less create (API-only;
-        the bot always sends a pin) has no place to compare and skips the check.
+        outlets anywhere else are branches and never block (R8). `create` only calls this with a
+        pin: `_validate_common` refuses a create without one (D31 R3). A pin-less call would have
+        no place to compare and finds nothing.
         """
         if latitude is None or longitude is None:
             return []
@@ -754,11 +843,12 @@ class OutletService:
         merely for being free — a chain's office or first shop is not this branch, and adopting
         it would send orders on behalf and branch history to the wrong place. Only a pin-less
         outlet falls back to the default while it is free, else a row of its own. Pin-less is
-        API-only or a converted try-out: the bot always sends a pin and `approve` refuses
-        pin-less activation (`SALES_ACTIVATION_PIN_REQUIRED`), so the coordinate-less address a
-        pin-less link can still mint stays confined to those doors. Written once and shared with
-        `_activate_converted_tryouts`, because "which address is this shop" must not be answered
-        two ways.
+        now only an outlet written before D31, reaching here through `_activate_converted_tryouts`:
+        `create` refuses an outlet without a pin (`SALES_OUTLET_PIN_REQUIRED`, D31 R3) and
+        `approve` refuses pin-less activation (`SALES_ACTIVATION_PIN_REQUIRED`) before it gets
+        here, so the coordinate-less address a pin-less outlet can still mint stays confined to
+        that door. Written once and shared with `_activate_converted_tryouts`, because "which
+        address is this shop" must not be answered two ways.
         """
         if outlet.address_id is not None:
             return
@@ -874,12 +964,60 @@ class OutletService:
     def agent_outlet_filter(agent_user_id: int):
         """SQL predicate: the outlets THIS agent can open.
 
-        Assigned OR onboarded-by, written once. An agent who registered a shop keeps seeing it
-        after a manager reassigns the territory, and the due list, the morning digest and the
-        *Nearby* list must agree about that — a digest naming an outlet whose card answers 403
-        is a message the agent cannot act on.
+        Assigned OR onboarded-by, written once. An agent who registered a shop keeps REACHING it
+        after a manager reassigns the territory: the card, *Nearby* and the *All* and *Prospects*
+        lists agree about that, and a list naming an outlet whose card answers 403 is a message
+        the agent cannot act on. Whose PLAN a shop is on is a different question with its own
+        predicate, `agent_due_filter` (Q10).
         """
         return or_(Outlet.assigned_agent_user_id == agent_user_id, Outlet.onboarded_by_user_id == agent_user_id)
+
+    @staticmethod
+    def agent_due_filter(agent_user_id: int):
+        """SQL predicate: the outlets on THIS agent's plan. Ownership, not reach (Q10).
+
+        Assigned to the agent, or onboarded by them while nobody owns it. Once a manager hands a
+        shop to another agent it leaves the onboarder's due list, digest and 01:20 snapshot and
+        joins the new owner's, so a district hand-over no longer loads B's overdue shops onto A's
+        compliance (review gaming F2). The onboarder can still open it (`agent_outlet_filter`).
+        Every due reader goes through `due_scope` (the list, the counts, the snapshot and
+        `VisitService.start`'s `planned` stamp); the digest's unvisited section pairs this
+        predicate with `unvisited_filter`, so its nudges follow the same owner.
+        """
+        return or_(
+            Outlet.assigned_agent_user_id == agent_user_id,
+            and_(Outlet.assigned_agent_user_id.is_(None), Outlet.onboarded_by_user_id == agent_user_id),
+        )
+
+    @staticmethod
+    def due_owner_id(outlet: Outlet) -> Optional[int]:
+        """Whose plan `outlet` is on: the Python twin of `agent_due_filter` (Q10).
+
+        The assignee, else the onboarder while nobody owns it, else nobody. An outlet matches
+        `agent_due_filter(X)` exactly when this returns X (pinned in
+        tests/integration/test_sales_outlet_plan_self_decision.py). The plan-change guard, the
+        exception feed's `unvisited` row and the agent pushes all name the owner through it.
+        """
+        return outlet.assigned_agent_user_id or outlet.onboarded_by_user_id
+
+    @staticmethod
+    def _guard_plan_change(owner_ids, actor_id: int) -> None:
+        """Final-review I1 (owner decision 2026-10-05): refuse a manager changing his own due plan.
+
+        Class and the cadence override set the cadence, the cadence sets `next_visit_due_at`, and
+        that decides the 01:20 frozen due set the pay gate measures; reassigning an outlet or
+        marking it lost moves it off a plan just the same. So every such write names the due
+        owners it touches (before and after) and asks the one self-decision rule,
+        `pay_rules.check_self_decision`, about each, BEFORE anything is written: a manager who is
+        one of them gets 403 `SALES_PAY_SELF_DECISION`. An admin is allowed (D-Q11); tagging an
+        admin's own plan change needs an actor record these writes do not keep yet (deferred).
+        """
+        owners = sorted({int(owner) for owner in owner_ids if owner is not None})
+        if not owners:
+            return
+        actor = db.session.get(User, actor_id)
+        for owner in owners:
+            pay_rules.check_self_decision(owner, actor)
 
     @staticmethod
     def _name_filter(search: str):
@@ -907,11 +1045,8 @@ class OutletService:
         "due today" and the `overdue_days` printed beside each row cannot straddle a day
         boundary between two queries of the same message.
         """
-        query = Outlet.query.filter(OutletService.agent_outlet_filter(agent_user_id))
         order_by = Outlet.name.asc()
-        if scope == "prospects":
-            query = query.filter(Outlet.stage.in_(PROSPECT_STAGES))
-        elif scope == "due":
+        if scope == "due":
             # D7: "is this outlet due" is a question the backend already ANSWERED, into
             # `outlets.next_visit_due_at`. This scope only reads it, so the due list, the card's
             # overdue line and the nightly recompute can never disagree.
@@ -920,10 +1055,17 @@ class OutletService:
             # today's work list. And the boundary is the end of the agent's LOCAL day, not UTC --
             # an outlet due at 20:00 Tashkent is due TODAY, and a UTC-midnight comparison hides it
             # until tomorrow morning, every single evening (the `_driver_day_start_utc` lesson).
-            query = query.filter(*OutletService._due_clauses(now))
+            #
+            # Q10: whose PLAN it is, not who may open it. `due_scope` is the one query the count
+            # and the 01:20 snapshot read too.
+            query = OutletService.due_scope(agent_user_id, now=now)
             order_by = Outlet.next_visit_due_at.asc()
         else:
-            query = query.filter(Outlet.stage != "lost")
+            query = Outlet.query.filter(OutletService.agent_outlet_filter(agent_user_id))
+            if scope == "prospects":
+                query = query.filter(Outlet.stage.in_(PROSPECT_STAGES))
+            else:
+                query = query.filter(Outlet.stage != "lost")
         if search:
             clause = OutletService._name_filter(search)
             if clause is not None:
@@ -949,11 +1091,29 @@ class OutletService:
         )
 
     @staticmethod
+    def due_scope(agent_user_id: int, *, now: Optional[datetime]):
+        """THE due query for one agent: `agent_due_filter` plus `_due_clauses`, as an Outlet query.
+
+        The due list, `due_counts` and the snapshot's `due_outlet_ids` all start here, so the list
+        an agent holds, the "+N more" the digest prints and the set a day is measured against are
+        one query (spec §4.1.2). `now=None` reads the wall clock, as `_due_clauses` does:
+        `GET /sales/outlets` hands `list_for_agent` no instant.
+        """
+        return Outlet.query.filter(OutletService.agent_due_filter(agent_user_id), *OutletService._due_clauses(now))
+
+    @staticmethod
+    def due_outlet_ids(agent_user_id: int, *, now: datetime) -> List[int]:
+        """The ids `due_scope` returns, ascending: what the 01:20 snapshot freezes as the day's plan."""
+        rows = OutletService.due_scope(agent_user_id, now=now).with_entities(Outlet.id).order_by(Outlet.id.asc()).all()
+        return [outlet_id for (outlet_id,) in rows]
+
+    @staticmethod
     def due_counts(agent_user_id: int, *, now: datetime) -> Tuple[int, int]:
         """`(due incl. overdue, overdue)` for one agent at one instant.
 
-        The first number is the due scope's own total — the digest reads it for
-        "+N more" and the 01:20 job stores it as the day's plan. The second is the
+        The first number is the due scope's own total, `len(due_outlet_ids)` over the
+        same `due_scope` query; the digest reads it for "+N more", and the 01:20 job
+        stores the ids themselves beside their count. The second is the
         same split the digest, the due-list button and the outlet card print:
         `overdue_days(due_at, now) >= 1`, which is exactly `due_at <= now - 1 day`
         (`serializers/sales_serializers.py:285` computes `(now - due_at).days`).
@@ -962,9 +1122,7 @@ class OutletService:
         same fixture rather than trusting the equivalence.
         """
         moment = ensure_utc(now)
-        query = Outlet.query.filter(
-            OutletService.agent_outlet_filter(agent_user_id), *OutletService._due_clauses(moment)
-        )
+        query = OutletService.due_scope(agent_user_id, now=moment)
         return query.count(), query.filter(Outlet.next_visit_due_at <= moment - timedelta(days=1)).count()
 
     @staticmethod
@@ -989,8 +1147,9 @@ class OutletService:
         standing outside of is exactly what this screen exists for.
 
         The visibility clause is `OutletService.agent_outlet_filter` — the SQL expression of
-        "the outlets this agent can open", extracted in Task 3 and shared with the due list
-        and the morning digest; `get_for_agent` holds the ORM twin, which carries a third arm
+        "the outlets this agent can open", extracted in Task 3 and shared with the *All* and
+        *Prospects* lists (the due list and the digest ask `agent_due_filter`, Q10);
+        `get_for_agent` holds the ORM twin, which carries a third arm
         this filter does not (backlog). It is called rather than re-spelled: a second
         `assigned OR onboarded_by` here is how a Nearby row appears for a shop whose card
         answers 403, or disappears from under an agent who registered it. Only the RANKING is
@@ -1032,6 +1191,18 @@ class OutletService:
         # sitting on the session — and the next successful write committed the edit the server
         # had already answered 400 to (L50). Validating up here is what makes the refusal total.
         cadence_before = (outlet.outlet_class, outlet.cadence_days_override)
+        cadence_after = (
+            (payload["outlet_class"] or None) if "outlet_class" in payload else outlet.outlet_class,
+            (
+                (payload["cadence_days_override"] or None)
+                if "cadence_days_override" in payload
+                else outlet.cadence_days_override
+            ),
+        )
+        if cadence_after != cadence_before:
+            # Only a CHANGE to the two cadence inputs is a plan decision; notes, or the class the
+            # row already has, are not (I1).
+            OutletService._guard_plan_change({OutletService.due_owner_id(outlet)}, actor_id)
         window = {}
         for key in ("delivery_window_start", "delivery_window_end"):
             if key in payload:
@@ -1113,16 +1284,59 @@ class OutletService:
 
     # ------------------------------------------------------------------ activation
     @staticmethod
-    def request_activation(outlet: Outlet, actor_id: int) -> Outlet:
-        if outlet.stage not in ("prospect", "trial"):
-            raise ValidationError("Outlet is not a prospect", error_code="SALES_OUTLET_STAGE_INVALID")
+    def _pre_activation_refusal(outlet: Outlet) -> Optional[ValidationError]:
+        """Why this outlet no longer stands BEFORE activation, or None while it does.
+
+        R5's first two conditions (D31): a prospect or trial outlet, and a shop or workplace -- a
+        private customer is activated at creation (`_activate_individual`), never on request.
+        D31.2's "before activation", the window in which an agent may still set the outlet's
+        phone, means exactly these two, so it is this gate and not a copy of it: a copy would let
+        the phone action and Request activation disagree about which outlets are still the
+        agent's to prepare. Both refusals carry SALES_OUTLET_STAGE_INVALID.
+
+        RETURNED, not raised, so one expression serves both modes -- the `can_approve` pattern (a
+        write's refusals published in check mode) without a second copy of the condition: a write
+        path raises what comes back, and its `can_*` twin asks only whether anything did. Each is
+        built with a literal `error_code=`, the form `tests/unit/test_staff_error_code_coverage.py`
+        collects, so a code that lives only here is still held to the staff bot's error map.
+        """
+        if outlet.stage not in REQUESTABLE_STAGES:
+            return ValidationError("Outlet is not a prospect or trial", error_code="SALES_OUTLET_STAGE_INVALID")
+        if not outlet.is_business_outlet:
+            return ValidationError(
+                "Only a shop or workplace goes through activation", error_code="SALES_OUTLET_STAGE_INVALID"
+            )
+        return None
+
+    @staticmethod
+    def _activation_refusal(outlet: Outlet) -> Optional[ValidationError]:
+        """R5 (D31): the first reason an agent may not ask for this outlet's activation, or None.
+
+        The ONE expression of the rule, returned for the reason `_pre_activation_refusal` gives:
+        `request_activation` raises it and `can_request_activation` publishes its absence on the
+        card, so no client offers a request the write refuses. Today's codes in today's order, the
+        type check new right after the stage check: `_pre_activation_refusal`, then a phone on the
+        PRIMARY contact, then a pin -- a shop missing both is still asked for the phone first.
+        """
+        refusal = OutletService._pre_activation_refusal(outlet)
+        if refusal is not None:
+            return refusal
         contact = outlet.primary_contact
         if contact is None or not contact.phone:
-            raise ValidationError(
+            return ValidationError(
                 "A contact phone is required to request activation", error_code="SALES_ACTIVATION_PHONE_REQUIRED"
             )
         if outlet.latitude is None:
-            raise ValidationError("A pin is required to request activation", error_code="SALES_ACTIVATION_PIN_REQUIRED")
+            return ValidationError(
+                "A pin is required to request activation", error_code="SALES_ACTIVATION_PIN_REQUIRED"
+            )
+        return None
+
+    @staticmethod
+    def request_activation(outlet: Outlet, actor_id: int) -> Outlet:
+        refusal = OutletService._activation_refusal(outlet)
+        if refusal is not None:
+            raise refusal
         outlet.activation_requested_at = datetime.now(UTC)
         outlet.rejected_reason = None
         OutletService.transition(outlet, "activation_requested", actor_id, reason_code="requested")
@@ -1189,7 +1403,7 @@ class OutletService:
         )
 
     @staticmethod
-    def activation_request_rows() -> List[Dict[str, Any]]:
+    def activation_request_rows(viewer_id: Optional[int] = None) -> List[Dict[str, Any]]:
         """The operator's queue as its renderers read it: the outlet row plus the account its
         contact phone already belongs to (R6).
 
@@ -1197,13 +1411,48 @@ class OutletService:
         LIST and must never look a phone up for itself -- a plain Approve on a row that has a
         candidate is the 409, so the button the operator sees has to come from the same answer.
         One phone query per pending row, on a list that is short by construction.
+
+        `can_approve` is resolved here for the same reason (spec §4.12): a dual-role operator
+        still sees the requests for shops they registered themselves, so they know those exist,
+        but the row says they cannot approve them and the bot draws no Approve or Attach.
         """
         from business_app.serializers.sales_serializers import serialize_outlet
 
         return [
-            {**serialize_outlet(outlet), "account_candidate": OutletService.account_candidate(outlet)}
+            {
+                **serialize_outlet(outlet),
+                "account_candidate": OutletService.account_candidate(outlet),
+                "can_approve": OutletService.can_approve(outlet, viewer_id),
+            }
             for outlet in OutletService.list_activation_requests()
         ]
+
+    @staticmethod
+    def is_self_approval(outlet: Outlet, actor_id) -> bool:
+        """True when `actor_id` onboarded this outlet: the ONE expression of "approving your own
+        shop" (C5, spec §4.12).
+
+        `approve`, `TryoutService.convert_tryout` and every published `can_approve` /
+        `can_convert` ask it. An imported outlet has no onboarder, and nobody is the onboarder
+        when nobody is asking. `actor_id` may be a JWT identity string.
+        """
+        return (
+            actor_id is not None
+            and outlet.onboarded_by_user_id is not None
+            and outlet.onboarded_by_user_id == int(actor_id)
+        )
+
+    @staticmethod
+    def can_approve(outlet: Outlet, viewer_id) -> bool:
+        """`approve`'s two viewer-and-stage refusals in check mode, published so no client
+        re-derives them: an approvable stage, and not the viewer's own outlet."""
+        return outlet.stage in APPROVABLE_STAGES and not OutletService.is_self_approval(outlet, viewer_id)
+
+    @staticmethod
+    def can_request_activation(outlet: Outlet) -> bool:
+        """`request_activation`'s refusals in check mode (R5, D31), published on the card for every
+        viewer so no client re-derives them: True exactly when `_activation_refusal` finds none."""
+        return OutletService._activation_refusal(outlet) is None
 
     @staticmethod
     def approve(outlet_id: int, actor_id: int, contract_number: Optional[str] = None, attach: bool = False) -> Outlet:
@@ -1221,7 +1470,18 @@ class OutletService:
         outlet = OutletService.get(outlet_id)
         if outlet.stage == "active":
             return outlet
-        if outlet.stage not in ("activation_requested", "prospect", "trial"):
+        # C5 / spec §4.12: nobody approves an outlet they onboarded -- an agent who also holds the
+        # operator role, or an admin or manager with an agent profile. AFTER the idempotent early
+        # return, so a retry after someone else's approval stays a no-op; BEFORE the stage check
+        # and `step = "customer"`, so a refusal leaves no account, address or contract behind.
+        # One check covers the bot route, the admin route and `attach=True`.
+        if OutletService.is_self_approval(outlet, actor_id):
+            raise ForbiddenError(
+                "You cannot approve an outlet you onboarded",
+                error_code="SALES_OUTLET_SELF_APPROVAL",
+                details={"outlet_id": outlet.id},
+            )
+        if outlet.stage not in APPROVABLE_STAGES:
             raise ValidationError("Outlet is not awaiting activation", error_code="SALES_OUTLET_STAGE_INVALID")
         contact = outlet.primary_contact
         phone = contact.phone if contact else None
@@ -1361,6 +1621,7 @@ class OutletService:
     @staticmethod
     def assign(outlet_id: int, agent_user_id: Optional[int], actor_id: int) -> Outlet:
         outlet = OutletService.get(outlet_id)
+        OutletService._guard_plan_change({OutletService.due_owner_id(outlet), agent_user_id}, actor_id)
         if agent_user_id is not None:
             OutletService._assert_agent(agent_user_id)
         outlet.assigned_agent_user_id = agent_user_id
@@ -1371,10 +1632,13 @@ class OutletService:
     def bulk_assign_by_district(district: str, agent_user_id: int, actor_id: int) -> int:
         if district not in TASHKENT_DISTRICTS:
             raise ValidationError(f"Unknown district {district}", error_code="SALES_DISTRICT_INVALID")
+        scope = Outlet.query.filter(Outlet.district == district, Outlet.stage != "lost")
+        # Every outlet the bulk would move leaves its current owner's plan and joins the target's,
+        # so all of them are asked before the one UPDATE: any refusal writes nothing (I1).
+        owners = {OutletService.due_owner_id(outlet) for outlet in scope.all()}
+        OutletService._guard_plan_change(owners | {agent_user_id}, actor_id)
         OutletService._assert_agent(agent_user_id)
-        count = Outlet.query.filter(Outlet.district == district, Outlet.stage != "lost").update(
-            {Outlet.assigned_agent_user_id: agent_user_id}, synchronize_session=False
-        )
+        count = scope.update({Outlet.assigned_agent_user_id: agent_user_id}, synchronize_session=False)
         db.session.commit()
         return int(count)
 
@@ -1644,6 +1908,7 @@ class OutletService:
     @staticmethod
     def mark_lost(outlet_id: int, actor_id: int, reason: str, note: Optional[str]) -> Outlet:
         outlet = OutletService.get(outlet_id)
+        OutletService._guard_plan_change({OutletService.due_owner_id(outlet)}, actor_id)
         if reason not in LOST_REASONS:
             raise ValidationError("Unknown lost reason", error_code="SALES_LOST_REASON_INVALID")
         outlet.lost_reason = reason
@@ -1832,12 +2097,15 @@ class OutletService:
     def card(
         outlet: Outlet,
         *,
-        agent_user_id: Optional[int] = None,
+        viewer_user_id: Optional[int] = None,
         open_visit_ids: Optional[Dict[int, int]] = None,
     ) -> Dict[str, Any]:
-        """The full outlet card. `agent_user_id` is the VIEWER, not the assignee: only a sales
-        agent can have an open visit, so the admin drawer (`admin_sales.get_outlet_admin`) calls
-        this without one and gets `open_visit_id: None`.
+        """The full outlet card. `viewer_user_id` is whoever is LOOKING at it, not the assignee.
+
+        Two fields depend on the viewer. `open_visit_id`: only a sales agent can have an open
+        visit, so an admin viewer gets None. `can_approve` (spec §4.12) is published only when a
+        viewer is given, from `can_approve`, so neither the staff card nor the admin drawer
+        (`admin_sales.get_outlet_admin`) offers Approve to the outlet's own onboarder.
 
         `open_visit_ids` is `VisitService.open_visit_ids_by_outlet`'s mapping when the caller
         already holds it; without one the card asks for it below. Either way the answer comes
@@ -1958,6 +2226,13 @@ class OutletService:
         # `is not None`, not truthiness: a viewer id is an identity, and "0 is falsy" is how
         # an identity test quietly becomes a value test.
         if open_visit_ids is None:
-            open_visit_ids = VisitService.open_visit_ids_by_outlet(agent_user_id) if agent_user_id is not None else {}
+            open_visit_ids = VisitService.open_visit_ids_by_outlet(viewer_user_id) if viewer_user_id is not None else {}
         data["open_visit_id"] = open_visit_ids.get(outlet.id)
+        # R5 (D31) does not depend on who is looking, so it is published for every viewer.
+        data["can_request_activation"] = OutletService.can_request_activation(outlet)
+        # R4 (D31.2), likewise for every viewer: the card's Add/Change phone button reads it, and
+        # `set_primary_phone` raises from the same `_pre_activation_refusal`.
+        data["can_set_phone"] = OutletService.can_set_phone(outlet)
+        if viewer_user_id is not None:
+            data["can_approve"] = OutletService.can_approve(outlet, viewer_user_id)
         return data

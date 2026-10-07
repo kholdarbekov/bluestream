@@ -32,9 +32,9 @@
     <tr><th>Новые точки (регистрация)</th><td>{{ cell(agent.new_outlets_registered) }}</td></tr>
     <tr><th>Новые точки (активация)</th><td>{{ cell(agent.new_outlets_activated) }}</td></tr>
     <tr><th>Создано заказов</th><td>{{ cell(agent.orders_placed) }}</td></tr>
-    <tr><th>Заказы доставлены и оплачены</th><td>{{ cell(agent.orders_delivered_paid) }}</td></tr>
-    <tr><th>Бутыли доставлены и оплачены</th><td>{{ cell(agent.bottles_delivered_paid) }}</td></tr>
-    <tr class="total-row"><th>Выручка доставлено и оплачено</th><td>{{ cell(agent.revenue_delivered_paid) }} сум</td></tr>
+    <tr><th>Размещённые заказы: доставлены и оплачены</th><td>{{ cell(agent.orders_delivered_paid) }}</td></tr>
+    <tr><th>Бутыли по размещённым заказам: доставлены и оплачены</th><td>{{ cell(agent.bottles_delivered_paid) }}</td></tr>
+    <tr class="total-row"><th>Выручка по размещённым заказам: доставлены и оплачены</th><td>{{ cell(agent.revenue_delivered_paid) }} сум</td></tr>
     <tr><th>Отменённые заказы</th><td>{{ cell(agent.agent_orders_cancelled) }}</td></tr>
     <tr><th>Предложено/принято, %</th><td>{{ cell(agent.suggested_vs_accepted_pct) }}</td></tr>
     <tr><th>Чек-ины вне радиуса</th><td>{{ cell(agent.out_of_range_checkins) }}</td></tr>

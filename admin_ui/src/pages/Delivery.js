@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { DEFAULT_PAGE_SIZE } from '../utils/constants';
+import { apiErrorCode } from '../utils/apiError';
 import {
   Table,
   Card,
@@ -142,7 +143,7 @@ const Delivery = () => {
     onError: (error) => {
       // A return's reason refusal was named in handledErrorCodes, so api.js stayed silent: this is
       // its one message, in the words the Orders page uses (F6).
-      const known = ADMIN_REASON_ERROR_MESSAGES.get(error?.response?.data?.data?.error_code);
+      const known = ADMIN_REASON_ERROR_MESSAGES.get(apiErrorCode(error));
       if (known) {
         message.error(t(known[0], known[1]));
         return;

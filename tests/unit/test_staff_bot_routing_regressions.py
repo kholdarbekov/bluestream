@@ -111,6 +111,27 @@ def test_staff_cod_callback_and_reconciliation_wiring_present():
     assert not missing, f"Missing COD/reconciliation callback fragments: {missing}"
 
 
+def test_staff_sales_earnings_callbacks_present():
+    """My earnings' screens and the two pay pushes' buttons stay registered, each on its own
+    literal pattern. `staff_sales_earn_n` is the approval push's button from before the
+    Statement screen: those pushes stay in agents' chats, so it stays wired after the new
+    pushes moved to `staff_sales_earn_sn_<yyyymm>`. The Statement and its push variant share a
+    prefix; which handler takes which is checked by real dispatch in
+    tests/staff_bot/test_staff_wiring_contract.py."""
+    text = BOT_FILE.read_text(encoding="utf-8")
+    required_fragments = [
+        'CallbackQueryHandler(sales_earnings_handler.show_summary, pattern=r"^staff_sales_earn$")',
+        'CallbackQueryHandler(sales_earnings_handler.show_lines, pattern=r"^staff_sales_earn_l_\\d+_\\d+$")',
+        'CallbackQueryHandler(sales_earnings_handler.show_statement, pattern=r"^staff_sales_earn_s_\\d+$")',
+        'CallbackQueryHandler(sales_earnings_handler.show_past_statements, pattern=r"^staff_sales_earn_h$")',
+        'CallbackQueryHandler(sales_earnings_handler.show_summary_from_push, pattern=r"^staff_sales_earn_n$")',
+        'CallbackQueryHandler(sales_earnings_handler.show_statement_from_push, pattern=r"^staff_sales_earn_sn_\\d+$")',
+        'CallbackQueryHandler(sales_earnings_handler.show_penalties_from_push, pattern=r"^staff_sales_earn_xn$")',
+    ]
+    missing = [fragment for fragment in required_fragments if fragment not in text]
+    assert not missing, f"Missing My earnings callback fragments: {missing}"
+
+
 def test_staff_operator_text_entry_patterns_present():
     """Ensure reply-keyboard operator flows enter conversations via message handlers.
 

@@ -142,12 +142,26 @@ class TestDueCounts:
         assert named == 10
         assert named + payload["more_count"] == due_count
 
-    def test_an_onboarded_outlet_counts_even_after_the_territory_moves(self, db, agent):
-        """`agent_outlet_filter` is assigned-OR-onboarded, and the plan must be the
-        same estate the agent's own due list shows them."""
-        _outlet(db, agent, "Onboarded", due_at=datetime(2026, 9, 10, 4, 0, tzinfo=UTC), onboarded=True)
+    def test_the_due_scope_follows_ownership_not_reach(self, db, agent):
+        """Q10 (owner-confirmed, spec §4.1.2): the plan is `agent_due_filter`, not
+        `agent_outlet_filter`.
+
+        An outlet the agent onboarded stays on their plan while nobody owns it. Once a manager
+        hands it to another agent it leaves THIS agent's plan and joins the new owner's, so a
+        district hand-over no longer loads someone else's overdue shops onto this agent's
+        compliance. Reach is unchanged: both shops are still ones this agent can open.
+        """
+        other = _agent(db, "+998901234635")
+        unassigned = _outlet(db, agent, "Onboarded", due_at=datetime(2026, 9, 10, 4, 0, tzinfo=UTC), onboarded=True)
+        handed_over = _outlet(db, agent, "Handed over", due_at=datetime(2026, 9, 11, 4, 0, tzinfo=UTC), onboarded=True)
+        handed_over.assigned_agent_user_id = other.id
+        db.session.commit()
 
         assert OutletService.due_counts(agent.id, now=FROZEN_UTC) == (1, 1)
+        assert OutletService.due_outlet_ids(agent.id, now=FROZEN_UTC) == [unassigned.id]
+        assert OutletService.due_outlet_ids(other.id, now=FROZEN_UTC) == [handed_over.id]
+        reach = {outlet.id for outlet in Outlet.query.filter(OutletService.agent_outlet_filter(agent.id)).all()}
+        assert {unassigned.id, handed_over.id} <= reach
 
 
 class TestSnapshotAll:
@@ -172,6 +186,22 @@ class TestSnapshotAll:
         assert (rows[quiet.id].due_count, rows[quiet.id].overdue_count) == (0, 0)
         assert ensure_utc(rows[quiet.id].snapshot_at) == FROZEN_UTC
 
+    def test_the_snapshot_freezes_which_outlets_were_due_beside_how_many(self, db, agent):
+        """Spec §4.1.2: the ids come from the same query as the count, so `len` IS `due_count`.
+
+        A quiet agent's set is an EMPTY list, never NULL: NULL is the marker `compliance` reads
+        as "written before the set was frozen" and answers with its legacy fallback.
+        """
+        rows = _seed_a_days_work(db, agent)
+        quiet = _agent(db, "+998901234632")
+
+        AgentDayPlanService.snapshot_all(now=FROZEN_UTC)
+
+        plans = {row.agent_user_id: row for row in SalesAgentDayPlan.query.all()}
+        assert plans[agent.id].due_outlet_ids == sorted(outlet.id for outlet in rows.values())
+        assert len(plans[agent.id].due_outlet_ids) == plans[agent.id].due_count == 5
+        assert (plans[quiet.id].due_outlet_ids, plans[quiet.id].due_count) == ([], 0)
+
     def test_the_plan_date_is_the_local_day_not_the_utc_one(self, db, agent):
         """The job fires at 01:20 Tashkent, when UTC is still on yesterday's date:
         a snapshot keyed on the UTC day would file every night's plan against the
@@ -186,7 +216,7 @@ class TestSnapshotAll:
         `(agent_user_id, plan_date)` is the backstop and the sequential upsert is what
         keeps it from raising. Two OVERLAPPING runs would still collide on that
         constraint; beat does not produce that overlap."""
-        _seed_a_days_work(db, agent)
+        rows = _seed_a_days_work(db, agent)
         AgentDayPlanService.snapshot_all(now=FROZEN_UTC)
         Outlet.query.filter_by(name="Bahor").one().next_visit_due_at = None
         db.session.commit()
@@ -196,6 +226,8 @@ class TestSnapshotAll:
 
         row = SalesAgentDayPlan.query.one()
         assert (row.plan_date, row.due_count, row.overdue_count) == (PLAN_DATE, 4, 2)
+        # The set is rewritten with the count: Bahor left both.
+        assert row.due_outlet_ids == sorted(outlet.id for name, outlet in rows.items() if name != "overdue_five_days")
         assert ensure_utc(row.snapshot_at) == later
 
     def test_a_deactivated_agent_and_a_suspended_user_get_no_plan(self, db, agent):

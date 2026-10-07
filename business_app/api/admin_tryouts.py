@@ -52,6 +52,7 @@ def list_tryouts():
         end_date=request.args.get("end_date"),
         due_start_date=request.args.get("due_start_date"),
         due_end_date=request.args.get("due_end_date"),
+        viewer_user_id=int(get_jwt_identity()),
     )
     return success_response(data=result)
 
@@ -75,7 +76,9 @@ def create_tryout():
 @jwt_required()
 @validate_admin_action(["view_orders", "manage_orders"])
 def get_tryout(tryout_id: int):
-    return success_response(data={"tryout": AdminTryoutService.get_tryout(tryout_id)})
+    return success_response(
+        data={"tryout": AdminTryoutService.get_tryout(tryout_id, viewer_user_id=int(get_jwt_identity()))}
+    )
 
 
 @admin_tryouts_bp.route("/tryouts/<int:tryout_id>", methods=["PUT"])

@@ -35,20 +35,27 @@ def requested(db, agent):
 
 
 def test_request_activation_needs_phone_and_pin(db, agent):
-    no_phone = OutletService.create(agent.id, {**GROCERY, "name": "No phone", "contact": {"name": "X"}})
+    # Legacy rows, built directly: `create` refuses both since D31 (R1, R3), but an outlet made
+    # before that -- or whose phone an admin cleared in the Contacts tab -- still reaches this guard.
+    no_phone = _seed_outlet(
+        db,
+        name="No phone",
+        latitude=PIN[0],
+        longitude=PIN[1],
+        assigned_agent_user_id=agent.id,
+        onboarded_by_user_id=agent.id,
+        contacts=[OutletContact(name="X", is_primary=True)],
+    )
     with pytest.raises(ValidationError) as excinfo:
         OutletService.request_activation(no_phone, agent.id)
     assert excinfo.value.error_code == "SALES_ACTIVATION_PHONE_REQUIRED"
 
-    no_pin = OutletService.create(
-        agent.id,
-        {
-            **GROCERY,
-            "name": "No pin",
-            "latitude": None,
-            "longitude": None,
-            "contact": {"name": "Y", "phone": "+998901113311"},
-        },
+    no_pin = _seed_outlet(
+        db,
+        name="No pin",
+        assigned_agent_user_id=agent.id,
+        onboarded_by_user_id=agent.id,
+        contacts=[OutletContact(name="Y", phone="+998901113311", is_primary=True)],
     )
     with pytest.raises(ValidationError) as excinfo:
         OutletService.request_activation(no_pin, agent.id)
@@ -166,7 +173,15 @@ def test_agent_scope_lists_and_ownership(db, agent, admin_user):
     # A different district on purpose: bulk assignment below must move `mine` and NOT this one.
     theirs = OutletService.create(
         other_agent.id,
-        {**GROCERY, "name": "Navruz", "contact": None, "latitude": 41.35, "longitude": 69.20, "district": "yunusabad"},
+        {
+            **GROCERY,
+            "name": "Navruz",
+            # Not GROCERY's phone: that would make this shop a duplicate of `mine`.
+            "contact": {"name": "Nodir", "phone": "+998901113355", "role": "owner"},
+            "latitude": 41.35,
+            "longitude": 69.20,
+            "district": "yunusabad",
+        },
     )
 
     items, total = OutletService.list_for_agent(agent.id, "all")
@@ -282,6 +297,20 @@ def test_card_carries_money_and_bottle_fields(db, admin_user, requested):
     assert card["open_receivable"] == 0.0 and card["bottle_balance"] == 0.0
     assert card["last_orders"] == []
     assert card["contacts"][0]["phone"] == "+998901112266"
+
+
+def test_the_card_publishes_can_approve_only_for_a_viewer_and_never_to_the_onboarder(
+    db, agent, admin_user, requested
+):
+    """Spec §4.12: `can_approve` is the VIEWER's answer. A card read with no viewer (a service
+    caller, a script) carries no such key; the onboarder's own card says False; an active outlet
+    has nothing left to approve, for anyone."""
+    assert "can_approve" not in OutletService.card(requested)
+    assert OutletService.card(requested, viewer_user_id=admin_user.id)["can_approve"] is True
+    assert OutletService.card(requested, viewer_user_id=agent.id)["can_approve"] is False
+
+    approved = OutletService.approve(requested.id, actor_id=admin_user.id)
+    assert OutletService.card(approved, viewer_user_id=admin_user.id)["can_approve"] is False
 
 
 def _order_with_payment(db, user, status, amount):

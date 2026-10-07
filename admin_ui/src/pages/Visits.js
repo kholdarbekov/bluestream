@@ -194,7 +194,23 @@ const Visits = () => {
   ];
 
   const planColumns = [
-    { title: t('sales_agents:visits.plan_vs_fact.day', 'Day'), dataIndex: 'day', key: 'day' },
+    {
+      title: t('sales_agents:visits.plan_vs_fact.day', 'Day'),
+      dataIndex: 'day',
+      key: 'day',
+      // Only worked days count toward compliance (C11); the backend says which ones were not.
+      render: (value, record) => (record.day_status === 'worked' ? value : (
+        <Space size={4}>
+          {value}
+          <Tag>
+            {t('sales_agents:visits.plan_vs_fact.not_counted_day', {
+              defaultValue: 'Not counted: {{status}}',
+              status: t(`sales_agents:pay.day_status.${record.day_status}`, record.day_status),
+            })}
+          </Tag>
+        </Space>
+      )),
+    },
     { title: t('sales_agents:agent', 'Agent'), dataIndex: 'agent_name', key: 'agent_name' },
     {
       title: t('sales_agents:visits.plan_vs_fact.due', 'Due'),
@@ -206,6 +222,7 @@ const Visits = () => {
         ? <Tag>{t('sales_agents:visits.plan_vs_fact.no_plan', 'No plan')}</Tag>
         : value),
     },
+    { title: t('sales_agents:visits.plan_vs_fact.counted', 'Counted'), dataIndex: 'counted', key: 'counted' },
     { title: t('sales_agents:visits.plan_vs_fact.completed', 'Completed'), dataIndex: 'completed', key: 'completed' },
     { title: t('sales_agents:visits.plan_vs_fact.unplanned', 'Unplanned'), dataIndex: 'unplanned', key: 'unplanned' },
     { title: t('sales_agents:visits.plan_vs_fact.strike_rate', 'Strike rate'), dataIndex: 'strike_rate_pct', key: 'strike_rate_pct', render: pct },
@@ -249,6 +266,7 @@ const Visits = () => {
               columns={planColumns}
               dataSource={planRows}
               rowKey={(r) => `${r.agent_user_id}-${r.day}`}
+              onRow={(r) => (r.day_status === 'worked' ? {} : { style: { opacity: 0.55 } })}
               loading={planQuery.isLoading}
               pagination={false}
               size="small"

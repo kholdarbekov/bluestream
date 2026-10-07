@@ -31,6 +31,7 @@ from business_app.tasks.order_tasks import auto_confirm_pending_orders, cancel_a
 from business_app.utils import bot_webhook
 from business_app.utils.exceptions import ConflictError
 from shared.enums import EntitySubtype, OrderStatus, PaymentMethod, PaymentStatus
+from shared.staff_constants import SALES_AGENT_ORDER_STATES
 from tests.integration.test_outlet_create import GROCERY
 from tests.unit.test_order_tasks_auto_confirm import _aged_cash_order
 from tests.unit.test_outlet_dedupe import PIN, _customer
@@ -77,7 +78,7 @@ def linked_outlet(db, agent):
         UserAddress(user_id=customer.id, full_address="Chilonzor 5", latitude=PIN[0], longitude=PIN[1], is_default=True)
     )
     db.session.commit()
-    return OutletService.create(agent.id, {**GROCERY, "contact": None}, link_user_id=customer.id)
+    return OutletService.create(agent.id, dict(GROCERY), link_user_id=customer.id)
 
 
 def _place_order(agent, outlet, product, *, payment_method="cash", quantity=2):
@@ -133,18 +134,23 @@ def test_the_three_confirmation_states_are_one_published_vocabulary(
     they are unpacked from it -- and it is DISTINCT from `CONFIRMATION_STATUSES`, the request
     ROW's statuses, which share the word "confirmed" and do not mean the same thing by it.
     """
-    assert CONFIRMATION_STATES == ("auto_confirmed", "pending_confirmation", "confirmed")
+    # The shared tuple itself, not a restated copy: the same-day hold (compensation spec C14) made it
+    # four states, and the staff bot imports the same name (S-30).
+    assert CONFIRMATION_STATES == SALES_AGENT_ORDER_STATES
     assert set(CONFIRMATION_STATES) != set(CONFIRMATION_STATUSES)
     assert "pending" in CONFIRMATION_STATUSES and "pending" not in CONFIRMATION_STATES
 
     _spy(monkeypatch, sales_agent_tasks.push_agent_order_confirmation, "delay")
     # (1) somebody to ask
-    _order, pending_state = _place_order(agent, linked_outlet, sample_product)
+    first_order, pending_state = _place_order(agent, linked_outlet, sample_product)
     assert pending_state in CONFIRMATION_STATES and pending_state == "pending_confirmation"
 
-    # (2) nobody to ask — the store has no Telegram account
+    # (2) nobody to ask — the store has no Telegram account. Placed as the shop's first agent
+    # order of ITS day: the order above moves to yesterday, or the same-day hold (compensation
+    # spec C14) would answer instead (declared exception: `created_at` has no clock seam).
     customer = linked_outlet.user
     customer.telegram_id = None
+    first_order.created_at = first_order.created_at - timedelta(days=1)
     db.session.commit()
     VisitService.close(
         VisitService.current(agent.id),

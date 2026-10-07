@@ -19,6 +19,13 @@ RowKey = Tuple[Any, ...]
 
 BOTTLE_LEDGER_TABLE_NAME = "bottle_ledger"
 
+# Tables whose rows make an order undeletable: the walk below would delete them with the order,
+# and for these it must not. A pay ledger line is commission the business already owes an
+# agent. Deleted with its order, the commission would stand forever, because the ledger sync
+# can no longer see the order to reverse it. Refuse, never cascade.
+PROTECTED_TABLES = ("sales_pay_ledger_lines",)
+PROTECTED_REFUSAL = "sales-agent pay ledger lines reference this order; a credited order cannot be hard-deleted"
+
 
 class OrderDeletionService:
     """Delete an order and every dependent row by traversing FK relationships."""
@@ -95,6 +102,7 @@ class OrderDeletionService:
             "rows_by_table": rows_by_table,
             "deletion_order": deletion_order,
             "total_rows": sum(rows_by_table.values()),
+            "refused": PROTECTED_REFUSAL if any(table in rows_by_table for table in PROTECTED_TABLES) else None,
             "_row_keys_by_table": normalized_row_keys_by_table,
         }
 
@@ -105,6 +113,9 @@ class OrderDeletionService:
         if not row_keys_by_table or not deletion_order:
             return {}
 
+        # HERE for the reason the bottle-ledger fence below gives, and BEFORE it: that reversal
+        # is the first write this method makes.
+        self._refuse_protected(plan)
         metadata = self._reflect_metadata()
         deleted_rows_by_table: Dict[str, int] = {}
 
@@ -114,6 +125,9 @@ class OrderDeletionService:
             # plan and executes it directly, so a fence placed one level up would
             # be skipped by the exact path an operator actually uses.
             plan = self._plan_with_bottle_ledger_reversed(plan)
+            # The rebuilt plan is read again: a pay line posted since the preview refuses as well,
+            # and the rollback below undoes the reversal just written.
+            self._refuse_protected(plan)
             row_keys_by_table = plan["_row_keys_by_table"]
             deletion_order = plan["deletion_order"]
 
@@ -157,6 +171,7 @@ class OrderDeletionService:
             return {
                 "found": True,
                 "applied": False,
+                "refused": plan["refused"],
                 "order_number": plan["order_number"],
                 "order_ids": plan["order_ids"],
                 "rows_by_table": plan["rows_by_table"],
@@ -183,6 +198,12 @@ class OrderDeletionService:
             "deleted_rows_by_table": deleted_rows_by_table,
             "deleted_total_rows": sum(deleted_rows_by_table.values()),
         }
+
+    @staticmethod
+    def _refuse_protected(plan: Dict[str, Any]) -> None:
+        """Raise the plan's refusal, if it has one (`PROTECTED_TABLES`)."""
+        if plan.get("refused"):
+            raise RuntimeError(plan["refused"])
 
     def _plan_with_bottle_ledger_reversed(self, plan: Dict[str, Any]) -> Dict[str, Any]:
         """Reverse the plan's bottle-ledger rows, then rebuild the plan around them.

@@ -95,6 +95,15 @@ SCHEDULED_RELEASE_SWEEP_MINUTES = _int("SCHEDULED_RELEASE_SWEEP_MINUTES", 5)
 LOYALTY_POINTS_RATIO = _int("LOYALTY_POINTS_RATIO", 250)  # UZS per earned point (bootstrap default)
 
 
+# ─── Sales-agent pay ────────────────────────────────────────────────────
+# The largest sum one pay input may carry (an adjustment either way, a base salary, a penalty, a
+# penalty type's default, a plan's bonus amount or threshold). `pay_rules.check_amount_bound`
+# refuses anything above it with SALES_PAY_AMOUNT_INVALID before rounding: past it a typo
+# overflowed `Numeric(14,2)` (a 500), and one huge adjustment made the month's close 500 for
+# every agent at once.
+MAX_PAY_AMOUNT = _int("MAX_PAY_AMOUNT", 10_000_000_000)  # UZS per input
+
+
 # ─── OTP / Auth ─────────────────────────────────────────────────────────
 OTP_EXPIRY_SECONDS = _int("OTP_EXPIRY_SECONDS", 300)  # generic/email OTP (5 min)
 # Phone-registration OTP is a deliberately distinct, shorter flow (3 min) — do
@@ -297,3 +306,20 @@ SALES_SHORT_VISIT_SECONDS = _int("SALES_SHORT_VISIT_SECONDS", 60)
 # must come back as a clear 400, because a clamped answer is a number an owner
 # would read as the whole period and act on.
 SALES_METRICS_MAX_RANGE_DAYS = _int("SALES_METRICS_MAX_RANGE_DAYS", 92)
+
+# ─── Sales agents (pay: the earnings ledger sync, the same-day approval hold) ───
+# The ledger sync re-reads an agent order created within this many days, whatever changed it:
+# a late payment or a cash correction months later still moves the commission. It is also the
+# horizon of the agent's "on the way" pipeline.
+SALES_PAY_SYNC_LOOKBACK_DAYS = _int("SALES_PAY_SYNC_LOOKBACK_DAYS", 120)
+
+# ...plus any agent order whose row changed within this many days, however old it is.
+SALES_PAY_SYNC_TOUCH_DAYS = _int("SALES_PAY_SYNC_TOUCH_DAYS", 7)
+
+# An estimate syncs that agent's ledger first, at most once per this many seconds. A bot user
+# tapping "My earnings" twice gets the same figure without a second sync.
+SALES_PAY_ONDEMAND_SYNC_SECONDS = _int("SALES_PAY_ONDEMAND_SYNC_SECONDS", 120)
+
+# How long a held agent order's stock stays reserved while it waits for a manager. It is not a
+# decision deadline: a manager may still approve it the next morning.
+SALES_STAFF_APPROVAL_HOLD_HOURS = _int("SALES_STAFF_APPROVAL_HOLD_HOURS", 12)

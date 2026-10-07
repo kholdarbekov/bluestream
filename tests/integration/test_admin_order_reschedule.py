@@ -161,25 +161,6 @@ def rostered_driver(db):
 
 
 @pytest.fixture
-def manager_headers(db):
-    """A MANAGER: `validate_admin_action` reads the role off the DB row and grants `manage_orders`."""
-    manager = User(
-        email="resched-manager@example.com",
-        phone="+998901239002",
-        password_hash=hash_password("ManagerPassword123!"),
-        first_name="Malika",
-        last_name="Menejer",
-        user_type=UserType.STAFF,
-        role=UserRole.MANAGER,
-        is_verified=True,
-    )
-    db.session.add(manager)
-    db.session.commit()
-    token = create_access_token(identity=str(manager.id), additional_claims={"role": "manager"})
-    return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-
-
-@pytest.fixture
 def audit_events():
     """Every `audit_logger.log_event` call, bound against the real method's signature.
 
@@ -646,7 +627,7 @@ def test_a_reason_the_history_row_cannot_hold_is_refused_before_anything_moves(
 
 @pytest.mark.parametrize(
     "headers_fixture,expected_status",
-    [("manager_headers", 200), ("operator_auth_headers", 403), ("driver_auth_headers", 403)],
+    [("manager_claim_headers", 200), ("operator_auth_headers", 403), ("driver_auth_headers", 403)],
     ids=["manager", "operator", "driver"],
 )
 def test_admins_and_managers_may_reschedule_operators_and_drivers_may_not(

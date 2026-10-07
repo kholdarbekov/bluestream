@@ -18,10 +18,11 @@ from shared.enums import (
     PaymentMethod,
     PaymentStatus,
 )
+from business_app.utils.constants import ORDER_SOURCE_SALES_AGENT
 from business_app.utils.exceptions import InvalidStateTransition
 
 
-STAFF_ORDER_SOURCES: FrozenSet[str] = frozenset({"phone", "admin", "sales_agent"})
+STAFF_ORDER_SOURCES: FrozenSet[str] = frozenset({"phone", "admin", ORDER_SOURCE_SALES_AGENT})
 
 
 # Order: from CONFIRMED onward the customer-facing flow needs an address.

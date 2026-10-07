@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
+  Alert,
   Button,
   Card,
   Col,
@@ -39,6 +40,7 @@ import AddressMapPicker from '../components/AddressMapPicker';
 import tryoutService from '../services/tryoutService';
 import { formatDate, formatDateTimeShort } from '../utils/dateUtils';
 import AsyncButton from '../components/common/AsyncButton';
+import { apiErrorCode, extractApiErrorMessage } from '../utils/apiError';
 
 const { RangePicker } = DatePicker;
 const { Text } = Typography;
@@ -138,8 +140,13 @@ const toTryoutFormValues = (tryout) => ({
   outcome: tryout?.outcome,
 });
 
+// C12: the self-approval refusal a Convert click can still meet after `can_convert` drew it.
+const SELF_APPROVAL = 'SALES_OUTLET_SELF_APPROVAL';
+
 const Tryouts = () => {
-  const { t } = useTranslation('tryouts');
+  // `sales_agents` for the one refusal this page explains itself (SALES_OUTLET_SELF_APPROVAL).
+  const { t } = useTranslation(['tryouts', 'sales_agents']);
+  const [convertRefusal, setConvertRefusal] = useState(null);
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState();
@@ -260,9 +267,15 @@ const Tryouts = () => {
   });
 
   const convertMutation = useMutation({
-    mutationFn: (tryoutId) => tryoutService.convertTryout(tryoutId),
+    mutationFn: (tryoutId) => tryoutService.convertTryout(tryoutId, { handledErrorCodes: [SELF_APPROVAL] }),
+    // A race: `can_convert` drew the button, then the outlet turned out to be the viewer's own
+    // onboarding (C5). The request named the code, so this alert is the only message.
+    onError: (error) => {
+      if (apiErrorCode(error) === SELF_APPROVAL) setConvertRefusal(error);
+    },
 
     onSuccess: ({ tryout: updatedTryout, conversion }) => {
+      setConvertRefusal(null);
       const action = conversion?.action;
       const user = conversion?.user;
       if (action === 'created_user' && user) {
@@ -456,13 +469,16 @@ const Tryouts = () => {
           <Button onClick={() => openEdit(record)}>
             {t('edit', { defaultValue: 'Edit' })}
           </Button>
-          <AsyncButton
-            icon={<UserAddOutlined />}
-            disabled={record.outcome === 'converted'}
-            onClick={() => convertMutation.mutateAsync(record.id)}
-          >
-            {t('convert', { defaultValue: 'Convert' })}
-          </AsyncButton>
+          {/* Drawn from the backend's `can_convert` (C12), never from the stage alone. */}
+          {record.can_convert ? (
+            <AsyncButton
+              icon={<UserAddOutlined />}
+              disabled={record.outcome === 'converted'}
+              onClick={() => convertMutation.mutateAsync(record.id).catch(() => {})}
+            >
+              {t('convert', { defaultValue: 'Convert' })}
+            </AsyncButton>
+          ) : null}
         </Space>
       ),
     },
@@ -554,6 +570,17 @@ const Tryouts = () => {
         </Row>
       </Card>
 
+      {convertRefusal ? (
+        <Alert
+          type="error"
+          showIcon
+          closable
+          data-testid="convert-refusal"
+          style={{ marginBottom: 16 }}
+          onClose={() => setConvertRefusal(null)}
+          message={t('sales_agents:pay.error.sales_outlet_self_approval', { defaultValue: extractApiErrorMessage(convertRefusal) })}
+        />
+      ) : null}
       <Card>
         <Table
           loading={isLoading}
@@ -585,13 +612,15 @@ const Tryouts = () => {
             }}>
               {t('adjust_bottles', { defaultValue: 'Adjust Bottles' })}
             </Button>
-            <AsyncButton
-              type="primary"
-              disabled={selectedTryout?.outcome === 'converted'}
-              onClick={() => convertMutation.mutateAsync(selectedTryout?.id)}
-            >
-              {t('convert', { defaultValue: 'Convert' })}
-            </AsyncButton>
+            {selectedTryout?.can_convert ? (
+              <AsyncButton
+                type="primary"
+                disabled={selectedTryout?.outcome === 'converted'}
+                onClick={() => convertMutation.mutateAsync(selectedTryout?.id).catch(() => {})}
+              >
+                {t('convert', { defaultValue: 'Convert' })}
+              </AsyncButton>
+            ) : null}
           </Space>
         )}
       >

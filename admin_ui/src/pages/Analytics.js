@@ -102,9 +102,10 @@ const AGENT_METRIC_LABELS = new Map([
   ['new_outlets_registered', 'New outlets registered'],
   ['new_outlets_activated', 'New outlets activated'],
   ['orders_placed', 'Orders placed'],
-  ['orders_delivered_paid', 'Orders delivered & paid'],
-  ['bottles_delivered_paid', 'Bottles delivered & paid'],
-  ['revenue_delivered_paid', 'Revenue delivered & paid'],
+  // S-6: the same count the staff-bot card and the weekly email name, in their words.
+  ['orders_delivered_paid', 'Placed orders delivered and paid'],
+  ['bottles_delivered_paid', 'Bottles on placed orders delivered and paid'],
+  ['revenue_delivered_paid', 'Revenue on placed orders delivered and paid'],
   ['agent_orders_cancelled', 'Orders cancelled'],
   ['suggested_vs_accepted_pct', 'Suggested vs accepted %'],
   ['out_of_range_checkins', 'Out-of-range check-ins'],
@@ -650,12 +651,15 @@ const Analytics = () => {
     }
   ];
 
-  // R47: both halves of plan-vs-fact come from the snapshotted days only, so a night the 01:20
-  // job missed costs the ratio precision rather than truth. The header says so, because
-  // "Plan vs fact %" on its own reads as a promise about the whole period. A `title` attribute
-  // rather than an antd Tooltip: one column needs it, and the native hint needs no portal.
+  // C4: plan-vs-fact counts a due outlet only when a verified visit reached it (a real check-in
+  // lasting at least the short-visit threshold), and both halves come from snapshotted WORKED
+  // days only, so a holiday, an unpaid day, a day outside employment or a night the 01:20 job
+  // missed leaves the ratio instead of poisoning it. The header says so, because "Plan vs fact %"
+  // on its own reads as a promise about the whole period. A `title` attribute rather than an
+  // antd Tooltip: one column needs it, and the native hint needs no portal. The default is the
+  // seed's en value.
   const planVsFactHint = t('sales_agents:analytics.agent_performance.plan_vs_fact_hint', {
-    defaultValue: 'Measured only on days that had a plan',
+    defaultValue: 'Due outlets that got a real check-in lasting at least 1 minute, on worked days only',
   });
 
   const agentPerformanceColumns = [

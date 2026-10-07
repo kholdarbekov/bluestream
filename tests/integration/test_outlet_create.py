@@ -51,7 +51,8 @@ def test_create_prospect_records_contact_history_and_attribution(db, agent):
 
 def test_duplicate_is_refused_unless_forced_and_candidates_are_kept(db, agent):
     OutletService.create(agent.id, dict(GROCERY))
-    again = {**GROCERY, "latitude": NEAR[0], "longitude": NEAR[1], "contact": {"name": "Other", "phone": None}}
+    # Its own phone, so the only thing it shares with the first shop is a name ~55 m away.
+    again = {**GROCERY, "latitude": NEAR[0], "longitude": NEAR[1], "contact": {"name": "Other", "phone": "+998901112255"}}
 
     with pytest.raises(ConflictError) as excinfo:
         OutletService.create(agent.id, dict(again))
@@ -69,7 +70,7 @@ def test_link_existing_grocery_customer_makes_the_outlet_active(db, agent):
     db.session.add(address)
     db.session.commit()
 
-    outlet = OutletService.create(agent.id, {**GROCERY, "contact": None}, link_user_id=customer.id)
+    outlet = OutletService.create(agent.id, dict(GROCERY), link_user_id=customer.id)
 
     assert outlet.user_id == customer.id and outlet.address_id == address.id and outlet.stage == "active"
     assert _history(outlet) == [(None, "prospect", "created"), ("prospect", "active", "linked")]
@@ -82,7 +83,6 @@ def test_link_existing_grocery_customer_makes_the_outlet_active(db, agent):
         {
             **GROCERY,
             "name": "Bahor market, Yunusobod",
-            "contact": None,
             "latitude": FAR[0],
             "longitude": FAR[1],
             "address_text": "Yunusobod 19-kvartal, 4",
@@ -111,7 +111,7 @@ def test_link_creates_its_own_address_when_the_free_default_is_somewhere_else(db
     db.session.commit()
     office_id = office.id
 
-    outlet = OutletService.create(agent.id, {**GROCERY, "contact": None}, link_user_id=customer.id)
+    outlet = OutletService.create(agent.id, dict(GROCERY), link_user_id=customer.id)
 
     assert outlet.stage == "active" and outlet.address_id not in (None, office_id)
     shop = UserAddress.query.get(outlet.address_id)
@@ -154,27 +154,28 @@ def test_link_adopts_the_nearest_free_address_and_never_a_held_one(db, agent):
     db.session.commit()
     before = {a.id for a in UserAddress.query.filter_by(user_id=customer.id)}
 
-    outlet = OutletService.create(agent.id, {**GROCERY, "contact": None}, link_user_id=customer.id)
+    outlet = OutletService.create(agent.id, dict(GROCERY), link_user_id=customer.id)
 
     assert (outlet.stage, outlet.address_id) == ("active", near.id)
     assert {a.id for a in UserAddress.query.filter_by(user_id=customer.id)} == before
 
 
-def test_a_pin_less_link_falls_back_to_the_free_default_and_takes_its_pin(db, agent):
-    """R39's pin-less branch (API-only — the bot always sends a pin): with no place to compare,
-    the same-place check is skipped and the account's default is adopted while it is free,
-    lending the outlet its pin."""
+def test_a_pin_less_link_is_refused_before_anything_is_written(db, agent):
+    """D31 R3: every create carries both coordinates, the 🔗 Link included. The pin-less fallback
+    this used to pin (adopt the account's free default, borrow its pin) is still reached by a
+    converted try-out on a pin-less trial outlet from before D31, and is pinned there:
+    tests/unit/test_sales_nightly_jobs.py::TestStageSweep::
+    test_a_pin_less_trial_outlet_adopts_its_customers_free_default_and_takes_its_pin."""
     customer = _customer(db, "+998901112347", company="Bahor", subtype=EntitySubtype.GROCERY_STORE)
     home = UserAddress(user_id=customer.id, full_address="Chilonzor 5", latitude=PIN[0], longitude=PIN[1], is_default=True)
     db.session.add(home)
     db.session.commit()
 
-    outlet = OutletService.create(
-        agent.id, {**GROCERY, "contact": None, "latitude": None, "longitude": None}, link_user_id=customer.id
-    )
+    with pytest.raises(ValidationError) as excinfo:
+        OutletService.create(agent.id, {**GROCERY, "latitude": None, "longitude": None}, link_user_id=customer.id)
 
-    assert (outlet.stage, outlet.address_id) == ("active", home.id)
-    assert (outlet.latitude, outlet.longitude) == PIN
+    assert excinfo.value.error_code == "SALES_OUTLET_PIN_REQUIRED"
+    assert Outlet.query.count() == 0
     assert UserAddress.query.filter_by(user_id=customer.id).count() == 1
 
 
@@ -184,7 +185,7 @@ def test_linking_an_account_with_no_address_gives_the_outlet_one(db, agent):
     exactly that — a shop at stage `active` nobody can place an order for."""
     customer = _customer(db, "+998901112344", company="Navruz", subtype=EntitySubtype.GROCERY_STORE)
 
-    outlet = OutletService.create(agent.id, {**GROCERY, "name": "Navruz market", "contact": None}, link_user_id=customer.id)
+    outlet = OutletService.create(agent.id, {**GROCERY, "name": "Navruz market"}, link_user_id=customer.id)
 
     assert outlet.stage == "active" and outlet.address_id is not None
     address = UserAddress.query.get(outlet.address_id)
@@ -194,7 +195,7 @@ def test_linking_an_account_with_no_address_gives_the_outlet_one(db, agent):
 def test_link_refuses_a_customer_of_another_type(db, agent):
     workplace = _customer(db, "+998901112288", company="Office", subtype=EntitySubtype.WORKPLACE)
     with pytest.raises(ConflictError) as excinfo:
-        OutletService.create(agent.id, {**GROCERY, "contact": None}, link_user_id=workplace.id)
+        OutletService.create(agent.id, dict(GROCERY), link_user_id=workplace.id)
     assert excinfo.value.error_code == "SALES_APPROVAL_PHONE_TAKEN"
 
 
@@ -215,9 +216,19 @@ def test_individual_with_phone_is_activated_immediately(db, agent):
     assert address.user_id == user.id and address.is_default is True and address.is_business is False
 
 
-def test_individual_without_phone_stays_a_prospect(db, agent):
-    outlet = OutletService.create(agent.id, {"name": "Someone", "outlet_type": "individual", "latitude": PIN[0], "longitude": PIN[1]})
-    assert outlet.stage == "prospect" and outlet.user_id is None
+def test_individual_without_phone_is_refused_and_nothing_is_written(db, agent):
+    """D31 R1. It used to be stored as a prospect no bot path could ever move (the phase-1 ledger's
+    accepted gap): an individual is activated at creation, on this very phone."""
+    users_before = User.query.count()
+
+    with pytest.raises(ValidationError) as excinfo:
+        OutletService.create(
+            agent.id, {"name": "Someone", "outlet_type": "individual", "latitude": PIN[0], "longitude": PIN[1]}
+        )
+
+    assert excinfo.value.error_code == "SALES_OUTLET_PHONE_REQUIRED"
+    assert Outlet.query.count() == 0
+    assert User.query.count() == users_before
 
 
 def test_phone_only_contact_borrows_the_outlet_name(db, agent):

@@ -2,15 +2,18 @@ import React, { useState } from 'react';
 import {
     Card, Table, Tag, Space, Button, Input, Select, Row, Col,
     Statistic, Switch, Drawer, Descriptions, Typography, message,
-    Modal, Form, InputNumber,
+    Modal, Form, InputNumber, Tabs,
 } from 'antd';
 import {
     SearchOutlined, UserOutlined, PhoneOutlined, ReloadOutlined, PlusOutlined, EditOutlined, LinkOutlined, CopyOutlined,
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
+import { useLocation } from 'react-router-dom';
 import staffService from '../services/staffService';
 import api from '../services/api';
+import { useAuthStore } from '../stores/authStore';
+import AgentPayTab from '../components/sales/pay/AgentPayTab';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -28,8 +31,13 @@ const SalesAgents = () => {
     const [search, setSearch] = useState('');
     const [statusFilter, setStatusFilter] = useState(undefined);
 
-    const [selectedAgent, setSelectedAgent] = useState(null);
-    const [drawerOpen, setDrawerOpen] = useState(false);
+    const canManagePay = useAuthStore().hasPermission('can_manage_sales_pay');
+    // The pay month view's "Set pay terms" lands here with the agent in the router state
+    // (§6.2): the drawer opens on that agent's Pay tab.
+    const payAgent = useLocation().state?.payAgent;
+    const [selectedAgent, setSelectedAgent] = useState(payAgent || null);
+    const [drawerOpen, setDrawerOpen] = useState(Boolean(payAgent));
+    const [drawerTab, setDrawerTab] = useState(payAgent ? 'pay' : 'details');
     const [editorOpen, setEditorOpen] = useState(false);
     const [editingAgent, setEditingAgent] = useState(null);
     const [inviteModalOpen, setInviteModalOpen] = useState(false);
@@ -85,6 +93,8 @@ const SalesAgents = () => {
 
     const items = data?.data?.data?.items || [];
     const total = data?.data?.meta?.total || 0;
+    // A deep-linked agent arrives as {user_id, full_name}; the list row, once loaded, fills the rest.
+    const drawerAgent = items.find((row) => row.user_id === selectedAgent?.user_id) || selectedAgent;
     const summary = data?.data?.meta?.summary || {};
 
     const openCreateModal = () => {
@@ -278,21 +288,39 @@ const SalesAgents = () => {
             </Card>
 
             <Drawer
-                title={selectedAgent?.full_name || t('sales_agents:agent_details', 'Details')}
+                title={drawerAgent?.full_name || t('sales_agents:agent_details', 'Details')}
                 open={drawerOpen}
-                onClose={() => { setDrawerOpen(false); setSelectedAgent(null); }}
-                width={520}
+                onClose={() => { setDrawerOpen(false); setSelectedAgent(null); setDrawerTab('details'); }}
+                width={640}
             >
-                {selectedAgent ? (
-                    <Descriptions column={1} bordered size="small">
-                        <Descriptions.Item label={t('sales_agents:contact_name', 'Name')}>{selectedAgent.full_name}</Descriptions.Item>
-                        <Descriptions.Item label={t('sales_agents:phone', 'Phone')}>{selectedAgent.phone}</Descriptions.Item>
-                        <Descriptions.Item label={t('sales_agents:districts', 'Districts')}>{(selectedAgent.districts || []).join(', ') || '—'}</Descriptions.Item>
-                        <Descriptions.Item label={t('sales_agents:weekly_target', 'Weekly new-outlet target')}>{selectedAgent.weekly_new_outlet_target ?? '—'}</Descriptions.Item>
-                        <Descriptions.Item label={t('sales_agents:employment_type', 'Employment')}>{selectedAgent.employment_type || '—'}</Descriptions.Item>
-                        <Descriptions.Item label={t('sales_agents:telegram_linked', 'Telegram linked')}>{selectedAgent.telegram_linked ? t('ui.common.yes', 'Yes') : t('ui.common.no', 'No')}</Descriptions.Item>
-                        <Descriptions.Item label={t('sales_agents:notes', 'Notes')}>{selectedAgent.notes || '—'}</Descriptions.Item>
-                    </Descriptions>
+                {drawerAgent ? (
+                    <Tabs
+                        activeKey={drawerTab}
+                        onChange={setDrawerTab}
+                        items={[
+                            {
+                                key: 'details',
+                                label: t('sales_agents:agent_details', 'Details'),
+                                children: (
+                                    <Descriptions column={1} bordered size="small">
+                                        <Descriptions.Item label={t('sales_agents:contact_name', 'Name')}>{drawerAgent.full_name}</Descriptions.Item>
+                                        <Descriptions.Item label={t('sales_agents:phone', 'Phone')}>{drawerAgent.phone}</Descriptions.Item>
+                                        <Descriptions.Item label={t('sales_agents:districts', 'Districts')}>{(drawerAgent.districts || []).join(', ') || '—'}</Descriptions.Item>
+                                        <Descriptions.Item label={t('sales_agents:weekly_target', 'Weekly new-outlet target')}>{drawerAgent.weekly_new_outlet_target ?? '—'}</Descriptions.Item>
+                                        <Descriptions.Item label={t('sales_agents:employment_type', 'Employment')}>{drawerAgent.employment_type || '—'}</Descriptions.Item>
+                                        <Descriptions.Item label={t('sales_agents:telegram_linked', 'Telegram linked')}>{drawerAgent.telegram_linked ? t('ui.common.yes', 'Yes') : t('ui.common.no', 'No')}</Descriptions.Item>
+                                        <Descriptions.Item label={t('sales_agents:notes', 'Notes')}>{drawerAgent.notes || '—'}</Descriptions.Item>
+                                    </Descriptions>
+                                ),
+                            },
+                            // Pay is admin-only (C13); a manager's drawer is exactly today's.
+                            ...(canManagePay ? [{
+                                key: 'pay',
+                                label: t('sales_agents:pay.terms.tab', 'Pay'),
+                                children: <AgentPayTab agentUserId={drawerAgent.user_id} active={drawerTab === 'pay'} />,
+                            }] : []),
+                        ]}
+                    />
                 ) : null}
             </Drawer>
 

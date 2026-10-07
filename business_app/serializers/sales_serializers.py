@@ -1,10 +1,11 @@
 """Request models and dict serializers for the sales module (agents, outlets)."""
 
 from datetime import date, datetime, time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from business_app.models.sales_visits import AGENT_ORDER_APPROVAL_STATUSES
 from business_app.utils.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from business_app.utils.local_windows import parse_date_range
 from business_app.utils.timezone_utils import ensure_utc
@@ -68,6 +69,15 @@ class UpdateContactPayload(_Payload):
     role: Optional[str] = None
     presence_window: Optional[str] = Field(default=None, max_length=100)
     is_primary: Optional[bool] = None
+
+
+class SetPrimaryPhonePayload(_Payload):
+    """`PUT /staff/sales/outlets/<id>/primary-phone` (D31.4). `phone` is Optional on purpose: an
+    empty value must reach `OutletService.set_primary_phone`, whose refusal carries a code
+    (SALES_OUTLET_PHONE_REQUIRED). A required field here would be an uncoded pydantic 400, which
+    the bot can only render as generic copy."""
+
+    phone: Optional[str] = Field(default=None, max_length=20)
 
 
 class CreateOutletPayload(_Payload):
@@ -263,8 +273,8 @@ class DateRangeQuery(_Payload):
         return parse_date_range(self.start_date, self.end_date, now=now)
 
 
-class PaginatedRangeQuery(DateRangeQuery):
-    """A windowed LIST query: the period, plus the page the table asked for.
+class PageQuery(_Payload):
+    """The page a table asked for.
 
     `page`/`per_page` CLAMP rather than refuse, and they clamp HERE — the one home. antd's
     pager sends whatever it is holding, so `?per_page=500` has to come back as a hundred rows
@@ -275,7 +285,10 @@ class PaginatedRangeQuery(DateRangeQuery):
     the model did not is exactly how `?per_page=500` reaches `PaginationMeta` as a validation
     error instead of a page.
 
-    Every sales list route that pages inherits this rather than restating the two fields.
+    Every sales list route that pages inherits this rather than restating the two fields: through
+    `PaginatedRangeQuery` when the list is windowed by date, directly when it is not (the
+    order-approval queue, the pay lists). `_Payload` is `extra="ignore"`, so an unknown query key
+    (a cache-buster) stays harmless.
     """
 
     page: int = 1
@@ -290,6 +303,11 @@ class PaginatedRangeQuery(DateRangeQuery):
     @classmethod
     def _per_page_cap(cls, value: int) -> int:
         return min(max(1, value), MAX_PAGE_SIZE)
+
+
+class PaginatedRangeQuery(DateRangeQuery, PageQuery):
+    """A windowed LIST query: the period (`DateRangeQuery`), plus the page the table asked for
+    (`PageQuery`)."""
 
 
 class AdminVisitsQuery(PaginatedRangeQuery):
@@ -538,6 +556,11 @@ def serialize_plan_vs_fact_row(row) -> Dict[str, Any]:
     saying which of the two it is. "Nobody recorded what was due" and "nothing was due" are
     different answers, and collapsing them scores a perfect day for every date before the
     snapshot job shipped.
+
+    `counted` and `day_status` are `AgentDayPlanService.compliance`'s per-day answer (C4): the
+    due outlets a verified visit reached, and whether the day is a worked one at all. A day that
+    is not worked publishes `counted: 0` beside its `due`, which is why the status travels with
+    it: the table shows the day as excluded instead of as a zero score.
     """
     return {
         "agent_user_id": row["agent_user_id"],
@@ -545,9 +568,11 @@ def serialize_plan_vs_fact_row(row) -> Dict[str, Any]:
         "day": _iso(row["day"]),
         "due": row["due"],
         "completed": row["completed"],
+        "counted": row["counted"],
         "unplanned": row["unplanned"],
         "strike_rate_pct": row["strike_rate_pct"],
         "plan_source": row["plan_source"],
+        "day_status": row["day_status"],
     }
 
 
@@ -673,4 +698,88 @@ def serialize_exception_row(row: Dict[str, Any]) -> Dict[str, Any]:
         "outlet_name": row["outlet_name"],
         "visit_id": row["visit_id"],
         "detail": row["detail"],
+    }
+
+
+def person_ref(user) -> Optional[Dict[str, Any]]:
+    """A user as the read models name a person: `{id, name}`, or None when there is no user."""
+    return None if user is None else {"id": user.id, "name": user.full_name}
+
+
+# --- The same-day hold's queue (compensation spec C14, §5.7) ---
+
+
+class AgentOrderApprovalQuery(PageQuery):
+    """`GET /admin/sales/order-approvals`'s query string (OA1), typed once.
+
+    Extends the sales page clamp (§5.7), so `page`/`per_page` clamp exactly as on every sales
+    list; the queue is not windowed, so it takes no dates. An unknown `status` is a pydantic error
+    (a `ValueError`), which `handle_api_exception` answers with 400.
+    """
+
+    status: Literal[AGENT_ORDER_APPROVAL_STATUSES] = "pending"
+    agent_id: Optional[int] = None
+
+
+class _ApproveAgentOrderPayload(BaseModel):
+    """OA2's body: nothing. `extra="forbid"`, so a stray key is a 400 rather than ignored."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class _RejectAgentOrderPayload(BaseModel):
+    """OA3's body. `reason: Any` on purpose: `OrderService.require_admin_reason` is the ONE
+    validator of it, a number or a list included (F6), so both admin cancel paths answer alike."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: Any = None
+
+
+def serialize_agent_order_approval(row, *, earlier: Mapping[int, Any], viewer) -> Dict[str, Any]:
+    """`ApprovalRow` (§5.7): EXACTLY these keys, pinned by T-HOLD-11.
+
+    Order data only, the class a manager already reads on /admin/orders: the order is
+    `serialize_order_placed` plus its rail and items; each earlier order is the brief plus when and
+    by whom it was placed, with its LIVE status (the ids themselves are the frozen evidence, I-22).
+    No pay field of any kind (C11). `self_decided` and `can_decide` are the service's answers; the
+    page draws its buttons from `can_decide` only. `earlier` and `viewer` come from the service's
+    `ApprovalPage`, loaded once per request.
+    """
+    from business_app.services.sales.agent_order_approval_service import AgentOrderApprovalService
+
+    order = row.order
+    return {
+        "order_id": row.order_id,
+        "status": row.status,
+        "requested_at": _iso(row.requested_at),
+        "decided_at": _iso(row.decided_at),
+        "agent": person_ref(row.agent),
+        "outlet": {"id": row.outlet.id, "name": row.outlet.name},
+        "visit_id": order.visit_id,
+        "order": {
+            **serialize_order_placed(order),
+            "payment_method": getattr(order.payment_method, "value", order.payment_method),
+            "items": [
+                {
+                    "product_id": item.product_id,
+                    "product_name": item.product.name if item.product is not None else None,
+                    "quantity": int(item.quantity),
+                }
+                for item in order.order_items
+            ],
+        },
+        "earlier_orders": [
+            {
+                **serialize_order_brief(earlier[order_id]),
+                "created_at": _iso(earlier[order_id].created_at),
+                "placed_by": person_ref(earlier[order_id].created_by_staff),
+            }
+            for order_id in (row.earlier_order_ids or [])
+            if order_id in earlier
+        ],
+        "decided_by": person_ref(row.decided_by),
+        "reason": row.reason,
+        "self_decided": AgentOrderApprovalService.self_decided(row),
+        "can_decide": AgentOrderApprovalService.can_decide(row, viewer),
     }

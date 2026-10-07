@@ -63,11 +63,17 @@ def main() -> int:
             'rows_by_table': plan['rows_by_table'],
             'deletion_order': plan['deletion_order'],
             'total_rows': plan['total_rows'],
+            'refused': plan['refused'],
         }
 
         if not args.apply:
             _print_result(preview)
             return 0
+
+        if plan['refused']:
+            # The service refuses to apply this plan; say so before anyone types DELETE.
+            _print_result(preview)
+            return 1
 
         if not args.yes:
             confirmation = input(

@@ -25,7 +25,8 @@ class SalesApprovalsHandler(BaseHandler):
     sales-agent-only AND assignment-checked, so an operator cannot fetch it.
     The card is rendered from the LIST item instead — a plain
     `serialize_outlet`, which is why `format_outlet_card` prints no money lines
-    here (it needs `open_receivable`, which only the agent's GET carries).
+    here (it needs `open_receivable`, which only the agent's cards carry: the
+    GET and, since D31, the create, request-activation and set-phone replies).
     """
 
     async def _render(self, update: Update, text: str, keyboard) -> None:
@@ -91,6 +92,11 @@ class SalesApprovalsHandler(BaseHandler):
                 )
                 return
             candidate = outlet.get('account_candidate') or {}
+            # Compensation spec §4.12, §7.4: whether THIS operator may approve the row is the
+            # backend's answer (`OutletService.can_approve`, on every queue row). The bot
+            # compares no ids of its own. A row without the flag is read as approvable, and the
+            # backend's refusal (`staff.sales.error.approval_self`) still guards the door.
+            can_approve = outlet.get('can_approve') is not False
             text = format_outlet_card(outlet, language)
             if candidate:
                 # Published on the activation-request row (D25 rule 3): the
@@ -103,10 +109,15 @@ class SalesApprovalsHandler(BaseHandler):
                     account=escape_html(candidate.get('name') or ''),
                     count=candidate.get('outlet_count') or 0,
                 )
+            if not can_approve:
+                # Said, not just withheld: an operator who finds no Approve on a card would
+                # otherwise read it as a broken button.
+                text += "\n\n" + i18n.get('staff.sales.approvals.own_outlet', language)
             await self._render(
                 update, text,
                 SalesKeyboards.approval_actions(
-                    language, outlet_id, has_account_candidate=bool(candidate)
+                    language, outlet_id, has_account_candidate=bool(candidate),
+                    can_approve=can_approve,
                 ),
             )
         except Exception as e:

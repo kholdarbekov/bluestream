@@ -549,6 +549,37 @@ async def test_same_as_last_time_repeats_what_the_outlet_took(monkeypatch):
     assert "🕘" not in receipt.text
 
 
+async def test_a_held_order_says_a_manager_decides_and_nothing_else(monkeypatch):
+    """Compensation spec §7.6, §10.4 (C14): the outlet already has an order from today.
+
+    `POST …/order` answers `confirmation.state: "awaiting_staff_approval"`. The receipt says a
+    manager decides and promises a message on their decision; it prints none of the three
+    store-side lines (the store is never asked, §7.6); and the visit moves on to the close
+    step exactly as for any order.
+    """
+    harness, ops, _labels = await _agent(monkeypatch)
+    _freeze_today(monkeypatch)
+    await _to_order(harness, ops)
+    harness.backend.route("POST", ORDER,
+                          lambda c: _order_response(state="awaiting_staff_approval"))
+
+    await harness.send(ops.tap("staff_sales_v_orderlast"))
+    await harness.send(ops.tap("staff_sales_v_day_tomorrow"))
+    await harness.send(ops.tap("staff_sales_v_skip_notes"))
+    await harness.send(ops.tap("staff_sales_v_orderconfirm"))
+
+    receipt = harness.telegram.shown[-2]
+    assert receipt.text.split("\n")[:2] == [
+        "Order SA_000413_26 created.",
+        "This outlet already has an order from today, so a manager has to approve this one "
+        "before it goes to delivery. You will get a message when a manager approves or rejects it.",
+    ]
+    for other in ("order_pending_confirmation", "order_confirmed", "order_auto_confirmed"):
+        assert _curated(f"staff.sales.visit.{other}") not in receipt.text, other
+    assert _curated("staff.sales.visit.close_notes_prompt") in harness.telegram.last_shown().text
+    assert harness.conversation_state(CONV) == V_CLOSE
+
+
 async def test_the_receipt_prints_the_total_the_store_was_actually_charged(monkeypatch):
     """The quote and the charge are two numbers, and only the second is a bill.
 

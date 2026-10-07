@@ -480,6 +480,20 @@ class OrderEditService:
                         f"product_id={existing_item.product_id}, got {spec.product_id}"
                     )
                     continue
+                if existing_item.id in seen_existing_ids:
+                    # A product-path (null order_item_id) spec earlier in the payload
+                    # already bound to this same line by product, or another id-path
+                    # spec already claimed it (e.g. the admin's minus button appends a
+                    # {order_item_id, quantity: 0} removal AFTER an "Add Item" row that
+                    # re-adds the same product with no id, which binds to this line —
+                    # see the product-path duplicate check below). Without this guard,
+                    # the plan would hold two changes for one line (set qty, then
+                    # remove), and preview/apply would silently honour only one.
+                    plan.blocking_reasons.append(
+                        f"duplicate_product: product_id={spec.product_id} appears "
+                        f"in multiple specs for order_item_id={existing_item.id}"
+                    )
+                    continue
                 seen_existing_ids.add(existing_item.id)
             else:
                 existing_item = existing_by_product.get(spec.product_id)
@@ -781,7 +795,11 @@ class OrderEditService:
                 CorporatePrepaymentLedger.query.filter_by(order_item_id=change.existing_item.id).update(
                     {"order_item_id": None}, synchronize_session=False
                 )
-                db.session.delete(change.existing_item)
+                # Through the loaded collection, not a bare `session.delete`: `_recompute_totals` sums
+                # `order.order_items`, and a deleted row stays in a loaded collection until it expires,
+                # so the stored total would still count the removed line. delete-orphan still deletes
+                # the row (and its marking-code allocations) at the next flush.
+                order.order_items.remove(change.existing_item)
                 continue
             if change.direction == "add":
                 new_item = OrderItem(
@@ -792,7 +810,11 @@ class OrderEditService:
                     discount_amount=Decimal("0.00"),
                     total_price=change.unit_price * Decimal(change.new_quantity),
                 )
-                db.session.add(new_item)
+                # Through the loaded collection, not a bare `session.add`: `_recompute_totals`
+                # sums `order.order_items`, which already holds the pre-edit lines and would
+                # never see a row only the session knows about, so the stored total would
+                # leave the new line out.
+                order.order_items.append(new_item)
                 db.session.flush()
                 change.existing_item = new_item
                 continue

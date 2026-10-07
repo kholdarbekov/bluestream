@@ -1478,6 +1478,12 @@ class AuthService:
             "can_view_admin_panel": False,
             "can_manage_settings": False,
             "can_manage_translations": False,
+            # Sales-agent pay (spec §5.6): the admin UI's Compensation nav, route and queries read this;
+            # `super_admin_required` on every /admin/sales/pay route states the same rule.
+            "can_manage_sales_pay": False,
+            # The same-day hold's queue (C14, §5.6): the admin UI's Order approvals nav, route guard
+            # and badge read this; `manager_or_higher_required` on OA1-OA3 states the same rule.
+            "can_review_agent_orders": False,
         }
         # Get role value for comparison (handle both enum and string)
         role_value = user.role.value if hasattr(user.role, "value") else user.role
@@ -1497,6 +1503,8 @@ class AuthService:
                     "can_view_admin_panel": True,
                     "can_manage_settings": role_value == UserRole.ADMIN.value,
                     "can_manage_translations": role_value == UserRole.ADMIN.value,
+                    "can_manage_sales_pay": role_value == UserRole.ADMIN.value,
+                    "can_review_agent_orders": True,
                 }
             )
         elif role_value == UserRole.OPERATOR.value:

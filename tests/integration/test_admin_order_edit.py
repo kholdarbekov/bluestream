@@ -1188,3 +1188,325 @@ def test_edit_preview_totals_dicts_publish_every_line_the_total_subtracts(
     # the total, so a hardcoded-zero (or any other wrong constant) still fails.
     assert Decimal(str(projected["totals_before"]["tier_discount"])) == tier_discount
     assert Decimal(str(projected["totals_after"]["tier_discount"])) == tier_discount
+
+
+# -------------------------------------------------------------------------
+# Adding a product line (the admin UI's "add product" row: orderItemId None)
+# -------------------------------------------------------------------------
+
+
+def _second_product(sample_category, *, price: str = "8000.00") -> "Product":
+    from business_app.models.product import Product
+
+    product = Product(
+        name="Lemonade 5L",
+        category_id=sample_category.id,
+        size="5L",
+        base_price=Decimal(price),
+        stock_quantity=100,
+        min_stock_level=0,
+        max_stock_level=1000,
+        is_active=True,
+    )
+    _db.session.add(product)
+    _db.session.commit()
+    return product
+
+
+def _returning_customer(user) -> None:
+    """Give `user` the loyalty account every returning customer already holds.
+
+    Without one, the edit's points estimate creates it and COMMITS in mid-plan, which expires
+    the order and reloads `order.order_items` after the new line is written, so a stale
+    collection never shows. A known customer's edit takes no such commit.
+    """
+    LoyaltyService().get_or_create_loyalty_account(user.id)
+
+
+def test_apply_edit_added_line_is_in_the_stored_total(
+    client, db, admin_claim_headers, sample_user, sample_product, sample_category
+):
+    """A new line must reach the stored subtotal and total, not only the plan's projection.
+
+    4 × 15,000 + a 3,000 fee = 63,000; the admin adds 3 × 8,000 lemonade: subtotal
+    60,000 + 24,000 = 84,000, total 87,000. The history's projected `totals_after`, the
+    stored order and the admin order detail the UI re-reads all say 87,000.
+    """
+    _returning_customer(sample_user)
+    order = _seed_order_with_item(sample_user, sample_product, quantity=4)
+    lemonade = _second_product(sample_category)
+    payload = {
+        "items": [
+            {"orderItemId": order.order_items[0].id, "productId": sample_product.id, "quantity": 4},
+            {"orderItemId": None, "productId": lemonade.id, "quantity": 3},
+        ],
+        "reason": "customer added 3 lemonades",
+    }
+
+    resp = client.post(f"/api/v1/admin/orders/{order.id}/edit", json=payload, headers=admin_claim_headers)
+
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    history = OrderEditHistory.query.get(resp.get_json()["data"]["history_id"])
+    assert Decimal(str(history.diff["totals_after"]["total_amount"])) == Decimal("87000.00")
+    _db.session.expire_all()
+    stored = Order.query.get(order.id)
+    assert sorted((item.product_id, item.quantity) for item in stored.order_items) == sorted(
+        [(sample_product.id, 4), (lemonade.id, 3)]
+    )
+    assert (stored.subtotal, stored.total_amount) == (Decimal("84000.00"), Decimal("87000.00"))
+
+    detail = client.get(f"/api/v1/admin/orders/{order.id}", headers=admin_claim_headers)
+    assert detail.status_code == 200, detail.get_data(as_text=True)
+    shown = detail.get_json()["data"]["order"]
+    assert (shown["subtotal"], shown["total_amount"]) == (84000.0, 87000.0)
+    assert sorted((item["product_id"], item["quantity"]) for item in shown["items"]) == sorted(
+        [(sample_product.id, 4), (lemonade.id, 3)]
+    )
+
+
+def test_apply_edit_added_line_on_a_delivered_cash_order_is_owed(
+    client, db, admin_claim_headers, sample_user, sample_product, sample_category
+):
+    """Delivered and paid 63,000 in cash; the admin adds 1 × 8,000 lemonade. The total is
+    71,000, so the payment is re-priced to 71,000 and the 8,000 is owed: the stored figures
+    agree with the cash cascade's "additional_cash_collection_required"."""
+    _returning_customer(sample_user)
+    order = _seed_paid_cash_delivered_order(sample_user, sample_product, quantity=4)
+    lemonade = _second_product(sample_category)
+    payload = {
+        "items": [{"orderItemId": None, "productId": lemonade.id, "quantity": 1}],
+        "reason": "customer took a lemonade at the door; cash to be collected later",
+    }
+
+    resp = client.post(f"/api/v1/admin/orders/{order.id}/edit", json=payload, headers=admin_claim_headers)
+
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert resp.get_json()["data"]["cascade_summary"]["cash"]["action"] == "additional_cash_collection_required"
+    _db.session.expire_all()
+    stored = Order.query.get(order.id)
+    assert (stored.subtotal, stored.total_amount) == (Decimal("68000.00"), Decimal("71000.00"))
+    pay = stored.payment
+    assert (pay.amount, pay.amount_collected, pay.outstanding_amount) == (
+        Decimal("71000.00"),
+        Decimal("63000.00"),
+        Decimal("8000.00"),
+    )
+    assert pay.status == PaymentStatus.PARTIALLY_PAID
+    assert stored.is_paid is False
+
+
+# -------------------------------------------------------------------------
+# Removing a product line (the admin UI's quantity 0, or the row's minus button)
+# -------------------------------------------------------------------------
+
+
+def _seed_water_and_lemonade_order(sample_user, sample_product, lemonade, *, delivered_and_paid: bool) -> Order:
+    """4 × 15,000 water + 3 × 8,000 lemonade + a 3,000 fee = 87,000, with its Payment row.
+
+    Unpaid: a pending cash payment of 87,000, all of it outstanding. Delivered and paid:
+    87,000 collected in cash.
+    """
+    order = _seed_order_with_item(
+        sample_user,
+        sample_product,
+        status=OrderStatus.DELIVERED if delivered_and_paid else OrderStatus.CONFIRMED,
+        is_paid=delivered_and_paid,
+        quantity=4,
+    )
+    _db.session.add(
+        OrderItem(
+            order_id=order.id,
+            product_id=lemonade.id,
+            quantity=3,
+            unit_price=Decimal("8000.00"),
+            discount_amount=Decimal("0.00"),
+            total_price=Decimal("24000.00"),
+        )
+    )
+    order.subtotal = Decimal("84000.00")
+    order.total_amount = Decimal("87000.00")
+    _db.session.add(
+        Payment(
+            user_id=sample_user.id,
+            order_id=order.id,
+            amount=Decimal("87000.00"),
+            amount_collected=Decimal("87000.00") if delivered_and_paid else Decimal("0.00"),
+            outstanding_amount=Decimal("0.00") if delivered_and_paid else Decimal("87000.00"),
+            payment_method=PaymentMethod.CASH,
+            status=PaymentStatus.COMPLETED if delivered_and_paid else PaymentStatus.PENDING,
+            collected_by=sample_user.id if delivered_and_paid else None,
+        )
+    )
+    _db.session.commit()
+    return order
+
+
+def _remove_lemonade_payload(order, sample_product, lemonade) -> dict:
+    """The payload the Orders edit modal sends when the lemonade row is set to 0 (or removed)."""
+    water_line = next(item for item in order.order_items if item.product_id == sample_product.id)
+    lemonade_line = next(item for item in order.order_items if item.product_id == lemonade.id)
+    return {
+        "items": [
+            {"orderItemId": water_line.id, "productId": sample_product.id, "quantity": 4},
+            {"orderItemId": lemonade_line.id, "productId": lemonade.id, "quantity": 0},
+        ],
+        "reason": "customer cancelled the lemonade",
+    }
+
+
+def test_apply_edit_removed_line_leaves_the_stored_total(
+    client, db, admin_claim_headers, sample_user, sample_product, sample_category
+):
+    """A removed line must leave the stored subtotal and total, not only the plan's projection.
+
+    Unpaid COD order: 4 × 15,000 + 3 × 8,000 + 3,000 fee = 87,000. Setting the lemonade to 0:
+    subtotal 60,000, total 63,000, and the pending payment is re-priced to 63,000 (all of it
+    outstanding), so the driver collects 63,000 at the door, never 87,000.
+    """
+    _returning_customer(sample_user)
+    lemonade = _second_product(sample_category)
+    order = _seed_water_and_lemonade_order(sample_user, sample_product, lemonade, delivered_and_paid=False)
+
+    resp = client.post(
+        f"/api/v1/admin/orders/{order.id}/edit",
+        json=_remove_lemonade_payload(order, sample_product, lemonade),
+        headers=admin_claim_headers,
+    )
+
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    _db.session.expire_all()
+    stored = Order.query.get(order.id)
+    assert [(item.product_id, item.quantity) for item in stored.order_items] == [(sample_product.id, 4)]
+    assert (stored.subtotal, stored.total_amount) == (Decimal("60000.00"), Decimal("63000.00"))
+    assert (stored.payment.amount, stored.payment.outstanding_amount) == (Decimal("63000.00"), Decimal("63000.00"))
+
+    detail = client.get(f"/api/v1/admin/orders/{order.id}", headers=admin_claim_headers)
+    assert detail.status_code == 200, detail.get_data(as_text=True)
+    shown = detail.get_json()["data"]["order"]
+    assert (shown["subtotal"], shown["total_amount"]) == (60000.0, 63000.0)
+    assert [(item["product_id"], item["quantity"]) for item in shown["items"]] == [(sample_product.id, 4)]
+
+
+def test_apply_edit_removed_line_on_a_delivered_cash_order_is_credited_once(
+    client, db, admin_claim_headers, sample_user, sample_product, sample_category
+):
+    """Delivered and paid 87,000 in cash; the admin removes the 3 × 8,000 lemonade. The order
+    now bills 63,000, the 87,000 collected stays on the payment (audit), and the 24,000
+    difference is booked once as the customer's ADMIN_ADJUSTMENT prepayment credit."""
+    from business_app.models.payment import CashCollectionEvent
+    from shared.enums import CashCollectionSource
+
+    _returning_customer(sample_user)
+    lemonade = _second_product(sample_category)
+    order = _seed_water_and_lemonade_order(sample_user, sample_product, lemonade, delivered_and_paid=True)
+
+    resp = client.post(
+        f"/api/v1/admin/orders/{order.id}/edit",
+        json=_remove_lemonade_payload(order, sample_product, lemonade),
+        headers=admin_claim_headers,
+    )
+
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    _db.session.expire_all()
+    stored = Order.query.get(order.id)
+    assert (stored.subtotal, stored.total_amount) == (Decimal("60000.00"), Decimal("63000.00"))
+    assert stored.payment.amount_collected == Decimal("87000.00")
+    credits = CashCollectionEvent.query.filter_by(
+        order_id=order.id, source=CashCollectionSource.ADMIN_ADJUSTMENT
+    ).all()
+    assert [event.amount for event in credits] == [Decimal("24000.00")]
+
+
+# -------------------------------------------------------------------------
+# FR-1: minus an existing line, then re-add the same product as a new row
+# (admin_ui/src/pages/Orders.js handleEditPreview appends the minus button's
+# quantity-0 removal AFTER the form rows, so the re-add's null-order_item_id
+# spec binds to the line by product FIRST, then the appended removal targets
+# the same already-claimed line — two specs for one line).
+# -------------------------------------------------------------------------
+
+
+def test_apply_edit_null_id_spec_then_appended_removal_for_same_line_blocks_and_nothing_changes(
+    client, db, admin_claim_headers, sample_user, sample_product, sample_category
+):
+    """The UI payload order from the bug: [lemonade (kept, has id), water re-add (null id,
+    new qty), water removal (the original line's id, qty 0)]. The null-id spec binds to the
+    water line by product first; the appended id-spec then targets the SAME line. This must
+    be refused as a duplicate — not silently set the quantity and then remove the line."""
+    _returning_customer(sample_user)
+    lemonade = _second_product(sample_category)
+    order = _seed_water_and_lemonade_order(sample_user, sample_product, lemonade, delivered_and_paid=False)
+    water_line = next(item for item in order.order_items if item.product_id == sample_product.id)
+    lemonade_line = next(item for item in order.order_items if item.product_id == lemonade.id)
+
+    before_items = sorted((item.id, item.product_id, item.quantity) for item in order.order_items)
+    before_totals = (order.subtotal, order.total_amount)
+    before_payment = (order.payment.amount, order.payment.outstanding_amount, order.payment.status)
+    before_water_stock = sample_product.stock_quantity
+    before_lemonade_stock = lemonade.stock_quantity
+
+    payload = {
+        "items": [
+            {"orderItemId": lemonade_line.id, "productId": lemonade.id, "quantity": 3},
+            {"orderItemId": None, "productId": sample_product.id, "quantity": 6},
+            {"orderItemId": water_line.id, "productId": sample_product.id, "quantity": 0},
+        ],
+        "reason": "re-added water after pressing minus",
+    }
+
+    resp = client.post(
+        f"/api/v1/admin/orders/{order.id}/edit",
+        json=payload,
+        headers=admin_claim_headers,
+    )
+
+    assert resp.status_code == 400, resp.get_data(as_text=True)
+    body = resp.get_json()
+    assert any("duplicate_product" in err for err in body.get("errors", [])), body
+
+    _db.session.expire_all()
+    stored = Order.query.get(order.id)
+    assert sorted((item.id, item.product_id, item.quantity) for item in stored.order_items) == before_items
+    assert (stored.subtotal, stored.total_amount) == before_totals
+    assert (stored.payment.amount, stored.payment.outstanding_amount, stored.payment.status) == before_payment
+    _db.session.refresh(sample_product)
+    _db.session.refresh(lemonade)
+    assert sample_product.stock_quantity == before_water_stock
+    assert lemonade.stock_quantity == before_lemonade_stock
+
+
+def test_apply_edit_null_id_spec_alone_rebinds_to_existing_line(
+    client, db, admin_claim_headers, sample_user, sample_product, sample_category
+):
+    """Pre-M7 behaviour: re-adding the same product as a new row (null order_item_id, with NO
+    appended quantity-0 removal for that line — i.e. the admin UI fix for FR-1) must bind to
+    the EXISTING line and set its quantity, not open a second line for the same product."""
+    _returning_customer(sample_user)
+    lemonade = _second_product(sample_category)
+    order = _seed_water_and_lemonade_order(sample_user, sample_product, lemonade, delivered_and_paid=False)
+    water_line = next(item for item in order.order_items if item.product_id == sample_product.id)
+    lemonade_line = next(item for item in order.order_items if item.product_id == lemonade.id)
+
+    payload = {
+        "items": [
+            {"orderItemId": lemonade_line.id, "productId": lemonade.id, "quantity": 3},
+            {"orderItemId": None, "productId": sample_product.id, "quantity": 6},
+        ],
+        "reason": "re-added water via Add Item without pressing minus first",
+    }
+
+    resp = client.post(
+        f"/api/v1/admin/orders/{order.id}/edit",
+        json=payload,
+        headers=admin_claim_headers,
+    )
+
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    _db.session.expire_all()
+    stored = Order.query.get(order.id)
+    assert len(stored.order_items) == 2
+    assert sorted((item.product_id, item.quantity) for item in stored.order_items) == sorted(
+        [(sample_product.id, 6), (lemonade.id, 3)]
+    )
+    water_item = next(item for item in stored.order_items if item.product_id == sample_product.id)
+    assert water_item.id == water_line.id

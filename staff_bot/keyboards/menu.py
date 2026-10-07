@@ -294,6 +294,12 @@ class MenuKeyboards:
                 f"📊 {i18n.get('staff.sales.stats.button', language)}",
                 callback_data="staff_sales_stats",
             )])
+            # Directly under My stats (compensation spec §7.1): C4 ties the two screens
+            # together, since the pay gate prints the same plan-vs-fact %.
+            rows.append([InlineKeyboardButton(
+                f"💰 {i18n.get('staff.sales.earnings.button', language)}",
+                callback_data="staff_sales_earn",
+            )])
 
         rows.append([InlineKeyboardButton(
             f"⬅️ {i18n.get('staff.back', language)}",

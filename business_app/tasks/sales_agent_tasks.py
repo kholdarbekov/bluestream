@@ -6,6 +6,7 @@ Registered in tasks/celery_app.py `include`; unrouted (default queue).
 import logging
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from typing import Any, Iterable, Mapping, Optional
 
 from celery import shared_task
 
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 @shared_task(name="sales.push_sales_event", bind=True, max_retries=3, default_retry_delay=60)
-def push_sales_event(self, telegram_id: int, event: str, payload: dict):
+def push_sales_event(self, telegram_id: int, event: str, payload: dict, event_id: Optional[str] = None):
     """Push one sales event to one staff member's Telegram chat.
 
     Retried like its sibling `push_agent_order_confirmation`: this is the only channel that
@@ -29,10 +30,16 @@ def push_sales_event(self, telegram_id: int, event: str, payload: dict):
     id collapse. Celery keeps `request.id` across `self.retry()`, which makes the task's own id
     the one stable key available here; called directly (a test, a synchronous caller) there is
     no id and the sender's uuid stands, exactly as before.
+
+    A producer that has a DOMAIN id for the push (a manager's decision on a held order, a
+    confirmed penalty, an approved statement) passes it as `event_id`, and that id is the key
+    instead (move M3): a re-enqueue of the same decision under a new task id still collapses to
+    one message.
     """
     data = {"telegram_id": telegram_id, "event": event, "payload": payload}
-    if self.request.id:
-        data["event_id"] = f"sales-event:{self.request.id}"
+    stable_id = event_id or self.request.id
+    if stable_id:
+        data["event_id"] = f"sales-event:{stable_id}"
     if not _send_staff_webhook("/internal/sales-event", data):
         raise self.retry(exc=RuntimeError(f"sales-event webhook failed for {event}"))
     return {"success": True, "event": event, "telegram_id": telegram_id}
@@ -158,45 +165,62 @@ def snapshot_agent_day_plans():
     return {"success": True, "agents": AgentDayPlanService.snapshot_all()}
 
 
-@shared_task(name="sales.notify_managers_activation_requested", bind=True)
-def notify_managers_activation_requested(self, outlet_id: int):
-    """IN_APP alert to admins/managers + staff-bot push to operators for a new activation request."""
-    from business_app.models.sales import Outlet
+@shared_task(name="sales.sync_pay_ledger")
+def sync_pay_ledger(full: bool = False):
+    """01:40 local: open the month if needed, then reconcile every agent's commission lines
+    with their orders (spec §4.4). Twenty minutes behind the 01:20 day-plan snapshot and
+    thirty behind the 01:10 stage sweep, which writes the first-activation rows for converted
+    try-outs that the new-outlet bonus reads.
+
+    `full=True` drops the candidate windows; it is for recovery only:
+    `celery call sales.sync_pay_ledger --kwargs '{"full": true}'`.
+    """
+    from business_app.services.sales.pay_ledger_service import SalesPayLedgerService
+
+    return {"success": True, **SalesPayLedgerService.sync(full=full).as_dict()}
+
+
+def _send_manager_in_app(
+    subject_key: str,
+    content_key: str,
+    *,
+    fields: Mapping[str, Any],
+    template_data: Mapping[str, Any],
+    exclude_user_ids: Iterable[int] = (),
+) -> int:
+    """IN_APP SYSTEM_ALERT to every active admin and manager except `exclude_user_ids`; returns how
+    many were notified (S-33). The one admin-and-manager fan-out of the sales tasks.
+
+    Both keys must be MARKUP-FREE rows: the admin UI renders a notification's `content` as plain
+    text. `fields` fill the content row; the subject row has none. One bad recipient must not cost
+    the rest their alert, so each gets its own try.
+    """
     from business_app.models.user import User
     from business_app.services.notification_service import NotificationService
-    from business_app.services.staff_service import StaffService
     from business_app.utils.constants import NotificationChannel, NotificationType
     from business_app.utils.translations import get_translation
     from shared.enums import UserRole
-    from shared.staff_constants import SALES_EVENT_ACTIVATION_REQUESTED
 
-    outlet = Outlet.query.get(outlet_id)
-    if outlet is None:
-        return {"success": False, "reason": "outlet_not_found"}
-    payload = {"outlet_id": outlet.id, "outlet_name": outlet.name, "reason": None}
-
+    excluded = {int(user_id) for user_id in exclude_user_ids}
     managers = User.query.filter(User.role.in_([UserRole.ADMIN, UserRole.MANAGER]), User.status == "active").all()
     notified = 0
     for manager in managers:
+        if manager.id in excluded:
+            continue
         try:
             language = getattr(manager, "preferred_language", None) or "en"
 
-            def _get_translated(field_name, lang, _name=outlet.name, _language=language):
+            def _get_translated(field_name, lang, _language=language):
                 target = lang or _language
                 if field_name == "subject":
-                    return get_translation("staff.notification.subject.outlet_activation_requested", language=target)
-                # Markup-FREE key: the admin UI renders notification `content` as plain text, so the
-                # <b>...</b> in `staff.sales.notify.activation_requested` would ship as literal tags.
-                # That HTML key stays reserved for the staff-bot push (parse_mode='HTML').
-                return get_translation(
-                    "staff.notification.content.outlet_activation_requested", language=target, outlet_name=_name
-                )
+                    return get_translation(subject_key, language=target)
+                return get_translation(content_key, language=target, **fields)
 
             NotificationService().send_notification(
                 user_id=manager.id,
                 notification_type=NotificationType.SYSTEM_ALERT,
                 channels=[NotificationChannel.IN_APP],
-                template_data={"outlet_id": outlet.id, "outlet_name": outlet.name},
+                template_data=dict(template_data),
                 template_override=SimpleNamespace(
                     subject=_get_translated("subject", language),
                     content=_get_translated("content", language),
@@ -205,13 +229,50 @@ def notify_managers_activation_requested(self, outlet_id: int):
             )
             notified += 1
         except Exception:  # noqa: BLE001 — one bad recipient must not block the rest
-            logger.exception("Failed to notify manager %s about outlet %s", manager.id, outlet.id)
+            logger.exception("Failed to send manager %s the in-app alert %s", manager.id, subject_key)
+    return notified
 
-    operators = User.query.filter(
+
+@shared_task(name="sales.notify_managers_activation_requested", bind=True)
+def notify_managers_activation_requested(self, outlet_id: int):
+    """IN_APP alert to admins/managers + staff-bot push to operators for a new activation request.
+
+    The outlet's onboarder is left out of BOTH channels (spec §4.12): `OutletService.approve`
+    refuses them, and nobody is asked to act on a request they cannot approve. That bites exactly
+    when the onboarder is an agent who also holds the operator role, or an admin or manager with
+    an agent profile.
+    """
+    from business_app.models.sales import Outlet
+    from business_app.models.user import User
+    from business_app.services.staff_service import StaffService
+    from shared.enums import UserRole
+    from shared.staff_constants import SALES_EVENT_ACTIVATION_REQUESTED
+
+    outlet = Outlet.query.get(outlet_id)
+    if outlet is None:
+        return {"success": False, "reason": "outlet_not_found"}
+    payload = {"outlet_id": outlet.id, "outlet_name": outlet.name, "reason": None}
+    onboarder_id = outlet.onboarded_by_user_id
+
+    # Markup-FREE content key: the <b>...</b> in `staff.sales.notify.activation_requested` would
+    # ship as literal tags in the admin UI. That HTML key stays reserved for the staff-bot push
+    # (parse_mode='HTML') below.
+    notified = _send_manager_in_app(
+        "staff.notification.subject.outlet_activation_requested",
+        "staff.notification.content.outlet_activation_requested",
+        fields={"outlet_name": outlet.name},
+        template_data={"outlet_id": outlet.id, "outlet_name": outlet.name},
+        exclude_user_ids=() if onboarder_id is None else (onboarder_id,),
+    )
+
+    operators_query = User.query.filter(
         StaffService.staff_role_member_filter(UserRole.OPERATOR.value),
         User.status == "active",
         User.telegram_id.isnot(None),
-    ).all()
+    )
+    if onboarder_id is not None:
+        operators_query = operators_query.filter(User.id != onboarder_id)
+    operators = operators_query.all()
     for operator in operators:
         push_sales_event.delay(int(operator.telegram_id), SALES_EVENT_ACTIVATION_REQUESTED, payload)
     return {"success": True, "managers": notified, "operators": len(operators)}
@@ -286,51 +347,53 @@ def notify_managers_exception_summary():
     One bad recipient must not cost the rest their morning — the
     `notify_managers_activation_requested` precedent, same per-recipient try/except.
     """
-    from business_app.models.user import User
-    from business_app.services.notification_service import NotificationService
     from business_app.services.sales.exception_feed_service import EXCEPTIONS_FEED_PATH, ExceptionFeedService
-    from business_app.utils.constants import NotificationChannel, NotificationType
     from business_app.utils.local_windows import local_date
-    from business_app.utils.translations import get_translation
-    from shared.enums import UserRole
 
     day = local_date() - timedelta(days=1)
     count = ExceptionFeedService.count_for_day(day)
     if count == 0:
         return {"success": True, "day": day.isoformat(), "count": 0, "managers": 0}
 
-    managers = User.query.filter(User.role.in_([UserRole.ADMIN, UserRole.MANAGER]), User.status == "active").all()
-    notified = 0
-    for manager in managers:
-        try:
-            language = getattr(manager, "preferred_language", None) or "en"
-
-            def _get_translated(field_name, lang, _count=count, _day=day.isoformat(), _language=language):
-                target = lang or _language
-                if field_name == "subject":
-                    return get_translation("staff.notification.subject.sales_exception_summary", language=target)
-                # Markup-FREE, like its activation-request twin: the admin UI renders
-                # notification `content` as plain text, so any <b> would ship as literal tags.
-                return get_translation(
-                    "staff.notification.content.sales_exception_summary",
-                    language=target,
-                    count=_count,
-                    day=_day,
-                    path=EXCEPTIONS_FEED_PATH,
-                )
-
-            NotificationService().send_notification(
-                user_id=manager.id,
-                notification_type=NotificationType.SYSTEM_ALERT,
-                channels=[NotificationChannel.IN_APP],
-                template_data={"day": day.isoformat(), "count": count, "path": EXCEPTIONS_FEED_PATH},
-                template_override=SimpleNamespace(
-                    subject=_get_translated("subject", language),
-                    content=_get_translated("content", language),
-                    get_translated=_get_translated,
-                ),
-            )
-            notified += 1
-        except Exception:  # noqa: BLE001 — one bad recipient must not block the rest
-            logger.exception("Failed to send manager %s the %s exception summary", manager.id, day)
+    # Markup-FREE, like its activation-request twin: the admin UI prints `content` as plain text.
+    notified = _send_manager_in_app(
+        "staff.notification.subject.sales_exception_summary",
+        "staff.notification.content.sales_exception_summary",
+        fields={"count": count, "day": day.isoformat(), "path": EXCEPTIONS_FEED_PATH},
+        template_data={"day": day.isoformat(), "count": count, "path": EXCEPTIONS_FEED_PATH},
+    )
     return {"success": True, "day": day.isoformat(), "count": count, "managers": notified}
+
+
+@shared_task(name="sales.notify_managers_agent_order_awaiting_approval")
+def notify_managers_agent_order_awaiting_approval(order_id: int):
+    """IN_APP alert: an agent's second order at one outlet today waits in the queue (C14, §4.18.5).
+
+    Every active admin and manager EXCEPT the hold's decision subjects (the placer and the
+    outlet's onboarder, I-24): nobody is asked to act on their own pay. In-app only: managers have
+    no staff-bot path and operators cannot decide. No amount (C11). No beat entry: enqueued once
+    per hold, after `create_order`'s commit. A hold already decided or cancelled is not news.
+    """
+    from business_app.models.sales_visits import AgentOrderApproval
+    from business_app.services.sales.agent_order_approval_service import (
+        ORDER_APPROVALS_PATH,
+        AgentOrderApprovalService,
+    )
+
+    row = AgentOrderApproval.query.filter_by(order_id=order_id).one_or_none()
+    if row is None or row.status != "pending":
+        return {"success": False, "reason": "not_awaiting", "order_id": order_id}
+    order = row.order
+    notified = _send_manager_in_app(
+        "staff.notification.subject.agent_order_awaiting_approval",
+        "staff.notification.content.agent_order_awaiting_approval",
+        fields={
+            "agent_name": row.agent.full_name if row.agent is not None else "",
+            "outlet_name": row.outlet.name,
+            "order_number": order.order_number,
+            "path": ORDER_APPROVALS_PATH,
+        },
+        template_data={"order_id": order.id, "order_number": order.order_number, "outlet_id": row.outlet_id},
+        exclude_user_ids=AgentOrderApprovalService.decision_subjects(row),
+    )
+    return {"success": True, "order_id": order_id, "managers": notified}

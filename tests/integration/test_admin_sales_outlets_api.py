@@ -64,6 +64,7 @@ def test_list_filters_summary_pins_and_detail(client, admin_claim_headers, db, a
     assert detail.status_code == 200
     data = detail.get_json()["data"]
     assert data["outlet"]["open_receivable"] is None  # no customer account yet: not applicable, not zero
+    assert data["outlet"]["can_approve"] is True  # awaiting activation, and this admin did not onboard it
     assert [(h["from_stage"], h["to_stage"]) for h in data["stage_history"]] == [
         (None, "prospect"),
         ("prospect", "activation_requested"),

@@ -110,6 +110,7 @@ from staff_bot.handlers.sales.new_outlet import (
     NO_NOTES,
     NO_CONFIRM,
 )
+from staff_bot.handlers.sales.earnings import SalesEarningsHandler
 from staff_bot.handlers.sales.stats import SalesStatsHandler
 from staff_bot.handlers.sales.visit import (
     VisitHandler,
@@ -132,11 +133,13 @@ from staff_bot.handlers.sales.tryout import (
     T_NOTES,
     T_CONFIRM,
 )
+from staff_bot.handlers.sales.outlet_phone import SetPhoneHandler, SP_PHONE
 from staff_bot.handlers.common.profile import ProfileHandler
 from staff_bot.handlers.common.help import HelpHandler
 from staff_bot.permissions import require_auth
 from staff_bot.utils.flow_state import (
     SALES_NEARBY_FLOW_KEY as NEARBY_FLOW_KEY,
+    SALES_SET_PHONE_FLOW_KEY as SET_PHONE_FLOW_KEY,
     SALES_TRYOUT_FLOW_KEY as TRYOUT_FLOW_KEY,
 )
 
@@ -578,7 +581,9 @@ class StaffBot:
         nearby_handler = NearbyHandler()
         sales_approvals_handler = SalesApprovalsHandler()
         sales_tryout_handler = TryoutFromFieldHandler()
+        set_phone_handler = SetPhoneHandler()
         sales_stats_handler = SalesStatsHandler()
+        sales_earnings_handler = SalesEarningsHandler()
 
         # Common handlers
         profile_handler = ProfileHandler()
@@ -770,6 +775,7 @@ class StaffBot:
             'nearby': nearby_handler,
             'approvals': sales_approvals_handler,
             'tryout': sales_tryout_handler,
+            'set_phone': set_phone_handler,
         }
         self._common_handlers = {
             'profile': profile_handler,
@@ -1957,6 +1963,78 @@ class StaffBot:
         self.application.add_handler(tryout_conv)
 
         # ------------------------------------------------------------------
+        # Sales agent: the outlet card's 📞 Add phone / Change phone (D31)
+        # ------------------------------------------------------------------
+        # Group 0, after the try-out and ahead of the "My outlets" callbacks
+        # below, for the try-out's reason: the entry button is drawn on the
+        # outlet CARD, and PTB runs the FIRST handler that claims an update.
+        #
+        # SP_PHONE claims `staff_sales_outlet_<id>` itself, as Nearby's list
+        # does: an older card's row tapped while the prompt is open would
+        # otherwise be drawn by the hub's handler below with this state still
+        # armed behind it, and the agent's next text would be PUT as the phone
+        # of the outlet they walked away from. The wiring contract allows it:
+        # `test_no_callback_button_is_stolen_by_an_earlier_handler` compares a
+        # pattern only with handlers in its OWN scope, and nothing else in
+        # SP_PHONE accepts `staff_sales_outlet_7`.
+        #
+        # `staff_back_to_main` is plain navigation here -- this screen's Cancel
+        # is `staff_sales_sp_cancel` -- so it ends the flow and renders
+        # nothing; `main_menu_handler` draws the menu in GROUP 1.
+        #
+        # Two conversations registered ABOVE this one take a tap before SP_PHONE
+        # can see it: the walk-in's "New outlet" and the visit's ⏯ Resume. Their
+        # entry points drop this screen's draft (`_drop_other_sales_drafts`), so
+        # a number typed behind them finds nothing to PUT. Known residuals, each
+        # leaving the screen armed until its 300 s timeout (the PUT still checks
+        # stage and ownership): the operator menu entries, for dual-role staff;
+        # an older screen's 🚀, list, stats, earnings or approvals buttons; a
+        # Nearby row tapped while Nearby is armed; and 📞 opened mid-walk-in,
+        # where the walk-in claims the next text.
+        stale_set_phone_tap = _StaleFlowTap(set_phone_handler.stale_tap, pattern=r"^staff_sales_sp_\w+$")
+
+        set_phone_conv = ConversationHandler(
+            entry_points=[
+                CallbackQueryHandler(set_phone_handler.start, pattern=r"^staff_sales_setphone_\d+$"),
+                # LAST: only the taps no live state claims (see _StaleFlowTap).
+                stale_set_phone_tap,
+            ],
+            states={
+                # `menu_escape` FIRST: this state reads free text, and a
+                # main-menu tap must never reach `receive_phone`. Every
+                # registration keeps `CallbackQueryHandler(` and its `pattern=`
+                # on ONE line, for the static scraper. NEW messages only:
+                # `filters.TEXT` alone also matches an EDITED one, and editing
+                # any older message to a mobile would PUT that number.
+                SP_PHONE: [
+                    menu_escape,
+                    MessageHandler(filters.UpdateType.MESSAGE & filters.TEXT & ~filters.COMMAND, set_phone_handler.receive_phone),
+                    CallbackQueryHandler(set_phone_handler.cancel, pattern="^staff_sales_sp_cancel$"),
+                    CallbackQueryHandler(set_phone_handler.open_outlet, pattern=r"^staff_sales_outlet_\d+$"),
+                ],
+                # The SHARED copy, true here: nothing is written until a valid
+                # number is sent. Scoped to its OWN key, like the try-out's,
+                # because a visit, the walk-in, Nearby or a try-out can displace
+                # this screen, and their drafts must survive its timer.
+                ConversationHandler.TIMEOUT: _flow_timeout(own_key=SET_PHONE_FLOW_KEY),
+            },
+            fallbacks=[
+                CommandHandler("cancel", set_phone_handler.cancel),
+                start_reset,
+                CallbackQueryHandler(_leave_conversation, pattern="^staff_back_to_main$"),
+                CallbackQueryHandler(_leave_conversation, pattern="^staff_cash_hub$"),
+                CallbackQueryHandler(_leave_conversation, pattern="^staff_sales_hub$"),
+            ],
+            per_chat=True,
+            per_user=True,
+            name="staff_sales_set_phone",
+            conversation_timeout=300,
+            allow_reentry=True,
+        )
+        stale_set_phone_tap.conversation = set_phone_conv
+        self.application.add_handler(set_phone_conv)
+
+        # ------------------------------------------------------------------
         # Sales agent: "My outlets"
         # ------------------------------------------------------------------
         # Group 0, registered AFTER the operator conversations and BEFORE the
@@ -2012,6 +2090,45 @@ class StaffBot:
         )
         self.application.add_handler(
             CallbackQueryHandler(sales_stats_handler.change_period, pattern=r"^staff_sales_stats_\w+$")
+        )
+
+        # My earnings (compensation spec §7.1). Group 0 beside My stats and for the same
+        # reasons: not a conversation destination, and read-only, so not refused during an
+        # open visit. `staff_sales_earn_sn_<yyyymm>` and `staff_sales_earn_xn` are the buttons on
+        # the two pay pushes (webhook_server.sales_event_handler): they answer from a cold chat
+        # and open that month's Statement / the penalties as a NEW message, so the push stays
+        # readable (final review M9); the in-screen buttons edit in place. `staff_sales_earn_n`
+        # was the approval push's button before the Statement screen and stays registered for
+        # the pushes still in agents' chats (it opens the summary the same way).
+        # The lines and statement patterns are `\d+_\d+` and `\d+`; `SalesEarningsHandler`
+        # re-checks the month and page ranges rather than trusting them. `_s_\d+` cannot take
+        # an `_sn_…` button: `n` is not a digit.
+        self.application.add_handler(
+            CallbackQueryHandler(sales_earnings_handler.show_summary, pattern=r"^staff_sales_earn$")
+        )
+        self.application.add_handler(
+            CallbackQueryHandler(sales_earnings_handler.show_lines, pattern=r"^staff_sales_earn_l_\d+_\d+$")
+        )
+        self.application.add_handler(
+            CallbackQueryHandler(sales_earnings_handler.show_statement, pattern=r"^staff_sales_earn_s_\d+$")
+        )
+        self.application.add_handler(
+            CallbackQueryHandler(sales_earnings_handler.show_past_statements, pattern=r"^staff_sales_earn_h$")
+        )
+        self.application.add_handler(
+            CallbackQueryHandler(sales_earnings_handler.show_pipeline, pattern=r"^staff_sales_earn_p$")
+        )
+        self.application.add_handler(
+            CallbackQueryHandler(sales_earnings_handler.show_penalties, pattern=r"^staff_sales_earn_x$")
+        )
+        self.application.add_handler(
+            CallbackQueryHandler(sales_earnings_handler.show_summary_from_push, pattern=r"^staff_sales_earn_n$")
+        )
+        self.application.add_handler(
+            CallbackQueryHandler(sales_earnings_handler.show_statement_from_push, pattern=r"^staff_sales_earn_sn_\d+$")
+        )
+        self.application.add_handler(
+            CallbackQueryHandler(sales_earnings_handler.show_penalties_from_push, pattern=r"^staff_sales_earn_xn$")
         )
 
         # ------------------------------------------------------------------

@@ -208,6 +208,75 @@ async def test_a_pin_outside_the_radius_is_recorded_not_refused(monkeypatch):
     assert harness.conversation_state(CONV) == V_STOCK
 
 
+async def test_a_forwarded_pin_is_refused_and_the_checkin_step_stays(monkeypatch):
+    """T-CHECKIN-1 (compensation spec §7.4, review gaming F5).
+
+    A forwarded location is where somebody stood, some time ago. Posted, the backend would
+    measure its distance as if it were the agent at the door, and the visit would count as
+    verified for pay. Nothing is posted: the agent is asked for their own pin, with the
+    location button redrawn (the one-shot reply keyboard collapsed when the pin was sent), and
+    the conversation stays on the check-in step. Their own pin, sent next, checks in.
+    """
+    harness, ops, labels = await _agent(monkeypatch)
+    await _start(harness, ops)
+    harness.backend.route("POST", CHECKIN, lambda _c: {"visit": _visit(
+        current_step="stock", distance_m=8.0, in_radius=True,
+    )})
+    harness.telegram.reset()
+
+    await harness.send(ops.location(*DOOR, horizontal_accuracy=ACCURACY, forwarded=True))
+
+    assert _calls(harness, "POST", CHECKIN) == []
+    assert harness.conversation_state(CONV) == V_CHECKIN
+    refusal = harness.telegram.last_shown()
+    # Whole and literal (R31/R44). The 📎 is the seeded row's own (§8.5's one exception: it
+    # names the button the agent must press); the 📍 is the renderer's.
+    assert refusal.text == (
+        "📍 Please send your current location with the 📎 → Location button, not a forwarded one."
+    )
+    assert _curated("staff.sales.visit.checkin_button") in refusal.button_labels()
+
+    await harness.send(ops.location(*DOOR, horizontal_accuracy=ACCURACY))
+
+    assert [call.data for call in _calls(harness, "POST", CHECKIN)] == [
+        {"latitude": DOOR[0], "longitude": DOOR[1], "horizontal_accuracy": ACCURACY}
+    ]
+    assert harness.conversation_state(CONV) == V_STOCK
+
+
+async def test_a_checkin_at_an_outlet_with_no_pin_warns_it_will_not_count(monkeypatch):
+    """Owner rule Q9 (controller ruling T2-R3): the agent sent a pin, but the OUTLET has none,
+    so the backend measured nothing -- `distance_m` and `in_radius` are both null -- and the
+    visit is a `no_location` one that does not count as verified. The reply used to read
+    "✅ At the outlet (— m)", a pass the pay gate then quietly refuses. It is a warning now,
+    whole and literal (R31/R44): the ⚠️ is the renderer's (§8.5), the words the seed's. Still
+    data, never a refusal (D16): the pin is posted as sent and the visit moves on to the shelf.
+    """
+    harness, ops, labels = await _agent(monkeypatch)
+    await _start(harness, ops)
+    harness.backend.route("POST", CHECKIN, lambda _c: {"visit": _visit(
+        current_step="stock", checkin_at="2026-09-08T05:12:00+00:00",
+        checkin_latitude=DOOR[0], checkin_longitude=DOOR[1], checkin_accuracy_m=ACCURACY,
+        distance_m=None, in_radius=None,
+    )})
+    harness.telegram.reset()
+
+    await harness.send(ops.location(*DOOR, horizontal_accuracy=ACCURACY))
+
+    assert [call.data for call in _calls(harness, "POST", CHECKIN)] == [
+        {"latitude": DOOR[0], "longitude": DOOR[1], "horizontal_accuracy": ACCURACY}
+    ]
+    result = harness.telegram.shown[-2]
+    assert result.text == (
+        "⚠️ Your location was recorded, but this outlet has no map pin, so the distance could not "
+        "be measured and this visit will not count as verified."
+    )
+    # The result message hands the main menu back, as for a measured pin.
+    assert _curated("staff.menu.my_outlets") in " ".join(result.button_labels())
+    assert harness.conversation_state(CONV) == V_STOCK
+    assert _curated("staff.sales.visit.stock_title") in harness.telegram.last_shown().text
+
+
 async def test_skipping_the_checkin_posts_the_skip_flag_alone(monkeypatch):
     """`Skip` sends `{"skipped": true}` and nothing else — no fabricated pin."""
     harness, ops, labels = await _agent(monkeypatch)

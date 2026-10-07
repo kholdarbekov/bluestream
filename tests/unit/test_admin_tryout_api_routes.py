@@ -40,6 +40,7 @@ def test_get_admin_tryouts_route_delegates_to_service(client, app, admin_user, m
         end_date=None,
         due_start_date=None,
         due_end_date=None,
+        viewer_user_id=admin_user.id,
     )
     assert response.get_json()['data']['items'][0]['tryout_number'] == 'TRY_000001_26'
 

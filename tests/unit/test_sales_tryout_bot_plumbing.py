@@ -64,8 +64,11 @@ TRYOUT_PATTERNS = (
 # tapped — which is exactly why they may be borrowed rather than re-registered.
 # They are checked separately from TRYOUT_PATTERNS so that "every pattern this
 # task registers is really drawn" keeps meaning what it says.
+# `staff_sales_setphone_<id>` opens the 📞 phone conversation (D31) and is drawn
+# whenever the card publishes `can_set_phone`.
 BORROWED_CARD_PATTERNS = (
     r"^staff_sales_activate_\d+$",
+    r"^staff_sales_setphone_\d+$",
     r"^staff_sales_visit_start_\d+$",
     r"^staff_sales_visit_resume$",
     r"^staff_sales_hub$",
@@ -132,13 +135,18 @@ def _every_tryout_keyboard():
         ("notes", SalesKeyboards.tryout_notes("en")),
         ("confirm", SalesKeyboards.tryout_confirm("en")),
         ("outlet_link", SalesKeyboards.tryout_outlet_link("en", 5)),
+        # Both cards say `can_request_activation` and `can_set_phone` true, as
+        # the backend does for a prospect or trial shop with a phone and a pin
+        # (D31), so 🚀 and 📞 are in this sweep too.
         ("card", SalesKeyboards.outlet_card(
-            "en", {"id": 5, "stage": "prospect", "outlet_type": "grocery_store"})),
+            "en", {"id": 5, "stage": "prospect", "outlet_type": "grocery_store",
+                   "can_request_activation": True, "can_set_phone": True})),
         # The RECEIPT: Task 5's 201 carries the moved card, so the last screen
         # of this conversation is an outlet card at `trial` — drawn here, so a
         # button on it can never be one nothing routes.
         ("receipt_card", SalesKeyboards.outlet_card(
-            "en", {"id": 5, "stage": "trial", "outlet_type": "grocery_store"})),
+            "en", {"id": 5, "stage": "trial", "outlet_type": "grocery_store",
+                   "can_request_activation": True, "can_set_phone": True})),
     ]
 
 

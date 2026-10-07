@@ -44,6 +44,7 @@ import {
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { formatDate, formatDateTimeShort } from '../utils/dateUtils';
 import { formatMoney } from '../utils/formatMoney';
+import { getOrderStatusColor } from '../utils/orderStatusColor';
 import {
   describeAllocationScope,
   describeCashEditWarning,
@@ -52,7 +53,8 @@ import {
 import adminService from '../services/adminService';
 import api from '../services/api';
 import { useTranslation } from 'react-i18next';
-import { extractApiErrorMessages } from '../utils/apiError';
+import { Link } from 'react-router-dom';
+import { apiErrorCode, extractApiErrorMessages } from '../utils/apiError';
 import AsyncButton from '../components/common/AsyncButton';
 import EmptyState from '../components/common/EmptyState';
 import { usePermissions } from '../components/common/PermissionGuard';
@@ -106,27 +108,6 @@ const buildRewardDisplayItems = (rawItems) => {
     result.push({ ...i, standalone: true });
   });
   return result;
-};
-
-const getOrderStatusColor = (status) => {
-  switch (status) {
-    case 'pending':
-      return 'orange';
-    case 'confirmed':
-      return 'blue';
-    case 'preparing':
-      return 'cyan';
-    case 'out_for_delivery':
-      return 'purple';
-    case 'delivered':
-      return 'green';
-    case 'cancelled':
-      return 'red';
-    case 'returned':
-      return 'volcano';
-    default:
-      return 'default';
-  }
 };
 
 // PUT /admin/orders/<id>/status refusals the page explains itself, in the admin's language:
@@ -243,7 +224,21 @@ const Orders = () => {
   // The admin cancel or return waiting for confirmation (CloseOrderDialog); null = none.
   const [closeRequest, setCloseRequest] = useState(null);
 
-  const { isAdmin } = usePermissions();
+  const { isAdmin, hasPermission } = usePermissions();
+  const canReviewAgentOrders = hasPermission('can_review_agent_orders');
+
+  // C14 (§6.6): the backend's `awaiting_staff_approval`, beside the status in the list and the
+  // drawer. A held order is confirmed only from the approval queue, so reviewers get the way there.
+  const renderStaffApprovalHold = (order) => (order?.awaiting_staff_approval ? (
+    <>
+      <Tag color="gold" style={{ marginLeft: 4 }}>
+        {t('ui.orders.awaiting_staff_approval', 'Awaiting manager approval')}
+      </Tag>
+      {canReviewAgentOrders ? (
+        <Link to="/sales/order-approvals">{t('ui.orders.open_order_approvals', 'Open order approvals')}</Link>
+      ) : null}
+    </>
+  ) : null);
 
   const [statusForm] = Form.useForm();
   const [createOrderForm] = Form.useForm();
@@ -371,8 +366,12 @@ const Orders = () => {
   const reasonRequiredStatuses = statusesData?.data?.reason_required_statuses || [];
   const closesOrder = (status) => reasonRequiredStatuses.includes(status);
   const isClosingStatus = closesOrder(watchedStatusValue);
+  // C14: a held order is confirmed only from the approval queue, and PUT /status refuses it
+  // (ORDER_AWAITING_STAFF_APPROVAL), so the form does not offer it. The flag is the backend's.
   const allowedNextStatuses = selectedOrder?.status
-    ? new Set(statusTransitions[selectedOrder.status] || [])
+    ? new Set((statusTransitions[selectedOrder.status] || []).filter(
+      (status) => !(selectedOrder.awaiting_staff_approval && status === 'confirmed'),
+    ))
     : null;
 
   // Create Order's date range, fetched afresh every time the modal opens. Never read from the
@@ -400,7 +399,7 @@ const Orders = () => {
     onError: (error) => {
       // A code this page explains was named in handledErrorCodes, so api.js stayed silent. This is
       // its one message, and the dialog stays open for the admin to act on it.
-      const known = STATUS_ERROR_MESSAGES.get(error?.response?.data?.data?.error_code);
+      const known = STATUS_ERROR_MESSAGES.get(apiErrorCode(error));
       if (known) {
         message.error(t(known[0], known[1]));
         return;
@@ -958,12 +957,31 @@ const Orders = () => {
     try {
       const values = await editItemsForm.validateFields();
       setEditPreviewLoading(true);
+      const formItems = values.items || [];
+      // The backend reads an existing line missing from the payload as unchanged, so a row the
+      // admin dropped with its minus button is sent as quantity 0 (the same as typing 0).
+      const kept = new Set(formItems.map((entry) => String(entry.order_item_id ?? '')));
+      // A row the admin added without an id (via "Add Item") binds to an original line BY
+      // PRODUCT — the same rule the backend's edit-plan builder uses for a null order_item_id.
+      // So when the admin presses minus on a line and then re-adds its product as a new row,
+      // that line isn't actually being removed; it's being re-bound to the new quantity. Sending
+      // both the re-add and an appended quantity-0 removal for the same line would give the
+      // backend two specs for one line, which it now refuses outright as a duplicate.
+      const reAddedProductIds = new Set(
+        formItems.filter((entry) => !entry.order_item_id).map((entry) => String(entry.product_id)),
+      );
+      const removed = (selectedOrder.items || [])
+        .filter((item) => !kept.has(String(item.id)) && !reAddedProductIds.has(String(item.product_id)))
+        .map((item) => ({ orderItemId: item.id, productId: item.product_id, quantity: 0 }));
       const payload = {
-        items: (values.items || []).map((entry) => ({
-          orderItemId: entry.order_item_id || null,
-          productId: entry.product_id,
-          quantity: Number(entry.quantity || 0),
-        })),
+        items: [
+          ...formItems.map((entry) => ({
+            orderItemId: entry.order_item_id || null,
+            productId: entry.product_id,
+            quantity: Number(entry.quantity || 0),
+          })),
+          ...removed,
+        ],
         reason: values.reason,
       };
       const response = await adminService.previewOrderEdit(selectedOrder.id, payload);
@@ -1135,7 +1153,12 @@ const Orders = () => {
       dataIndex: 'status',
       key: 'status',
       width: 120,
-      render: (status) => <Tag color={getOrderStatusColor(status)}>{t(`ui.orders.status_${status}`, status)}</Tag>,
+      render: (status, record) => (
+        <>
+          <Tag color={getOrderStatusColor(status)}>{t(`ui.orders.status_${status}`, status)}</Tag>
+          {renderStaffApprovalHold(record)}
+        </>
+      ),
     },
     {
       title: t('ui.orders.payment', 'Payment'),
@@ -1414,6 +1437,7 @@ const Orders = () => {
                 <Tag color={getOrderStatusColor(selectedOrder.status)}>
                   {t(`ui.orders.status_${selectedOrder.status}`, selectedOrder.status)}
                 </Tag>
+                {renderStaffApprovalHold(selectedOrder)}
                 {selectedOrder.has_loyalty_reward ? (
                   <Tag color="gold" style={{ marginLeft: 4 }}>
                     🎁 {t('ui.orders.reward', 'Reward')}

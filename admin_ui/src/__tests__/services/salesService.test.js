@@ -1,4 +1,4 @@
-import salesService from '../../services/salesService';
+import salesService, { ORDER_APPROVAL_HANDLED_CODES } from '../../services/salesService';
 import api from '../../services/api';
 
 vi.mock('../../services/api', () => ({
@@ -40,7 +40,7 @@ describe('salesService phase-3 read methods', () => {
 
   it('reads the plan-vs-fact rows', async () => {
     api.get.mockResolvedValue(envelope({
-      rows: [{ agent_user_id: 41, agent_name: 'Sardor Alimov', day: '2026-09-09', due: 6, completed: 4, unplanned: 1, strike_rate_pct: 75.0, plan_source: 'snapshot' }],
+      rows: [{ agent_user_id: 41, agent_name: 'Sardor Alimov', day: '2026-09-09', due: 6, completed: 4, counted: 3, unplanned: 1, strike_rate_pct: 75.0, plan_source: 'snapshot', day_status: 'worked' }],
       ...WINDOW,
     }));
 
@@ -50,8 +50,8 @@ describe('salesService phase-3 read methods', () => {
       params: { start_date: '2026-09-07', end_date: '2026-09-13', agent_id: 41 },
     });
     expect(result.rows[0]).toEqual({
-      agent_user_id: 41, agent_name: 'Sardor Alimov', day: '2026-09-09', due: 6, completed: 4,
-      unplanned: 1, strike_rate_pct: 75.0, plan_source: 'snapshot',
+      agent_user_id: 41, agent_name: 'Sardor Alimov', day: '2026-09-09', due: 6, completed: 4, counted: 3,
+      unplanned: 1, strike_rate_pct: 75.0, plan_source: 'snapshot', day_status: 'worked',
     });
   });
 
@@ -59,7 +59,7 @@ describe('salesService phase-3 read methods', () => {
     api.get.mockResolvedValue(envelope({
       exceptions: [{ type: 'short_visit', occurred_at: '2026-09-09T05:12:00+00:00', agent_user_id: 41, agent_name: 'Sardor Alimov', outlet_id: 5, outlet_name: 'Bahor market', visit_id: 12, detail: { seconds: 24, threshold_seconds: 60 } }],
       meta: { page: 1, per_page: 20, total: 1, pages: 1, has_next: false, has_prev: false },
-      types: ['out_of_range_checkin', 'skipped_checkin', 'short_visit', 'declined_agent_order', 'duplicate_photo', 'unvisited', 'duplicate_open_tryout'],
+      types: ['out_of_range_checkin', 'skipped_checkin', 'short_visit', 'declined_agent_order', 'rejected_agent_order', 'duplicate_photo', 'unvisited', 'duplicate_open_tryout'],
       ...WINDOW,
     }));
 
@@ -71,7 +71,7 @@ describe('salesService phase-3 read methods', () => {
     // `short_visit`'s detail is SECONDS (R8 as corrected in Task 5): the threshold is 60s, so a
     // minutes shape would render every row of this type as "0.3 min".
     expect(result.exceptions[0].detail).toEqual({ seconds: 24, threshold_seconds: 60 });
-    expect(result.types).toHaveLength(7);
+    expect(result.types).toHaveLength(8);
   });
 
   it('reads one agent metrics card by users.id', async () => {
@@ -165,5 +165,97 @@ describe('salesService outlet editing and photos', () => {
     expect(api.post).toHaveBeenCalledWith('/admin/sales/outlets/5/contacts', { name: 'Zafar' });
     expect(api.put).toHaveBeenCalledWith('/admin/sales/outlets/5/contacts/2', { is_primary: true });
     expect(api.delete).toHaveBeenCalledWith('/admin/sales/outlets/5/contacts/2');
+  });
+});
+
+describe('salesService outlet plan writes (final-review I1)', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  // The Outlets page explains a refused change to the manager's own visit plan itself, so the
+  // interceptor must not toast it as well: one refusal, one message.
+  const HANDLED = { handledErrorCodes: ['SALES_PAY_SELF_DECISION'] };
+
+  it('names the self-decision refusal on the four plan writes', async () => {
+    api.put.mockResolvedValue(envelope({ outlet: { id: 5 } }));
+    api.post.mockResolvedValue(envelope({ outlet: { id: 5 } }));
+
+    await salesService.updateOutlet(5, { class: 'A' });
+    await salesService.assignOutlet(5, 77);
+    await salesService.markLost(5, 'closed', 'Shutters down');
+    await salesService.bulkAssign('chilanzar', 77);
+
+    expect(api.put).toHaveBeenCalledWith('/admin/sales/outlets/5', { class: 'A' }, HANDLED);
+    expect(api.post.mock.calls).toEqual([
+      ['/admin/sales/outlets/5/assign', { agent_user_id: 77 }, HANDLED],
+      ['/admin/sales/outlets/5/mark-lost', { reason: 'closed', note: 'Shutters down' }, HANDLED],
+      ['/admin/sales/outlets/bulk-assign', { district: 'chilanzar', agent_user_id: 77 }, HANDLED],
+    ]);
+  });
+});
+
+describe('salesService order approvals (C14)', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  // §6.7: the refusals the queue explains inline. A literal here on purpose: the page test and
+  // test_admin_ui_payload_fixture_contracts.py read the exported list, this pins its members.
+  const HANDLED = {
+    handledErrorCodes: [
+      'SALES_ORDER_APPROVAL_NOT_FOUND',
+      'SALES_ORDER_APPROVAL_NOT_PENDING',
+      'SALES_PAY_SELF_DECISION',
+      'ADMIN_REASON_REQUIRED',
+      'ADMIN_REASON_TOO_LONG',
+      'INVENTORY_CONFIRMATION_FAILED',
+    ],
+  };
+
+  it('exports exactly the six codes the queue explains itself', () => {
+    expect(ORDER_APPROVAL_HANDLED_CODES).toEqual(HANDLED.handledErrorCodes);
+  });
+
+  it('reads one page of the queue and unwraps data.data whole', async () => {
+    const page = {
+      items: [{ order_id: 812, status: 'pending', can_decide: true }],
+      meta: { page: 2, per_page: 20, total: 21, pages: 2, has_next: false, has_prev: true },
+      statuses: ['pending', 'approved', 'rejected', 'cancelled'],
+      pending_count: 21,
+    };
+    api.get.mockResolvedValue(envelope(page));
+
+    const result = await salesService.listOrderApprovals({ status: 'approved', agentId: 41, page: 2, perPage: 20 });
+
+    // A read names no handled codes: a failed read is shown by the page's inline Alert, and
+    // nothing about it is a refusal the queue explains.
+    expect(api.get).toHaveBeenCalledTimes(1);
+    expect(api.get.mock.calls[0]).toEqual([
+      '/admin/sales/order-approvals',
+      { params: { status: 'approved', agent_id: 41, page: 2, per_page: 20 } },
+    ]);
+    // `meta`, `statuses` and `pending_count` ride INSIDE data (the visits-route shape, §5.7).
+    expect(result).toEqual(page);
+  });
+
+  it('approves with an empty body and names the handled codes', async () => {
+    api.post.mockResolvedValue(envelope({ approval: { order_id: 812, status: 'approved' } }));
+
+    const result = await salesService.approveAgentOrder(812);
+
+    // `{}` exactly: `_ApproveAgentOrderPayload` has no fields and forbids extras.
+    expect(api.post).toHaveBeenCalledWith('/admin/sales/order-approvals/812/approve', {}, HANDLED);
+    expect(result).toEqual({ approval: { order_id: 812, status: 'approved' } });
+  });
+
+  it('rejects with the reason as typed and names the handled codes', async () => {
+    api.post.mockResolvedValue(envelope({ approval: { order_id: 813, status: 'rejected' } }));
+
+    const result = await salesService.rejectAgentOrder(813, '  Duplicate of SA_000809_26 ');
+
+    // Untrimmed: `require_admin_reason` is the one validator of the reason (strip, blank, length).
+    expect(api.post).toHaveBeenCalledWith(
+      '/admin/sales/order-approvals/813/reject',
+      { reason: '  Duplicate of SA_000809_26 ' },
+      HANDLED,
+    );
+    expect(result).toEqual({ approval: { order_id: 813, status: 'rejected' } });
   });
 });

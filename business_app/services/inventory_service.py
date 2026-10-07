@@ -387,6 +387,12 @@ class InventoryService:
         exist, so "touch only what is already held" is a property of the operation instead
         of a read we would then be racing. A line whose hold has already lapsed is skipped
         and reported, never re-created.
+
+        The details hash's `expires_at` moves WITH the TTL (compensation spec §4.18.4, S-34).
+        `cleanup_expired_reservations` reads that stored field, not the TTL, so a hold
+        stretched by EXPIRE alone still carried `reserve_inventory`'s 30-minute expiry on
+        paper. It is written only after the hash's own EXPIRE succeeded, so a lapsed hash is
+        never re-created without a TTL.
         """
         redis_client = self._get_redis_client()
         if not redis_client:
@@ -394,10 +400,13 @@ class InventoryService:
 
         extended = []
         lapsed = []
+        expires_at = (datetime.now(timezone.utc) + timedelta(seconds=ttl)).isoformat()
         for item in items:
             product_id = item["product_id"]
             if redis_client.expire(RedisKeyspace.inventory_reservation(order_id, product_id), ttl):
-                redis_client.expire(RedisKeyspace.reservation_details(order_id, product_id), ttl)
+                details_key = RedisKeyspace.reservation_details(order_id, product_id)
+                if redis_client.expire(details_key, ttl):
+                    redis_client.hset(details_key, "expires_at", expires_at)
                 extended.append(product_id)
             else:
                 lapsed.append(product_id)

@@ -1,7 +1,11 @@
 """Who confirms an order a sales agent placed on a store's behalf.
 
-Three outcomes, decided HERE and published as one `state` string so neither bot
+Four outcomes, decided HERE and published as one `state` string so neither bot
 re-derives it (D15):
+
+* ``awaiting_staff_approval`` — the agent's second order at this outlet today
+  (compensation spec C14). A manager or an admin decides it in the order-approval
+  queue; the store is not asked, and nothing confirms it automatically;
 
 * ``auto_confirmed`` — ``create_order``'s instant-COD block already confirmed
   the order (a returning store), so there is nothing left to ask and a request
@@ -25,6 +29,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
 from flask import current_app
+from sqlalchemy import and_
 
 from business_app import db
 from business_app.models.order import Order
@@ -34,16 +39,22 @@ from business_app.serializers.order_serializers import serialize_order
 from business_app.services.inventory_service import get_inventory_service
 from business_app.services.order_service import OrderService
 from business_app.services.sales import notifications
+from business_app.services.sales.agent_order_approval_service import AgentOrderApprovalService
 from business_app.utils.exceptions import ConflictError, ValidationError
 from business_app.utils.timezone_utils import get_utc_now
 from shared.enums import OrderStatus, PaymentMethod
-from shared.staff_constants import SALES_EVENT_AGENT_ORDER_CONFIRMED, SALES_EVENT_AGENT_ORDER_DECLINED
+from shared.staff_constants import (
+    SALES_AGENT_ORDER_STATES,
+    SALES_EVENT_AGENT_ORDER_CONFIRMED,
+    SALES_EVENT_AGENT_ORDER_DECLINED,
+)
 
 logger = logging.getLogger(__name__)
 
-# The three answers `open_or_confirm` can give. One definition, because the staff bot renders a
-# different line for each and the admin drawer reads the same word: a fourth state invented in
-# the service, or a dropped one, must break a pin rather than a screen in Tashkent.
+# The four answers `open_or_confirm` can give. One definition, in shared/staff_constants.py,
+# because the staff bot renders a different line for each and imports the same tuple (S-30): a
+# fifth state invented in the service, or a dropped one, must break a pin rather than a screen in
+# Tashkent.
 #
 # DELIBERATELY NOT `CONFIRMATION_STATUSES` (models/sales_visits.py), which are the statuses of the
 # request ROW — pending / confirmed / declined / expired. The two vocabularies overlap on the word
@@ -51,8 +62,8 @@ logger = logging.getLogger(__name__)
 # and the backend confirmed the order itself, while a request ROW of "confirmed" says the store
 # answered yes. Merging them would lose that distinction; the names are unpacked from the tuple
 # below so the tuple is what the returns are made of.
-CONFIRMATION_STATES = ("auto_confirmed", "pending_confirmation", "confirmed")
-STATE_AUTO_CONFIRMED, STATE_PENDING_CONFIRMATION, STATE_CONFIRMED = CONFIRMATION_STATES
+CONFIRMATION_STATES = SALES_AGENT_ORDER_STATES
+STATE_AUTO_CONFIRMED, STATE_PENDING_CONFIRMATION, STATE_CONFIRMED, STATE_AWAITING_STAFF_APPROVAL = CONFIRMATION_STATES
 
 
 def _enqueue_push(order_id: int) -> None:
@@ -76,7 +87,8 @@ class AgentOrderConfirmationService:
 
     @staticmethod
     def _hold_stock_for_the_question(order: Order, ttl_hours) -> None:
-        """Keep the inventory reserved for as long as the store has to answer (M28).
+        """Keep the inventory reserved for as long as the store has to answer, or a manager has
+        to approve (M28; C14 passes `SALES_STAFF_APPROVAL_HOLD_HOURS`).
 
         `create_order` holds these units for `INVENTORY_RESERVATION_TTL` — 30 minutes, sized for
         a checkout somebody is still typing. An agent order asked back to the shop instead waits
@@ -139,6 +151,16 @@ class AgentOrderConfirmationService:
     @staticmethod
     def open_or_confirm(order: Order, outlet: Outlet, agent_user_id: int) -> str:
         """Decide who confirms this order, act on it, and name the outcome."""
+        # FIRST, because a held order is PENDING and may belong to a store with Telegram: the
+        # customer branch below would otherwise ask the store about an order a manager owns. No
+        # request row and no customer-bot push; the stock is held for the approval window and the
+        # managers are alerted. `create_order` already committed the hold row.
+        if AgentOrderApprovalService.is_awaiting(order.id):
+            AgentOrderConfirmationService._hold_stock_for_the_question(
+                order, current_app.config["SALES_STAFF_APPROVAL_HOLD_HOURS"]
+            )
+            notifications.notify_order_awaiting_approval(order)
+            return STATE_AWAITING_STAFF_APPROVAL
         if order.status != OrderStatus.PENDING:
             # `create_order` already confirmed it (returning-customer COD). Nothing to ask.
             return STATE_AUTO_CONFIRMED
@@ -171,13 +193,15 @@ class AgentOrderConfirmationService:
 
     @staticmethod
     def pending_request_filter():
-        """NOT EXISTS clause for "this order is still the store's to answer".
+        """NOT EXISTS clause for "a pending question owns this order": the store's
+        (`order_confirmation_requests`) or a staff approval (`agent_order_approvals`, C14). One
+        rule, both kinds.
 
-        Correlates on `Order.id`, so it drops straight into any `Order.query`.
-        Published as a clause rather than restated in the task because the rule
-        ("a pending request owns the order") must have exactly one definition.
+        Correlates on `Order.id`, so it drops straight into any `Order.query`. The two beat
+        sweeps (`auto_confirm_pending_orders`, `cancel_abandoned_orders`) read it, so neither
+        confirms nor cancels an order somebody still has to answer (I-25).
         """
-        return ~(
+        customer_pending = (
             db.session.query(OrderConfirmationRequest.id)
             .filter(
                 OrderConfirmationRequest.order_id == Order.id,
@@ -185,6 +209,7 @@ class AgentOrderConfirmationService:
             )
             .exists()
         )
+        return and_(~customer_pending, ~AgentOrderApprovalService.awaiting_clause())
 
     @staticmethod
     def respond(order_id: int, user_id: int, action: str, reason: Optional[str] = None) -> Dict[str, Any]:

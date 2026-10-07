@@ -41,6 +41,9 @@ from staff_bot.keyboards.sales import (
 from staff_bot.permissions import require_auth, require_sales_agent
 from staff_bot.utils import flow_state
 from staff_bot.utils.formatters import escape_html, format_currency, format_local_date
+# The answers `POST /visits/<id>/order` can give for `confirmation.state`, and the vocabulary
+# `_order_state_line` gates on: the backend's own tuple, never a copy (compensation spec §7.6).
+from shared.staff_constants import SALES_AGENT_ORDER_STATES as ORDER_STATES
 
 logger = logging.getLogger(__name__)
 
@@ -90,14 +93,6 @@ DATE_ERROR_CODE = 'SALES_DELIVERY_DATE_INVALID'
 # An admin un-flagged a SKU while the agent was counting it. The stock-check
 # list is the backend's, so the recovery is to ask for it again.
 STOCK_PRODUCT_ERROR_CODE = 'SALES_STOCK_PRODUCT_INVALID'
-
-# The three answers `POST /visits/<id>/order` can give for
-# `confirmation.state` -- `AgentOrderConfirmationService.CONFIRMATION_STATES`
-# (D15), and the VOCABULARY `_order_state_line` gates on. A copy, like the
-# four in `keyboards/sales.py`, and pinned against the backend tuple by
-# `tests/unit/test_sales_visit_bot_plumbing.py` so a fourth state added there
-# fails a test instead of printing nothing on the agent's receipt.
-ORDER_STATES = ('auto_confirmed', 'pending_confirmation', 'confirmed')
 
 
 class VisitHandler(SalesHubHandler):
@@ -705,7 +700,15 @@ class VisitHandler(SalesHubHandler):
         as from the entry point: Task 12's order and close paths fall back to
         it whenever the draft has lost the visit id (a restart, a second
         device, a timeout), rather than posting to `None`.
+
+        Both doors that re-arm the visit -- ⏯ Resume and a stale visit button
+        -- come through here, and the visit conversation is registered ahead of
+        the 📞 phone screen, so they take their tap before that screen's
+        `menu_escape` can end it. This is where its draft goes, as `start_visit`
+        drops it (`_drop_other_sales_drafts` says why). Inside a live visit
+        there is none to drop: no other sales screen opens on top of one.
         """
+        self._drop_other_sales_drafts(context, FLOW_KEY)
         flow = await self._load_current(update, context, language)
         if flow is None:
             return ConversationHandler.END
@@ -766,6 +769,10 @@ class VisitHandler(SalesHubHandler):
         unlike the new-outlet pin: a check-in is a record of where the agent
         actually stood. The backend measures `distance_m` and decides
         `in_radius`; this only reads them back.
+
+        A FORWARDED pin is refused (compensation spec §7.4, review gaming F5):
+        it is where somebody stood, some time ago, and the verified visit it
+        would record counts for pay. Nothing is posted.
         """
         language = await self._get_language(update, context)
         flow = await self._flow(update, context)
@@ -773,6 +780,16 @@ class VisitHandler(SalesHubHandler):
             return ConversationHandler.END
         location = update.effective_message.location if update.effective_message else None
         if not location:
+            return V_CHECKIN
+        if self._is_forwarded(update.effective_message):
+            # The one-shot location keyboard collapsed when the pin was sent: redraw it with
+            # the re-prompt, or the agent has no button left to send their own pin with.
+            await self._say(
+                update,
+                f"📍 {i18n.get('staff.sales.visit.checkin_forwarded', language)}",
+                self._checkin_prompt(language),
+                force_new=True,
+            )
             return V_CHECKIN
         token = await self._get_auth_token(update, context)
         if not token:
@@ -807,18 +824,21 @@ class VisitHandler(SalesHubHandler):
             return V_CHECKIN
         visit = (response.data or {}).get('visit') or {}
         distance = visit.get('distance_m')
-        # An outlet with no pin has no distance and no radius to be inside of.
-        # Unreachable for a visitable outlet (activation requires a pin), and
-        # reported honestly rather than as a fabricated zero if it ever is.
-        shown = '—' if distance is None else int(round(float(distance)))
-        key = 'staff.sales.visit.checkin_ok' if visit.get('in_radius') is not False else 'staff.sales.visit.checkin_far'
-        mark = '✅' if visit.get('in_radius') is not False else '⚠️'
+        in_radius = visit.get('in_radius')
         flow['step'] = visit.get('current_step') or 'stock'
-        return await self._after_checkin(
-            update, context, flow, language,
-            f"{mark} {i18n.get(key, language, distance=shown)}",
-            visit,
-        )
+        if in_radius is None:
+            # An outlet with no pin has no distance and no radius to be inside of,
+            # so presence was never measured and the visit is not counted as
+            # verified (owner rule Q9, `no_location`). A warning, never the ✅
+            # line: that one told the agent a visit counted that the pay gate
+            # then refused.
+            result = f"⚠️ {i18n.get('staff.sales.visit.checkin_no_location', language)}"
+        else:
+            shown = '—' if distance is None else int(round(float(distance)))
+            key = 'staff.sales.visit.checkin_ok' if in_radius else 'staff.sales.visit.checkin_far'
+            mark = '✅' if in_radius else '⚠️'
+            result = f"{mark} {i18n.get(key, language, distance=shown)}"
+        return await self._after_checkin(update, context, flow, language, result, visit)
 
     @require_auth
     @require_sales_agent
@@ -1598,20 +1618,26 @@ class VisitHandler(SalesHubHandler):
 
     @staticmethod
     def _order_state_line(state: str, language: str) -> str:
-        """Which of the three result lines the agent reads.
+        """Which of the four result lines the agent reads.
 
-        `confirmation.state` is the backend's (D15) -- whether the store has
-        to confirm in its own bot, whether it was confirmed at creation, or
-        whether the instant-COD rule already did it. `ORDER_STATES` is the
-        gate (and the pin against the backend's own tuple); the three i18n
+        `confirmation.state` is the backend's (D15, and C14's same-day hold) --
+        whether the store has to confirm in its own bot, whether it was
+        confirmed at creation, whether the instant-COD rule already did it, or
+        whether a manager has to approve it first. `ORDER_STATES` is the gate,
+        and it IS the shared tuple the backend's constant is; the four i18n
         KEYS stay written out as literals so staff_bot/i18n.py's key scraper
-        sees all three and /health requires them.
+        sees all four and /health requires them.
 
         Anything else -- including the 409's `details.order`, which carries no
         state at all -- prints no line rather than a guessed one.
         """
         if state not in ORDER_STATES:
             return ''
+        if state == 'awaiting_staff_approval':
+            # Compensation spec §7.6: this outlet already has an order from today. The store is
+            # never asked; a manager approves or rejects, and the agent hears about exactly
+            # those two outcomes (a cancellation by any other path sends nothing, §4.18.7).
+            return i18n.get('staff.sales.visit.order_awaiting_staff_approval', language)
         if state == 'pending_confirmation':
             return i18n.get('staff.sales.visit.order_pending_confirmation', language)
         if state == 'confirmed':

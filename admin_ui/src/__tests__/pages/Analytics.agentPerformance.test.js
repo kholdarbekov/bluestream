@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { message } from 'antd';
@@ -88,8 +88,8 @@ const CSV_HEADERS = [
   'Agent', 'Phone',
   'Planned visits', 'Completed visits', 'Plan vs fact %', 'Unplanned visits', 'Visits / day',
   'Strike rate %', 'Assigned outlets', 'Active outlets', 'Active share %',
-  'New outlets registered', 'New outlets activated', 'Orders placed', 'Orders delivered & paid',
-  'Bottles delivered & paid', 'Revenue delivered & paid', 'Orders cancelled',
+  'New outlets registered', 'New outlets activated', 'Orders placed', 'Placed orders delivered and paid',
+  'Bottles on placed orders delivered and paid', 'Revenue on placed orders delivered and paid', 'Orders cancelled',
   'Suggested vs accepted %', 'Out-of-range check-ins', 'Skipped check-ins', 'Avg visit minutes',
 ];
 
@@ -166,6 +166,19 @@ it('renders every KPI for both agents, with an em dash where the service publish
   expect(nsCalls).toContainEqual(['analytics', 'sales_agents']);
 });
 
+it('explains plan vs fact as verified check-ins on worked days, on the column header', async () => {
+  // Spec §8.1: the hint moved with the verified-visit rule (C4). The inline default is the seed's
+  // English value word for word (scripts/seed_ui_sales_translations.py), and the i18n stub above
+  // resolves every key to its default, so this is the English an owner reads on hover.
+  render(<Analytics />, { wrapper: createWrapper() });
+  await openAgentTab();
+
+  const header = screen.getByRole('columnheader', { name: 'Plan vs fact %' });
+  expect(
+    within(header).getByTitle('Due outlets that got a real check-in lasting at least 1 minute, on worked days only'),
+  ).toHaveTextContent('Plan vs fact %');
+});
+
 it('exports the visible rows as CSV with translated headers and raw values', async () => {
   render(<Analytics />, { wrapper: createWrapper() });
   await openAgentTab();
@@ -187,8 +200,8 @@ it('exports the visible rows as CSV with translated headers and raw values', asy
       'Unplanned visits': 3, 'Visits / day': 2.3, 'Strike rate %': 57.1,
       'Assigned outlets': 26, 'Active outlets': 19, 'Active share %': 73.1,
       'New outlets registered': 4, 'New outlets activated': 2, 'Orders placed': 9,
-      'Orders delivered & paid': 6, 'Bottles delivered & paid': 71,
-      'Revenue delivered & paid': 1250000.5, 'Orders cancelled': 1,
+      'Placed orders delivered and paid': 6, 'Bottles on placed orders delivered and paid': 71,
+      'Revenue on placed orders delivered and paid': 1250000.5, 'Orders cancelled': 1,
       'Suggested vs accepted %': 64.5, 'Out-of-range check-ins': 2,
       'Skipped check-ins': 1, 'Avg visit minutes': 12.4,
     },
@@ -198,8 +211,8 @@ it('exports the visible rows as CSV with translated headers and raw values', asy
       'Unplanned visits': 0, 'Visits / day': 0, 'Strike rate %': null,
       'Assigned outlets': 5, 'Active outlets': 0, 'Active share %': 0,
       'New outlets registered': 0, 'New outlets activated': 0, 'Orders placed': 0,
-      'Orders delivered & paid': 0, 'Bottles delivered & paid': 0,
-      'Revenue delivered & paid': 0, 'Orders cancelled': 0,
+      'Placed orders delivered and paid': 0, 'Bottles on placed orders delivered and paid': 0,
+      'Revenue on placed orders delivered and paid': 0, 'Orders cancelled': 0,
       'Suggested vs accepted %': null, 'Out-of-range check-ins': 0,
       'Skipped check-ins': 0, 'Avg visit minutes': null,
     },

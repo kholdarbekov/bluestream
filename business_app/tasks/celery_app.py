@@ -230,6 +230,16 @@ def make_celery(app=None):
             "task": "sales.snapshot_agent_day_plans",
             "schedule": crontab(hour=1, minute=20),
         },
+        # 01:40 Tashkent, twenty minutes behind the day-plan snapshot and thirty behind the
+        # stage sweep (which writes the first-activation rows the new-outlet bonus reads).
+        # Opens the month if needed and reconciles every agent's commission lines. Clear of
+        # the 01:00 / 01:10 / 01:20 sales jobs and of 02:00 / 02:30. The task carries no
+        # limit of its own, so it gets one here.
+        "sync-sales-pay-ledger": {
+            "task": "sales.sync_pay_ledger",
+            "schedule": crontab(hour=1, minute=40),
+            "options": {"time_limit": 900},
+        },
         # The agent's day in one message, at the local time the owner configured
         # (SALES_DIGEST_LOCAL_TIME, default 08:30). Skipped for any agent with nothing to
         # report — this is the only sales push that arrives with a sound.

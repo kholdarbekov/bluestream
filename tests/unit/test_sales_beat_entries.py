@@ -30,6 +30,9 @@ EXPECTED = {
     # both jobs above rewrite, so running it earlier would file a plan against a
     # column that is still moving.
     "snapshot-sales-agent-day-plans": ("sales.snapshot_agent_day_plans", crontab(hour=1, minute=20)),
+    # 01:40, twenty minutes behind the snapshot and thirty behind the stage sweep, which
+    # writes the first-activation rows a converted try-out's new-outlet bonus reads.
+    "sync-sales-pay-ledger": ("sales.sync_pay_ledger", crontab(hour=1, minute=40)),
     "send-agent-morning-digest": ("sales.send_agent_morning_digest", crontab(hour=8, minute=30)),
     "notify-sales-exception-summary": ("sales.notify_managers_exception_summary", crontab(hour=8, minute=0)),
 }

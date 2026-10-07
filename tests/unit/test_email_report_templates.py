@@ -8,6 +8,7 @@ The per-language marker asserts the RIGHT language file rendered (not a
 cross-language fallback), and 'None' must never leak from an optional key.
 """
 
+import importlib.util
 import pathlib
 import re
 
@@ -258,3 +259,27 @@ def test_the_agent_performance_template_prints_every_metric_key_in_order(languag
     source = (EMAIL_TEMPLATES_DIR / language / "agent_performance.html").read_text(encoding="utf-8")
 
     assert re.findall(r"cell\(agent\.(\w+)\)", source) == list(METRIC_KEYS)
+
+
+def _staff_seed_text(suffix, language):
+    """A curated `staff.sales.*` value, read from the staff seed by path (scripts/ is not a package;
+    tests/unit/test_sales_phase2b_vocabulary.py loads it the same way)."""
+    path = pathlib.Path(__file__).resolve().parents[2] / "scripts" / "seed_staff_translations.py"
+    spec = importlib.util.spec_from_file_location("seed_staff_translations", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.SALES_TEXT_TRANSLATIONS[suffix][language]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("language", ("uz", "en", "ru"))
+def test_the_delivered_and_paid_row_uses_the_bot_cards_words(language):
+    """Spec 2026-09-28 §8.3: the count reads pay's earning rule over the orders the agent PLACED in
+    the window, so "delivered and paid" alone misled twice (a contract order counts once delivered,
+    and the window is the placement, not the payment). The weekly email and the bot card name it
+    the same way in each language: the seed row is the wording, and the email must match it."""
+    source = (EMAIL_TEMPLATES_DIR / language / "agent_performance.html").read_text(encoding="utf-8")
+    heading = re.search(r"<th>([^<]+)</th><td>\{\{ cell\(agent\.orders_delivered_paid\) \}\}</td>", source)
+
+    assert heading is not None
+    assert heading.group(1) == _staff_seed_text("stats.metric_orders_delivered_paid", language)

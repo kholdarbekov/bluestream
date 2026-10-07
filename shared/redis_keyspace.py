@@ -179,6 +179,14 @@ class RedisKeyspace:
     def reservation_details(order_id: int | str, product_id: int | str) -> str:
         return f"reservation_details:{order_id}:{product_id}"
 
+    # Tier: CACHE. The sales-pay on-demand sync throttle (`SET NX EX`): present means the
+    # agent's ledger was synced within SALES_PAY_ONDEMAND_SYNC_SECONDS. A throttle, never a
+    # lock: the period row lock and the ledger's unique key keep the ledger right, so a Redis
+    # failure means "sync anyway".
+    @staticmethod
+    def sales_pay_fresh(agent_user_id: int) -> str:
+        return f"sales_pay:fresh:{agent_user_id}"
+
     # ---- Scan patterns ---------------------------------------------------
     # SCAN patterns use `*` wildcards. Callers should prefer these helpers
     # over inlining `f"{prefix}:*"` so the wildcard shape stays in sync
@@ -223,6 +231,7 @@ KEYSPACE_TIERS: dict[str, RedisUsageTier] = {
     'webhook_replay_nonce':              RedisUsageTier.TIER_SECURITY,
     'inventory_reservation':             RedisUsageTier.TIER_RESERVATION,
     'reservation_details':               RedisUsageTier.TIER_RESERVATION,
+    'sales_pay_fresh':                   RedisUsageTier.TIER_CACHE,
 }
 
 
@@ -232,8 +241,8 @@ KEYSPACE_TIERS: dict[str, RedisUsageTier] = {
 #
 #     rg -n --glob '!shared/redis_keyspace.py' \
 #        --glob '!docs/**' --glob '!tests/**' \
-#        -e 'f"(bot:|rate:|otp:|bs:|inventory_reservation:|reservation_details:|staff_bot:|webhook_nonce:)' \
-#        -e "f'(bot:|rate:|otp:|bs:|inventory_reservation:|reservation_details:|staff_bot:|webhook_nonce:)"
+#        -e 'f"(bot:|rate:|otp:|bs:|inventory_reservation:|reservation_details:|staff_bot:|webhook_nonce:|sales_pay:)' \
+#        -e "f'(bot:|rate:|otp:|bs:|inventory_reservation:|reservation_details:|staff_bot:|webhook_nonce:|sales_pay:)"
 #
 # Any match in a non-excluded path is a violation: the caller should use a
 # RedisKeyspace method instead. We exclude tests because test fixtures

@@ -9,6 +9,23 @@ import api from './api';
  */
 const unwrap = (response) => response?.data?.data || response?.data || {};
 
+// C14 (spec §6.7): the refusals the order-approval queue explains itself, inline, in the admin's
+// language. Both decisions name them, so api.js does not toast them as well: one refusal, one
+// message. Held to the literal raise sites by tests/unit/test_admin_ui_payload_fixture_contracts.py.
+export const ORDER_APPROVAL_HANDLED_CODES = [
+  'SALES_ORDER_APPROVAL_NOT_FOUND',
+  'SALES_ORDER_APPROVAL_NOT_PENDING',
+  'SALES_PAY_SELF_DECISION',
+  'ADMIN_REASON_REQUIRED',
+  'ADMIN_REASON_TOO_LONG',
+  'INVENTORY_CONFIRMATION_FAILED',
+];
+
+// Final-review I1: a manager who holds an agent profile may not change his own visit plan (class,
+// cadence, assignment, lost), and the Outlets page explains that refusal itself, so api.js does not
+// toast it as well.
+export const OUTLET_PLAN_HANDLED_CODES = ['SALES_PAY_SELF_DECISION'];
+
 class SalesService {
   async getOutlets(params = {}) {
     const response = await api.get('/admin/sales/outlets', { params });
@@ -29,7 +46,9 @@ class SalesService {
   }
 
   async updateOutlet(outletId, payload) {
-    const response = await api.put(`/admin/sales/outlets/${outletId}`, payload);
+    const response = await api.put(`/admin/sales/outlets/${outletId}`, payload, {
+      handledErrorCodes: OUTLET_PLAN_HANDLED_CODES,
+    });
     return unwrap(response);
   }
 
@@ -79,17 +98,23 @@ class SalesService {
   }
 
   async assignOutlet(outletId, agentUserId) {
-    const response = await api.post(`/admin/sales/outlets/${outletId}/assign`, { agent_user_id: agentUserId });
+    const response = await api.post(`/admin/sales/outlets/${outletId}/assign`, { agent_user_id: agentUserId }, {
+      handledErrorCodes: OUTLET_PLAN_HANDLED_CODES,
+    });
     return unwrap(response);
   }
 
   async markLost(outletId, reason, note = null) {
-    const response = await api.post(`/admin/sales/outlets/${outletId}/mark-lost`, { reason, note });
+    const response = await api.post(`/admin/sales/outlets/${outletId}/mark-lost`, { reason, note }, {
+      handledErrorCodes: OUTLET_PLAN_HANDLED_CODES,
+    });
     return unwrap(response);
   }
 
   async bulkAssign(district, agentUserId) {
-    const response = await api.post('/admin/sales/outlets/bulk-assign', { district, agent_user_id: agentUserId });
+    const response = await api.post('/admin/sales/outlets/bulk-assign', { district, agent_user_id: agentUserId }, {
+      handledErrorCodes: OUTLET_PLAN_HANDLED_CODES,
+    });
     return unwrap(response);
   }
 
@@ -127,6 +152,31 @@ class SalesService {
 
   async getAgentsMetrics(params = {}) {
     const response = await api.get('/admin/sales/agents/metrics', { params });
+    return unwrap(response);
+  }
+
+  // --- Same-day order approvals (C14, spec §5.7) -------------------------------------------
+  // `meta`, `statuses` and `pending_count` ride inside `data`, so `unwrap` is the whole adapter.
+  async listOrderApprovals({ status, agentId, page, perPage } = {}) {
+    const response = await api.get('/admin/sales/order-approvals', {
+      params: { status, agent_id: agentId, page, per_page: perPage },
+    });
+    return unwrap(response);
+  }
+
+  async approveAgentOrder(orderId) {
+    const response = await api.post(`/admin/sales/order-approvals/${orderId}/approve`, {}, {
+      handledErrorCodes: ORDER_APPROVAL_HANDLED_CODES,
+    });
+    return unwrap(response);
+  }
+
+  // The reason travels as typed: `require_admin_reason` strips it and refuses a blank or an
+  // over-long one (ADMIN_REASON_REQUIRED / ADMIN_REASON_TOO_LONG), shown inline by the page.
+  async rejectAgentOrder(orderId, reason) {
+    const response = await api.post(`/admin/sales/order-approvals/${orderId}/reject`, { reason }, {
+      handledErrorCodes: ORDER_APPROVAL_HANDLED_CODES,
+    });
     return unwrap(response);
   }
 }

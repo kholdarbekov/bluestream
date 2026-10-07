@@ -29,6 +29,9 @@ import Operators from './pages/Operators';
 import SalesAgents from './pages/SalesAgents';
 import Outlets from './pages/Outlets';
 import Visits from './pages/Visits';
+import SalesCompensation from './pages/SalesCompensation';
+import PenaltyProposals from './pages/PenaltyProposals';
+import SalesOrderApprovals from './pages/SalesOrderApprovals';
 import StaffManagement from './pages/StaffManagement';
 import Prepayments from './pages/Prepayments';
 import MarkingCodeOperations from './pages/MarkingCodeOperations';
@@ -36,6 +39,7 @@ import SupportInbox from './pages/SupportInbox';
 import Subscriptions from './pages/Subscriptions';
 import { useAuthStore } from './stores/authStore';
 import ProtectedRoute from './components/common/ProtectedRoute';
+import PermissionGuard from './components/common/PermissionGuard';
 
 function App() {
   const { isAuthenticated } = useAuthStore();
@@ -85,6 +89,20 @@ function App() {
                   <Route path="/sales/agents" element={<SalesAgents />} />
                   <Route path="/sales/outlets" element={<Outlets />} />
                   <Route path="/sales/visits" element={<Visits />} />
+                  {/* §6.1: admins only (C13). Anyone else lands on the manager's proposals page
+                      (Task 13), with `replace` so Back does not bounce into the guard again. */}
+                  <Route path="/sales/compensation" element={<PermissionGuard permission="can_manage_sales_pay" fallback={<Navigate to="/sales/penalty-proposals" replace />}><SalesCompensation /></PermissionGuard>} />
+                  {/* The manager's proposals page. It sends an administrator on to Compensation's
+                      Penalties tab itself, so no guard is needed here (§6.1). */}
+                  <Route path="/sales/penalty-proposals" element={<PenaltyProposals />} />
+                  <Route
+                    path="/sales/order-approvals"
+                    element={(
+                      <PermissionGuard permission="can_review_agent_orders" fallback={<Navigate to="/dashboard" replace />}>
+                        <SalesOrderApprovals />
+                      </PermissionGuard>
+                    )}
+                  />
                   <Route path="/outlets" element={<Navigate to="/sales/outlets" replace />} />
                   <Route path="/staff/delivery-persons" element={<DeliveryPersons />} />
                   <Route path="/staff/operators" element={<Operators />} />

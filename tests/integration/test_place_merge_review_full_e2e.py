@@ -3190,7 +3190,50 @@ def test_the_api_contract_snapshot_still_lists_the_merge_preview_route(db):
     # POST /api/v1/admin/deliveries/<int:delivery_id>/redispatch (admin.redispatch_admin_delivery),
     # the Delivery page's today-only Re-dispatch: its Reschedule now opens the Orders page's modal
     # (F13). Unrelated to place-merge; only the estate-wide count moved.
-    assert len(routes) == 616
+    # 616 -> 620: the sales-agent compensation plan's Task 4 -- the pay-plan routes on the new
+    # `admin_sales_pay` blueprint behind `super_admin_required`: GET and POST
+    # /api/v1/admin/sales/pay/plans (admin_sales_pay.list_pay_plans / create_pay_plan, a plan with its
+    # first version), GET /api/v1/admin/sales/pay/plans/<int:plan_id>/versions/<int:version_id>
+    # (get_pay_plan_version) and POST /api/v1/admin/sales/pay/plans/<int:plan_id>/versions
+    # (create_pay_plan_version) -- A12-A15. Unrelated to place-merge; only the estate-wide count moved.
+    # 620 -> 623: the sales-agent compensation plan's Task 9 -- the same-day hold's order-approval
+    # queue on `admin_sales` behind `manager_or_higher_required`: GET
+    # /api/v1/admin/sales/order-approvals (admin_sales.list_order_approvals) and POST
+    # /api/v1/admin/sales/order-approvals/<int:order_id>/{approve,reject}
+    # (approve_agent_order / reject_agent_order) -- OA1-OA3. Unrelated to place-merge; only the
+    # estate-wide count moved.
+    # 623 -> 638: the sales-agent compensation plan's Task 7 -- the month, statement and terms routes
+    # on `admin_sales_pay` behind `super_admin_required`: POST /api/v1/admin/sales/pay/start (A0);
+    # GET /api/v1/admin/sales/pay/periods and /periods/<month> (A1, A2); POST
+    # /periods/<month>/{close,recalculate,approve,mark-paid} (A3-A6); PUT /periods/<month>/holidays
+    # (A7); GET /periods/<month>/agents/<int:agent_user_id> and .../lines (A8, A9); PUT
+    # .../unpaid-days (A10); POST .../adjustments (A11); GET and POST
+    # /api/v1/admin/sales/pay/agents/<int:agent_user_id>/terms (A16, A17) and PUT .../employment
+    # (A18). Unrelated to place-merge; only the estate-wide count moved.
+    # 638 -> 648: the sales-agent compensation plan's Task 8 -- penalties on the `admin_sales_pay`
+    # blueprint. Behind `super_admin_required`: GET and POST /api/v1/admin/sales/pay/penalty-types
+    # and PATCH /api/v1/admin/sales/pay/penalty-types/<int:type_id> (list_pay_penalty_types /
+    # create_pay_penalty_type / update_pay_penalty_type, A19-A21); GET and POST
+    # /api/v1/admin/sales/pay/penalties and POST /api/v1/admin/sales/pay/penalties/<int:penalty_id>/
+    # {confirm,reject,cancel} (list_pay_penalties / create_pay_penalty / confirm_pay_penalty /
+    # reject_pay_penalty / cancel_pay_penalty, A22-A26). Behind `manager_or_higher_required`: GET and
+    # POST /api/v1/admin/sales/penalty-proposals (list_penalty_proposals / create_penalty_proposal,
+    # M1-M2). Unrelated to place-merge; only the estate-wide count moved.
+    # 648 -> 650: the sales-agent compensation plan's Task 10 -- the agent's own pay on `staff_sales`
+    # behind `require_staff_roles("sales_agent")`: GET /api/v1/staff/sales/me/earnings (my_earnings,
+    # S1) and GET /api/v1/staff/sales/me/earnings/lines (my_earnings_lines, S2). Unrelated to
+    # place-merge; only the estate-wide count moved.
+    # 616 -> 650: sales-agent pay (27 admin, 2 manager proposal, 2 agent earnings) + order approvals (3)
+    # 650 -> 651: D31 (mandatory phone and location) -- the agent's set-phone route on `staff_sales`
+    # behind `require_staff_roles("sales_agent")`: PUT
+    # /api/v1/staff/sales/outlets/<int:outlet_id>/primary-phone (set_outlet_primary_phone, R4).
+    # Unrelated to place-merge; only the estate-wide count moved.
+    # 651 -> 653: agent statements (2026-10-07) -- the agent's approved pay statements on `staff_sales`
+    # behind `require_staff_roles("sales_agent")`, both GET and read-only: GET
+    # /api/v1/staff/sales/me/statements (my_statements, S3, the approved-or-paid months newest first)
+    # and GET /api/v1/staff/sales/me/statements/<month> (my_statement, S4, one of them in full).
+    # Unrelated to place-merge; only the estate-wide count moved.
+    assert len(routes) == 653
     entry = next(r for r in routes if r["rule"] == "/api/v1/admin/place-groups/merge-preview")
     assert entry["methods"] == ["GET"]
     assert entry["endpoint"] == "admin.get_place_group_merge_preview"

@@ -1923,6 +1923,11 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Savdo agentlari',
         'ru': 'Торговые агенты'
     },
+    'ui.nav.sales_compensation': {
+        'en': 'Compensation',
+        'uz': 'Ish haqi',
+        'ru': 'Оплата труда'
+    },
     'ui.nav.sales': {
         'en': 'Sales',
         'uz': 'Savdo',
@@ -1932,6 +1937,16 @@ BACKEND_TRANSLATIONS = {
         'en': 'Visits',
         'uz': 'Tashriflar',
         'ru': 'Визиты'
+    },
+    'ui.nav.sales_penalty_proposals': {
+        'en': 'Penalty proposals',
+        'uz': 'Jarima takliflari',
+        'ru': 'Предложения штрафов'
+    },
+    'ui.nav.sales_order_approvals': {
+        'en': 'Order approvals',
+        'uz': 'Buyurtmalarni tasdiqlash',
+        'ru': 'Одобрение заказов'
     },
     'ui.analytics.avg_redemption_value': {
         'en': 'Average Redemption Value',
@@ -6723,6 +6738,23 @@ BACKEND_TRANSLATIONS = {
         'uz': '⚠️ {day} sanasida {count} ta savdo chetlanishi qayd etildi. Ko\'rish: {path}',
         'ru': '⚠️ За {day} зафиксировано отклонений: {count}. Посмотреть: {path}'
     },
+    # An agent's second order at one outlet today waits for a manager (compensation spec C14,
+    # business_app/tasks/sales_agent_tasks.py::notify_managers_agent_order_awaiting_approval).
+    # Seeded HERE only, like the summary above, and markup-free for the same reason. `{path}` is
+    # the queue's own URL (ORDER_APPROVALS_PATH). No amount: a manager's alert never carries pay.
+    'staff.notification.subject.agent_order_awaiting_approval': {
+        'en': 'Agent order awaiting approval',
+        'uz': 'Agent buyurtmasi tasdiqlashni kutmoqda',
+        'ru': 'Заказ агента ждёт одобрения'
+    },
+    'staff.notification.content.agent_order_awaiting_approval': {
+        'en': '🕒 {agent_name} placed another order today for {outlet_name} ({order_number}). '
+              'Approve or reject it at {path}',
+        'uz': '🕒 {agent_name} bugun {outlet_name} uchun yana bir buyurtma berdi ({order_number}). '
+              'Tasdiqlang yoki rad eting: {path}',
+        'ru': '🕒 {agent_name} оформил(а) ещё один заказ за сегодня для {outlet_name} ({order_number}). '
+              'Одобрите или отклоните: {path}'
+    },
     # ============================================================================
     # Sales module - the customer-bot proposal for an order a sales agent placed
     # on this store's behalf (telegram_bot/webhook_server.py
@@ -7378,6 +7410,15 @@ ADMIN_UI_ORDER_TRANSLATIONS = {
     # (staff.notification.delivery_failed_admin_hint). tests/staff_bot/test_webhook_delivery_failed.py
     # holds the two together: reword both or neither.
     'ui.orders.delivery_failed_only': _ui_tr('Delivery failed', 'Yetkazib berilmadi', 'Доставка не удалась'),
+    # C14 (sales-agent compensation spec §6.6): the tag beside an agent's held same-day order, and
+    # the reviewers' link to the approval queue. Pinned by
+    # tests/unit/test_admin_ui_payload_fixture_contracts.py.
+    'ui.orders.awaiting_staff_approval': _ui_tr(
+        'Awaiting manager approval', "Menejer tasdig'ini kutmoqda", 'Ждёт одобрения менеджера',
+    ),
+    'ui.orders.open_order_approvals': _ui_tr(
+        'Open order approvals', 'Tasdiqlash navbatini ochish', 'Открыть одобрение заказов',
+    ),
     # F19: the latest admin cancel or return, in the admin order detail only.
     'ui.orders.closing_reason': _ui_tr(
         'Internal reason: {{reason}}',

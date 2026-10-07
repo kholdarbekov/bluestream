@@ -29,6 +29,7 @@ from tests.staff_bot.test_sales_hub_journey import (
     _curated,
     _label,
     _outlet,
+    _prospect_card_response,
 )
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
@@ -45,7 +46,13 @@ async def test_happy_path_with_pin_posts_the_exact_payload(monkeypatch):
     harness, ops, labels = await _agent(monkeypatch)
     harness.backend.route("POST", REVERSE, lambda c: {"formatted_address": "Chilonzor 5-kvartal, 12", "district": "Mirzo Ulug\u2018bek Tumani"})
     harness.backend.route("GET", DEDUPE, lambda c: {"candidates": []})
-    harness.backend.route("POST", OUTLETS, lambda c: {"outlet": _outlet(id=9, name="Bahor market")})
+    # P6 (D31): the create reply IS the card. A new grocery prospect with a
+    # phone and a pin, so it publishes `can_request_activation` and
+    # `can_set_phone` true.
+    harness.backend.route("POST", OUTLETS, lambda c: {"outlet": {
+        **_prospect_card_response()["outlet"], "id": 9, "can_request_activation": True,
+        "can_set_phone": True,
+    }})
     harness.backend.route("GET", f"{OUTLETS}/9", lambda c: {"outlet": _outlet(id=9)})
 
     await harness.send(ops.text(_label(labels, "staff.menu.new_outlet")))
@@ -79,6 +86,13 @@ async def test_happy_path_with_pin_posts_the_exact_payload(monkeypatch):
     }]
     done = harness.telegram.last_shown()
     assert _curated("staff.sales.new.created") in done.text and "Bahor market" in done.text
+    # The receipt IS the outlet card, drawn from the create reply: the agent's
+    # next move, Request activation, is already on the screen (D31).
+    assert "staff_sales_activate_9" in done.callback_data()
+    # D31, spec §4.3: the receipt is drawn from the create reply's own card, so
+    # the phone typed a moment ago is already one tap from being changed.
+    assert "staff_sales_setphone_9" in done.callback_data()
+    assert f"📞 {_curated('staff.sales.card.change_phone')}" in done.button_labels()
     assert harness.conversation_state(CONV) is None
     assert "new_outlet" not in harness.application.user_data[DEFAULT_DRIVER_TELEGRAM_ID]
 
@@ -91,7 +105,7 @@ async def test_out_of_zone_pin_is_refused_and_skips_are_honoured(monkeypatch):
     await harness.send(ops.tap("staff_sales_no_type_workplace"))
     await harness.send(ops.text("Acme office"))
     await harness.send(ops.tap("staff_sales_no_skip_contact_name"))
-    await harness.send(ops.tap("staff_sales_no_skip_contact_phone"))
+    await harness.send(ops.text("90 123 45 67"))
 
     await harness.send(ops.location(*OUT_OF_ZONE))
     assert _curated("staff.operator.outside_delivery_area") in harness.telegram.last_shown().text
@@ -103,8 +117,11 @@ async def test_out_of_zone_pin_is_refused_and_skips_are_honoured(monkeypatch):
     await harness.send(ops.tap("staff_sales_no_class_skip"))
     await harness.send(ops.tap("staff_sales_no_skip_notes"))
     await harness.send(ops.tap("staff_sales_no_confirm"))
+    # The contact name was skipped, so the contact is named after the outlet;
+    # the phone has no Skip, so the contact itself is always sent (D31.1).
     assert _calls(harness, "POST", OUTLETS)[-1].data == {
-        "name": "Acme office", "outlet_type": "workplace", "contact": None,
+        "name": "Acme office", "outlet_type": "workplace",
+        "contact": {"name": "Acme office", "phone": "+998901234567", "role": "owner"},
         "latitude": IN_ZONE[0], "longitude": IN_ZONE[1], "address_text": "Yunusobod 4", "district": "Yashnobod Tumani",
         "class": None, "notes": None, "force": False, "link_user_id": None,
     }
@@ -121,7 +138,7 @@ async def test_duplicate_candidates_offer_link_or_create_anyway(monkeypatch):
     await harness.send(ops.tap("staff_sales_no_type_grocery_store"))
     await harness.send(ops.text("Bahor market"))
     await harness.send(ops.tap("staff_sales_no_skip_contact_name"))
-    await harness.send(ops.tap("staff_sales_no_skip_contact_phone"))
+    await harness.send(ops.text("90 123 45 67"))
     await harness.send(ops.location(*IN_ZONE))
     await harness.send(ops.tap("staff_sales_no_class_skip"))
     await harness.send(ops.tap("staff_sales_no_skip_notes"))
@@ -132,7 +149,11 @@ async def test_duplicate_candidates_offer_link_or_create_anyway(monkeypatch):
     assert _curated("staff.sales.new.create_anyway") in buttons and "Bahor (Olim)" in buttons
 
     await harness.send(ops.tap("staff_sales_no_link_41"))
-    assert _calls(harness, "POST", OUTLETS)[-1].data["link_user_id"] == 41
+    linked = _calls(harness, "POST", OUTLETS)[-1].data
+    assert linked["link_user_id"] == 41
+    # Link re-posts the walk-in's own payload (`link_existing` → `_submit`), so
+    # it carries the phone the agent TYPED, never the candidate's (D31).
+    assert linked["contact"] == {"name": "Bahor market", "phone": "+998901234567", "role": "owner"}
     assert harness.conversation_state(CONV) is None
 
 
@@ -204,7 +225,7 @@ async def test_create_anyway_sets_force(monkeypatch):
     await harness.send(ops.tap("staff_sales_no_type_grocery_store"))
     await harness.send(ops.text("Bahor market"))
     await harness.send(ops.tap("staff_sales_no_skip_contact_name"))
-    await harness.send(ops.tap("staff_sales_no_skip_contact_phone"))
+    await harness.send(ops.text("90 123 45 67"))
     await harness.send(ops.location(*IN_ZONE))
     await harness.send(ops.tap("staff_sales_no_class_skip"))
     await harness.send(ops.tap("staff_sales_no_skip_notes"))
@@ -227,12 +248,13 @@ async def test_menu_tap_mid_flow_cancels_and_clears(monkeypatch):
 
 
 async def _walk_to_pin(harness, ops, labels, outlet_type="grocery_store", name="Bahor market"):
-    """Type → name → both contact skips, i.e. the shortest way to the pin step."""
+    """Type → name → the contact-name Skip → a typed phone: the shortest way to
+    the pin step, now that the phone has no Skip (D31.1)."""
     await harness.send(ops.text(_label(labels, "staff.menu.new_outlet")))
     await harness.send(ops.tap(f"staff_sales_no_type_{outlet_type}"))
     await harness.send(ops.text(name))
     await harness.send(ops.tap("staff_sales_no_skip_contact_name"))
-    await harness.send(ops.tap("staff_sales_no_skip_contact_phone"))
+    await harness.send(ops.text("90 123 45 67"))
 
 
 async def test_a_typed_address_is_geocoded_and_carries_the_flow_forward(monkeypatch):
@@ -581,3 +603,149 @@ async def test_a_dead_session_at_the_dedupe_step_ends_the_flow_instead_of_parkin
     assert _calls(harness, "GET", DEDUPE) == []
     assert harness.conversation_state(CONV) is None
     assert _curated("staff.session_expired") in " ".join(_alerts(harness) + harness.telegram.texts())
+
+
+@pytest.mark.parametrize("contact_name_step", ["typed", "skipped"])
+async def test_the_phone_prompt_offers_no_skip(monkeypatch, contact_name_step):
+    """D31.1: the phone is mandatory, so its prompt draws no keyboard at all.
+
+    Both doors into the step. A TYPED contact name is answered with a NEW
+    message; the name's own Skip EDITS its prompt into the phone prompt, and an
+    edit sent without a keyboard is also what takes that Skip off the message.
+    """
+    harness, ops, labels = await _agent(monkeypatch)
+    await harness.send(ops.text(_label(labels, "staff.menu.new_outlet")))
+    await harness.send(ops.tap("staff_sales_no_type_grocery_store"))
+    await harness.send(ops.text("Bahor market"))
+    harness.telegram.reset()
+
+    if contact_name_step == "typed":
+        await harness.send(ops.text("Olim aka"))
+    else:
+        await harness.send(ops.tap("staff_sales_no_skip_contact_name"))
+
+    prompt = harness.telegram.last_shown()
+    assert prompt.method == {"typed": "sendMessage", "skipped": "editMessageText"}[contact_name_step]
+    assert prompt.text == _curated("staff.sales.new.enter_contact_phone")
+    assert prompt.reply_markup == {}
+    assert harness.conversation_state(CONV) == NO_CONTACT_PHONE
+
+
+async def test_a_landline_is_refused_and_the_mobile_typed_next_is_what_gets_posted(monkeypatch):
+    """D31 R2 at the walk-in: a Tashkent landline cannot open a customer account.
+
+    `validate_phone` (the shared SSOT) refuses it, the re-prompt says a MOBILE
+    is wanted and carries no Skip either (D31.1), and the step waits. The
+    outlet is then created with the mobile typed next, written in another
+    everyday format -- the landline reaches the backend in no form.
+    """
+    harness, ops, labels = await _agent(monkeypatch)
+    harness.backend.route("POST", REVERSE, lambda c: {"formatted_address": "Yunusobod 4", "district": "Yashnobod Tumani"})
+    harness.backend.route("GET", DEDUPE, lambda c: {"candidates": []})
+    # Since P6 the create answers with the new prospect's CARD, readiness fields
+    # included: what the backend publishes for a workplace with a phone and a pin.
+    harness.backend.route("POST", OUTLETS, lambda c: {"outlet": {
+        **_prospect_card_response()["outlet"], "id": 9, "name": "Acme office", "outlet_type": "workplace",
+        "can_request_activation": True, "can_set_phone": True,
+    }})
+    await harness.send(ops.text(_label(labels, "staff.menu.new_outlet")))
+    await harness.send(ops.tap("staff_sales_no_type_workplace"))
+    await harness.send(ops.text("Acme office"))
+    await harness.send(ops.text("Dilshod"))
+    harness.backend.calls.clear()
+
+    await harness.send(ops.text("71 123 45 67"))
+
+    assert harness.backend.calls == []
+    reprompt = harness.telegram.last_shown()
+    assert reprompt.text == _curated("staff.sales.error.mobile_required")
+    assert reprompt.reply_markup == {}
+    assert harness.conversation_state(CONV) == NO_CONTACT_PHONE
+    assert "contact_phone" not in harness.application.user_data[DEFAULT_DRIVER_TELEGRAM_ID]["new_outlet"]
+
+    await harness.send(ops.text("+998 90 123-45-67"))
+    assert harness.conversation_state(CONV) == NO_PIN
+    await harness.send(ops.location(*IN_ZONE))
+    await harness.send(ops.tap("staff_sales_no_class_skip"))
+    await harness.send(ops.tap("staff_sales_no_skip_notes"))
+    await harness.send(ops.tap("staff_sales_no_confirm"))
+
+    assert [c.params for c in _calls(harness, "GET", DEDUPE)] == [
+        {"name": "Acme office", "phone": "+998901234567", "latitude": IN_ZONE[0], "longitude": IN_ZONE[1]},
+    ]
+    assert [c.data for c in _calls(harness, "POST", OUTLETS)] == [{
+        "name": "Acme office", "outlet_type": "workplace",
+        "contact": {"name": "Dilshod", "phone": "+998901234567", "role": "owner"},
+        "latitude": IN_ZONE[0], "longitude": IN_ZONE[1], "address_text": "Yunusobod 4", "district": "Yashnobod Tumani",
+        "class": None, "notes": None, "force": False, "link_user_id": None,
+    }]
+    assert harness.conversation_state(CONV) is None
+    done = harness.telegram.last_shown()
+    assert _curated("staff.sales.new.created") in done.text and "Acme office" in done.text
+
+
+async def test_a_stale_skip_cannot_move_the_walk_in_past_the_phone(monkeypatch):
+    """`skip_contact_phone` absorbs a Skip; it no longer skips (D31.1).
+
+    After a TYPED contact name the name prompt is still on screen one message
+    up with its live Skip, and a phone Skip drawn before D31 can sit further up
+    the chat. The name's Skip is acknowledged bare and changes nothing -- the
+    typed name survives it. The phone's Skip is refused WITH the reason, as
+    that tap's one popup. Neither redraws anything or calls the backend, and
+    the next text is still read as the phone.
+    """
+    harness, ops, labels = await _agent(monkeypatch)
+    await harness.send(ops.text(_label(labels, "staff.menu.new_outlet")))
+    await harness.send(ops.tap("staff_sales_no_type_grocery_store"))
+    await harness.send(ops.text("Bahor market"))
+    await harness.send(ops.text("Olim aka"))
+    assert harness.conversation_state(CONV) == NO_CONTACT_PHONE
+    flow = harness.application.user_data[DEFAULT_DRIVER_TELEGRAM_ID]["new_outlet"]
+    harness.telegram.reset()
+    harness.backend.calls.clear()
+
+    await harness.send(ops.tap("staff_sales_no_skip_contact_name"))
+    assert [c.params.get("text") for c in harness.telegram.of("answerCallbackQuery")] == [None]
+    assert harness.telegram.shown == []
+    harness.telegram.reset()
+
+    await harness.send(ops.tap("staff_sales_no_skip_contact_phone"))
+    answers = harness.telegram.of("answerCallbackQuery")
+    assert [(c.params.get("text"), c.params.get("show_alert")) for c in answers] == [
+        (_curated("staff.sales.error.phone_required"), True),
+    ]
+    assert harness.telegram.shown == []
+
+    assert harness.backend.calls == []
+    assert harness.conversation_state(CONV) == NO_CONTACT_PHONE
+    assert flow == {"outlet_type": "grocery_store", "name": "Bahor market", "contact_name": "Olim aka"}
+
+    await harness.send(ops.text("90 123 45 67"))
+    assert harness.conversation_state(CONV) == NO_PIN
+    assert flow["contact_phone"] == "+998901234567"
+
+
+@pytest.mark.parametrize("leave, lands_on", [
+    pytest.param(lambda ops, labels: ops.text(_label(labels, "staff.menu.my_outlets")), "staff.sales.hub.title",
+                 id="main_menu_tap"),
+    pytest.param(lambda ops, labels: ops.command("cancel"), "staff.cancelled", id="cancel_command"),
+])
+async def test_the_phone_step_is_left_by_a_menu_tap_or_cancel(monkeypatch, leave, lands_on):
+    """With no Skip (D31.1), these are the ways out of the phone step. Each ENDS the walk-in,
+    so the number typed next is not read as this outlet's phone."""
+    harness, ops, labels = await _agent(monkeypatch)
+    await harness.send(ops.text(_label(labels, "staff.menu.new_outlet")))
+    await harness.send(ops.tap("staff_sales_no_type_grocery_store"))
+    await harness.send(ops.text("Bahor market"))
+    await harness.send(ops.text("Olim aka"))
+    assert harness.conversation_state(CONV) == NO_CONTACT_PHONE
+
+    await harness.send(leave(ops, labels))
+
+    assert harness.conversation_state(CONV) is None
+    assert "new_outlet" not in harness.application.user_data[DEFAULT_DRIVER_TELEGRAM_ID]
+    assert _curated(lands_on) in harness.telegram.last_shown().text
+    harness.backend.calls.clear()
+    await harness.send(ops.text("90 123 45 67"))
+    assert harness.conversation_state(CONV) is None
+    assert harness.backend.calls == []

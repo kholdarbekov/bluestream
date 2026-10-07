@@ -29,10 +29,11 @@ from sqlalchemy.orm import selectinload
 from business_app import db
 from business_app.models.order import Order, OrderItem
 from business_app.models.sales import Outlet, OutletStageHistory
-from business_app.models.sales_visits import SalesAgentDayPlan, Visit, VisitStockCheck
+from business_app.models.sales_visits import Visit, VisitStockCheck
 from business_app.models.user import User
+from business_app.services.sales.pay_rules import agent_placed_clause, order_is_earned
+from business_app.services.sales.visit_rules import presence_seconds
 from business_app.utils.local_windows import days_inclusive, local_date, local_day_bounds, window_bounds
-from business_app.utils.timezone_utils import ensure_utc
 from shared.enums import OrderStatus
 
 # The spec's own reading order (spec :391). Published as data so every consumer pins its
@@ -115,14 +116,12 @@ class AgentMetricsService:
         `parse_date_range` (Task 3) is the one guard on the pair; an inverted range never
         reaches this method, so nothing here re-checks it.
 
-        `plan_vs_fact_pct` is measured on the days a plan existed (R47). Both halves of the
-        fraction come from the SAME `sales_agent_day_plans` rows: a local day with no row is
-        left out of the denominator AND its completed planned visits are left out of the
-        numerator. `Visit.planned` has been stamped since phase 2a, so counting it across the
-        whole window against a partial denominator would measure a seven-day numerator with a
-        five-day plan and `cap=100.0` would dress the result up as a flawless 100.0%. The key
-        is `None` only when no day of the window was snapshotted at all — a denominator of
-        zero is not a score of zero. `planned_visits` is the same sum over the same rows.
+        `planned_visits` and `plan_vs_fact_pct` are `AgentDayPlanService.compliance`'s, the ONE
+        producer of plan compliance (C4): due outlets reached by a verified visit, over the
+        frozen due set, both halves narrowed to days that have a snapshot row (R47) AND are
+        worked days. The metrics card, the Analytics tab and CSV, the weekly email, the
+        plan-vs-fact table and the pay gate therefore print one figure. The % is `None` only
+        when no day of the window was measured — a denominator of zero is not a score of zero.
         """
         start_utc, end_utc = window_bounds(start_date, end_date)
         visits = (
@@ -137,40 +136,23 @@ class AgentMetricsService:
         completed = [visit for visit in visits if visit.status == "completed"]
         completed_ids = [visit.id for visit in completed]
 
-        # The rows themselves, not a SUM: R47 needs the DAYS as well as the total, because the
-        # numerator below is narrowed to exactly the days these rows cover.
-        plan_rows = (
-            db.session.query(SalesAgentDayPlan.plan_date, SalesAgentDayPlan.due_count)
-            .filter(
-                SalesAgentDayPlan.agent_user_id == agent_user_id,
-                SalesAgentDayPlan.plan_date >= start_date,
-                SalesAgentDayPlan.plan_date <= end_date,
-            )
-            .all()
-        )
-        planned_days = {row.plan_date for row in plan_rows}
-        planned_visits = int(sum(row.due_count or 0 for row in plan_rows))
-        # Completed, planned, AND on a day that has a plan behind it. `local_date` is the same
-        # bucket key `AgentDayPlanService.plan_vs_fact` files a visit under, so the period's
-        # number and the per-day table cannot file one visit under two days.
-        planned_completed = len(
-            [visit for visit in completed if visit.planned and local_date(visit.started_at) in planned_days]
-        )
+        # Imported here, not at module scope: `day_plan_service` imports `agent_account_service`,
+        # which imports THIS module at its top, so a top-level import back would close the cycle.
+        from business_app.services.sales.day_plan_service import AgentDayPlanService
+
+        compliance = AgentDayPlanService.compliance(agent_user_id, start_date, end_date)
         assigned_outlets, active_outlets = AgentMetricsService._outlet_counts(agent_user_id)
         registered, activated = AgentMetricsService._new_outlets(agent_user_id, start_utc, end_utc)
         orders = AgentMetricsService._order_metrics(agent_user_id, start_utc, end_utc)
 
         return {
-            "planned_visits": planned_visits,
+            "planned_visits": compliance.due,
             "completed_visits": len(completed),
-            # Capped at 100: an agent who cleared today's list and walked an overdue shop
-            # from last week did 6 of 5, and "120%" reads as a data bug on a manager's screen.
-            # Both halves are narrowed to the snapshotted days above (R47), so a night the
-            # 01:20 job missed costs this ratio precision, never truth — and `pct` answers
-            # None when the denominator is 0, which is the go-live window and nothing else.
+            # One decimal, capped at 100, None when no day was measured: `compliance` rounds it
+            # with `pct`, so the band a statement applies and the % on screen are one figure.
             # The caveat rides on the VALUE, never on a 21st key: METRIC_KEYS is pinned by the
             # bot card, the three email templates and the Analytics tab.
-            "plan_vs_fact_pct": AgentMetricsService.pct(planned_completed, planned_visits, cap=100.0),
+            "plan_vs_fact_pct": compliance.pct,
             "unplanned_visits": len([visit for visit in completed if not visit.planned]),
             # Calendar days, not working days: no shift or working-day calendar exists
             # anywhere in this repo, and inventing one here would be a second one tomorrow.
@@ -205,10 +187,11 @@ class AgentMetricsService:
         territory, and counting it would drop `active_share_pct` every time an agent
         correctly closed a dead prospect. Deliberately NOT `OutletService.agent_outlet_filter`
         (assigned OR onboarded, `outlet_service.py:602-610`): that predicate answers "which
-        outlets may this agent OPEN" — a visibility question, also the one
-        `OutletService.due_counts` asks for the nightly plan snapshot — and a shop the agent
+        outlets may this agent OPEN" — a visibility question — and a shop the agent
         registered before a territory hand-over belongs on the NEW owner's numbers. Phase 3
-        ships both definitions on purpose (R7); this helper is the assignment one.
+        ships both definitions on purpose (R7); this helper is the assignment one. The nightly
+        plan snapshot asks a third question, whose PLAN a shop is on:
+        `OutletService.agent_due_filter` (Q10).
 
         Both counters in this service splat these clauses (`_outlet_counts` for one agent,
         `today_counters` for a whole page), so "whose numbers is this shop on" cannot be
@@ -292,9 +275,15 @@ class AgentMetricsService:
     def _order_metrics(agent_user_id: int, start_utc: datetime, end_utc: datetime) -> Dict[str, Any]:
         """The five order keys, windowed on `Order.created_at` — when the agent SOLD.
 
-        Attribution is `created_by_staff_id` AND `order_source == "sales_agent"` together:
-        the staff id alone would sweep in an order the same person placed from the admin
-        panel wearing an operator hat, and the source alone carries no agent.
+        Attribution is `pay_rules.agent_placed_clause`: `created_by_staff_id` AND the
+        sales-agent `order_source` together. The staff id alone would sweep in an order the
+        same person placed from the admin panel wearing an operator hat, and the source alone
+        carries no agent.
+
+        "Delivered and paid" is `pay_rules.order_is_earned`, the rule pay credits on, so a
+        contract order counts once it is delivered (spec 2026-09-28 §4.3.1, T-KPI-1). The
+        window is still the PLACEMENT, while pay windows by the earned month, which is why
+        the card says "placed orders delivered and paid".
 
         Bottles come from `Product.returnable_bottles_for` — the ONE line-to-bottles
         conversion (`product.py:154-164`) — over the non-reward lines. A free reward bottle
@@ -312,15 +301,14 @@ class AgentMetricsService:
                 selectinload(Order.order_items).selectinload(OrderItem.product)
             )
             .filter(
-                Order.created_by_staff_id == agent_user_id,
-                Order.order_source == "sales_agent",
+                agent_placed_clause([agent_user_id]),
                 Order.created_at >= start_utc,
                 Order.created_at < end_utc,
             )
             .order_by(Order.id.asc())
             .all()
         )
-        delivered_paid = [order for order in orders if order.status == OrderStatus.DELIVERED and bool(order.is_paid)]
+        delivered_paid = [order for order in orders if order_is_earned(order)]
         revenue = sum((order.total_amount or _ZERO for order in delivered_paid), _ZERO)
         bottles = _ZERO
         for order in delivered_paid:
@@ -342,11 +330,12 @@ class AgentMetricsService:
     def _avg_visit_minutes(completed: List[Visit]) -> Optional[float]:
         """Mean minutes from check-in to close, sweep-closed visits excluded.
 
-        `checkin_at`, not `started_at`: Start is tapped on the way to the shop, sometimes
-        minutes before the door, and a mean over `started_at` measures the walk. A visit the
-        auto-abandon sweep closed carries a span of at least `SALES_VISIT_AUTO_ABANDON_HOURS`
-        that belongs to a dead phone rather than to a conversation, so it is dropped instead
-        of being allowed to drag the mean up by hours.
+        `visit_rules.presence_seconds` is the span: the same check-in-to-end the verified-visit
+        rule and the short-visit feed measure. `checkin_at`, not `started_at`: Start is tapped on
+        the way to the shop, sometimes minutes before the door, and a mean over `started_at`
+        measures the walk. A visit the auto-abandon sweep closed carries a span of at least
+        `SALES_VISIT_AUTO_ABANDON_HOURS` that belongs to a dead phone rather than to a
+        conversation, so it is dropped instead of being allowed to drag the mean up by hours.
 
         Computed in Python over rows the window already bounded: SQLite (the suite's engine)
         has no `EXTRACT(EPOCH ...)`, and an agent's week is tens of rows.
@@ -354,10 +343,8 @@ class AgentMetricsService:
         cutoff_seconds = float(current_app.config["SALES_VISIT_AUTO_ABANDON_HOURS"]) * 3600.0
         spans = []
         for visit in completed:
-            if visit.checkin_at is None or visit.ended_at is None:
-                continue
-            seconds = (ensure_utc(visit.ended_at) - ensure_utc(visit.checkin_at)).total_seconds()
-            if seconds >= cutoff_seconds:
+            seconds = presence_seconds(visit)
+            if seconds is None or seconds >= cutoff_seconds:
                 continue
             spans.append(seconds)
         if not spans:
@@ -469,8 +456,7 @@ class AgentMetricsService:
         order_rows = (
             db.session.query(Order.created_by_staff_id, func.count(Order.id))
             .filter(
-                Order.created_by_staff_id.in_(agent_user_ids),
-                Order.order_source == "sales_agent",
+                agent_placed_clause(agent_user_ids),
                 Order.created_at >= start_utc,
                 Order.created_at < end_utc,
             )

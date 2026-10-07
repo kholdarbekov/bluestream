@@ -1,8 +1,8 @@
 """The supervisor's exception feed (spec § *Admin API*, D7) and the count behind the
 managers' 08:00 summary.
 
-Seven questions, ONE answer shape. Every row carries the same keys (`EXCEPTION_ROW_KEYS`)
-so the Visits page's second tab is one table instead of seven, and every predicate here is
+Eight questions, ONE answer shape. Every row carries the same keys (`EXCEPTION_ROW_KEYS`)
+so the Visits page's second tab is one table instead of eight, and every predicate here is
 READ BACK from the column the writing service already stamped — `in_radius` from
 `VisitService.checkin` (visit_service.py:243-259), `duplicate_of_photo_id` from
 `VisitService.add_photo`, `status == "declined"` from
@@ -13,7 +13,7 @@ supervisor's feed and the agent's own card end up disagreeing about the same vis
 
 Two type families, deliberately:
 
-  * the five DATED types have an instant and answer "what went wrong in this period".
+  * the six DATED types have an instant and answer "what went wrong in this period".
     They are the only ones `count_for_day` may read: a daily count of things that are
     STILL true would name the same shop every morning until somebody drove there.
   * `unvisited` and `duplicate_open_tryout` are AS OF NOW. They describe a state, not an event, so
@@ -28,12 +28,13 @@ publish is still the instant of the EVENT (`checkin_at`, `ended_at`), which is w
 supervisor reads; the two are minutes apart, and agreeing with the KPI page about which DAY
 a visit belongs to matters more than agreeing with the clock.
 
-The other two dated types are not visit rows and window on their OWN event instant, which
+The other three dated types are not visit rows and window on their OWN event instant, which
 is also the `occurred_at` they publish: `duplicate_photo` on `VisitPhoto.received_at` (the
-moment Telegram delivered the image) and `declined_agent_order` on
-`OrderConfirmationRequest.responded_at` (the moment the shop said no). A photo sent or an
-answer given hours after the visit was closed is news on the day it arrived, and neither
-row is counted by any visit metric, so there is nothing for it to disagree with.
+moment Telegram delivered the image), `declined_agent_order` on
+`OrderConfirmationRequest.responded_at` (the moment the shop said no) and
+`rejected_agent_order` on `AgentOrderApproval.decided_at` (the moment a manager said no to a
+same-day second order, compensation spec C14). Each is news on the day it happened, and none
+is counted by any visit metric, so there is nothing for it to disagree with.
 
 Durations are computed in Python after a window-bounded fetch: SQLite (the test database)
 has no `EXTRACT(EPOCH ...)`, so a SQL duration predicate would be Postgres-only and the
@@ -48,10 +49,11 @@ from flask import current_app
 from business_app import db
 from business_app.models.order import Order
 from business_app.models.sales import Outlet
-from business_app.models.sales_visits import OrderConfirmationRequest, Visit, VisitPhoto
+from business_app.models.sales_visits import AgentOrderApproval, OrderConfirmationRequest, Visit, VisitPhoto
 from business_app.models.tryout import ProductTryout
 from business_app.models.user import User
 from business_app.services.sales.outlet_service import OutletService
+from business_app.services.sales.visit_rules import is_short_visit, presence_seconds, short_visit_threshold
 from business_app.utils import local_windows
 from business_app.utils.exceptions import ValidationError
 from business_app.utils.local_windows import local_day_bounds, window_bounds
@@ -68,6 +70,7 @@ EXCEPTION_TYPES = (
     "skipped_checkin",
     "short_visit",
     "declined_agent_order",
+    "rejected_agent_order",
     "duplicate_photo",
     "unvisited",
     "duplicate_open_tryout",
@@ -77,7 +80,7 @@ EXCEPTION_TYPES = (
 # that got a second bottle after returning the first is the NORMAL case, not an exception.
 # Named here so the day a sixth status appears there is one place to read.
 OPEN_TRYOUT_STATUSES = (TryoutStatus.DRAFT, TryoutStatus.SCHEDULED, TryoutStatus.ACTIVE)
-# The five with an event instant — the only ones the managers' daily count reads (R9).
+# The six with an event instant — the only ones the managers' daily count reads (R9).
 # Spelled OUT, never `EXCEPTION_TYPES[:5]`. The tuple above is published on the wire with
 # every response and the admin UI's type dropdown renders it in that order, so reordering it
 # to read better (grouping the visit types, putting `unvisited` first because supervisors act
@@ -89,6 +92,7 @@ DATED_EXCEPTION_TYPES = (
     "skipped_checkin",
     "short_visit",
     "declined_agent_order",
+    "rejected_agent_order",
     "duplicate_photo",
 )
 # A typo or a retired type here would otherwise reach `_collect`'s `_BUILDERS[...]` as a
@@ -123,7 +127,7 @@ class ExceptionFeedService:
 
     GOTCHA: route EVERY builder through `_row` — never append a raw dict to `rows`. `_row`
     normalises `occurred_at` through `ensure_utc` at birth, and one builder that skips it makes the
-    seven-source `rows.sort()` raise `TypeError: can't compare offset-naive and offset-aware
+    eight-source `rows.sort()` raise `TypeError: can't compare offset-naive and offset-aware
     datetimes` mid-request, on SQLite only.
     """
 
@@ -140,7 +144,7 @@ class ExceptionFeedService:
         """One row, names left blank for `_hydrate` to fill after the page is sliced.
 
         `occurred_at` is normalised through `ensure_utc` at birth: SQLite hands back naive
-        datetimes and PostgreSQL aware ones, and the merge below SORTS these across seven
+        datetimes and PostgreSQL aware ones, and the merge below SORTS these across eight
         sources — one naive value among them raises `TypeError` mid-request.
         """
         return {
@@ -214,14 +218,14 @@ class ExceptionFeedService:
 
     @staticmethod
     def _short_visits(start_utc, end_utc, *, agent_user_id, now):
-        """Completed visits shorter than `SALES_SHORT_VISIT_SECONDS`, measured door to door.
+        """Completed visits shorter than the short-visit threshold, measured door to door.
 
-        From `checkin_at`, not `started_at`: the Start tap can be minutes before the agent
-        reaches the door. `status == "completed"` only, because `abandon` stamps `ended_at`
-        with the SWEEP's moment (visit_service.py:768) and would mint a false short visit for
-        every dead phone.
+        `visit_rules.is_short_visit`: the verified-visit rule's own duration and threshold,
+        inverted (C4), so this feed and plan compliance can never disagree about which visit was
+        too short. From `checkin_at`, not `started_at`: the Start tap can be minutes before the
+        agent reaches the door. The SQL below only narrows the fetch; the rule decides.
         """
-        threshold = int(current_app.config["SALES_SHORT_VISIT_SECONDS"])
+        threshold = short_visit_threshold()
         visits = (
             ExceptionFeedService._visit_window(start_utc, end_utc, agent_user_id)
             .filter(
@@ -233,9 +237,9 @@ class ExceptionFeedService:
         )
         rows = []
         for visit in visits:
-            seconds = int((ensure_utc(visit.ended_at) - ensure_utc(visit.checkin_at)).total_seconds())
-            if seconds >= threshold:
+            if not is_short_visit(visit, min_seconds=threshold):
                 continue
+            seconds = presence_seconds(visit)
             rows.append(
                 ExceptionFeedService._row(
                     "short_visit",
@@ -289,6 +293,40 @@ class ExceptionFeedService:
         return rows
 
     @staticmethod
+    def _rejected_agent_orders(start_utc, end_utc, *, agent_user_id, now):
+        """Same-day second orders a manager or an admin rejected (C14, §4.18.8). A hold closed by an
+        ordinary cancel is `cancelled`, which is not a decision, and is not itemised."""
+        records = (
+            db.session.query(AgentOrderApproval, Order, Visit)
+            .join(Order, Order.id == AgentOrderApproval.order_id)
+            .outerjoin(Visit, Visit.id == Order.visit_id)
+            .filter(
+                AgentOrderApproval.status == "rejected",
+                AgentOrderApproval.decided_at >= start_utc,
+                AgentOrderApproval.decided_at < end_utc,
+            )
+            .all()
+        )
+        rows = []
+        for approval, order, visit in records:
+            # `_declined_agent_orders`' owner rule, so the two agent-order types agree about whose
+            # row it is and the `agent_id` filter cannot disagree with the published agent.
+            owner_id = visit.agent_user_id if visit is not None else order.created_by_staff_id
+            if agent_user_id is not None and owner_id != agent_user_id:
+                continue
+            rows.append(
+                ExceptionFeedService._row(
+                    "rejected_agent_order",
+                    occurred_at=approval.decided_at,
+                    agent_user_id=owner_id,
+                    outlet_id=approval.outlet_id,
+                    visit_id=order.visit_id,
+                    detail={"order_id": order.id, "order_number": order.order_number, "reason": approval.reason},
+                )
+            )
+        return rows
+
+    @staticmethod
     def _duplicate_photos(start_utc, end_utc, *, agent_user_id, now):
         query = (
             db.session.query(VisitPhoto, Visit)
@@ -324,14 +362,16 @@ class ExceptionFeedService:
         The predicate is `OutletService.unvisited_filter` verbatim, threshold included: the
         admin Outlets `unvisited_days` filter and the agent's morning digest already read it,
         and a third copy is how a manager and the agent outside the shop get different answers
-        an hour apart. The agent filter is `assigned_agent_user_id`, the same column the row
-        publishes — `agent_outlet_filter` (assigned OR onboarded) is a VISIBILITY question and
-        would return rows filed under somebody else's name.
+        an hour apart. The row is filed under the outlet's DUE OWNER, as the digest files its
+        nudge: the agent filter is `agent_due_filter` and the row publishes its Python twin,
+        `due_owner_id` (assignee, else the onboarder while nobody owns it). `agent_outlet_filter`
+        (assigned OR onboarded) is a VISIBILITY question and would return rows filed under
+        somebody else's name.
         """
         days = int(current_app.config["SALES_UNVISITED_ALERT_DAYS"])
         query = Outlet.query.filter(OutletService.unvisited_filter(days, now=now))
         if agent_user_id is not None:
-            query = query.filter(Outlet.assigned_agent_user_id == agent_user_id)
+            query = query.filter(OutletService.agent_due_filter(agent_user_id))
         rows = []
         for outlet in query.all():
             last_visit_at = ensure_utc(outlet.last_visit_at) if outlet.last_visit_at else None
@@ -341,7 +381,7 @@ class ExceptionFeedService:
                     # "Never visited" has no instant; `created_at` keeps the row sortable and
                     # `days_unvisited: null` keeps the claim honest.
                     occurred_at=last_visit_at or outlet.created_at,
-                    agent_user_id=outlet.assigned_agent_user_id,
+                    agent_user_id=OutletService.due_owner_id(outlet),
                     outlet_id=outlet.id,
                     visit_id=None,
                     detail={
@@ -366,8 +406,9 @@ class ExceptionFeedService:
         ignores the requested range (module docstring) and never reaches `count_for_day`.
 
         The agent filter is the OUTLET's `assigned_agent_user_id` — the column the row
-        publishes — exactly as `_unvisited` does; filtering on whoever created the try-out
-        would file the row under one name and show another.
+        publishes; filtering on whoever created the try-out would file the row under one name
+        and show another. (`_unvisited` files under the due owner instead, the digest's rule:
+        final-review M6 moved that row only.)
         """
         query = (
             db.session.query(ProductTryout, Outlet)
@@ -469,7 +510,7 @@ class ExceptionFeedService:
     ) -> Tuple[List[Dict[str, Any]], int]:
         """One page of the feed, newest first, and the true total behind it.
 
-        Merged and sliced in Python rather than UNIONed in SQL: the seven sources have seven
+        Merged and sliced in Python rather than UNIONed in SQL: the eight sources have eight
         different shapes and `short_visit` is not expressible as a portable SQL predicate at
         all. `visits` is one row per field call, so the window fetch is small; the cost that
         DOES matter — loading a name for every row of a 92-day feed — is avoided by hydrating
@@ -530,6 +571,7 @@ _BUILDERS = {
     "skipped_checkin": ExceptionFeedService._skipped_checkins,
     "short_visit": ExceptionFeedService._short_visits,
     "declined_agent_order": ExceptionFeedService._declined_agent_orders,
+    "rejected_agent_order": ExceptionFeedService._rejected_agent_orders,
     "duplicate_photo": ExceptionFeedService._duplicate_photos,
     "unvisited": ExceptionFeedService._unvisited,
     "duplicate_open_tryout": ExceptionFeedService._duplicate_open_tryouts,

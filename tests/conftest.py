@@ -704,6 +704,37 @@ def admin_claim_headers(app, admin_user, db):
 
 
 @pytest.fixture
+def manager_user(db):
+    """A MANAGER. Phone +998901239002 sits outside the conftest sequence (568-577) and the
+    sales modules' 573-576; the reschedule tests, where this fixture started, took it first."""
+    user = User(
+        email='sales-manager@example.com',
+        phone='+998901239002',
+        password_hash=hash_password('ManagerPassword123!'),
+        first_name='Malika',
+        last_name='Menejer',
+        user_type=UserType.STAFF,
+        role=UserRole.MANAGER,
+        is_verified=True,
+        created_at=datetime.now(UTC),
+    )
+    db.session.add(user)
+    db.session.commit()
+    return user
+
+
+@pytest.fixture
+def manager_claim_headers(app, manager_user):
+    """A MANAGER's headers for routes that read the role CLAIM and cross-check the DB row
+    (`manager_or_higher_required`, `super_admin_required`, `validate_admin_action`)."""
+    from flask_jwt_extended import create_access_token
+
+    with app.app_context():
+        token = create_access_token(identity=str(manager_user.id), additional_claims={"role": "manager"})
+    return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+
+@pytest.fixture
 def operator_user(db):
     """Create an operator user for testing.
 

@@ -21,6 +21,8 @@ from the app config: parsing is where a request's range is refused, and the
 ceiling is a deployable tunable rather than a literal in a route.
 """
 
+import calendar
+import re
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Optional, Tuple
 
@@ -174,3 +176,61 @@ def parse_date_range(
     if days_inclusive(start, end) > max_days:
         raise ValidationError(f"date range is longer than {max_days} days", error_code=DATE_RANGE_INVALID)
     return start, end
+
+
+# A pay month is named by its first day. Every month column holds that DATE, and only
+# `month_start` / `local_month` produce one, so no caller can write "2026-10-05" for a month
+# another caller compares against "2026-10-01". On the wire a month is "YYYY-MM": `parse_month`
+# reads it and `format_month` writes it. ASCII digits only: `\d` would also accept other scripts'.
+_MONTH_TEXT = re.compile(r"[0-9]{4}-[0-9]{2}")
+
+
+def month_start(day: date) -> date:
+    """The first day of the month `day` falls in: that month's one name."""
+    return day.replace(day=1)
+
+
+def month_end(month: date) -> date:
+    """The last calendar day of `month`."""
+    return month.replace(day=calendar.monthrange(month.year, month.month)[1])
+
+
+def next_month(month: date) -> date:
+    return month_end(month) + timedelta(days=1)
+
+
+def previous_month(month: date) -> date:
+    return month_start(month_start(month) - timedelta(days=1))
+
+
+def local_month(instant: datetime) -> date:
+    """The LOCAL month an instant falls in.
+
+    A payment at 00:30 Tashkent on the 1st belongs to the new month, although UTC still reads the
+    last day of the old one for another four and a half hours.
+    """
+    return month_start(local_date(instant))
+
+
+def month_bounds(month: date) -> Tuple[datetime, datetime]:
+    """`[start, end)` in UTC for a whole local month. Consecutive months tile."""
+    return window_bounds(month, month_end(month))
+
+
+def parse_month(value: str) -> date:
+    """`"YYYY-MM"` -> the month's first day, or one coded 400.
+
+    Strict: `"2026-1"` or `"2026-10-01"` is refused rather than guessed, because a month the admin
+    did not mean would close, approve or pay the wrong one.
+    """
+    if isinstance(value, str) and _MONTH_TEXT.fullmatch(value):
+        try:
+            return date(int(value[:4]), int(value[5:]), 1)
+        except ValueError:
+            pass
+    raise ValidationError("Month must be YYYY-MM", error_code="SALES_PAY_MONTH_INVALID", details={"month": value})
+
+
+def format_month(month: date) -> str:
+    """A month's wire name, `"YYYY-MM"`: the one inverse of `parse_month`."""
+    return f"{month.year:04d}-{month.month:02d}"

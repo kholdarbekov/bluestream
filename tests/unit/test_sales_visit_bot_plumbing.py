@@ -180,6 +180,12 @@ VISIT_SUFFIXES = (
     "visit.photo_kind_prompt", "visit.photo_saved", "visit.photo_duplicate",
     "visit.photo_failed", "visit.photo_forwarded",
     "visit.photo_request", "visit.photo_skip",
+    # Compensation spec §7.4 and §7.6: the forwarded check-in re-prompt and the same-day
+    # hold's receipt line (C14). Both bare.
+    "visit.checkin_forwarded", "visit.order_awaiting_staff_approval",
+    # Owner rule Q9 (controller ruling T2-R3): a check-in the backend could not measure
+    # (`in_radius` null) is a warning, not a pass. Bare.
+    "visit.checkin_no_location",
     "notify.digest_due_today", "notify.digest_overdue", "notify.digest_unvisited",
     "notify.digest_open_visit", "notify.digest_days", "notify.digest_never",
     "notify.digest_more",
@@ -846,12 +852,27 @@ class TestTheOrderAndOutletVocabulariesMatchTheBackendOriginals:
     """
 
     def test_the_order_states_the_bot_renders_are_the_backends_own_tuple(self):
-        """`confirmation.state` is D15's, and all three lines are the agent's
-        only word on whether the store still has to answer."""
+        """`confirmation.state` is D15's plus C14's `awaiting_staff_approval`, and each line is
+        the agent's only word on what happens to the order next. Compensation spec §7.6: the
+        bot keeps no copy. It imports the shared tuple the backend's own constant is, so a
+        fifth state cannot print nothing on the receipt."""
         from business_app.services.sales.agent_order_confirmation_service import CONFIRMATION_STATES
+        from shared.staff_constants import SALES_AGENT_ORDER_STATES
         from staff_bot.handlers.sales.visit import ORDER_STATES
 
-        assert ORDER_STATES == CONFIRMATION_STATES
+        assert ORDER_STATES is SALES_AGENT_ORDER_STATES
+        assert tuple(CONFIRMATION_STATES) == SALES_AGENT_ORDER_STATES
+
+    def test_the_new_visit_lines_are_literal_keys_health_can_see(self):
+        """§8.4: `/health` requires only the keys its scraper reads, and it reads a LITERAL
+        first argument. A key chosen into a variable ships unrequired: an unseeded row would
+        render a humanised English key to the agent while /health stays green."""
+        from staff_bot.i18n import Translation
+
+        literal = Translation._extract_literal_staff_keys(ROOT / "staff_bot")
+        assert "staff.sales.visit.order_awaiting_staff_approval" in literal
+        assert "staff.sales.visit.checkin_forwarded" in literal
+        assert "staff.sales.visit.checkin_no_location" in literal
 
     def test_every_order_state_renders_a_line_and_nothing_else_does(self):
         from staff_bot.handlers.sales.visit import ORDER_STATES, VisitHandler
@@ -1287,3 +1308,287 @@ class TestTheAttachRefusalIsTranslated:
         module = _load_seed_script()
         unseeded = [language for language in LANGUAGES if not module._curated_value(key, language)]
         assert not unseeded, f"attach refusal copy is missing in {unseeded}"
+
+
+# ---- compensation: "My earnings" and the pay pushes (spec §7.2, §7.5, §8.2, §8.4, §8.5) ----
+
+# The push rows live in STAFF_TRANSLATIONS (two of them carry HTML); the screens' rows are the
+# `staff.sales.earnings.*` suffixes.
+PAY_PUSH_KEYS = (
+    "staff.sales.notify.pay_penalty_confirmed", "staff.sales.notify.pay_statement_approved",
+    "staff.sales.notify.pay_statement_approved_shadow", "staff.sales.notify.penalty_type",
+    "staff.sales.notify.penalty_date", "staff.sales.notify.penalty_amount",
+    "staff.sales.notify.counts_in", "staff.sales.notify.late", "staff.sales.notify.open_earnings",
+    "staff.sales.notify.open_statement",
+)
+# Every file that renders pay copy. The placeholder contract is read off their SOURCE, so a
+# call site that passes a field its row lacks (or lacks one the row has) fails here: the
+# renderer drops an unused keyword silently, and a missing one turns the row into the
+# humanised English key in every language.
+PAY_RENDERERS = (
+    ROOT / "staff_bot" / "handlers" / "sales" / "earnings.py",
+    ROOT / "staff_bot" / "keyboards" / "sales.py",
+    ROOT / "staff_bot" / "keyboards" / "menu.py",
+    ROOT / "staff_bot" / "utils" / "formatters.py",
+    ROOT / "staff_bot" / "webhook_server.py",
+)
+# §8.5: the glyphs live in code. `+` is left out on purpose: §8.2's own `earnings.more` row
+# is "+{count} more". So is the em dash, which the spec's Russian `estimate_note` uses as
+# punctuation. The minus below is U+2212, the sign `signed_currency` prints. The en dash is
+# the tier range's ("501–1,000"); no pay row uses one as punctuation.
+PAY_COPY_GLYPHS = ("💰", "🧾", "⏳", "⚠", "✅", "🔎", "📄", "📚", "🔄", "⬅", "◀", "▶", "🎯",
+                   "×", "→", "≈", "·", "−", "–")
+
+
+def _earnings_families():
+    """§8.4: each f-string family and the shared tuple its values come from."""
+    from shared.staff_constants import (
+        SALES_PAY_DIFFERENCE_CAUSES,
+        SALES_PAY_LEDGER_KINDS,
+        SALES_PAY_PENALTY_STATUSES,
+        SALES_PAY_PERIOD_STATUSES,
+        SALES_PAY_PIPELINE_WAITING,
+        SALES_PAY_REVERSAL_CAUSES,
+    )
+
+    return {
+        "staff.sales.earnings.status.": SALES_PAY_PERIOD_STATUSES,
+        "staff.sales.earnings.kind.": SALES_PAY_LEDGER_KINDS,
+        "staff.sales.earnings.waiting.": SALES_PAY_PIPELINE_WAITING,
+        "staff.sales.earnings.penalty_status.": SALES_PAY_PENALTY_STATUSES,
+        "staff.sales.earnings.cause.": SALES_PAY_REVERSAL_CAUSES + SALES_PAY_DIFFERENCE_CAUSES,
+    }
+
+
+def _pay_copy_calls():
+    """{key: [the keyword names one call passes, …]} for every LITERAL pay-copy lookup."""
+    import ast
+
+    calls = {}
+    for path in PAY_RENDERERS:
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "get"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "i18n"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
+            ):
+                continue
+            key = node.args[0].value
+            if key.startswith("staff.sales.earnings.") or key in PAY_PUSH_KEYS:
+                calls.setdefault(key, []).append(frozenset(kw.arg for kw in node.keywords))
+    return calls
+
+
+class TestTheEarningsCopy:
+    """The pay copy is seeded in three languages, registered for /health, and filled with
+    exactly the fields its renderers pass."""
+
+    def test_both_registries_derive_the_earnings_families_from_the_shared_tuples(self):
+        """The five families are built with f-strings from BACKEND values, so these loops are
+        the only thing that makes an unseeded status, kind, cause, wait or penalty status
+        visible to /health. Both sides are compared with the tuples, not with each other, so
+        they cannot drift together."""
+        from staff_bot.i18n import Translation
+
+        health, seeded = set(), set()
+        Translation._add_dynamic_family_keys(health)
+        _load_seed_script()._add_dynamic_keys(seeded)
+        for prefix, values in _earnings_families().items():
+            assert {k[len(prefix):] for k in health if k.startswith(prefix)} == set(values), prefix
+            assert {k[len(prefix):] for k in seeded if k.startswith(prefix)} == set(values), prefix
+
+    @pytest.mark.parametrize("language", LANGUAGES)
+    def test_every_earnings_family_member_is_seeded(self, language):
+        module = _load_seed_script()
+        missing = sorted(
+            f"{prefix}{value}"
+            for prefix, values in _earnings_families().items()
+            for value in values
+            if not module._curated_value(f"{prefix}{value}", language)
+        )
+        assert not missing, f"unseeded earnings family member in {language}: {missing}"
+
+    @pytest.mark.parametrize("language", LANGUAGES)
+    def test_every_pay_push_row_is_seeded(self, language):
+        module = _load_seed_script()
+        missing = [key for key in PAY_PUSH_KEYS if not module._curated_value(key, language)]
+        assert not missing, f"unseeded pay push copy in {language}: {missing}"
+
+    def test_the_pay_copy_holds_words_not_glyphs(self):
+        """§8.5. A glyph in a seeded row doubles up the day the renderer's own glyph is added
+        in front of it, and it cannot follow the renderer when the screen changes."""
+        module = _load_seed_script()
+        keys = [f"staff.sales.{s}" for s in module.SALES_TEXT_TRANSLATIONS if s.startswith("earnings.")]
+        offenders = {}
+        for key in keys + list(PAY_PUSH_KEYS):
+            for language in LANGUAGES:
+                value = module._curated_value(key, language) or ""
+                found = [glyph for glyph in PAY_COPY_GLYPHS if glyph in value]
+                if found:
+                    offenders[f"{key}[{language}]"] = found
+        assert not offenders, f"glyphs belong to the renderer (§8.5): {offenders}"
+
+    def test_the_self_approval_refusal_and_its_queue_line_are_seeded_apart(self):
+        """§8.2: the refusal (a stale Approve) and the queue card's line are two sentences."""
+        module = _load_seed_script()
+        for language in LANGUAGES:
+            refusal = module._curated_value("staff.sales.error.approval_self", language)
+            line = module._curated_value("staff.sales.approvals.own_outlet", language)
+            assert refusal and line and refusal != line, language
+
+
+class TestTheEarningsRenderers:
+    """What the earnings journey cannot see from one run: every call site's fields against the
+    seed, every seeded row against a call site, and the callback shapes the routing guard reads."""
+
+    def test_earnings_placeholder_contract(self):
+        """§8.2: each row's `{fields}`, in all three languages, equal the keyword arguments every
+        renderer that asks for it passes. Read off the source with `ast`, so a new call site is
+        checked the day it is written."""
+        module = _load_seed_script()
+        calls = _pay_copy_calls()
+        assert calls, "no pay copy found in the renderers: the scan itself is broken"
+        wrong = {}
+        for key, passed in sorted(calls.items()):
+            for language in LANGUAGES:
+                fields = frozenset(re.findall(r"\{(\w+)\}", module._curated_value(key, language) or ""))
+                for kwargs in passed:
+                    if kwargs != fields:
+                        wrong[f"{key}[{language}]"] = (sorted(fields), sorted(kwargs))
+        assert not wrong, f"seeded fields vs the keywords a renderer passes: {wrong}"
+
+    # §8.2 (v5, D-BANDS): the six tier rows and the fields each one is filled with.
+    TIER_ROWS = {
+        "staff.sales.earnings.units": {"count"},
+        "staff.sales.earnings.tier_percent": {"value", "net"},
+        "staff.sales.earnings.tier_scaled": {"amount"},
+        "staff.sales.earnings.per_unit": {"amount"},
+        "staff.sales.earnings.next_tier": {"from_unit", "rate", "count"},
+        "staff.sales.earnings.tier_shift": set(),
+    }
+
+    def test_the_tier_rows_are_literal_calls_health_can_see(self):
+        """§8.2/§8.4: each of the six rows is asked for by a LITERAL key, with exactly §8.2's
+        fields at every call site. Literal, because `/health` finds required keys by scanning
+        for them (`_extract_literal_staff_keys`): a tier row built by f-string would ship
+        unseeded with /health green, and the placeholder contract above would never see it."""
+        from staff_bot.i18n import Translation
+
+        calls = _pay_copy_calls()
+        assert {key: set(calls.get(key, [])) for key in self.TIER_ROWS} == {
+            key: {frozenset(fields)} for key, fields in self.TIER_ROWS.items()
+        }
+        required = Translation._extract_literal_staff_keys(ROOT / "staff_bot")
+        assert set(self.TIER_ROWS) <= required, sorted(set(self.TIER_ROWS) - required)
+
+    def test_no_pay_copy_key_is_built_outside_the_five_families(self):
+        """§8.4/§10.4: a key built by f-string is invisible to /health's literal scan, so only the
+        five registered families (status, kind, cause, waiting, penalty status) may be built, each
+        as its prefix plus one value. Every other pay row, the six tier rows among them, is a
+        literal call that the scan and the placeholder contract both see."""
+        import ast
+
+        families = set(_earnings_families())
+        built = []
+        for path in PAY_RENDERERS:
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                if not (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "get"
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "i18n"
+                    and node.args
+                    and isinstance(node.args[0], ast.JoinedStr)
+                ):
+                    continue
+                parts = node.args[0].values
+                prefix = parts[0].value if parts and isinstance(parts[0], ast.Constant) else ""
+                if prefix.startswith("staff.sales.earnings.") and (prefix not in families or len(parts) != 2):
+                    built.append(f"{path.name}:{node.lineno} {prefix}…")
+        assert not built, f"pay copy keys built outside the §8.4 families: {built}"
+
+    def test_every_earnings_row_is_drawn_somewhere(self):
+        """A seeded row no renderer asks for is dead copy the agent can never see, and the next
+        author reuses the wrong one. The five families are drawn by f-string, so they are exempt
+        from the literal check and pinned by the registry test above. A seeded member of a family
+        must still belong to its family's tuple, so a retired member (v5's `cause.plan_changed`)
+        is dead copy too (R2-5). A refusal's copy is drawn by the error renderer, which reads
+        `BaseHandler.error_copy_keys()` and never a literal: S4's `statement_unavailable`."""
+        module = _load_seed_script()
+        literal = set(_pay_copy_calls())
+        refusals = BaseHandler.error_copy_keys()
+        families = _earnings_families()
+        seeded = {f"staff.sales.{s}" for s in module.SALES_TEXT_TRANSLATIONS if s.startswith("earnings.")}
+        dead = sorted(
+            key for key in seeded if key not in literal | refusals and not key.startswith(tuple(families))
+        )
+        retired = sorted(
+            key
+            for key in seeded
+            for prefix, values in families.items()
+            if key.startswith(prefix) and key[len(prefix):] not in values
+        )
+        assert not dead, f"seeded but never drawn: {dead}"
+        assert not retired, f"seeded family members outside their family's tuple: {retired}"
+        assert set(PAY_PUSH_KEYS) <= literal, sorted(set(PAY_PUSH_KEYS) - literal)
+
+    def test_the_lines_keyboard_pages_by_the_backends_answer(self):
+        assert _callbacks(SalesKeyboards.earnings_lines("en", "202610", 1, False)) == ["staff_sales_earn"]
+        assert _callbacks(SalesKeyboards.earnings_lines("en", "202610", 2, True)) == [
+            "staff_sales_earn_l_202610_1", "staff_sales_earn_l_202610_3", "staff_sales_earn",
+        ]
+        assert _callbacks(SalesKeyboards.earnings_back("en")) == ["staff_sales_earn"]
+
+    def test_the_statement_keyboards_open_the_months_orders_and_statements(self):
+        """Under a Statement: its month's Credited orders, Past statements, Back. Past statements:
+        one button per S3 month, in S3's order, then Back."""
+        assert _callbacks(SalesKeyboards.earnings_statement("en", "2026-09")) == [
+            "staff_sales_earn_l_202609_1", "staff_sales_earn_h", "staff_sales_earn",
+        ]
+        items = [
+            {"month": "2026-10", "total": 3560000.0, "status": "paid", "paid_on": "2026-11-05", "is_shadow": False},
+            {"month": "2026-09", "total": 1050000.0, "status": "approved", "paid_on": None, "is_shadow": True},
+        ]
+        assert _callbacks(SalesKeyboards.earnings_statements("en", items)) == [
+            "staff_sales_earn_s_202610", "staff_sales_earn_s_202609", "staff_sales_earn",
+        ]
+        assert _callbacks(SalesKeyboards.earnings_statements("en", [])) == ["staff_sales_earn"]
+
+    def test_the_lines_callbacks_are_literal_for_the_routing_guard(self):
+        """`_materialize_literal` turns every `{...}` into `1`; a literal prefix is what lets the
+        guard check these buttons against `^staff_sales_earn_l_\\d+_\\d+$`, the Statement's
+        against `^staff_sales_earn_s_\\d+$` and the approval push's against
+        `^staff_sales_earn_sn_\\d+$`."""
+        source = (ROOT / "staff_bot" / "keyboards" / "sales.py").read_text(encoding="utf-8")
+        for literal in (
+            'f"staff_sales_earn_l_{month_key}_1"',
+            'f"staff_sales_earn_l_{month_key}_{prev_page}"',
+            'f"staff_sales_earn_l_{month_key}_{next_page}"',
+            'f"staff_sales_earn_s_{month_key}"',
+        ):
+            assert literal in source, literal
+        push = (ROOT / "staff_bot" / "webhook_server.py").read_text(encoding="utf-8")
+        assert 'f"staff_sales_earn_sn_{month_key}"' in push
+
+    def test_the_summary_keyboard_draws_no_button_for_a_month_under_review(self):
+        """I-14 (reviews SSOT I3, gaming F8): a closed month shows no numbers until approved."""
+        data = {
+            "state": "ok",
+            "open_months": [{"month": "2026-11", "configured": True}, {"month": "2026-10", "configured": True}],
+            "in_review": [{"month": "2026-09", "status": "closed"}],
+            "last_statement": {"month": "2026-08"},
+        }
+        assert _callbacks(SalesKeyboards.earnings("en", data)) == [
+            "staff_sales_earn_l_202611_1", "staff_sales_earn_l_202610_1", "staff_sales_earn_p",
+            "staff_sales_earn_x", "staff_sales_earn_s_202608", "staff_sales_earn_h", "staff_sales_earn",
+            "staff_profile",
+        ]
+        assert _callbacks(SalesKeyboards.earnings("en", {"state": "not_started"})) == [
+            "staff_sales_earn", "staff_profile",
+        ]

@@ -23,8 +23,9 @@ class TryoutService {
     return unwrap(response)?.tryout || null;
   }
 
-  async convertTryout(tryoutId) {
-    const response = await api.post(`/admin/tryouts/${tryoutId}/convert`, {});
+  // `config` carries `handledErrorCodes`: the page explains a self-approval refusal inline.
+  async convertTryout(tryoutId, config = {}) {
+    const response = await api.post(`/admin/tryouts/${tryoutId}/convert`, {}, config);
     const data = unwrap(response);
     return {
       tryout: data?.tryout || null,

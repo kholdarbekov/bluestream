@@ -250,9 +250,13 @@ def seeded_week(db, sample_user, sample_category):
 # The week above, read out by hand. Each number is the ruling applied to the fixtures, not
 # a formula this test could re-run: that is the whole point of writing them down.
 EXPECTED = {
-    "planned_visits": 10,             # 3+2+0+1+2+0+2 snapshot due_counts inside the window
+    # 3+2+0+1+2+0+2 over the WORKED days: Sunday 09-13's due_count of 2 counts, every day being a
+    # working day (C2 v5, I-39).
+    "planned_visits": 10,
     "completed_visits": 5,            # the abandoned one and the pre-window one are not visits of this week
-    "plan_vs_fact_pct": 20.0,         # 2 completed-and-planned / 10 planned
+    # 1 / 10. These are legacy rows (no frozen set), so the numerator is the planned visits that are
+    # VERIFIED: v1 on 09-15. v2 on 09-10 checked in out of range, so it no longer counts (C4).
+    "plan_vs_fact_pct": 10.0,
     "unplanned_visits": 3,
     "visits_per_day": 0.7,            # 5 / 7 inclusive local days
     "strike_rate_pct": 40.0,          # 2 of 5 ended in an order; the cancelled one still struck
@@ -460,21 +464,19 @@ def test_the_snapshot_job_and_the_metrics_rows_read_the_same_roster(db, seeded_w
 def test_plan_vs_fact_is_measured_only_on_the_days_a_plan_existed(db, seeded_week):
     """R47/V01: an unsnapshotted day leaves the ratio, it does not poison it.
 
-    Both halves of the fraction have to come from the SAME days or the number is a lie:
-    `Visit.planned` has been stamped since phase 2a, so a window straddling the night the
-    01:20 job did not run would otherwise divide a seven-day numerator by a five-day
-    denominator — and `cap=100.0` would dress the result up as a flawless 100.0%.
+    Both halves come from the SAME days (`AgentDayPlanService.compliance`, C4): a day with no
+    row adds nothing to the denominator and nothing to the numerator. Agent A's 09-10 snapshot
+    is deleted:
 
-    Agent A's 09-10 snapshot is the one deleted because it is the only day besides 09-15
-    that carries a completed PLANNED visit (v2), so the deletion moves both halves and the
-    two failure modes are distinguishable:
-
-      * denominator = 3+0+1+2+0+2 = 8 (09-10's due_count of 2 is gone with its row),
-      * numerator   = 1 (only v1, on 09-15; v2's day has no plan behind it any more),
+      * denominator = 3+0+1+2+0+2 = 8 (09-10's due_count of 2 is gone with its row; Sunday
+        09-13's 2 is in, every day being a working day),
+      * numerator   = 1 (v1 on 09-15; v2 on 09-10 checked in out of range, so it never counted),
       * 1/8 = 12.5%.
 
-    A numerator that kept v2 would publish 2/8 = 25.0, and the pre-R47 rule published None.
-    Both are named here so neither can come back unnoticed.
+    A denominator that kept 09-10 would publish 1/10 = 10.0, the fully snapshotted week's figure.
+    The numerator half of R47 (a verified visit on a day with no row is not counted) is pinned
+    by tests/integration/test_sales_compliance_one_producer.py's 10-06, where the visit IS
+    verified.
     """
     SalesAgentDayPlan.query.filter_by(
         agent_user_id=seeded_week.agent_a.id, plan_date=date(2026, 9, 10)
@@ -484,8 +486,8 @@ def test_plan_vs_fact_is_measured_only_on_the_days_a_plan_existed(db, seeded_wee
     metrics = AgentMetricsService.compute(seeded_week.agent_a.id, START_DATE, END_DATE, now=FROZEN_UTC)
 
     assert metrics["plan_vs_fact_pct"] == 12.5
-    # `planned_visits` is unchanged in DEFINITION -- the sum over the rows that exist -- which
-    # is now 8 rather than 10. It is still a true count of the plan we have.
+    # `planned_visits` is unchanged in DEFINITION -- the sum over the measured rows that exist --
+    # which is now 8 rather than 10. It is still a true count of the plan we have.
     assert metrics["planned_visits"] == 8
     # Nothing else moves: an unsnapshotted day is not a day that stopped happening.
     assert {

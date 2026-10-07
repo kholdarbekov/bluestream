@@ -88,7 +88,9 @@ const day = (offset) => dayjs().subtract(offset, 'day').format('YYYY-MM-DD');
 beforeEach(() => {
   vi.clearAllMocks();
   salesService.getOutlets.mockResolvedValue({ items: [OUTLET], total: 1, page: 1, per_page: 20, summary: { prospect: 0, activation_requested: 1, active: 0 } });
-  salesService.getOutlet.mockResolvedValue({ outlet: { ...OUTLET, open_receivable: 0, bottle_balance: 0, last_orders: [] }, stage_history: STAGE_HISTORY });
+  // `can_approve` is the backend's answer (OutletService.can_approve: stage AND "not the viewer's
+  // own onboarding", C12), published on the detail GET only; the list row never carries it.
+  salesService.getOutlet.mockResolvedValue({ outlet: { ...OUTLET, can_approve: true, open_receivable: 0, bottle_balance: 0, last_orders: [] }, stage_history: STAGE_HISTORY });
   salesService.approveOutlet.mockResolvedValue({ outlet: { ...OUTLET, stage: 'active' } });
   salesService.updateOutlet.mockResolvedValue({ outlet: { ...OUTLET, district: 'yunusabad' } });
   salesService.bulkAssign.mockResolvedValue({ updated: 3 });
@@ -156,7 +158,7 @@ it('attaches an outlet whose phone already belongs to an account instead of appr
   // button must offer the door that works — and must name the account it is about to join.
   salesService.getOutlet.mockResolvedValue({
     outlet: {
-      ...OUTLET, open_receivable: 0, bottle_balance: 0, last_orders: [],
+      ...OUTLET, can_approve: true, open_receivable: 0, bottle_balance: 0, last_orders: [],
       account_candidate: { user_id: 908, name: 'Bahor Savdo MChJ', outlet_count: 3 },
     },
     stage_history: STAGE_HISTORY,
@@ -419,6 +421,27 @@ it('opens the Edit form on the stored values and sends only what changed', async
   await waitFor(() => expect(salesService.updateOutlet).toHaveBeenCalledWith(5, { class: 'A' }));
 });
 
+it('explains a refused change to the admin\'s own visit plan in one sentence (I1)', async () => {
+  // A manager who holds an agent profile edits the class of an outlet on his own plan: the
+  // backend refuses 403 SALES_PAY_SELF_DECISION (top-level envelope, handle_api_exception), and
+  // the page explains it itself instead of showing the backend's pay wording.
+  salesService.updateOutlet.mockRejectedValue({
+    response: {
+      status: 403,
+      data: { success: false, error_code: 'SALES_PAY_SELF_DECISION', message: 'You cannot propose or decide anything about your own pay', details: { agent_user_id: 41 } },
+    },
+  });
+  render(<Outlets />, { wrapper: createWrapper() });
+  const modal = await openEditModal();
+  await pickOption(within(modal).getByTestId('edit-class-select').querySelector('.ant-select-selector'), 'A');
+  fireEvent.click(within(modal).getByRole('button', { name: /save/i }));
+
+  await waitFor(() => expect(message.error).toHaveBeenCalledWith(
+    'This outlet is on your own visit plan, so another manager or an administrator has to change it.',
+  ));
+  expect(message.error).toHaveBeenCalledTimes(1);
+});
+
 it('clears an emptied text field with an explicit null', async () => {
   salesService.getOutlet.mockResolvedValue({ outlet: { ...OUTLET, notes: 'Corner shop', open_receivable: 0, bottle_balance: 0, last_orders: [] }, stage_history: STAGE_HISTORY });
   render(<Outlets />, { wrapper: createWrapper() });
@@ -585,4 +608,22 @@ it('shows "Photo unavailable" for a photo Telegram no longer serves', async () =
   expect(await within(drawer).findByText('Photo unavailable')).toBeInTheDocument();
   // The rest of the drawer still renders.
   expect(within(drawer).getByRole('tab', { name: 'Overview' })).toBeInTheDocument();
+});
+
+it.each([
+  ['a plain approve', undefined, /^approve$/i],
+  ['an attach', { user_id: 908, name: 'Bahor Savdo MChJ', outlet_count: 3 }, 'Attach to Bahor Savdo MChJ'],
+])('draws no %s door when the backend says the viewer may not approve, even awaiting activation', async (_label, candidate, name) => {
+  // The outlet IS at `activation_requested`: the old stage-only derivation would have drawn the
+  // button, and a self-approval would then have been refused on click (C5, §6.6).
+  salesService.getOutlet.mockResolvedValue({
+    outlet: { ...OUTLET, can_approve: false, account_candidate: candidate, open_receivable: 0, bottle_balance: 0, last_orders: [] },
+    stage_history: STAGE_HISTORY,
+  });
+  render(<Outlets />, { wrapper: createWrapper() });
+  const drawer = await openDrawer();
+
+  expect(within(drawer).queryByRole('button', { name })).toBeNull();
+  // Reject is not an approval: it keeps following the stage.
+  expect(within(drawer).getByRole('button', { name: /^reject$/i })).toBeInTheDocument();
 });

@@ -34,6 +34,7 @@ from business_app.models.product import Product
 from business_app.models.sales import Outlet
 from business_app.models.sales_visits import Visit, VisitStockCheck
 from business_app.utils.local_windows import local_date, local_day_bounds
+from business_app.utils.order_timing import delivered_instants_by_order
 from business_app.utils.timezone_utils import ensure_utc
 from shared.constants import DISPLAY_TIMEZONE
 from shared.enums import OrderStatus
@@ -288,15 +289,16 @@ class ReplenishmentService:
     def delivered_instants(outlet: Outlet, *, limit: int) -> List[datetime]:
         """When this outlet's last `limit` orders actually landed, newest first.
 
-        The stage job's one input, read where every other number here reads it: `orders` has
-        no `delivered_at` column, so the DELIVERED row in `order_status_history` is the
-        instant. One row per ORDER (`max(changed_at)` grouped by `order_id`) because a
-        re-delivered order carries two DELIVERED rows, and the second would read as a second
-        purchase and halve the shop's measured buying interval.
+        The stage job's one input. The instant is `order_timing.delivered_instants_by_order`'s,
+        the same one sales-agent pay credits on (spec 2026-09-28 §4.3.2), so the stage job and
+        pay cannot disagree about when water arrived. It is one instant per ORDER (the latest
+        DELIVERED row), because a re-delivered order carries two DELIVERED rows, and the second
+        would read as a second purchase and halve the shop's measured buying interval.
 
-        Filtered on `Order.status == DELIVERED` as well, exactly like `delivered_qty` and
-        `last_delivered_qty`: an order that came back is not a delivery this outlet still
-        has, and three queries answering "did this land" must not answer it three ways.
+        Which orders count stays this method's question: `Order.status == DELIVERED`, exactly
+        like `delivered_qty` and `last_delivered_qty`. An order that came back is not a delivery
+        this outlet still has, and three queries answering "did this land" must not answer it
+        three ways.
 
         An outlet with no customer account has no history at all and answers with an empty
         list rather than raising — the contract `delivered_qty` already keeps.
@@ -309,20 +311,13 @@ class ReplenishmentService:
 
         from business_app.services.sales.outlet_service import OutletService
 
-        rows = (
-            db.session.query(func.max(OrderStatusHistory.changed_at))
-            .join(Order, Order.id == OrderStatusHistory.order_id)
-            .filter(
-                OutletService.order_scope(outlet),
-                Order.status == OrderStatus.DELIVERED,
-                OrderStatusHistory.new_status == OrderStatus.DELIVERED,
-            )
-            .group_by(OrderStatusHistory.order_id)
-            .order_by(func.max(OrderStatusHistory.changed_at).desc())
-            .limit(limit)
+        landed_ids = [
+            order_id
+            for (order_id,) in db.session.query(Order.id)
+            .filter(OutletService.order_scope(outlet), Order.status == OrderStatus.DELIVERED)
             .all()
-        )
-        return [_aware(row[0]) for row in rows]
+        ]
+        return sorted(delivered_instants_by_order(landed_ids).values(), reverse=True)[:limit]
 
     @staticmethod
     def _recent_checks(

@@ -563,6 +563,13 @@ class BaseConfig:
     SALES_SHORT_VISIT_SECONDS = business_config.SALES_SHORT_VISIT_SECONDS
     SALES_METRICS_MAX_RANGE_DAYS = business_config.SALES_METRICS_MAX_RANGE_DAYS
 
+    # Sales agents — pay (the ledger sync) and the same-day approval hold. Same single-default
+    # rule: one derivation line each, no literal here. Read only as current_app.config[NAME].
+    SALES_PAY_SYNC_LOOKBACK_DAYS = business_config.SALES_PAY_SYNC_LOOKBACK_DAYS
+    SALES_PAY_SYNC_TOUCH_DAYS = business_config.SALES_PAY_SYNC_TOUCH_DAYS
+    SALES_PAY_ONDEMAND_SYNC_SECONDS = business_config.SALES_PAY_ONDEMAND_SYNC_SECONDS
+    SALES_STAFF_APPROVAL_HOLD_HOURS = business_config.SALES_STAFF_APPROVAL_HOLD_HOURS
+
     # Loyalty Program Configuration
     # Earning is DB-driven (LoyaltyProgram.uzs_per_point); this is the legacy
     # fallback ratio. Points redeem only via rewards — no points→UZS conversion.

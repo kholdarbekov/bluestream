@@ -54,6 +54,7 @@ from business_app.services.product_fiscal_service import ProductFiscalService
 from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
 from business_app.services.customer_map_service import CustomerMapService
 from business_app.services.customer_link_service import CustomerLinkService
+from business_app.services.sales.agent_order_approval_service import AgentOrderApprovalService
 from business_app.serializers.admin_serializers import (
     serialize_user_admin,
     serialize_order_admin,
@@ -1171,6 +1172,7 @@ def get_user_details(user_id):
         total_orders = Order.query.filter_by(user_id=user_id).count()
         total_spent = db.session.query(func.sum(Order.total_amount)).filter_by(user_id=user_id).scalar() or 0
 
+        awaiting = AgentOrderApprovalService.awaiting_ids(order.id for order in recent_orders)
         user_details = {
             "user": serialize_user_admin(user),
             "statistics": {
@@ -1178,7 +1180,9 @@ def get_user_details(user_id):
                 "total_spent": total_spent,
                 "avg_order_value": total_spent / total_orders if total_orders > 0 else 0,
             },
-            "recent_orders": [serialize_order_admin(order) for order in recent_orders],
+            "recent_orders": [
+                serialize_order_admin(order, awaiting_staff_approval=order.id in awaiting) for order in recent_orders
+            ],
             "addresses": [
                 {
                     "id": addr.id,
@@ -1930,11 +1934,13 @@ def get_orders():
         # Get order statistics efficiently
         order_ids = [order.id for order in pagination.items]
         order_statistics = AggregationOptimizer.get_order_statistics(order_ids)
+        # C14: one batched lookup for the page, not one per row.
+        awaiting = AgentOrderApprovalService.awaiting_ids(order_ids)
 
         # Serialize orders with statistics
         orders_data = []
         for order in pagination.items:
-            order_data = serialize_order_admin(order)
+            order_data = serialize_order_admin(order, awaiting_staff_approval=order.id in awaiting)
             order_stats = order_statistics.get(order.id, {})
             order_data.update(
                 {
@@ -2136,6 +2142,16 @@ def update_order_status(order_id):
             )
         except ValidationError as e:
             return validation_error_response(e.message, error_code=e.error_code)
+        except ConflictError as e:
+            # C14: a held order is confirmed only in the order-approval queue. A 409 with its code
+            # and details in this route's envelope (`data.error_code`, what Orders.js reads).
+            # Every other conflict keeps the generic answer below, unchanged.
+            if e.error_code == "ORDER_AWAITING_STAFF_APPROVAL":
+                return error_response(
+                    e.message, status_code=409, data={"error_code": e.error_code, "details": e.details}
+                )
+            current_app.logger.error(f"Failed to update order status: {e}")
+            return validation_error_response(str(e))
         except Exception as e:
             current_app.logger.error(f"Failed to update order status: {e}")
             return validation_error_response(str(e))
@@ -2855,6 +2871,9 @@ def get_order_details(order_id):
         from business_app.services.order_service import OrderService
 
         order_data["closing_reason"] = OrderService.closing_reason(order)
+        # C14: this payload replaces the list row in Orders.js when the modal opens, so it carries
+        # the same published flag as `serialize_order_admin`.
+        order_data["awaiting_staff_approval"] = AgentOrderApprovalService.is_awaiting(order.id)
 
         return success_response(data={"order": order_data})
 

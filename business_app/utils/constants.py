@@ -261,6 +261,11 @@ MAX_PAGE_SIZE = 100
 MAX_FILE_SIZE = 16 * 1024 * 1024  # 16MB
 ALLOWED_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
 
+# The order source a sales agent's order carries. One constant for the writer
+# (`visit_service.place_order`), the staff-source guard (`STAFF_ORDER_SOURCES`) and pay
+# attribution: a second spelling would attribute no order to any agent.
+ORDER_SOURCE_SALES_AGENT = "sales_agent"
+
 # Format: {PREFIX}_{SEQUENCE}_{YY} e.g., TG_000042_26
 ORDER_SOURCE_PREFIXES = {
     "telegram": "TG",  # Telegram bot orders
@@ -269,7 +274,7 @@ ORDER_SOURCE_PREFIXES = {
     "admin": "AD",  # Admin-created orders
     "api": "AP",  # Direct API orders
     "mobile": "MB",  # Mobile app orders (future)
-    "sales_agent": "SA",  # Sales-agent orders placed on a store's behalf at a visit
+    ORDER_SOURCE_SALES_AGENT: "SA",  # Sales-agent orders placed on a store's behalf at a visit
 }
 
 # Regex Patterns

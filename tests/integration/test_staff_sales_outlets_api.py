@@ -4,12 +4,15 @@ from decimal import Decimal
 
 import pytest
 
+from business_app.api.staff_sales import AGENT_EDITABLE_OUTLET_FIELDS
 from business_app.models.order import Order, OrderItem, OrderStatusHistory
 from business_app.models.payment import Payment
-from business_app.models.sales import Outlet, SalesAgentProfile
+from business_app.models.sales import OUTLET_STAGES, Outlet, OutletContact, SalesAgentProfile
 from business_app.models.user import User, UserAddress
+from business_app.services.sales import notifications
 from shared.enums import EntitySubtype, OrderStatus, PaymentMethod, PaymentStatus
 from tests.unit.test_outlet_dedupe import FAR, NEAR, PIN, _customer
+from tests.unit.test_sales_agent_tasks import _spy
 
 pytestmark = pytest.mark.integration
 
@@ -53,14 +56,14 @@ def test_create_list_dedupe_and_card(client, sales_agent_auth_headers, sales_age
 
     dup = client.post(
         OUTLETS,
-        json={**BOT_PAYLOAD, "contact": None, "latitude": NEAR[0], "longitude": NEAR[1]},
+        json={**BOT_PAYLOAD, "latitude": NEAR[0], "longitude": NEAR[1]},
         headers=sales_agent_auth_headers,
     )
     assert dup.status_code == 409 and "SALES_OUTLET_DUPLICATE" in dup.get_data(as_text=True)
     forced = _create(
         client,
         sales_agent_auth_headers,
-        {**BOT_PAYLOAD, "contact": None, "latitude": NEAR[0], "longitude": NEAR[1], "force": True},
+        {**BOT_PAYLOAD, "latitude": NEAR[0], "longitude": NEAR[1], "force": True},
     )
     assert forced["dedupe_candidates"][0]["outlet_id"] == outlet["id"]
 
@@ -187,7 +190,7 @@ def test_a_geocoders_district_string_is_canonicalised_not_refused(client, sales_
         outlet = _create(
             client,
             sales_agent_auth_headers,
-            {**BOT_PAYLOAD, "contact": None, "district": raw, "force": True},
+            {**BOT_PAYLOAD, "district": raw, "force": True},
         )
         assert outlet["district"] == expected, raw
 
@@ -210,7 +213,7 @@ def test_a_district_that_names_nothing_is_stored_as_null_not_refused(client, sal
     outlet = _create(
         client,
         sales_agent_auth_headers,
-        {**BOT_PAYLOAD, "contact": None, "district": "Nowhere District", "force": True},
+        {**BOT_PAYLOAD, "district": "Nowhere District", "force": True},
     )
     assert outlet["district"] is None
 
@@ -443,14 +446,13 @@ def test_linking_a_second_shop_to_one_account_creates_a_branch_address(client, s
     db.session.commit()
     home_id = home.id
 
-    first = _create(client, sales_agent_auth_headers, {**BOT_PAYLOAD, "contact": None, "link_user_id": customer.id})
+    first = _create(client, sales_agent_auth_headers, {**BOT_PAYLOAD, "link_user_id": customer.id})
     second = _create(
         client,
         sales_agent_auth_headers,
         {
             **BOT_PAYLOAD,
             "name": "Bahor market, Yunusobod",
-            "contact": None,
             "latitude": FAR[0],
             "longitude": FAR[1],
             "address_text": "Yunusobod 19-kvartal, 4",
@@ -592,7 +594,7 @@ def test_linking_at_a_free_address_of_the_account_adopts_it_not_the_default(clie
     shop_id = shop.id
     addresses_before = {a.id for a in UserAddress.query.filter_by(user_id=account.id)}
 
-    outlet = _create(client, sales_agent_auth_headers, {**BOT_PAYLOAD, "contact": None, "link_user_id": account.id})
+    outlet = _create(client, sales_agent_auth_headers, {**BOT_PAYLOAD, "link_user_id": account.id})
 
     assert (outlet["stage"], outlet["user_id"], outlet["address_id"]) == ("active", account.id, shop_id)
     assert {a.id for a in UserAddress.query.filter_by(user_id=account.id)} == addresses_before
@@ -660,6 +662,8 @@ def test_activation_requests_name_the_account_and_the_operator_attaches_the_bran
     row = queue.get_json()["data"]["items"][0]
     assert row["id"] == outlet["id"]
     assert row["account_candidate"] == {"user_id": account.id, "name": "Chinor", "outlet_count": 1}
+    # Published per viewer (spec §4.12): this operator did not register the shop.
+    assert row["can_approve"] is True
 
     refused = client.post(f"{OUTLETS}/{outlet['id']}/approve", json={}, headers=operator_auth_headers)
     assert refused.status_code == 409, refused.get_data(as_text=True)
@@ -682,6 +686,7 @@ def test_activation_requests_name_the_account_and_the_operator_attaches_the_bran
     # the renderers only label what is published here.
     assert body["open_receivable_scope"] == "account"
     assert body["account_candidate"] is None  # it HAS an account now; nothing left to attach
+    assert body["can_approve"] is False  # active, and the viewer is the agent who registered it
 
 
 def test_a_silent_link_adopts_the_customers_free_address_at_the_pin(
@@ -925,14 +930,13 @@ def test_marking_a_junk_branch_lost_takes_the_real_shop_out_of_branch_mode(
     account line and the "(account)" money label on -- is False.
     """
     account = _customer(db, "+998901112211", company="Bahor", subtype=EntitySubtype.GROCERY_STORE)
-    shop = _create(client, sales_agent_auth_headers, {**BOT_PAYLOAD, "contact": None, "link_user_id": account.id})
+    shop = _create(client, sales_agent_auth_headers, {**BOT_PAYLOAD, "link_user_id": account.id})
     junk = _create(
         client,
         sales_agent_auth_headers,
         {
             **BOT_PAYLOAD,
             "name": "Bahor market, Yunusobod",
-            "contact": None,
             "latitude": FAR[0],
             "longitude": FAR[1],
             "address_text": "Yunusobod 19-kvartal, 4",
@@ -958,22 +962,337 @@ def test_marking_a_junk_branch_lost_takes_the_real_shop_out_of_branch_mode(
     assert (body["account_name"], body["branch_count"], body["is_branch"]) == ("Bahor", 1, False)
 
 
-def test_an_agents_class_change_moves_the_due_date_too(client, app, db, sales_agent_user, sales_agent_auth_headers):
-    """D29 applies to the agent's PUT as well: it is one service method."""
-    from datetime import UTC, datetime, timedelta
+def test_an_agent_cannot_change_an_outlets_class(client, db, sales_agent_user, sales_agent_auth_headers):
+    """T-VIS-10, D-CLASS (owner-confirmed): `outlet_class` is not agent-editable.
 
-    from business_app.models.sales import Outlet
-
-    last_visit = datetime(2026, 9, 1, 6, 0, tzinfo=UTC)
+    The class sets the cadence, the cadence sets the due date, and the due date decides which
+    shops enter the 01:20 frozen plan (spec §4.1.2), so an agent reclassing a shop between the
+    snapshot and the visit was editing their own compliance. Dropped, not refused, like every
+    other admin-only field: the notes in the same PUT still land. The bot never calls this route.
+    An admin still changes the class and moves the due date with it (D29,
+    tests/integration/test_admin_sales_outlets_api.py::test_a_class_change_moves_the_due_date_now).
+    """
     outlet = Outlet(
         name="Bahor market", outlet_type="grocery_store", stage="active", outlet_class="C",
-        district="chilanzar", assigned_agent_user_id=sales_agent_user.id, last_visit_at=last_visit,
+        district="chilanzar", assigned_agent_user_id=sales_agent_user.id,
+        last_visit_at=datetime(2026, 9, 1, 6, 0, tzinfo=timezone.utc),
     )
     db.session.add(outlet)
     db.session.commit()
 
-    moved = client.put(f"{OUTLETS}/{outlet.id}", json={"class": "B"}, headers=sales_agent_auth_headers)
+    response = client.put(
+        f"{OUTLETS}/{outlet.id}",
+        json={"class": "B", "notes": "Asked for weekly visits"},
+        headers=sales_agent_auth_headers,
+    )
 
-    assert moved.status_code == 200, moved.get_data(as_text=True)
-    due = datetime.fromisoformat(moved.get_json()["data"]["outlet"]["next_visit_due_at"])
-    assert due == last_visit + timedelta(days=app.config["SALES_CADENCE_DAYS_B"])
+    assert response.status_code == 200, response.get_data(as_text=True)
+    body = response.get_json()["data"]["outlet"]
+    assert body["notes"] == "Asked for weekly visits"   # proof the write really happened
+    assert body["class"] == "C" and body["next_visit_due_at"] is None
+    assert Outlet.query.get(outlet.id).outlet_class == "C"
+    # The allowlist itself, pinned: a key added here is a new thing agents may write, and that is
+    # a decision, not a refactor.
+    assert AGENT_EDITABLE_OUTLET_FIELDS == frozenset(
+        {
+            "name",
+            "channel",
+            "opening_hours",
+            "preferred_visit_window",
+            "delivery_window_start",
+            "delivery_window_end",
+            "competitor_note",
+            "notes",
+            "preferred_language",
+        }
+    )
+
+
+def test_create_without_a_contact_phone_is_refused_before_the_duplicate_and_link_checks(
+    client, sales_agent_auth_headers, db
+):
+    """D31 R1: an agent-created outlet carries a phone on its primary contact.
+
+    Checked BEFORE `find_duplicates` and the 🔗 Link branch. The shop below already stands at this
+    pin under this account, so in any other order the plain, Link and name-only bodies would get
+    the 409 the bot answers with "Create anyway" / "Link" -- buttons that could only end in this
+    refusal -- and the forced one would be stored. A contact with a name but no phone has no phone,
+    and a phone of only spaces is missing, not malformed: the rule reads the raw value, before
+    `_contact_fields` and its format check could call it "invalid".
+    """
+    customer = _customer(db, "+998901112277", company="Bahor", subtype=EntitySubtype.GROCERY_STORE)
+    db.session.add(
+        Outlet(
+            name="Bahor market",
+            outlet_type="grocery_store",
+            stage="active",
+            user_id=customer.id,
+            latitude=PIN[0],
+            longitude=PIN[1],
+        )
+    )
+    db.session.commit()
+    phoneless = {**BOT_PAYLOAD, "contact": None}
+
+    for body in (
+        phoneless,
+        {**phoneless, "force": True},
+        {**phoneless, "link_user_id": customer.id},
+        {**BOT_PAYLOAD, "contact": {"name": "Olim aka", "role": "owner"}},
+        {**BOT_PAYLOAD, "contact": {"name": "Olim aka", "phone": "   ", "role": "owner"}},
+    ):
+        refused = client.post(OUTLETS, json=body, headers=sales_agent_auth_headers)
+
+        assert refused.status_code == 400, (body, refused.get_data(as_text=True))
+        assert refused.get_json()["error_code"] == "SALES_OUTLET_PHONE_REQUIRED", body
+        assert Outlet.query.count() == 1, body  # only the shop that was already there
+
+
+@pytest.mark.parametrize(
+    "missing",
+    [("latitude", "longitude"), ("longitude",), ("latitude", "longitude", "contact")],
+    ids=["no-pin", "half-pin", "no-pin-and-no-phone"],
+)
+def test_create_without_both_coordinates_is_refused(client, sales_agent_auth_headers, db, missing):
+    """D31 R3: the API now demands the pin the walk-in already could not skip. One code for no pin
+    and for half a pin, which the bot maps to one sentence. With no phone either, the pin is still
+    the answer: `_validate_common` runs before the phone rule."""
+    body = {key: value for key, value in BOT_PAYLOAD.items() if key not in missing}
+
+    refused = client.post(OUTLETS, json=body, headers=sales_agent_auth_headers)
+
+    assert refused.status_code == 400, refused.get_data(as_text=True)
+    assert refused.get_json()["error_code"] == "SALES_OUTLET_PIN_REQUIRED"
+    assert Outlet.query.count() == 0
+
+
+@pytest.mark.parametrize("phone", ["71 123 45 67", "+79161234567"], ids=["tashkent-landline", "foreign-mobile"])
+def test_a_number_that_is_not_an_uzbek_mobile_is_refused_at_create(client, sales_agent_auth_headers, db, phone):
+    """D31 R2: the customer account is opened on this number, so it is held to the shared rule
+    (`shared.validators.normalize_phone_number`), not to "parses as a phone number". Both of these
+    ARE valid numbers -- a Tashkent fixed line, a Russian mobile -- which is exactly why the old
+    format-only check let them in."""
+    body = {**BOT_PAYLOAD, "contact": {"name": "Olim aka", "phone": phone, "role": "owner"}}
+
+    refused = client.post(OUTLETS, json=body, headers=sales_agent_auth_headers)
+
+    assert refused.status_code == 400, refused.get_data(as_text=True)
+    assert refused.get_json()["error_code"] == "SALES_CONTACT_PHONE_INVALID"
+    assert Outlet.query.count() == 0
+
+
+@pytest.mark.parametrize("typed", ["90 123 45 67", "+998 90 123-45-67", "998901234567", "901234567"])
+def test_every_everyday_spelling_of_a_mobile_is_stored_as_one_e164_number(
+    client, sales_agent_auth_headers, db, typed
+):
+    """Review focus 1: what agents really type. R2 refuses landlines without refusing any of
+    these, and the primary contact stores the one E.164 number `_require_primary_phone` returns."""
+    body = {**BOT_PAYLOAD, "contact": {"name": "Olim aka", "phone": typed, "role": "owner"}}
+
+    created = _create(client, sales_agent_auth_headers, body)
+
+    assert [(contact["phone"], contact["is_primary"]) for contact in created["contacts"]] == [
+        ("+998901234567", True)
+    ]
+    assert Outlet.query.get(created["id"]).primary_contact.phone == "+998901234567"
+
+
+def _outlet_row(db, agent, *, stage="prospect", outlet_type="grocery_store", contact=None, pinned=True):
+    """An outlet built directly, in a stage or a shape `POST /sales/outlets` does not produce.
+
+    Since D31 the create route refuses a shop with no phone or no pin, but rows from before it
+    remain: dev outlet #9 "Abc market" has no contact at all. `contact` (OutletContact fields)
+    becomes the PRIMARY contact. Assigned to `agent`, so `get_for_agent` opens it in any stage.
+    """
+    outlet = Outlet(
+        name="Abc market",
+        outlet_type=outlet_type,
+        stage=stage,
+        latitude=PIN[0] if pinned else None,
+        longitude=PIN[1] if pinned else None,
+        assigned_agent_user_id=agent.id,
+    )
+    if contact is not None:
+        outlet.contacts.append(OutletContact(role="owner", is_primary=True, **contact))
+    db.session.add(outlet)
+    db.session.commit()
+    return outlet
+
+
+@pytest.mark.parametrize("stage", OUTLET_STAGES)
+def test_the_card_offers_request_activation_only_to_a_prospect_or_a_trial(
+    client, db, sales_agent_auth_headers, sales_agent_user, stage
+):
+    """R5 (D31) over every stage, read where the staff bot reads it: the agent's card. The shop has
+    everything else activation needs -- a primary phone and a pin -- so the stage is the only
+    variable. The two stages are spelled out, not imported, so a drift in `REQUESTABLE_STAGES`
+    shows against the ruling rather than against itself.
+    """
+    outlet = _outlet_row(db, sales_agent_user, stage=stage, contact={"name": "Olim aka", "phone": "+998901112266"})
+
+    card = client.get(f"{OUTLETS}/{outlet.id}", headers=sales_agent_auth_headers)
+
+    assert card.status_code == 200, card.get_data(as_text=True)
+    assert card.get_json()["data"]["outlet"]["can_request_activation"] is (stage in ("prospect", "trial"))
+
+
+@pytest.mark.parametrize(
+    "outlet_type, contact, pinned, error_code, message",
+    [
+        # A private customer is activated at creation, never on request. The bot never offered the
+        # button; now the backend refuses the request as well.
+        (
+            "individual",
+            {"name": "Dilnoza Rahimova", "phone": "+998901112299"},
+            True,
+            "SALES_OUTLET_STAGE_INVALID",
+            "Only a shop or workplace goes through activation",
+        ),
+        # The same with no phone: the shop-or-workplace check comes before the phone.
+        (
+            "individual",
+            None,
+            True,
+            "SALES_OUTLET_STAGE_INVALID",
+            "Only a shop or workplace goes through activation",
+        ),
+        # Dev outlet #9: the phone step was skipped with no name typed, so there is no contact.
+        (
+            "grocery_store",
+            None,
+            True,
+            "SALES_ACTIVATION_PHONE_REQUIRED",
+            "A contact phone is required to request activation",
+        ),
+        # A name was typed and the phone skipped: the PRIMARY contact has no phone.
+        (
+            "grocery_store",
+            {"name": "Olim aka", "phone": None},
+            True,
+            "SALES_ACTIVATION_PHONE_REQUIRED",
+            "A contact phone is required to request activation",
+        ),
+        (
+            "grocery_store",
+            {"name": "Olim aka", "phone": "+998901112266"},
+            False,
+            "SALES_ACTIVATION_PIN_REQUIRED",
+            "A pin is required to request activation",
+        ),
+        # Neither: the phone is asked for first, as it always was.
+        (
+            "grocery_store",
+            None,
+            False,
+            "SALES_ACTIVATION_PHONE_REQUIRED",
+            "A contact phone is required to request activation",
+        ),
+    ],
+    ids=[
+        "individual", "individual_without_a_phone", "no_contact", "name_only_contact", "no_pin",
+        "no_contact_and_no_pin",
+    ],
+)
+def test_the_card_hides_request_activation_exactly_where_the_request_is_refused(
+    client, db, monkeypatch, sales_agent_auth_headers, sales_agent_user, outlet_type, contact, pinned, error_code, message
+):
+    """R5 (D31) has one expression, `OutletService._activation_refusal`: the card publishes
+    `can_request_activation: false` for exactly the outlets `POST /request-activation` refuses,
+    and the request gets the first refusal in R5's order -- the new shop-or-workplace check, then
+    a phone on the PRIMARY contact, then a pin -- each with today's code. These are legacy shapes
+    the create route no longer produces, so they are built directly; a refusal writes nothing and
+    alerts no operator.
+    """
+    notified = _spy(monkeypatch, notifications, "notify_activation_requested")
+    outlet = _outlet_row(db, sales_agent_user, outlet_type=outlet_type, contact=contact, pinned=pinned)
+    outlet_id = outlet.id
+
+    card = client.get(f"{OUTLETS}/{outlet_id}", headers=sales_agent_auth_headers)
+    assert card.status_code == 200, card.get_data(as_text=True)
+    assert card.get_json()["data"]["outlet"]["can_request_activation"] is False
+
+    refused = client.post(f"{OUTLETS}/{outlet_id}/request-activation", headers=sales_agent_auth_headers)
+
+    assert refused.status_code == 400, refused.get_data(as_text=True)
+    assert (refused.get_json()["error_code"], refused.get_json()["message"]) == (error_code, message)
+    row = Outlet.query.get(outlet_id)
+    assert (row.stage, row.activation_requested_at) == ("prospect", None)
+    assert notified == []
+
+
+@pytest.mark.parametrize(
+    "payload, stage, can_request",
+    [
+        ({**BOT_PAYLOAD, "force": False, "link_user_id": None}, "prospect", True),
+        (
+            {
+                **BOT_PAYLOAD,
+                "name": "Yashnobod ofis",
+                "outlet_type": "workplace",
+                "class": "A",
+                "force": False,
+                "link_user_id": None,
+            },
+            "prospect",
+            True,
+        ),
+        # A private customer with a phone is activated at creation: there is nothing to request.
+        (
+            {
+                **BOT_PAYLOAD,
+                "name": "Dilnoza opa",
+                "outlet_type": "individual",
+                "contact": {"name": "Dilnoza Rahimova", "phone": "+998901112299", "role": "owner"},
+                "class": "C",
+                "force": False,
+                "link_user_id": None,
+            },
+            "active",
+            False,
+        ),
+    ],
+    ids=["grocery_store", "workplace", "individual"],
+)
+def test_create_replies_with_the_card(client, db, sales_agent_auth_headers, payload, stage, can_request):
+    """P6 (D31): `POST /sales/outlets` answers with `OutletService.card`, not the bare record. The
+    bot draws the receipt and its buttons from this reply, so it must carry what the card
+    publishes and say exactly what a re-fetch says. One case per type on the bot's type keyboard,
+    each posted with every key `new_outlet.py:_payload()` sends.
+    """
+    created = _create(client, sales_agent_auth_headers, payload)
+
+    assert (created["stage"], created["can_request_activation"]) == (stage, can_request)
+    # Card-only keys, as their creator reads them: no visit is open here, and nobody approves a
+    # shop they registered themselves.
+    assert (created["open_visit_id"], created["can_approve"]) == (None, False)
+    card = client.get(f"{OUTLETS}/{created['id']}", headers=sales_agent_auth_headers)
+    assert card.status_code == 200, card.get_data(as_text=True)
+    assert card.get_json()["data"]["outlet"] == created
+
+
+def test_request_activation_replies_with_the_moved_card(client, db, monkeypatch, sales_agent_auth_headers):
+    """P6 (D31): the bot redraws the card from this reply, so the reply IS the card -- already at
+    `activation_requested`, and so no longer offering the request it has just made. A second tap
+    from the old card is the stage refusal, and the operators are alerted once.
+    """
+    notified = _spy(monkeypatch, notifications, "notify_activation_requested")
+    outlet = _create(client, sales_agent_auth_headers)
+
+    requested = client.post(f"{OUTLETS}/{outlet['id']}/request-activation", headers=sales_agent_auth_headers)
+
+    assert requested.status_code == 200, requested.get_data(as_text=True)
+    body = requested.get_json()["data"]["outlet"]
+    assert (body["id"], body["stage"], body["can_request_activation"]) == (outlet["id"], "activation_requested", False)
+    assert (body["open_visit_id"], body["can_approve"]) == (None, False)
+    card = client.get(f"{OUTLETS}/{outlet['id']}", headers=sales_agent_auth_headers)
+    assert card.status_code == 200, card.get_data(as_text=True)
+    assert card.get_json()["data"]["outlet"] == body
+
+    again = client.post(f"{OUTLETS}/{outlet['id']}/request-activation", headers=sales_agent_auth_headers)
+
+    assert again.status_code == 400, again.get_data(as_text=True)
+    assert (again.get_json()["error_code"], again.get_json()["message"]) == (
+        "SALES_OUTLET_STAGE_INVALID",
+        "Outlet is not a prospect or trial",
+    )
+    assert [args[0].id for args, _kwargs in notified] == [outlet["id"]]

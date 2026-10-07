@@ -9,10 +9,11 @@ from staff_bot.api_client import api_client
 from staff_bot.handlers.base import BaseHandler
 from staff_bot.i18n import i18n
 from staff_bot.keyboards.menu import MenuKeyboards
-from staff_bot.keyboards.sales import SalesKeyboards, stage_label
+from staff_bot.keyboards.sales import SalesKeyboards, primary_contact, stage_label
 from staff_bot.permissions import require_auth, require_sales_agent
 from staff_bot.utils.flow_state import (
     SALES_NEARBY_FLOW_KEY,
+    SALES_SET_PHONE_FLOW_KEY,
     SALES_TRYOUT_FLOW_KEY,
     SALES_VISIT_FLOW_KEY as VISIT_FLOW_KEY,
 )
@@ -28,7 +29,7 @@ def format_outlet_card(outlet: Dict, language: str) -> str:
     Reading the field IS the whole rule. `OutletService.card` answers NULL for a
     figure that does not apply — no customer account means no wallet, no address
     row means no bottle ledger, a store nobody has visited has no rate — and the
-    activation POST answers with a plain `serialize_outlet` that carries none of
+    operator's queue and its approve/reject replies answer with a plain `serialize_outlet` that carries none of
     these keys. So `.get(...) is not None` covers both shapes, and the bot never
     re-derives applicability from `user_id`: that rule lives server-side, in one
     place, or the two ends of it drift apart. The figures are answered
@@ -68,14 +69,12 @@ def format_outlet_card(outlet: Dict, language: str) -> str:
     ]
     if outlet.get('class'):
         lines.append(f"{i18n.get('staff.sales.card.class', language)}: {outlet['class']}")
-    contacts = outlet.get('contacts') or []
-    if contacts:
-        primary = next((c for c in contacts if c.get('is_primary')), contacts[0])
-        # Built from the non-empty parts: a contact with a phone and no name
-        # (the common field case) would otherwise render a double space.
-        who = ' '.join(escape_html(part) for part in (primary.get('name'), primary.get('phone')) if part)
-        if who:
-            lines.append(f"📞 {i18n.get('staff.sales.card.contact', language)}: {who}")
+    primary = primary_contact(outlet)
+    # Built from the non-empty parts: a contact with a phone and no name
+    # (the common field case) would otherwise render a double space.
+    who = ' '.join(escape_html(part) for part in (primary.get('name'), primary.get('phone')) if part)
+    if who:
+        lines.append(f"📞 {i18n.get('staff.sales.card.contact', language)}: {who}")
     if outlet.get('address_text'):
         lines.append(f"📍 {i18n.get('staff.sales.card.address', language)}: {escape_html(outlet['address_text'])}")
     if is_branch and outlet.get('account_name'):
@@ -206,26 +205,35 @@ class SalesHubHandler(BaseHandler):
         return True
 
     def _drop_other_sales_drafts(self, context, own_key: str) -> None:
-        """Entering one sales conversation leaves the other two holding nothing.
+        """Entering one sales conversation leaves the others holding nothing.
 
         PTB checks an INACTIVE conversation's entry points on every update, so a
-        stale 🧭 Nearby or 🧪 Try-out tap arms its conversation on top of whatever
-        the agent is really doing — and nothing ends the one that loses. The
-        loser keeps its draft, its five-minute timer keeps running, and
-        `_refused_by_open_visit` then reads a draft no live conversation owns.
+        stale 🧭 Nearby, 🧪 Try-out or 📞 phone tap arms its conversation on top
+        of whatever the agent is really doing — and nothing ends the one that
+        loses. The loser keeps its draft, its five-minute timer keeps running,
+        and `_refused_by_open_visit` then reads a draft no live conversation owns.
+        The 📞 screen's draft is the costliest to keep: its prompt reads free
+        text, so the agent's next message would be sent as a phone number.
 
-        So the entry point that WINS drops the others' drafts. The visit's is not
+        So the entry point that WINS drops the others' drafts. That includes the
+        walk-in's `start_new_outlet` and the visit's `_resume` (⏯ Resume and
+        its stale-tap re-arm): both conversations are registered ahead of the
+        📞 screen, so they take their tap (the "New outlet" label, ⏯ Resume)
+        before its `menu_escape` can end it. The visit's own draft is not
         dropped here: it is guarded instead (a live visit refuses the tap
         outright), because the visit is the one flow with a row open on the
         server behind it.
         """
-        for key in (SALES_NEARBY_FLOW_KEY, SALES_TRYOUT_FLOW_KEY):
+        for key in (SALES_NEARBY_FLOW_KEY, SALES_TRYOUT_FLOW_KEY, SALES_SET_PHONE_FLOW_KEY):
             if key != own_key:
                 context.user_data.pop(key, None)
 
     async def _render(self, update: Update, text: str, keyboard) -> None:
         if update.callback_query:
-            await update.callback_query.answer()
+            # Through `_safe_callback_answer`, never a bare `answer()`: a refused
+            # 🚀 spends the tap's one answer on its alert before the card is
+            # redrawn here, and a second answer is refused or dropped by Telegram.
+            await self._safe_callback_answer(update.callback_query, None, show_alert=False)
             await update.callback_query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
         else:
             await update.message.reply_text(
@@ -327,6 +335,13 @@ class SalesHubHandler(BaseHandler):
                 response = await client.sales_request_activation(token, outlet_id)
             if not response.success:
                 await self._handle_api_response_error(update, response, language)
+                # Since D31 the card draws 🚀 only where the request would pass,
+                # so a 400 means the CARD is stale: drawn before the outlet lost
+                # its phone or pin, or moved on. Draw it again, so the agent sees
+                # the buttons it has now (📞 included). A 403/404 gets the alert
+                # only: a GET for an outlet that is not theirs is refused too.
+                if getattr(response, 'status_code', None) == 400:
+                    await self._show_card(update, context, outlet_id, language)
                 return
             outlet = (response.data or {}).get('outlet') or {}
             await update.callback_query.answer()

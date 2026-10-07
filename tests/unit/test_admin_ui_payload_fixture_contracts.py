@@ -52,6 +52,17 @@ ANALYTICS_PAGE = REPO_ROOT / "admin_ui/src/pages/Analytics.js"
 ANALYTICS_AGENT_TEST = REPO_ROOT / "admin_ui/src/__tests__/pages/Analytics.agentPerformance.test.js"
 DELIVERY_PAGE = REPO_ROOT / "admin_ui/src/pages/Delivery.js"
 OPERATIONS_MAP_TEST = REPO_ROOT / "admin_ui/src/components/OperationsMap.test.jsx"
+ADMIN_UI_SRC = REPO_ROOT / "admin_ui/src"
+SALES_SERVICE = REPO_ROOT / "admin_ui/src/services/salesService.js"
+SALES_ORDER_APPROVALS_PAGE = REPO_ROOT / "admin_ui/src/pages/SalesOrderApprovals.js"
+SALES_ORDER_APPROVALS_TEST = REPO_ROOT / "admin_ui/src/__tests__/pages/SalesOrderApprovals.test.js"
+PENALTY_PROPOSALS_TEST = REPO_ROOT / "admin_ui/src/__tests__/pages/PenaltyProposals.test.js"
+PENALTY_PROPOSALS_PAGE = REPO_ROOT / "admin_ui/src/pages/PenaltyProposals.js"
+SALES_AGENTS_PAGE = REPO_ROOT / "admin_ui/src/pages/SalesAgents.js"
+TRYOUTS_PAGE = REPO_ROOT / "admin_ui/src/pages/Tryouts.js"
+SALES_COMPENSATION_PAGE = REPO_ROOT / "admin_ui/src/pages/SalesCompensation.js"
+PAY_COMPONENTS_DIR = REPO_ROOT / "admin_ui/src/components/sales/pay"
+SALES_PAY_SERVICE = REPO_ROOT / "admin_ui/src/services/salesPayService.js"
 
 _LINE_COMMENT = re.compile(r"//[^\n]*")
 _QUOTED = re.compile(r"'([^']*)'")
@@ -709,3 +720,418 @@ def test_operations_map_order_entry_fixture_matches_the_live_snapshot(
     assert _declared_key_set(OPERATIONS_MAP_TEST, "ORDER_ENTRY_KEYS") == set(entry), _explain(
         OPERATIONS_MAP_TEST, "ORDER_ENTRY_KEYS"
     )
+
+
+# --------------------------------------------------------------------------- #
+# Sales-agent pay (spec §8.1): the seed against its producers and its pages
+# --------------------------------------------------------------------------- #
+
+_PAY_VISITS_KEYS = ("visits.plan_vs_fact.counted", "visits.plan_vs_fact.not_counted_day")
+# A static key the page names. Template-literal keys (`pay.kind.${kind}`) are the families below.
+_PAY_LITERAL_KEY = re.compile(r"'sales_agents:(pay\.[a-z0-9_.]+|visits\.plan_vs_fact\.(?:counted|not_counted_day))'")
+# `t('sales_agents:pay.x', 'Default')` or `t('sales_agents:pay.x', { defaultValue: "Default", … })`.
+_PAY_T_DEFAULT = re.compile(
+    r"t\(\s*'sales_agents:(pay\.[a-z0-9_.]+|visits\.plan_vs_fact\.(?:counted|not_counted_day))'\s*,\s*"
+    r"(?:\{\s*defaultValue:\s*)?(['\"])((?:(?!\2).)*)\2"
+)
+_PLACEHOLDER = re.compile(r"\{\{(\w+)\}\}")
+# A literal raise site: `error_code="SALES_PAY_X"` (spacing around `=` and either quote allowed).
+_RAISED_CODE = re.compile(r"""error_code\s*=\s*["']([A-Z][A-Z0-9_]+)["']""")
+
+
+def _raised_codes(paths) -> set:
+    """Every error code a literal raise site in `paths` names."""
+    codes = set()
+    for path in paths:
+        codes |= set(_RAISED_CODE.findall(path.read_text(encoding="utf-8")))
+    return codes
+
+
+def _pay_sources():
+    """Every admin_ui source that renders a `sales_agents:pay.*` string."""
+    return [
+        SALES_COMPENSATION_PAGE,
+        PENALTY_PROPOSALS_PAGE,
+        SALES_AGENTS_PAGE,
+        VISITS_PAGE,
+        TRYOUTS_PAGE,
+        *sorted(PAY_COMPONENTS_DIR.glob("*.js")),
+        *sorted(PAY_COMPONENTS_DIR.glob("*.jsx")),
+    ]
+
+
+def _pay_families():
+    """`pay.<family>.<value>` -> the producer's tuple (§8.1's "Pinned to" column)."""
+    from business_app.services.sales.pay_bonus_service import SALES_PAY_REVIEW_FLAGS
+    from business_app.services.sales.pay_statement_service import NOT_COUNTED_REASONS
+    from shared.staff_constants import (
+        SALES_PAY_ADJUSTMENT_SOURCES,
+        SALES_PAY_BONUS_RULES,
+        SALES_PAY_DAY_STATUSES,
+        SALES_PAY_DIFFERENCE_CAUSES,
+        SALES_PAY_GATE_RULES,
+        SALES_PAY_LEDGER_KINDS,
+        SALES_PAY_OUTLET_CHECK_STATUSES,
+        SALES_PAY_PENALTY_ORIGINS,
+        SALES_PAY_PENALTY_STATUSES,
+        SALES_PAY_PERIOD_ACTIONS,
+        SALES_PAY_PERIOD_STATUSES,
+        SALES_PAY_RATE_MODES,
+        SALES_PAY_REVERSAL_CAUSES,
+        SALES_PAY_SELF_DECISION_ACTIONS,
+        SALES_PAY_SELF_DECISION_INPUTS,
+    )
+
+    return {
+        "status": set(SALES_PAY_PERIOD_STATUSES),
+        # `sync_now` is the open month's label for `recalculate` (§6.2), not a period action.
+        "action": set(SALES_PAY_PERIOD_ACTIONS) | {"sync_now"},
+        "kind": set(SALES_PAY_LEDGER_KINDS),
+        "cause": set(SALES_PAY_REVERSAL_CAUSES) | set(SALES_PAY_DIFFERENCE_CAUSES),
+        "day_status": set(SALES_PAY_DAY_STATUSES),
+        "not_counted": set(NOT_COUNTED_REASONS),
+        "penalty_status": set(SALES_PAY_PENALTY_STATUSES),
+        "penalty_origin": set(SALES_PAY_PENALTY_ORIGINS),
+        "adjustment_source": set(SALES_PAY_ADJUSTMENT_SOURCES),
+        "rate_mode": set(SALES_PAY_RATE_MODES),
+        "bonus_rule": set(SALES_PAY_BONUS_RULES),
+        "gate_rule": set(SALES_PAY_GATE_RULES),
+        "check_status": set(SALES_PAY_OUTLET_CHECK_STATUSES),
+        "self_decided.input": set(SALES_PAY_SELF_DECISION_INPUTS),
+        "self_decided.action": set(SALES_PAY_SELF_DECISION_ACTIONS),
+        "flag": set(SALES_PAY_REVIEW_FLAGS),
+        # A8 `days[].weekday` is Python's `date.weekday()`, Monday = 0.
+        "weekday": {str(day) for day in range(7)},
+    }
+
+
+def test_every_pay_vocabulary_is_seeded_trilingual_and_nothing_else():
+    """§8.1: the pay pages build a label key from every published value
+    (``t(`sales_agents:pay.kind.${line.kind}`, line.kind)``), so each family must hold exactly one
+    row per value of its producer's tuple, in every language. A value added on the backend would
+    reach an admin as its raw name; a retired one would leave a row nobody can see. vitest never
+    notices either: it mocks i18next and reads the raw value as the default.
+    """
+    from scripts.seed_ui_sales_translations import UI_SALES_TRANSLATIONS
+
+    for language, block in UI_SALES_TRANSLATIONS.items():
+        for family, values in _pay_families().items():
+            prefix = f"pay.{family}."
+            seeded = {key[len(prefix):] for key in block if key.startswith(prefix) and "." not in key[len(prefix):]}
+            assert seeded == values, (
+                f"\nThe {language} block of scripts/seed_ui_sales_translations.py no longer carries exactly "
+                f"one pay.{family}.* row per value of its producer.\n"
+                f"missing: {sorted(values - seeded)}\nextra:   {sorted(seeded - values)}"
+            )
+            assert all(block[f"{prefix}{value}"].strip() for value in values), f"empty {language} row in pay.{family}.*"
+
+
+def test_pay_handled_codes_are_raised_codes_each_with_its_sentence():
+    """§6.4 (review SSOT I12): `PAY_HANDLED_CODES` names the refusals a pay modal explains itself,
+    so every name must be a code the pay services really raise, or a modal waits for a refusal
+    that never comes while the real one is toasted. Each needs its `pay.error.*` sentence in
+    three languages; `sales_outlet_self_approval` is the Tryouts page's one extra (§6.6),
+    `sales_pay_sync_incomplete_concurrent` is SYNC_INCOMPLETE's `details.reason: "concurrent"`
+    sentence (final-review M3), and `tier_position` is the fragment a plan refusal appends when
+    `details.tier` names a tier (D-BANDS, §6.2), not a code.
+    """
+    from scripts.seed_ui_sales_translations import UI_SALES_TRANSLATIONS
+
+    codes = _declared_array(SALES_PAY_SERVICE, "PAY_HANDLED_CODES")
+    sources = [*sorted((REPO_ROOT / "business_app/services/sales").glob("pay_*.py")), REPO_ROOT / "business_app/utils/local_windows.py"]
+    raised = _raised_codes(sources)
+
+    assert len(codes) == len(set(codes)) == 18, codes
+    assert all(code.startswith("SALES_PAY_") for code in codes), codes
+    assert set(codes) <= raised, (
+        f"PAY_HANDLED_CODES names codes no pay service raises: {sorted(set(codes) - raised)}. "
+        "A modal would wait for a refusal that never comes."
+    )
+    expected = {code.lower() for code in codes} | {
+        "sales_outlet_self_approval",
+        "sales_pay_sync_incomplete_concurrent",
+        "tier_position",
+    }
+    for language, block in UI_SALES_TRANSLATIONS.items():
+        seeded = {key[len("pay.error."):] for key in block if key.startswith("pay.error.")}
+        assert seeded == expected, (
+            f"{language}: missing {sorted(expected - seeded)}, extra {sorted(seeded - expected)}"
+        )
+
+
+def test_every_pay_string_the_admin_ui_renders_is_seeded_as_the_page_says_it():
+    """The seed docstring's rule, in code, for the pay pages: once a row exists its text wins in
+    every language, so the English row must BE the inline default, and every static key a page
+    names must exist in all three languages. The placeholders must agree across languages too:
+    a `{{month}}` dropped from one translation ships the literal braces to that admin.
+    """
+    from scripts.seed_ui_sales_translations import UI_SALES_TRANSLATIONS
+
+    en = UI_SALES_TRANSLATIONS["en"]
+    missing, mismatched = [], []
+    for path in _pay_sources():
+        source = path.read_text(encoding="utf-8")
+        name = path.relative_to(REPO_ROOT)
+        for key in sorted(set(_PAY_LITERAL_KEY.findall(source))):
+            for language in ("en", "uz", "ru"):
+                if not UI_SALES_TRANSLATIONS[language].get(key, "").strip():
+                    missing.append(f"{name}: {key} [{language}]")
+        for key, _quote, default in _PAY_T_DEFAULT.findall(source):
+            if key in en and en[key] != default:
+                mismatched.append(f"{name}: {key}: page {default!r} != seed {en[key]!r}")
+    assert not missing, "unseeded pay keys:\n" + "\n".join(missing)
+    assert not mismatched, "inline defaults that differ from the English seed:\n" + "\n".join(mismatched)
+
+    for key in (key for key in en if key.startswith("pay.") or key in _PAY_VISITS_KEYS):
+        tokens = {
+            language: frozenset(_PLACEHOLDER.findall(UI_SALES_TRANSLATIONS[language][key])) for language in ("en", "uz", "ru")
+        }
+        assert len(set(tokens.values())) == 1, f"{key!r} carries different placeholders per language: {tokens}"
+
+
+def test_the_drill_down_reads_the_published_follows_money_and_names_no_cause():
+    """Ruling T14-R1 (final-review I3): which order rows carry the `pay.hint.settled_final` hint is
+    the backend's answer, A9 `events[].follows_money` (`pay_rules.follows_money`, pinned through A9
+    in tests/integration/test_sales_pay_statement_api.py). `PayLinesTable.jsx` reads the field on
+    each event and spells no difference cause, so a cause added to `SALES_PAY_DIFFERENCE_CAUSES`
+    reaches the hint without a UI edit; every PayLinesTable event fixture carries the field, as A9
+    sends it.
+    """
+    from shared.staff_constants import SALES_PAY_DIFFERENCE_CAUSES
+
+    source = (PAY_COMPONENTS_DIR / "PayLinesTable.jsx").read_text(encoding="utf-8")
+    assert "event.follows_money" in source
+    assert "SETTLED_CAUSES" not in source
+    spelled = [cause for cause in SALES_PAY_DIFFERENCE_CAUSES if cause in source]
+    assert not spelled, f"PayLinesTable.jsx decides by cause again: {spelled}"
+
+    fixtures = (REPO_ROOT / "admin_ui/src/__tests__/components/sales/pay/PayLinesTable.test.jsx").read_text(
+        encoding="utf-8"
+    )
+    assert "follows_money: false, occurred_at" in fixtures, "the base A9 event fixture lacks follows_money"
+
+
+# V13's Task 5 rows: spec §8.1's D-BANDS table, its D-Q3 / OQ-B3 rows, and the rows the tier
+# editor and tables keep drawing. And §8.1's "Deleted seed rows (v5)".
+TIER_COPY_KEYS = (
+    "pay.form.default_tiers",
+    "pay.form.product_tiers",
+    "pay.form.from_unit",
+    "pay.form.add_tier",
+    "pay.form.add_product",
+    "pay.form.rate_mode",
+    "pay.form.rate_value",
+    "pay.formula.product_units",
+    "pay.formula.default_tiers_tag",
+    "pay.formula.tier_per_unit",
+    "pay.formula.tier_percent",
+    "pay.formula.tier_scaled",
+    "pay.formula.next_tier",
+    "pay.formula.late_product",
+    "pay.formula.money_line",
+    "pay.formula.units_line",
+    "pay.formula.reversal",
+    "pay.lines.tier_shift",
+    "pay.lines.rate_per_unit",
+    "pay.hint.tier_shift",
+    "pay.hint.tiers",
+    "pay.hint.settled_final",
+    "pay.col.tier",
+    "pay.col.units",
+    "pay.col.rate",
+    "pay.col.share",
+    "pay.col.share_before",
+    "pay.error.tier_position",
+    "pay.empty.plans",
+)
+RETIRED_PAY_KEYS = (
+    "pay.cause.plan_changed",
+    "pay.formula.proportional",
+    "pay.form.default_rate",
+    "pay.form.product_rates",
+    "pay.form.add_rate",
+)
+
+
+def test_the_tier_copy_is_rendered_and_seeded_and_the_retired_rows_are_gone():
+    """§8.1 (D-BANDS, OQ-B3): every tier row is drawn by a pay screen and seeded in three
+    languages (that its English row is the inline default is the generic test above). The rows v5
+    retires are in no language block and no admin_ui file, so no screen asks for a row nobody
+    seeds any more.
+    """
+    from scripts.seed_ui_sales_translations import UI_SALES_TRANSLATIONS
+
+    rendered = set()
+    for path in _pay_sources():
+        rendered |= set(_PAY_LITERAL_KEY.findall(path.read_text(encoding="utf-8")))
+    assert set(TIER_COPY_KEYS) <= rendered, f"tier rows no pay screen draws: {sorted(set(TIER_COPY_KEYS) - rendered)}"
+
+    for language, block in UI_SALES_TRANSLATIONS.items():
+        unseeded = [key for key in TIER_COPY_KEYS if not block.get(key, "").strip()]
+        assert not unseeded, f"{language}: unseeded tier rows {unseeded}"
+        still = sorted(set(RETIRED_PAY_KEYS) & set(block))
+        assert not still, f"{language}: retired rows still seeded {still}"
+
+    named = []
+    for path in ADMIN_UI_SRC.rglob("*"):
+        if path.suffix not in {".js", ".jsx"}:
+            continue
+        text = path.read_text(encoding="utf-8")
+        named += [f"{path.relative_to(REPO_ROOT)}: {key}" for key in RETIRED_PAY_KEYS if key in text]
+    assert not named, "retired pay rows still named in admin_ui:\n" + "\n".join(named)
+
+
+# ---- C14 order approvals and the manager proposals page ----------------------------------------
+
+# Where the codes the approval queue explains are raised (spec §8.1): the queue's own service, the
+# self-decision guard, the reason validator and the order's inventory confirmation.
+ORDER_APPROVAL_RAISE_SITES = (
+    "business_app/services/sales/agent_order_approval_service.py",
+    "business_app/services/sales/pay_rules.py",
+    "business_app/services/order_service.py",
+    "business_app/services/inventory_service.py",
+)
+
+# The page-owned copy families, and every rendered UI row of the two new nav children and the
+# Orders tag. Template-literal keys (`order_approvals.status.${…}`, `.error.${…}`) are pinned to
+# their backend vocabularies by the two tests below instead.
+_SALES_COPY_KEY = r"(?:order_approvals|pay\.proposals)\.[A-Za-z0-9_.]+|pay\.empty\.proposals"
+C14_UI_ROWS = {
+    "components/layout/AdminLayout.js": ("ui.nav.sales_penalty_proposals", "ui.nav.sales_order_approvals"),
+    "pages/Orders.js": ("ui.orders.awaiting_staff_approval", "ui.orders.open_order_approvals"),
+}
+
+
+def _sales_copy_calls() -> dict:
+    """key -> every inline English default the admin UI passes for it (a set, so drift shows)."""
+    from tests.unit.test_place_group_translation_seeds import _JS_STRING, _unquote_js
+
+    call = re.compile(
+        r"""(['"])sales_agents:({k})\1\s*,\s*({s})""".format(k=_SALES_COPY_KEY, s=_JS_STRING), re.S
+    )
+    found = {}
+    for path in ADMIN_UI_SRC.rglob("*"):
+        if path.suffix not in {".js", ".jsx"} or "__tests__" in path.parts or ".test." in path.name:
+            continue
+        for _, key, literal in call.findall(path.read_text(encoding="utf-8")):
+            found.setdefault(key, set()).add(_unquote_js(literal))
+    return found
+
+
+def test_order_approval_status_labels_are_the_backends_own_vocabulary():
+    """C14: one `order_approvals.status.*` row per `AGENT_ORDER_APPROVAL_STATUSES` member.
+
+    OA1 publishes `statuses` and the queue builds each label key from the published value, so a
+    fifth status would reach a manager as its raw name in every language, and a retired one
+    would leave a dead row. Same contract as the exception-type labels above.
+    """
+    from business_app.models.sales_visits import AGENT_ORDER_APPROVAL_STATUSES
+    from scripts.seed_ui_sales_translations import UI_SALES_TRANSLATIONS
+
+    expected = {f"order_approvals.status.{status}" for status in AGENT_ORDER_APPROVAL_STATUSES}
+    for language, block in UI_SALES_TRANSLATIONS.items():
+        seeded = {key for key in block if key.startswith("order_approvals.status.")}
+        assert seeded == expected, (
+            f"\nThe `{language}` block of scripts/seed_ui_sales_translations.py no longer carries exactly "
+            f"one order_approvals.status.* row per AGENT_ORDER_APPROVAL_STATUSES.\n"
+            f"missing: {sorted(expected - seeded)}\nextra:   {sorted(seeded - expected)}"
+        )
+        assert all(block[key].strip() for key in seeded), f"empty {language} approval status label"
+    # ...and the page keys off the published value rather than a map of its own.
+    assert "sales_agents:order_approvals.status.${" in SALES_ORDER_APPROVALS_PAGE.read_text(encoding="utf-8")
+
+
+def test_order_approval_handled_codes_are_raised_and_explained():
+    """C14: every code the queue explains inline is one the backend raises, and has its copy.
+
+    `ORDER_APPROVAL_HANDLED_CODES` switches off api.js's toast for its codes. A listed code no
+    backend path raises is dead weight; a listed code with no `order_approvals.error.*` row would
+    show a ru/uz manager the backend's English sentence; a row for an unlisted code is never read.
+    """
+    from scripts.seed_ui_sales_translations import UI_SALES_TRANSLATIONS
+
+    handled = _declared_array(SALES_SERVICE, "ORDER_APPROVAL_HANDLED_CODES")
+    assert len(handled) == len(set(handled)), handled
+    raised = _raised_codes(REPO_ROOT / relative for relative in ORDER_APPROVAL_RAISE_SITES)
+    assert set(handled) <= raised, f"handled but raised nowhere: {sorted(set(handled) - raised)}"
+
+    expected = {f"order_approvals.error.{code.lower()}" for code in handled}
+    for language, block in UI_SALES_TRANSLATIONS.items():
+        seeded = {key for key in block if key.startswith("order_approvals.error.")}
+        assert seeded == expected, (language, sorted(expected - seeded), sorted(seeded - expected))
+        assert all(block[key].strip() for key in seeded), f"empty {language} refusal copy"
+
+
+def test_outlet_plan_handled_codes_are_raised_and_explained_in_the_page_words():
+    """Final-review I1: `OUTLET_PLAN_HANDLED_CODES` switches off api.js's toast for the outlet plan
+    writes, so each code must be one the guard raises (`pay_rules.check_self_decision`, called by
+    `OutletService._guard_plan_change`) and must have its `outlets.error.*` sentence in three
+    languages whose English is the Outlets page's inline default, or a ru/uz manager reads the
+    backend's English pay wording, or nothing at all.
+    """
+    from scripts.seed_ui_sales_translations import UI_SALES_TRANSLATIONS
+
+    handled = _declared_array(SALES_SERVICE, "OUTLET_PLAN_HANDLED_CODES")
+    assert handled == ["SALES_PAY_SELF_DECISION"], handled
+    raised = _raised_codes([REPO_ROOT / "business_app/services/sales/pay_rules.py"])
+    assert set(handled) <= raised, f"handled but raised nowhere: {sorted(set(handled) - raised)}"
+
+    page = OUTLETS_PAGE.read_text(encoding="utf-8")
+    for code in handled:
+        key = f"outlets.error.{code.lower()}"
+        for language in ("en", "uz", "ru"):
+            assert UI_SALES_TRANSLATIONS[language].get(key, "").strip(), f"{key} [{language}]"
+        assert f"t('sales_agents:{key}', '{UI_SALES_TRANSLATIONS['en'][key]}')" in page, key
+
+
+def test_the_queue_and_proposal_fixtures_are_the_backends_pinned_row_shapes():
+    """The two Vitest row fixtures carry exactly the keys the routes publish.
+
+    Both backend key sets are pinned against the live routes (T-HOLD-11 for `ApprovalRow`, the M1
+    tests for `ProposalRow`). Holding the fixtures to those same sets means a key a page reads but
+    the route never sends fails here, not in front of a manager.
+    """
+    from tests.integration.test_sales_agent_order_hold_api import APPROVAL_ROW_KEYS
+    from tests.integration.test_sales_pay_penalties_api import PROPOSAL_KEYS
+
+    assert _declared_key_set(SALES_ORDER_APPROVALS_TEST, "APPROVAL_ROW_KEYS") == APPROVAL_ROW_KEYS
+    assert _declared_key_set(PENALTY_PROPOSALS_TEST, "PROPOSAL_ROW_KEYS") == PROPOSAL_KEYS
+
+
+def test_the_queue_and_proposal_copy_is_seeded_as_the_pages_say_it():
+    """Every `order_approvals.*` / `pay.proposals.*` call site: its English default is the seeded
+    `en` row byte for byte, and uz and ru exist with the same `{{tokens}}`."""
+    from scripts.seed_ui_sales_translations import UI_SALES_TRANSLATIONS
+    from tests.unit.test_place_group_translation_seeds import _i18next_placeholders
+
+    calls = _sales_copy_calls()
+    assert {
+        "order_approvals.title", "order_approvals.hint", "order_approvals.confirm.approve.title",
+        "pay.proposals.title", "pay.proposals.propose", "pay.proposals.sent", "pay.empty.proposals",
+    } <= set(calls), sorted(calls)
+    for key, defaults in sorted(calls.items()):
+        english = UI_SALES_TRANSLATIONS["en"].get(key)
+        assert defaults == {english}, (key, defaults, english)
+        for language in ("uz", "ru"):
+            value = UI_SALES_TRANSLATIONS[language].get(key)
+            assert value and value.strip(), (key, language)
+            assert _i18next_placeholders(value) == _i18next_placeholders(english), (key, language)
+
+
+def test_the_c14_nav_and_orders_rows_are_seeded_as_the_ui_says_them():
+    """The two nav children and the Orders tag and link: shared `ui` rows, trilingual, and the
+    seeded `en` is the call site's fallback byte for byte."""
+    from scripts.seed_backend_translations import BACKEND_TRANSLATIONS, _category_for
+    from tests.unit.test_place_group_translation_seeds import _JS_PAIR, _JS_STRING, _unquote_js
+
+    for relative, keys in C14_UI_ROWS.items():
+        defaults = {}
+        for _, key, expr in _JS_PAIR.findall((ADMIN_UI_SRC / relative).read_text(encoding="utf-8")):
+            defaults.setdefault(key, set()).add("".join(_unquote_js(lit) for lit in re.findall(_JS_STRING, expr, re.S)))
+        for key in keys:
+            row = BACKEND_TRANSLATIONS.get(key)
+            assert row is not None, f"{key} is not seeded in scripts/seed_backend_translations.py"
+            assert _category_for(key) == "ui", key
+            assert defaults.get(key) == {row["en"]}, (key, relative, defaults.get(key), row["en"])
+            for language in ("uz", "ru"):
+                assert isinstance(row[language], str) and row[language].strip(), (key, language)

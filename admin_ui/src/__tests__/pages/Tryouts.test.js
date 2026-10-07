@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { message } from 'antd';
 
@@ -20,6 +20,7 @@ vi.mock('../../services/tryoutService', () => ({
   default: {
     getTryouts: vi.fn(),
     exportTryouts: vi.fn(),
+    convertTryout: vi.fn(),
   },
 }));
 
@@ -47,10 +48,54 @@ describe('Tryouts page', () => {
         outstanding_bottles_total: 2,
         pickup_state: 'not_due',
         return_due_at: null,
+        can_convert: true,
       }],
       total: 1,
       summary: {},
     });
+  });
+
+  const rowOf = async () => (await screen.findByText('TRY-1001')).closest('tr');
+
+  it('draws Convert from the backend\'s can_convert and names the self-approval refusal', async () => {
+    render(<Tryouts />, { wrapper: createWrapper() });
+    const row = await rowOf();
+    fireEvent.click(within(row).getByRole('button', { name: /Convert/ }));
+
+    // The request names the one refusal the page explains itself, so the interceptor stays quiet.
+    await waitFor(() => expect(tryoutService.convertTryout).toHaveBeenCalledWith(1, { handledErrorCodes: ['SALES_OUTLET_SELF_APPROVAL'] }));
+  });
+
+  it('draws no Convert when the viewer may not convert this try-out', async () => {
+    tryoutService.getTryouts.mockResolvedValue({
+      items: [{
+        id: 1, tryout_number: 'TRY-1001', trial_contact: { full_name: 'Jane Doe', phone: '+998901234567' },
+        status: 'active', outcome: 'pending', outstanding_bottles_total: 2, pickup_state: 'not_due', return_due_at: null,
+        can_convert: false,
+      }],
+      total: 1,
+      summary: {},
+    });
+    render(<Tryouts />, { wrapper: createWrapper() });
+    const row = await rowOf();
+
+    expect(within(row).queryByRole('button', { name: /Convert/ })).toBeNull();
+  });
+
+  it('shows a self-approval race refusal inline, once', async () => {
+    tryoutService.convertTryout.mockRejectedValue({
+      response: {
+        status: 403,
+        data: { success: false, message: 'You cannot approve an outlet you onboarded', error_code: 'SALES_OUTLET_SELF_APPROVAL', details: { outlet_id: 5 } },
+      },
+    });
+    render(<Tryouts />, { wrapper: createWrapper() });
+    const row = await rowOf();
+    fireEvent.click(within(row).getByRole('button', { name: /Convert/ }));
+
+    const alerts = await screen.findAllByTestId('convert-refusal');
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toHaveTextContent('You cannot approve an outlet you onboarded');
   });
 
   it('renders the page title and a try-out row using the translated (defaultValue) text', async () => {

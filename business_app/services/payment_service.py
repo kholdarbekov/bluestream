@@ -1277,7 +1277,16 @@ class PaymentService:
 
         # Handle both Enum and string status values
         status_value = order.status.value if hasattr(order.status, "value") else order.status
-        if allow_order_confirmation and status_value == "pending":
+        from business_app.services.sales.agent_order_approval_service import AgentOrderApprovalService
+
+        # C14: a held agent order's payment still completes, but the order stays PENDING. Only the
+        # order-approval queue (OA2) confirms it. This covers a business-account order paid at
+        # creation, a payment-method edit to the business account, and a Click completion.
+        if (
+            allow_order_confirmation
+            and status_value == "pending"
+            and not AgentOrderApprovalService.is_awaiting(order.id)
+        ):
             from .order_service import OrderService
 
             order_service = OrderService()

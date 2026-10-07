@@ -340,13 +340,25 @@ class UpdateFactory:
             ),
         })
 
-    def location(self, latitude: float, longitude: float, horizontal_accuracy=None) -> Update:
+    # The Bot API 7.0 forward marker both `photo(forwarded=)` and `location(forwarded=)` add:
+    # the staff bot refuses a picture or a check-in pin that somebody else sent.
+    _FORWARD_ORIGIN = {
+        "type": "user",
+        "date": 1_699_000_000,
+        "sender_user": {"id": 55_001, "is_bot": False, "first_name": "Dilnoza K"},
+    }
+
+    def location(self, latitude: float, longitude: float, horizontal_accuracy=None,
+                 forwarded: bool = False) -> Update:
         location = {"latitude": latitude, "longitude": longitude}
         if horizontal_accuracy is not None:
             location["horizontal_accuracy"] = horizontal_accuracy
+        extra = {"location": location}
+        if forwarded:
+            extra["forward_origin"] = dict(self._FORWARD_ORIGIN)
         return self._build({
             "update_id": self._next_update_id(),
-            "message": self._message_envelope(location=location),
+            "message": self._message_envelope(**extra),
         })
 
     def contact(self, phone_number: str) -> Update:
@@ -382,11 +394,7 @@ class UpdateFactory:
         if caption is not None:
             extra["caption"] = caption
         if forwarded:
-            extra["forward_origin"] = {
-                "type": "user",
-                "date": 1_699_000_000,
-                "sender_user": {"id": 55_001, "is_bot": False, "first_name": "Dilnoza K"},
-            }
+            extra["forward_origin"] = dict(self._FORWARD_ORIGIN)
         return self._build({
             "update_id": self._next_update_id(),
             "message": self._message_envelope(**extra),

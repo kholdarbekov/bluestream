@@ -669,14 +669,12 @@ def test_an_outlet_visited_exactly_the_alert_days_ago_is_not_yet_unvisited(
 def test_an_outlet_is_attributed_to_the_agent_it_is_assigned_to_never_its_onboarder(
     client, admin_claim_headers, db, agent, other_agent, seeded
 ):
-    """R7/M13: for the feed, "whose numbers is this shop on" is `assigned_agent_user_id`.
+    """R7/M13: once a shop is assigned, the feed files it under the assignee, never the onboarder.
 
-    The due list, the morning digest and the plan snapshot deliberately ask the OTHER question
-    (assigned OR onboarded — "whose list is this shop on"), and that twin is already pinned.
-    This one was not: every outlet in the estate's fixtures was assigned to and onboarded by
-    the same person, so a feed that had quietly kept onboarding attribution would put a shop
-    the agent handed over months ago back in their exception list — and take it off the new
-    owner's, who is the only person who can act on it.
+    Every outlet in the estate's fixtures was assigned to and onboarded by the same person, so a
+    feed that had quietly kept onboarding attribution would put a shop the agent handed over
+    months ago back in their exception list — and take it off the new owner's, who is the only
+    person who can act on it. The unassigned half of the due-owner rule is the next test.
     """
     handover = Outlet(
         name="Yunusobod dokon",
@@ -701,3 +699,34 @@ def test_an_outlet_is_attributed_to_the_agent_it_is_assigned_to_never_its_onboar
         (handover.id, other_agent.id)
     ]
     assert handover.id not in {row["outlet_id"] for row in unvisited_for(agent.id)}
+
+
+def test_an_unassigned_outlet_is_filed_under_its_onboarder_as_the_digest_files_it(
+    client, admin_claim_headers, db, agent, other_agent, seeded
+):
+    """Final-review M6: the row's agent is the outlet's DUE OWNER (`OutletService.due_owner_id`,
+    the twin of `agent_due_filter`), the same owner the morning digest nudges.
+
+    Agent A onboarded the shop and a manager unassigned it; 60 days without a visit. It is still
+    on A's due list and in A's digest, so the feed lists it under A, and filtering by A finds it.
+    """
+    orphan = Outlet(
+        name="Olmazor kiosk",
+        outlet_type="grocery_store",
+        stage="active",
+        district="chilanzar",
+        onboarded_by_user_id=agent.id,
+        assigned_agent_user_id=None,
+        last_visit_at=datetime.now(UTC) - timedelta(days=60),
+    )
+    db.session.add(orphan)
+    db.session.commit()
+
+    def unvisited(**query):
+        response = client.get(URL, headers=admin_claim_headers, query_string={"type": "unvisited", **query})
+        assert response.status_code == 200, response.get_data(as_text=True)
+        return {row["outlet_id"]: row["agent_user_id"] for row in response.get_json()["data"]["exceptions"]}
+
+    assert unvisited()[orphan.id] == agent.id
+    assert unvisited(agent_id=agent.id)[orphan.id] == agent.id
+    assert orphan.id not in unvisited(agent_id=other_agent.id)

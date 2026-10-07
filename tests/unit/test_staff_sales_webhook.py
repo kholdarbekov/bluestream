@@ -16,11 +16,13 @@ convention of every other async staff_bot test in the suite: a plain sync
 
 import asyncio
 import importlib.util
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from shared.redis_keyspace import RedisKeyspace
 from shared.staff_constants import SALES_EVENTS
 
 _spec = importlib.util.spec_from_file_location(
@@ -73,6 +75,31 @@ def make_request(payload):
     request.path = "/internal/sales-event"
     request.json = AsyncMock(return_value=payload)
     return request
+
+
+# The payload every one-line sales event carries. The vocabulary, sound and release tests drive
+# EVERY event in `SALES_EVENTS` with it, including the digest and the two pay pushes, whose
+# renderers must skip what is missing rather than raise (compensation spec §7.5).
+GENERIC_PAYLOAD = {"outlet_id": 5, "outlet_name": "Bahor", "order_id": 9,
+                   "order_number": "SA_000413_26", "reason": "Incomplete"}
+
+
+def _send_generic(server, event):
+    """One event with `GENERIC_PAYLOAD`, through the sentinel copy; the send's kwargs."""
+    payload = {
+        "event_id": f"sales:{event}",
+        "telegram_id": 777000111,
+        "event": event,
+        "payload": dict(GENERIC_PAYLOAD),
+    }
+    with patch("staff_bot.webhook_server.verify_webhook_signature", AsyncMock(return_value=True)), \
+         patch.object(server, "_check_rate_limit", AsyncMock(return_value=None)), \
+         patch.object(server, "_is_duplicate_event", AsyncMock(return_value=False)), \
+         patch("staff_bot.webhook_server.i18n.get_user_language", AsyncMock(return_value="en")), \
+         patch("staff_bot.webhook_server.i18n.get", side_effect=_fake_i18n_get):
+        response = asyncio.run(server.sales_event_handler(make_request(payload)))
+    assert response.status == 200
+    return server.bot_app.bot.send_message.await_args.kwargs
 
 
 class TestSalesEventHandler:
@@ -262,23 +289,18 @@ class TestTheSalesEventVocabularyHasOneDefinition:
 
     @pytest.mark.parametrize("event", SALES_EVENTS)
     def test_every_event_in_the_constant_reaches_the_agent(self, server, event):
-        payload = {
-            "event_id": f"sales:{event}",
-            "telegram_id": 777000111,
-            "event": event,
-            "payload": {"outlet_id": 5, "outlet_name": "Bahor", "order_id": 9,
-                        "order_number": "SA_000413_26", "reason": "Incomplete"},
-        }
-        with patch("staff_bot.webhook_server.verify_webhook_signature", AsyncMock(return_value=True)), \
-             patch.object(server, "_check_rate_limit", AsyncMock(return_value=None)), \
-             patch.object(server, "_is_duplicate_event", AsyncMock(return_value=False)), \
-             patch("staff_bot.webhook_server.i18n.get_user_language", AsyncMock(return_value="en")), \
-             patch("staff_bot.webhook_server.i18n.get", side_effect=_fake_i18n_get):
-            response = asyncio.run(server.sales_event_handler(make_request(payload)))
+        text = _send_generic(server, event)["text"]
+        # Compensation spec §10.4: the pay pushes put their glyph in front of the headline in
+        # code (§8.5), so the event's row is IN the first line rather than at its start.
+        assert f"staff.sales.notify.{event}|" in text.splitlines()[0]
 
-        assert response.status == 200
-        text = server.bot_app.bot.send_message.await_args.kwargs["text"]
-        assert text.startswith(f"staff.sales.notify.{event}|")
+    @pytest.mark.parametrize("event", SALES_EVENTS)
+    def test_only_the_digest_and_the_pay_pushes_make_a_sound(self, server, event):
+        """The digest starts the agent's day, and pay news arrives while the phone is in a
+        pocket (§7.5). Every other sales event arrives while the agent is already looking at
+        the phone and stays silent."""
+        loud = {"morning_digest", "pay_penalty_confirmed", "pay_statement_approved"}
+        assert _send_generic(server, event)["disable_notification"] is (event not in loud)
 
     def test_an_event_outside_the_constant_is_refused_at_the_door(self, server):
         payload = {"telegram_id": 777000111, "event": "outlet_visited", "payload": {"outlet_id": 5}}
@@ -368,12 +390,10 @@ class TestTheMorningDigest:
         assert "staff.sales.notify.digest_unvisited" in lines[6]
         assert lines[7].strip() == "• Yunusobod 4 · staff.sales.notify.digest_days|||25"
 
-    def test_the_digest_is_the_one_sales_push_that_makes_a_sound(self, server):
-        """A silent 08:30 message is a digest nobody reads.
-
-        Every other sales event is `disable_notification=True` — they arrive
-        while the agent is already looking at the phone.
-        """
+    def test_the_digest_makes_a_sound(self, server):
+        """A silent 08:30 message is a digest nobody reads. (The two pay pushes are the only
+        other loud sales events; `test_only_the_digest_and_the_pay_pushes_make_a_sound` pins
+        the whole list.)"""
         assert self._send(server, DIGEST_PAYLOAD)["disable_notification"] is False
 
     def test_every_row_carries_a_button_that_opens_that_outlet(self, server):
@@ -672,3 +692,442 @@ class TestTheMorningDigest:
         assert len(kwargs["reply_markup"].inline_keyboard) == (
             1 + self.DIGEST_SECTION_CAP * 2 + self.DIGEST_UNVISITED_CAP
         )
+
+
+# ---- the two pay pushes (compensation spec §7.5, §10.4) ----------------------------------------
+
+MINUS = "−"  # what `signed_currency` prints; a hyphen-minus here would pass against a bug
+
+# Every row the two renderers read. The pushes are asserted byte for byte, so they are rendered
+# through production's own `i18n.get` over the seed's rows, never through a sentinel.
+PAY_COPY_KEYS = (
+    "staff.currency.uzs",
+    "staff.sales.notify.pay_penalty_confirmed", "staff.sales.notify.pay_statement_approved",
+    "staff.sales.notify.pay_statement_approved_shadow", "staff.sales.notify.penalty_type",
+    "staff.sales.notify.penalty_date", "staff.sales.notify.penalty_amount",
+    "staff.sales.notify.counts_in", "staff.sales.notify.late", "staff.sales.notify.open_earnings",
+    "staff.sales.notify.open_statement", "staff.sales.earnings.shadow_note",
+    "staff.sales.earnings.reason", "staff.sales.earnings.base",
+    # D-BANDS: the Commission row and its tier block (`format_pay_tiers`).
+    "staff.sales.earnings.commission", "staff.sales.earnings.units",
+    "staff.sales.earnings.tier_percent", "staff.sales.earnings.tier_scaled",
+    "staff.sales.earnings.per_unit", "staff.sales.earnings.next_tier",
+    "staff.sales.earnings.commission_after_gate", "staff.sales.earnings.late",
+    "staff.sales.earnings.new_outlets", "staff.sales.earnings.adjustments",
+    "staff.sales.earnings.penalties", "staff.sales.earnings.total",
+    "staff.sales.earnings.carry_in", "staff.sales.earnings.owed_in",
+    "staff.sales.earnings.carry_note", "staff.sales.earnings.owed_note",
+)
+
+# C24's keys exactly; money is whole UZS, months "YYYY-MM", dates "YYYY-MM-DD".
+PENALTY = {
+    "penalty_id": 17, "month": "2026-10", "incident_date": "2026-10-14",
+    "type_names": {"en": "Missed planned visits", "uz": "Rejadagi tashriflar qoldirilgan",
+                   "ru": "Пропущенные плановые визиты"},
+    "reason": "Did not visit 5 planned outlets", "amount": 150000, "is_late": False,
+}
+# Illustration B (§1.2), as §7.5 prints it: D-DAYS's base and total (E.3 M4), and the commission as
+# A8's `summary.commission` with `next_tier` null, as `_pushed_product` publishes a frozen
+# statement's (it has none, §7.5).
+NAMES_19L = {"en": "19L", "uz": "19 l", "ru": "19 л"}
+
+
+def _single_tier_19l(units, amount, net):
+    """19L on one per-unit tier at 1,000, in A8's product shape."""
+    return {"product_id": 3, "product_name": NAMES_19L, "uses_default_tiers": False, "units": units,
+            "total": amount,
+            "tiers": [{"from_unit": 1, "to_unit": None, "units": units, "mode": "per_unit", "value": 1000.0,
+                       "net": net, "amount_full": amount, "amount": amount}],
+            "next_tier": None}
+
+
+STATEMENT = {
+    "statement_id": 55, "month": "2026-10", "is_shadow": False, "base": 2800000,
+    "commission": {"gross": 850000, "products": [
+        {"product_id": 3, "product_name": NAMES_19L, "uses_default_tiers": False, "units": 500, "total": 600000,
+         "tiers": [
+             {"from_unit": 1, "to_unit": 300, "units": 300, "mode": "per_unit", "value": 1000.0,
+              "net": 6000000.0, "amount_full": 300000, "amount": 300000},
+             {"from_unit": 301, "to_unit": None, "units": 200, "mode": "per_unit", "value": 1500.0,
+              "net": 4000000.0, "amount_full": 300000, "amount": 300000},
+         ],
+         "next_tier": None},
+        {"product_id": 9, "product_name": {"en": "Juice 1 L", "uz": "Sharbat 1 l", "ru": "Сок 1 л"},
+         "uses_default_tiers": True, "units": 500, "total": 250000,
+         "tiers": [{"from_unit": 1, "to_unit": None, "units": 500, "mode": "percent", "value": 2.0,
+                    "net": 12500000.0, "amount_full": 250000, "amount": 250000}],
+         "next_tier": None},
+    ]},
+    "commission_after_gate": 680000, "late": -20000, "new_outlets": 200000,
+    "adjustments": 50000, "penalties": 150000,
+    "carry_in": {"amount": 0, "from_month": None, "source": None},
+    "total": 3560000, "carry_out": 0, "owed": 0,
+}
+
+
+@pytest.fixture
+def seeded_copy(monkeypatch):
+    from staff_bot.i18n import i18n
+
+    monkeypatch.setattr(i18n, "translations", {
+        language: {key: _SEED._curated_value(key, language) for key in PAY_COPY_KEYS}
+        for language in ("en", "uz", "ru")
+    })
+
+
+class _FakeRedis:
+    """The two calls the dedup makes, under redis-py's own parameter names (the fake
+    `tests/staff_bot/test_webhook_delivery_failed.py` drives the same helpers with)."""
+
+    def __init__(self):
+        self.store = {}
+
+    async def set(self, name, value, ex=None, px=None, nx=False, xx=False):
+        if nx and name in self.store:
+            return None
+        self.store[name] = value
+        return True
+
+    async def delete(self, *names):
+        return sum(1 for name in names if self.store.pop(name, None) is not None)
+
+
+@pytest.mark.usefixtures("seeded_copy")
+class TestThePayPushes:
+    """Both render through their own branch, every figure the backend's (C24), each through
+    the formatters' pay block the My earnings screens share."""
+
+    def _push(self, server, event, payload, language="en"):
+        body = {"event_id": f"sales-event:{event}:{language}", "telegram_id": 777000111,
+                "event": event, "payload": payload}
+        with patch("staff_bot.webhook_server.verify_webhook_signature", AsyncMock(return_value=True)), \
+             patch.object(server, "_check_rate_limit", AsyncMock(return_value=None)), \
+             patch.object(server, "_is_duplicate_event", AsyncMock(return_value=False)), \
+             patch("staff_bot.webhook_server.i18n.get_user_language", AsyncMock(return_value=language)):
+            response = asyncio.run(server.sales_event_handler(make_request(body)))
+        assert response.status == 200
+        return server.bot_app.bot.send_message.await_args.kwargs
+
+    def test_the_penalty_push_reads_as_the_spec_prints_it(self, server):
+        sent = self._push(server, "pay_penalty_confirmed", PENALTY)
+
+        assert sent["text"] == "\n".join((
+            "⚠️ <b>Penalty confirmed</b>",
+            "Type: Missed planned visits",
+            "Date: 14.10.2026",
+            f"Amount: {MINUS}150,000 UZS",
+            "Counts in 10.2026",
+            "Reason: Did not visit 5 planned outlets",
+        ))
+        (button,) = [b for row in sent["reply_markup"].inline_keyboard for b in row]
+        assert (button.text, button.callback_data) == ("💰 Open my earnings", "staff_sales_earn_xn")
+        assert sent["parse_mode"] == "HTML"
+        assert sent["disable_notification"] is False
+
+    def test_a_late_penalty_names_the_later_month_it_counts_in(self, server):
+        late = {**PENALTY, "penalty_id": 18, "month": "2026-11", "incident_date": "2026-10-29",
+                "amount": 90000, "is_late": True}
+
+        lines = self._push(server, "pay_penalty_confirmed", late)["text"].split("\n")
+
+        assert lines[2:5] == ["Date: 29.10.2026", f"Amount: {MINUS}90,000 UZS", "Counts in 11.2026 (late)"]
+
+    def test_the_penalty_push_in_russian(self, server):
+        sent = self._push(server, "pay_penalty_confirmed", PENALTY, language="ru")
+
+        # The reason is the admin's free text and is echoed as written, escaped.
+        assert sent["text"] == "\n".join((
+            "⚠️ <b>Штраф подтверждён</b>",
+            "Тип: Пропущенные плановые визиты",
+            "Дата: 14.10.2026",
+            f"Сумма: {MINUS}150,000 сум",
+            "Учитывается в 10.2026",
+            "Причина: Did not visit 5 planned outlets",
+        ))
+        assert sent["reply_markup"].inline_keyboard[0][0].text == "💰 Открыть мой заработок"
+
+    def test_a_reason_is_html_escaped(self, server):
+        """T-HTML-1: the reason is typed by an admin, and the push is sent with parse_mode=HTML.
+        One raw '<' and Telegram refuses the whole message."""
+        hostile = {**PENALTY, "reason": '<a href="https://x">Open</a> & <b>'}
+
+        text = self._push(server, "pay_penalty_confirmed", hostile)["text"]
+
+        assert text.split("\n")[-1] == 'Reason: &lt;a href="https://x"&gt;Open&lt;/a&gt; &amp; &lt;b&gt;'
+
+    def test_the_statement_push_reads_as_the_spec_prints_it(self, server):
+        sent = self._push(server, "pay_statement_approved", STATEMENT)
+
+        assert sent["text"] == "\n".join((
+            "✅ <b>Pay for 10.2026 is approved</b>",
+            "Base: 2,800,000 UZS",
+            "Commission: 850,000 UZS",
+            "   19L: 500 units · 600,000 UZS",
+            "      1–300: 300 × 1,000 = 300,000",
+            "      301+: 200 × 1,500 = 300,000",
+            "   Juice 1 L: 500 units · 250,000 UZS",
+            "      1+: 2% of 12,500,000 = 250,000",
+            "Commission after discipline: 680,000 UZS",
+            f"Corrections from earlier months: {MINUS}20,000 UZS",
+            "New outlets: +200,000 UZS",
+            "Adjustments: +50,000 UZS",
+            f"Penalties: {MINUS}150,000 UZS",
+            "<b>Total: 3,560,000 UZS</b>",
+        ))
+        (button,) = [b for row in sent["reply_markup"].inline_keyboard for b in row]
+        # That month's Statement, as a new message under the push (`_sn_`, M9).
+        assert (button.text, button.callback_data) == ("📄 Open statement", "staff_sales_earn_sn_202610")
+        assert sent["disable_notification"] is False
+
+    def test_a_trial_statement_says_it_is_not_paid(self, server):
+        """The trial September (I-16): the headline says "(not paid)", and the push ends with the
+        trial month's own note, the words My earnings prints for it. Its button opens that month."""
+        shadow = {**STATEMENT, "statement_id": 56, "month": "2026-09", "is_shadow": True}
+
+        sent = self._push(server, "pay_statement_approved", shadow)
+        lines = sent["text"].split("\n")
+
+        assert lines[0] == "✅ <b>Trial statement for 09.2026 is approved (not paid)</b>"
+        assert lines[-2:] == [
+            "<b>Total: 3,560,000 UZS</b>",
+            "Trial month: these numbers are shown for review; pay is made the old way.",
+        ]
+        (button,) = [b for row in sent["reply_markup"].inline_keyboard for b in row]
+        assert (button.text, button.callback_data) == ("📄 Open statement", "staff_sales_earn_sn_202609")
+
+    def test_a_trial_statement_in_russian_ends_with_its_note(self, server):
+        shadow = {**STATEMENT, "statement_id": 62, "month": "2026-09", "is_shadow": True}
+
+        sent = self._push(server, "pay_statement_approved", shadow, language="ru")
+
+        assert sent["text"].split("\n")[-1] == _SEED._curated_value("staff.sales.earnings.shadow_note", "ru")
+        assert sent["reply_markup"].inline_keyboard[0][0].text == "📄 Открыть расчётный лист"
+
+    def test_the_statement_push_in_russian_with_distinct_amounts(self, server):
+        """Every figure distinct, so a field printed on the wrong row cannot pass. The zero
+        corrections, new-outlet and penalty rows are skipped, as on the summary; the commission
+        prints its tier block in Russian."""
+        product = {"product_id": 3, "product_name": NAMES_19L, "uses_default_tiers": False,
+                   "units": 443, "total": 514500,
+                   "tiers": [
+                       {"from_unit": 1, "to_unit": 300, "units": 300, "mode": "per_unit", "value": 1000.0,
+                        "net": 6000000.0, "amount_full": 300000, "amount": 300000},
+                       {"from_unit": 301, "to_unit": None, "units": 143, "mode": "per_unit", "value": 1500.0,
+                        "net": 2860000.0, "amount_full": 214500, "amount": 214500},
+                   ],
+                   "next_tier": None}
+        statement = {**STATEMENT, "statement_id": 57, "base": 2500000,
+                     "commission": {"gross": 514500, "products": [product]},
+                     "commission_after_gate": 412345, "late": 0, "new_outlets": 0, "adjustments": -30000,
+                     "penalties": 0, "total": 2882345}
+
+        text = self._push(server, "pay_statement_approved", statement, language="ru")["text"]
+
+        assert text == "\n".join((
+            "✅ <b>Оплата за 10.2026 утверждена</b>",
+            "Оклад: 2,500,000 сум",
+            "Комиссия: 514,500 сум",
+            "   19 л: 443 шт. · 514,500 сум",
+            "      1–300: 300 × 1,000 = 300,000",
+            "      301+: 143 × 1,500 = 214,500",
+            "Комиссия с учётом дисциплины: 412,345 сум",
+            f"Корректировки: {MINUS}30,000 сум",
+            "<b>Итого: 2,882,345 сум</b>",
+        ))
+
+    def test_a_carried_shortfall_reads_before_and_after_the_total(self, server):
+        """§7.5: a negative `carry_in` from `carry_forward` adds its row before the total, and
+        a negative `carry_out` adds `carry_note` after it (the "below 0" month)."""
+        statement = {**STATEMENT, "statement_id": 58, "base": 400000,
+                     "commission": {"gross": 50000, "products": [_single_tier_19l(50, 50000, 1000000.0)]},
+                     "commission_after_gate": 50000,
+                     "late": 0, "new_outlets": 0, "adjustments": 0, "penalties": 600000,
+                     "carry_in": {"amount": -120000, "from_month": "2026-09", "source": "carry_forward"},
+                     "total": 0, "carry_out": -270000, "owed": 0}
+
+        text = self._push(server, "pay_statement_approved", statement)["text"]
+
+        assert text == "\n".join((
+            "✅ <b>Pay for 10.2026 is approved</b>",
+            "Base: 400,000 UZS",
+            "Commission: 50,000 UZS",
+            "   19L: 50 units · 50,000 UZS",
+            "      1+: 50 × 1,000 = 50,000",
+            "Commission after discipline: 50,000 UZS",
+            f"Penalties: {MINUS}600,000 UZS",
+            f"Shortfall from 09.2026: {MINUS}120,000 UZS",
+            "<b>Total: 0 UZS</b>",
+            "Shortfall of 270,000 UZS will be deducted next month.",
+        ))
+
+    def test_an_owed_balance_reads_before_and_after_the_total(self, server):
+        """I-28: a negative `carry_in` whose `source` is `owed` is labelled as owed, and a
+        positive `owed` is the agent's new outstanding balance, said under the total."""
+        statement = {**STATEMENT, "statement_id": 59, "month": "2026-11", "base": 900000,
+                     "commission": {"gross": 100000, "products": [_single_tier_19l(100, 100000, 2000000.0)]},
+                     "commission_after_gate": 100000, "late": 0, "new_outlets": 0, "adjustments": 0,
+                     "penalties": 1200000,
+                     "carry_in": {"amount": -80000, "from_month": "2026-08", "source": "owed"},
+                     "total": 0, "carry_out": 0, "owed": 280000}
+
+        text = self._push(server, "pay_statement_approved", statement)["text"]
+
+        assert text == "\n".join((
+            "✅ <b>Pay for 11.2026 is approved</b>",
+            "Base: 900,000 UZS",
+            "Commission: 100,000 UZS",
+            "   19L: 100 units · 100,000 UZS",
+            "      1+: 100 × 1,000 = 100,000",
+            "Commission after discipline: 100,000 UZS",
+            f"Penalties: {MINUS}1,200,000 UZS",
+            f"Owed from 08.2026: {MINUS}80,000 UZS",
+            "<b>Total: 0 UZS</b>",
+            "Owed: 280,000 UZS. It will be deducted from your later earnings.",
+        ))
+
+    def test_a_frozen_statement_never_prints_a_next_tier(self, server):
+        """§7.5: the push draws its tiers through `format_pay_tiers` without the next tier, which
+        only an open estimate has, so a product that carried one anyway prints none. A tier paid
+        on less money says what it counted, as on the summary (T-TIER-5's October, frozen)."""
+        half_paid = {"product_id": 3, "product_name": NAMES_19L, "uses_default_tiers": False,
+                     "units": 700, "total": 687500,
+                     "tiers": [
+                         {"from_unit": 1, "to_unit": 500, "units": 500, "mode": "per_unit", "value": 1000.0,
+                          "net": 10000000.0, "amount_full": 500000, "amount": 500000},
+                         {"from_unit": 501, "to_unit": 1000, "units": 200, "mode": "per_unit", "value": 1500.0,
+                          "net": 4000000.0, "amount_full": 300000, "amount": 187500},
+                     ],
+                     "next_tier": {"from_unit": 1001, "units_to_go": 301, "mode": "per_unit", "value": 2000.0}}
+        statement = {**STATEMENT, "statement_id": 60, "commission": {"gross": 687500, "products": [half_paid]}}
+
+        lines = self._push(server, "pay_statement_approved", statement)["text"].split("\n")
+
+        start = lines.index("Commission: 687,500 UZS")
+        assert lines[start:start + 5] == [
+            "Commission: 687,500 UZS",
+            "   19L: 700 units · 687,500 UZS",
+            "      1–500: 500 × 1,000 = 500,000",
+            "      501–1,000: 200 × 1,500 = 300,000 · counted 187,500, less money received",
+            "Commission after discipline: 680,000 UZS",
+        ]
+        assert "🎯" not in "\n".join(lines)
+
+    def test_a_push_past_telegrams_limit_keeps_every_product_line_and_drops_its_tiers(self, server):
+        """V5-T6-R1: Telegram refuses a message over 4,096 characters, the handler answers 502 and
+        every retry is refused the same way, so the agent never hears the month was approved. Here
+        25 products on three tiers each put the tier block alone past the limit, so the push
+        collapses each product to its product line, the summary's first "Length" step (§7.2), and
+        keeps every other row: the commission, the corrections and the paid total. A push that
+        fits is untouched (`test_the_statement_push_reads_as_the_spec_prints_it`)."""
+        from staff_bot.utils.formatters import format_pay_tiers
+
+        products = [
+            {"product_id": index, "product_name": {"en": f"Product {index} " + "Ö" * 40},
+             "uses_default_tiers": False, "units": 300, "total": 450000,
+             "tiers": [
+                 {"from_unit": 1, "to_unit": 100, "units": 100, "mode": "per_unit", "value": 1000.0,
+                  "net": 2000000.0, "amount_full": 100000, "amount": 100000},
+                 {"from_unit": 101, "to_unit": 200, "units": 100, "mode": "per_unit", "value": 1500.0,
+                  "net": 2000000.0, "amount_full": 150000, "amount": 150000},
+                 {"from_unit": 201, "to_unit": None, "units": 100, "mode": "per_unit", "value": 2000.0,
+                  "net": 2000000.0, "amount_full": 200000, "amount": 200000},
+             ],
+             "next_tier": None}
+            for index in range(1, 26)
+        ]
+        statement = {**STATEMENT, "statement_id": 61, "commission": {"gross": 11250000, "products": products}}
+        full = [row for product in products for row in format_pay_tiers(product, "en", with_next=False)]
+        assert len("\n".join(full)) > 4096, "the fixture must need the collapse"
+
+        sent = self._push(server, "pay_statement_approved", statement)
+
+        lines = sent["text"].split("\n")
+        assert len(sent["text"]) <= 4096
+        assert lines[:3] == ["✅ <b>Pay for 10.2026 is approved</b>", "Base: 2,800,000 UZS", "Commission: 11,250,000 UZS"]
+        assert lines[3:28] == [f"   Product {index} {'Ö' * 40}: 300 units · 450,000 UZS" for index in range(1, 26)]
+        assert lines[28:] == [
+            "Commission after discipline: 680,000 UZS",
+            f"Corrections from earlier months: {MINUS}20,000 UZS",
+            "New outlets: +200,000 UZS",
+            "Adjustments: +50,000 UZS",
+            f"Penalties: {MINUS}150,000 UZS",
+            "<b>Total: 3,560,000 UZS</b>",
+        ]
+        (button,) = [b for row in sent["reply_markup"].inline_keyboard for b in row]
+        assert button.callback_data == "staff_sales_earn_sn_202610"
+
+
+class TestTheSalesEventDedupAndDelivery:
+    """Compensation spec §7.5 points 1 and 3 (S-18, S-19)."""
+
+    def _post(self, server, body):
+        """The real dedup (in-memory, or the fake Redis a test connects), sentinel copy."""
+        with patch("staff_bot.webhook_server.verify_webhook_signature", AsyncMock(return_value=True)), \
+             patch.object(server, "_check_rate_limit", AsyncMock(return_value=None)), \
+             patch("staff_bot.webhook_server.i18n.get_user_language", AsyncMock(return_value="en")), \
+             patch("staff_bot.webhook_server.i18n.get", side_effect=_fake_i18n_get):
+            response = asyncio.run(server.sales_event_handler(make_request(body)))
+        return response.status, json.loads(response.text)
+
+    @pytest.mark.parametrize("event, payload, key", [
+        ("pay_penalty_confirmed", PENALTY, "sales:pay_penalty_confirmed:777000111:17"),
+        ("pay_statement_approved", STATEMENT, "sales:pay_statement_approved:777000111:55"),
+    ])
+    def test_a_pay_push_dedups_on_its_own_row(self, server, event, payload, key):
+        dedup = AsyncMock(return_value=False)
+        body = {"telegram_id": 777000111, "event": event, "payload": payload}
+        with patch.object(server, "_is_duplicate_event", dedup):
+            status, _answer = self._post(server, body)
+
+        assert status == 200
+        assert dedup.await_args.args[1] == key
+
+    def test_two_penalties_confirmed_on_one_day_are_two_pushes_with_redis_down(self, server):
+        """Point 1: neither pay payload carries an order, an outlet or a `date`, so a key
+        without `penalty_id` collapsed the second penalty into the first."""
+        first = {"telegram_id": 777000111, "event": "pay_penalty_confirmed", "payload": PENALTY}
+        second = {**first, "payload": {**PENALTY, "penalty_id": 18, "amount": 40000}}
+
+        assert self._post(server, first) == (200, {"success": True, "message": "Notification sent"})
+        assert self._post(server, second) == (200, {"success": True, "message": "Notification sent"})
+        assert server.bot_app.bot.send_message.await_count == 2
+
+    @pytest.mark.parametrize("redis_up", [False, True], ids=["in-memory", "redis"])
+    @pytest.mark.parametrize("event", SALES_EVENTS)
+    def test_a_failed_send_releases_the_slot_so_the_retry_delivers(self, server, event, redis_up):
+        """Point 3, for EVERY sales event: the slot is claimed before the send, and
+        `push_sales_event` retries only on a non-200. A failed send that kept the slot would
+        answer the retry "Already processed": the message lost, and reported delivered."""
+        redis = _FakeRedis() if redis_up else None
+        server._redis, server._redis_connected = redis, redis_up
+        server.bot_app.bot.send_message = AsyncMock(side_effect=[RuntimeError("Bad Gateway"), None])
+        body = {"event_id": f"sales-event:{event}:1", "telegram_id": 777000111,
+                "event": event, "payload": dict(GENERIC_PAYLOAD)}
+
+        first = self._post(server, body)
+        after_failure = dict(redis.store) if redis_up else None
+        retry = self._post(server, body)
+        replay = self._post(server, body)
+
+        assert first == (502, {"success": False, "message": "Send failed"})
+        assert retry == (200, {"success": True, "message": "Notification sent"})
+        assert replay == (200, {"success": True, "message": "Already processed"})
+        assert server.bot_app.bot.send_message.await_count == 2
+        if redis_up:
+            assert after_failure == {}
+            assert list(redis.store) == [RedisKeyspace.staff_bot_webhook_event(body["event_id"])]
+
+    def test_an_unreachable_recipient_is_a_200_that_keeps_the_slot(self, server):
+        """Nobody can reach an agent who blocked the bot, so the backend must not retry."""
+        server.bot_app.bot.send_message = AsyncMock(
+            side_effect=Exception("Forbidden: bot was blocked by the user")
+        )
+        body = {"event_id": "sales-event:statement-approved:55", "telegram_id": 777000111,
+                "event": "pay_statement_approved", "payload": STATEMENT}
+
+        first = self._post(server, body)
+        replay = self._post(server, body)
+
+        assert first == (200, {"success": False, "message": "Recipient unreachable"})
+        assert replay == (200, {"success": True, "message": "Already processed"})
+        assert server.bot_app.bot.send_message.await_count == 1

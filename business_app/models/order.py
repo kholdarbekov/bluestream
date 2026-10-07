@@ -60,6 +60,9 @@ class Order(db.Model, TimestampMixin):
             postgresql_where=text("visit_id IS NOT NULL"),
             sqlite_where=text("visit_id IS NOT NULL"),
         ),
+        # Sales-agent attribution: pay and the agent KPIs select an agent's orders by source and
+        # creator, and `created_by_staff_id` had no index. Created in migration b7e3c1a95d42.
+        Index("ix_orders_order_source_created_by_staff_id", "order_source", "created_by_staff_id"),
     )
 
     id = Column(Integer, primary_key=True)

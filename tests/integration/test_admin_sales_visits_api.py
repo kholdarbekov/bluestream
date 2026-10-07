@@ -376,18 +376,25 @@ def test_plan_vs_fact_pairs_the_stored_plan_with_the_day_that_happened(
     assert body["rows"] == [
         # The second agent has no snapshot for that day: `due` is null and `plan_source` says
         # why. A zero here would read as "nothing was due" and score a perfect plan-vs-fact for
-        # every day before the snapshot job shipped.
+        # every day before the snapshot job shipped. Nothing is counted without a plan (C4).
         {"agent_user_id": second_agent.id, "agent_name": "Nodira Rep", "day": "2026-09-14",
-         "due": None, "completed": 1, "unplanned": 1, "strike_rate_pct": 0.0, "plan_source": "none"},
+         "due": None, "completed": 1, "unplanned": 1, "strike_rate_pct": 0.0, "plan_source": "none",
+         "counted": 0, "day_status": "worked"},
         # A day with a plan and no visits still gets its row — three shops were due, nobody went.
+        # 09-13 is a Sunday, a worked day like any other (C2 v5): measured, and nothing counted.
         {"agent_user_id": agent.id, "agent_name": "Sardor Agent", "day": "2026-09-13",
-         "due": 3, "completed": 0, "unplanned": 0, "strike_rate_pct": None, "plan_source": "snapshot"},
+         "due": 3, "completed": 0, "unplanned": 0, "strike_rate_pct": None, "plan_source": "snapshot",
+         "counted": 0, "day_status": "worked"},
+        # The one visit that day was unplanned and out of range: nothing counted.
         {"agent_user_id": agent.id, "agent_name": "Sardor Agent", "day": "2026-09-14",
-         "due": 4, "completed": 1, "unplanned": 1, "strike_rate_pct": 0.0, "plan_source": "snapshot"},
+         "due": 4, "completed": 1, "unplanned": 1, "strike_rate_pct": 0.0, "plan_source": "snapshot",
+         "counted": 0, "day_status": "worked"},
         # Two visits on day two: 09:00 local, and 01:30 local -- whose stored instant is on the
-        # 14th in UTC. A UTC-date bucket would move that one into the 09-14 row above.
+        # 14th in UTC. A UTC-date bucket would move that one into the 09-14 row above. Both are to
+        # Bahor; only the 09:00 one is verified (in range), so the legacy row counts one outlet.
         {"agent_user_id": agent.id, "agent_name": "Sardor Agent", "day": "2026-09-15",
-         "due": 2, "completed": 2, "unplanned": 0, "strike_rate_pct": 100.0, "plan_source": "snapshot"},
+         "due": 2, "completed": 2, "unplanned": 0, "strike_rate_pct": 100.0, "plan_source": "snapshot",
+         "counted": 1, "day_status": "worked"},
     ]
 
 

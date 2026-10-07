@@ -98,6 +98,11 @@ SALES_VISIT_FLOW_KEY = 'sales_visit'
 # outside the module that stamps them.
 SALES_NEARBY_FLOW_KEY = 'sales_nearby'
 SALES_TRYOUT_FLOW_KEY = 'sales_tryout'
+# D31: the outlet card's 📞 screen. Named for the same two reasons --
+# `_drop_other_sales_drafts` drops it, and its conversation's timeout clears
+# only this key -- and `handlers/sales/outlet_phone.py` imports it rather than
+# spelling it again.
+SALES_SET_PHONE_FLOW_KEY = 'sales_set_phone'
 
 PENDING_FLOW_USER_DATA_KEYS = (
     # -- Text-router flows: while present, the catch-all router feeds the next
@@ -139,6 +144,11 @@ PENDING_FLOW_USER_DATA_KEYS = (
     # drop it. Nothing is written server-side until Confirm, so dropping it
     # costs the agent only the taps.
     SALES_TRYOUT_FLOW_KEY,
+    # The 📞 set-phone screen (state 327). Same WRITE-side rule:
+    # `handlers/sales/outlet_phone.py` stamps it, so a menu tap must drop it.
+    # Its one state reads free TEXT, and an armed draft would send the agent's
+    # next message to `PUT /outlets/<id>/primary-phone`.
+    SALES_SET_PHONE_FLOW_KEY,
     'new_address',
     'new_tryout',
     'new_tryout_products',

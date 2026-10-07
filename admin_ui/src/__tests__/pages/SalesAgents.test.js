@@ -5,9 +5,18 @@ import { MemoryRouter } from 'react-router-dom';
 
 import SalesAgents from '../../pages/SalesAgents';
 import staffService from '../../services/staffService';
+import salesPayService from '../../services/salesPayService';
 import api from '../../services/api';
 
 vi.mock('../../services/staffService');
+vi.mock('../../services/salesPayService', async () => {
+  const actual = await vi.importActual('../../services/salesPayService');
+  const methods = Object.getOwnPropertyNames(Object.getPrototypeOf(actual.default)).filter((name) => name !== 'constructor');
+  return { ...actual, default: Object.fromEntries(methods.map((name) => [name, vi.fn()])) };
+});
+// Only the Pay tab reads a permission; every older test here runs as a viewer without it.
+const mockAuth = { hasPermission: vi.fn(() => false) };
+vi.mock('../../stores/authStore', () => ({ useAuthStore: () => mockAuth }));
 vi.mock('../../services/api', () => ({ __esModule: true, default: { get: vi.fn() } }));
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key, opts) => (typeof opts === 'string' ? opts : opts?.defaultValue) || key }),
@@ -26,10 +35,10 @@ const AGENT = {
 };
 const LIST = { data: { data: { items: [AGENT] }, meta: { total: 1, summary: { total_agents: 1, active_agents: 1 } } } };
 
-const createWrapper = () => {
+const createWrapper = (initialEntry = '/staff/sales-agents') => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return ({ children }) => (
-    <MemoryRouter initialEntries={['/staff/sales-agents']}>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     </MemoryRouter>
   );
@@ -37,6 +46,13 @@ const createWrapper = () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockAuth.hasPermission.mockReturnValue(false);
+  salesPayService.getAgentTerms.mockResolvedValue({
+    agent: { user_id: 41, name: 'Sardor Alimov', phone: '+998901234574', is_active: true },
+    employment: { start: '2026-06-01', end: null },
+    owed_to_date: { amount: 0.0, month: null, nets_in: null },
+    terms: [], term_in_force: null, plans: [], editable_from_month: '2026-10',
+  });
   staffService.getSalesAgents.mockResolvedValue(LIST);
   staffService.createSalesAgent.mockResolvedValue({ data: { data: { sales_agent: AGENT } } });
   staffService.setSalesAgentActive.mockResolvedValue({ data: { data: { sales_agent: { ...AGENT, is_active: false } } } });
@@ -102,4 +118,37 @@ it("shows today's field activity on the cards and on the row", async () => {
   expect(within(visitsCard).getByText('11')).toBeInTheDocument();
   const ordersCard = screen.getAllByText('Orders today').map((el) => el.closest('.ant-card')).find(Boolean);
   expect(within(ordersCard).getByText('5')).toBeInTheDocument();
+});
+
+it('gives a pay admin a Pay tab beside the details, read only when opened', async () => {
+  mockAuth.hasPermission.mockImplementation((flag) => flag === 'can_manage_sales_pay');
+  render(<SalesAgents />, { wrapper: createWrapper() });
+  const row = await screen.findByRole('row', { name: /Sardor Alimov/ });
+  fireEvent.click(within(row).getByText('Sardor Alimov'));
+
+  expect(await screen.findByRole('tab', { name: 'Details' })).toBeInTheDocument();
+  expect(salesPayService.getAgentTerms).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Pay' }));
+  await waitFor(() => expect(salesPayService.getAgentTerms).toHaveBeenCalledWith(41));
+});
+
+it('draws no Pay tab and reads no pay data without can_manage_sales_pay', async () => {
+  render(<SalesAgents />, { wrapper: createWrapper() });
+  const row = await screen.findByRole('row', { name: /Sardor Alimov/ });
+  fireEvent.click(within(row).getByText('Sardor Alimov'));
+
+  expect(await screen.findByRole('tab', { name: 'Details' })).toBeInTheDocument();
+  expect(screen.queryByRole('tab', { name: 'Pay' })).toBeNull();
+  expect(salesPayService.getAgentTerms).not.toHaveBeenCalled();
+});
+
+it('opens straight on the Pay tab from the month view\'s "Set pay terms" link', async () => {
+  mockAuth.hasPermission.mockImplementation((flag) => flag === 'can_manage_sales_pay');
+  render(<SalesAgents />, {
+    wrapper: createWrapper({ pathname: '/sales/agents', state: { payAgent: { user_id: 41, full_name: 'Sardor Alimov' } } }),
+  });
+
+  await waitFor(() => expect(salesPayService.getAgentTerms).toHaveBeenCalledWith(41));
+  expect(screen.getByRole('tab', { name: 'Pay', selected: true })).toBeInTheDocument();
 });

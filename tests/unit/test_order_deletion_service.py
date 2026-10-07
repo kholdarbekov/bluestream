@@ -1,6 +1,8 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from uuid import uuid4
+
+import pytest
 
 from business_app import db
 from business_app.models.delivery import Delivery, DeliveryStatusHistory
@@ -14,7 +16,14 @@ from business_app.models.payment import (
     PaymentFiscalization,
     PaymentTransaction,
 )
-from business_app.services.order_deletion_service import OrderDeletionService
+from business_app.models.sales_pay import (
+    SalesPayLedgerLine,
+    SalesPayPeriod,
+    SalesPayPlan,
+    SalesPayPlanRate,
+    SalesPayPlanVersion,
+)
+from business_app.services.order_deletion_service import PROTECTED_REFUSAL, PROTECTED_TABLES, OrderDeletionService
 from business_app.utils.constants import (
     LoyaltyTransactionType,
     NotificationChannel,
@@ -300,3 +309,127 @@ def test_delete_order_by_number_returns_not_found_for_unknown_order(db):
     assert result['found'] is False
     assert result['applied'] is False
     assert result['total_rows'] == 0
+
+
+def _post_credit_line(*, order: Order, agent_id: int, admin_id: int) -> SalesPayLedgerLine:
+    """The row the ledger sync writes when it credits an agent's order (spec §4.4)."""
+    october = date(2026, 10, 1)
+    plan = SalesPayPlan(name='Standard', created_by_user_id=admin_id)
+    period = SalesPayPeriod(month_start=october, status='open', is_shadow=False, holidays=[])
+    db.session.add_all([plan, period])
+    db.session.flush()
+    version = SalesPayPlanVersion(
+        plan_id=plan.id,
+        version_no=1,
+        effective_month=october,
+        gate_bands=[{'min_pct': '0.0', 'multiplier': '1.000'}],
+        gate_min_visits_due=20,
+        bonus_amount=Decimal('300000'),
+        bonus_window_days=60,
+        bonus_min_orders_with_total=2,
+        bonus_min_combined_total=Decimal('500000'),
+        bonus_min_orders_any_amount=5,
+        bonus_prior_customer_lookback_days=180,
+        created_by_user_id=admin_id,
+    )
+    db.session.add(version)
+    db.session.flush()
+    db.session.add(
+        SalesPayPlanRate(
+            plan_version_id=version.id, product_id=None, from_unit=1, rate_mode='per_unit', rate_value=Decimal('1500')
+        )
+    )
+    line = SalesPayLedgerLine(
+        agent_user_id=agent_id,
+        period_id=period.id,
+        kind='commission_credit',
+        order_id=order.id,
+        plan_version_id=version.id,
+        amount=None,  # v5: a commission line records a level, never money
+        earned_month=october,
+        occurred_at=datetime(2026, 10, 4, 9, 12, tzinfo=UTC),
+        idempotency_key=f'commission:{order.id}:1',
+        snapshot={'order_number': order.order_number},
+    )
+    db.session.add(line)
+    db.session.flush()
+    return line
+
+
+def test_the_protected_tables_and_the_refusal_text_are_the_contracts():
+    assert PROTECTED_TABLES == ('sales_pay_ledger_lines',)
+    assert PROTECTED_REFUSAL == (
+        'sales-agent pay ledger lines reference this order; a credited order cannot be hard-deleted'
+    )
+
+
+def test_a_credited_order_is_refused_not_deleted(db, sample_user, sample_product, monkeypatch):
+    """T-DEL-1 (spec §3.6): a pay ledger line makes its order undeletable.
+
+    The walk would otherwise delete the line together with the order. A hard-deleted credited
+    order then keeps its commission forever, because the sync can no longer see the order to
+    reverse it. The dry run says so, and applying refuses before any write. The bottle-ledger
+    reversal is the first write `execute_deletion_plan` makes, so it must never run.
+
+    The operator script calls `build_deletion_plan` and then `execute_deletion_plan` directly,
+    so that path is driven too.
+    """
+    reversal_calls = []
+
+    def _reversal_spy(self, plan):
+        reversal_calls.append(plan['order_number'])
+        return plan
+
+    monkeypatch.setattr(OrderDeletionService, '_plan_with_bottle_ledger_reversed', _reversal_spy)
+
+    order = _create_order(user_id=sample_user.id, order_number='SA_000777_26', amount=Decimal('120000.00'))
+    db.session.add(
+        OrderItem(
+            order_id=order.id,
+            product_id=sample_product.id,
+            quantity=6,
+            unit_price=Decimal('20000.00'),
+            total_price=Decimal('120000.00'),
+        )
+    )
+    line = _post_credit_line(order=order, agent_id=sample_user.id, admin_id=sample_user.id)
+    db.session.commit()
+    order_id, line_id = order.id, line.id
+
+    service = OrderDeletionService()
+    dry_run = service.delete_order_by_number('SA_000777_26', apply_changes=False)
+    assert dry_run['found'] is True
+    assert dry_run['applied'] is False
+    assert dry_run['refused'] == PROTECTED_REFUSAL
+    assert dry_run['rows_by_table']['sales_pay_ledger_lines'] == 1
+
+    with pytest.raises(RuntimeError) as exc_info:
+        service.delete_order_by_number('SA_000777_26', apply_changes=True)
+    assert str(exc_info.value) == PROTECTED_REFUSAL
+
+    plan = service.build_deletion_plan('SA_000777_26')
+    assert plan['refused'] == PROTECTED_REFUSAL
+    with pytest.raises(RuntimeError) as exc_info:
+        service.execute_deletion_plan(plan)
+    assert str(exc_info.value) == PROTECTED_REFUSAL
+
+    assert reversal_calls == []
+    db.session.expire_all()
+    assert Order.query.filter_by(id=order_id).count() == 1
+    assert OrderItem.query.filter_by(order_id=order_id).count() == 1
+    assert SalesPayLedgerLine.query.filter_by(id=line_id).count() == 1
+
+
+def test_an_uncredited_order_is_not_refused(db, sample_user):
+    """The other half of T-DEL-1: with no pay line, the plan says `refused: None` and deletes."""
+    order = _create_order(user_id=sample_user.id, order_number='SA_000778_26', amount=Decimal('60000.00'))
+    db.session.commit()
+    order_id = order.id
+
+    service = OrderDeletionService()
+    dry_run = service.delete_order_by_number('SA_000778_26', apply_changes=False)
+    assert dry_run['refused'] is None
+
+    result = service.delete_order_by_number('SA_000778_26', apply_changes=True)
+    assert result['applied'] is True
+    assert Order.query.filter_by(id=order_id).first() is None

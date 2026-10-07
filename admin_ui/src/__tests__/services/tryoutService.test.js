@@ -63,7 +63,9 @@ describe('TryoutService', () => {
 
     const result = await tryoutService.convertTryout(7);
 
-    expect(api.post).toHaveBeenCalledWith('/admin/tryouts/7/convert', {});
+    // T12: `convertTryout` forwards a `config` (default `{}`) so a caller can pass
+    // `handledErrorCodes`; a caller that names none still gets an explicit empty config.
+    expect(api.post).toHaveBeenCalledWith('/admin/tryouts/7/convert', {}, {});
     expect(result).toEqual({
       tryout: { id: 7, outcome: 'converted' },
       conversion: {

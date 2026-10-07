@@ -282,27 +282,74 @@ def test_an_agent_with_nothing_to_report_gets_no_digest(db, agent):
     assert AgentDigestService.build(agent.id, now=FROZEN_UTC) is None
 
 
-def test_the_digest_covers_exactly_the_outlets_the_agent_can_open(db, agent):
-    """Assigned OR onboarded-by — `OutletService.agent_outlet_filter`, the due list's own
-    predicate. A covering agent who registered the shop keeps seeing it after a manager
-    reassigns the territory, and an outlet belonging to someone else is never named in a
-    digest whose *Open outlet* button would 403."""
+def test_the_digest_names_the_outlets_on_this_agents_plan(db, agent):
+    """Q10 (owner-confirmed): the due sections are the due list, and the due list follows
+    OWNERSHIP (`OutletService.agent_due_filter`). A shop this agent onboarded stays on their plan
+    while nobody else owns it; once a manager hands it to another agent it moves to THAT agent's
+    digest. An outlet belonging to someone else is never named here. (Reach is unchanged: the
+    onboarder can still open the handed-over shop's card, pinned over HTTP by T-VIS-9.)"""
     other = _agent(db, "+998901234582", "777000332")
     mine = _outlet(db, agent, "Meniki", due_at=datetime(2026, 9, 10, 4, 0, tzinfo=timezone.utc))
-    onboarded = Outlet(
+    unowned = Outlet(
+        name="Egasiz",
+        outlet_type="grocery_store",
+        stage="active",
+        assigned_agent_user_id=None,
+        onboarded_by_user_id=agent.id,
+        next_visit_due_at=datetime(2026, 9, 11, 4, 0, tzinfo=timezone.utc),
+        last_visit_at=RECENT_VISIT_AT,
+    )
+    handed_over = Outlet(
         name="Men ochganim",
         outlet_type="grocery_store",
         stage="active",
         assigned_agent_user_id=other.id,
         onboarded_by_user_id=agent.id,
-        next_visit_due_at=datetime(2026, 9, 11, 4, 0, tzinfo=timezone.utc),
+        next_visit_due_at=datetime(2026, 9, 12, 4, 0, tzinfo=timezone.utc),
         last_visit_at=RECENT_VISIT_AT,
     )
-    db.session.add(onboarded)
+    db.session.add_all([unowned, handed_over])
     db.session.commit()
     _outlet(db, other, "Boshqaniki", due_at=datetime(2026, 9, 9, 4, 0, tzinfo=timezone.utc))
 
     payload = AgentDigestService.build(agent.id, now=FROZEN_UTC)
+    theirs = AgentDigestService.build(other.id, now=FROZEN_UTC)
 
-    assert [row["outlet_id"] for row in payload["overdue"]] == [mine.id, onboarded.id]
-    assert [row["outlet_name"] for row in payload["overdue"]] == ["Meniki", "Men ochganim"]
+    assert [row["outlet_id"] for row in payload["overdue"]] == [mine.id, unowned.id]
+    assert [row["outlet_name"] for row in theirs["overdue"]] == ["Boshqaniki", "Men ochganim"]
+
+
+def test_the_unvisited_nudge_goes_to_the_shops_owner_not_its_onboarder(db, agent):
+    """T2-R2 (Q10): the unvisited section follows OWNERSHIP too, through `agent_due_filter`, the
+    due list's own filter. A shop this agent onboarded stays theirs to be nudged about while
+    nobody owns it. Once a manager hands it to another agent, a silence there is the new owner's
+    to fix: the nudge goes to them, and never to the onboarder, who can still open the card
+    (reach, `agent_outlet_filter`) but is no longer measured on it. The admin exception feed's
+    `unvisited` row already files the shop under its owner."""
+    other = _agent(db, "+998901234582", "777000332")
+    own = _outlet(db, agent, "Meniki", last_visit_at=None)
+    unowned = Outlet(
+        name="Egasiz",
+        outlet_type="grocery_store",
+        stage="active",
+        assigned_agent_user_id=None,
+        onboarded_by_user_id=agent.id,
+        last_visit_at=None,
+    )
+    handed_over = Outlet(
+        name="Men ochganim",
+        outlet_type="grocery_store",
+        stage="active",
+        assigned_agent_user_id=other.id,
+        onboarded_by_user_id=agent.id,
+        last_visit_at=None,
+    )
+    db.session.add_all([unowned, handed_over])
+    db.session.commit()
+
+    payload = AgentDigestService.build(agent.id, now=FROZEN_UTC)
+    theirs = AgentDigestService.build(other.id, now=FROZEN_UTC)
+
+    # Never visited, so each row is `days: None` and the id breaks the tie.
+    assert [row["outlet_id"] for row in payload["unvisited"]] == [own.id, unowned.id]
+    assert [row["outlet_name"] for row in theirs["unvisited"]] == ["Men ochganim"]

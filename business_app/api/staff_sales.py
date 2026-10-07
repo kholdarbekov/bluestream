@@ -4,8 +4,8 @@ from datetime import UTC, datetime
 
 from flask import Blueprint, current_app, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
-from pydantic import ValidationError as PydanticValidationError
 
+from business_app.serializers.sales_pay_serializers import EarningsLinesQuery, to_wire
 from business_app.serializers.sales_serializers import (
     AddVisitPhotoPayload,
     ApprovePayload,
@@ -17,6 +17,7 @@ from business_app.serializers.sales_serializers import (
     OrderEstimatePayload,
     PlaceOrderPayload,
     RejectPayload,
+    SetPrimaryPhonePayload,
     StockCheckPayload,
     UpdateOutletPayload,
     serialize_agent_metrics,
@@ -30,14 +31,17 @@ from business_app.serializers.sales_serializers import (
 )
 from business_app.services.sales.agent_metrics_service import AgentMetricsService
 from business_app.services.sales.outlet_service import OutletService
+from business_app.services.sales.pay_statement_service import SalesPayStatementService
 from business_app.services.sales.replenishment_service import ReplenishmentService
 from business_app.services.sales.visit_service import VisitService
 from business_app.services.tryout_service import TryoutService
-from business_app.utils.api_responses import paginated_response, success_response, validation_error_response
+from business_app.utils import local_windows
+from business_app.utils.api_responses import paginated_response, success_response
 from business_app.utils.decorators import require_staff_roles
 from business_app.utils.error_handlers import handle_api_exception
 from business_app.utils.exceptions import NotFoundError
 from business_app.utils.local_windows import resolve_stats_period
+from business_app.utils.request_helpers import validated_json_payload
 
 
 staff_sales_bp = Blueprint("staff_sales", __name__)
@@ -47,11 +51,15 @@ staff_sales_bp = Blueprint("staff_sales", __name__)
 # column (credit terms, tax id, legal form, district, visit cadence, the operator's status warning)
 # parsed cleanly out of an agent's payload and was written by `OutletService.update`. The schema
 # says what the resource looks like; the ROUTE says who may write which part of it.
+#
+# `outlet_class` is admin-only too (D-CLASS, owner-confirmed): the class sets the cadence, the
+# cadence sets the due date, and the due date decides which shops enter the 01:20 frozen plan an
+# agent's compliance is measured against. The class picked at creation is unchanged, the operator
+# reviews it at approval, and the staff bot never calls this route.
 AGENT_EDITABLE_OUTLET_FIELDS = frozenset(
     {
         "name",
         "channel",
-        "outlet_class",
         "opening_hours",
         "preferred_visit_window",
         "delivery_window_start",
@@ -65,22 +73,6 @@ AGENT_EDITABLE_OUTLET_FIELDS = frozenset(
 
 def _actor_id() -> int:
     return int(get_jwt_identity())
-
-
-def _validated_payload(schema_cls):
-    payload = request.get_json() or {}
-    try:
-        # exclude_unset, NOT exclude_none: a field the client never mentioned is dropped, but a
-        # null it deliberately sent survives, so emptying an input in the admin UI actually clears
-        # the column instead of returning a success toast that wrote nothing.
-        #
-        # The rule the services then apply: an explicit null CLEARS a nullable column, and a
-        # NOT-NULL column REFUSES it (`outlets.preferred_language` keeps its truthiness guard;
-        # `outlets.payment_terms` 400s with SALES_PAYMENT_TERMS_INVALID). Both halves are pinned in
-        # tests/integration/test_admin_sales_outlets_api.py.
-        return schema_cls(**payload).model_dump(exclude_unset=True)
-    except PydanticValidationError as exc:
-        return validation_error_response(exc.errors())
 
 
 # --- Sales agent: outlets ---
@@ -155,13 +147,16 @@ def dedupe_outlet():
 @jwt_required()
 @require_staff_roles("sales_agent")
 def create_outlet():
-    payload = _validated_payload(CreateOutletPayload)
+    payload = validated_json_payload(CreateOutletPayload)
     if not isinstance(payload, dict):
         return payload
     force = bool(payload.pop("force", False))
     link_user_id = payload.pop("link_user_id", None)
-    outlet = OutletService.create(_actor_id(), payload, force=force, link_user_id=link_user_id)
-    return success_response(data={"outlet": serialize_outlet(outlet)}, status_code=201)
+    actor_id = _actor_id()
+    outlet = OutletService.create(actor_id, payload, force=force, link_user_id=link_user_id)
+    # The CARD, as `create_outlet_tryout` answers: the bot draws the receipt and its buttons from
+    # this reply, so it carries what the card publishes (`can_request_activation`, D31).
+    return success_response(data={"outlet": OutletService.card(outlet, viewer_user_id=actor_id)}, status_code=201)
 
 
 @staff_sales_bp.route("/sales/outlets/<int:outlet_id>", methods=["GET"])
@@ -171,7 +166,7 @@ def create_outlet():
 def get_outlet(outlet_id):
     actor_id = _actor_id()
     outlet = OutletService.get_for_agent(actor_id, outlet_id)
-    return success_response(data={"outlet": OutletService.card(outlet, agent_user_id=actor_id)})
+    return success_response(data={"outlet": OutletService.card(outlet, viewer_user_id=actor_id)})
 
 
 @staff_sales_bp.route("/sales/outlets/<int:outlet_id>", methods=["PUT"])
@@ -179,7 +174,7 @@ def get_outlet(outlet_id):
 @jwt_required()
 @require_staff_roles("sales_agent")
 def update_outlet(outlet_id):
-    payload = _validated_payload(UpdateOutletPayload)
+    payload = validated_json_payload(UpdateOutletPayload)
     if not isinstance(payload, dict):
         return payload
     # Dropped, not refused: the agent-editable half of a visit note still lands, rather than the
@@ -194,7 +189,7 @@ def update_outlet(outlet_id):
 @jwt_required()
 @require_staff_roles("sales_agent")
 def add_outlet_contact(outlet_id):
-    payload = _validated_payload(ContactPayload)
+    payload = validated_json_payload(ContactPayload)
     if not isinstance(payload, dict):
         return payload
     outlet = OutletService.get_for_agent(_actor_id(), outlet_id)
@@ -203,13 +198,35 @@ def add_outlet_contact(outlet_id):
     )
 
 
+@staff_sales_bp.route("/sales/outlets/<int:outlet_id>/primary-phone", methods=["PUT"])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles("sales_agent")
+def set_outlet_primary_phone(outlet_id):
+    # D31.4: a SET, not the contacts POST above -- `add_contact` adds a NON-primary row once the
+    # outlet has a contact, so a name-only primary would keep blocking activation. A PUT because
+    # it is idempotent, and the staff client retries a PUT after an ambiguous transport failure.
+    # The CARD travels back, as create, request-activation and the try-out answer (P6), so the bot
+    # redraws the phone and Request activation buttons from this reply without a second GET.
+    payload = validated_json_payload(SetPrimaryPhonePayload)
+    if not isinstance(payload, dict):
+        return payload
+    actor_id = _actor_id()
+    outlet = OutletService.get_for_agent(actor_id, outlet_id)
+    OutletService.set_primary_phone(outlet, payload.get("phone"))
+    return success_response(data={"outlet": OutletService.card(outlet, viewer_user_id=actor_id)})
+
+
 @staff_sales_bp.route("/sales/outlets/<int:outlet_id>/request-activation", methods=["POST"])
 @handle_api_exception
 @jwt_required()
 @require_staff_roles("sales_agent")
 def request_outlet_activation(outlet_id):
-    outlet = OutletService.get_for_agent(_actor_id(), outlet_id)
-    return success_response(data={"outlet": serialize_outlet(OutletService.request_activation(outlet, _actor_id()))})
+    actor_id = _actor_id()
+    outlet = OutletService.get_for_agent(actor_id, outlet_id)
+    OutletService.request_activation(outlet, actor_id)
+    # The moved card, for the same reason as the create reply: the bot redraws the outlet from it.
+    return success_response(data={"outlet": OutletService.card(outlet, viewer_user_id=actor_id)})
 
 
 @staff_sales_bp.route("/sales/outlets/<int:outlet_id>/tryouts", methods=["POST"])
@@ -217,7 +234,7 @@ def request_outlet_activation(outlet_id):
 @jwt_required()
 @require_staff_roles("sales_agent")
 def create_outlet_tryout(outlet_id):
-    payload = _validated_payload(FieldTryoutPayload)
+    payload = validated_json_payload(FieldTryoutPayload)
     if not isinstance(payload, dict):
         return payload
     actor_id = _actor_id()
@@ -235,7 +252,7 @@ def create_outlet_tryout(outlet_id):
     return success_response(
         data={
             "tryout": TryoutService.serialize_tryout(tryout),
-            "outlet": OutletService.card(outlet, agent_user_id=actor_id),
+            "outlet": OutletService.card(outlet, viewer_user_id=actor_id),
         },
         status_code=201,
     )
@@ -283,7 +300,7 @@ def current_visit():
             "visit": data,
             "outlet": OutletService.card(
                 outlet,
-                agent_user_id=actor_id,
+                viewer_user_id=actor_id,
                 open_visit_ids=VisitService.open_visit_ids_by_outlet(actor_id, open_visit=visit),
             ),
         }
@@ -295,7 +312,7 @@ def current_visit():
 @jwt_required()
 @require_staff_roles("sales_agent")
 def checkin_visit(visit_id):
-    payload = _validated_payload(CheckinPayload)
+    payload = validated_json_payload(CheckinPayload)
     if not isinstance(payload, dict):
         return payload
     visit = VisitService.get_owned(visit_id, _actor_id())
@@ -314,7 +331,7 @@ def checkin_visit(visit_id):
 @jwt_required()
 @require_staff_roles("sales_agent")
 def stock_check_visit(visit_id):
-    payload = _validated_payload(StockCheckPayload)
+    payload = validated_json_payload(StockCheckPayload)
     if not isinstance(payload, dict):
         return payload
     visit = VisitService.get_owned(visit_id, _actor_id())
@@ -348,7 +365,7 @@ def outlet_payment_methods(outlet_id):
 @jwt_required()
 @require_staff_roles("sales_agent")
 def outlet_order_estimate(outlet_id):
-    payload = _validated_payload(OrderEstimatePayload)
+    payload = validated_json_payload(OrderEstimatePayload)
     if not isinstance(payload, dict):
         return payload
     outlet = OutletService.get_for_agent(_actor_id(), outlet_id)
@@ -362,7 +379,7 @@ def outlet_order_estimate(outlet_id):
 @jwt_required()
 @require_staff_roles("sales_agent")
 def place_visit_order(visit_id):
-    payload = _validated_payload(PlaceOrderPayload)
+    payload = validated_json_payload(PlaceOrderPayload)
     if not isinstance(payload, dict):
         return payload
     actor_id = _actor_id()
@@ -384,7 +401,7 @@ def place_visit_order(visit_id):
 @jwt_required()
 @require_staff_roles("sales_agent")
 def add_visit_photo(visit_id):
-    payload = _validated_payload(AddVisitPhotoPayload)
+    payload = validated_json_payload(AddVisitPhotoPayload)
     if not isinstance(payload, dict):
         return payload
     actor_id = _actor_id()
@@ -407,7 +424,7 @@ def add_visit_photo(visit_id):
 @jwt_required()
 @require_staff_roles("sales_agent")
 def close_visit(visit_id):
-    payload = _validated_payload(CloseVisitPayload)
+    payload = validated_json_payload(CloseVisitPayload)
     if not isinstance(payload, dict):
         return payload
     actor_id = _actor_id()
@@ -424,7 +441,7 @@ def close_visit(visit_id):
     # The CARD, same as `GET /visits/current`: the closing screen shows the recomputed next-due
     # date and the bot lands back on a card whose Start/Resume button is already correct.
     outlet = OutletService.get(data["outlet_id"])
-    return success_response(data={"visit": data, "outlet": OutletService.card(outlet, agent_user_id=actor_id)})
+    return success_response(data={"visit": data, "outlet": OutletService.card(outlet, viewer_user_id=actor_id)})
 
 
 @staff_sales_bp.route("/sales/visits/<int:visit_id>/abandon", methods=["POST"])
@@ -441,7 +458,7 @@ def abandon_visit(visit_id):
     # One shape for both endings also means the bot reads `visit.status` to tell them apart
     # rather than guessing from which key happens to be present.
     outlet = OutletService.get(data["outlet_id"])
-    return success_response(data={"visit": data, "outlet": OutletService.card(outlet, agent_user_id=actor_id)})
+    return success_response(data={"visit": data, "outlet": OutletService.card(outlet, viewer_user_id=actor_id)})
 
 
 # --- Sales agent: my stats ---
@@ -468,6 +485,51 @@ def my_stats():
     return success_response(data=data)
 
 
+# --- Sales agent: my earnings ---
+
+
+@staff_sales_bp.route("/sales/me/earnings", methods=["GET"])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles("sales_agent")
+def my_earnings():
+    # "Mine", like /me/stats: `_actor_id()`, never an agent id, so there is no ownership check to
+    # forget (§5.6). The service syncs the agent's open months before it estimates them.
+    return success_response(data=to_wire(SalesPayStatementService.agent_earnings(_actor_id())))
+
+
+@staff_sales_bp.route("/sales/me/earnings/lines", methods=["GET"])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles("sales_agent")
+def my_earnings_lines():
+    # The page rides inside `data` (`{items, page, has_more}`): the bot client drops the envelope's
+    # `meta`. The month is parsed here like every month on the admin pay routes.
+    query = EarningsLinesQuery.model_validate(request.args.to_dict())
+    month = local_windows.parse_month(query.month)
+    return success_response(data=to_wire(SalesPayStatementService.agent_lines(_actor_id(), month, page=query.page)))
+
+
+@staff_sales_bp.route("/sales/me/statements", methods=["GET"])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles("sales_agent")
+def my_statements():
+    # S3: the agent's own approved-or-paid months, newest first. "Mine", like S1: no agent id.
+    return success_response(data=to_wire(SalesPayStatementService.agent_statements(_actor_id())))
+
+
+@staff_sales_bp.route("/sales/me/statements/<month>", methods=["GET"])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles("sales_agent")
+def my_statement(month):
+    # S4: one of those months in full. The month is parsed as S2 parses its own, so anything but
+    # "YYYY-MM" is the same SALES_PAY_MONTH_INVALID.
+    data = SalesPayStatementService.agent_statement(_actor_id(), local_windows.parse_month(month))
+    return success_response(data=to_wire(data))
+
+
 # --- Operator: activation requests ---
 
 
@@ -476,7 +538,7 @@ def my_stats():
 @jwt_required()
 @require_staff_roles("operator")
 def list_activation_requests():
-    return success_response(data={"items": OutletService.activation_request_rows()})
+    return success_response(data={"items": OutletService.activation_request_rows(viewer_id=_actor_id())})
 
 
 @staff_sales_bp.route("/sales/outlets/<int:outlet_id>/approve", methods=["POST"])
@@ -484,7 +546,7 @@ def list_activation_requests():
 @jwt_required()
 @require_staff_roles("operator")
 def approve_outlet(outlet_id):
-    payload = _validated_payload(ApprovePayload)
+    payload = validated_json_payload(ApprovePayload)
     if not isinstance(payload, dict):
         return payload
     outlet = OutletService.approve(
@@ -501,7 +563,7 @@ def approve_outlet(outlet_id):
 @jwt_required()
 @require_staff_roles("operator")
 def reject_outlet(outlet_id):
-    payload = _validated_payload(RejectPayload)
+    payload = validated_json_payload(RejectPayload)
     if not isinstance(payload, dict):
         return payload
     outlet = OutletService.reject(outlet_id, actor_id=_actor_id(), reason=payload["reason"])

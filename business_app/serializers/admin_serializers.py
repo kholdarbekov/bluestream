@@ -634,12 +634,15 @@ def order_schedule_fields(order: Order, *, detail: bool) -> Dict[str, Any]:
     }
 
 
-def serialize_order_admin(order: Order) -> Dict[str, Any]:
+def serialize_order_admin(order: Order, *, awaiting_staff_approval: Optional[bool] = None) -> Dict[str, Any]:
     """
     Serialize order for admin view
 
     Args:
         order: Order model instance
+        awaiting_staff_approval: Whether a same-day hold (C14) is pending on this order. A list
+            caller passes its batched answer (`AgentOrderApprovalService.awaiting_ids`); with
+            None the serializer asks `is_awaiting` for this one order.
 
     Returns:
         Serialized order data for admin
@@ -757,6 +760,14 @@ def serialize_order_admin(order: Order) -> Dict[str, Any]:
             data["marking_code_summary"] = PaymentFiscalizationService().marking_code_allocation_summary(order)
         else:
             data["marking_code_summary"] = {"events": {}, "codes_by_order_item": {}}
+
+        # C14: published, never re-derived by Orders.js. It drives the tag, the missing
+        # "confirmed" option and the link to the order-approval queue.
+        if awaiting_staff_approval is None:
+            from business_app.services.sales.agent_order_approval_service import AgentOrderApprovalService
+
+            awaiting_staff_approval = AgentOrderApprovalService.is_awaiting(order.id)
+        data["awaiting_staff_approval"] = bool(awaiting_staff_approval)
 
         return data
 

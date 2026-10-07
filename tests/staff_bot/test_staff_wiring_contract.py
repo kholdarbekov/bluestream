@@ -217,6 +217,26 @@ async def test_every_registered_pattern_is_readable_by_the_collision_check(staff
     )
 
 
+@pytest.mark.parametrize("data, handler", [
+    ("staff_sales_earn_s_202609", "SalesEarningsHandler.show_statement"),
+    ("staff_sales_earn_sn_202609", "SalesEarningsHandler.show_statement_from_push"),
+    ("staff_sales_earn_h", "SalesEarningsHandler.show_past_statements"),
+    ("staff_sales_earn_l_202609_1", "SalesEarningsHandler.show_lines"),
+    # The approval push's button before the Statement screen: still in agents' chats.
+    ("staff_sales_earn_n", "SalesEarningsHandler.show_summary_from_push"),
+])
+async def test_each_my_earnings_button_reaches_exactly_its_own_handler(staff, driver, data, handler):
+    """The Statement (`_s_<yyyymm>`) and its push variant (`_sn_<yyyymm>`) share a prefix, and a
+    real month string is what decides which handler PTB picks. One claimant each, through the
+    registered patterns, never two."""
+    matched = [
+        getattr(getattr(found, "callback", None), "__qualname__", type(found).__name__)
+        for _group, found in staff.handlers_matching(driver.tap(data))
+    ]
+
+    assert matched == [handler]
+
+
 async def test_the_start_command_reaches_the_auth_conversation(staff, driver):
     """A /start that matches no entry point leaves a new driver with a bot that
     does nothing. Checked through real dispatch, including the bot_command

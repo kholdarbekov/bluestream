@@ -23,6 +23,7 @@ async def test_sales_wrappers_call_the_documented_routes(monkeypatch):
     await client.sales_create_outlet("t", {"name": "Bahor", "outlet_type": "grocery_store"})
     await client.sales_get_outlet("t", 7)
     await client.sales_request_activation("t", 7)
+    await client.sales_set_primary_phone("t", 7, "+998901234567")
     await client.sales_list_activation_requests("t")
     await client.sales_approve_outlet("t", 7)
     await client.sales_approve_outlet("t", 8, attach=True)
@@ -51,6 +52,14 @@ async def test_sales_wrappers_call_the_documented_routes(monkeypatch):
                                              "dm_present": True})
     await client.sales_abandon_visit("t", 31)
     await client.sales_agent_stats("t", period="week")
+    # Compensation spec §7.3: S1 carries no query (the backend knows whose earnings), S2
+    # exactly the month and page the keyboard drew.
+    await client.sales_my_earnings("t")
+    await client.sales_my_earnings_lines("t", month="2026-10", page=2)
+    # S3 carries no query either; S4's month rides in the PATH, exactly as S1, S3 or the approval
+    # push's payload published it.
+    await client.sales_my_statements("t")
+    await client.sales_my_statement("t", "2026-09")
 
     assert calls == [
         ("GET", "/api/v1/staff/sales/outlets", "t", None, {"scope": "prospects", "page": 2, "per_page": 20, "search": "bahor"}),
@@ -63,6 +72,10 @@ async def test_sales_wrappers_call_the_documented_routes(monkeypatch):
         ("POST", "/api/v1/staff/sales/outlets", "t", {"name": "Bahor", "outlet_type": "grocery_store"}, None),
         ("GET", "/api/v1/staff/sales/outlets/7", "t", None, None),
         ("POST", "/api/v1/staff/sales/outlets/7/request-activation", "t", {}, None),
+        # D31: a PUT, because it SETS the primary contact's number -- the
+        # client may replay it (RETRY_SAFE_METHODS). The bot sends the number
+        # it normalised itself.
+        ("PUT", "/api/v1/staff/sales/outlets/7/primary-phone", "t", {"phone": "+998901234567"}, None),
         ("GET", "/api/v1/staff/sales/activation-requests", "t", None, None),
         ("POST", "/api/v1/staff/sales/outlets/7/approve", "t", {}, None),
         # D25: attach is the SAME door with one flag. A plain approve still
@@ -94,6 +107,10 @@ async def test_sales_wrappers_call_the_documented_routes(monkeypatch):
           "notes": "Shelf still full", "next_visit_at": "2026-09-16", "dm_present": True}, None),
         ("POST", "/api/v1/staff/sales/visits/31/abandon", "t", {}, None),
         ("GET", "/api/v1/staff/sales/me/stats", "t", None, {"period": "week"}),
+        ("GET", "/api/v1/staff/sales/me/earnings", "t", None, None),
+        ("GET", "/api/v1/staff/sales/me/earnings/lines", "t", None, {"month": "2026-10", "page": 2}),
+        ("GET", "/api/v1/staff/sales/me/statements", "t", None, None),
+        ("GET", "/api/v1/staff/sales/me/statements/2026-09", "t", None, None),
     ]
 
 

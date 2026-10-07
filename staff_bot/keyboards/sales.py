@@ -4,6 +4,7 @@ from typing import Dict, List, Optional
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from staff_bot.i18n import i18n
+from staff_bot.utils.formatters import format_pay_amount, format_pay_month, format_pay_status
 
 # Stage decoration only. The WORDS come from `staff.sales.stage.<stage>`, whose
 # family is registered in `staff_bot/i18n.py::_add_dynamic_family_keys` — the
@@ -140,6 +141,21 @@ def reject_reason_key(reason_text: str) -> Optional[str]:
 
 def stage_label(stage: str, language: str) -> str:
     return f"{STAGE_EMOJI.get(stage, '•')} {i18n.get(f'staff.sales.stage.{stage}', language)}"
+
+
+def primary_contact(outlet: Dict) -> Dict:
+    """The contact an outlet card speaks about: the one flagged primary, else the first.
+
+    `Outlet.primary_contact` (business_app/models/sales.py) makes the same
+    choice server-side, over contacts in the same (id) order. The card's
+    contact line (`hub.format_outlet_card`) and the label of its 📞 button both
+    read it from here, so the line can never print one contact's number while
+    the button says there is none. `{}` when the outlet has no contact at all.
+    """
+    contacts = outlet.get('contacts') or []
+    if not contacts:
+        return {}
+    return next((c for c in contacts if c.get('is_primary')), contacts[0])
 
 
 class SalesKeyboards:
@@ -330,10 +346,28 @@ class SalesKeyboards:
                 f"▶️ {i18n.get('staff.sales.card.start_visit', language)}",
                 callback_data=f"staff_sales_visit_start_{outlet_id}",
             )])
-        if outlet.get('stage') in ('prospect', 'trial') and outlet.get('outlet_type') != 'individual':
+        # Request activation is offered exactly when the card says the backend
+        # would accept it: `can_request_activation` is published from the same
+        # check `OutletService.request_activation` refuses from (D31), so the
+        # button and the refusal cannot disagree. `is True`, so a reply without
+        # the field (an older backend) offers nothing rather than a refusal.
+        if outlet.get('can_request_activation') is True:
             rows.append([InlineKeyboardButton(
                 f"🚀 {i18n.get('staff.sales.card.request_activation', language)}",
                 callback_data=f"staff_sales_activate_{outlet_id}",
+            )])
+        # D31: drawn from the backend's answer (`OutletService.can_set_phone`),
+        # never from the stage. The label says only whether there is a number
+        # to change, read off the contact the card's own text prints.
+        if outlet.get('can_set_phone') is True:
+            label = (
+                i18n.get('staff.sales.card.change_phone', language)
+                if primary_contact(outlet).get('phone')
+                else i18n.get('staff.sales.card.add_phone', language)
+            )
+            rows.append([InlineKeyboardButton(
+                f"📞 {label}",
+                callback_data=f"staff_sales_setphone_{outlet_id}",
             )])
         if outlet.get('stage') in TRYOUT_STAGES:
             rows.append([InlineKeyboardButton(
@@ -348,6 +382,20 @@ class SalesKeyboards:
             )])
         rows.append(SalesKeyboards._back_to_hub(language))
         return InlineKeyboardMarkup(rows)
+
+    @staticmethod
+    def phone_prompt(language: str) -> InlineKeyboardMarkup:
+        """The 📞 screen's one button (D31): ❌ back to the outlet card.
+
+        Its own `staff_sales_sp_cancel` rather than the try-out's
+        `staff_back_to_main`: leaving this screen returns to the card the 📞 was
+        tapped on, and only the conversation can draw that card -- it holds the
+        outlet id.
+        """
+        return InlineKeyboardMarkup([[InlineKeyboardButton(
+            f"❌ {i18n.get('staff.cancel', language)}",
+            callback_data="staff_sales_sp_cancel",
+        )]])
 
     # ---- field onboarding ("New outlet") -------------------------------------
 
@@ -501,7 +549,8 @@ class SalesKeyboards:
 
     @staticmethod
     def approval_actions(language: str, outlet_id: int, *,
-                         has_account_candidate: bool = False) -> InlineKeyboardMarkup:
+                         has_account_candidate: bool = False,
+                         can_approve: bool = True) -> InlineKeyboardMarkup:
         """The review card's actions: approve, or ATTACH to the account whose
         phone this is, plus the four rejection reasons.
 
@@ -511,20 +560,26 @@ class SalesKeyboards:
         button whose only outcome is a refusal -- the rule the outlet card
         already follows for Start visit vs Resume visit. The keyboard looks no
         phone up of its own; it draws the answer it was handed.
+
+        `can_approve` is the row's own flag too (compensation spec §4.12, §7.4):
+        false for the operator who registered this outlet as an agent. Neither
+        door is drawn then, because the backend refuses both with
+        `SALES_OUTLET_SELF_APPROVAL`; the card keeps Reject and Back.
         """
         # Hoisted out of the f-strings, as everywhere else in this module: the
         # static literal guard's scraper cannot span an inner quote, and a
         # literal it cannot read is a button nobody checks has a handler.
-        if has_account_candidate:
-            rows = [[InlineKeyboardButton(
+        rows = []
+        if can_approve and has_account_candidate:
+            rows.append([InlineKeyboardButton(
                 f"🔗 {i18n.get('staff.sales.approvals.attach', language)}",
                 callback_data=f"staff_sales_attach_{outlet_id}",
-            )]]
-        else:
-            rows = [[InlineKeyboardButton(
+            )])
+        elif can_approve:
+            rows.append([InlineKeyboardButton(
                 f"✅ {i18n.get('staff.sales.approvals.approve', language)}",
                 callback_data=f"staff_sales_approve_{outlet_id}",
-            )]]
+            )])
         # Two reasons per row, drawn from REJECT_REASONS so the buttons and the
         # handler's allowlist can never drift apart.
         reasons = [
@@ -1112,8 +1167,9 @@ class SalesKeyboards:
     def tryout_outlet_link(language: str, outlet_id: int) -> InlineKeyboardMarkup:
         """Back to the outlet card, built ONCE for the two screens that end here.
 
-        The NO-PHONE screen lands on it because the contact is edited THERE
-        and nowhere else, and the receipt falls back to it if a 201 ever
+        The NO-PHONE screen lands on it because the card's 📞 Add phone button
+        (D31) is where an agent sets the contact phone while the outlet is a
+        prospect or on trial, and the receipt falls back to it if a 201 ever
         arrives without its `outlet` block (Task 5 publishes one on every
         success, so the receipt normally draws the card itself). Both paths END
         the conversation first, which is what lets this borrow the hub's own
@@ -1144,3 +1200,134 @@ class SalesKeyboards:
                 callback_data=f"staff_sales_stats_{choice}",
             ))
         return InlineKeyboardMarkup([row, SalesKeyboards._back_to_main(language)])
+
+    # ---- compensation: "My earnings" (spec §7.2) --------------------------------------------
+    #
+    # Month keys are hoisted out of the f-strings, and every callback prefix is a literal, for
+    # the routing guard: it materialises each `{...}` as `1`, so `staff_sales_earn_l_1_1` is
+    # checked against `^staff_sales_earn_l_\d+_\d+$`.
+
+    @staticmethod
+    def _past_statements_row(language: str) -> List[InlineKeyboardButton]:
+        """Past statements (S3), from the summary and from a Statement."""
+        return [InlineKeyboardButton(
+            f"📚 {i18n.get('staff.sales.earnings.past_statements', language)}",
+            callback_data="staff_sales_earn_h",
+        )]
+
+    @staticmethod
+    def _earnings_back_row(language: str) -> List[InlineKeyboardButton]:
+        """Back to the summary, under every My earnings screen but the summary itself."""
+        return [InlineKeyboardButton(
+            f"⬅️ {i18n.get('staff.back', language)}",
+            callback_data="staff_sales_earn",
+        )]
+
+    @staticmethod
+    def earnings(language: str, data: Dict) -> InlineKeyboardMarkup:
+        """The summary card's keyboard, drawn from the S1 answer it sits under.
+
+        A Credited orders button for each open month that has an estimate (the newest named in
+        full, an older one by its month alone), the pipeline and penalties screens, the last
+        statement and Past statements, Refresh and Back. Never a button for a month under
+        review: a closed month shows no numbers until it is approved (I-14).
+        """
+        rows = []
+        if data.get('state') != 'not_started':
+            for index, month in enumerate(data.get('open_months') or []):
+                if not month.get('configured'):
+                    continue
+                period = month.get('month') or ''
+                month_key = period.replace('-', '')
+                label = format_pay_month(period)
+                text = (f"🧾 {i18n.get('staff.sales.earnings.lines_title', language)} {label}"
+                        if index == 0 else f"🧾 {label}")
+                rows.append([InlineKeyboardButton(text, callback_data=f"staff_sales_earn_l_{month_key}_1")])
+            rows.append([
+                InlineKeyboardButton(
+                    f"⏳ {i18n.get('staff.sales.earnings.pipeline_title', language)}",
+                    callback_data="staff_sales_earn_p",
+                ),
+                InlineKeyboardButton(
+                    f"⚠️ {i18n.get('staff.sales.earnings.penalties', language)}",
+                    callback_data="staff_sales_earn_x",
+                ),
+            ])
+            statement_month = (data.get('last_statement') or {}).get('month')
+            if statement_month:
+                month_key = statement_month.replace('-', '')
+                rows.append([InlineKeyboardButton(
+                    f"📄 {i18n.get('staff.sales.earnings.statement', language)} {format_pay_month(statement_month)}",
+                    callback_data=f"staff_sales_earn_s_{month_key}",
+                )])
+                rows.append(SalesKeyboards._past_statements_row(language))
+        rows.append([InlineKeyboardButton(
+            f"🔄 {i18n.get('staff.sales.earnings.refresh', language)}",
+            callback_data="staff_sales_earn",
+        )])
+        rows.append([InlineKeyboardButton(
+            f"⬅️ {i18n.get('staff.back', language)}",
+            callback_data="staff_profile",
+        )])
+        return InlineKeyboardMarkup(rows)
+
+    @staticmethod
+    def earnings_lines(language: str, month_key: str, page: int, has_more: bool) -> InlineKeyboardMarkup:
+        """Previous and next page, and Back to the summary. "Next" is drawn only when the
+        backend said `has_more`: the bot never guesses there is another page."""
+        nav = []
+        if page > 1:
+            prev_page = page - 1
+            nav.append(InlineKeyboardButton(
+                f"◀️ {i18n.get('staff.sales.list.prev', language)}",
+                callback_data=f"staff_sales_earn_l_{month_key}_{prev_page}",
+            ))
+        if has_more:
+            next_page = page + 1
+            nav.append(InlineKeyboardButton(
+                f"{i18n.get('staff.sales.list.next', language)} ▶️",
+                callback_data=f"staff_sales_earn_l_{month_key}_{next_page}",
+            ))
+        rows = [nav] if nav else []
+        rows.append(SalesKeyboards._earnings_back_row(language))
+        return InlineKeyboardMarkup(rows)
+
+    @staticmethod
+    def earnings_back(language: str) -> InlineKeyboardMarkup:
+        """The pipeline and penalties screens: Back to the summary and nothing else."""
+        return InlineKeyboardMarkup([SalesKeyboards._earnings_back_row(language)])
+
+    @staticmethod
+    def earnings_statement(language: str, month: str) -> InlineKeyboardMarkup:
+        """Under a Statement (S4, `month` "YYYY-MM"): that month's Credited orders, Past
+        statements, and Back to the summary."""
+        month_key = month.replace('-', '')
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(
+                f"🧾 {i18n.get('staff.sales.earnings.lines_title', language)} {format_pay_month(month)}",
+                callback_data=f"staff_sales_earn_l_{month_key}_1",
+            )],
+            SalesKeyboards._past_statements_row(language),
+            SalesKeyboards._earnings_back_row(language),
+        ])
+
+    @staticmethod
+    def earnings_statements(language: str, items: List[Dict]) -> InlineKeyboardMarkup:
+        """Past statements: one button per S3 month, in S3's order (newest first), each opening
+        its Statement, then Back. A label reads "MM.YYYY · total · status" in the last-statement
+        line's words, and a trial month carries the marker the summary gives a trial month."""
+        rows = []
+        for item in items:
+            period = item.get('month') or ''
+            month_key = period.replace('-', '')
+            parts = [format_pay_month(period), format_pay_amount(item.get('total'), language),
+                     format_pay_status(item.get('status'), language)]
+            if item.get('is_shadow'):
+                # A trial month is approved and never paid (I-16): its total is not pay due.
+                parts.append(i18n.get('staff.sales.earnings.not_counted_shadow', language))
+            rows.append([InlineKeyboardButton(
+                ' · '.join(part for part in parts if part),
+                callback_data=f"staff_sales_earn_s_{month_key}",
+            )])
+        rows.append(SalesKeyboards._earnings_back_row(language))
+        return InlineKeyboardMarkup(rows)

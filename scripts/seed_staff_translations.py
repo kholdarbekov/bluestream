@@ -22,6 +22,12 @@ from shared.staff_constants import (  # noqa: E402
     FAILED_DELIVERY_REASONS,
     RECONCILIATION_RISK_FLAGS,
     SALES_EVENTS,
+    SALES_PAY_DIFFERENCE_CAUSES,
+    SALES_PAY_LEDGER_KINDS,
+    SALES_PAY_PENALTY_STATUSES,
+    SALES_PAY_PERIOD_STATUSES,
+    SALES_PAY_PIPELINE_WAITING,
+    SALES_PAY_REVERSAL_CAUSES,
     STAFF_BOT_ROLES,
 )
 from shared.enums import (  # noqa: E402
@@ -502,6 +508,20 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "❌ <b>{outlet_name}</b> {order_number} buyurtmasini rad etdi. {reason}",
         "ru": "❌ <b>{outlet_name}</b> отклонила заказ {order_number}. {reason}",
     },
+    # A manager's decision on an agent's second order of the day at one outlet (compensation spec
+    # C14, §7.6). Rendered by the webhook's generic branch, so the glyph stays in the row like its
+    # two siblings above (§8.5). A reject always carries the manager's reason
+    # (`OrderService.require_admin_reason` refuses a blank one), so the colon form never dangles.
+    "staff.sales.notify.agent_order_approved": {
+        "en": "✅ Order {order_number} for <b>{outlet_name}</b> was approved and is in the delivery queue.",
+        "uz": "✅ <b>{outlet_name}</b> uchun {order_number} buyurtmasi tasdiqlandi va yetkazish navbatida.",
+        "ru": "✅ Заказ {order_number} для <b>{outlet_name}</b> одобрен и стоит в очереди на доставку.",
+    },
+    "staff.sales.notify.agent_order_rejected": {
+        "en": "❌ Order {order_number} for <b>{outlet_name}</b> was not approved and is cancelled. Reason: {reason}",
+        "uz": "❌ <b>{outlet_name}</b> uchun {order_number} buyurtmasi tasdiqlanmadi va bekor qilindi. Sabab: {reason}",
+        "ru": "❌ Заказ {order_number} для <b>{outlet_name}</b> не одобрен и отменён. Причина: {reason}",
+    },
     # The morning digest's header line (phase 2b), seeded in its FINAL copy so
     # this row has exactly one owner: Task 8 renders it and does not reseed it.
     # It carries `<b>` like its two order siblings, and exactly ONE replacement
@@ -522,6 +542,36 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "📋 <b>Bugungi ishingiz — {date}</b>",
         "ru": "📋 <b>Ваш день — {date}</b>",
     },
+    # The two pay pushes' headlines (compensation spec §7.5, §8.2). Words only, `<b>` around
+    # the whole headline (§8.5): the pay renderer adds the glyph and every figure line in
+    # code. The approval row carries exactly ONE field, the statement's month, already
+    # formatted by the bot. Until the dedicated renderers land in `webhook_server`, the
+    # generic `sales_event_handler` branch prints these rows and cannot fill `{month}`, so
+    # the pay pushes must not reach an agent before those renderers ship.
+    "staff.sales.notify.pay_penalty_confirmed": {
+        "en": "<b>Penalty confirmed</b>",
+        "uz": "<b>Jarima tasdiqlandi</b>",
+        "ru": "<b>Штраф подтверждён</b>",
+    },
+    "staff.sales.notify.pay_statement_approved": {
+        "en": "<b>Pay for {month} is approved</b>",
+        "uz": "<b>{month} uchun ish haqi tasdiqlandi</b>",
+        "ru": "<b>Оплата за {month} утверждена</b>",
+    },
+    # The rest of the two pay pushes (compensation spec §7.5, §8.2). The shadow headline is a
+    # LITERAL key in the approval renderer, never a member of the event family. The labels
+    # are bare: the renderer adds the value after ": ", and the glyphs in code (§8.5).
+    "staff.sales.notify.pay_statement_approved_shadow": {
+        "en": "<b>Trial statement for {month} is approved (not paid)</b>",
+        "uz": "<b>{month} uchun sinov hisob-kitobi tasdiqlandi (to'lanmaydi)</b>",
+        "ru": "<b>Пробный расчёт за {month} утверждён (не выплачивается)</b>",
+    },
+    "staff.sales.notify.penalty_type": {"en": "Type", "uz": "Turi", "ru": "Тип"},
+    "staff.sales.notify.penalty_date": {"en": "Date", "uz": "Sana", "ru": "Дата"},
+    "staff.sales.notify.penalty_amount": {"en": "Amount", "uz": "Summa", "ru": "Сумма"},
+    "staff.sales.notify.counts_in": {"en": "Counts in {month}", "uz": "{month} hisobiga kiradi", "ru": "Учитывается в {month}"},
+    "staff.sales.notify.late": {"en": "late", "uz": "kechikkan", "ru": "с опозданием"},
+    "staff.sales.notify.open_earnings": {"en": "Open my earnings", "uz": "Daromadimni ochish", "ru": "Открыть мой заработок"},
     # Rendered by the BACKEND (NotificationService in-app subject), not the bot;
     # seeded here too because both seeders upsert the same `translations` table
     # by key and backend get_translation reads it regardless of category.
@@ -2745,10 +2795,18 @@ SALES_TEXT_TRANSLATIONS = {
     "error.duplicate": {"en": "A similar outlet or customer already exists nearby.", "uz": "Yaqin atrofda shunga o'xshash savdo nuqtasi yoki mijoz allaqachon bor.", "ru": "Похожая торговая точка или клиент уже есть поблизости."},
     "error.pin_required": {"en": "A location pin is required.", "uz": "Joylashuv belgisi kerak.", "ru": "Нужна геометка."},
     "error.phone_required": {"en": "A contact phone is required.", "uz": "Aloqa telefoni kerak.", "ru": "Нужен контактный телефон."},
+    # D31: a number at either phone step (the walk-in, the card's 📞) that is not an Uzbek
+    # mobile, and SALES_CONTACT_PHONE_INVALID. Says which number is wanted: a 71 … office line is
+    # a valid number, so the operator flows' "Invalid phone number format." left nothing to act on.
+    "error.mobile_required": {"en": "That is not an Uzbek mobile number. Send a mobile number, e.g. 90 123 45 67 — office landlines (71 …) are not accepted.", "uz": "Bu O'zbekiston mobil raqami emas. Mobil raqam yuboring, masalan 90 123 45 67 — ofisning shahar raqamlari (71 …) qabul qilinmaydi.", "ru": "Это не мобильный номер Узбекистана. Отправьте мобильный номер, напр. 90 123 45 67 — городские номера (71 …) не принимаются."},
     "error.stage_invalid": {"en": "This action is not possible at the outlet's current stage.", "uz": "Bu amal savdo nuqtasining hozirgi bosqichida mumkin emas.", "ru": "Действие невозможно на текущем этапе точки."},
     "error.approval_failed": {"en": "Activation failed at one step. Try again or ask an admin.", "uz": "Faollashtirish bir bosqichda to'xtadi. Qayta urinib ko'ring yoki adminga murojaat qiling.", "ru": "Активация прервалась на одном из шагов. Повторите или обратитесь к администратору."},
     "error.phone_taken": {"en": "This phone already belongs to another customer.", "uz": "Bu telefon boshqa mijozga tegishli.", "ru": "Этот телефон уже принадлежит другому клиенту."},
     "error.attach_no_account": {"en": "No existing customer account matches this outlet's contact phone.", "uz": "Bu nuqtaning aloqa telefoni bo'yicha mavjud mijoz hisobi topilmadi.", "ru": "По контактному телефону точки не найден существующий аккаунт клиента."},
+    # SALES_OUTLET_SELF_APPROVAL (compensation spec §4.12, §7.4): Approve or Attach tapped by
+    # the operator who registered the outlet as an agent. Only a stale card can send it: the
+    # queue draws neither door for them.
+    "error.approval_self": {"en": "You added this outlet yourself, so another operator has to approve it.", "uz": "Bu savdo nuqtasini o'zingiz qo'shgansiz, uni boshqa operator tasdiqlashi kerak.", "ru": "Эту точку добавили вы сами, поэтому её должен одобрить другой оператор."},
     "error.district_invalid": {"en": "Unknown district.", "uz": "Noma'lum tuman.", "ru": "Неизвестный район."},
     "hub.title": {"en": "My outlets", "uz": "Mening savdo nuqtalarim", "ru": "Мои точки"},
     # Names the due list first, because that row is the agent's day (L95: the
@@ -2782,6 +2840,16 @@ SALES_TEXT_TRANSLATIONS = {
     "card.navigate": {"en": "Navigate", "uz": "Yo'l ko'rsatish", "ru": "Маршрут"},
     "card.back_to_hub": {"en": "My outlets", "uz": "Mening nuqtalarim", "ru": "Мои точки"},
     "card.activation_requested": {"en": "Activation requested. An operator or admin will review it.", "uz": "Faollashtirish so'raldi. Operator yoki admin ko'rib chiqadi.", "ru": "Активация запрошена. Оператор или админ рассмотрит заявку."},
+    # D31: the card's 📞 button and the one-question screen behind it. Bare
+    # words: `SalesKeyboards.outlet_card` draws the 📞 and `SetPhoneHandler` the
+    # ✅, so a glyph seeded here would show twice.
+    "card.add_phone": {"en": "Add phone", "uz": "Telefon qo'shish", "ru": "Добавить телефон"},
+    "card.change_phone": {"en": "Change phone", "uz": "Telefonni o'zgartirish", "ru": "Изменить телефон"},
+    "phone.enter": {"en": "Send the contact's mobile number, e.g. 90 123 45 67:", "uz": "Aloqa uchun mobil raqamni yuboring, masalan 90 123 45 67:", "ru": "Отправьте мобильный номер контакта, напр. 90 123 45 67:"},
+    "phone.saved": {"en": "Phone saved.", "uz": "Telefon saqlandi.", "ru": "Телефон сохранён."},
+    # The prompt's ❌ tapped once the screen has ended: after a save, the timeout or a restart.
+    # True in all three, where "Nothing was saved" is false under "✅ Phone saved.".
+    "phone.closed": {"en": "This screen is closed. Open the outlet card again if you need it.", "uz": "Bu oyna yopilgan. Kerak bo'lsa, nuqta kartasini qayta oching.", "ru": "Этот экран закрыт. При необходимости откройте карточку точки снова."},
     # Stages and types mirror `business_app/models/sales.py` — see the loops in
     # `_add_dynamic_keys`, which is what puts these in front of /health.
     "stage.prospect": {"en": "Prospect", "uz": "Nomzod", "ru": "Кандидат"},
@@ -2798,9 +2866,8 @@ SALES_TEXT_TRANSLATIONS = {
     "new.choose_type": {"en": "What kind of outlet is this?", "uz": "Bu qanday savdo nuqtasi?", "ru": "Какой это тип точки?"},
     "new.enter_name": {"en": "Enter the outlet name (as on the sign):", "uz": "Savdo nuqtasi nomini kiriting (peshlavhadagidek):", "ru": "Введите название точки (как на вывеске):"},
     "new.enter_contact_name": {"en": "Contact person's name (or skip):", "uz": "Aloqa uchun shaxs ismi (yoki o'tkazib yuboring):", "ru": "Имя контактного лица (или пропустите):"},
-    "new.enter_contact_phone": {"en": "Contact phone, e.g. 90 123 45 67 (or skip — needed before activation):", "uz": "Aloqa telefoni, masalan 90 123 45 67 (yoki o'tkazing — faollashtirishdan oldin kerak bo'ladi):", "ru": "Контактный телефон, напр. 90 123 45 67 (или пропустите — понадобится до активации):"},
+    "new.enter_contact_phone": {"en": "Contact's mobile phone, e.g. 90 123 45 67 (required — the customer account will be opened on this number):", "uz": "Aloqa uchun mobil telefon, masalan 90 123 45 67 (majburiy — mijoz hisobi shu raqamga ochiladi):", "ru": "Мобильный телефон контакта, напр. 90 123 45 67 (обязательно — на этот номер будет открыт аккаунт клиента):"},
     "new.share_pin": {"en": "Share the outlet location: tap the button while standing at the door, or type the address.", "uz": "Savdo nuqtasi joylashuvini yuboring: eshik oldida turib tugmani bosing yoki manzilni yozing.", "ru": "Отправьте геолокацию точки: нажмите кнопку у входа или введите адрес."},
-    "new.share_pin_hint": {"en": "Use the button below or type the address.", "uz": "Quyidagi tugmadan foydalaning yoki manzilni yozing.", "ru": "Используйте кнопку ниже или введите адрес."},
     "new.share_pin_button": {"en": "📍 Share outlet location", "uz": "📍 Nuqta joylashuvini yuborish", "ru": "📍 Отправить геолокацию точки"},
     "new.pin_received": {"en": "Location saved: {address}", "uz": "Joylashuv saqlandi: {address}", "ru": "Геолокация сохранена: {address}"},
     "new.choose_class": {"en": "Estimated class (A = high volume, C = low) — or skip:", "uz": "Taxminiy toifa (A = yuqori hajm, C = past) — yoki o'tkazing:", "ru": "Предполагаемый класс (A — большой объём, C — малый) — или пропустите:"},
@@ -2842,6 +2909,8 @@ SALES_TEXT_TRANSLATIONS = {
     "approvals.candidate": {"en": "Phone belongs to {account} (outlets: {count})", "uz": "Telefon {account} hisobiga tegishli ({count} ta nuqta)", "ru": "Телефон принадлежит аккаунту {account} (точек: {count})"},
     "approvals.attach": {"en": "Attach to existing account", "uz": "Mavjud hisobga biriktirish", "ru": "Привязать к существующему аккаунту"},
     "approvals.attached": {"en": "Outlet attached to the existing account as a branch. The agent has been notified.", "uz": "Nuqta mavjud hisobga filial sifatida biriktirildi. Agentga xabar berildi.", "ru": "Точка привязана к существующему аккаунту как филиал. Агент уведомлён."},
+    # The queue card's line when the row's `can_approve` is false (compensation spec §7.4).
+    "approvals.own_outlet": {"en": "You added this outlet, so another operator approves it.", "uz": "Bu nuqtani siz qo'shgansiz, uni boshqa operator tasdiqlaydi.", "ru": "Эту точку добавили вы, её одобрит другой оператор."},
     # ---- phase 2a: the due list, the card's visit lines and the visit loop ----
     # Only `card.overdue`, `list.overdue_suffix`, `visit.checkin_ok`,
     # `visit.checkin_far`, `visit.order_created` and `visit.closed`
@@ -2876,6 +2945,11 @@ SALES_TEXT_TRANSLATIONS = {
     "visit.checkin_ok": {"en": "At the outlet ({distance} m)", "uz": "Nuqtada ({distance} m)", "ru": "На точке ({distance} м)"},
     "visit.checkin_far": {"en": "{distance} m from the pin — recorded", "uz": "Belgidan {distance} m uzoqda — qayd etildi", "ru": "{distance} м от метки — записано"},
     "visit.checkin_skipped": {"en": "Check-in skipped.", "uz": "Belgilash o'tkazib yuborildi.", "ru": "Отметка пропущена."},
+    # Owner rule Q9 (controller ruling T2-R3): the backend answered `in_radius` null for a pin
+    # the agent DID send, because the outlet itself has no pin, so the visit is recorded but
+    # not counted as verified. Words only: the renderer adds the warning glyph (§8.5).
+    # uz/ru: pending a native-speaker check.
+    "visit.checkin_no_location": {"en": "Your location was recorded, but this outlet has no map pin, so the distance could not be measured and this visit will not count as verified.", "uz": "Joylashuvingiz qayd etildi, lekin bu savdo nuqtasining xaritada belgisi yo'q, shuning uchun masofa o'lchanmadi va bu tashrif tasdiqlangan hisoblanmaydi.", "ru": "Ваша геопозиция записана, но у этой точки нет метки на карте, поэтому расстояние не измерено и этот визит не будет засчитан как подтверждённый."},
     "visit.stock_title": {"en": "Stock check", "uz": "Qoldiqni tekshirish", "ru": "Проверка остатков"},
     "visit.stock_hint": {"en": "Tap a product and set what is on the shelf.", "uz": "Mahsulotni bosing va javondagi miqdorni belgilang.", "ru": "Нажмите на товар и укажите остаток на полке."},
     "visit.stock_row": {"en": "On shelf", "uz": "Javonda", "ru": "На полке"},
@@ -2936,6 +3010,9 @@ SALES_TEXT_TRANSLATIONS = {
     "visit.order_pending_confirmation": {"en": "Waiting for the store to confirm it in their bot.", "uz": "Do'kon o'z botida tasdiqlashini kutmoqdamiz.", "ru": "Ждём подтверждения от магазина в его боте."},
     "visit.order_confirmed": {"en": "Confirmed — it is in the delivery queue.", "uz": "Tasdiqlandi — yetkazish navbatida.", "ru": "Подтверждён — в очереди на доставку."},
     "visit.order_auto_confirmed": {"en": "Confirmed automatically — it is in the delivery queue.", "uz": "Avtomatik tasdiqlandi — yetkazish navbatida.", "ru": "Подтверждён автоматически — в очереди на доставку."},
+    # The same-day hold's receipt line (compensation spec §7.6, C14). It promises a message
+    # only for a manager's decision: a cancellation by any other path sends none.
+    "visit.order_awaiting_staff_approval": {"en": "This outlet already has an order from today, so a manager has to approve this one before it goes to delivery. You will get a message when a manager approves or rejects it.", "uz": "Bu savdo nuqtasida bugun allaqachon buyurtma bor, shuning uchun bu buyurtma yetkazishga ketishidan oldin uni menejer tasdiqlashi kerak. Menejer uni tasdiqlasa yoki rad etsa, sizga xabar keladi.", "ru": "У этой точки уже есть заказ за сегодня, поэтому этот заказ должен одобрить менеджер, прежде чем он уйдёт в доставку. Когда менеджер одобрит или отклонит его, вам придёт сообщение."},
     "visit.close_outcome_prompt": {"en": "How did the visit end?", "uz": "Tashrif qanday yakunlandi?", "ru": "Чем закончился визит?"},
     "visit.close_notes_prompt": {"en": "Notes for the next visit (or skip):", "uz": "Keyingi tashrif uchun izoh (yoki o'tkazing):", "ru": "Заметка для следующего визита (или пропустите):"},
     "visit.next_visit_prompt": {"en": "When is the next visit?", "uz": "Keyingi tashrif qachon?", "ru": "Когда следующий визит?"},
@@ -2990,6 +3067,9 @@ SALES_TEXT_TRANSLATIONS = {
     "visit.photo_duplicate": {"en": "You have already sent this photo.", "uz": "Bu suratni allaqachon yuborgansiz.", "ru": "Вы уже отправляли это фото."},
     "visit.photo_failed": {"en": "The photo could not be saved. Send it again.", "uz": "Suratni saqlab bo'lmadi. Qaytadan yuboring.", "ru": "Фото не удалось сохранить. Отправьте ещё раз."},
     "visit.photo_forwarded": {"en": "Forwarded photos are not accepted — take the photo here.", "uz": "Uzatilgan suratlar qabul qilinmaydi — suratni shu yerda oling.", "ru": "Пересланные фото не принимаются — сделайте снимок здесь."},
+    # The check-in twin of the row above (compensation spec §7.4, review gaming F5). The one
+    # §8.5 exception: it names the 📎 button the agent must press.
+    "visit.checkin_forwarded": {"en": "Please send your current location with the 📎 → Location button, not a forwarded one.", "uz": "Iltimos, joriy joylashuvingizni 📎 → Joylashuv tugmasi orqali yuboring, uzatilganini emas.", "ru": "Пожалуйста, отправьте текущую геопозицию через 📎 → Геопозиция, а не пересланную."},
     # D26: the one-time prompt after check-in at a shop or an office, and the way past it.
     "visit.photo_request": {"en": "Take a photo of the shop — the storefront or the shelf.", "uz": "Do'konni suratga oling — peshtoq yoki javonni.", "ru": "Сфотографируйте магазин — витрину или полку."},
     "visit.photo_skip": {"en": "Skip photo", "uz": "Suratni o'tkazish", "ru": "Пропустить фото"},
@@ -3013,6 +3093,9 @@ SALES_TEXT_TRANSLATIONS = {
     # raises and three retries that deliver nothing). The figure is rendered,
     # never computed here.
     "notify.digest_more": {"en": "+{count} more", "uz": "yana {count} ta", "ru": "ещё {count}"},
+    # The approval push's button (compensation spec §7.5): that month's Statement, as a new
+    # message under the push. Bare: the renderer adds the 📄 (§8.5).
+    "notify.open_statement": {"en": "Open statement", "uz": "Hisob-kitobni ochish", "ru": "Открыть расчётный лист"},
     "error.visit_open": {"en": "You already have an open visit.", "uz": "Sizda allaqachon ochiq tashrif bor.", "ru": "У вас уже есть открытый визит."},
     "error.visit_not_open": {"en": "This visit is already closed.", "uz": "Bu tashrif allaqachon yopilgan.", "ru": "Этот визит уже закрыт."},
     "error.visit_step": {"en": "That step is already done. The visit reopens at its current step.", "uz": "Bu bosqich allaqachon bajarilgan. Tashrif joriy bosqichdan ochiladi.", "ru": "Этот шаг уже пройден. Визит откроется на текущем шаге."},
@@ -3109,7 +3192,7 @@ SALES_TEXT_TRANSLATIONS = {
     "stats.metric_new_outlets_registered": {"en": "New registered", "uz": "Yangi qo'shilgan", "ru": "Новых добавлено"},
     "stats.metric_new_outlets_activated": {"en": "New activated", "uz": "Yangi faollashgan", "ru": "Новых активировано"},
     "stats.metric_orders_placed": {"en": "Placed", "uz": "Berilgan", "ru": "Оформлено"},
-    "stats.metric_orders_delivered_paid": {"en": "Delivered and paid", "uz": "Yetkazilgan va to'langan", "ru": "Доставлено и оплачено"},
+    "stats.metric_orders_delivered_paid": {"en": "Placed orders delivered and paid", "uz": "Joylashtirilgan buyurtmalardan yetkazilgan va to'langanlari", "ru": "Размещённые заказы: доставлены и оплачены"},
     "stats.metric_bottles_delivered_paid": {"en": "Bottles delivered", "uz": "Yetkazilgan idishlar", "ru": "Бутылей доставлено"},
     "stats.metric_revenue_delivered_paid": {"en": "Revenue", "uz": "Tushum", "ru": "Выручка"},
     "stats.metric_agent_orders_cancelled": {"en": "Cancelled", "uz": "Bekor qilingan", "ru": "Отменено"},
@@ -3117,6 +3200,92 @@ SALES_TEXT_TRANSLATIONS = {
     "stats.metric_out_of_range_checkins": {"en": "Check-ins out of range", "uz": "Radiusdan tashqari belgilanishlar", "ru": "Отметки вне радиуса"},
     "stats.metric_skipped_checkins": {"en": "Check-ins skipped", "uz": "O'tkazib yuborilgan belgilanishlar", "ru": "Пропущенные отметки"},
     "stats.metric_avg_visit_minutes": {"en": "Average visit, minutes", "uz": "O'rtacha tashrif, daqiqa", "ru": "Средний визит, минут"},
+    # ---- compensation: "My earnings" (spec §7.2, §8.2) ----
+    # Words only (§8.5): every emoji, "×", "→", "≈", "·" and money sign on these screens is
+    # the handler's. A row interpolates exactly the fields its renderer passes, pinned by
+    # `test_earnings_placeholder_contract`: `render_translation` shows the humanised ENGLISH
+    # key for a row whose fields the caller did not fill, in every language.
+    "earnings.button": {"en": "My earnings", "uz": "Daromadim", "ru": "Мой заработок"},
+    "earnings.title": {"en": "My earnings", "uz": "Daromadim", "ru": "Мой заработок"},
+    "earnings.estimate_note": {"en": "Estimate as of {time}. The final amount is set after the month-end review.", "uz": "{time} holatiga taxminiy hisob. Yakuniy summa oy yakunidagi tekshiruvdan keyin belgilanadi.", "ru": "Предварительный расчёт на {time}. Итоговая сумма — после проверки в конце месяца."},
+    "earnings.not_started": {"en": "Pay tracking has not started yet.", "uz": "Ish haqi hisobi hali boshlanmagan.", "ru": "Расчёт оплаты ещё не начат."},
+    "earnings.not_configured": {"en": "Your pay terms are not set up yet. Please ask an administrator.", "uz": "Ish haqi shartlaringiz hali kiritilmagan. Administratorga murojaat qiling.", "ru": "Условия оплаты ещё не заданы. Обратитесь к администратору."},
+    "earnings.shadow_note": {"en": "Trial month: these numbers are shown for review; pay is made the old way.", "uz": "Sinov oyi: raqamlar tanishish uchun ko'rsatiladi, ish haqi avvalgidek to'lanadi.", "ru": "Пробный месяц: цифры показаны для ознакомления, оплата — по-старому."},
+    "earnings.base": {"en": "Base", "uz": "Asosiy maosh", "ru": "Оклад"},
+    "earnings.days_worked": {"en": "{worked} of {working} working days", "uz": "{working} ish kunidan {worked} kun", "ru": "{worked} из {working} рабочих дней"},
+    "earnings.commission": {"en": "Commission", "uz": "Komissiya", "ru": "Комиссия"},
+    "earnings.orders_count": {"en": "{count} orders", "uz": "{count} ta buyurtma", "ru": "заказов: {count}"},
+    # D-BANDS (v5): the per-product tier rows of the summary and the approval push
+    # (`format_pay_tiers`), the late rows' units, and the lines screen's tier-change label.
+    "earnings.units": {"en": "{count} units", "uz": "{count} dona", "ru": "{count} шт."},
+    "earnings.tier_percent": {"en": "{value}% of {net}", "uz": "{net} dan {value}%", "ru": "{value}% от {net}"},
+    "earnings.tier_scaled": {"en": "counted {amount}, less money received", "uz": "hisobga olingani {amount}, kamroq pul olingan", "ru": "учтено {amount}, получено меньше денег"},
+    "earnings.per_unit": {"en": "{amount} per unit", "uz": "donasiga {amount}", "ru": "{amount} за шт."},
+    "earnings.next_tier": {"en": "next tier from unit {from_unit} ({rate}): {count} more units", "uz": "keyingi pog'ona {from_unit}-donadan ({rate}): yana {count} dona", "ru": "следующая ступень с {from_unit}-й шт. ({rate}): ещё {count} шт."},
+    "earnings.tier_shift": {"en": "Tier change", "uz": "Pog'ona o'zgarishi", "ru": "Смена ступени"},
+    "earnings.visits_of": {"en": "{done} of {due} visits", "uz": "{due} tadan {done} ta tashrif", "ru": "{done} из {due} визитов"},
+    "earnings.gate_not_applied": {"en": "fewer than {min_due} visits due, no reduction", "uz": "rejadagi tashriflar {min_due} tadan kam, kamaytirilmaydi", "ru": "визитов по плану меньше {min_due}, без снижения"},
+    "earnings.gate_not_applied_yet": {"en": "fewer than {min_due} visits due so far; settled at month end", "uz": "hozircha rejadagi tashriflar {min_due} tadan kam; oy oxirida aniqlanadi", "ru": "пока визитов по плану меньше {min_due}; итог — в конце месяца"},
+    "earnings.commission_after_gate": {"en": "Commission after discipline", "uz": "Intizom hisobga olingan komissiya", "ru": "Комиссия с учётом дисциплины"},
+    "earnings.late": {"en": "Corrections from earlier months", "uz": "Oldingi oylar bo'yicha tuzatishlar", "ru": "Корректировки за прошлые месяцы"},
+    "earnings.new_outlets": {"en": "New outlets", "uz": "Yangi savdo nuqtalari", "ru": "Новые точки"},
+    "earnings.adjustments": {"en": "Adjustments", "uz": "Tuzatishlar", "ru": "Корректировки"},
+    "earnings.penalties": {"en": "Penalties", "uz": "Jarimalar", "ru": "Штрафы"},
+    "earnings.variable": {"en": "Variable pay", "uz": "O'zgaruvchan qism", "ru": "Переменная часть"},
+    "earnings.carry_in": {"en": "Shortfall from {month}", "uz": "{month} dan o'tgan kamomad", "ru": "Недостача за {month}"},
+    "earnings.owed_in": {"en": "Owed from {month}", "uz": "{month} dan qolgan qarz", "ru": "Долг за {month}"},
+    "earnings.carry_note": {"en": "Shortfall of {amount} will be deducted next month.", "uz": "{amount} kamomad keyingi oyda ushlab qolinadi.", "ru": "Недостача {amount} будет удержана в следующем месяце."},
+    "earnings.owed_note": {"en": "Owed: {amount}. It will be deducted from your later earnings.", "uz": "Qarz: {amount}. U keyingi daromadingizdan ushlab qolinadi.", "ru": "Долг: {amount}. Он будет удержан из вашего следующего заработка."},
+    "earnings.owed_netted_note": {"en": "Owed: {amount}. Being deducted in {month}.", "uz": "Qarz: {amount}. {month} hisob-kitobidan ushlab qolinmoqda.", "ru": "Долг: {amount}. Удерживается в расчёте за {month}."},
+    "earnings.total": {"en": "Total", "uz": "Jami", "ru": "Итого"},
+    "earnings.pipeline_summary": {"en": "{count} orders are waiting for approval, delivery or payment", "uz": "{count} ta buyurtma tasdiqlash, yetkazish yoki to'lovni kutmoqda", "ru": "Заказов в ожидании одобрения, доставки или оплаты: {count}"},
+    "earnings.pipeline_title": {"en": "Not counted yet", "uz": "Hali hisoblanmagan", "ru": "Ещё не начислено"},
+    "earnings.pipeline_note": {"en": "Commission is counted once an order is both delivered and paid. Amounts are estimates.", "uz": "Komissiya buyurtma yetkazilib, to'langanidan keyin hisoblanadi. Summalar taxminiy.", "ru": "Комиссия начисляется, когда заказ доставлен и оплачен. Суммы предварительные."},
+    "earnings.lines_title": {"en": "Credited orders", "uz": "Hisoblangan buyurtmalar", "ru": "Начисленные заказы"},
+    # S2's empty page, chosen by its own `available` and `status`: a readable month with nothing
+    # credited, and a closed month (I-14: under review, no rows until approved).
+    "earnings.lines_none": {"en": "No credited orders or new-outlet bonuses in {month}.", "uz": "{month} oyida hisoblangan buyurtmalar yoki yangi nuqta bonuslari yo'q.", "ru": "В {month} нет начисленных заказов и бонусов за новые точки."},
+    "earnings.lines_under_review": {"en": "{month} is under review — its orders appear after approval.", "uz": "{month} tekshirilmoqda — buyurtmalar tasdiqlangandan keyin ko'rinadi.", "ru": "{month} на проверке — заказы появятся после утверждения."},
+    "earnings.last_statement": {"en": "Last statement", "uz": "Oxirgi hisob-kitob", "ru": "Последний расчёт"},
+    "earnings.paid_on": {"en": "paid on {date}", "uz": "{date} da to'langan", "ru": "выплачено {date}"},
+    "earnings.statement": {"en": "Statement", "uz": "Hisob-kitob varaqasi", "ru": "Расчётный лист"},
+    # The Statement screen (S4) and Past statements (S3).
+    "earnings.statement_title": {"en": "Statement — {month}", "uz": "Hisob-kitob varaqasi — {month}", "ru": "Расчётный лист — {month}"},
+    "earnings.past_statements": {"en": "Past statements", "uz": "Oldingi hisob-kitoblar", "ru": "Прошлые расчётные листы"},
+    "earnings.past_empty": {"en": "No approved statements yet.", "uz": "Hozircha tasdiqlangan hisob-kitob yo'q.", "ru": "Утверждённых расчётных листов пока нет."},
+    # S4's refusal (SALES_PAY_STATEMENT_NOT_AVAILABLE, `API_ERROR_CODE_KEY_MAP`): a stale statement button.
+    "earnings.statement_unavailable": {"en": "This statement is not available yet — it appears after the month is approved.", "uz": "Bu hisob-kitob hali mavjud emas — oy tasdiqlangandan keyin paydo bo'ladi.", "ru": "Этот расчётный лист пока недоступен — он появится после утверждения месяца."},
+    "earnings.refresh": {"en": "Refresh", "uz": "Yangilash", "ru": "Обновить"},
+    "earnings.for_month": {"en": "for {month}", "uz": "{month} uchun", "ru": "за {month}"},
+    "earnings.reason": {"en": "Reason", "uz": "Sabab", "ru": "Причина"},
+    "earnings.page": {"en": "Page {page}", "uz": "{page}-sahifa", "ru": "Страница {page}"},
+    "earnings.more": {"en": "+{count} more", "uz": "yana {count} ta", "ru": "ещё {count}"},
+    "earnings.empty": {"en": "Nothing here yet.", "uz": "Hozircha hech narsa yo'q.", "ru": "Пока ничего нет."},
+    # Final-review I2/M5: a trial-month line or estimate the backend publishes as not counted.
+    "earnings.not_counted_shadow": {"en": "trial month, not counted", "uz": "sinov oyi, hisoblanmaydi", "ru": "пробный месяц, не учитывается"},
+    # The five §8.4 families, one row per member of the shared tuple each is built from
+    # (`_add_dynamic_keys` above registers them).
+    "earnings.status.open": {"en": "Open", "uz": "Ochiq", "ru": "Открыт"},
+    "earnings.status.closed": {"en": "Under review", "uz": "Tekshirilmoqda", "ru": "На проверке"},
+    "earnings.status.approved": {"en": "Approved", "uz": "Tasdiqlangan", "ru": "Утверждён"},
+    "earnings.status.paid": {"en": "Paid", "uz": "To'langan", "ru": "Выплачен"},
+    "earnings.kind.commission_credit": {"en": "Commission", "uz": "Komissiya", "ru": "Комиссия"},
+    "earnings.kind.commission_reversal": {"en": "Reversal", "uz": "Bekor qilingan komissiya", "ru": "Сторно"},
+    "earnings.kind.commission_difference": {"en": "Commission change", "uz": "Komissiya o'zgarishi", "ru": "Изменение комиссии"},
+    "earnings.kind.new_outlet_bonus": {"en": "New outlet bonus", "uz": "Yangi nuqta bonusi", "ru": "Бонус за новую точку"},
+    "earnings.cause.not_delivered": {"en": "order no longer delivered", "uz": "buyurtma endi yetkazilgan emas", "ru": "заказ больше не доставлен"},
+    "earnings.cause.nothing_received": {"en": "no payment left on the order", "uz": "buyurtmada to'lov qolmadi", "ru": "по заказу не осталось оплаты"},
+    "earnings.cause.received_reduced": {"en": "less money received", "uz": "kamroq pul olindi", "ru": "получено меньше денег"},
+    "earnings.cause.received_restored": {"en": "money received again", "uz": "pul qayta olindi", "ru": "деньги снова получены"},
+    "earnings.cause.units_reduced": {"en": "fewer units on the order", "uz": "buyurtmada kamroq dona", "ru": "в заказе меньше единиц"},
+    "earnings.cause.units_restored": {"en": "units back on the order", "uz": "donalar buyurtmaga qaytdi", "ru": "единицы снова в заказе"},
+    "earnings.waiting.approval": {"en": "waiting for manager approval", "uz": "menejer tasdig'ini kutmoqda", "ru": "ждёт одобрения менеджера"},
+    "earnings.waiting.delivery": {"en": "waiting for delivery", "uz": "yetkazilishi kutilmoqda", "ru": "ждёт доставки"},
+    "earnings.waiting.payment": {"en": "waiting for payment", "uz": "to'lov kutilmoqda", "ru": "ждёт оплаты"},
+    "earnings.penalty_status.proposed": {"en": "Proposed", "uz": "Taklif qilingan", "ru": "Предложен"},
+    "earnings.penalty_status.confirmed": {"en": "Confirmed", "uz": "Tasdiqlangan", "ru": "Подтверждён"},
+    "earnings.penalty_status.rejected": {"en": "Rejected", "uz": "Rad etilgan", "ru": "Отклонён"},
+    "earnings.penalty_status.cancelled": {"en": "Cancelled", "uz": "Bekor qilingan", "ru": "Отменён"},
 }
 
 
@@ -3305,6 +3474,24 @@ def _add_dynamic_keys(keys: Set[str]) -> None:
 
     for period in ("today", "week", "month"):
         keys.add(f"staff.sales.stats.period_{period}")
+
+    # My earnings (compensation spec §8.4): the twin of `staff_bot/i18n.py::
+    # _add_dynamic_family_keys`. Unlike the visit tuples above these are importable here,
+    # because they live in `shared/`, so both registries loop the same tuples.
+    for status in SALES_PAY_PERIOD_STATUSES:
+        keys.add(f"staff.sales.earnings.status.{status}")
+
+    for kind in SALES_PAY_LEDGER_KINDS:
+        keys.add(f"staff.sales.earnings.kind.{kind}")
+
+    for waiting in SALES_PAY_PIPELINE_WAITING:
+        keys.add(f"staff.sales.earnings.waiting.{waiting}")
+
+    for status in SALES_PAY_PENALTY_STATUSES:
+        keys.add(f"staff.sales.earnings.penalty_status.{status}")
+
+    for cause in SALES_PAY_REVERSAL_CAUSES + SALES_PAY_DIFFERENCE_CAUSES:
+        keys.add(f"staff.sales.earnings.cause.{cause}")
 
     # Delivery statuses — derived from the ENUM, never a hand-written tuple.
     # A hardcoded six-status list here (and the twin in

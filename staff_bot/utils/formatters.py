@@ -6,7 +6,13 @@ import html
 from decimal import Decimal, InvalidOperation
 from typing import Dict, Any, List, Optional
 from datetime import datetime
+from shared.staff_constants import SALES_PAY_PERIOD_STATUSES
 from staff_bot.i18n import i18n
+
+# Telegram's own ceiling for one message. Past it `sendMessage` and `editMessageText` raise a 400,
+# and a push's retries raise identically, so every long screen and push here fits itself under
+# this one number (the earnings summary and lists, the morning digest, the approval push).
+TELEGRAM_TEXT_LIMIT = 4096
 
 # One literal key per `FAILED_DELIVERY_REASONS` code, so no key is built at
 # runtime. test_every_failure_reason_has_exactly_one_seeded_label keeps the two
@@ -32,16 +38,24 @@ def _escape(value: Any) -> str:
     return escape_html(value)
 
 
+def format_number(value) -> str:
+    """A figure grouped in thousands with no currency ("1,001", "12,500,000"): tier bounds, unit
+    counts, a tier's rate, net and amount. Whole, as money is printed; '0' for a missing figure,
+    and anything unreadable is echoed, never raised. `format_currency` groups through it, so a
+    count and a sum on one card cannot be grouped two ways."""
+    if value is None:
+        return '0'
+    try:
+        return f"{float(value):,.0f}"
+    except (ValueError, TypeError):
+        return str(value)
+
+
 def format_currency(amount, currency: Optional[str] = None, language: str = 'en') -> str:
     """Format currency amount"""
     if currency is None:
         currency = i18n.get('staff.currency.uzs', language)
-    if amount is None:
-        return f"0 {currency}"
-    try:
-        return f"{float(amount):,.0f} {currency}"
-    except (ValueError, TypeError):
-        return f"{amount} {currency}"
+    return f"{format_number(amount)} {currency}"
 
 
 def format_quantity(value: Any) -> str:
@@ -549,6 +563,162 @@ def format_local_date(value: Any, fmt: str = '%d.%m.%Y') -> str:
     if isinstance(moment, _date):
         return moment.strftime(fmt)
     return ''
+
+
+# ---- Sales-agent pay (compensation spec §7.2, §7.5) ---------------------------------------
+#
+# One home for how pay money reads, shared by the My earnings screens and the two pay pushes,
+# so a figure cannot look one way on the summary and another in the push that links to it.
+# Every figure is the backend's: nothing below adds one or compares it against a rule. Pay
+# amounts arrive whole; a tier's net is order money and prints to the whole UZS, as every sum here.
+
+# U+2212, the true minus. A hyphen-minus in front of a grouped figure reads as a dash.
+MINUS_SIGN = '−'
+
+
+def signed_currency(value, language: str) -> str:
+    """`+` or `−` (U+2212), then `format_currency` of the absolute amount.
+
+    For money whose sign is the news: a correction from an earlier month, a bonus, an
+    adjustment, a carried shortfall. Zero reads `+0`.
+    """
+    amount = float(value or 0)
+    sign = MINUS_SIGN if amount < 0 else '+'
+    return f"{sign}{format_currency(abs(amount), language=language)}"
+
+
+def signed_deduction(amount, language: str) -> str:
+    """A deduction the backend publishes as a positive amount (a penalty), with its minus."""
+    return signed_currency(-float(amount or 0), language)
+
+
+def format_pay_amount(value, language: str) -> str:
+    """A figure that is normally positive (base, commission, variable, total): plain, or
+    through `signed_currency` once it is below zero. Nothing below the paid total is floored
+    (C1), so a negative variable pay is printed with its minus, never hidden."""
+    if value is not None and float(value) < 0:
+        return signed_currency(value, language)
+    return format_currency(value, language=language)
+
+
+def format_pay_month(month: Optional[str]) -> str:
+    """A pay month as the wire carries it ("2026-10") as the agent reads it ("10.2026").
+
+    Through `format_local_date`, the date SSOT: the first of the month is a bare date, so no
+    timezone can move it. '' for a missing month, so the caller gates its line on the result.
+    """
+    if not month:
+        return ''
+    return format_local_date(f"{month}-01", '%m.%Y')
+
+
+def format_pay_status(status, language: str) -> str:
+    """A pay month's published status in the agent's words ("Under review", "Paid"); '' for a
+    value the family lacks. One reading for the My earnings screens and their buttons."""
+    if status not in SALES_PAY_PERIOD_STATUSES:
+        return ''
+    return i18n.get(f'staff.sales.earnings.status.{status}', language)
+
+
+def format_pay_carry_in(carry_in: Optional[Dict[str, Any]], language: str) -> Optional[str]:
+    """The carried-in row, labelled by its published `source`, or None when nothing came in.
+
+    `owed` is a balance the agent owed after leaving, netted here (I-28); anything else is
+    last month's shortfall carried forward (C1). Which one it is was decided by the backend's
+    `carry_in_view` and is never re-derived from amounts here.
+    """
+    carry_in = carry_in or {}
+    amount = carry_in.get('amount')
+    if amount is None or float(amount) >= 0:
+        return None
+    month = format_pay_month(carry_in.get('from_month'))
+    if carry_in.get('source') == 'owed':
+        label = i18n.get('staff.sales.earnings.owed_in', language, month=month)
+    else:
+        label = i18n.get('staff.sales.earnings.carry_in', language, month=month)
+    return f"{label}: {signed_currency(amount, language)}"
+
+
+def format_pay_balance_note(carry_out, owed, language: str) -> Optional[str]:
+    """The sentence under a total that a paid 0 would otherwise hide, or None.
+
+    A negative `carry_out` is a shortfall approval moves into next month; a positive `owed`
+    is one the agent owes because employment does not continue (C1, I-26). The backend never
+    publishes both; `{amount}` is the absolute value, as the copy reads.
+    """
+    if carry_out is not None and float(carry_out) < 0:
+        return i18n.get(
+            'staff.sales.earnings.carry_note', language,
+            amount=format_currency(abs(float(carry_out)), language=language),
+        )
+    if owed is not None and float(owed) > 0:
+        return i18n.get(
+            'staff.sales.earnings.owed_note', language,
+            amount=format_currency(owed, language=language),
+        )
+    return None
+
+
+def format_pay_product_name(names: Optional[Dict[str, Any]], language: str) -> str:
+    """A product's published name (`product_name {en, uz, ru}`) in the agent's language, else
+    English, escaped for the HTML message (§7.2). The one reading of it for the tier rows, the
+    late rows and the credited-order units."""
+    names = names or {}
+    return escape_html(names.get(language) or names.get('en'))
+
+
+def _tier_range(tier: Dict[str, Any]) -> str:
+    """"501–1,000", or "1,001+" for the open-ended top tier: built from the published bounds,
+    the one string §5.1 leaves to the clients. The `–` and the `+` are glyphs (§8.5)."""
+    start = format_number(tier.get('from_unit'))
+    end = tier.get('to_unit')
+    return f"{start}+" if end is None else f"{start}–{format_number(end)}"
+
+
+def _tier_rate(mode: Optional[str], value, language: str) -> str:
+    """A next tier's rate in words: "2,000 UZS per unit", or "2.5%" (the published value)."""
+    if mode == 'percent':
+        return f"{format_quantity(value)}%"
+    return i18n.get('staff.sales.earnings.per_unit', language, amount=format_currency(value, language=language))
+
+
+def format_pay_tiers(product: Dict[str, Any], language: str, *, with_next: bool) -> List[str]:
+    """One product's commission as the summary and the approval push print it (§7.2, §7.5):
+
+        "   19L: 700 units · 800,000 UZS"
+        "      501–1,000: 200 × 1,500 = 300,000"       (a per-unit tier)
+        "      1+: 2% of 12,500,000 = 250,000"          (a percent tier)
+        "      🎯 next tier from unit 1,001 (2,000 UZS per unit): 301 more units"
+
+    One row per published tier, all of which hold units. A tier whose `amount` differs from its
+    `amount_full` holds an order paid on less money (D-Q3), so the row keeps "units × rate =
+    amount_full" true and adds what it counted (V5-B10). The 🎯 row is drawn only `with_next`
+    and only when the backend published a next tier (an open estimate's, §5.2). Every figure is
+    a field; the range string is the one thing built here. The first row is always the product
+    line, which is all a card short of room keeps (§7.2 "Length").
+    """
+    name = format_pay_product_name(product.get('product_name'), language)
+    units = i18n.get('staff.sales.earnings.units', language, count=format_number(product.get('units')))
+    lines = [f"   {name}: {units} · {format_currency(product.get('total'), language=language)}"]
+    for tier in product.get('tiers') or []:
+        if tier.get('mode') == 'percent':
+            rate = i18n.get('staff.sales.earnings.tier_percent', language,
+                            value=format_quantity(tier.get('value')), net=format_number(tier.get('net')))
+        else:
+            rate = f"{format_number(tier.get('units'))} × {format_number(tier.get('value'))}"
+        line = f"      {_tier_range(tier)}: {rate} = {format_number(tier.get('amount_full'))}"
+        if tier.get('amount') != tier.get('amount_full'):
+            counted = i18n.get('staff.sales.earnings.tier_scaled', language, amount=format_number(tier.get('amount')))
+            line = f"{line} · {counted}"
+        lines.append(line)
+    next_tier = product.get('next_tier') if with_next else None
+    if next_tier:
+        hint = i18n.get('staff.sales.earnings.next_tier', language,
+                        from_unit=format_number(next_tier.get('from_unit')),
+                        rate=_tier_rate(next_tier.get('mode'), next_tier.get('value'), language),
+                        count=format_number(next_tier.get('units_to_go')))
+        lines.append(f"      🎯 {hint}")
+    return lines
 
 
 def format_user_card(user: Dict[str, Any], language: str) -> str:

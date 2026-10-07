@@ -1,4 +1,4 @@
-import { extractApiErrorMessage } from '../utils/apiError';
+import { apiErrorCode, extractApiErrorMessage } from '../utils/apiError';
 
 /**
  * Shared place-group copy: the fence-code map, the audit-event labels and the
@@ -141,7 +141,7 @@ export const placeGroupEventText = (eventType, t) => {
 };
 
 export const placeGroupErrorMessage = (error, t, fallback) => {
-  const code = error?.response?.data?.data?.error_code;
+  const code = apiErrorCode(error);
   const known = code ? PLACE_GROUP_ERROR_MESSAGES.get(code) : null;
   if (known) {
     return t(known[0], known[1]);

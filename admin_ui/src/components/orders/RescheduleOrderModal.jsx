@@ -6,7 +6,7 @@ import dayjs from 'dayjs';
 import customParseFormat from 'dayjs/plugin/customParseFormat';
 
 import adminService from '../../services/adminService';
-import { extractApiErrorMessage } from '../../utils/apiError';
+import { apiErrorCode, extractApiErrorMessage } from '../../utils/apiError';
 import AsyncButton from '../common/AsyncButton';
 import DeliverySchedulePicker from './DeliverySchedulePicker';
 import { buildSchedulePayload, presetFromWindow } from './deliverySchedule';
@@ -229,7 +229,7 @@ const RescheduleForm = ({ order, onClose, onRescheduled }) => {
   // copied into state from onError: React Query runs onError before it leaves `isPending`, so a
   // copy rendered beside a Save that was still spinning. A new submit clears it.
   const errorText = mutation.error
-    ? rescheduleErrorText(mutation.error.response?.data?.data?.error_code, t)
+    ? rescheduleErrorText(apiErrorCode(mutation.error), t)
       || extractApiErrorMessage(mutation.error, t('ui.common.error_occurred', 'An error occurred'))
     : null;
 

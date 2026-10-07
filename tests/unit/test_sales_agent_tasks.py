@@ -4,6 +4,7 @@ import inspect
 import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from celery.exceptions import Retry
@@ -14,7 +15,12 @@ from business_app.services.sales import notifications
 from business_app.services.sales.digest_service import AgentDigestService
 from business_app.services.sales.outlet_service import OutletService
 from business_app.tasks import sales_agent_tasks
-from shared.staff_constants import SALES_EVENT_MORNING_DIGEST, SALES_EVENTS
+from shared.staff_constants import (
+    SALES_EVENT_AGENT_ORDER_APPROVED,
+    SALES_EVENT_AGENT_ORDER_CONFIRMED,
+    SALES_EVENT_MORNING_DIGEST,
+    SALES_EVENTS,
+)
 from tests.integration.test_outlet_create import GROCERY
 from tests.unit.test_sales_agent_role import make_sales_agent_user
 
@@ -166,6 +172,56 @@ def test_a_retried_sales_event_carries_the_same_event_id_so_the_chat_gets_one_me
     assert [call[0][1]["payload"] for call in sent] == [payload, payload, payload]
 
 
+def test_a_domain_event_id_is_the_dedup_key_whatever_the_task_id(monkeypatch):
+    """Move M3 (compensation spec §7.5): a push with a domain id (`order-approval:<id>:approved`)
+    keys the staff bot's dedup on THAT id, so two task runs for one decision (a re-enqueue under a
+    new task id, a direct call) put one message in the agent's chat. Without one, the task id
+    stays the key, as the test above pins."""
+    sent = _spy(monkeypatch, sales_agent_tasks, "_send_staff_webhook", result=True)
+    payload = {"outlet_id": 5, "outlet_name": "X", "order_id": 9, "order_number": "SA_1", "reason": None}
+
+    for task_id in ("task-1", "task-2"):
+        sales_agent_tasks.push_sales_event.push_request(id=task_id)
+        try:
+            sales_agent_tasks.push_sales_event.run(
+                777000111, SALES_EVENT_AGENT_ORDER_APPROVED, payload, event_id="order-approval:5:approved"
+            )
+        finally:
+            sales_agent_tasks.push_sales_event.pop_request()
+    sales_agent_tasks.push_sales_event.run(
+        777000111, SALES_EVENT_AGENT_ORDER_APPROVED, payload, event_id="order-approval:5:approved"
+    )
+
+    assert [call[0][1]["event_id"] for call in sent] == ["sales-event:order-approval:5:approved"] * 3
+
+
+def test_an_outcome_push_carries_its_event_id_and_a_store_answer_is_unchanged(db, agent, monkeypatch):
+    """`notify_agent_order_event(event_id=)`: the held order's outcome passes its domain id; the
+    store's own answer passes none, so its `.delay` call keeps its exact old shape."""
+    task = sales_agent_tasks.push_sales_event
+    signature = inspect.signature(task.run)
+    delays = []
+
+    def fake(*args, **kwargs):
+        signature.bind(*args, **kwargs)
+        delays.append((args, kwargs))
+
+    monkeypatch.setitem(vars(task), "delay", fake)
+    order = SimpleNamespace(id=9, order_number="SA_000009_26", created_by_staff_id=agent.id)
+    outlet = SimpleNamespace(id=5, name="Bahor market", assigned_agent_user_id=None, onboarded_by_user_id=None)
+    payload = {"outlet_id": 5, "outlet_name": "Bahor market", "order_id": 9, "order_number": "SA_000009_26", "reason": None}
+
+    notifications.notify_agent_order_event(
+        order, outlet, SALES_EVENT_AGENT_ORDER_APPROVED, event_id="order-approval:3:approved"
+    )
+    notifications.notify_agent_order_event(order, outlet, SALES_EVENT_AGENT_ORDER_CONFIRMED)
+
+    assert delays == [
+        ((777000111, SALES_EVENT_AGENT_ORDER_APPROVED, payload), {"event_id": "order-approval:3:approved"}),
+        ((777000111, SALES_EVENT_AGENT_ORDER_CONFIRMED, payload), {}),
+    ]
+
+
 def test_managers_get_in_app_and_operators_get_a_push(db, agent, admin_user, operator_user, monkeypatch):
     from business_app.services.notification_service import NotificationService
 
@@ -189,6 +245,47 @@ def test_managers_get_in_app_and_operators_get_a_push(db, agent, admin_user, ope
     assert delays == [
         ((777000222, "activation_requested", {"outlet_id": outlet.id, "outlet_name": "Bahor market", "reason": None}), {})
     ]
+
+
+def test_the_onboarder_is_asked_on_neither_channel_to_approve_their_own_outlet(
+    db, admin_user, operator_user, monkeypatch
+):
+    """T-SELF-4, the notification half (spec §4.12): `OutletService.approve` refuses the outlet's
+    onboarder, so the alert that asks for an approval reaches everyone else and never them.
+
+    The onboarder is an ADMIN who also holds the operator and sales-agent roles and has a Telegram
+    chat, so they sit in BOTH audiences: the admin/manager in-app fan-out and the operator push.
+    The push spy is bound to the task's own signature and patched on the instance `__dict__`
+    (`_patch_task_publish`, tests/unit/test_delivery_service_business_rules.py).
+    """
+    from business_app.services.notification_service import NotificationService
+    from shared.enums import UserRole
+
+    onboarder = make_sales_agent_user(
+        db, phone="+998901239111", role=UserRole.ADMIN, staff_roles=["operator", "sales_agent"]
+    )
+    onboarder.telegram_id = "777000333"
+    db.session.add(SalesAgentProfile(user_id=onboarder.id, districts=["chilanzar"]))
+    operator_user.telegram_id = "777000222"
+    db.session.commit()
+    in_app = _spy(monkeypatch, NotificationService, "send_notification")
+    pushes = []
+    push_signature = inspect.signature(sales_agent_tasks.push_sales_event.run)
+
+    def _delay(*args, **kwargs):
+        push_signature.bind(*args, **kwargs)
+        pushes.append((args, kwargs))
+
+    monkeypatch.setitem(vars(sales_agent_tasks.push_sales_event), "delay", _delay)
+    outlet = OutletService.create(onboarder.id, dict(GROCERY))
+
+    result = sales_agent_tasks.notify_managers_activation_requested.run(outlet.id)
+
+    assert [call[1]["user_id"] for call in in_app] == [admin_user.id]
+    assert pushes == [
+        ((777000222, "activation_requested", {"outlet_id": outlet.id, "outlet_name": "Bahor market", "reason": None}), {})
+    ]
+    assert result == {"success": True, "managers": 1, "operators": 1}
 
 
 def _manager(db):
@@ -402,6 +499,65 @@ def test_the_exception_summary_copy_is_seeded_trilingually_and_markup_free():
     assert re.findall(r"\{(\w+)\}", subject["en"]) == []
 
 
+def test_the_manager_fan_out_skips_the_excluded_and_survives_a_bad_recipient(db, admin_user, monkeypatch):
+    """`_send_manager_in_app` (S-33): every active admin and manager, one try each, minus
+    `exclude_user_ids` (the §4.12 precedent: nobody is asked to act on their own pay)."""
+    from business_app.services.notification_service import NotificationService
+    from business_app.utils.constants import NotificationChannel, NotificationType
+
+    manager = _manager(db)
+    calls = []
+
+    # The production signature, so a drifted call raises here instead of being swallowed.
+    def fake(_self, user_id, notification_type, channels=None, template_data=None, priority="normal",
+             template_override=None, campaign_id=None):
+        calls.append((user_id, notification_type, channels, template_data, template_override))
+        if user_id == admin_user.id:
+            raise RuntimeError("inbox write failed")
+
+    monkeypatch.setattr(NotificationService, "send_notification", fake)
+
+    everyone = sales_agent_tasks._send_manager_in_app(
+        "subject.key", "content.key", fields={"count": 3}, template_data={"order_id": 7}
+    )
+    assert everyone == 1  # the admin's write raised; the manager was still notified
+    assert sorted(call[0] for call in calls) == sorted([admin_user.id, manager.id])
+
+    calls.clear()
+    excluded = sales_agent_tasks._send_manager_in_app(
+        "subject.key", "content.key", fields={"count": 3}, template_data={"order_id": 7},
+        exclude_user_ids=[manager.id],
+    )
+    assert excluded == 0
+    assert [call[0] for call in calls] == [admin_user.id]
+    assert calls[0][1:4] == (NotificationType.SYSTEM_ALERT, [NotificationChannel.IN_APP], {"order_id": 7})
+    # Unseeded keys render as themselves, which is what makes the choice of key visible.
+    override = calls[0][4]
+    assert (override.subject, override.content) == ("subject.key", "content.key")
+    assert override.get_translated("content", "ru") == "content.key"
+
+
+def test_the_awaiting_approval_alert_is_seeded_trilingually_and_markup_free():
+    """Both keys, three languages, the same four placeholders, genuine Cyrillic ru, and no amount
+    (C11): `get_translation` falls back to the KEY when a row is missing, so an unseeded alert
+    would ship the raw key into a manager's inbox and nothing would fail anywhere else."""
+    from scripts.seed_backend_translations import BACKEND_TRANSLATIONS
+
+    subject = BACKEND_TRANSLATIONS["staff.notification.subject.agent_order_awaiting_approval"]
+    content = BACKEND_TRANSLATIONS["staff.notification.content.agent_order_awaiting_approval"]
+
+    for row in (subject, content):
+        assert sorted(row) == ["en", "ru", "uz"]
+        assert all(value.strip() for value in row.values())
+        # The admin UI renders notification content as PLAIN TEXT.
+        assert all("<" not in value for value in row.values())
+        assert any("Ѐ" <= char <= "ӿ" for char in row["ru"])
+    assert {lang: sorted(re.findall(r"\{(\w+)\}", value)) for lang, value in content.items()} == {
+        lang: ["agent_name", "order_number", "outlet_name", "path"] for lang in ("en", "ru", "uz")
+    }
+    assert all(re.findall(r"\{(\w+)\}", value) == [] for value in subject.values())
+
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Which event names, spelled as a bare string literal in THIS file, would be the
@@ -411,8 +567,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SALES_EVENT_PRODUCERS = {
     "business_app/services/sales/notifications.py": SALES_EVENTS,
     "business_app/services/sales/agent_order_confirmation_service.py": SALES_EVENTS,
+    "business_app/services/sales/agent_order_approval_service.py": SALES_EVENTS,
     "business_app/services/sales/outlet_service.py": tuple(e for e in SALES_EVENTS if e not in OUTLET_STAGES),
     "business_app/tasks/sales_agent_tasks.py": SALES_EVENTS,
+    # The pay services reach the agent only through `notifications` (compensation spec §7.5).
+    "business_app/services/sales/pay_penalty_service.py": SALES_EVENTS,
+    "business_app/services/sales/pay_period_service.py": SALES_EVENTS,
 }
 
 

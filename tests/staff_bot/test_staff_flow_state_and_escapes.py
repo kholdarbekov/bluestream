@@ -331,6 +331,12 @@ ENTRY_TAP = {
     # The try-out opens from the outlet card's 🧪 button, so the tap carries an
     # outlet id — 7, the id `prepare_backend` answers for below.
     "staff_sales_tryout": "staff_sales_tryout_7",
+    # D31: the 📞 phone screen opens from the outlet card, so the tap carries an
+    # outlet id. Its entry point stores the id and asks for the number without
+    # calling the backend, so -- like Nearby -- it needs no `prepare_backend`
+    # branch. (Its /cancel redraws the card through GET /outlets/7, which the
+    # fake backend answers with its empty default.)
+    "staff_sales_set_phone": "staff_sales_setphone_7",
 }
 
 # `staff_auth` is entered by /start rather than a button and only parks an

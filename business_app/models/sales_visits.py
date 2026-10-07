@@ -23,6 +23,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    JSON,
     Numeric,
     String,
     Text,
@@ -40,6 +41,9 @@ VISIT_OUTCOMES = ("order_placed", "no_order", "closed", "owner_absent", "refused
 NO_ORDER_REASONS = ("sufficient_stock", "cash_issue", "price", "competitor", "other")
 RATE_SOURCES = ("stock_checks", "orders", "none")
 CONFIRMATION_STATUSES = ("pending", "confirmed", "declined", "expired")
+# The same-day approval hold's row vocabulary. The staff-bot-facing agent order states live in
+# shared/staff_constants.py (SALES_AGENT_ORDER_STATES).
+AGENT_ORDER_APPROVAL_STATUSES = ("pending", "approved", "rejected", "cancelled")
 PHOTO_KINDS = ("storefront", "shelf", "other")
 
 
@@ -192,6 +196,72 @@ class OrderConfirmationRequest(db.Model, TimestampMixin):
         return f"<OrderConfirmationRequest order={self.order_id} {self.status}>"
 
 
+class AgentOrderApproval(db.Model, TimestampMixin):
+    """The same-day staff approval hold on one agent order (C14).
+
+    An agent's second or later order at one outlet on one local day is held here. The decision
+    is made at placement, under an outlet row lock. Only the manager/admin queue confirms a held
+    order: every automatic confirmer skips it, and every explicit one is refused.
+
+    This is a table of its own, not a kind of `order_confirmation_requests` row, because every
+    reader of that table picks the latest pending row by `order_id` alone. The store's answer,
+    the push task and the expiry sweep would each reach a staff hold.
+
+    The CHECKs enforce the state matrix:
+
+    | status    | decided_at | decided_by_user_id | reason |
+    | pending   | NULL       | NULL               | NULL   |
+    | approved  | set        | set                | NULL   |
+    | rejected  | set        | set                | set    |
+    | cancelled | set        | set, or NULL for a system path | NULL |
+
+    `reason` is the rejecter's. The same text goes to the cancel history row's staff-only
+    `reason`, never to its customer-visible `notes`.
+    """
+
+    __tablename__ = "agent_order_approvals"
+    __table_args__ = (
+        UniqueConstraint("order_id", name="uq_agent_order_approvals_order_id"),
+        CheckConstraint(
+            f"status IN ({_quoted(AGENT_ORDER_APPROVAL_STATUSES)})", name="ck_agent_order_approvals_status"
+        ),
+        CheckConstraint("(status = 'pending') = (decided_at IS NULL)", name="ck_agent_order_approvals_decided"),
+        CheckConstraint(
+            "(status NOT IN ('approved', 'rejected') OR decided_by_user_id IS NOT NULL) "
+            "AND (status <> 'pending' OR decided_by_user_id IS NULL)",
+            name="ck_agent_order_approvals_decider",
+        ),
+        CheckConstraint("(status = 'rejected') = (reason IS NOT NULL)", name="ck_agent_order_approvals_reason"),
+        Index("ix_agent_order_approvals_status_requested_at", "status", "requested_at"),
+        Index("ix_agent_order_approvals_agent_user_id", "agent_user_id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    order_id = Column(Integer, ForeignKey("orders.id", name="fk_agent_order_approvals_order_id"), nullable=False)
+    outlet_id = Column(Integer, ForeignKey("outlets.id", name="fk_agent_order_approvals_outlet_id"), nullable=False)
+    # `order.created_by_staff_id`: the queue's agent filter, and one of the two self-decision subjects.
+    agent_user_id = Column(
+        Integer, ForeignKey("users.id", name="fk_agent_order_approvals_agent_user_id"), nullable=False
+    )
+    # Frozen evidence: the earlier same-day orders found at placement. The queue shows them live.
+    earlier_order_ids = Column(JSON, nullable=False)
+    status = Column(String(12), nullable=False, default="pending")
+    requested_at = Column(DateTime(timezone=True), nullable=False)
+    decided_at = Column(DateTime(timezone=True), nullable=True)
+    decided_by_user_id = Column(
+        Integer, ForeignKey("users.id", name="fk_agent_order_approvals_decided_by_user_id"), nullable=True
+    )
+    reason = Column(Text, nullable=True)
+
+    order = db.relationship("Order", foreign_keys=[order_id])
+    outlet = db.relationship("Outlet", foreign_keys=[outlet_id])
+    agent = db.relationship("User", foreign_keys=[agent_user_id])
+    decided_by = db.relationship("User", foreign_keys=[decided_by_user_id])
+
+    def __repr__(self):
+        return f"<AgentOrderApproval order={self.order_id} {self.status}>"
+
+
 class VisitPhoto(db.Model, TimestampMixin):
     """One photo taken at a visit, kept on Telegram (D27, reversing D17).
 
@@ -265,6 +335,10 @@ class SalesAgentDayPlan(db.Model, TimestampMixin):
     plan_date = Column(Date, nullable=False)
     due_count = Column(Integer, nullable=False, default=0)
     overdue_count = Column(Integer, nullable=False, default=0)
+    # The outlet ids behind `due_count`, frozen by the same 01:20 query that counts them, so pay
+    # and plan-vs-fact judge a past day against what was actually due. NULL on rows written
+    # before this column existed; readers then fall back to the legacy count.
+    due_outlet_ids = Column(JSON, nullable=True)
     snapshot_at = Column(DateTime(timezone=True), nullable=False)
 
     agent = db.relationship("User", foreign_keys=[agent_user_id])

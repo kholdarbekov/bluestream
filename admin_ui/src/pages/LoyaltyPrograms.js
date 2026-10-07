@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { DEFAULT_PAGE_SIZE } from '../utils/constants';
+import { apiErrorCode } from '../utils/apiError';
 import {
   Button,
   Card,
@@ -168,7 +169,7 @@ const LoyaltyPrograms = () => {
   const confirmTierGuardOrReport = (error, retry, fallbackKey, fallbackDefault) => {
     const responseData = error?.response?.data;
     const payload = responseData?.data;
-    const code = payload?.error_code;
+    const code = apiErrorCode(error);
 
     if (code === 'impact_confirmation_required') {
       // The server's own message is authoritative (localized, and already

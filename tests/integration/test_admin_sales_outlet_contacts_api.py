@@ -128,3 +128,21 @@ def test_editing_a_contact_never_touches_the_customer_account(client, admin_clai
 
 def test_contacts_are_for_managers_only(client, sales_agent_auth_headers, outlet):
     assert client.post(f"{URL}/{outlet.id}/contacts", json={"name": "X"}, headers=sales_agent_auth_headers).status_code == 403
+
+
+def test_the_contacts_tab_still_keeps_name_only_and_non_mobile_contacts(client, admin_claim_headers, outlet):
+    """D30 survives D31. The agent's create holds the primary phone to R1/R2 through
+    `OutletService._require_primary_phone`; the shared `_contact_fields` / `_format_optional_phone`
+    this tab writes through do not, so an office landline and a name-only contact are still kept.
+    Green before and after D31: it goes red only if the mobile rule leaks into the shared helpers."""
+    landline = client.post(f"{URL}/{outlet.id}/contacts", json={"name": "Office", "phone": "71 123 45 67"},
+                           headers=admin_claim_headers)
+    name_only = client.post(f"{URL}/{outlet.id}/contacts", json={"name": "Reception"}, headers=admin_claim_headers)
+
+    assert landline.status_code == 201, landline.get_data(as_text=True)
+    assert name_only.status_code == 201, name_only.get_data(as_text=True)
+    assert _contacts(client, admin_claim_headers, outlet.id) == [
+        ("Olim aka", "+998901112266", "owner", True),
+        ("Office", "+998711234567", "owner", False),
+        ("Reception", None, "owner", False),
+    ]

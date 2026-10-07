@@ -25,6 +25,7 @@ from business_app.tasks import sales_agent_tasks
 from business_app.utils.password_security import hash_password
 from business_app.utils.timezone_utils import ensure_utc
 from shared.enums import EntitySubtype, OrderStatus, UserRole, UserType
+from tests.unit.test_outlet_dedupe import PIN
 
 pytestmark = pytest.mark.unit
 
@@ -471,6 +472,28 @@ class TestStageSweep:
         assert outlet.address_id is not None
         address = UserAddress.query.get(outlet.address_id)
         assert (address.user_id, address.is_default, address.title) == (converted.id, True, "Trial shop")
+
+    def test_a_pin_less_trial_outlet_adopts_its_customers_free_default_and_takes_its_pin(
+        self, db, sample_product, admin_user
+    ):
+        """R39's pin-less branch, through the one door that still reaches it. `create` refuses a
+        pin-less outlet since D31 (R3), so the 🔗 Link no longer gets here; a trial outlet written
+        without a pin before that still does when its try-out converts. With no place to compare,
+        the account's FREE default is adopted -- no new row -- and lends the outlet its pin."""
+        outlet, converted = _converted_tryout_outlet(db, sample_product, admin_user)
+        home = UserAddress(
+            user_id=converted.id, full_address="Chilonzor 5", latitude=PIN[0], longitude=PIN[1], is_default=True
+        )
+        db.session.add(home)
+        db.session.commit()
+        home_id = home.id
+
+        counts = OutletService.update_stages(now=FROZEN_UTC)
+
+        assert counts["activated_from_trial"] == 1
+        assert (outlet.stage, outlet.user_id, outlet.address_id) == ("active", converted.id, home_id)
+        assert (outlet.latitude, outlet.longitude) == PIN
+        assert UserAddress.query.filter_by(user_id=converted.id).count() == 1
 
 
 class TestNightlyJobWiring:

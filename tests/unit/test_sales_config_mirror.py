@@ -9,7 +9,7 @@ than re-declaring the literal, and no call site adds a
 Nothing in the repo currently enforces that rule for a NEW constant — there is
 no "every business_config name is mirrored" test anywhere (verified 2026-09-08).
 This file is that guard for the ten constants Phase 2a adds, the five Phase 2b
-adds and the two Phase 3 adds (plans
+adds, the two Phase 3 adds and the four sales-agent pay adds (plans
 `docs/superpowers/plans/2026-09-08-sales-agent-phase2a-visit-loop.md`, "Shared
 interfaces → Constants"; spec section "Constants — shared/business_config.py").
 
@@ -90,7 +90,23 @@ SALES_PHASE_3_CONSTANTS = {
     "SALES_METRICS_MAX_RANGE_DAYS": (92, int),
 }
 
-SALES_CONSTANTS = {**SALES_PHASE_2A_CONSTANTS, **SALES_PHASE_2B_CONSTANTS, **SALES_PHASE_3_CONSTANTS}
+# Sales-agent pay and the same-day approval hold. DATA transcribed from the knob table of spec
+# docs/superpowers/specs/2026-09-28-sales-agent-compensation-design.md §4.14, not a
+# re-implementation of any rule. Numbers a pay PLAN configures are not env knobs; they live in
+# plan versions.
+SALES_PAY_CONSTANTS = {
+    "SALES_PAY_SYNC_LOOKBACK_DAYS": (120, int),
+    "SALES_PAY_SYNC_TOUCH_DAYS": (7, int),
+    "SALES_PAY_ONDEMAND_SYNC_SECONDS": (120, int),
+    "SALES_STAFF_APPROVAL_HOLD_HOURS": (12, int),
+}
+
+SALES_CONSTANTS = {
+    **SALES_PHASE_2A_CONSTANTS,
+    **SALES_PHASE_2B_CONSTANTS,
+    **SALES_PHASE_3_CONSTANTS,
+    **SALES_PAY_CONSTANTS,
+}
 
 CONSTANT_NAMES = sorted(SALES_CONSTANTS)
 

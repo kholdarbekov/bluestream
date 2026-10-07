@@ -60,7 +60,7 @@ KEYS = (
     # words and the operator refusals it reuses rather than reseeding.
     "staff.sales.new.choose_type", "staff.sales.new.enter_name",
     "staff.sales.new.enter_contact_name", "staff.sales.new.enter_contact_phone",
-    "staff.sales.new.share_pin", "staff.sales.new.share_pin_hint", "staff.sales.new.share_pin_button",
+    "staff.sales.new.share_pin", "staff.sales.new.share_pin_button",
     "staff.sales.new.pin_received", "staff.sales.new.choose_class", "staff.sales.new.enter_notes",
     "staff.sales.new.skip", "staff.sales.new.summary_title", "staff.sales.new.confirm_hint",
     "staff.sales.new.duplicates_title", "staff.sales.new.link_existing",
@@ -85,6 +85,10 @@ KEYS = (
     "staff.sales.visit.started", "staff.sales.visit.resume_or_abandon",
     "staff.sales.visit.resume", "staff.sales.visit.abandon", "staff.sales.visit.abandoned",
     "staff.sales.visit.checkin_prompt", "staff.sales.visit.checkin_button",
+    # Compensation spec §7.4 (T-CHECKIN-1): the re-prompt for a forwarded pin.
+    "staff.sales.visit.checkin_forwarded",
+    # Owner rule Q9 (controller ruling T2-R3): the check-in at an outlet with no pin.
+    "staff.sales.visit.checkin_no_location",
     "staff.sales.visit.checkin_skip", "staff.sales.visit.checkin_ok",
     "staff.sales.visit.checkin_far", "staff.sales.visit.checkin_skipped",
     "staff.sales.visit.stock_title", "staff.sales.visit.stock_hint",
@@ -120,6 +124,8 @@ KEYS = (
     "staff.sales.visit.confirm", "staff.sales.visit.back",
     "staff.sales.visit.order_created", "staff.sales.visit.order_pending_confirmation",
     "staff.sales.visit.order_confirmed", "staff.sales.visit.order_auto_confirmed",
+    # Compensation spec §7.6 (C14): the receipt of an order a manager has to approve.
+    "staff.sales.visit.order_awaiting_staff_approval",
     "staff.sales.visit.close_notes_prompt", "staff.sales.visit.next_visit_prompt",
     "staff.sales.visit.closed",
     "staff.sales.visit.outcome.no_order", "staff.sales.visit.outcome.closed",
@@ -235,6 +241,18 @@ KEYS = (
     # backend's own sentence inside this frame. Left out, it renders
     # `humanise_key` ("Backend reason") and the reason is lost.
     "staff.error.api.backend_reason",
+    # D31: the card's 📞 button, the screen behind it (tests/staff_bot/
+    # test_sales_set_phone_journey.py), and the three refusals that screen
+    # renders whole -- the outlet moved on, is another agent's, or is gone.
+    "staff.sales.card.add_phone", "staff.sales.card.change_phone",
+    "staff.sales.phone.enter", "staff.sales.phone.saved",
+    "staff.sales.error.stage_invalid", "staff.error.api.outlet_not_assigned",
+    "staff.error.api.outlet_not_found",
+    # D31's final fix wave: the "not a mobile" re-prompt at both phone steps, the
+    # stale ❌'s answer once the 📞 screen has closed, and the 429 the screen
+    # now survives (a 5xx's `service_unavailable` is above).
+    "staff.sales.error.mobile_required", "staff.sales.phone.closed",
+    "staff.error.api.rate_limited",
 )
 
 
@@ -265,7 +283,7 @@ def _table():
 
 
 def _outlet(**over):
-    """`serialize_outlet` — what POST /request-activation answers with.
+    """`serialize_outlet` — what the operator's approve and reject POSTs answer with.
 
     Deliberately carries NO `open_receivable` / `bottle_balance` /
     `last_orders`: the backend's POST really does answer with this shape, and
@@ -361,10 +379,14 @@ def _prospect_card_response():
 
     The visit fields are NULL for the same reason and by the same rule: a
     prospect has never been visited, has no consumption history to rate, and
-    cannot be ordered for — so there is nothing to print, not a zero."""
+    cannot be ordered for — so there is nothing to print, not a zero.
+
+    `can_request_activation` is what the backend publishes for this shop (D31):
+    a grocery prospect with a phone on its primary contact and a pin."""
     return {"outlet": _card(user_id=None, open_receivable=None, bottle_balance=None, last_orders=[],
                             last_visit=None, next_visit_due_at=None, overdue_days=None,
-                            rate_per_day=None, suggested_now=None, open_visit_id=None)}
+                            rate_per_day=None, suggested_now=None, open_visit_id=None,
+                            can_request_activation=True)}
 
 
 def _calls(harness, method, endpoint):
@@ -381,9 +403,13 @@ async def test_menu_hub_list_card_and_activation(monkeypatch):
     assert not any(_curated("staff.menu.new_orders", "en") in label for label in labels)
 
     harness.backend.route("GET", OUTLETS, lambda c: {"items": [_outlet()]})
-    harness.backend.route("GET", f"{OUTLETS}/5", lambda c: {"outlet": _card()})
-    harness.backend.route("POST", f"{OUTLETS}/5/request-activation",
-                          lambda c: {"outlet": _outlet(stage="activation_requested")})
+    harness.backend.route("GET", f"{OUTLETS}/5", lambda c: {"outlet": _card(can_request_activation=True)})
+    # D31/P6: the POST answers with the CARD, built from the prospect card: an
+    # outlet awaiting activation has no account yet, so its money figures are
+    # NULL, and it publishes `can_request_activation` false.
+    harness.backend.route("POST", f"{OUTLETS}/5/request-activation", lambda c: {"outlet": {
+        **_prospect_card_response()["outlet"], "stage": "activation_requested", "can_request_activation": False,
+    }})
 
     await harness.send(ops.text(_label(labels, "staff.menu.my_outlets")))
     hub = harness.telegram.last_shown()
@@ -411,23 +437,71 @@ async def test_menu_hub_list_card_and_activation(monkeypatch):
     assert [c.data for c in _calls(harness, "POST", f"{OUTLETS}/5/request-activation")] == [{}]
     after = harness.telegram.last_shown()
     assert _curated("staff.sales.stage.activation_requested") in after.text
-    # Re-rendered from the POST's `serialize_outlet`, which has a `user_id` but
-    # no money fields: the receivable line must be ABSENT, not "Owes: 0".
+    # Re-rendered from the POST's own card, with no second GET. That card's
+    # money figures are NULL, so the receivable line must be ABSENT, not
+    # "Owes: 0"; and it publishes `can_request_activation` false, so 🚀 is gone.
+    assert len(_calls(harness, "GET", f"{OUTLETS}/5")) == 1
     assert _curated("staff.sales.card.receivable") not in after.text
     assert _curated("staff.sales.card.bottles") not in after.text
     assert _curated("staff.sales.card.request_activation") not in " ".join(after.button_labels())
 
 
-async def test_backend_error_surfaces_as_alert_not_crash(monkeypatch):
-    harness, ops, labels = await _agent(monkeypatch)
-    harness.backend.route("GET", f"{OUTLETS}/5", lambda c: {"outlet": _outlet(contacts=[])})
+async def test_a_stale_activation_tap_is_refused_out_loud_and_redraws_the_card(monkeypatch):
+    """🚀 on a card drawn while the outlet still had its phone; an admin has cleared it since.
+
+    The card the agent is looking at is the stale part: since D31 the backend draws 🚀 only
+    where the request would pass. So after the alert the card is fetched and drawn again, and
+    the agent sees the 📞 that fixes it instead of a 🚀 that can only be refused again.
+    """
+    harness, ops, _labels = await _agent(monkeypatch)
+    harness.backend.route("GET", f"{OUTLETS}/5", lambda c: _prospect_card_response())
     harness.backend.route("POST", f"{OUTLETS}/5/request-activation",
                           lambda c: staff_backend_failure("phone required", 400, "SALES_ACTIVATION_PHONE_REQUIRED"))
     await harness.send(ops.tap("staff_sales_outlet_5"))
+    assert "staff_sales_activate_5" in harness.telegram.last_shown().callback_data()
+    harness.backend.route("GET", f"{OUTLETS}/5", lambda c: {"outlet": {
+        **_prospect_card_response()["outlet"], "contacts": [],
+        "can_request_activation": False, "can_set_phone": True,
+    }})
+    harness.telegram.reset()
+
     await harness.send(ops.tap("staff_sales_activate_5"))
+
+    assert [c.data for c in _calls(harness, "POST", f"{OUTLETS}/5/request-activation")] == [{}]
     # `BaseHandler._handle_api_error` prefixes the resolved copy with "❌ " —
     # asserted whole rather than by substring so this stays a payload check.
-    assert f"❌ {_curated('staff.sales.error.phone_required')}" in _alerts(harness)
+    # The alert is the tap's ONE answer: the redraw spends no second one.
+    assert [c.params.get("text") for c in harness.telegram.of("answerCallbackQuery")] == [
+        f"❌ {_curated('staff.sales.error.phone_required')}"
+    ]
+    assert len(_calls(harness, "GET", f"{OUTLETS}/5")) == 2
+    fresh = harness.telegram.last_shown()
+    assert fresh.method == "editMessageText"
+    assert "staff_sales_setphone_5" in fresh.callback_data()
+    assert f"📞 {_curated('staff.sales.card.add_phone')}" in fresh.button_labels()
+    assert "staff_sales_activate_5" not in fresh.callback_data()
+
+
+@pytest.mark.parametrize("status, code, key", [
+    (403, "SALES_OUTLET_NOT_ASSIGNED", "staff.error.api.outlet_not_assigned"),
+    (404, "SALES_OUTLET_NOT_FOUND", "staff.error.api.outlet_not_found"),
+])
+async def test_an_activation_tap_on_an_outlet_no_longer_theirs_gets_only_the_alert(
+    monkeypatch, status, code, key
+):
+    """Reassigned or gone: a GET would only be refused again, so no card is redrawn."""
+    harness, ops, _labels = await _agent(monkeypatch)
+    harness.backend.route("GET", f"{OUTLETS}/5", lambda c: _prospect_card_response())
+    harness.backend.route("POST", f"{OUTLETS}/5/request-activation",
+                          lambda c: staff_backend_failure("refused", status, code))
+    await harness.send(ops.tap("staff_sales_outlet_5"))
+    harness.telegram.reset()
+
+    await harness.send(ops.tap("staff_sales_activate_5"))
+
+    assert _alerts(harness) == [f"❌ {_curated(key)}"]
+    assert len(_calls(harness, "GET", f"{OUTLETS}/5")) == 1
+    assert harness.telegram.shown == []
 
 
 async def test_a_malformed_list_callback_is_answered_not_raised(monkeypatch):
@@ -802,3 +876,55 @@ async def test_the_visit_lines_speak_the_agents_language(monkeypatch):
     assert _curated("staff.sales.card.rate", "en") not in card.text
     assert _curated("staff.sales.card.suggested", "en") not in card.text
     assert _curated("staff.sales.card.start_visit", "en") not in buttons
+
+
+# ---------------------------------------------------------------------------
+# D31: Request activation is drawn from the backend's published answer.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("over, drop, callbacks", [
+    # What `OutletService.card` publishes for `_prospect_card_response`.
+    pytest.param(
+        {}, (), ["staff_sales_activate_5", "staff_sales_tryout_5", "staff_sales_hub"],
+        id="published_true",
+    ),
+    # Dev outlet #9 on 2026-10-06: a prospect created with no phone. The old
+    # stage/type rule drew the button here, and both of the agent's taps were
+    # refused with SALES_ACTIVATION_PHONE_REQUIRED.
+    pytest.param(
+        {"can_request_activation": False, "contacts": []}, (), ["staff_sales_tryout_5", "staff_sales_hub"],
+        id="published_false_for_a_phoneless_prospect",
+    ),
+    # A backend that predates the field (spec §9: the bot and the backend ship
+    # together). No answer is not a yes.
+    pytest.param(
+        {}, ("can_request_activation",), ["staff_sales_tryout_5", "staff_sales_hub"],
+        id="no_field_from_an_older_backend",
+    ),
+    # Row order. A trial shop draws all three: the visit button stays first,
+    # then Request activation, then the try-out.
+    pytest.param(
+        {"stage": "trial"}, (),
+        ["staff_sales_visit_start_5", "staff_sales_activate_5", "staff_sales_tryout_5", "staff_sales_hub"],
+        id="the_visit_button_stays_first",
+    ),
+])
+async def test_request_activation_is_drawn_from_the_published_field(monkeypatch, over, drop, callbacks):
+    """`can_request_activation` is `OutletService.can_request_activation`'s
+    answer, published on the card, and the keyboard draws exactly that. The bot
+    keeps no stage or type rule of its own, so it never offers a button whose
+    only outcome is a refusal (D31).
+    """
+    outlet = {**_prospect_card_response()["outlet"], **over}
+    for key in drop:
+        del outlet[key]
+    harness, ops, _labels = await _agent(monkeypatch)
+    harness.backend.route("GET", f"{OUTLETS}/5", lambda c: {"outlet": outlet})
+
+    await harness.send(ops.tap("staff_sales_outlet_5"))
+
+    card = harness.telegram.last_shown()
+    assert card.callback_data() == callbacks
+    drawn = f"🚀 {_curated('staff.sales.card.request_activation')}" in card.button_labels()
+    assert drawn is ("staff_sales_activate_5" in callbacks)

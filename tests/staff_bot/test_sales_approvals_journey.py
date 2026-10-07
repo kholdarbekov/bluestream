@@ -50,6 +50,10 @@ EXTRA_KEYS = (
     # harness served a humanised fallback for it.
     "staff.sales.approvals.attach", "staff.sales.approvals.attached",
     "staff.sales.approvals.candidate", "staff.sales.error.stage_invalid",
+    # Compensation spec §4.12, §7.4: the line the card shows the operator who registered the
+    # outlet, and the refusal a stale Approve gets. Listed so the harness serves the seeded
+    # words; a key left out renders `humanise_key` and every assertion below passes vacuously.
+    "staff.sales.approvals.own_outlet", "staff.sales.error.approval_self",
 )
 
 
@@ -105,6 +109,13 @@ async def test_operator_lists_reviews_approves_and_rejects(monkeypatch):
     assert [c.data for c in _calls(harness, "POST", f"{OUTLETS}/5/approve")] == [{}]
     approved = harness.telegram.last_shown()
     assert _curated("staff.sales.approvals.approved") in approved.text
+    # The approve POST answers with a plain `serialize_outlet`: a `user_id` and
+    # NO money keys at all, so the card prints no money line rather than
+    # "Owes: 0". (The agent's request-activation reply pinned this ABSENT-keys
+    # shape until D31 made that reply the card, whose money keys are present
+    # and NULL.)
+    assert _curated("staff.sales.card.receivable") not in approved.text
+    assert _curated("staff.sales.card.bottles") not in approved.text
     # An operator works a QUEUE: the way back to it has to be on the result
     # screen, or every decision costs a round trip through the main menu.
     assert _curated("staff.sales.approvals.back") in " ".join(approved.button_labels())
@@ -253,3 +264,72 @@ async def test_a_reason_the_keyboard_never_drew_is_answered_not_sent(monkeypatch
 
     assert not _calls(harness, "POST", f"{OUTLETS}/6/reject")
     assert len(harness.telegram.of("answerCallbackQuery")) == 1
+
+
+async def test_a_request_the_operator_registered_draws_no_approve_or_attach(monkeypatch):
+    """Spec §4.12, §7.4, §10.4: nobody approves an outlet they onboarded.
+
+    A dual-role operator still sees the request in the queue, so they know it exists, but the
+    row says `can_approve: false` and the card draws neither door, only the four Reject
+    reasons and Back. The flag is the backend's (`OutletService.can_approve`, published per
+    viewer on every queue row); the bot compares no user ids of its own. The row carries an
+    account candidate too, so the test proves Attach is withheld as well as Approve.
+    """
+    harness, ops = await _operator(monkeypatch)
+    harness.backend.route("GET", REQUESTS, lambda c: {"items": [
+        _outlet(id=5, stage="activation_requested", can_approve=False,
+                account_candidate={"user_id": 41, "name": "Bahor Savdo MChJ", "outlet_count": 2}),
+    ]})
+
+    await harness.send(ops.tap("staff_sales_approvals"))
+    await harness.send(ops.tap("staff_sales_review_5"))
+
+    review = harness.telegram.last_shown()
+    # Asserted whole and literally (R31/R44): a line composed from the seed would pass
+    # against a row that grew a glyph the renderer also adds.
+    assert "You added this outlet, so another operator approves it." in review.text.split("\n")
+    assert review.callback_data() == [
+        "staff_sales_reject_5_duplicate", "staff_sales_reject_5_incomplete",
+        "staff_sales_reject_5_not_customer", "staff_sales_reject_5_other",
+        "staff_sales_approvals",
+    ]
+    assert _curated("staff.sales.approvals.approve") not in " ".join(review.button_labels())
+    assert _curated("staff.sales.approvals.attach") not in " ".join(review.button_labels())
+    # Nothing was posted: the card is a read.
+    assert not _calls(harness, "POST", f"{OUTLETS}/5/approve")
+
+
+async def test_a_request_another_operator_registered_still_offers_approve(monkeypatch):
+    """The other half of the flag: `can_approve: true` keeps today's card exactly."""
+    harness, ops = await _operator(monkeypatch)
+    harness.backend.route("GET", REQUESTS, lambda c: {"items": [
+        _outlet(id=5, stage="activation_requested", can_approve=True),
+    ]})
+
+    await harness.send(ops.tap("staff_sales_approvals"))
+    await harness.send(ops.tap("staff_sales_review_5"))
+
+    review = harness.telegram.last_shown()
+    assert review.callback_data()[0] == "staff_sales_approve_5"
+    assert "You added this outlet, so another operator approves it." not in review.text
+
+
+async def test_a_stale_approve_on_an_own_outlet_is_refused_with_its_own_sentence(monkeypatch):
+    """Spec §4.12, §7.4, §10.4. The card was drawn before the rule (or forwarded from another
+    operator's chat), so it still carries Approve. The backend refuses with
+    `SALES_OUTLET_SELF_APPROVAL` (403) and the operator reads why as an alert, in words: not the
+    generic "forbidden" sentence, which reads as a permissions fault to take to an admin."""
+    harness, ops = await _operator(monkeypatch)
+    harness.backend.route("GET", REQUESTS, lambda c: {"items": [
+        _outlet(id=5, stage="activation_requested", can_approve=True),
+    ]})
+    harness.backend.route("POST", f"{OUTLETS}/5/approve", lambda c: staff_backend_failure(
+        "You cannot approve an outlet you onboarded.", 403, "SALES_OUTLET_SELF_APPROVAL"))
+
+    await harness.send(ops.tap("staff_sales_approvals"))
+    await harness.send(ops.tap("staff_sales_review_5"))
+    await harness.send(ops.tap("staff_sales_approve_5"))
+
+    assert [c.data for c in _calls(harness, "POST", f"{OUTLETS}/5/approve")] == [{}]
+    assert "❌ You added this outlet yourself, so another operator has to approve it." in _alerts(harness)
+    assert _curated("staff.sales.approvals.approved") not in harness.telegram.last_shown().text

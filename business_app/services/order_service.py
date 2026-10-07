@@ -5,7 +5,7 @@ Order service for the Water Business Platform
 import logging
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
-from typing import List, Dict, Any, Optional, Tuple
+from typing import TYPE_CHECKING, List, Dict, Any, Optional, Tuple
 from flask import current_app
 from sqlalchemy import desc, func
 from sqlalchemy.exc import IntegrityError
@@ -44,6 +44,10 @@ from business_app.utils.validation_helpers import strip_reason  # noqa: E402
 from business_app.models.order import OrderStatusHistory  # noqa: E402
 from business_app.models.delivery import DeliveryStatusHistory  # noqa: E402
 from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity  # noqa: E402
+
+if TYPE_CHECKING:
+    from business_app.services.sales.agent_order_approval_service import StaffApprovalHold
+
 from business_app.utils.state_validators import (  # noqa: E402
     ACTIVE_ORDER_STATUSES,
     DELIVERY_DRIVERLESS_STATES,
@@ -110,6 +114,7 @@ class OrderService:
         *,
         bypass_cod_check: bool = False,
         subscription: Optional["Subscription"] = None,
+        staff_approval_hold: Optional["StaffApprovalHold"] = None,
     ) -> Order:
         """
         Create a new order
@@ -127,6 +132,12 @@ class OrderService:
                 discount_percentage is applied to Order.discount_amount. Passing
                 the row (rather than a discount amount) keeps the discount
                 un-forgeable by callers.
+            staff_approval_hold: The same-day hold `VisitService.place_order`
+                decided under the outlet lock (compensation spec C14). When set,
+                a `pending` agent_order_approvals row is written in this
+                transaction, before the payment row, and nothing inside creation
+                confirms the order. Like `bypass_cod_check`, never taken from an
+                API payload: `place_order` is its only caller.
 
         Returns:
             Created Order object
@@ -380,6 +391,15 @@ class OrderService:
 
                 CorporateContractService().reserve_for_order(order.id)
 
+                # C14: the same-day hold is written BEFORE the payment row. A business-account
+                # payment completes inside `initialize_order_payment`, and its
+                # `_handle_successful_payment` confirms a PENDING order unless a pending hold is
+                # already flushed here. The hold commits, or rolls back, with the order.
+                if staff_approval_hold is not None:
+                    from business_app.services.sales.agent_order_approval_service import AgentOrderApprovalService
+
+                    AgentOrderApprovalService.open_hold(order, staff_approval_hold)
+
                 # Create the canonical payment row in the same transaction.
                 # commit=False keeps the outer atomic_transaction in charge.
                 from business_app.services.payment_service import PaymentService
@@ -472,7 +492,11 @@ class OrderService:
         # below does not assert the order is still PENDING.)
         if payment_method == PaymentMethod.CASH:
             try:
-                if self._customer_has_delivered_order(user_id):
+                from business_app.services.sales.agent_order_approval_service import AgentOrderApprovalService
+
+                # C14: a held order is a manager's to confirm (OA2), never this block's. Asked
+                # inside the try: a failing lookup must not fail a creation that already committed.
+                if not AgentOrderApprovalService.is_awaiting(order.id) and self._customer_has_delivered_order(user_id):
                     self.update_order_status(
                         order.id,
                         OrderStatus.CONFIRMED,
@@ -1173,6 +1197,15 @@ class OrderService:
             from business_app.services.order_schedule_service import OrderScheduleService
 
             OrderScheduleService.assert_can_advance(order)
+
+        # C14: a held agent order reaches CONFIRMED only through the order-approval queue (OA2),
+        # which closes the hold before it calls this. Refused before the claim below, so nothing is
+        # written or queued, and an automatic path that forgot to ask `is_awaiting` fails loudly
+        # here instead of bypassing the hold (R27).
+        if new_status == OrderStatus.CONFIRMED:
+            from business_app.services.sales.agent_order_approval_service import AgentOrderApprovalService
+
+            AgentOrderApprovalService.assert_not_awaiting(order)
 
         # Update order
         old_status = current_status
@@ -2095,10 +2128,18 @@ class OrderService:
             # setting the delivery status. Cascading back onto the delivery from
             # there would fight the caller.
             delivery_cancelled = False
+            hold_closed = False
             if new_status == OrderStatus.CANCELLED:
                 delivery_cancelled = self._cancel_delivery_for_cancelled_order(order)
+                # C14 (S-28): any cancellation ends a pending same-day hold and records the
+                # canceller. Here and not in `cancel_order` for the delivery cascade's reason: the
+                # admin dropdown calls `update_order_status(CANCELLED)` directly. A no-op for OA3,
+                # whose row is already `rejected`.
+                from business_app.services.sales.agent_order_approval_service import AgentOrderApprovalService
 
-            if commit and (settled or delivery_cancelled):
+                hold_closed = AgentOrderApprovalService.close_on_cancel(order, actor_id=updated_by)
+
+            if commit and (settled or delivery_cancelled or hold_closed):
                 db.session.commit()
 
     def settle_dead_order_side_effects(

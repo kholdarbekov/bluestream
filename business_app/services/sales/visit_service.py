@@ -37,12 +37,13 @@ from business_app.models.sales_visits import (
 )
 from business_app.serializers.sales_serializers import serialize_order_brief, serialize_stock_check
 from business_app.services.order_service import OrderService
+from business_app.services.sales.agent_order_approval_service import AgentOrderApprovalService, StaffApprovalHold
 from business_app.services.sales.agent_order_confirmation_service import AgentOrderConfirmationService
 from business_app.services.sales.outlet_service import OutletService
 from business_app.services.sales.replenishment_service import ReplenishmentService, effective_line_qty_max
 from business_app.services.staff_service import StaffService
 from business_app.services.telegram_file_proxy import TelegramFileProxy
-from business_app.utils.constants import MAX_PAGE_SIZE
+from business_app.utils.constants import MAX_PAGE_SIZE, ORDER_SOURCE_SALES_AGENT
 from business_app.utils.delivery_window import local_now, parse_and_validate_schedule
 from business_app.utils.exceptions import (
     AttachmentUnavailableError,
@@ -54,7 +55,6 @@ from business_app.utils.exceptions import (
 from business_app.utils.helpers import calculate_distance
 from business_app.utils.local_windows import window_bounds
 from business_app.utils.telegram_tokens import get_staff_bot_token
-from business_app.utils.timezone_utils import ensure_utc
 from shared.staff_constants import STAFF_ACTIONS
 
 # The only two rails an agent may take at the door. ONE definition, read by the menu the bot
@@ -125,11 +125,12 @@ class VisitService:
         open_visit = VisitService.current(agent_user_id)
         if open_visit is not None:
             raise VisitService._already_open(open_visit)
-        # `planned` is decided once, HERE, against the same local-day boundary the due list
-        # sorts on — otherwise a visit could be "unplanned" on a card the agent reached from
-        # the due list. Never re-derived by the bot.
-        due_at = ensure_utc(outlet.next_visit_due_at) if outlet.next_visit_due_at is not None else None
-        planned = due_at is not None and due_at <= ReplenishmentService.local_day_end_utc()
+        # `planned` is decided once, HERE: is this outlet on THIS agent's due list right now?
+        # Asked of `OutletService.due_scope`, the due list's own query (ownership under Q10, the
+        # due stages, the end of the agent's LOCAL day), so a visit reached from the due list is
+        # planned and a drop-in at a shop another agent now owns is not. `unplanned_visits` and
+        # plan-vs-fact's `unplanned` column read this stamp. Never re-derived by the bot.
+        planned = OutletService.due_scope(agent_user_id, now=None).filter(Outlet.id == outlet.id).count() > 0
         visit = Visit(
             outlet_id=outlet.id,
             agent_user_id=agent_user_id,
@@ -516,7 +517,8 @@ class VisitService:
         `visit_id` is the idempotency key: one visit, at most one order, so a double tap on
         "Order suggested" buys the store one load of water and not two. Everything about the
         order — pricing, the COD cap, inventory reservation, the payment row, the instant-COD
-        confirmation — is `create_order`'s, unchanged.
+        confirmation — is `create_order`'s, unchanged, unless the order is held (C14): the agent's
+        second order at this outlet today waits for a manager (`AgentOrderApprovalService`).
 
         Returns `(order, confirmation_state)`; the state is
         `AgentOrderConfirmationService.open_or_confirm`'s single published answer.
@@ -610,6 +612,14 @@ class VisitService:
         order_service = OrderService()
         user, address = order_service.get_user_and_address_for_order(outlet.user_id, outlet.address_id)
         visit_id = visit.id
+        # C14 (I-21): the same-day rule, decided under the OUTLET's row lock, so two agents
+        # ordering at one shop at the same moment cannot both see "no earlier order". Visit first,
+        # then outlet: nothing else locks an outlet row, so there is no inversion. `create_order`'s
+        # commit releases both, by which time this order is what the next placement sees. The
+        # local day is `now_local`, the one clock this method already read above.
+        outlet = db.session.get(Outlet, visit.outlet_id, with_for_update=True, populate_existing=True)
+        earlier = AgentOrderApprovalService.same_day_agent_order_ids(outlet.id, now=now_local)
+        hold = StaffApprovalHold(outlet.id, tuple(earlier)) if earlier else None
         try:
             order = order_service.create_order(
                 user.id,
@@ -626,7 +636,7 @@ class VisitService:
                     "delivery_window_start": window_start,
                     "delivery_window_end": window_end,
                     "delivery_notes": payload.get("delivery_notes"),
-                    "order_source": "sales_agent",
+                    "order_source": ORDER_SOURCE_SALES_AGENT,
                     "created_by_staff_id": agent_user_id,
                     # The idempotency key travels WITH the order so `uq_orders_visit_id` is
                     # evaluated inside `create_order`'s own transaction. Writing it afterwards
@@ -635,6 +645,7 @@ class VisitService:
                     # double tap had a real, paid-for order before anything refused it.
                     "visit_id": visit_id,
                 },
+                staff_approval_hold=hold,
             )
         except IntegrityError:
             # The index got there first: another tap's order already owns this visit. Mirrors

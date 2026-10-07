@@ -40,11 +40,15 @@ import pytest
 from shared.i18n_rendering import humanise_key, render_translation
 from shared.staff_constants import (
     SALES_EVENT_ACTIVATION_REQUESTED,
+    SALES_EVENT_AGENT_ORDER_APPROVED,
     SALES_EVENT_AGENT_ORDER_CONFIRMED,
     SALES_EVENT_AGENT_ORDER_DECLINED,
+    SALES_EVENT_AGENT_ORDER_REJECTED,
     SALES_EVENT_MORNING_DIGEST,
     SALES_EVENT_OUTLET_APPROVED,
     SALES_EVENT_OUTLET_REJECTED,
+    SALES_EVENT_PAY_PENALTY_CONFIRMED,
+    SALES_EVENT_PAY_STATEMENT_APPROVED,
     SALES_EVENTS,
     STAFF_ACTIONS,
 )
@@ -76,9 +80,10 @@ def test_the_two_field_actions_are_registered():
 def test_every_event_has_a_name_a_producer_can_pass():
     """Ruling 66: a producer passes a MEMBER, so each member needs an identifier.
 
-    Asserted as a set equality in BOTH directions — a seventh event added to the
-    tuple as a bare literal would satisfy "in SALES_EVENTS" and still leave
-    ruling 66 unmet for its producer.
+    Pinned as the exact tuple, ORDER included: the six phase-2 events, then the same-day
+    hold's two outcomes (compensation spec C14), then the two pay pushes (§7.5). A member
+    added as a bare literal would satisfy "in SALES_EVENTS" and still leave ruling 66 unmet
+    for its producer; a member dropped from the end would refuse that push at the bot's door.
     """
     named = (
         SALES_EVENT_OUTLET_APPROVED,
@@ -87,10 +92,21 @@ def test_every_event_has_a_name_a_producer_can_pass():
         SALES_EVENT_AGENT_ORDER_CONFIRMED,
         SALES_EVENT_AGENT_ORDER_DECLINED,
         SALES_EVENT_MORNING_DIGEST,
+        SALES_EVENT_AGENT_ORDER_APPROVED,
+        SALES_EVENT_AGENT_ORDER_REJECTED,
+        SALES_EVENT_PAY_PENALTY_CONFIRMED,
+        SALES_EVENT_PAY_STATEMENT_APPROVED,
     )
     assert SALES_EVENT_MORNING_DIGEST == "morning_digest"
-    assert set(SALES_EVENTS) == set(named)
-    assert len(SALES_EVENTS) == len(named)
+    assert (SALES_EVENT_AGENT_ORDER_APPROVED, SALES_EVENT_AGENT_ORDER_REJECTED) == (
+        "agent_order_approved",
+        "agent_order_rejected",
+    )
+    assert (SALES_EVENT_PAY_PENALTY_CONFIRMED, SALES_EVENT_PAY_STATEMENT_APPROVED) == (
+        "pay_penalty_confirmed",
+        "pay_statement_approved",
+    )
+    assert SALES_EVENTS == named
 
 
 @pytest.mark.unit
@@ -174,3 +190,56 @@ def test_the_russian_gate_still_catches_a_latin_value_behind_a_tag():
     }
     with pytest.raises(Exception):
         module._validate_russian_translations({DIGEST_KEY})
+
+
+# The two outcome pushes of a held order (compensation spec §7.6, §8.2). They render through the
+# webhook's GENERIC branch, which fills exactly `outlet_name`, `order_number` and `reason`
+# (WEBHOOK_KWARGS above), so a row naming any other field would ship its humanised English key
+# tail. Unlike the pay rows, these keep the leading glyph their siblings `agent_order_confirmed`
+# and `agent_order_declined` carry (§8.5, second exception): the generic renderer prints the row
+# verbatim.
+HOLD_NOTIFY_ROWS = {
+    "staff.sales.notify.agent_order_approved": {
+        "fields": ["order_number", "outlet_name"],
+        "en": "✅ Order {order_number} for <b>{outlet_name}</b> was approved and is in the delivery queue.",
+        "uz": "✅ <b>{outlet_name}</b> uchun {order_number} buyurtmasi tasdiqlandi va yetkazish navbatida.",
+        "ru": "✅ Заказ {order_number} для <b>{outlet_name}</b> одобрен и стоит в очереди на доставку.",
+    },
+    "staff.sales.notify.agent_order_rejected": {
+        "fields": ["order_number", "outlet_name", "reason"],
+        "en": "❌ Order {order_number} for <b>{outlet_name}</b> was not approved and is cancelled. Reason: {reason}",
+        "uz": "❌ <b>{outlet_name}</b> uchun {order_number} buyurtmasi tasdiqlanmadi va bekor qilindi. Sabab: {reason}",
+        "ru": "❌ Заказ {order_number} для <b>{outlet_name}</b> не одобрен и отменён. Причина: {reason}",
+    },
+}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("language", LANGUAGES)
+@pytest.mark.parametrize("key", sorted(HOLD_NOTIFY_ROWS))
+def test_the_held_order_outcome_rows_are_seeded_as_the_spec_words_them(key, language):
+    value = _load_seed_script()._curated_value(key, language)
+
+    assert value == HOLD_NOTIFY_ROWS[key][language]
+    assert sorted(set(re.findall(r"\{(\w+)\}", value))) == HOLD_NOTIFY_ROWS[key]["fields"]
+    assert set(HOLD_NOTIFY_ROWS[key]["fields"]) <= set(WEBHOOK_KWARGS)
+
+
+# The two pay pushes' headline rows (compensation spec §8.2) and the fields their renderers
+# fill. `render_translation` degrades a row with an unfilled field to the humanised ENGLISH
+# key in every language, so a stray second field is an English leak no other gate sees.
+PAY_NOTIFY_FIELDS = {
+    "staff.sales.notify.pay_penalty_confirmed": [],
+    "staff.sales.notify.pay_statement_approved": ["month"],
+}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("language", LANGUAGES)
+@pytest.mark.parametrize("key", sorted(PAY_NOTIFY_FIELDS))
+def test_the_pay_push_headlines_are_seeded_with_exactly_their_fields(key, language):
+    value = _load_seed_script()._curated_value(key, language)
+
+    assert value, f"{key} has no {language} row"
+    assert sorted(re.findall(r"\{(\w+)\}", value)) == PAY_NOTIFY_FIELDS[key]
+    assert value.startswith("<b>") and value.endswith("</b>"), "words only; the glyph is the renderer's (§8.5)"

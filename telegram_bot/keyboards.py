@@ -932,6 +932,9 @@ class OrderKeyboards:
 class SubscriptionKeyboards:
     """Subscription-related keyboards"""
 
+    # The 1/2/3/4/5/10 ladder, as steps above the product's minimum order quantity.
+    QUANTITY_LADDER_OFFSETS = (0, 1, 2, 3, 4, 9)
+
     @staticmethod
     def subscription_frequency(
         language: str = 'en',
@@ -1037,6 +1040,8 @@ class SubscriptionKeyboards:
     def quantity_selector(
         language: str = 'en',
         back_callback: str = None,
+        *,
+        min_order_qty: int,
     ) -> InlineKeyboardMarkup:
         """Quantity selection keyboard.
 
@@ -1046,18 +1051,16 @@ class SubscriptionKeyboards:
         item-management menu instead. One callback per destination is what
         makes each Back landable — `back_to_product_selection` used to be the
         only option and, in the update flow, meant nothing.
+
+        ``min_order_qty`` is REQUIRED and is the first button: a subscription line
+        below it is one billing's `create_order` refuses every cycle. The fixed
+        1/2/3/4/5/10 keyboard let a customer subscribe to 1 of a product whose
+        minimum is 2 (prod subscription 8, 2026-10-04).
         """
+        quantities = [min_order_qty + offset for offset in SubscriptionKeyboards.QUANTITY_LADDER_OFFSETS]
         buttons = [
-            [
-                {'text': '1', 'callback_data': 'sub_qty_1'},
-                {'text': '2', 'callback_data': 'sub_qty_2'},
-                {'text': '3', 'callback_data': 'sub_qty_3'}
-            ],
-            [
-                {'text': '4', 'callback_data': 'sub_qty_4'},
-                {'text': '5', 'callback_data': 'sub_qty_5'},
-                {'text': '10', 'callback_data': 'sub_qty_10'}
-            ],
+            [{'text': str(qty), 'callback_data': f'sub_qty_{qty}'} for qty in quantities[:3]],
+            [{'text': str(qty), 'callback_data': f'sub_qty_{qty}'} for qty in quantities[3:]],
             [{
                 'text': i18n.get('telegram.back', language),
                 'callback_data': back_callback or 'back_to_product_selection',

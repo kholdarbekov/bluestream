@@ -149,6 +149,92 @@ describe('Subscriptions page', () => {
     expect(within(dropdown).queryByText(/payme/i)).not.toBeInTheDocument();
   });
 
+  describe('per-product minimum order quantity', () => {
+    // A subscription line below the minimum is one billing's create_order refuses
+    // every cycle (prod subscription 8: 1 x a product whose minimum is 2).
+    const detailWithItem = (quantity) => ({
+      id: 1, subscription_number: 'SUB-1', user: { id: 7, name: 'Test User' },
+      name: 'Existing Sub', billing_cycle: 'weekly', delivery_frequency: 'weekly',
+      payment_method: 'click', delivery_address_id: 3, auto_renew: true,
+      discount_percentage: 0, status: 'active',
+      items: [{ id: 55, product_id: 2, product_name: 'Aqua 18.9 l', quantity, unit_price: 18000 }],
+    });
+
+    const pickOption = async (selectRoot, label) => {
+      fireEvent.mouseDown(selectRoot.querySelector('.ant-select-selector'));
+      const option = await waitFor(() => {
+        const el = document.querySelector(`.ant-select-item-option[title="${label}"]`);
+        expect(el).toBeTruthy();
+        return el;
+      });
+      fireEvent.click(option);
+    };
+
+    const openDrawer = async () => {
+      render(<Subscriptions />, { wrapper: createWrapper() });
+      await screen.findByText('SUB-1');
+      fireEvent.click(document.querySelector('.anticon-eye').closest('button'));
+      expect(await screen.findByText('Aqua 18.9 l')).toBeInTheDocument();
+      await waitFor(() => expect(adminService.getProducts).toHaveBeenCalled());
+    };
+
+    beforeEach(() => {
+      adminService.getProducts.mockResolvedValue({
+        data: {
+          items: [
+            { id: 2, name: 'Aqua 18.9 l', min_order_quantity: 2 },
+            { id: 3, name: 'Aqua 10 l', min_order_quantity: 3 },
+          ],
+        },
+      });
+      adminService.updateSubscriptionItem.mockResolvedValue({ data: {} });
+      adminService.addSubscriptionItem.mockResolvedValue({ data: {} });
+    });
+
+    it('saves a drawer quantity typed below the minimum as the minimum', async () => {
+      adminService.getSubscription.mockResolvedValue(detailWithItem(4));
+      await openDrawer();
+
+      const qtyInput = document.querySelectorAll('.ant-drawer .ant-input-number-input')[0];
+      fireEvent.change(qtyInput, { target: { value: '1' } });
+      fireEvent.blur(qtyInput);
+      fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+
+      await waitFor(() => {
+        expect(adminService.updateSubscriptionItem).toHaveBeenCalledWith(1, 55, { quantity: 2 });
+      });
+    });
+
+    it('adds a drawer item at the chosen product minimum', async () => {
+      adminService.getSubscription.mockResolvedValue(detailWithItem(2));
+      await openDrawer();
+
+      await pickOption(document.querySelector('.ant-drawer .ant-select'), 'Aqua 10 l');
+      fireEvent.click(screen.getByRole('button', { name: /add item/i }));
+
+      await waitFor(() => {
+        expect(adminService.addSubscriptionItem).toHaveBeenCalledWith(1, { product_id: 3, quantity: 3 });
+      });
+    });
+
+    it('raises a create-form item to the chosen product minimum', async () => {
+      render(<Subscriptions />, { wrapper: createWrapper() });
+      await screen.findByText('SUB-1');
+      fireEvent.click(screen.getByRole('button', { name: /create subscription/i }));
+      const dialog = await screen.findByRole('dialog');
+      await waitFor(() => expect(adminService.getProducts).toHaveBeenCalled());
+
+      const productSelect = [...dialog.querySelectorAll('.ant-select-selection-placeholder')]
+        .find((el) => el.textContent === 'Product')
+        .closest('.ant-select');
+      await pickOption(productSelect, 'Aqua 10 l');
+
+      await waitFor(() => {
+        expect(within(dialog).getByPlaceholderText('Qty').value).toBe('3');
+      });
+    });
+  });
+
   it('shows payment_method in the detail drawer', async () => {
     adminService.getSubscription.mockResolvedValue({
       id: 1, subscription_number: 'SUB-1', user: { id: 7, name: 'Test User' },

@@ -836,6 +836,7 @@ class SubscriptionService:
         product = Product.query.filter_by(id=product_id, is_active=True).first()
         if not product:
             raise NotFoundError("api.subscriptions.error.product_not_found")
+        self._ensure_meets_min_order_quantity(product, quantity)
 
         existing_item = SubscriptionItem.query.filter_by(
             subscription_id=subscription_id,
@@ -897,6 +898,8 @@ class SubscriptionService:
         ).first()
         if not item:
             raise NotFoundError("api.subscriptions.error.item_not_found")
+        if item.product is not None:
+            self._ensure_meets_min_order_quantity(item.product, quantity)
 
         old_quantity = item.quantity
         item.quantity = quantity
@@ -1423,6 +1426,7 @@ class SubscriptionService:
         product = Product.query.filter_by(id=product_id, is_active=True).first()
         if not product:
             raise NotFoundError("Product not found or inactive")
+        self._ensure_meets_min_order_quantity(product, quantity)
 
         existing = SubscriptionItem.query.filter_by(subscription_id=subscription_id, product_id=product_id).first()
         if existing:
@@ -1468,6 +1472,8 @@ class SubscriptionService:
         item = SubscriptionItem.query.filter_by(id=item_id, subscription_id=subscription_id).first()
         if not item:
             raise NotFoundError("Subscription item not found")
+        if item.product is not None:
+            self._ensure_meets_min_order_quantity(item.product, quantity)
 
         old_quantity = item.quantity
         item.quantity = quantity
@@ -1659,6 +1665,42 @@ class SubscriptionService:
 
             if item["quantity"] <= 0:
                 raise ValidationError("Item quantity must be positive")
+
+            self._ensure_meets_min_order_quantity(product, item["quantity"])
+
+    @staticmethod
+    def _ensure_meets_min_order_quantity(product: Product, quantity: int) -> None:
+        """Refuse a subscription line that billing's `create_order` would refuse.
+
+        A subscription item is a standing order line, and `OrderService._process_order_items`
+        rejects any quantity under the product's minimum. A subscription saved with one could
+        never produce an order: it failed every billing cycle and told no one (prod
+        subscription 8, 2026-10-04). Every item write path calls this, before it mutates.
+        """
+        minimum = int(product.min_order_quantity or 1)
+        quantity = int(quantity)
+        if quantity >= minimum:
+            return
+        from business_app.utils.helpers import get_current_language
+
+        language = get_current_language()
+        product_name = product.get_translated("name", language)
+        raise ValidationError(
+            get_translation(
+                "api.subscriptions.error.below_min_order_quantity",
+                language,
+                product=product_name,
+                minimum=minimum,
+                quantity=quantity,
+            ),
+            details={
+                "product_id": product.id,
+                "product_name": product_name,
+                "min_order_quantity": minimum,
+                "quantity": quantity,
+            },
+            error_code="SUBSCRIPTION_ITEM_BELOW_MIN_ORDER_QUANTITY",
+        )
 
     # _calculate_subscription_total with plan removed - discounts applied directly to subscriptions
 

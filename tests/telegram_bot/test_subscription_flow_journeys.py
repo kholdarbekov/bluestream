@@ -33,7 +33,7 @@ from handlers.subscriptions import (
     SELECT_QUANTITY,
 )
 
-from tests.telegram_bot.ptb_harness import DEFAULT_USER_ID, build_bot_harness
+from tests.telegram_bot.ptb_harness import DEFAULT_USER_ID, backend_failure, build_bot_harness
 # One expression of each shared trick rather than a second copy: ageing the
 # dedup lock table is what the wall clock does, and PTB fires a conversation
 # timeout itself rather than through `process_update`.
@@ -53,6 +53,30 @@ TEMPLATES = "/api/v1/subscriptions/templates"
 SUB_ID = 12
 PRODUCT_ID = 7
 ADDRESS_ID = 91
+
+# Per-product minimum order quantities, as `GET /api/v1/products/<id>` publishes them.
+# PRODUCT_ID mirrors prod's 18.9 l bottle (minimum 2); 8 is the 10 l (minimum 3).
+PRODUCT_MINIMUMS = {PRODUCT_ID: 2, 8: 3}
+ITEM_ID = 33  # an existing subscription line, of product 8
+
+
+def product_detail(product_id, minimum):
+    """The fields of `GET /api/v1/products/<id>` the bot reads."""
+    return {
+        "data": {
+            "product": {
+                "id": product_id,
+                "name": f"Product {product_id}",
+                "pricing": {"base_price": 25000},
+                "inventory": {
+                    "stock_quantity": 500,
+                    "track_inventory": True,
+                    "is_in_stock": True,
+                    "min_order_quantity": minimum,
+                },
+            }
+        }
+    }
 
 
 # Distinct strings, so "which screen is the customer on" is answerable from the
@@ -90,6 +114,30 @@ async def bot(monkeypatch):
                 "items": [
                     {"id": PRODUCT_ID, "name": "Aqua Element 19L", "base_price": 25000},
                     {"id": 8, "name": "Aqua Element 10L", "base_price": 16000},
+                ]
+            }
+        },
+    )
+    for product_id, minimum in PRODUCT_MINIMUMS.items():
+        harness.backend.route(
+            "GET",
+            f"{PRODUCTS}/{product_id}",
+            lambda _c, product_id=product_id, minimum=minimum: product_detail(product_id, minimum),
+        )
+    harness.backend.route(
+        "GET",
+        f"/api/v1/subscriptions/{SUB_ID}/items",
+        lambda _c: {
+            "data": {
+                "items": [
+                    {
+                        "id": ITEM_ID,
+                        "subscription_id": SUB_ID,
+                        "product_id": 8,
+                        "quantity": 4,
+                        "unit_price": 16000.0,
+                        "total_price": 64000.0,
+                    }
                 ]
             }
         },
@@ -139,6 +187,11 @@ def buttons(bot):
         for row in markup.get("inline_keyboard", [])
         for button in row
     ]
+
+
+def quantity_buttons(bot):
+    """The quantities the screen offers, in order."""
+    return [int(data.rsplit("_", 1)[1]) for data in buttons(bot) if data and data.startswith("sub_qty_")]
 
 
 async def reach_quantity_screen(bot, user):
@@ -288,6 +341,60 @@ async def test_the_update_item_quantity_screen_offers_a_back_that_exists(bot, us
     assert bot.handlers_matching(user.tap(f"manage_items_{SUB_ID}")), (
         "the Back button this screen renders lands nowhere"
     )
+
+
+# ---------------------------------------------------------------------------
+# The quantity screens start at the product's minimum order quantity
+# ---------------------------------------------------------------------------
+#
+# The keyboard used to be a fixed 1/2/3/4/5/10 whatever the product, so a customer
+# subscribed to 1 bottle of a product whose minimum is 2. The backend saved it and
+# billing's `create_order` then refused every cycle (prod subscription 8, 2026-10-04).
+
+
+async def test_the_creation_quantity_screen_starts_at_the_products_minimum(bot, user):
+    await reach_quantity_screen(bot, user)
+
+    assert quantity_buttons(bot) == [2, 3, 4, 5, 6, 11]
+
+
+async def test_a_product_with_no_minimum_keeps_the_one_to_ten_ladder(bot, user):
+    bot.backend.route("GET", f"{PRODUCTS}/{PRODUCT_ID}", lambda _c: product_detail(PRODUCT_ID, 1))
+
+    await reach_quantity_screen(bot, user)
+
+    assert quantity_buttons(bot) == [1, 2, 3, 4, 5, 10]
+
+
+async def test_the_add_item_quantity_screen_starts_at_that_products_minimum(bot, user):
+    await bot.send(user.tap(f"add_item_{SUB_ID}"))
+    await bot.send(user.tap("sub_product_8"))
+
+    assert last_text(bot) == "HOW-MANY-TO-ADD"
+    assert quantity_buttons(bot) == [3, 4, 5, 6, 7, 12]
+
+
+async def test_the_update_item_quantity_screen_starts_at_that_items_product_minimum(bot, user):
+    await bot.send(user.tap(f"update_item_{SUB_ID}_{ITEM_ID}"))
+
+    assert last_text(bot) == "NEW-QUANTITY"
+    assert quantity_buttons(bot) == [3, 4, 5, 6, 7, 12]
+    assert bot.conversation_state("update_item") == ITEM_SELECT_QUANTITY
+
+
+async def test_a_product_the_bot_cannot_read_is_never_offered_from_one(bot, user):
+    """No silent fallback to a floor of 1: that is the bug."""
+    bot.backend.route(
+        "GET", f"{PRODUCTS}/{PRODUCT_ID}", lambda _c: backend_failure("Product not found", 404)
+    )
+    await bot.send(user.tap("create_subscription"))
+    bot.telegram.reset()
+
+    await bot.send(user.tap(f"sub_product_{PRODUCT_ID}"))
+
+    offered = [data for call in bot.telegram.shown for data in call.callback_data() if data.startswith("sub_qty_")]
+    assert offered == []
+    assert any("Product not found" in call.text for call in bot.telegram.of("answerCallbackQuery"))
 
 
 # ---------------------------------------------------------------------------

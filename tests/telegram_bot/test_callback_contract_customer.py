@@ -768,7 +768,7 @@ def _keyboard_callbacks(lang: str = "uz") -> list[tuple[str, str]]:
         "SubscriptionKeyboards.subscription_creation_options",
         SubscriptionKeyboards.subscription_creation_options(lang),
     )
-    add("SubscriptionKeyboards.quantity_selector", SubscriptionKeyboards.quantity_selector(lang))
+    add("SubscriptionKeyboards.quantity_selector", SubscriptionKeyboards.quantity_selector(lang, min_order_qty=1))
     add(
         "SubscriptionKeyboards.payment_methods",
         SubscriptionKeyboards.payment_methods(_AVAILABLE_METHODS, lang),
@@ -1037,7 +1037,7 @@ async def test_the_subscription_quantity_back_button_is_owned_by_the_subscriptio
     Pins the routing, not the error text, so an improved error message does not
     turn this red for the wrong reason.
     """
-    rendered = SubscriptionKeyboards.quantity_selector("uz")
+    rendered = SubscriptionKeyboards.quantity_selector("uz", min_order_qty=1)
     backs = [
         button.callback_data
         for row in rendered.inline_keyboard

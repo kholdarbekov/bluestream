@@ -16,6 +16,7 @@ from shared.constants import SUBSCRIPTION_STATUS_ICONS
 # old" used to end the customer's subscription flow AFTER the change had already
 # been sent to the backend.
 from handlers.base import BaseHandler
+from handlers.products import ProductHandlers
 
 
 # Conversation states for subscription creation
@@ -232,7 +233,13 @@ class SubscriptionHandlers(BaseHandler):
             product_id = int(update.callback_query.data.split('_')[2])
             context.user_data['current_product_id'] = product_id
 
-            await self._show_quantity_selector(update, language, 'telegram.subscription.select_quantity')
+            min_order_qty = await self._product_min_order_qty(update, context, product_id, language)
+            if min_order_qty is None:
+                return SELECT_QUANTITY
+
+            await self._show_quantity_selector(
+                update, language, 'telegram.subscription.select_quantity', min_order_qty=min_order_qty
+            )
             return SELECT_FREQUENCY
 
         except Exception as e:
@@ -837,7 +844,13 @@ class SubscriptionHandlers(BaseHandler):
             product_id = int(update.callback_query.data.split('_')[2])
             context.user_data['adding_product_id'] = product_id
 
-            await self._show_quantity_selector(update, language, 'telegram.subscription.select_quantity_for_item')
+            min_order_qty = await self._product_min_order_qty(update, context, product_id, language)
+            if min_order_qty is None:
+                return ITEM_SELECT_PRODUCT
+
+            await self._show_quantity_selector(
+                update, language, 'telegram.subscription.select_quantity_for_item', min_order_qty=min_order_qty
+            )
             return ITEM_SELECT_QUANTITY
 
         except Exception as e:
@@ -922,6 +935,13 @@ class SubscriptionHandlers(BaseHandler):
             context.user_data['editing_subscription_id'] = sub_id
             context.user_data['editing_item_id'] = item_id
 
+            product_id = await self._item_product_id(update, context, sub_id, item_id, language)
+            if product_id is None:
+                return ConversationHandler.END
+            min_order_qty = await self._product_min_order_qty(update, context, product_id, language)
+            if min_order_qty is None:
+                return ConversationHandler.END
+
             # This flow never showed a product list — the customer picked an
             # existing item off the item-management menu, so that is where Back
             # belongs. The shared default (`back_to_product_selection`) would
@@ -929,6 +949,7 @@ class SubscriptionHandlers(BaseHandler):
             await self._show_quantity_selector(
                 update, language, 'telegram.subscription.select_new_quantity',
                 back_callback=f'manage_items_{sub_id}',
+                min_order_qty=min_order_qty,
             )
             return ITEM_SELECT_QUANTITY
 
@@ -1388,7 +1409,7 @@ class SubscriptionHandlers(BaseHandler):
 
         return products
 
-    async def _show_quantity_selector(self, update, language, text_key, back_callback=None):
+    async def _show_quantity_selector(self, update, language, text_key, back_callback=None, *, min_order_qty):
         """Shared helper: display quantity selection keyboard.
 
         `back_callback` names the screen this one was reached from; the builder
@@ -1398,10 +1419,57 @@ class SubscriptionHandlers(BaseHandler):
         query = update.callback_query
         text = i18n.get(text_key, language)
         keyboard = SubscriptionKeyboards.quantity_selector(
-            language, back_callback=back_callback
+            language, back_callback=back_callback, min_order_qty=min_order_qty
         )
         await self._edit_or_replace_callback_message(query, text=text, reply_markup=keyboard)
         await self._ack(query)
+
+    async def _product_min_order_qty(self, update, context, product_id, language):
+        """The product's minimum order quantity: the first button the quantity screen offers.
+
+        Read through `ProductHandlers._purchase_bounds`, the resolver every cart surface
+        uses. Its stock ceiling is ignored: a subscription repeats, so today's shelf does
+        not bound it. Returns None, with the customer already told, when the product
+        cannot be read. Guessing 1 is how a below-minimum subscription got saved.
+        """
+        async with api_client as client:
+            user_token = await get_auth_token(update, context, client)
+            if not user_token:
+                await self._handle_auth_error(update, language)
+                return None
+            response = await client.get_product(user_token, product_id, language=language)
+            if not response.success:
+                await self._handle_api_error(update, response.error, language)
+                return None
+
+        product = (response.data or {}).get('data', {}).get('product')
+        if not product:
+            await self._ack(
+                update.callback_query, i18n.get('telegram.error.product_error', language), show_alert=True
+            )
+            return None
+        min_order_qty, _ceiling = ProductHandlers._purchase_bounds(product)
+        return min_order_qty
+
+    async def _item_product_id(self, update, context, sub_id, item_id, language):
+        """The product of one subscription line, or None with the customer already told."""
+        async with api_client as client:
+            user_token = await get_auth_token(update, context, client)
+            if not user_token:
+                await self._handle_auth_error(update, language)
+                return None
+            response = await client.get_subscription_items(user_token, sub_id)
+            if not response.success:
+                await self._handle_api_error(update, response.error, language)
+                return None
+
+        items = (response.data or {}).get('data', {}).get('items', [])
+        product_id = next((item.get('product_id') for item in items if item.get('id') == item_id), None)
+        if product_id is None:
+            await self._ack(
+                update.callback_query, i18n.get('telegram.error.product_error', language), show_alert=True
+            )
+        return product_id
 
     def _build_address_keyboard(self, addresses, language):
         """Build keyboard for address selection"""

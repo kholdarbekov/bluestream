@@ -13,7 +13,6 @@ from business_app.serializers.subscription_serializers import (
     serialize_subscription_item,
     serialize_subscription_log,
     SubscriptionSchema,
-    SubscriptionItemSchema,
     CreateSubscriptionRequest,
     UpdateSubscriptionRequest,
     PauseSubscriptionRequest,
@@ -442,8 +441,11 @@ def update_subscription_item(subscription_id, item_id):
         item = update_result["item"]
         billing_amount = update_result["billing_amount"]
 
-        # Use Pydantic schema for response
-        item_response = serialize_database_model(item, SubscriptionItemSchema)
+        # Same shape as add_subscription_item. SubscriptionItemSchema requires a
+        # `product_name` attribute the model does not have, so it fell back to a raw
+        # attribute dump (SQLAlchemy MetaData included) and every update 500'd after
+        # its commit.
+        item_response = item.to_dict()
 
         return success_response(
             data={"item": item_response, "new_billing_amount": float(billing_amount)},
@@ -621,6 +623,8 @@ def preview_subscription():
 
     except NotFoundError as e:
         return not_found_response(get_translation(e.message))
+    except ValidationError as e:
+        return error_response(get_translation(e.message), status_code=400)
     except ValueError as e:
         current_app.logger.warning(f"Preview subscription validation error: {e}")
         return error_response(get_translation("api.subscriptions.error.validation_failed"), status_code=400)

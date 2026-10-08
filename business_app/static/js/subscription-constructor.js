@@ -253,7 +253,10 @@ class SubscriptionConstructor {
 
         const productsHTML = this.products.map(product => {
             const isSelected = this.selectedProducts.has(product.id);
-            const quantity = isSelected ? this.selectedProducts.get(product.id).quantity : 1;
+            const minQty = this.minOrderQuantity(product.id);
+            // A quantity restored from sessionStorage may predate the minimum.
+            const quantity = Math.max(isSelected ? this.selectedProducts.get(product.id).quantity : minQty, minQty);
+            if (isSelected) this.selectedProducts.get(product.id).quantity = quantity;
 
             // Get price from nested structure
             const price = product.pricing?.base_price || product.base_price || 0;
@@ -699,7 +702,7 @@ class SubscriptionConstructor {
 
         if (action === 'increase') {
             currentQty++;
-        } else if (action === 'decrease' && currentQty > 1) {
+        } else if (action === 'decrease' && currentQty > this.minOrderQuantity(productId)) {
             currentQty--;
         }
 
@@ -710,6 +713,13 @@ class SubscriptionConstructor {
             item.quantity = currentQty;
             this.saveState();
         }
+    }
+
+    // The product's minimum order quantity, as the products API publishes it. A
+    // subscription line below it is one billing's create_order refuses every cycle.
+    minOrderQuantity(productId) {
+        const product = this.products.find(p => p.id === productId);
+        return parseInt(product?.inventory?.min_order_quantity, 10) || 1;
     }
 
     selectFrequency(option) {

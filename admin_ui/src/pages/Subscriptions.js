@@ -63,6 +63,7 @@ const Subscriptions = () => {
   const [form] = Form.useForm();
   const watchedUserId = Form.useWatch('user_id', form);
   const watchedDeliveryFreq = Form.useWatch('delivery_frequency', form);
+  const watchedItems = Form.useWatch('items', form);
   const manualAmount = Form.useWatch('override_manual_billing_amount', form);
   const manualDates = Form.useWatch('override_manual_billing_dates', form);
 
@@ -121,6 +122,9 @@ const Subscriptions = () => {
   const total = listQuery.data?.total || 0;
   const users = usersQuery.data?.data?.items || usersQuery.data?.items || [];
   const products = productsQuery.data?.data?.items || productsQuery.data?.items || [];
+  // A subscription line below the product's minimum order quantity is one billing's
+  // create_order refuses every cycle, so every quantity input here is floored by it.
+  const minQtyFor = (productId) => Number(products.find((p) => p.id === productId)?.min_order_quantity) || 1;
   const timeSlots = timeSlotsQuery.data?.data?.items || timeSlotsQuery.data?.items || [];
   const addresses = addressesQuery.data?.data?.addresses || addressesQuery.data?.addresses || [];
   const detail = detailQuery.data || {};
@@ -263,7 +267,7 @@ const Subscriptions = () => {
       render: (v, item) => (
         <Space>
           <InputNumber
-            min={1}
+            min={minQtyFor(item.product_id)}
             // eslint-disable-next-line security/detect-object-injection
             value={qtyDrafts[item.id] ?? v}
             onChange={(nv) => setQtyDrafts((d) => ({ ...d, [item.id]: nv }))}
@@ -360,12 +364,19 @@ const Subscriptions = () => {
                         <Col span={11}>
                           <Form.Item name={[field.name, 'product_id']} rules={[{ required: true }]}>
                             <Select showSearch optionFilterProp="label" placeholder={t('product', { defaultValue: 'Product' })}
-                              options={products.map((p) => ({ value: p.id, label: p.name }))} />
+                              options={products.map((p) => ({ value: p.id, label: p.name }))}
+                              onChange={(productId) => {
+                                const path = ['items', field.name, 'quantity'];
+                                const minimum = minQtyFor(productId);
+                                if ((form.getFieldValue(path) || 0) < minimum) form.setFieldValue(path, minimum);
+                              }} />
                           </Form.Item>
                         </Col>
                         <Col span={6}>
                           <Form.Item name={[field.name, 'quantity']} rules={[{ required: true }]}>
-                            <InputNumber min={1} style={{ width: '100%' }} placeholder={t('quantity', { defaultValue: 'Qty' })} />
+                            <InputNumber
+                              min={minQtyFor(watchedItems?.[field.name]?.product_id)}
+                              style={{ width: '100%' }} placeholder={t('quantity', { defaultValue: 'Qty' })} />
                           </Form.Item>
                         </Col>
                         <Col span={5}>
@@ -561,9 +572,9 @@ const Subscriptions = () => {
             <Space style={{ marginTop: 12 }} wrap>
               <Select showSearch optionFilterProp="label" style={{ width: 240 }}
                 placeholder={t('product', { defaultValue: 'Product' })} value={addItemValue.product_id}
-                onChange={(v) => setAddItemValue((s) => ({ ...s, product_id: v }))}
+                onChange={(v) => setAddItemValue((s) => ({ product_id: v, quantity: Math.max(s.quantity || 0, minQtyFor(v)) }))}
                 options={products.map((p) => ({ value: p.id, label: p.name }))} />
-              <InputNumber min={1} value={addItemValue.quantity}
+              <InputNumber min={minQtyFor(addItemValue.product_id)} value={addItemValue.quantity}
                 onChange={(v) => setAddItemValue((s) => ({ ...s, quantity: v }))} />
               <Button type="primary" icon={<PlusOutlined />} loading={addItemMutation.isPending}
                 disabled={!addItemValue.product_id}

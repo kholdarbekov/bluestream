@@ -1378,6 +1378,11 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Obuna elementi topilmadi',
         'ru': 'Элемент подписки не найден'
     },
+    'api.subscriptions.error.below_min_order_quantity': {
+        'en': '{product}: at least {minimum} per delivery (you chose {quantity})',
+        'uz': '{product}: har bir yetkazishda kamida {minimum} ta (siz {quantity} ta tanladingiz)',
+        'ru': '{product}: не менее {minimum} шт. за доставку (вы выбрали {quantity})'
+    },
     'api.subscriptions.error.no_failed_billing_to_retry': {
         'en': 'No failed billing attempts to retry',
         'uz': 'Qayta urinish uchun muvaffaqiyatsiz hisob-kitob yo\'q',

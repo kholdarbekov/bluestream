@@ -73,6 +73,8 @@ NOT_STAFF_FACING: dict[str, str] = {
     "/orders/<id>/agent-confirmation)",
     "SALES_CONFIRMATION_NOT_PENDING": f"{_NOT_ON_ROUTE} (agent_order_confirmation_service.py:210: customer "
     "/orders/<id>/agent-confirmation)",
+    "SUBSCRIPTION_ITEM_BELOW_MIN_ORDER_QUANTITY": f"{_NOT_ON_ROUTE} (subscription_service.py "
+    "_ensure_meets_min_order_quantity: customer /subscriptions/*, admin /admin/subscriptions/*)",
     # The same-day hold (compensation spec C14).
     "ORDER_AWAITING_STAFF_APPROVAL": f"{_NOT_ON_ROUTE} (order_service.update_order_status guard: a held order "
     "has no delivery, so no staff-bot route confirms one)",

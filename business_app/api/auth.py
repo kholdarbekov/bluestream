@@ -30,7 +30,6 @@ from business_app.utils.validators import phone_validator
 from business_app.utils.exceptions import ValidationError, UnauthorizedError, ConflictError
 from business_app.utils.translations import get_translation
 from shared.enums import UserRole
-from business_app.utils.csrf_protection import csrf_required
 from business_app.models.user import User
 from business_app import db
 from business_app.utils.api_responses import (
@@ -1068,8 +1067,9 @@ def forgot_password():
     return success_response(message=get_translation("success.sent"))
 
 
+# No CSRF guard: the caller is logged out, and the emailed one-time token in the body is
+# the only credential. No cookie authenticates this request, so there is nothing to forge.
 @auth_bp.route("/reset-password", methods=["POST"])
-@csrf_required
 @validate_json(["token", "new_password"])
 @handle_exceptions
 @log_request
@@ -1117,8 +1117,7 @@ def reset_password():
 
 
 @auth_bp.route("/change-password", methods=["POST"])
-@jwt_required()
-@csrf_required
+@jwt_required()  # cookie requests are CSRF-checked here (JWT_COOKIE_CSRF_PROTECT)
 @validate_json(["current_password", "new_password"])
 @handle_exceptions
 @log_request

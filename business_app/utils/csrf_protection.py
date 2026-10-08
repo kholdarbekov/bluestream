@@ -7,8 +7,7 @@ import hmac
 import hashlib
 import secrets
 import time
-from typing import Optional, List
-from functools import wraps
+from typing import Optional
 
 from flask import Flask, request, jsonify, current_app, session
 from flask_wtf.csrf import CSRFProtect, CSRFError
@@ -232,91 +231,6 @@ class CSRFProtectionManager:
 csrf_protection = CSRFProtectionManager()
 
 
-def csrf_required(f):
-    """
-    Decorator to require CSRF protection for a specific endpoint
-    Can be used in addition to or instead of global CSRF protection
-    """
-
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        # Skip CSRF for excluded methods
-        if request.method in ["GET", "HEAD", "OPTIONS"]:
-            return f(*args, **kwargs)
-
-        # Get CSRF token from various sources
-        csrf_token = (
-            request.headers.get("X-CSRFToken")
-            or request.headers.get("X-CSRF-Token")
-            or request.form.get("csrf_token")
-            or request.json.get("csrf_token")
-            if request.is_json
-            else None
-        )
-
-        if not csrf_token:
-            current_app.logger.warning(f"Missing CSRF token for {request.endpoint}")
-            return (
-                jsonify(
-                    {
-                        "error": "CSRF token required",
-                        "message": "CSRF token must be provided in headers or request body",
-                    }
-                ),
-                400,
-            )
-
-        # Get user ID if available (for JWT protected endpoints)
-        user_id = None
-        try:
-            if hasattr(request, "headers") and "Authorization" in request.headers:
-                verify_jwt_in_request(optional=True)
-                user_id = get_jwt_identity()
-        except Exception:
-            pass  # JWT not present or invalid, continue with anonymous validation
-
-        # Validate CSRF token
-        if not csrf_protection.validate_csrf_token(csrf_token, user_id):
-            current_app.logger.warning(f"Invalid CSRF token for {request.endpoint}")
-
-            # Log security event
-            audit_logger.log_event(
-                event_type=AuditEventType.SUSPICIOUS_ACTIVITY,
-                action="csrf_token_invalid",
-                severity=AuditSeverity.HIGH,
-                resource_type="csrf_protection",
-                description=f"Invalid CSRF token for endpoint {request.endpoint}",
-                additional_data={
-                    "user_id": user_id,
-                    "endpoint": request.endpoint,
-                    "method": request.method,
-                    "remote_addr": request.remote_addr,
-                    "user_agent": request.headers.get("User-Agent"),
-                },
-            )
-
-            return jsonify({"error": "Invalid CSRF token", "message": "CSRF token validation failed"}), 400
-
-        return f(*args, **kwargs)
-
-    return decorated_function
-
-
-def csrf_exempt(f):
-    """
-    Decorator to exempt an endpoint from CSRF protection
-    Use sparingly and only for endpoints with alternative protection
-    """
-
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        return f(*args, **kwargs)
-
-    # Mark function as CSRF exempt
-    decorated_function._csrf_exempt = True
-    return decorated_function
-
-
 def get_csrf_token() -> str:
     """
     Get CSRF token for the current request/session
@@ -373,24 +287,6 @@ def setup_csrf_protection(app: Flask):
         return response
 
     app.logger.info("CSRF protection initialized successfully")
-
-
-def protect_forms_with_csrf(endpoints: List[str]):
-    """
-    Apply CSRF protection to a list of form endpoints
-
-    Args:
-        endpoints: List of endpoint names to protect
-    """
-    for endpoint in endpoints:
-        try:
-            view_func = current_app.view_functions.get(endpoint)
-            if view_func and not getattr(view_func, "_csrf_exempt", False):
-                # Wrap the view function with CSRF protection
-                current_app.view_functions[endpoint] = csrf_required(view_func)
-                current_app.logger.debug(f"Applied CSRF protection to {endpoint}")
-        except Exception as e:
-            current_app.logger.error(f"Failed to apply CSRF protection to {endpoint}: {e}")
 
 
 def validate_double_submit_csrf(token: str, cookie_token: str) -> bool:

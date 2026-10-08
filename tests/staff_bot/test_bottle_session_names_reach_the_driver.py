@@ -80,7 +80,6 @@ def _seeded_table() -> dict:
 
 
 # What the driver saw instead of the sentence: humanise_key() of each key.
-HUMANISED_JOINED = "Joined session"
 HUMANISED_MEMBERSHIP = "Current membership"
 HUMANISED_INVITED = "Codriver invited"
 
@@ -141,27 +140,6 @@ def handler(monkeypatch):
 def _rendered(query) -> str:
     call = query.edit_message_text.call_args
     return call.args[0] if call.args else call.kwargs["text"]
-
-
-@pytest.mark.parametrize("language", LANGUAGES)
-async def test_joining_a_session_names_whose_session_it_is(
-    real_copy, handler, monkeypatch, language
-):
-    monkeypatch.setattr(
-        mod, "api_client",
-        _FakeClient(join_bottle_session=_ok({"owner_name": "Aziz Karimov"})),
-    )
-    update, query = _callback("bottles_join_execute_17")
-
-    await handler.execute_join_session(update, _context(language))
-
-    text = _rendered(query)
-    assert "Aziz Karimov" in text, (
-        "the driver is not told whose session they just joined — two trucks "
-        "share one inventory and this name is the only thing distinguishing them"
-    )
-    assert HUMANISED_JOINED not in text
-    assert "{" not in text and "}" not in text
 
 
 @pytest.mark.parametrize("language", LANGUAGES)
@@ -248,3 +226,30 @@ async def test_the_invite_receipt_does_not_decorate_copy_that_already_decorates_
     assert text.count("<b>") == 1 and text.count("</b>") == 1, (
         f"nested <b> tags under parse_mode=HTML: {text!r}"
     )
+
+
+@pytest.mark.parametrize("language", LANGUAGES)
+async def test_a_membership_status_owner_name_is_html_escaped(real_copy, handler, monkeypatch, language):
+    monkeypatch.setattr(
+        mod, "api_client",
+        _FakeClient(get_current_session_membership=_ok({"owner_name": "Ali <&> Co", "current_inventory": 5})),
+    )
+    update, query = _callback("bottles_membership_status")
+
+    await handler.show_membership_status(update, _context(language))
+
+    text = _rendered(query)
+    assert "Ali &lt;&amp;&gt; Co" in text and "Ali <&> Co" not in text
+
+
+@pytest.mark.parametrize("language", LANGUAGES)
+async def test_an_invited_codriver_name_is_html_escaped(real_copy, handler, monkeypatch, language):
+    monkeypatch.setattr(
+        mod, "api_client", _FakeClient(invite_driver_to_session=_ok({"member_name": "Ali <&> Co"})),
+    )
+    update, query = _callback("bottles_invite_execute_9")
+
+    await handler.execute_invite_driver(update, _context(language))
+
+    text = _rendered(query)
+    assert "Ali &lt;&amp;&gt; Co" in text and "Ali <&> Co" not in text

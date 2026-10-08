@@ -95,6 +95,20 @@ MENU_KEYS = (
 
 # Everything the bottle screens render.
 BOTTLE_KEYS = (
+    "staff.bottles.join_session",
+    "staff.bottles.choose_session_to_join",
+    "staff.bottles.join_session_confirm_title",
+    "staff.bottles.join_session_confirm_note",
+    "staff.bottles.confirm_join",
+    "staff.bottles.session_owner",
+    "staff.bottles.bottles_on_truck",
+    "staff.bottles.no_open_sessions",
+    "staff.bottles.join_request_sent",
+    "staff.bottles.join_request_approved_owner",
+    "staff.bottles.join_request_declined_owner",
+    "staff.error.api.bottle_session_closed",
+    "staff.error.api.join_request_stale",
+    "staff.error.api.transfer_receiver_invalid",
     "staff.back",
     "staff.cancel",
     "staff.cash.hub_title",
@@ -201,6 +215,12 @@ SESSION_CURRENT = "/api/v1/staff/bottles/session/current"
 SESSION_OPEN = "/api/v1/staff/bottles/session/open"
 SESSION_CLOSE = "/api/v1/staff/bottles/session/close"
 AVAILABLE_DRIVERS = "/api/v1/staff/bottles/sessions/available-drivers"
+TRANSFER_RECIPIENTS = "/api/v1/staff/bottles/transfers/recipients"
+JOINABLE = "/api/v1/staff/bottles/sessions/joinable"
+JOIN_REQUEST = "/api/v1/staff/bottles/session/join-request"
+JOIN_APPROVE = f"{JOIN_REQUEST}/approve"
+JOIN_DECLINE = f"{JOIN_REQUEST}/decline"
+JOINABLE_ROW = {"session_id": 12, "owner_name": "Ali <&> Co", "current_inventory": 9, "bottles_loaded": 40}
 TRANSFERS = "/api/v1/staff/bottles/transfers"
 TRANSFERS_PENDING = "/api/v1/staff/bottles/transfers/pending"
 SESSION_MEMBERSHIP = "/api/v1/staff/bottles/session/membership"
@@ -1152,9 +1172,9 @@ def transfer_backend(harness, *, inventory=9, drivers=None):
     harness.backend.route("GET", SESSION_CURRENT, lambda _call: open_session(current_inventory=inventory))
     harness.backend.route(
         "GET",
-        AVAILABLE_DRIVERS,
+        TRANSFER_RECIPIENTS,
         lambda _call: drivers if drivers is not None else [
-            {"user_id": RECEIVER_DRIVER_ID, "name": "Bekzod Rahimov"},
+            {"user_id": RECEIVER_DRIVER_ID, "name": "Bekzod Rahimov", "bottle_status": "own_session"},
         ],
     )
     harness.backend.route("POST", TRANSFERS, lambda _call: {
@@ -1793,3 +1813,187 @@ async def test_an_invite_refused_for_want_of_a_session_offers_the_way_to_open_on
     assert screen.callback_data() == ["staff_bottle_my_accountability", "staff_back_to_main"], (
         f"the refusal does not offer the way to open a session: {screen.callback_data()}"
     )
+
+
+async def test_the_transfer_picker_lists_every_recipient_with_their_session_state(monkeypatch):
+    """Twelve active drivers: all twelve are offered (the old picker cut at ten),
+    each with the hint the backend published. A driver who already has a
+    session is a recipient now. The old list hid exactly those drivers."""
+    harness = await build_driver(monkeypatch)
+    statuses = ["own_session", "co_driver", "none"]
+    rows = [
+        {"user_id": 100 + i, "name": f"Driver {i}", "bottle_status": statuses[i % 3]}
+        for i in range(12)
+    ]
+    transfer_backend(harness, drivers=rows)
+    driver_updates, labels = await sign_in(harness)
+    await open_cash_hub(harness, driver_updates, labels)
+    await harness.send(driver_updates.tap("staff_bottle_log_loaded"))
+
+    await harness.send(driver_updates.tap("staff_bottle_transfer_start"))
+
+    picker = harness.telegram.last_shown()
+    assert [f"staff_transfer_driver_{100 + i}" for i in range(12)] == picker.callback_data()[:12]
+    labels_shown = picker.button_labels()
+    assert labels_shown[0] == "🚚 Driver 0"
+    assert labels_shown[1] == "🤝 Driver 1"
+    assert labels_shown[2] == "👤 Driver 2"
+    assert backend_calls(harness, "GET", AVAILABLE_DRIVERS) == []
+
+
+async def test_a_recipient_deactivated_after_the_picker_was_drawn_is_refused_and_the_flow_ends(monkeypatch):
+    harness = await build_driver(monkeypatch)
+    transfer_backend(harness)
+    harness.backend.route("POST", TRANSFERS, lambda _call: staff_backend_failure(
+        "This driver can't receive bottles right now", 400, error_code="BOTTLE_TRANSFER_RECEIVER_INVALID",
+    ))
+    driver_updates, labels = await sign_in(harness)
+    await start_transfer(harness, driver_updates, labels)
+
+    await harness.send(driver_updates.text("4"))
+
+    refusal = harness.telegram.last_shown()
+    assert _curated("staff.error.api.transfer_receiver_invalid") in refusal.text
+    assert "staff_bottle_my_accountability" in refusal.callback_data()
+    assert harness.conversation_state("staff_bottle_transfer") is None
+
+
+# ===========================================================================
+# Asking to join a colleague's session
+# ===========================================================================
+
+
+async def test_a_driver_with_no_session_finds_join_on_the_accountability_screen_and_sends_a_request(driver):
+    driver.backend.route("GET", JOINABLE, lambda _call: [dict(JOINABLE_ROW)])
+    driver.backend.route("POST", JOIN_REQUEST, lambda _call: dict(JOINABLE_ROW))
+    driver_updates, labels = await sign_in(driver)
+    await open_cash_hub(driver, driver_updates, labels)
+
+    await driver.send(driver_updates.tap("staff_bottle_my_accountability"))
+    assert "bottles_join_session" in driver.telegram.last_shown().callback_data()
+
+    await driver.send(driver_updates.tap("bottles_join_session"))
+    assert "bottles_join_confirm_12" in driver.telegram.last_shown().callback_data()
+
+    await driver.send(driver_updates.tap("bottles_join_confirm_12"))
+    confirm = driver.telegram.last_shown()
+    assert _curated("staff.bottles.join_session_confirm_title") in confirm.text
+    assert "Ali &lt;&amp;&gt; Co" in confirm.text and "Ali <&> Co" not in confirm.text
+    assert "bottles_join_request_12" in confirm.callback_data()
+    assert not any(c.startswith("bottles_join_execute_") for c in confirm.callback_data())
+
+    await driver.send(driver_updates.tap("bottles_join_request_12"))
+
+    assert [c.data for c in backend_calls(driver, "POST", JOIN_REQUEST)] == [{"session_id": 12}]
+    sent = driver.telegram.last_shown().text
+    assert "Ali &lt;&amp;&gt; Co" in sent and "Ali <&> Co" not in sent
+    assert _curated("staff.bottles.join_request_sent").split("{name}")[0].strip() in sent
+
+
+async def test_an_owner_does_not_see_join_on_their_own_session(driver):
+    driver.backend.route("GET", SESSION_CURRENT, lambda _call: open_session())
+    driver_updates, labels = await sign_in(driver)
+    await open_cash_hub(driver, driver_updates, labels)
+
+    await driver.send(driver_updates.tap("staff_bottle_my_accountability"))
+
+    assert "bottles_join_session" not in driver.telegram.last_shown().callback_data()
+
+
+async def test_a_session_that_closed_before_the_request_was_sent_says_so_and_offers_the_list(driver):
+    driver.backend.route("POST", JOIN_REQUEST, lambda _call: staff_backend_failure(
+        "Can only join an OPEN session", 400, error_code="BOTTLE_SESSION_NOT_OPEN",
+    ))
+    driver_updates, _labels = await sign_in(driver)
+
+    await driver.send(driver_updates.tap("bottles_join_request_12"))
+
+    screen = driver.telegram.last_shown()
+    assert _curated("staff.error.api.bottle_session_closed") in screen.text
+    assert screen.callback_data() == ["bottles_join_session"]
+
+
+@pytest.mark.parametrize("verdict, endpoint, reply, key", [
+    ("ok", JOIN_APPROVE, {"member_name": "Vali <b>"}, "staff.bottles.join_request_approved_owner"),
+    ("no", JOIN_DECLINE, {"requester_id": 77, "requester_name": "Vali <b>"}, "staff.bottles.join_request_declined_owner"),
+])
+async def test_the_owner_answers_from_the_pushed_message_and_the_buttons_go_away(driver, verdict, endpoint, reply, key):
+    driver.backend.route("POST", endpoint, lambda _call: dict(reply))
+    driver_updates, _labels = await sign_in(driver)
+
+    await driver.send(driver_updates.tap(f"bottles_jr_{verdict}_12_77"))
+
+    assert [c.data for c in backend_calls(driver, "POST", endpoint)] == [{"session_id": 12, "requester_id": 77}]
+    answered = driver.telegram.last_shown()
+    assert "Vali &lt;b&gt;" in answered.text
+    assert _curated(key).split("{name}")[0].strip() in answered.text
+    assert not any(c.startswith("bottles_jr_") for c in answered.callback_data())
+
+
+def _tap_on_pushed_request(driver_updates, verdict):
+    """The owner's tap on the pushed request, whose message still carries both buttons."""
+    return driver_updates._build({
+        "update_id": driver_updates._next_update_id(),
+        "callback_query": {
+            "id": f"cb{driver_updates._update_id}",
+            "from": driver_updates._user,
+            "chat_instance": "test-chat-instance",
+            "data": f"bottles_jr_{verdict}_12_77",
+            "message": {
+                "message_id": driver_updates._message_id,
+                "date": 1_700_000_000,
+                "chat": {"id": driver_updates.chat_id, "type": "private"},
+                "from": {"id": 42, "is_bot": True, "first_name": "BlueStream"},
+                "text": "Ali asks to join your session",
+                "reply_markup": {"inline_keyboard": [[
+                    {"text": "Approve", "callback_data": "bottles_jr_ok_12_77"},
+                    {"text": "Decline", "callback_data": "bottles_jr_no_12_77"},
+                ]]},
+            },
+        },
+    })
+
+
+async def test_a_transient_failure_keeps_the_owners_approve_and_decline_buttons(driver):
+    driver.backend.route("POST", JOIN_APPROVE, lambda _call: staff_backend_failure("boom", 503))
+    driver_updates, _labels = await sign_in(driver)
+
+    await driver.send(_tap_on_pushed_request(driver_updates, "ok"))
+
+    shown = driver.telegram.last_shown()
+    assert "bottles_jr_ok_12_77" in shown.callback_data()
+    assert "bottles_jr_no_12_77" in shown.callback_data()
+
+
+async def test_a_coded_refusal_still_replaces_the_buttons_with_back(driver):
+    driver.backend.route("POST", JOIN_APPROVE, lambda _call: staff_backend_failure(
+        "This join request was for a session you have since closed", 409, error_code="BOTTLE_JOIN_REQUEST_STALE",
+    ))
+    driver_updates, _labels = await sign_in(driver)
+
+    await driver.send(_tap_on_pushed_request(driver_updates, "ok"))
+
+    assert not any(c.startswith("bottles_jr_") for c in driver.telegram.last_shown().callback_data())
+
+
+async def test_a_stale_approve_says_so(driver):
+    driver.backend.route("POST", JOIN_APPROVE, lambda _call: staff_backend_failure(
+        "This join request was for a session you have since closed", 409, error_code="BOTTLE_JOIN_REQUEST_STALE",
+    ))
+    driver_updates, _labels = await sign_in(driver)
+
+    await driver.send(driver_updates.tap("bottles_jr_ok_12_77"))
+
+    assert _curated("staff.error.api.join_request_stale") in driver.telegram.last_shown().text
+
+
+async def test_an_old_instant_join_button_in_the_chat_history_opens_the_request_list(driver):
+    driver.backend.route("GET", JOINABLE, lambda _call: [dict(JOINABLE_ROW)])
+    driver_updates, _labels = await sign_in(driver)
+    update = driver_updates.tap("bottles_join_execute_12")
+    assert driver.handlers_matching(update), "an old Join button would spin with no answer"
+
+    await driver.send(update)
+
+    assert "bottles_join_confirm_12" in driver.telegram.last_shown().callback_data()
+    assert backend_calls(driver, "POST", "/api/v1/staff/bottles/session/join") == []

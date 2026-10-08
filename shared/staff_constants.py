@@ -147,6 +147,20 @@ SALES_EVENTS = (
     SALES_EVENT_PAY_STATEMENT_APPROVED,
 )
 
+# Bottle pushes the staff bot's `/internal/bottle-event` door accepts. Produced by
+# business_app/services/bottle_notifications.py; rendered by
+# staff_bot/webhook_server.py::_render_bottle_event, which reads its copy by literal key.
+BOTTLE_EVENT_TRANSFER_RECEIVED = 'transfer_received'
+BOTTLE_EVENT_JOIN_REQUESTED = 'join_requested'
+BOTTLE_EVENT_JOIN_APPROVED = 'join_approved'
+BOTTLE_EVENT_JOIN_DECLINED = 'join_declined'
+BOTTLE_EVENTS = (
+    BOTTLE_EVENT_TRANSFER_RECEIVED,
+    BOTTLE_EVENT_JOIN_REQUESTED,
+    BOTTLE_EVENT_JOIN_APPROVED,
+    BOTTLE_EVENT_JOIN_DECLINED,
+)
+
 # Risk flags a driver cash-reconciliation session can carry.
 #
 # SSOT for a value with TWO expressions: `DriverReconciliationService.

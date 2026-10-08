@@ -1488,31 +1488,80 @@ def list_joinable_bottle_sessions():
     return success_response([serialize_joinable_session(s) for s in sessions])
 
 
-@staff_bp.route("/bottles/session/join", methods=["POST"])
+@staff_bp.route("/bottles/session/join-request", methods=["POST"])
 @handle_api_exception
 @jwt_required()
 @require_staff_roles("delivery_driver")
-def join_bottle_session():
-    """Driver joins another driver's open session as a co-driver."""
+def request_to_join_bottle_session():
+    """A driver with no session asks a colleague to let them join theirs."""
+    from business_app.serializers.bottle_serializers import JoinSessionRequest, serialize_joinable_session
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+    from pydantic import ValidationError as PydanticValidationError
+    from business_app.utils.api_responses import validation_error_response
+
+    try:
+        payload = JoinSessionRequest(**(request.get_json() or {}))
+    except PydanticValidationError as exc:
+        return validation_error_response(exc.errors())
+
+    session = BottleTrackingService().request_to_join_session(get_jwt_identity(), payload.session_id)
+    return success_response(serialize_joinable_session(session))
+
+
+@staff_bp.route("/bottles/session/join-request/approve", methods=["POST"])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles("delivery_driver")
+def approve_bottle_session_join_request():
+    """The session owner approves a colleague's join request."""
     from business_app.serializers.bottle_serializers import (
-        JoinSessionRequest,
+        JoinRequestDecisionRequest,
         serialize_session_membership,
     )
     from business_app.services.bottle_tracking_service import BottleTrackingService
     from pydantic import ValidationError as PydanticValidationError
     from business_app.utils.api_responses import validation_error_response
 
-    current_user_id = get_jwt_identity()
-    data = request.get_json() or {}
-
     try:
-        payload = JoinSessionRequest(**data)
+        payload = JoinRequestDecisionRequest(**(request.get_json() or {}))
     except PydanticValidationError as exc:
         return validation_error_response(exc.errors())
 
-    service = BottleTrackingService()
-    membership = service.join_session(current_user_id, payload.session_id)
-    return success_response(serialize_session_membership(membership), status_code=201)
+    membership = BottleTrackingService().approve_join_request(
+        get_jwt_identity(),
+        payload.session_id,
+        payload.requester_id,
+    )
+    return success_response(serialize_session_membership(membership))
+
+
+@staff_bp.route("/bottles/session/join-request/decline", methods=["POST"])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles("delivery_driver")
+def decline_bottle_session_join_request():
+    """The session owner declines a colleague's join request."""
+    from business_app.serializers.bottle_serializers import JoinRequestDecisionRequest
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+    from pydantic import ValidationError as PydanticValidationError
+    from business_app.utils.api_responses import validation_error_response
+
+    try:
+        payload = JoinRequestDecisionRequest(**(request.get_json() or {}))
+    except PydanticValidationError as exc:
+        return validation_error_response(exc.errors())
+
+    requester = BottleTrackingService().decline_join_request(
+        get_jwt_identity(),
+        payload.session_id,
+        payload.requester_id,
+    )
+    return success_response(
+        {
+            "requester_id": requester.id,
+            "requester_name": requester.full_name,
+        }
+    )
 
 
 @staff_bp.route("/bottles/session/leave", methods=["POST"])
@@ -1571,7 +1620,7 @@ def invite_driver_to_session():
     """
     from business_app.serializers.bottle_serializers import serialize_session_membership
     from business_app.services.bottle_tracking_service import BottleTrackingService
-    from business_app.utils.exceptions import ValidationError, ConflictError
+    from business_app.utils.exceptions import ValidationError
 
     current_user_id = get_jwt_identity()
     data = request.get_json() or {}
@@ -1579,30 +1628,7 @@ def invite_driver_to_session():
     if not member_driver_id:
         raise ValidationError("member_driver_id is required", error_code="INVITE_MEMBER_REQUIRED")
 
-    service = BottleTrackingService()
-    owner_session = service.get_open_session(current_user_id)
-    if not owner_session:
-        raise ConflictError(
-            "You must have an open bottle session to invite co-drivers",
-            error_code="BOTTLE_SESSION_REQUIRED_TO_INVITE",
-        )
-    # Reuse join_session from the member's perspective but initiated by owner
-    try:
-        membership = service.join_session(int(member_driver_id), owner_session.id)
-    except ConflictError as exc:
-        # join_session's refusals are worded for the JOINER; the inviter is
-        # reading this one. Same facts, the right person.
-        if exc.error_code == "BOTTLE_SESSION_ALREADY_OPEN":
-            raise ConflictError(
-                "The invited driver has their own open bottle session",
-                error_code="BOTTLE_INVITEE_HAS_SESSION",
-            ) from exc
-        if exc.error_code == "BOTTLE_SESSION_MEMBERSHIP_ALREADY_ACTIVE":
-            raise ConflictError(
-                "The invited driver is already in another driver's session",
-                error_code="BOTTLE_INVITEE_IN_OTHER_SESSION",
-            ) from exc
-        raise
+    membership = BottleTrackingService().invite_driver_to_session(current_user_id, member_driver_id)
     return success_response(serialize_session_membership(membership), status_code=201)
 
 
@@ -1620,6 +1646,17 @@ def list_drivers_available_to_invite():
     current_user_id = get_jwt_identity()
     service = BottleTrackingService()
     return success_response(service.list_eligible_co_drivers(current_user_id))
+
+
+@staff_bp.route("/bottles/transfers/recipients", methods=["GET"])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles("delivery_driver")
+def list_bottle_transfer_recipients():
+    """Every active driver the caller may transfer bottles to, with a session-state hint."""
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+
+    return success_response(BottleTrackingService().list_transfer_recipients(get_jwt_identity()))
 
 
 # --- Transfer endpoints ---

@@ -3233,7 +3233,12 @@ def test_the_api_contract_snapshot_still_lists_the_merge_preview_route(db):
     # /api/v1/staff/sales/me/statements (my_statements, S3, the approved-or-paid months newest first)
     # and GET /api/v1/staff/sales/me/statements/<month> (my_statement, S4, one of them in full).
     # Unrelated to place-merge; only the estate-wide count moved.
-    assert len(routes) == 653
+    # 653 -> 656: bottle transfer to any driver + owner-approved join requests (2026-10-08) -- on
+    # `staff`: GET /api/v1/staff/bottles/transfers/recipients (list_bottle_transfer_recipients),
+    # POST .../bottles/session/join-request/approve and .../decline (approve/decline_bottle_session_join_request);
+    # the old POST .../bottles/session/join was RENAMED to .../join-request (request_to_join_bottle_session),
+    # net zero. Unrelated to place-merge; only the estate-wide count moved.
+    assert len(routes) == 656
     entry = next(r for r in routes if r["rule"] == "/api/v1/admin/place-groups/merge-preview")
     assert entry["methods"] == ["GET"]
     assert entry["endpoint"] == "admin.get_place_group_merge_preview"

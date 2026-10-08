@@ -164,13 +164,16 @@ class BaseHandler:
         # The member's own membership: the owner closed the session they joined.
         'BOTTLE_SESSION_MEMBERSHIP_CLOSED': 'staff.error.api.joined_session_closed',
         'BOTTLE_SESSION_REQUIRED_TO_INVITE': 'staff.error.api.open_session_to_invite',
-        'BOTTLE_SESSION_REQUIRED_TO_RECEIVE': 'staff.error.api.open_session_to_receive',
         # Reached through JOIN only: the /open screen answers this code with its
         # own bespoke copy before the resolver sees it (bottle_collection.py).
         'BOTTLE_SESSION_ALREADY_OPEN': 'staff.error.api.close_own_session_to_join',
-        # The invite route re-words join_session's two refusals for the INVITER.
+        # Invite and join-request approval re-word join_session's two refusals for the OWNER.
         'BOTTLE_INVITEE_HAS_SESSION': 'staff.error.api.invitee_has_session',
         'BOTTLE_INVITEE_IN_OTHER_SESSION': 'staff.error.api.invitee_in_other_session',
+        # Approve/Decline on a join request that is no longer valid: session closed, not the caller's, or the requester is gone.
+        'BOTTLE_JOIN_REQUEST_STALE': 'staff.error.api.join_request_stale',
+        # Decline on a duplicate request message after the first was approved.
+        'BOTTLE_JOIN_REQUEST_ALREADY_MEMBER': 'staff.error.api.join_request_already_member',
         'BOTTLE_SESSION_MEMBERSHIP_ALREADY_ACTIVE': 'staff.error.api.already_in_session',
         'BOTTLE_SESSION_MEMBERSHIP_NOT_FOUND': 'staff.error.api.not_in_session',
         # A collection/fine at a place the customer is no longer a member of.
@@ -183,6 +186,8 @@ class BaseHandler:
         'BOTTLE_TRANSFER_NOT_FOUND': 'staff.error.api.transfer_not_found',
         'BOTTLE_TRANSFER_NOT_RECEIVER': 'staff.error.api.transfer_not_yours',
         'BOTTLE_TRANSFER_NOT_PENDING': 'staff.error.api.transfer_already_handled',
+        # The receiver stopped being an active driver after the picker was drawn.
+        'BOTTLE_TRANSFER_RECEIVER_INVALID': 'staff.error.api.transfer_receiver_invalid',
         # Sales-agent outlet flows (business_app/api/staff_sales.py).
         'SALES_OUTLET_NOT_FOUND': 'staff.error.api.outlet_not_found',
         'SALES_OUTLET_NOT_ASSIGNED': 'staff.error.api.outlet_not_assigned',
@@ -414,7 +419,8 @@ class BaseHandler:
         # where "Log bottles loaded" opens one.
         'BOTTLE_SESSION_NOT_FOUND': ('📊', 'staff.menu.my_bottle_accountability', 'staff_bottle_my_accountability'),
         'BOTTLE_SESSION_REQUIRED_TO_INVITE': ('📊', 'staff.menu.my_bottle_accountability', 'staff_bottle_my_accountability'),
-        'BOTTLE_SESSION_REQUIRED_TO_RECEIVE': ('📊', 'staff.menu.my_bottle_accountability', 'staff_bottle_my_accountability'),
+        # A refused send ends the flow; the accountability screen is the way back to the session.
+        'BOTTLE_TRANSFER_RECEIVER_INVALID': ('📊', 'staff.menu.my_bottle_accountability', 'staff_bottle_my_accountability'),
     }
 
     @classmethod

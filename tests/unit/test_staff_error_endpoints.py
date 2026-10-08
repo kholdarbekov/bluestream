@@ -281,8 +281,8 @@ def test_inviting_a_driver_already_in_another_session_is_worded_for_the_inviter(
     ])
     db.session.commit()
     joined = client.post(
-        "/api/v1/staff/bottles/session/join", headers=_headers(app, invitee.id),
-        json={"session_id": other_session.id},
+        "/api/v1/staff/bottles/session/invite", headers=_headers(app, other_owner.id),
+        json={"member_driver_id": invitee.id},
     )
     assert joined.status_code == 201, joined.get_json()
 
@@ -308,7 +308,7 @@ def test_bottle_session_refusals_each_carry_their_own_code(app, client, db):
     db.session.commit()
 
     gone = client.post(
-        "/api/v1/staff/bottles/session/join", headers=_headers(app, lone.id), json={"session_id": 987654},
+        "/api/v1/staff/bottles/session/join-request", headers=_headers(app, lone.id), json={"session_id": 987654},
     )
     assert gone.status_code == 404, gone.get_json()
     assert gone.get_json()["error_code"] == "BOTTLE_SESSION_TARGET_NOT_FOUND"
@@ -322,7 +322,8 @@ def test_bottle_session_refusals_each_carry_their_own_code(app, client, db):
         assert refused.get_json()["error_code"] == "BOTTLE_SESSION_REQUIRED_TO_INVITE", path
 
     joined = client.post(
-        "/api/v1/staff/bottles/session/join", headers=_headers(app, member.id), json={"session_id": session.id},
+        "/api/v1/staff/bottles/session/invite", headers=_headers(app, owner.id),
+        json={"member_driver_id": member.id},
     )
     assert joined.status_code == 201, joined.get_json()
     session.status = DriverBottleSessionStatus.CLOSED
@@ -363,14 +364,7 @@ def test_transfer_confirm_refusals_each_carry_their_own_code(app, client, db):
     assert not_yours.status_code == 409, not_yours.get_json()
     assert not_yours.get_json()["error_code"] == "BOTTLE_TRANSFER_NOT_RECEIVER"
 
-    no_session = _confirm(transfer_id, receiver)
-    assert no_session.status_code == 409, no_session.get_json()
-    assert no_session.get_json()["error_code"] == "BOTTLE_SESSION_REQUIRED_TO_RECEIVE"
-
-    db.session.add(DriverBottleSession(
-        driver_user_id=receiver.id, bottles_loaded=1, status=DriverBottleSessionStatus.OPEN,
-    ))
-    db.session.commit()
+    # A receiver with nothing open is no longer refused: confirming opens their session.
     assert _confirm(transfer_id, receiver).status_code == 200
     again = _confirm(transfer_id, receiver)
     assert again.status_code == 409, again.get_json()

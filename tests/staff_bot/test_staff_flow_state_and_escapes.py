@@ -138,6 +138,7 @@ LOGIN_ENDPOINT = "/api/v1/staff/auth/login"
 SESSION_ENDPOINT = "/api/v1/staff/bottles/session/current"
 OPEN_SESSION_ENDPOINT = "/api/v1/staff/bottles/session/open"
 AVAILABLE_DRIVERS_ENDPOINT = "/api/v1/staff/bottles/sessions/available-drivers"
+TRANSFER_RECIPIENTS_ENDPOINT = "/api/v1/staff/bottles/transfers/recipients"
 TRANSFERS_ENDPOINT = "/api/v1/staff/bottles/transfers"
 OPERATOR_SEARCH_ENDPOINT = "/api/v1/staff/operator/users/search"
 OPERATOR_USERS_ENDPOINT = "/api/v1/staff/operator/users"
@@ -360,6 +361,7 @@ def prepare_backend(harness, name):
         # Returning / transferring both refuse when there is no open session.
         harness.backend.route("GET", SESSION_ENDPOINT, lambda _call: dict(OPEN_SESSION))
         harness.backend.route("GET", AVAILABLE_DRIVERS_ENDPOINT, lambda _call: list(OTHER_DRIVERS))
+        harness.backend.route("GET", TRANSFER_RECIPIENTS_ENDPOINT, lambda _call: list(OTHER_DRIVERS))
     elif name in {"staff_create_user", "staff_create_order", "staff_search_user"}:
         harness.backend.route("GET", OPERATOR_SEARCH_ENDPOINT, lambda _call: [])
     elif name == "staff_sales_visit":

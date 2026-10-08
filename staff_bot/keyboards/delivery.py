@@ -577,15 +577,19 @@ class DeliveryKeyboards:
             )],
         ])
 
+    # The backend publishes `bottle_status`; the picker only draws it.
+    TRANSFER_RECIPIENT_ICONS = {"own_session": "🚚", "co_driver": "🤝", "none": "👤"}
+
     @staticmethod
     def driver_select_for_transfer(language: str, drivers: List[Dict]) -> InlineKeyboardMarkup:
-        """Select a driver to transfer bottles to."""
+        """Select a driver to transfer bottles to. Every recipient is listed."""
         keyboard = []
-        for driver in drivers[:10]:  # cap at 10 to avoid overflow
+        for driver in drivers:
             driver_id = driver.get('id') or driver.get('user_id')
             name = driver.get('name') or i18n.get('staff.common.unknown_driver', language)
+            icon = DeliveryKeyboards.TRANSFER_RECIPIENT_ICONS.get(driver.get('bottle_status'), "👤")
             keyboard.append([InlineKeyboardButton(
-                f"👤 {name}",
+                f"{icon} {name}",
                 callback_data=f"staff_transfer_driver_{driver_id}"
             )])
         keyboard.append([InlineKeyboardButton(

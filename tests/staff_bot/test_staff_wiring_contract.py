@@ -120,9 +120,11 @@ def _sample_matching(pattern_source: str):
     # A character class samples as its first member, and an optional group with no
     # alternation samples as present: `_[01]` is `_0`, and so is `(_[01])?`, the
     # longer and so the likelier to collide. Negated and escaped classes stay
-    # unreadable, as does `(next|all)`.
+    # unreadable.
     body = re.sub(r"\[([^\]\\^])[^\]]*\]", r"\1", body)
     body = re.sub(r"\(([^()|]*)\)\?", r"\1", body)
+    # A plain alternation samples as its first branch: `(ok|no)` is `ok`.
+    body = re.sub(r"\(([^()|]+)(?:\|[^()|]+)+\)", r"\1", body)
     body = re.sub(r"\\(.)", r"\1", body)
 
     if re.search(r"[\[\](){}*+?|]", body):
@@ -173,9 +175,7 @@ async def test_no_callback_button_is_stolen_by_an_earlier_handler(staff):
 # Registered staff patterns `_sample_matching` cannot turn into a concrete
 # callback_data. Every entry is a handler the collision check is BLIND to, so
 # this exists as a named place for the failure rather than as an allowance.
-_PATTERNS_THE_COLLISION_CHECK_CANNOT_READ = {
-    r"^staff_route_view_(next|all)$",
-}
+_PATTERNS_THE_COLLISION_CHECK_CANNOT_READ: set[str] = set()
 
 
 async def test_every_registered_pattern_is_readable_by_the_collision_check(staff):

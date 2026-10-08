@@ -1422,7 +1422,16 @@ class StaffBot:
             CallbackQueryHandler(bottle_session_membership_handler.confirm_join_session, pattern=r"^bottles_join_confirm_\d+$")
         )
         self.application.add_handler(
-            CallbackQueryHandler(bottle_session_membership_handler.execute_join_session, pattern=r"^bottles_join_execute_\d+$")
+            CallbackQueryHandler(bottle_session_membership_handler.send_join_request, pattern=r"^bottles_join_request_\d+$")
+        )
+        self.application.add_handler(
+            CallbackQueryHandler(bottle_session_membership_handler.answer_join_request, pattern=r"^bottles_jr_(ok|no)_\d+_\d+$")
+        )
+        # Instant-join buttons still sitting in chat history. The bot has no
+        # catch-all for an unhandled callback, so dropping the pattern would
+        # leave them spinning; they open the request list instead.
+        self.application.add_handler(
+            CallbackQueryHandler(bottle_session_membership_handler.show_joinable_sessions, pattern=r"^bottles_join_execute_\d+$")
         )
         self.application.add_handler(
             CallbackQueryHandler(bottle_session_membership_handler.leave_session, pattern="^bottles_leave_session$")

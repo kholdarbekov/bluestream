@@ -370,9 +370,16 @@ def serialize_bottle_transfer(transfer) -> Dict[str, Any]:
 
 
 class JoinSessionRequest(BaseModel):
-    """Request body for POST /staff/bottles/session/join."""
+    """Request body for POST /staff/bottles/session/join-request."""
 
     session_id: int = Field(..., description="ID of the DriverBottleSession to join")
+
+
+class JoinRequestDecisionRequest(BaseModel):
+    """Request body for POST /staff/bottles/session/join-request/{approve,decline}."""
+
+    session_id: int = Field(..., description="The session the request named")
+    requester_id: int = Field(..., description="The driver who asked to join")
 
 
 def serialize_session_membership(membership) -> Dict[str, Any]:

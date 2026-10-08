@@ -1225,7 +1225,7 @@ class BottleCollectionHandler(BaseHandler):
 
             await query.edit_message_text(
                 text,
-                reply_markup=self._session_menu_with_codriver_actions(language),
+                reply_markup=self._session_menu_with_codriver_actions(language, has_own_session=bool(session)),
                 parse_mode='HTML',
             )
         except Exception as exc:
@@ -1233,7 +1233,7 @@ class BottleCollectionHandler(BaseHandler):
             await self._handle_error(update, context)
 
     @staticmethod
-    def _session_menu_with_codriver_actions(language: str) -> InlineKeyboardMarkup:
+    def _session_menu_with_codriver_actions(language: str, *, has_own_session: bool) -> InlineKeyboardMarkup:
         """The session menu plus the two co-driver entry points.
 
         ``bottles_membership_status`` and ``bottles_invite_driver`` are both
@@ -1255,6 +1255,10 @@ class BottleCollectionHandler(BaseHandler):
         restating it: that keyboard is the single definition of "what can I do
         with my session" and is rendered from a dozen call sites here, so a row
         added there must keep appearing here too.
+
+        A driver with no session of their own also gets "Join a colleague's
+        session" here. It used to hang only off the BOTTLE_SESSION_REQUIRED
+        prompt after a refused order accept, where nobody looked for it.
         """
         base = DeliveryKeyboards.bottle_session_menu(language)
         rows = [list(row) for row in base.inline_keyboard]
@@ -1268,6 +1272,11 @@ class BottleCollectionHandler(BaseHandler):
                 callback_data='bottles_invite_driver',
             )],
         ]
+        if not has_own_session:
+            codriver_rows.insert(0, [InlineKeyboardButton(
+                i18n.get('staff.bottles.join_session', language),
+                callback_data='bottles_join_session',
+            )])
         # Above the trailing Back row, which must stay last.
         return InlineKeyboardMarkup(rows[:-1] + codriver_rows + rows[-1:])
 
@@ -1520,12 +1529,11 @@ class BottleCollectionHandler(BaseHandler):
             await self._handle_error(update, context)
             return ConversationHandler.END
 
-        # Fetch list of drivers eligible to receive a transfer.
-        # Reuses the same backend endpoint as session-invite (drivers who are
-        # on shift / available); see api_client.get_drivers_available_to_invite.
-        # A failed read is not "no drivers on shift": the resolver says why.
+        # Every active driver the backend says may receive from this sender, the
+        # same rule the send is checked against. A failed read is not "no drivers
+        # on shift": the resolver says why.
         async with api_client as client:
-            drivers_response = await client.get_drivers_available_to_invite(token)
+            drivers_response = await client.get_transfer_recipients(token)
         if not drivers_response.success:
             await self._handle_api_response_error(update, drivers_response, language)
             return ConversationHandler.END
@@ -1776,9 +1784,8 @@ class BottleCollectionHandler(BaseHandler):
                 response = await client.confirm_bottle_transfer(token, transfer_id, qty)
 
             if not response.success:
-                # The reason, not a fixed "failed": already handled, sent to
-                # someone else and "open a session first" each need a
-                # different next step.
+                # The reason, not a fixed "failed": already handled and sent
+                # to someone else each need a different next step.
                 text = f"❌ {self._resolve_response_error(language, response)}"
                 if update.callback_query:
                     await update.callback_query.edit_message_text(

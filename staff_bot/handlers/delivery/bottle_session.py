@@ -3,7 +3,7 @@
 Allows a driver to join another driver's open bottle session (e.g. two drivers
 sharing the same truck). The handler provides:
   - List of joinable sessions
-  - Join confirmation
+  - Join request (owner approves) and the owner's answer
   - Leave session
   - Current membership status display
 """
@@ -18,6 +18,7 @@ from staff_bot.handlers.base import BaseHandler
 from staff_bot.i18n import i18n
 from staff_bot.keyboards.common import CommonKeyboards
 from staff_bot.permissions import require_auth, require_delivery_driver
+from staff_bot.utils.formatters import escape_html
 
 logger = logging.getLogger(__name__)
 
@@ -143,14 +144,14 @@ class BottleSessionMembershipHandler(BaseHandler):
 
             text = (
                 f"🤝 <b>{i18n.get('staff.bottles.join_session_confirm_title', language)}</b>\n\n"
-                f"👤 {i18n.get('staff.bottles.session_owner', language)}: <b>{owner_name}</b>\n"
+                f"👤 {i18n.get('staff.bottles.session_owner', language)}: <b>{escape_html(owner_name)}</b>\n"
                 f"📦 {i18n.get('staff.bottles.bottles_on_truck', language)}: <b>{inventory}</b> / {loaded}\n\n"
                 f"{i18n.get('staff.bottles.join_session_confirm_note', language)}"
             )
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton(
                     f"✅ {i18n.get('staff.bottles.confirm_join', language)}",
-                    callback_data=f"bottles_join_execute_{session_id}",
+                    callback_data=f"bottles_join_request_{session_id}",
                 )],
                 [InlineKeyboardButton(
                     i18n.get('staff.cancel', language),
@@ -165,8 +166,8 @@ class BottleSessionMembershipHandler(BaseHandler):
 
     @require_auth
     @require_delivery_driver
-    async def execute_join_session(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Execute the join session request."""
+    async def send_join_request(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Ask the session owner to let this driver join; the owner answers in their own chat."""
         query = update.callback_query
         await query.answer()
         language = await self._get_language(update, context)
@@ -176,35 +177,83 @@ class BottleSessionMembershipHandler(BaseHandler):
             return
 
         try:
-            # Callback: bottles_join_execute_{session_id}
+            # Callback: bottles_join_request_{session_id}
             session_id = int(query.data.split('_')[-1])
 
             async with api_client as client:
-                response = await client.join_bottle_session(token, session_id)
+                response = await client.request_to_join_bottle_session(token, session_id)
 
             if not response.success:
-                error_msg = self._resolve_response_error(language, response, html=True)
                 await query.edit_message_text(
-                    f"❌ {error_msg}",
+                    f"❌ {self._resolve_response_error(language, response, html=True)}",
                     reply_markup=CommonKeyboards.back_button(language, 'bottles_join_session'),
                     parse_mode='HTML',
                 )
                 return
 
-            membership = response.data or {}
-            owner_name = membership.get('owner_name') or i18n.get('staff.common.unknown_driver', language)
+            owner_name = (response.data or {}).get('owner_name') or i18n.get('staff.common.unknown_driver', language)
+            await query.edit_message_text(
+                i18n.get('staff.bottles.join_request_sent', language, name=escape_html(owner_name)),
+                reply_markup=CommonKeyboards.back_button(language, 'staff_back_to_main'),
+                parse_mode='HTML',
+            )
+            context.user_data.pop('pending_join_session_id', None)
 
-            # The name goes INTO `get()`: `i18n.get()` no longer returns a
-            # fillable template (copy the caller does not fill is degraded to
-            # the humanised key), so formatting its RESULT rendered a bare
-            # "Joined session" with the owner's name dropped.
-            joined_line = i18n.get(
-                'staff.bottles.joined_session', language, name=owner_name
-            )
-            text = (
-                f"✅ <b>{joined_line}</b>\n\n"
-                f"{i18n.get('staff.bottles.joined_session_info', language)}"
-            )
+        except Exception as e:
+            logger.error(f"Error sending join request: {e}", exc_info=True)
+            await self._handle_error(update, context)
+
+    @require_auth
+    @require_delivery_driver
+    async def answer_join_request(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """The session owner taps Approve / Decline on a colleague's pushed join request."""
+        query = update.callback_query
+        await query.answer()
+        language = await self._get_language(update, context)
+        token = await self._get_auth_token(update, context)
+        if not token:
+            await self._handle_auth_error(update, language)
+            return
+
+        try:
+            # Callback: bottles_jr_{ok|no}_{session_id}_{requester_id}
+            _prefix, _jr, verdict, session_id, requester_id = query.data.split('_')
+            session_id, requester_id = int(session_id), int(requester_id)
+
+            async with api_client as client:
+                if verdict == 'ok':
+                    response = await client.approve_join_request(token, session_id, requester_id)
+                else:
+                    response = await client.decline_join_request(token, session_id, requester_id)
+
+            if not response.success:
+                # A transient failure (no code, or a 5xx) leaves the request open:
+                # keep Approve / Decline so the owner can tap again.
+                status_code = getattr(response, 'status_code', None)
+                transient = not getattr(response, 'error_code', None) or (status_code or 0) >= 500
+                await query.edit_message_text(
+                    f"❌ {self._resolve_response_error(language, response, html=True)}",
+                    reply_markup=(
+                        query.message.reply_markup if transient
+                        else CommonKeyboards.back_button(language, 'staff_back_to_main')
+                    ),
+                    parse_mode='HTML',
+                )
+                return
+
+            data = response.data or {}
+            unknown = i18n.get('staff.common.unknown_driver', language)
+            if verdict == 'ok':
+                text = i18n.get(
+                    'staff.bottles.join_request_approved_owner', language,
+                    name=escape_html(data.get('member_name') or unknown),
+                )
+            else:
+                text = i18n.get(
+                    'staff.bottles.join_request_declined_owner', language,
+                    name=escape_html(data.get('requester_name') or unknown),
+                )
+            # Edited in place: the Approve / Decline buttons go, so they cannot be tapped again.
             await query.edit_message_text(
                 text,
                 reply_markup=CommonKeyboards.back_button(language, 'staff_back_to_main'),
@@ -212,7 +261,7 @@ class BottleSessionMembershipHandler(BaseHandler):
             )
 
         except Exception as e:
-            logger.error(f"Error executing join session: {e}", exc_info=True)
+            logger.error(f"Error answering join request: {e}", exc_info=True)
             await self._handle_error(update, context)
 
     @require_auth
@@ -287,7 +336,7 @@ class BottleSessionMembershipHandler(BaseHandler):
 
             membership_line = i18n.get(
                 'staff.bottles.current_membership', language,
-                name=owner_name, qty=inventory,
+                name=escape_html(owner_name), qty=inventory,
             )
             text = (
                 f"🤝 <b>{i18n.get('staff.bottles.current_membership_title', language)}</b>\n\n"
@@ -478,14 +527,14 @@ class BottleSessionMembershipHandler(BaseHandler):
                 'staff.common.driver_number', language, driver_id=driver_id
             )
 
-            # NOT wrapped in `✅ <b>…</b>` the way `execute_join_session`
-            # decorates `staff.bottles.joined_session`: this row is seeded as
+            # NOT wrapped in `✅ <b>…</b>` the way the join-approved push
+            # decorates its sentence: this row is seeded as
             # "✅ <b>{name}</b> has been added…" in all three languages, so a
             # wrapper here produced a doubled tick and NESTED <b> tags under
             # parse_mode='HTML'. The copy already carries its own decoration;
             # render it as it ships.
             text = i18n.get(
-                'staff.bottles.codriver_invited', language, name=member_name
+                'staff.bottles.codriver_invited', language, name=escape_html(member_name)
             )
             await query.edit_message_text(
                 text,

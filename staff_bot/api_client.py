@@ -1312,10 +1312,21 @@ class StaffAPIClient:
     async def get_joinable_bottle_sessions(self, token: str) -> APIResponse:
         return await self._make_request('GET', '/api/v1/staff/bottles/sessions/joinable', token=token)
 
-    async def join_bottle_session(self, token: str, session_id: int) -> APIResponse:
+    async def request_to_join_bottle_session(self, token: str, session_id: int) -> APIResponse:
         return await self._make_request(
-            'POST', '/api/v1/staff/bottles/session/join', token=token,
-            data={'session_id': session_id},
+            'POST', '/api/v1/staff/bottles/session/join-request', token=token, data={'session_id': session_id}
+        )
+
+    async def approve_join_request(self, token: str, session_id: int, requester_id: int) -> APIResponse:
+        return await self._make_request(
+            'POST', '/api/v1/staff/bottles/session/join-request/approve', token=token,
+            data={'session_id': session_id, 'requester_id': requester_id},
+        )
+
+    async def decline_join_request(self, token: str, session_id: int, requester_id: int) -> APIResponse:
+        return await self._make_request(
+            'POST', '/api/v1/staff/bottles/session/join-request/decline', token=token,
+            data={'session_id': session_id, 'requester_id': requester_id},
         )
 
     async def leave_bottle_session(self, token: str) -> APIResponse:
@@ -1328,6 +1339,9 @@ class StaffAPIClient:
 
     async def get_pending_bottle_transfers(self, token: str) -> APIResponse:
         return await self._make_request('GET', '/api/v1/staff/bottles/transfers/pending', token=token)
+
+    async def get_transfer_recipients(self, token: str) -> APIResponse:
+        return await self._make_request('GET', '/api/v1/staff/bottles/transfers/recipients', token=token)
 
     async def initiate_bottle_transfer(self, token: str, receiver_driver_id: int, quantity: int, notes: str = None) -> APIResponse:
         data = {'receiver_driver_id': receiver_driver_id, 'quantity': quantity}

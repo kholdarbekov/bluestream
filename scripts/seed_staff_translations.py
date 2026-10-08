@@ -1111,11 +1111,6 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Hamkor haydovchilarni taklif qilishdan oldin o'z idish sessiyangizni oching.",
         "ru": "Откройте свою сессию по таре, прежде чем приглашать напарников.",
     },
-    "staff.error.api.open_session_to_receive": {
-        "en": "Open a bottle session before accepting a transfer.",
-        "uz": "O'tkazmani qabul qilishdan oldin idish sessiyasini oching.",
-        "ru": "Откройте сессию по таре, прежде чем принимать перевод.",
-    },
     "staff.error.api.close_own_session_to_join": {
         "en": "Close your own bottle session before joining another driver's.",
         "uz": "Boshqa haydovchining sessiyasiga qo'shilishdan oldin o'z idish sessiyangizni yoping.",
@@ -1130,6 +1125,16 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "This driver is already in another driver's session.",
         "uz": "Bu haydovchi allaqachon boshqa haydovchining sessiyasida.",
         "ru": "Этот водитель уже в сессии другого водителя.",
+    },
+    "staff.error.api.join_request_stale": {
+        "en": "This join request is no longer valid.",
+        "uz": "Bu qo'shilish so'rovi endi amal qilmaydi.",
+        "ru": "Этот запрос на присоединение больше не действителен.",
+    },
+    "staff.error.api.join_request_already_member": {
+        "en": "This driver is already in your session.",
+        "uz": "Bu haydovchi allaqachon sizning sessiyangizda.",
+        "ru": "Этот водитель уже в вашей сессии.",
     },
     "staff.error.api.already_in_session": {
         "en": "You're already in another driver's session. Leave it before joining a new one.",
@@ -1175,6 +1180,11 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "This transfer has already been handled.",
         "uz": "Bu o'tkazma allaqachon ko'rib chiqilgan.",
         "ru": "Этот перевод уже обработан.",
+    },
+    "staff.error.api.transfer_receiver_invalid": {
+        "en": "This driver can't receive bottles right now.",
+        "uz": "Bu haydovchi hozir idish qabul qila olmaydi.",
+        "ru": "Этот водитель сейчас не может принять бутылки.",
     },
     # Referenced at staff_bot/handlers/tryouts.py:138 since the delivery-zone
     # SSOT check landed, but never seeded under the `staff_bot` CATEGORY. It
@@ -2032,9 +2042,9 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "ru": "Других активных водителей не найдено.",
     },
     "staff.delivery.select_transfer_driver": {
-        "en": "Select the driver to transfer bottles to.\n(You have <b>{available}</b> bottles available)",
-        "uz": "Idish o'tkazish uchun haydovchini tanlang.\n(Sizda <b>{available}</b> ta idish mavjud)",
-        "ru": "Выберите водителя для передачи бутылок.\n(У вас <b>{available}</b> бутылок доступно)",
+        "en": "Select the driver to transfer bottles to.\n(You have <b>{available}</b> bottles available)\n\n🚚 has a session · 🤝 co-driver · 👤 no session yet",
+        "uz": "Idish o'tkazish uchun haydovchini tanlang.\n(Sizda <b>{available}</b> ta idish mavjud)\n\n🚚 sessiyasi bor · 🤝 hamkor haydovchi · 👤 hali sessiyasi yo'q",
+        "ru": "Выберите водителя для передачи бутылок.\n(У вас <b>{available}</b> бутылок доступно)\n\n🚚 есть сессия · 🤝 напарник · 👤 сессии пока нет",
     },
     "staff.delivery.enter_transfer_qty": {
         "en": "📦 How many bottles are you transferring?\n(You have <b>{available}</b> available)",
@@ -2164,11 +2174,6 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Qo'shilish uchun sessiyani tanlang:",
         "ru": "Выберите сессию для присоединения:",
     },
-    "staff.bottles.join_session_confirm_title": {
-        "en": "Join Session?",
-        "uz": "Sessiyaga qo'shilasizmi?",
-        "ru": "Присоединиться к сессии?",
-    },
     "staff.bottles.session_owner": {
         "en": "Session owner",
         "uz": "Sessiya egasi",
@@ -2179,15 +2184,60 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Mashinadagi shishalar",
         "ru": "Бутылок в машине",
     },
+    "staff.bottles.join_session_confirm_title": {
+        "en": "Ask to join this session?",
+        "uz": "Ushbu sessiyaga qo'shilishni so'raysizmi?",
+        "ru": "Попросить присоединиться к сессии?",
+    },
     "staff.bottles.join_session_confirm_note": {
-        "en": "While joined, your orders will be tracked against this session's inventory.",
-        "uz": "Qo'shilgandan so'ng buyurtmalaringiz ushbu sessiya inventariga hisoblanadi.",
-        "ru": "После присоединения ваши заказы будут учитываться в рамках этой сессии.",
+        "en": "The owner will be asked to approve. Once approved, orders you accept count against this session's bottles.",
+        "uz": "Sessiya egasidan tasdiq so'raladi. Tasdiqlangach, siz qabul qilgan buyurtmalar ushbu sessiya idishlariga hisoblanadi.",
+        "ru": "Владелец сессии должен будет одобрить запрос. После одобрения принятые вами заказы будут учитываться по таре этой сессии.",
     },
     "staff.bottles.confirm_join": {
-        "en": "Confirm Join",
-        "uz": "Qo'shilishni tasdiqlash",
-        "ru": "Подтвердить присоединение",
+        "en": "Send request",
+        "uz": "So'rov yuborish",
+        "ru": "Отправить запрос",
+    },
+    "staff.bottles.join_request_sent": {
+        "en": "📨 Request sent to <b>{name}</b>. You'll get a message when they answer.",
+        "uz": "📨 So'rov <b>{name}</b>ga yuborildi. U javob berganda sizga xabar keladi.",
+        "ru": "📨 Запрос отправлен: <b>{name}</b>. Вы получите сообщение, когда он ответит.",
+    },
+    "staff.bottles.join_request_approved_owner": {
+        "en": "✅ <b>{name}</b> is now in your session.",
+        "uz": "✅ <b>{name}</b> endi sizning sessiyangizda.",
+        "ru": "✅ <b>{name}</b> теперь в вашей сессии.",
+    },
+    "staff.bottles.join_request_declined_owner": {
+        "en": "You declined <b>{name}</b>'s request.",
+        "uz": "Siz <b>{name}</b>ning so'rovini rad etdingiz.",
+        "ru": "Вы отклонили запрос: <b>{name}</b>.",
+    },
+    "staff.bottles.notify.transfer_received": {
+        "en": "📥 <b>{sender}</b> sent you <b>{qty}</b> bottles. Confirm the count you received.",
+        "uz": "📥 <b>{sender}</b> sizga <b>{qty}</b> ta idish yubordi. Qabul qilgan soningizni tasdiqlang.",
+        "ru": "📥 <b>{sender}</b> передал вам <b>{qty}</b> бутылок. Подтвердите полученное количество.",
+    },
+    "staff.bottles.notify.join_requested": {
+        "en": "🤝 <b>{name}</b> wants to join your bottle session. Orders they accept will count against your truck.",
+        "uz": "🤝 <b>{name}</b> idish sessiyangizga qo'shilmoqchi. U qabul qilgan buyurtmalar sizning mashinangizga hisoblanadi.",
+        "ru": "🤝 <b>{name}</b> хочет присоединиться к вашей сессии по таре. Принятые им заказы будут учитываться на вашей машине.",
+    },
+    "staff.bottles.notify.join_declined": {
+        "en": "❌ <b>{name}</b> declined your request to join their session.",
+        "uz": "❌ <b>{name}</b> sessiyasiga qo'shilish so'rovingizni rad etdi.",
+        "ru": "❌ <b>{name}</b> отклонил ваш запрос на присоединение к сессии.",
+    },
+    "staff.bottles.join_request_approve": {
+        "en": "Approve",
+        "uz": "Tasdiqlash",
+        "ru": "Одобрить",
+    },
+    "staff.bottles.join_request_decline": {
+        "en": "Decline",
+        "uz": "Rad etish",
+        "ru": "Отклонить",
     },
     "staff.bottles.joined_session": {
         "en": "Joined {name}'s session!",

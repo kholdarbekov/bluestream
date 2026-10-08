@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from flask import current_app
-from sqlalchemy import event as sa_event, false as sa_false, func, or_, text
+from sqlalchemy import event as sa_event, false as sa_false, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session as SASession, joinedload
@@ -3494,7 +3494,13 @@ class BottleTrackingService:
         ).first()
 
     def get_joinable_sessions(self, excluding_driver_id: int) -> List[DriverBottleSession]:
-        """Return all OPEN sessions not owned by this driver, available to join."""
+        """OPEN sessions this driver may ask to join.
+
+        Refuses up front when the driver could not join any of them anyway
+        (their own open session, or already a co-driver), so the bot says why
+        before the driver picks one.
+        """
+        self._assert_free_to_join(int(excluding_driver_id))
         return (
             DriverBottleSession.query.filter(
                 DriverBottleSession.status == DriverBottleSessionStatus.OPEN,
@@ -3504,25 +3510,27 @@ class BottleTrackingService:
             .all()
         )
 
-    @transactional
-    def join_session(
-        self,
-        member_driver_id: int,
-        session_id: int,
-        *,
-        notes: str = None,
-    ) -> DriverSessionMembership:
-        """Allow a driver to join another driver's open session as a co-driver.
+    def _assert_free_to_join(self, driver_id: int) -> None:
+        if self.get_open_session(driver_id):
+            raise ConflictError(
+                "Close your own open session before joining another driver's session",
+                error_code="BOTTLE_SESSION_ALREADY_OPEN",
+            )
+        existing_membership = self.get_active_membership(driver_id)
+        if existing_membership:
+            raise ConflictError(
+                f"Already an active co-driver member of session {existing_membership.session_id}. "
+                "Leave that session before joining another.",
+                error_code="BOTTLE_SESSION_MEMBERSHIP_ALREADY_ACTIVE",
+            )
 
-        Raises:
-          - ConflictError if the driver already has their own OPEN session.
-          - ConflictError if the driver is already an active member of another session.
-          - NotFoundError if the target session is not found.
-          - ValidationError if the target session is not OPEN.
-          - ValidationError if driver tries to join their own session.
+    def _assert_can_join(self, member_driver_id: int, session_id: int) -> DriverBottleSession:
+        """Every rule for "this driver may join this session", in one place.
+
+        Shared by the request (which writes nothing) and `join_session` (which
+        writes the membership), so a request is never sent that the approval
+        would refuse for a reason that was already true.
         """
-        # JWT identities arrive as str (`sub`); every column compared below is int.
-        member_driver_id = int(member_driver_id)
         session = DriverBottleSession.query.get(session_id)
         if not session:
             # The session the driver picked, not their own: its own code, so
@@ -3541,21 +3549,30 @@ class BottleTrackingService:
                 "Can only join an OPEN session",
                 error_code="BOTTLE_SESSION_NOT_OPEN",
             )
+        self._assert_free_to_join(member_driver_id)
+        return session
 
-        own_session = self.get_open_session(member_driver_id)
-        if own_session:
-            raise ConflictError(
-                "Close your own open session before joining another driver's session",
-                error_code="BOTTLE_SESSION_ALREADY_OPEN",
-            )
+    @transactional
+    def join_session(
+        self,
+        member_driver_id: int,
+        session_id: int,
+        *,
+        notes: str = None,
+        invited_by_user_id: int = None,
+    ) -> DriverSessionMembership:
+        """Allow a driver to join another driver's open session as a co-driver.
 
-        existing_membership = self.get_active_membership(member_driver_id)
-        if existing_membership:
-            raise ConflictError(
-                f"Already an active co-driver member of session {existing_membership.session_id}. "
-                "Leave that session before joining another.",
-                error_code="BOTTLE_SESSION_MEMBERSHIP_ALREADY_ACTIVE",
-            )
+        Raises:
+          - ConflictError if the driver already has their own OPEN session.
+          - ConflictError if the driver is already an active member of another session.
+          - NotFoundError if the target session is not found.
+          - ValidationError if the target session is not OPEN.
+          - ValidationError if driver tries to join their own session.
+        """
+        # JWT identities arrive as str (`sub`); every column compared below is int.
+        member_driver_id = int(member_driver_id)
+        session = self._assert_can_join(member_driver_id, session_id)
 
         membership = DriverSessionMembership(
             session_id=session_id,
@@ -3563,6 +3580,7 @@ class BottleTrackingService:
             member_driver_id=member_driver_id,
             status=DriverSessionMembershipStatus.ACTIVE,
             notes=notes,
+            invited_by_user_id=invited_by_user_id,
         )
         db.session.add(membership)
         db.session.flush()
@@ -3596,6 +3614,114 @@ class BottleTrackingService:
         )
         return membership
 
+    def _add_codriver_for_owner(
+        self, owner_session: DriverBottleSession, member_driver_id: int
+    ) -> DriverSessionMembership:
+        """`join_session` on the OWNER's initiative (invite, or approving a request).
+
+        `join_session`'s refusals are worded for the joiner; the owner is the one
+        reading these. Same facts, the right person.
+        """
+        try:
+            return self.join_session(
+                member_driver_id,
+                owner_session.id,
+                invited_by_user_id=owner_session.driver_user_id,
+            )
+        except ConflictError as exc:
+            if exc.error_code == "BOTTLE_SESSION_ALREADY_OPEN":
+                raise ConflictError(
+                    "The invited driver has their own open bottle session",
+                    error_code="BOTTLE_INVITEE_HAS_SESSION",
+                ) from exc
+            if exc.error_code == "BOTTLE_SESSION_MEMBERSHIP_ALREADY_ACTIVE":
+                raise ConflictError(
+                    "The invited driver is already in another driver's session",
+                    error_code="BOTTLE_INVITEE_IN_OTHER_SESSION",
+                ) from exc
+            raise
+
+    def invite_driver_to_session(self, owner_driver_id: int, member_driver_id: int) -> DriverSessionMembership:
+        """The owner adds a colleague to their open session, instantly (ruling R4)."""
+        owner_session = self.get_open_session(int(owner_driver_id))
+        if not owner_session:
+            raise ConflictError(
+                "You must have an open bottle session to invite co-drivers",
+                error_code="BOTTLE_SESSION_REQUIRED_TO_INVITE",
+            )
+        return self._add_codriver_for_owner(owner_session, int(member_driver_id))
+
+    def request_to_join_session(self, requester_id: int, session_id: int) -> DriverBottleSession:
+        """Ask the session's owner to let this driver join. Writes nothing (ruling R6):
+        the request IS the owner's Telegram message, and approving re-checks it all."""
+        from business_app.services import bottle_notifications
+
+        requester_id = int(requester_id)
+        session = self._assert_can_join(requester_id, int(session_id))
+        bottle_notifications.notify_join_requested(session, User.query.get(requester_id))
+        return session
+
+    def _owner_session_for_request(
+        self, owner_driver_id: int, session_id: int, *, must_be_open: bool
+    ) -> DriverBottleSession:
+        """The session a request named, provided the caller owns it (and, to
+        approve, still has it open: a request for a session since closed must
+        never land the requester on a newer one they did not ask for)."""
+        session = DriverBottleSession.query.get(session_id)
+        if (
+            session is None
+            or session.driver_user_id != owner_driver_id
+            or (must_be_open and session.status != DriverBottleSessionStatus.OPEN)
+        ):
+            raise ConflictError(
+                "This join request is no longer valid",
+                error_code="BOTTLE_JOIN_REQUEST_STALE",
+            )
+        return session
+
+    def _requester_for_answer(self, requester_id: int) -> User:
+        """The requester, provided they are still an active driver (accounts can
+        be merged away or deactivated between the request and the answer)."""
+        requester = self._active_drivers_query().filter(User.id == requester_id).first()
+        if requester is None:
+            raise ConflictError(
+                "This join request is no longer valid",
+                error_code="BOTTLE_JOIN_REQUEST_STALE",
+            )
+        return requester
+
+    def approve_join_request(self, owner_driver_id: int, session_id: int, requester_id: int) -> DriverSessionMembership:
+        """The owner says yes. A repeat tap returns the membership already made
+        and tells nobody twice."""
+        from business_app.services import bottle_notifications
+
+        owner_driver_id, requester_id = int(owner_driver_id), int(requester_id)
+        session = self._owner_session_for_request(owner_driver_id, int(session_id), must_be_open=True)
+        self._requester_for_answer(requester_id)
+        existing = self.get_active_membership(requester_id)
+        if existing is not None and existing.session_id == session.id:
+            return existing
+        membership = self._add_codriver_for_owner(session, requester_id)
+        bottle_notifications.notify_join_answered(session, membership.member_driver, approved=True)
+        return membership
+
+    def decline_join_request(self, owner_driver_id: int, session_id: int, requester_id: int) -> User:
+        """The owner says no. Writes nothing; tells the requester."""
+        from business_app.services import bottle_notifications
+
+        owner_driver_id, requester_id = int(owner_driver_id), int(requester_id)
+        session = self._owner_session_for_request(owner_driver_id, int(session_id), must_be_open=False)
+        requester = self._requester_for_answer(requester_id)
+        existing = self.get_active_membership(requester_id)
+        if existing is not None and existing.session_id == session.id:
+            # A duplicate request message, answered after the first was approved.
+            raise ConflictError(
+                "This driver is already in your session",
+                error_code="BOTTLE_JOIN_REQUEST_ALREADY_MEMBER",
+            )
+        bottle_notifications.notify_join_answered(session, requester, approved=False)
+        return requester
+
     def revoke_all_memberships(self, session_id: int) -> int:
         """Revoke all active memberships for a session (called on close/force-close).
 
@@ -3610,6 +3736,79 @@ class BottleTrackingService:
             m.status = DriverSessionMembershipStatus.REVOKED
             m.left_at = now
         return len(memberships)
+
+    @staticmethod
+    def _active_drivers_query():
+        """Users who may work as a driver right now.
+
+        Holds the `delivery_driver` role through users.role OR staff_roles
+        (`StaffService.staff_role_member_filter`, the one spelling), has an
+        ACTIVE account, and has no DeliveryPerson row or an active one: the
+        reading `StaffService.assert_delivery_person_active` applies at the
+        staff-bot door, so nobody listed here is locked out of the bot.
+        """
+        from business_app.models.delivery import DeliveryPerson
+        from business_app.services.staff_service import StaffService
+
+        return User.query.outerjoin(DeliveryPerson, DeliveryPerson.user_id == User.id).filter(
+            StaffService.staff_role_member_filter("delivery_driver"),
+            User.status == UserStatus.ACTIVE,
+            or_(DeliveryPerson.id.is_(None), DeliveryPerson.is_active.is_(True)),
+        )
+
+    def _transfer_recipients_query(self, sender_driver_id: int):
+        """The ONE definition of "may receive bottles from this sender".
+
+        `list_transfer_recipients` lists it and `initiate_bottle_transfer` guards
+        with it, so the picker never offers a driver the send refuses. A
+        co-driver on the sender's own session is left out: same truck.
+        """
+        query = self._active_drivers_query().filter(User.id != sender_driver_id)
+        sender_session = self.get_open_session(sender_driver_id)
+        if sender_session is not None:
+            truck_mates = select(DriverSessionMembership.member_driver_id).where(
+                DriverSessionMembership.session_id == sender_session.id,
+                DriverSessionMembership.status == DriverSessionMembershipStatus.ACTIVE,
+            )
+            query = query.filter(~User.id.in_(truck_mates))
+        return query
+
+    def list_transfer_recipients(self, sender_driver_id: int) -> List[Dict[str, Any]]:
+        """Every driver this sender may transfer bottles to, with their session state.
+
+        `bottle_status` is published here so the bot renders the hint without
+        re-deriving it: `own_session`, `co_driver` or `none`.
+        """
+        sender_driver_id = int(sender_driver_id)
+        drivers = (
+            self._transfer_recipients_query(sender_driver_id).order_by(User.first_name, User.last_name, User.id).all()
+        )
+        ids = [driver.id for driver in drivers]
+        owners = {
+            row.driver_user_id
+            for row in DriverBottleSession.query.filter(
+                DriverBottleSession.driver_user_id.in_(ids),
+                DriverBottleSession.status == DriverBottleSessionStatus.OPEN,
+            )
+        }
+        members = {
+            row.member_driver_id
+            for row in DriverSessionMembership.query.filter(
+                DriverSessionMembership.member_driver_id.in_(ids),
+                DriverSessionMembership.status == DriverSessionMembershipStatus.ACTIVE,
+            )
+        }
+        return [
+            {
+                "user_id": driver.id,
+                "name": driver.full_name,
+                "phone": driver.phone,
+                "bottle_status": (
+                    "own_session" if driver.id in owners else "co_driver" if driver.id in members else "none"
+                ),
+            }
+            for driver in drivers
+        ]
 
     def list_eligible_co_drivers(self, owner_driver_id: int) -> List[Dict[str, Any]]:
         """Drivers who can be invited to ``owner_driver_id``'s open session.
@@ -3626,11 +3825,7 @@ class BottleTrackingService:
                 error_code="BOTTLE_SESSION_REQUIRED_TO_INVITE",
             )
 
-        drivers = User.query.filter(
-            User.role == "delivery_driver",
-            User.id != owner_driver_id,
-            User.status == UserStatus.ACTIVE,
-        ).all()
+        drivers = self._active_drivers_query().filter(User.id != owner_driver_id).all()
 
         eligible: List[Dict[str, Any]] = []
         for driver in drivers:
@@ -3963,8 +4158,32 @@ class BottleTrackingService:
     # Driver-to-driver bottle transfers
     # ------------------------------------------------------------------
 
-    @transactional
     def initiate_bottle_transfer(
+        self,
+        sender_driver_id: int,
+        receiver_driver_id: int,
+        declared_quantity: int,
+        *,
+        notes: str = None,
+    ) -> DriverBottleTransfer:
+        """Record the hand-off, then tell the receiver.
+
+        The push is queued only after `_record_bottle_transfer` has committed,
+        so a refused send tells nobody anything.
+        """
+        from business_app.services import bottle_notifications
+
+        transfer = self._record_bottle_transfer(
+            sender_driver_id,
+            receiver_driver_id,
+            declared_quantity,
+            notes=notes,
+        )
+        bottle_notifications.notify_transfer_received(transfer)
+        return transfer
+
+    @transactional
+    def _record_bottle_transfer(
         self,
         sender_driver_id: int,
         receiver_driver_id: int,
@@ -3987,6 +4206,12 @@ class BottleTrackingService:
             raise ValidationError("Transfer quantity must be greater than zero")
 
         sender_session = self._get_open_session_or_raise(sender_driver_id)
+        receiver = self._transfer_recipients_query(sender_driver_id).filter(User.id == receiver_driver_id).first()
+        if receiver is None:
+            raise ValidationError(
+                "This driver can't receive bottles right now",
+                error_code="BOTTLE_TRANSFER_RECEIVER_INVALID",
+            )
 
         if declared_quantity > sender_session.current_inventory:
             raise ValidationError(
@@ -4026,8 +4251,11 @@ class BottleTrackingService:
         """Receiver confirms (or disputes) a pending transfer.
 
         Quantities match → CONFIRMED; mismatch → DISPUTED.
-        Credits confirmed_quantity to receiver's open session.
-        Receiver must have an open session before confirming.
+        The receiver's state AT CONFIRM TIME decides where the bottles land:
+        their own open session, else the session they co-drive (one truck,
+        one load), else a session opened for them by this hand-off. A receiver
+        with nothing open who counts 0 opens nothing; the dispute goes to the
+        admin like any other mismatch.
         """
         # JWT identities arrive as str (`sub`); every column compared below is int.
         receiver_driver_id = int(receiver_driver_id)
@@ -4047,16 +4275,13 @@ class BottleTrackingService:
         if confirmed_quantity < 0:
             raise ValidationError("confirmed_quantity cannot be negative")
 
-        receiver_session = self.get_open_session(receiver_driver_id)
-        if not receiver_session:
-            raise ConflictError(
-                "Receiver must have an open bottle session to accept a transfer. " "Open a session first.",
-                error_code="BOTTLE_SESSION_REQUIRED_TO_RECEIVE",
-            )
+        receiver_session = self._receiver_session_for(transfer, receiver_driver_id, confirmed_quantity)
 
-        # Credit the receiver's session
-        receiver_session.bottles_transferred_in = (receiver_session.bottles_transferred_in or 0) + confirmed_quantity
-        transfer.receiver_session_id = receiver_session.id
+        if receiver_session is not None:
+            receiver_session.bottles_transferred_in = (
+                receiver_session.bottles_transferred_in or 0
+            ) + confirmed_quantity
+            transfer.receiver_session_id = receiver_session.id
         transfer.confirmed_quantity = confirmed_quantity
         transfer.confirmed_at = self._utc_now()
         if notes:
@@ -4072,6 +4297,52 @@ class BottleTrackingService:
         db.session.flush()
         return transfer
 
+    def _receiver_session_for(
+        self, transfer: DriverBottleTransfer, receiver_driver_id: int, quantity: int
+    ) -> Optional[DriverBottleSession]:
+        """The one rule for where a transfer's bottles land (confirm and admin resolve).
+
+        The receiver's own open session, else the session they co-drive, else a
+        session opened by this hand-off; nothing to land (quantity 0) opens nothing.
+        Confirm-time only: the receiver is on that truck right now. An admin
+        resolve differs (see `admin_resolve_transfer_dispute`).
+        """
+        session = self.get_effective_session(receiver_driver_id)
+        if session is None and quantity > 0:
+            session = self._open_session_for_transfer(receiver_driver_id, transfer)
+        return session
+
+    def _open_session_for_transfer(
+        self,
+        receiver_driver_id: int,
+        transfer: DriverBottleTransfer,
+        *,
+        actor_user_id: int = None,
+    ) -> DriverBottleSession:
+        """A receiver with nothing open gets a session that starts with the hand-off.
+
+        `actor_user_id` is who caused the open when it is not the receiver (an
+        admin resolving a dispute); it is recorded as `loaded_by_user_id`.
+
+        Not `open_bottle_session`: nothing was loaded at the warehouse (0 is the
+        true load here, and that method refuses it), and the hand-off happens
+        mid-route, so the driver's stored position is NOT moved to the depot.
+        The receiver closes it at the warehouse like any other session; the
+        partial unique index on one open session per driver still guards a
+        concurrent open.
+        """
+        session = DriverBottleSession(
+            driver_user_id=receiver_driver_id,
+            bottles_loaded=0,
+            status=DriverBottleSessionStatus.OPEN,
+            loaded_by_user_id=actor_user_id or receiver_driver_id,
+            started_at=self._utc_now(),
+            notes=f"Opened by transfer {transfer.transfer_ref}",
+        )
+        db.session.add(session)
+        db.session.flush()
+        return session
+
     @transactional
     def admin_resolve_transfer_dispute(
         self,
@@ -4084,6 +4355,11 @@ class BottleTrackingService:
         """Admin arbitrates a disputed transfer.
 
         Adjusts sender and receiver session tallies to use resolved_quantity.
+        A transfer that was never credited (the receiver counted 0 with nothing
+        open) lands the full resolved_quantity on the receiver's OWN open
+        session, else one opened for them with the admin as `loaded_by_user_id`.
+        Unlike confirm it never uses the session the receiver co-drives: the
+        hand-off is in the past, and that truck's owner was not party to it.
         """
         transfer = DriverBottleTransfer.query.get(transfer_id)
         if not transfer:
@@ -4107,6 +4383,12 @@ class BottleTrackingService:
             transfer.receiver_session.bottles_transferred_in = (
                 transfer.receiver_session.bottles_transferred_in or 0
             ) + delta_in
+        elif resolved_quantity > 0:
+            landing = self.get_open_session(transfer.receiver_driver_id) or self._open_session_for_transfer(
+                transfer.receiver_driver_id, transfer, actor_user_id=actor_user_id
+            )
+            landing.bottles_transferred_in = (landing.bottles_transferred_in or 0) + resolved_quantity
+            transfer.receiver_session_id = landing.id
 
         transfer.confirmed_quantity = resolved_quantity
         transfer.status = DriverBottleTransferStatus.RESOLVED

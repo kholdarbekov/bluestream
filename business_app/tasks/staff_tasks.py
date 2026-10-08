@@ -194,6 +194,23 @@ def notify_staff_order_assigned(self, telegram_id: str, order_info: dict):
     )
 
 
+@shared_task(name="staff.push_bottle_event", bind=True, max_retries=3, default_retry_delay=60)
+def push_bottle_event(self, telegram_id: int, event: str, payload: dict):
+    """Push one bottle event (transfer waiting, join request, its answer) to one driver.
+
+    Retried like `sales.push_sales_event`, and keyed the same way: Celery keeps
+    `request.id` across `self.retry()`, so a retry collapses to one message in
+    the staff bot's dedup. NOT a fixed per-request id: the bot holds an id for
+    24h, which would silently swallow a genuine re-request after a decline.
+    """
+    data = {"telegram_id": telegram_id, "event": event, "payload": payload}
+    if self.request.id:
+        data["event_id"] = f"bottle-event:{self.request.id}"
+    if not _send_staff_webhook("/internal/bottle-event", data):
+        raise self.retry(exc=RuntimeError(f"bottle-event webhook failed for {event}"))
+    return {"success": True, "event": event, "telegram_id": telegram_id}
+
+
 @shared_task(name="staff.notify_order_reassigned", bind=True)
 def notify_staff_order_reassigned(self, old_telegram_id: str, new_telegram_id: str, order_info: dict):
     """Notify both old and new delivery persons about a reassignment."""

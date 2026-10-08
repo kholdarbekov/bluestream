@@ -17,6 +17,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from staff_bot.config import config
 from staff_bot.database import db_manager
 from staff_bot.i18n import i18n
+from staff_bot.keyboards.delivery import DeliveryKeyboards
 from staff_bot.keyboards.operator import OperatorKeyboards
 from staff_bot.keyboards.sales import LABEL_MAX, reject_reason_key
 from staff_bot.utils import flow_state
@@ -36,6 +37,10 @@ from staff_bot.utils.formatters import (
 )
 from shared.redis_failure import report_redis_failure
 from shared.staff_constants import (
+    BOTTLE_EVENT_JOIN_APPROVED,
+    BOTTLE_EVENT_JOIN_REQUESTED,
+    BOTTLE_EVENT_TRANSFER_RECEIVED,
+    BOTTLE_EVENTS,
     SALES_EVENT_PAY_PENALTY_CONFIRMED,
     SALES_EVENT_PAY_STATEMENT_APPROVED,
     SALES_EVENTS,
@@ -442,6 +447,47 @@ def _render_sales_event(
     return text, InlineKeyboardMarkup([[button]]), True
 
 
+def _render_bottle_event(event: str, payload: dict, language: str) -> Tuple[str, Optional[InlineKeyboardMarkup]]:
+    """One bottle event as `(text, keyboard)`. Every one sounds: each asks the
+    driver to act, or answers a question they asked a moment ago."""
+    unknown = i18n.get('staff.common.unknown_driver', language)
+    if event == BOTTLE_EVENT_TRANSFER_RECEIVED:
+        text = i18n.get(
+            'staff.bottles.notify.transfer_received', language,
+            sender=escape_html(payload.get('sender_name') or unknown),
+            qty=payload.get('declared_quantity', 0),
+        )
+        # The inbox's own keyboard: its confirm button is a global handler and
+        # its "different count" button a conversation entry point, so both work
+        # from this message exactly as from "📥 Incoming transfers".
+        return text, DeliveryKeyboards.pending_transfer_list(language, [payload])
+    if event == BOTTLE_EVENT_JOIN_REQUESTED:
+        suffix = f"{payload.get('session_id')}_{payload.get('requester_id')}"
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton(
+                f"✅ {i18n.get('staff.bottles.join_request_approve', language)}",
+                callback_data=f"bottles_jr_ok_{suffix}",
+            ),
+            InlineKeyboardButton(
+                f"❌ {i18n.get('staff.bottles.join_request_decline', language)}",
+                callback_data=f"bottles_jr_no_{suffix}",
+            ),
+        ]])
+        text = i18n.get(
+            'staff.bottles.notify.join_requested', language,
+            name=escape_html(payload.get('requester_name') or unknown),
+        )
+        return text, keyboard
+    owner = escape_html(payload.get('owner_name') or unknown)
+    if event == BOTTLE_EVENT_JOIN_APPROVED:
+        text = (
+            f"✅ <b>{i18n.get('staff.bottles.joined_session', language, name=owner)}</b>\n\n"
+            f"{i18n.get('staff.bottles.joined_session_info', language)}"
+        )
+        return text, None
+    return i18n.get('staff.bottles.notify.join_declined', language, name=owner), None
+
+
 def _render_delivery_failed_alert(
     data: dict, delivery_id: int, language: str
 ) -> Tuple[str, Optional[InlineKeyboardMarkup]]:
@@ -743,6 +789,7 @@ class StaffWebhookServer:
             '/internal/order-unassigned': _TokenBucket(rate_per_sec=20, burst=60),
             '/internal/delivery-failed': _TokenBucket(rate_per_sec=20, burst=60),
             '/internal/sales-event': _TokenBucket(rate_per_sec=20, burst=60),
+            '/internal/bottle-event': _TokenBucket(rate_per_sec=20, burst=60),
             '/internal/route-updated': _TokenBucket(rate_per_sec=50, burst=120),
             '/internal/pool-insertion-suggestion': _TokenBucket(rate_per_sec=50, burst=120),
             '/internal/reload-translations': _TokenBucket(rate_per_sec=1, burst=5),
@@ -782,6 +829,7 @@ class StaffWebhookServer:
         self.app.router.add_post('/internal/order-unassigned', self.order_unassigned_handler)
         self.app.router.add_post('/internal/delivery-failed', self.delivery_failed_handler)
         self.app.router.add_post('/internal/sales-event', self.sales_event_handler)
+        self.app.router.add_post('/internal/bottle-event', self.bottle_event_handler)
         self.app.router.add_post('/internal/reload-translations', reload_translations_handler)
         self.app.router.add_post('/internal/route-updated', self.route_updated_handler)
         self.app.router.add_post('/internal/pool-insertion-suggestion', self.pool_insertion_suggestion_handler)
@@ -1099,6 +1147,61 @@ class StaffWebhookServer:
             return web.json_response({'success': True, 'message': 'Notification sent'})
         except Exception as e:
             logger.error(f"Error handling sales event: {e}", exc_info=True)
+            return web.json_response({'success': False, 'message': 'Internal server error'}, status=500)
+
+    async def bottle_event_handler(self, request):
+        """Push one bottle event to one driver's chat.
+
+        POST /internal/bottle-event
+          {telegram_id, event, event_id, payload}
+        """
+        try:
+            if not await verify_webhook_signature(request):
+                return web.json_response({'success': False, 'message': 'Invalid signature'}, status=401)
+            limited = await self._check_rate_limit(request)
+            if limited:
+                return limited
+            if not self.bot_app:
+                return web.json_response({'success': False, 'message': 'Bot not initialized'}, status=503)
+
+            data, parse_error = await _parse_json_body(request)
+            if parse_error:
+                return parse_error
+            telegram_id = data.get('telegram_id')
+            event = data.get('event')
+            payload = data.get('payload') or {}
+            if not telegram_id or event not in BOTTLE_EVENTS:
+                return web.json_response(
+                    {'success': False, 'message': 'Missing telegram_id or unknown event'}, status=400
+                )
+            event_id = data.get('event_id')
+            entity = ":".join(
+                str(payload[name]) for name in ('id', 'session_id', 'requester_id') if payload.get(name) is not None
+            )
+            # Without Redis the in-memory fallback must still tell a genuine
+            # re-request (new event id, same payload) from a retry (same id).
+            fallback_key = f"bottle:{event_id}" if event_id else f"bottle:{event}:{telegram_id}:{entity}"
+            if await self._is_duplicate_event(event_id, fallback_key):
+                return web.json_response({'success': True, 'message': 'Already processed'})
+
+            language = await i18n.get_user_language(int(telegram_id))
+            text, keyboard = _render_bottle_event(event, payload, language)
+            try:
+                await self.bot_app.bot.send_message(
+                    chat_id=telegram_id, text=text, parse_mode='HTML', reply_markup=keyboard,
+                )
+            except Exception as e:
+                # `sales_event_handler`'s contract: a driver who blocked the bot
+                # keeps the slot (nobody can reach them); anything else frees it
+                # and answers 502 so `push_bottle_event` retries and delivers.
+                _log_notify_failure(f"Failed to send bottle event {event} to {telegram_id}", e)
+                if _is_recipient_unreachable(e):
+                    return web.json_response({'success': False, 'message': 'Recipient unreachable'})
+                await self._release_event(event_id, fallback_key)
+                return web.json_response({'success': False, 'message': 'Send failed'}, status=502)
+            return web.json_response({'success': True, 'message': 'Notification sent'})
+        except Exception as e:
+            logger.error(f"Error handling bottle event: {e}", exc_info=True)
             return web.json_response({'success': False, 'message': 'Internal server error'}, status=500)
 
     async def order_reassigned_handler(self, request):

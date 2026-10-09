@@ -85,8 +85,9 @@ class TestReleaseOutOfScopeReservations:
     def test_own_account_reservations_untouched(self, db):
         u, admin = make_user(db), make_user(db)
         own_order, _ = delivered_cod_order(db, u, total=Decimal("5000.00"))
+        # Larger than the 4000 surplus, so it stays a live reservation.
         _, own_pending = delivered_cod_order(
-            db, u, total=Decimal("4000.00"), status=OrderStatus.CONFIRMED
+            db, u, total=Decimal("6000.00"), status=OrderStatus.CONFIRMED
         )
         CashCollectionService().post_collection(
             customer_id=u.id,

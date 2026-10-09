@@ -1017,8 +1017,10 @@ class TestBottlesLeavingSplit:
         _order, payment = delivered_cod_order(db, u1, address=a1, total=Decimal("30000.00"))
         # A live reservation parked on the COWORKER's pending order — the money
         # the split must not touch belongs to somebody who is not leaving.
+        # Larger than the credit, so the credit stays a live reservation (a
+        # reservation that covers the order in full settles it at once).
         _pending, pending_payment = delivered_cod_order(
-            db, u2, total=Decimal("6000.00"), status=OrderStatus.CONFIRMED
+            db, u2, total=Decimal("9000.00"), status=OrderStatus.CONFIRMED
         )
         seed_unapplied_credit(db, u2, Decimal("6000.00"), admin)
         db.session.expire_all()
@@ -2867,18 +2869,22 @@ def _fully_prepaid_delivery_fixture(db):
     ``DriverBottleSessionOrder`` binding into a ``ValidationError``, which
     ``_handle_status_change_actions`` deliberately re-raises to abort the
     transition. Nothing is monkeypatched into the bottle service.
+
+    The credit is seeded BEFORE the order exists, so it stays unapplied balance
+    until DELIVERED applies it; a reservation covering the order in full would
+    settle it before delivery instead.
     """
     admin = make_user(db)
     u1, u2 = make_user(db), make_user(db)
     a1, a2 = make_address(db, u1), make_address(db, u2)
     group_addresses(db, admin, a1, a2)
     product = bottle_product(db, per_unit="2")
-    order, payment = cash_order_with_bottles(
-        db, u1, product, a1, quantity=2, status=OrderStatus.CONFIRMED, total="30000.00"
-    )
     # Enough credit to settle the order in full at delivery -> COMPLETED ->
     # send_payment_confirmation_task.
     seed_unapplied_credit(db, u1, Decimal("30000.00"), admin)
+    order, payment = cash_order_with_bottles(
+        db, u1, product, a1, quantity=2, status=OrderStatus.CONFIRMED, total="30000.00"
+    )
     db.session.expire_all()
     return admin, u1, u2, a1, order, payment
 
@@ -2925,20 +2931,15 @@ class TestBottleFailureDoesNotDamageMoney:
         # NEVER exist is a DELIVERED, fully-settled order with no bottle record.
         assert Order.query.get(order.id).status != OrderStatus.DELIVERED
         assert money_snapshot(db) == before
-        # The customer's money is exactly where the fixture left it. Note WHERE
-        # that is: the 30 000 is not *unapplied* credit and never was —
-        # `post_collection` RESERVED it against this still-pending COD order at
-        # seeding time, so the wallet's unapplied total reads 0.00 both before
-        # and after, and the honest statement of "untouched" is that the
-        # RESERVATION is still standing at its full amount. (`money_snapshot ==
-        # before` above is the unfiltered proof that no money value moved
-        # anywhere in the database; these two are the named specifics.)
+        # The customer's money is exactly where the fixture left it: the full
+        # 30 000 is still unapplied balance and nothing reached the payment.
+        # (`money_snapshot == before` above is the unfiltered proof that no
+        # money value moved anywhere in the database; these are the named
+        # specifics.)
         assert CashCollectionService().get_customer_prepaid_balance(u1.id) == Decimal(
-            "0.00"
+            "30000.00"
         )
         payment = Payment.query.get(payment.id)
-        reserved = (payment.provider_data or {}).get("cod_prepayment_reserved_amount")
-        assert Decimal(str(reserved or 0)) == Decimal("30000.00")
         assert str(payment.amount_collected) == "0.00"
         assert payment.status != PaymentStatus.COMPLETED
         assert BottleLedger.query.filter_by(order_id=order.id).count() == 0
@@ -2977,7 +2978,7 @@ class TestBottleFailureDoesNotDamageMoney:
         assert BottleTrackingService.get_place_balance(a1.id) == place_before
 
         # THE RETRY. Same order, same call — and now it goes through end to end:
-        # the money settles from the reserved prepayment AND the place receives
+        # the money settles from the prepaid balance AND the place receives
         # the bottles, in one transaction.
         OrderService().update_order_status(
             order.id, OrderStatus.DELIVERED, updated_by=admin.id

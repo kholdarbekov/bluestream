@@ -1471,8 +1471,9 @@ class CashCollectionService:
         Runs wherever coverage can change: order creation, every collection,
         the pending-order sweep and an unpaid order's edit. The applied credit
         is tagged ``settled_pre_delivery`` so a cancel/return before delivery
-        refunds it. Partial coverage stays a reservation (consumed at
-        delivery), as does a reservation with no recordable collector — a
+        refunds it. Stays a reservation (consumed at delivery) when coverage is
+        partial, when any of it is a linked sibling's credit (an unlink must
+        still be able to release it), or when no collector can be recorded — a
         completed cash payment must name one. Returns the consumed amount.
         Runs in the caller's transaction (no commit).
         """
@@ -1483,12 +1484,16 @@ class CashCollectionService:
             return Decimal("0.00")
 
         owed = open_receivable_amount(payment)
-        if owed <= Decimal("0.00") or self._get_reserved_prepayment_amount(payment.id) < owed:
+        if owed <= Decimal("0.00"):
+            return Decimal("0.00")
+        sources = self._live_reservation_sources(payment.id)
+        reserved = sum((self._to_decimal(row.allocated_amount) for row in sources), Decimal("0.00"))
+        if reserved < owed or any(row.customer_id != payment.user_id for row in sources):
             return Decimal("0.00")
         if (
             actor_user_id is None
             and payment.collected_by is None
-            and not self._reservation_has_collector(payment.id)
+            and not any(row.collector_user_id or row.recorded_by_user_id for row in sources)
         ):
             return Decimal("0.00")
 
@@ -1499,10 +1504,15 @@ class CashCollectionService:
         )
 
     @staticmethod
-    def _reservation_has_collector(payment_id: int) -> bool:
-        """True when a live reservation's funding event names who took the cash."""
+    def _live_reservation_sources(payment_id: int):
+        """Each live reservation on a payment with its funding event's owner and collector."""
         return (
-            db.session.query(CashCollectionAllocation.id)
+            db.session.query(
+                CashCollectionAllocation.allocated_amount,
+                CashCollectionEvent.customer_id,
+                CashCollectionEvent.collector_user_id,
+                CashCollectionEvent.recorded_by_user_id,
+            )
             .join(
                 CashCollectionEvent,
                 CashCollectionAllocation.cash_collection_event_id == CashCollectionEvent.id,
@@ -1511,13 +1521,8 @@ class CashCollectionService:
                 CashCollectionAllocation.payment_id == payment_id,
                 CashCollectionAllocation.reversed_at.is_(None),
                 CashCollectionAllocation.allocation_mode == "prepaid_reservation",
-                or_(
-                    CashCollectionEvent.collector_user_id.isnot(None),
-                    CashCollectionEvent.recorded_by_user_id.isnot(None),
-                ),
             )
-            .first()
-            is not None
+            .all()
         )
 
     @staticmethod

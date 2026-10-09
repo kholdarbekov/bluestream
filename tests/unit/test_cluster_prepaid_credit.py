@@ -751,13 +751,14 @@ class TestSweepGateMatchesTheSpentPool:
         t0 = datetime.now(UTC) - timedelta(days=3)
         _seed_credit(db, u1, Decimal("1000.00"), admin)
         _seed_credit(db, u2, Decimal("5000.00"), admin)
+        # Each order is larger than its owner's credit, so both stay reservations.
         _, first_pending = delivered_cod_order(
-            db, u1, total=Decimal("1000.00"), status=OrderStatus.CONFIRMED, created_at=t0
+            db, u1, total=Decimal("1500.00"), status=OrderStatus.CONFIRMED, created_at=t0
         )
         _, second_pending = delivered_cod_order(
             db,
             u2,
-            total=Decimal("4000.00"),
+            total=Decimal("6000.00"),
             status=OrderStatus.CONFIRMED,
             created_at=t0 + timedelta(days=1),
         )
@@ -769,5 +770,5 @@ class TestSweepGateMatchesTheSpentPool:
             u1.id, cluster_user_ids=[u1.id, u2.id]
         )
         assert _reserved(db, first_pending) == Decimal("1000.00")
-        assert _reserved(db, second_pending) == Decimal("4000.00")
-        assert reserved == Decimal("5000.00")
+        assert _reserved(db, second_pending) == Decimal("5000.00")
+        assert reserved == Decimal("6000.00")

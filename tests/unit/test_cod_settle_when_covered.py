@@ -202,3 +202,27 @@ class TestSweepAndGuards:
             db.session.flush()
 
             assert service.settle_reserved_prepayment_if_covered(payment) == Decimal("0.00")
+
+    def test_a_linked_siblings_credit_stays_a_reservation(self, db):
+        """Cluster credit is one wallet, but an unlink must still be able to
+        hand a sibling's money back, so it is not settled before delivery."""
+        from tests.unit._scope_money_helpers import delivered_cod_order, link_users, make_user
+
+        u1, u2, admin = make_user(db), make_user(db), make_user(db)
+        link_users(db, [u1, u2])
+        own_order, _ = delivered_cod_order(db, u1, total=Decimal("5000.00"))
+        _, sibling_payment = delivered_cod_order(
+            db, u2, total=Decimal("4000.00"), status=OrderStatus.CONFIRMED
+        )
+        CashCollectionService().post_collection(
+            customer_id=u1.id,
+            amount=Decimal("9000.00"),
+            source="standalone_meeting",
+            order_id=own_order.id,
+            recorded_by_user_id=admin.id,
+            notes="overpaid",
+        )
+        db.session.refresh(sibling_payment)
+
+        assert sibling_payment.status == PaymentStatus.PENDING
+        assert sibling_payment.provider_data.get("cod_prepayment_reserved_amount") == 4000.0

@@ -280,11 +280,17 @@ class OrderPaymentMethodEditService:
             #    exactly what "flip first" protects against. A reservation that
             #    happens to be DELIVERY_COMPLETION-funded is released here too;
             #    `_reverse_collected_cash`'s later query simply finds it already
-            #    reversed and no-ops on it (no double-processing).
+            #    reversed and no-ops on it (no double-processing). Credit already
+            #    settled before delivery (`settled_pre_delivery`) is refunded the
+            #    same way, for the same reason; neither call sweeps allocations.
             if current == "cash":
                 from business_app.services.cash_collection_service import CashCollectionService
 
-                CashCollectionService().release_reserved_prepayment_for_order(
+                cash_service = CashCollectionService()
+                cash_service.release_pre_delivery_prepaid_settlement_for_order(
+                    order.id, actor_user_id=actor_user_id, reason=reason
+                )
+                cash_service.release_reserved_prepayment_for_order(
                     order.id, actor_user_id=actor_user_id, reason=reason
                 )
 

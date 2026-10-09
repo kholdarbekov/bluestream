@@ -640,6 +640,33 @@ def test_apply_t1_flip_releases_reservation_funded_by_standalone_meeting(
     assert result.money_action == "cod_cancelled"
 
 
+def test_apply_t1_flip_refunds_credit_settled_before_delivery(
+    db, workplace_user, sample_product, covered_contract, delivery_driver
+):
+    """A reservation that covered the order was settled before delivery
+    (``settled_pre_delivery``). The flip to business_account bills the
+    contract instead, so that credit must go back to the customer's balance."""
+    contract, price_row, _account, _balance = covered_contract
+    order, payment, event = _seed_cash_order_with_standalone_reservation(
+        db, workplace_user, sample_product, contract, price_row, delivery_driver,
+        order_total="90000.00", credit="90000.00",
+    )
+    CashCollectionService().settle_reserved_prepayment_if_covered(payment, actor_user_id=delivery_driver.id)
+    db.session.commit()
+    assert Payment.query.get(payment.id).status == PaymentStatus.COMPLETED
+
+    OrderPaymentMethodEditService().apply_edit(
+        order_id=order.id,
+        new_method="business_account",
+        reason="reclassify confirmed cash order to business account",
+        actor_user_id=delivery_driver.id,
+    )
+
+    db.session.expire_all()
+    assert CashCollectionEvent.query.get(event.id).unapplied_amount == Decimal("90000.00")
+    assert CashCollectionAllocation.query.filter_by(payment_id=payment.id, reversed_at=None).all() == []
+
+
 # --------------------------------------------------------------------------- #
 # apply_edit — out of business_account (T3 cash, T4 click)
 # --------------------------------------------------------------------------- #

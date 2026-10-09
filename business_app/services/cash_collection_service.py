@@ -1527,17 +1527,16 @@ class CashCollectionService:
 
     @staticmethod
     def _payments_allocated_by_event(event_id: int) -> List[Payment]:
-        """Payments holding a live allocation from ``event_id``, id-ordered."""
-        return (
-            Payment.query.join(CashCollectionAllocation, CashCollectionAllocation.payment_id == Payment.id)
-            .filter(
-                CashCollectionAllocation.cash_collection_event_id == event_id,
-                CashCollectionAllocation.reversed_at.is_(None),
-            )
-            .distinct()
-            .order_by(Payment.id.asc())
-            .all()
+        """Payments holding a live allocation from ``event_id``, id-ordered.
+
+        Filters by id subquery: DISTINCT over the row fails on Postgres
+        because ``provider_data`` is ``json``, which has no equality operator.
+        """
+        live_payment_ids = db.session.query(CashCollectionAllocation.payment_id).filter(
+            CashCollectionAllocation.cash_collection_event_id == event_id,
+            CashCollectionAllocation.reversed_at.is_(None),
         )
+        return Payment.query.filter(Payment.id.in_(live_payment_ids)).order_by(Payment.id.asc()).all()
 
     def release_reserved_prepayment_for_order(
         self,

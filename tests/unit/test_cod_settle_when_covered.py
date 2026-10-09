@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import event
 
 from business_app.models.order import Order
 from business_app.models.payment import CashCollectionAllocation, CashCollectionEvent
@@ -226,3 +227,68 @@ class TestSweepAndGuards:
 
         assert sibling_payment.status == PaymentStatus.PENDING
         assert sibling_payment.provider_data.get("cod_prepayment_reserved_amount") == 4000.0
+
+
+@pytest.mark.unit
+@pytest.mark.payment
+class TestPaymentsPaidDownByAnEvent:
+    """payments.provider_data is ``json`` on Postgres, which has no equality
+    operator, so the lookup must never DISTINCT a whole payment row."""
+
+    def test_post_collection_never_distincts_a_payment_row(
+        self, app, db, sample_user, admin_user, delivery_driver
+    ):
+        with app.app_context():
+            service = CashCollectionService()
+            order, _ = _reserved_order(
+                db, service, sample_user,
+                number="PDE-SQL", total="35460.00", credit="540.00", collector=delivery_driver,
+            )
+            statements = []
+
+            def capture(conn, cursor, statement, parameters, context, executemany):
+                statements.append(statement)
+
+            event.listen(db.engine, "before_cursor_execute", capture)
+            try:
+                _card_transfer(db, service, sample_user, admin_user, order, "36000.00")
+            finally:
+                event.remove(db.engine, "before_cursor_execute", capture)
+
+            assert statements
+            assert not [s for s in statements if "DISTINCT payments." in s]
+
+    def test_each_live_payment_once_in_id_order(self, app, db, sample_user, admin_user):
+        with app.app_context():
+            service = CashCollectionService()
+            payments = [
+                service.ensure_cod_payment_for_order(
+                    _order(db, sample_user, number=f"PDE-{n}", total="1000.00")
+                )
+                for n in range(3)
+            ]
+            db.session.flush()
+            collection = _credit(db, sample_user, "3000.00", collector=admin_user)
+            first, second, reversed_only = payments
+            for allocation_order, (payment, reversed_at) in enumerate(
+                (
+                    (second, None),
+                    (first, None),
+                    (second, None),
+                    (reversed_only, datetime.now(UTC)),
+                ),
+                start=1,
+            ):
+                db.session.add(CashCollectionAllocation(
+                    cash_collection_event_id=collection.id,
+                    payment_id=payment.id,
+                    order_id=payment.order_id,
+                    allocated_amount=Decimal("500.00"),
+                    allocation_order=allocation_order,
+                    reversed_at=reversed_at,
+                ))
+            db.session.flush()
+
+            found = CashCollectionService._payments_allocated_by_event(collection.id)
+
+            assert [p.id for p in found] == [first.id, second.id]

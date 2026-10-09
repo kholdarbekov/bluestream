@@ -973,13 +973,19 @@ def test_apply_edit_pre_delivery_decrease_below_reservation_trims_it(
     # customer's available (unapplied) balance instead of staying locked.
     assert event.unapplied_amount == Decimal("82000.00")
 
-    # What remains reserved on the payment matches the new outstanding exactly
-    # — never more than what this order can still absorb.
-    reservation = CashCollectionAllocation.query.filter_by(
+    # What stays held matches the new total exactly — never more than this
+    # order can absorb — and, now covering it in full, settles the order.
+    assert CashCollectionAllocation.query.filter_by(
         payment_id=payment.id, allocation_mode="prepaid_reservation", reversed_at=None
+    ).count() == 0
+    applied = CashCollectionAllocation.query.filter_by(
+        payment_id=payment.id, allocation_mode="prepaid_credit", reversed_at=None
     ).one()
-    assert reservation.allocated_amount == Decimal("18000.00")
-    assert Decimal(str(payment.outstanding_amount)) == Decimal("18000.00")
+    assert applied.allocated_amount == Decimal("18000.00")
+    assert applied.allocation_metadata.get("settled_pre_delivery") is True
+    assert Decimal(str(payment.amount_collected)) == Decimal("18000.00")
+    assert Decimal(str(payment.outstanding_amount)) == Decimal("0.00")
+    assert payment.status == PaymentStatus.COMPLETED
 
     # Conservation law: live allocations + unapplied_amount == event.amount.
     live_total = sum(

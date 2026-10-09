@@ -420,11 +420,8 @@ class OrderService:
                         payment,
                         actor_user_id=user_id,
                     )
-                    # If the customer's prepaid balance FULLY covers this order,
-                    # the cash is already in hand — settle it now so the order
-                    # reads as paid at creation instead of waiting for delivery.
-                    # Partial coverage stays a reservation (settled at delivery).
-                    cash_collection_service.settle_new_cod_order_from_prepaid(
+                    # Reserved balance that covers the whole order settles it now.
+                    cash_collection_service.settle_reserved_prepayment_if_covered(
                         payment,
                         actor_user_id=user_id,
                     )

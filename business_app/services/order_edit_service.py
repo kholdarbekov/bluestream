@@ -1378,6 +1378,7 @@ class OrderEditService:
             # available balance instead of staying locked, invisible, against
             # an order too small to ever consume it.
             self.cash_service.trim_reserved_prepayment_to_capacity(payment, actor_user_id=actor_user_id)
+            self.cash_service.settle_reserved_prepayment_if_covered(payment, actor_user_id=actor_user_id)
             db.session.flush()
             return
 

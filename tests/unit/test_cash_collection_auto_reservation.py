@@ -140,12 +140,13 @@ class TestAutoReserveAgainstPendingPayments:
             db.session.flush()
             assert service.get_customer_prepaid_balance(sample_user.id) == Decimal("50000.00")
 
-            # Pending cash order with 30k outstanding.
+            # Pending cash order with 80k outstanding (more than the credit, so
+            # it stays a reservation rather than settling).
             pending_order = _make_pending_cash_order(
                 db,
                 sample_user,
                 order_number="ORD-AUTO-RES-001",
-                total="30000.00",
+                total="80000.00",
             )
             pending_payment = service.ensure_cod_payment_for_order(pending_order)
             db.session.flush()
@@ -156,17 +157,17 @@ class TestAutoReserveAgainstPendingPayments:
             )
             db.session.flush()
 
-            assert reserved == Decimal("30000.00")
+            assert reserved == Decimal("50000.00")
             db.session.refresh(event)
             db.session.refresh(pending_payment)
-            assert event.unapplied_amount == Decimal("20000.00")
+            assert event.unapplied_amount == Decimal("0.00")
             assert pending_payment.provider_data.get(
                 "cod_prepayment_reserved_amount"
-            ) == 30000.0
+            ) == 50000.0
             # Payment projection unchanged because reservation does not
             # affect amount_collected/outstanding.
             assert pending_payment.amount_collected == Decimal("0.00")
-            assert pending_payment.outstanding_amount == Decimal("30000.00")
+            assert pending_payment.outstanding_amount == Decimal("80000.00")
 
     def test_skips_delivered_orders(
         self,
@@ -210,12 +211,12 @@ class TestAutoReserveAgainstPendingPayments:
             db.session.flush()
             delivered_payment = service.ensure_cod_payment_for_order(delivered_order)
 
-            # A PENDING cash order with 15k outstanding — eligible target.
+            # A PENDING cash order with 40k outstanding — eligible target.
             pending_order = _make_pending_cash_order(
                 db,
                 sample_user,
                 order_number="ORD-AUTO-RES-PEND-001",
-                total="15000.00",
+                total="40000.00",
             )
             pending_payment = service.ensure_cod_payment_for_order(pending_order)
             db.session.flush()
@@ -223,20 +224,20 @@ class TestAutoReserveAgainstPendingPayments:
             reserved = service.auto_reserve_against_pending_payments(sample_user.id)
             db.session.flush()
 
-            assert reserved == Decimal("15000.00")
+            assert reserved == Decimal("25000.00")
             db.session.refresh(delivered_payment)
             db.session.refresh(pending_payment)
             assert pending_payment.provider_data.get(
                 "cod_prepayment_reserved_amount"
-            ) == 15000.0
+            ) == 25000.0
             # Delivered payment must NOT receive any reservation.
             assert (
                 delivered_payment.provider_data.get("cod_prepayment_reserved_amount", 0)
                 == 0
             )
-            # Remaining customer prepayment balance is 10k (25k - 15k).
+            # The whole 25k is parked on the pending order.
             assert service.get_customer_prepaid_balance(sample_user.id) == Decimal(
-                "10000.00"
+                "0.00"
             )
 
     def test_skips_cancelled_orders(
@@ -283,7 +284,7 @@ class TestAutoReserveAgainstPendingPayments:
                 db,
                 sample_user,
                 order_number="ORD-AUTO-RES-PEND-002",
-                total="9000.00",
+                total="30000.00",
             )
             pending_payment = service.ensure_cod_payment_for_order(pending_order)
             db.session.flush()
@@ -291,12 +292,12 @@ class TestAutoReserveAgainstPendingPayments:
             reserved = service.auto_reserve_against_pending_payments(sample_user.id)
             db.session.flush()
 
-            assert reserved == Decimal("9000.00")
+            assert reserved == Decimal("20000.00")
             db.session.refresh(cancelled_payment)
             db.session.refresh(pending_payment)
             assert pending_payment.provider_data.get(
                 "cod_prepayment_reserved_amount"
-            ) == 9000.0
+            ) == 20000.0
             # Cancelled payment must not be touched.
             assert (
                 cancelled_payment.provider_data.get(
@@ -316,8 +317,8 @@ class TestAutoReserveAgainstPendingPayments:
             service = CashCollectionService()
 
             # 25k surplus available; total pending demand will be 30k, so the
-            # older order gets fully covered (20k) and the newer one gets
-            # partially covered (5k).
+            # older order gets fully covered (20k, settled as paid) and the
+            # newer one gets partially covered (5k, stays reserved).
             seed_event = CashCollectionEvent(
                 customer_id=sample_user.id,
                 recorded_by_user_id=admin_user.id,
@@ -357,9 +358,11 @@ class TestAutoReserveAgainstPendingPayments:
             db.session.refresh(newer_payment)
 
             assert reserved == Decimal("25000.00")
+            assert older_payment.status == PaymentStatus.COMPLETED
+            assert older_payment.amount_collected == Decimal("20000.00")
             assert older_payment.provider_data.get(
                 "cod_prepayment_reserved_amount"
-            ) == 20000.0
+            ) == 0.0
             assert newer_payment.provider_data.get(
                 "cod_prepayment_reserved_amount"
             ) == 5000.0
@@ -394,19 +397,19 @@ class TestAutoReserveAgainstPendingPayments:
                 db,
                 sample_user,
                 order_number="ORD-AUTO-RES-IDEMP",
-                total="22000.00",
+                total="40000.00",
             )
             pending_payment = service.ensure_cod_payment_for_order(pending_order)
             db.session.flush()
 
             first = service.auto_reserve_against_pending_payments(sample_user.id)
             db.session.flush()
-            assert first == Decimal("22000.00")
+            assert first == Decimal("30000.00")
             db.session.refresh(pending_payment)
             first_snapshot = pending_payment.provider_data.get(
                 "cod_prepayment_reserved_amount"
             )
-            assert first_snapshot == 22000.0
+            assert first_snapshot == 30000.0
 
             second = service.auto_reserve_against_pending_payments(sample_user.id)
             db.session.flush()
@@ -419,7 +422,7 @@ class TestAutoReserveAgainstPendingPayments:
             )
             # Customer prepaid balance unchanged after the no-op repeat call.
             assert service.get_customer_prepaid_balance(sample_user.id) == Decimal(
-                "8000.00"
+                "0.00"
             )
 
     def test_post_collection_triggers_auto_reservation(
@@ -433,12 +436,12 @@ class TestAutoReserveAgainstPendingPayments:
         with app.app_context():
             service = CashCollectionService()
 
-            # Customer has one pending CASH order with 57K outstanding.
+            # Customer has one pending CASH order with 100K outstanding.
             pending_order = _make_pending_cash_order(
                 db,
                 sample_user,
                 order_number="ORD-AUTO-RES-HOOK",
-                total="57000.00",
+                total="100000.00",
             )
             pending_payment = service.ensure_cod_payment_for_order(pending_order)
             db.session.commit()
@@ -447,7 +450,7 @@ class TestAutoReserveAgainstPendingPayments:
             # (e.g. a sidewalk hand-off). The new event has no order context,
             # _allocate_oldest_first finds no delivered debts, and unapplied
             # stays at 80K. The post_collection hook should then sweep this
-            # surplus into a reservation against the pending 57K payment.
+            # surplus into a reservation against the pending 100K payment.
             event = service.post_collection(
                 customer_id=sample_user.id,
                 amount=Decimal("80000.00"),
@@ -460,13 +463,13 @@ class TestAutoReserveAgainstPendingPayments:
             db.session.refresh(event)
             db.session.refresh(pending_payment)
 
-            assert event.unapplied_amount == Decimal("23000.00")
+            assert event.unapplied_amount == Decimal("0.00")
             assert pending_payment.provider_data.get(
                 "cod_prepayment_reserved_amount"
-            ) == 57000.0
+            ) == 80000.0
             # Reservation does not affect the actual payment projection.
             assert pending_payment.amount_collected == Decimal("0.00")
-            assert pending_payment.outstanding_amount == Decimal("57000.00")
+            assert pending_payment.outstanding_amount == Decimal("100000.00")
 
     def test_get_customer_cod_statement_exposes_reserved_and_net_fields(
         self,
@@ -553,16 +556,16 @@ class TestAutoReserveAgainstPendingPayments:
                 db,
                 sample_user,
                 order_number="ORD-AUTO-RES-REL",
-                total="14000.00",
+                total="25000.00",
             )
             pending_payment = service.ensure_cod_payment_for_order(pending_order)
             db.session.flush()
 
             reserved = service.auto_reserve_against_pending_payments(sample_user.id)
             db.session.flush()
-            assert reserved == Decimal("14000.00")
+            assert reserved == Decimal("18000.00")
             assert service.get_customer_prepaid_balance(sample_user.id) == Decimal(
-                "4000.00"
+                "0.00"
             )
 
             # Cancel the order, then release. release_reserved_prepayment_for_order
@@ -578,11 +581,11 @@ class TestAutoReserveAgainstPendingPayments:
             db.session.refresh(pending_payment)
             db.session.refresh(seed_event)
 
-            assert released == Decimal("14000.00")
+            assert released == Decimal("18000.00")
             assert pending_payment.provider_data.get(
                 "cod_prepayment_reserved_amount"
             ) == 0.0
-            # The 14k went back to the seed event's unapplied amount.
+            # The 18k went back to the seed event's unapplied amount.
             assert seed_event.unapplied_amount == Decimal("18000.00")
             assert service.get_customer_prepaid_balance(sample_user.id) == Decimal(
                 "18000.00"
@@ -598,10 +601,10 @@ class TestAutoReserveAgainstPendingPayments:
         second_delivery_driver,
         second_delivery_driver_profile,
     ):
-        """Driver B collects standalone cash that auto-reserves against a
-        pending order that Driver A later delivers. The reservation must
-        carry across drivers/sessions without double-counting cash in Driver
-        B's session."""
+        """Driver B collects standalone cash that fully covers a pending order
+        that Driver A later delivers. The order settles at collection with
+        Driver B as collector; delivery consumes nothing more and no cash is
+        double-counted in either session."""
         with app.app_context():
             service = CashCollectionService()
 
@@ -616,8 +619,8 @@ class TestAutoReserveAgainstPendingPayments:
             db.session.commit()
 
             # Driver B (second_delivery_driver) collects 80k standalone. The
-            # post_collection hook should reserve 57k against the pending
-            # payment, leaving 23k unapplied in Driver B's event.
+            # sweep reserves 57k against the pending payment, which covers it,
+            # so it settles at once; 23k stays unapplied in Driver B's event.
             event = service.post_collection(
                 customer_id=sample_user.id,
                 amount=Decimal("80000.00"),
@@ -630,29 +633,29 @@ class TestAutoReserveAgainstPendingPayments:
             db.session.refresh(event)
             db.session.refresh(pending_payment)
 
-            # Driver B's session shows the full 80k as gross collected, with
-            # no offset for the reservation (reservations don't write events).
+            # Driver B's session shows the full 80k as gross collected.
             driver_b_session = DriverCashSession.query.get(
                 event.driver_cash_session_id
             )
             assert driver_b_session.driver_user_id == second_delivery_driver.id
             assert driver_b_session.gross_cash_collected == Decimal("80000.00")
+            assert event.unapplied_amount == Decimal("23000.00")
+            assert pending_payment.amount_collected == Decimal("57000.00")
+            assert pending_payment.outstanding_amount == Decimal("0.00")
+            assert pending_payment.status == PaymentStatus.COMPLETED
+            # A COMPLETED cash payment must record WHO collected it (ARCH-006 /
+            # ck_payments_cash_completed_requires_collector), derived from the
+            # reservation's source event — Driver B, who took the cash.
+            assert pending_payment.collected_by == second_delivery_driver.id
             assert pending_payment.provider_data.get(
                 "cod_prepayment_reserved_amount"
-            ) == 57000.0
+            ) == 0.0
 
-            pre_consume_b_gross = driver_b_session.gross_cash_collected
-
-            # Capture the customer's CashCollectionEvent count BEFORE
-            # consumption so we can assert no new event is written in the
-            # delivering driver's session (consumption flips an existing
-            # allocation only).
             events_before = CashCollectionEvent.query.filter_by(
                 customer_id=sample_user.id
             ).count()
 
-            # Driver A delivers the order. order_service marks the order
-            # DELIVERED and calls consume_reserved_prepayment_for_payment.
+            # Driver A delivers the order: nothing left to consume.
             pending_order.status = OrderStatus.DELIVERED
             db.session.flush()
 
@@ -661,28 +664,9 @@ class TestAutoReserveAgainstPendingPayments:
             db.session.refresh(pending_payment)
             db.session.refresh(driver_b_session)
 
-            assert consumed == Decimal("57000.00")
+            assert consumed == Decimal("0.00")
             assert pending_payment.amount_collected == Decimal("57000.00")
-            assert pending_payment.outstanding_amount == Decimal("0.00")
-            assert pending_payment.status == PaymentStatus.COMPLETED
-            # A COMPLETED cash payment must record WHO collected it (ARCH-006 /
-            # ck_payments_cash_completed_requires_collector). Consumption of a
-            # reservation derives the collector from the reservation's source
-            # event — here Driver B, who physically collected the cash.
-            assert pending_payment.collected_by == second_delivery_driver.id
-            # No reservation remains; the marker is reset to 0.
-            assert pending_payment.provider_data.get(
-                "cod_prepayment_reserved_amount"
-            ) == 0.0
-            # Driver B's session gross_cash_collected MUST NOT have grown —
-            # consumption flips an existing allocation, it does not write a
-            # new cash collection event in any session.
-            assert driver_b_session.gross_cash_collected == pre_consume_b_gross
             assert driver_b_session.gross_cash_collected == Decimal("80000.00")
-
-            # And verify no new CashCollectionEvent row was written for the
-            # customer during consumption — reservation consumption must
-            # operate purely on the existing allocation/event ledger.
             events_after = CashCollectionEvent.query.filter_by(
                 customer_id=sample_user.id
             ).count()

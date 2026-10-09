@@ -8,7 +8,7 @@ not-yet-delivered order that was settled this way must refund the consumed
 credit back to the customer's prepaid balance.
 
 Covers:
-  - ``CashCollectionService.settle_new_cod_order_from_prepaid``
+  - ``CashCollectionService.settle_reserved_prepayment_if_covered``
   - ``CashCollectionService.release_pre_delivery_prepaid_settlement_for_order``
   - the ``settled_pre_delivery`` tag added to
     ``consume_reserved_prepayment_for_payment``
@@ -88,7 +88,7 @@ class TestSettleNewCodOrderFromPrepaid:
             )
             db.session.flush()
 
-            settled = service.settle_new_cod_order_from_prepaid(
+            settled = service.settle_reserved_prepayment_if_covered(
                 payment, actor_user_id=sample_user.id
             )
             db.session.flush()
@@ -139,7 +139,7 @@ class TestSettleNewCodOrderFromPrepaid:
             )
             db.session.flush()
 
-            settled = service.settle_new_cod_order_from_prepaid(
+            settled = service.settle_reserved_prepayment_if_covered(
                 payment, actor_user_id=sample_user.id
             )
             db.session.flush()
@@ -177,7 +177,7 @@ class TestReleasePreDeliveryPrepaidSettlement:
                 payment, actor_user_id=sample_user.id
             )
             db.session.flush()
-            service.settle_new_cod_order_from_prepaid(payment, actor_user_id=sample_user.id)
+            service.settle_reserved_prepayment_if_covered(payment, actor_user_id=sample_user.id)
             db.session.flush()
             db.session.refresh(payment)
             assert payment.status == PaymentStatus.COMPLETED
@@ -226,7 +226,7 @@ class TestReleasePreDeliveryPrepaidSettlement:
                 payment, actor_user_id=sample_user.id
             )
             db.session.flush()
-            service.settle_new_cod_order_from_prepaid(payment, actor_user_id=sample_user.id)
+            service.settle_reserved_prepayment_if_covered(payment, actor_user_id=sample_user.id)
             db.session.flush()
 
             # The order is delivered.

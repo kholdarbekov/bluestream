@@ -288,17 +288,18 @@ class TestPersonalCardTransferRespectsTheReservation:
             db.session.flush()
             db.session.refresh(payment)
 
-            assert payment.amount_collected == Decimal("85000.00")
-            assert payment.outstanding_amount == Decimal("5000.00")
+            # The reservation closes the rest at once: the order reads paid.
+            assert payment.amount_collected == Decimal("90000.00")
+            assert payment.outstanding_amount == Decimal("0.00")
 
-            # Delivery consumes the still-intact reservation.
+            # Delivery has nothing left to consume.
             consumed = service.consume_reserved_prepayment_for_payment(
                 payment, collected_by=delivery_driver.id
             )
             db.session.flush()
             db.session.refresh(payment)
 
-            assert consumed == Decimal("5000.00")
+            assert consumed == Decimal("0.00")
             assert payment.amount_collected == Decimal("90000.00")
             assert payment.outstanding_amount == Decimal("0.00")
             assert _live_applied_total(payment.id) == Decimal("90000.00")
@@ -309,7 +310,7 @@ class TestPersonalCardTransferRespectsTheReservation:
 @pytest.mark.unit
 @pytest.mark.payment
 class TestSpillCannotReabsorbTheReservedSlice:
-    def test_transfer_residual_leaves_the_reservation_intact(self, app, db, sample_user, delivery_driver):
+    def test_transfer_residual_never_refills_the_reserved_slice(self, app, db, sample_user, delivery_driver):
         """A card transfer settles its target first, then spills the residual
         through the ring allocator. If the ring quoted the GROSS receivable the
         residual would immediately refill the 5 000 the target-first step just
@@ -334,13 +335,15 @@ class TestSpillCannotReabsorbTheReservedSlice:
             db.session.flush()
             db.session.refresh(payment)
 
-            assert payment.amount_collected == Decimal("85000.00")
-            assert reserved_prepayment_amount(payment) == Decimal("5000.00")
+            # The 5 000 slice was closed by the customer's own reservation,
+            # not refilled from the transfer's residual.
+            assert payment.amount_collected == Decimal("90000.00")
             assert net_open_receivable_amount(payment) == Decimal("0.00")
-            reservation = CashCollectionAllocation.query.filter_by(
-                payment_id=payment.id, allocation_mode="prepaid_reservation", reversed_at=None
+            applied = CashCollectionAllocation.query.filter_by(
+                payment_id=payment.id, allocation_mode="prepaid_credit", reversed_at=None
             ).one()
-            assert reservation.allocated_amount == Decimal("5000.00")
+            assert applied.allocated_amount == Decimal("5000.00")
+            assert service.get_customer_prepaid_balance(sample_user.id) == Decimal("15000.00")
 
 
 @pytest.mark.unit

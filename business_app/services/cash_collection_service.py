@@ -1300,8 +1300,8 @@ class CashCollectionService:
 
         ``settled_pre_delivery`` tags the resulting applied allocations so a later
         cancellation/return of a not-yet-delivered order can recognise and refund
-        credit that was applied at order creation (full prepaid coverage) rather
-        than at delivery. See ``release_pre_delivery_prepaid_settlement_for_order``.
+        credit that was applied before delivery, once the reservation covered
+        the order, rather than at delivery. See ``release_pre_delivery_prepaid_settlement_for_order``.
         """
         if not payment or payment.payment_method != PaymentMethod.CASH:
             return Decimal("0.00")
@@ -1458,44 +1458,80 @@ class CashCollectionService:
         self._sync_reserved_prepayment_projection(payment)
         return self._to_decimal(released_total)
 
-    def settle_new_cod_order_from_prepaid(
+    def settle_reserved_prepayment_if_covered(
         self,
         payment: Payment,
         *,
         actor_user_id: Optional[int] = None,
     ) -> Decimal:
-        """Settle a freshly-created COD order immediately when the customer's
-        prepaid balance FULLY covers it.
+        """Settle a not-yet-delivered COD payment once its prepaid reservation
+        covers everything still owed, so the order reads as paid now rather
+        than at delivery.
 
-        The customer already paid this cash up front, so a fully-covered new
-        order should read as paid right away rather than waiting for delivery to
-        consume the reservation. This consumes the reservation now (marking the
-        order paid) and tags the applied credit ``settled_pre_delivery`` so a
-        cancellation/return before delivery refunds it.
-
-        Partial coverage is intentionally left as a reservation: the order still
-        owes a balance the driver collects at delivery, so it must stay unpaid.
-        Returns the consumed amount (``0.00`` when not fully covered).
-
-        Must be called AFTER ``reserve_customer_prepaid_credit_for_payment`` and
-        within the caller's transaction (no commit).
+        Runs wherever coverage can change: order creation, every collection,
+        the pending-order sweep and an unpaid order's edit. The applied credit
+        is tagged ``settled_pre_delivery`` so a cancel/return before delivery
+        refunds it. Partial coverage stays a reservation (consumed at
+        delivery), as does a reservation with no recordable collector — a
+        completed cash payment must name one. Returns the consumed amount.
+        Runs in the caller's transaction (no commit).
         """
         if not payment or payment.payment_method != PaymentMethod.CASH:
             return Decimal("0.00")
-
-        outstanding = self._to_decimal(payment.outstanding_amount)
-        if outstanding <= Decimal("0.00"):
+        order = payment.order
+        if order is not None and order.status not in self.RESERVABLE_ORDER_STATUSES:
             return Decimal("0.00")
 
-        reserved = self._get_reserved_prepayment_amount(payment.id)
-        if reserved < outstanding:
-            # Only partially covered — keep the reservation; settle at delivery.
+        owed = open_receivable_amount(payment)
+        if owed <= Decimal("0.00") or self._get_reserved_prepayment_amount(payment.id) < owed:
+            return Decimal("0.00")
+        if (
+            actor_user_id is None
+            and payment.collected_by is None
+            and not self._reservation_has_collector(payment.id)
+        ):
             return Decimal("0.00")
 
         return self.consume_reserved_prepayment_for_payment(
             payment,
             collected_by=actor_user_id,
             settled_pre_delivery=True,
+        )
+
+    @staticmethod
+    def _reservation_has_collector(payment_id: int) -> bool:
+        """True when a live reservation's funding event names who took the cash."""
+        return (
+            db.session.query(CashCollectionAllocation.id)
+            .join(
+                CashCollectionEvent,
+                CashCollectionAllocation.cash_collection_event_id == CashCollectionEvent.id,
+            )
+            .filter(
+                CashCollectionAllocation.payment_id == payment_id,
+                CashCollectionAllocation.reversed_at.is_(None),
+                CashCollectionAllocation.allocation_mode == "prepaid_reservation",
+                or_(
+                    CashCollectionEvent.collector_user_id.isnot(None),
+                    CashCollectionEvent.recorded_by_user_id.isnot(None),
+                ),
+            )
+            .first()
+            is not None
+        )
+
+    @staticmethod
+    def _payments_allocated_by_event(event_id: int) -> List[Payment]:
+        """Payments holding a live allocation from ``event_id``, id-ordered."""
+        return (
+            Payment.query.join(CashCollectionAllocation, CashCollectionAllocation.payment_id == Payment.id)
+            .filter(
+                CashCollectionAllocation.cash_collection_event_id == event_id,
+                CashCollectionAllocation.reversed_at.is_(None),
+            )
+            .distinct()
+            .order_by(Payment.id.asc())
+            .all()
         )
 
     def release_reserved_prepayment_for_order(
@@ -1643,14 +1679,15 @@ class CashCollectionService:
         actor_user_id: Optional[int] = None,
         reason: Optional[str] = None,
     ) -> Decimal:
-        """Refund prepaid credit that was APPLIED at order creation (full
-        coverage) when the order is cancelled/returned before delivery.
+        """Refund prepaid credit that was APPLIED before delivery (the
+        reservation covered the order) when it is cancelled/returned before
+        delivery.
 
         The companion to :meth:`release_reserved_prepayment_for_order`: that one
         releases un-consumed *reservations*; this one reverses credit that was
         actually consumed (``settled_pre_delivery``) so a not-yet-delivered order
         could read as paid. It restores the source events' unapplied balance,
-        rolls back ``amount_collected`` and re-projects the payment to unpaid.
+        rolls back ``amount_collected`` and re-projects the payment.
 
         No-op for orders that were ever delivered — credit consumed at delivery
         is settled against received goods, and a return is handled by the return
@@ -2062,6 +2099,7 @@ class CashCollectionService:
                 actor_user_id=actor_user_id,
             )
             total_reserved += self._to_decimal(reserved)
+            self.settle_reserved_prepayment_if_covered(payment, actor_user_id=actor_user_id)
 
         return self._to_decimal(total_reserved)
 
@@ -3228,8 +3266,8 @@ class CashCollectionService:
             # NET, not gross: the reserved slice is money this customer has
             # already handed over. Filling it from the transfer would orphan the
             # reservation, and the transfer's own surplus would stop short of
-            # becoming credit. Whatever the transfer leaves unpaid is exactly
-            # what the reservation closes at delivery.
+            # becoming credit. Whatever the transfer leaves unpaid is closed by
+            # the reservation right after, via settle_reserved_prepayment_if_covered.
             allocatable = min(
                 self._to_decimal(event.unapplied_amount),
                 net_open_receivable_amount(target_payment) if target_payment else Decimal("0.00"),
@@ -3290,6 +3328,11 @@ class CashCollectionService:
                 order_id=order_id,
                 allocation_mode=allocation_mode,
             )
+
+        # A payment this event paid down may now be covered by its reservation.
+        settle_actor = recorded_by_user_id or collector_user_id
+        for paid_down in self._payments_allocated_by_event(event.id):
+            self.settle_reserved_prepayment_if_covered(paid_down, actor_user_id=settle_actor)
 
         if event.driver_cash_session_id:
             from business_app.services.driver_reconciliation_service import DriverReconciliationService

@@ -1028,7 +1028,7 @@ def _prepaid_order(db, pay_now, name, advance):
 
 def test_an_order_paid_wholly_from_prepaid_credit_is_credited_at_the_money_applied(db, pay_now):
     """Review Focus 3 (wholly). The shop left 150,000 with the office; the agent's 120,000
-    cash order is settled from it at creation (`settle_new_cod_order_from_prepaid`). Money
+    cash order is settled from it at creation (`settle_reserved_prepayment_if_covered`). Money
     received is the 120,000 applied, and the credit freezes it as received_ref. Later syncs,
     with the allocation standing, write nothing."""
     order = _prepaid_order(db, pay_now, "Olmazor", 150000)

@@ -164,6 +164,7 @@ def get_order_pool():
                 ),
                 "cod_reserved_prepayment_amount": cod_projection["cod_reserved_prepayment_amount"],
                 "expected_cash_to_collect": cod_projection["expected_cash_to_collect"],
+                "amount_paid": cod_projection["amount_paid"],
                 "item_count": len(order.order_items) if order and order.order_items else 0,
                 "items": order_items,
                 "delivery_notes": order.delivery_notes or "",
@@ -438,6 +439,7 @@ def get_active_deliveries():
                 ),
                 "cod_reserved_prepayment_amount": cod_projection["cod_reserved_prepayment_amount"],
                 "expected_cash_to_collect": cod_projection["expected_cash_to_collect"],
+                "amount_paid": cod_projection["amount_paid"],
                 "items": item_list,
                 "delivery_notes": order.delivery_notes or "",
                 "delivery_instructions": address.delivery_instructions or "" if address else "",
@@ -710,6 +712,7 @@ def get_delivery_history():
                 ),
                 "cod_reserved_prepayment_amount": cod_projection["cod_reserved_prepayment_amount"],
                 "expected_cash_to_collect": cod_projection["expected_cash_to_collect"],
+                "amount_paid": cod_projection["amount_paid"],
             }
         )
 

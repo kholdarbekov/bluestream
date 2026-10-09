@@ -362,10 +362,29 @@ def net_open_receivable_amount(payment: Any) -> Decimal:
       reservation was holding, orphaning it (prod order AD_000630_26).
 
     The reservation itself is turned into collected money by
-    ``CashCollectionService.consume_reserved_prepayment_for_payment`` at
-    delivery, which is what closes the remaining gap.
+    ``CashCollectionService.settle_reserved_prepayment_if_covered`` once it
+    covers the rest, or by ``consume_reserved_prepayment_for_payment`` at
+    delivery.
     """
     return max(Decimal("0.00"), open_receivable_amount(payment) - reserved_prepayment_amount(payment))
+
+
+def paid_amount(payment: Any) -> Decimal:
+    """What the customer has already put toward this order — collected money
+    plus balance reserved against it — the "Paid" figure screens print.
+
+    Defined as the order's amount minus :func:`net_open_receivable_amount`, so
+    ``Paid + still owed`` equals the total printed above them by construction.
+    The amount is the order total when the payment row carries a larger one (a
+    paid order edited down keeps its original payment amount).
+    """
+    if payment is None:
+        return Decimal("0.00")
+    amount = _to_decimal(getattr(payment, "amount", 0))
+    order_total = getattr(getattr(payment, "order", None), "total_amount", None)
+    if order_total is not None:
+        amount = min(amount, _to_decimal(order_total))
+    return max(Decimal("0.00"), amount - net_open_receivable_amount(payment))
 
 
 def unpaid_after_delivery_clause():

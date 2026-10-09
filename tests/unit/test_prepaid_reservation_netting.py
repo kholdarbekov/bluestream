@@ -35,6 +35,7 @@ from business_app.services.cash_collection_service import CashCollectionService
 from business_app.utils.payment_projection import (
     get_payment_projection,
     net_open_receivable_amount,
+    paid_amount,
     reserved_prepayment_amount,
 )
 from shared.enums import OrderStatus, PaymentMethod
@@ -161,6 +162,27 @@ class TestNetReceivableIsOneArithmetic:
             expected = float(net_open_receivable_amount(payment))
             assert projection["expected_cash_to_collect"] == expected
             assert row["net_outstanding_amount"] == expected
+
+    def test_paid_and_still_owed_add_up_to_the_order_on_every_surface(
+        self, app, db, sample_user, delivery_driver
+    ):
+        """Screens print Total = Paid + To collect; both halves come from the server."""
+        from business_app.serializers.order_serializers import serialize_order_payment
+        from business_app.services.staff_service import StaffService
+
+        with app.app_context():
+            service = CashCollectionService()
+            order, payment, _event = _reserved_order(
+                db, service, sample_user, delivery_driver,
+                order_number="NET-PAID", total="90000.00", credit="5000.00",
+            )
+
+            assert paid_amount(payment) == Decimal("5000.00")
+            assert paid_amount(payment) + net_open_receivable_amount(payment) == Decimal("90000.00")
+            assert StaffService.get_cod_collection_projection(order)["amount_paid"] == 5000.0
+            info = serialize_order_payment(payment)
+            assert info["amount_paid"] == 5000.0
+            assert info["net_outstanding_amount"] == 85000.0
 
 
 @pytest.mark.unit

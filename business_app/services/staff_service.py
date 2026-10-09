@@ -32,6 +32,7 @@ from business_app.utils.user_search import build_name_match_clause
 from business_app.utils.payment_projection import (
     is_ledger_receivable,
     net_open_receivable_amount,
+    paid_amount,
     reserved_prepayment_amount,
 )
 from business_app.utils.state_validators import (
@@ -238,6 +239,7 @@ class StaffService:
             return {
                 "cod_reserved_prepayment_amount": 0.0,
                 "expected_cash_to_collect": float(total_amount),
+                "amount_paid": 0.0,
             }
 
         payment = getattr(order, "payment", None)
@@ -247,6 +249,7 @@ class StaffService:
             return {
                 "cod_reserved_prepayment_amount": 0.0,
                 "expected_cash_to_collect": float(total_amount),
+                "amount_paid": 0.0,
             }
 
         # The clamp and the subtraction live in payment_projection so this
@@ -255,6 +258,7 @@ class StaffService:
         return {
             "cod_reserved_prepayment_amount": float(reserved_prepayment_amount(payment)),
             "expected_cash_to_collect": float(net_open_receivable_amount(payment)),
+            "amount_paid": float(paid_amount(payment)),
         }
 
     @staticmethod

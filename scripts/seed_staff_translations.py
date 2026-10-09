@@ -2340,9 +2340,19 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "ru": "Зарезервированная предоплата за наложенный платёж",
     },
     "staff.delivery.cash_to_collect_now": {
-        "en": "Cash to collect now",
-        "uz": "Hozir yig'iladigan naqd pul",
-        "ru": "Сумма к получению сейчас",
+        "en": "Cash to collect",
+        "uz": "Naqd olish kerak",
+        "ru": "Получить наличными",
+    },
+    "staff.delivery.paid_label": {
+        "en": "Paid",
+        "uz": "To'langan",
+        "ru": "Оплачено",
+    },
+    "staff.delivery.paid_from_balance": {
+        "en": "{amount} from balance",
+        "uz": "{amount} balansdan",
+        "ru": "{amount} с баланса",
     },
     "staff.delivery.cod_prepaid_deduction": {
         "en": "COD prepaid deduction",
@@ -2392,9 +2402,9 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "ru": "Сколько бутылок (18,9 л) вернул клиент? По этому адресу пока нет учтённой тары.",
     },
     "staff.delivery.cash_already_collected": {
-        "en": "Cash already collected in full",
-        "uz": "Naqd pul to'liq yig'ib olingan",
-        "ru": "Наличные уже получены полностью",
+        "en": "Paid in full — no cash to collect",
+        "uz": "To'liq to'langan — naqd olinmaydi",
+        "ru": "Оплачено полностью — наличные не нужны",
     },
     "staff.delivery.cash_partially_collected": {
         "en": "Cash partially collected",

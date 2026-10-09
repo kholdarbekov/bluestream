@@ -10,7 +10,12 @@ from pydantic import BaseModel, Field, ConfigDict
 from pydantic.alias_generators import to_camel
 
 from business_app.utils.delivery_window import format_delivery_window
-from business_app.utils.payment_projection import get_payment_projection, order_is_payable_online
+from business_app.utils.payment_projection import (
+    get_payment_projection,
+    net_open_receivable_amount,
+    order_is_payable_online,
+    paid_amount,
+)
 from business_app.models.order import Order, OrderItem
 from business_app.serializers.types import MoneyFloat
 
@@ -607,6 +612,8 @@ def serialize_order_payment(payment, order=None) -> Dict[str, Any]:
             "amount": float(projection["amount"]),
             "amount_collected": float(projection["amount_collected"]),
             "outstanding_amount": float(projection["outstanding_amount"]),
+            "net_outstanding_amount": float(net_open_receivable_amount(payment)),
+            "amount_paid": float(paid_amount(payment)),
             "currency": getattr(payment, "currency", "UZS"),
             "transaction_id": getattr(payment, "provider_transaction_id", None),
             "provider_transaction_id": getattr(payment, "provider_transaction_id", None),
@@ -631,6 +638,8 @@ def serialize_order_payment(payment, order=None) -> Dict[str, Any]:
             "amount": float(projection["amount"]),
             "amount_collected": float(projection["amount_collected"]),
             "outstanding_amount": float(projection["outstanding_amount"]),
+            "net_outstanding_amount": float(net_open_receivable_amount(payment)),
+            "amount_paid": float(paid_amount(payment)),
             "payment_link": getattr(payment, "payment_link", None),
             **payability,
         }

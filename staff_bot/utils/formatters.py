@@ -119,6 +119,43 @@ def has_cash_due(payload: Dict[str, Any]) -> bool:
         return False
 
 
+def format_paid_and_due_lines(payload: Dict[str, Any], language: str) -> list:
+    """`Paid` and `Cash to collect` lines under the total: Total = Paid + To collect.
+
+    Both figures are the server's (`amount_paid`, `expected_cash_to_collect`)
+    and add up to the total by construction; balance still reserved against
+    the order is named inside the paid line. The paid line is omitted for a
+    non-cash order with nothing paid yet, and for a payload without
+    `amount_paid`.
+    """
+    cod = get_cod_cash_projection(payload)
+    to_collect = cod['expected_cash_to_collect']
+    try:
+        paid = float(payload['amount_paid'])
+    except (KeyError, TypeError, ValueError):
+        paid = None
+
+    lines = []
+    if paid is not None and (paid > 0 or payload.get('payment_method') == 'cash'):
+        paid_line = (
+            f"🧾 {i18n.get('staff.delivery.paid_label', language)}: "
+            f"{format_currency(paid, language=language)}"
+        )
+        reserved = cod['cod_reserved_prepayment_amount']
+        if reserved > 0:
+            from_balance = i18n.get(
+                'staff.delivery.paid_from_balance', language,
+                amount=format_currency(reserved, language=language),
+            )
+            paid_line += f" ({from_balance})"
+        lines.append(paid_line)
+    lines.append(
+        f"💵 {i18n.get('staff.delivery.cash_to_collect_now', language)}: "
+        f"{format_currency(to_collect, language=language)}"
+    )
+    return lines
+
+
 def format_place_cod_lines(payload: Dict[str, Any], language: str) -> list:
     """Place-group COD block for a delivery payload (spec 8), or [].
 
@@ -158,7 +195,7 @@ def format_money_block(
     *,
     include_place_lines: bool = False,
 ) -> list:
-    """Outstanding / reserved / to-collect lines for an order card, or [].
+    """Paid / to-collect lines for an order card, or [].
 
     SSOT for the order-card money block, shared by :func:`format_order_card` and
     the orders-pool renderer. The pool used to carry a THIRD hand-rolled copy of
@@ -166,35 +203,19 @@ def format_money_block(
     `payment == 'cash'` gate (plan 2026-08-08-open-receivable-ssot).
 
     Gated on `has_cash_due` — the server-computed figure — rather than on the
-    payment rail. `or payment == 'cash'` is retained so a fully-collected COD
-    order still shows its block with the "already collected" flag, which is
+    payment rail. `or payment == 'cash'` is retained so a fully-paid COD
+    order still shows its block with the "paid in full" flag, which is
     existing behaviour drivers rely on.
     """
     payment = order.get('payment_method', '')
     if not (has_cash_due(order) or payment == 'cash'):
         return []
 
-    cod_projection = get_cod_cash_projection(order)
-    lines = [
-        f"💸 {i18n.get('staff.delivery.cash_outstanding_label', language)}: "
-        f"{format_currency(order.get('outstanding_amount'), language=language)}"
-    ]
-    if cod_projection['cod_reserved_prepayment_amount'] > 0:
-        lines.append(
-            f"💳 {i18n.get('staff.delivery.cod_prepaid_reserved', language)}: "
-            f"{format_currency(cod_projection['cod_reserved_prepayment_amount'], language=language)}"
-        )
-    lines.append(
-        f"💵 {i18n.get('staff.delivery.cash_to_collect_now', language)}: "
-        f"{format_currency(cod_projection['expected_cash_to_collect'], language=language)}"
-    )
+    lines = format_paid_and_due_lines(order, language)
     if include_place_lines:
         lines.extend(format_place_cod_lines(order, language))
-    payment_status = str(order.get('payment_status') or '').lower()
-    if payment_status == 'completed' or cod_projection['expected_cash_to_collect'] <= 0:
+    if get_cod_cash_projection(order)['expected_cash_to_collect'] <= 0:
         lines.append(f"✅ {i18n.get('staff.delivery.cash_already_collected', language)}")
-    elif payment_status == 'partially_paid':
-        lines.append(f"ℹ️ {i18n.get('staff.delivery.cash_partially_collected', language)}")
     return lines
 
 
@@ -382,33 +403,10 @@ def format_active_delivery_summary(
         # There used to be three arms — cash / unsettled-electronic / nothing —
         # and a part-paid card order fell into the third and was told
         # "To collect now: 0 (no cash)" over a real debt. `payment == 'cash'` is
-        # retained so a fully-collected COD order still shows its collected and
+        # retained so a fully-paid COD order still shows its paid and
         # to-collect lines, which drivers rely on.
         if has_cash_due(delivery) or payment == 'cash':
-            cod = get_cod_cash_projection(delivery)
-            # The collected line is what EXPLAINS a part-paid balance ("90,000
-            # total, 60,000 already paid, 30,000 due"), so it must appear
-            # whenever money has actually landed. For an order with nothing
-            # collected it is pure noise, and omitting it keeps the
-            # unsettled-electronic card byte-identical to before this change.
-            try:
-                already_collected = float(delivery.get('amount_collected') or 0)
-            except (TypeError, ValueError):
-                already_collected = 0.0
-            if already_collected > 0 or payment == 'cash':
-                lines.append(
-                    f"🧾 {i18n.get('staff.delivery.cash_collected_label', language)}: "
-                    f"{format_currency(delivery.get('amount_collected'), language=language)}"
-                )
-            if cod['cod_reserved_prepayment_amount'] > 0:
-                lines.append(
-                    f"💳 {i18n.get('staff.delivery.cod_prepaid_reserved', language)}: "
-                    f"{format_currency(cod['cod_reserved_prepayment_amount'], language=language)}"
-                )
-            lines.append(
-                f"💵 {i18n.get('staff.delivery.cash_to_collect_now', language)}: "
-                f"{format_currency(cod['expected_cash_to_collect'], language=language)}"
-            )
+            lines.extend(format_paid_and_due_lines(delivery, language))
         else:
             lines.append(
                 f"💵 {i18n.get('staff.delivery.cash_to_collect_now', language)}: "

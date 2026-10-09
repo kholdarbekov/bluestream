@@ -13,6 +13,7 @@ def test_format_order_card_marks_cash_as_already_collected_when_settled():
             "total_amount": 90000,
             "outstanding_amount": 0,
             "expected_cash_to_collect": 0,
+            "amount_paid": 90000,
             "item_count": 1,
         },
         "en",
@@ -22,7 +23,7 @@ def test_format_order_card_marks_cash_as_already_collected_when_settled():
     assert "Cash to collect now: 0" in card
 
 
-def test_format_order_card_marks_cash_as_partially_collected():
+def test_format_order_card_states_paid_and_cash_due():
     card = format_order_card(
         {
             "order_number": "ORD-COD-002",
@@ -31,13 +32,16 @@ def test_format_order_card_marks_cash_as_partially_collected():
             "total_amount": 18000,
             "outstanding_amount": 13000,
             "expected_cash_to_collect": 13000,
+            "amount_paid": 5000,
             "item_count": 1,
         },
         "en",
     )
 
-    assert "Cash partially collected" in card
+    assert "5,000" in [line for line in card.splitlines() if line.startswith("🧾")][0]
     assert "Cash to collect now: 13,000" in card
+    assert "partially" not in card.lower()
+    assert "💸" not in card
 
 
 def test_cod_projection_keeps_explicit_zero_without_falling_back_to_total_amount():

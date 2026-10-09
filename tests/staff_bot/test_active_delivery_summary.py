@@ -5,6 +5,7 @@ emojis, dynamic values, and structural presence/absence — never on label text.
 """
 import pytest
 
+from staff_bot.i18n import i18n
 from staff_bot.utils.formatters import format_active_delivery_summary
 
 
@@ -22,6 +23,7 @@ def _cash_delivery(**overrides):
         "amount_collected": 0,
         "outstanding_amount": 57000,
         "expected_cash_to_collect": 57000,
+        "amount_paid": 0,
         "cod_reserved_prepayment_amount": 0,
     }
     d.update(overrides)
@@ -42,12 +44,31 @@ class TestFormatActiveDeliverySummary:
         assert "💳" not in out                            # reserved == 0 → no line
         assert "✅" not in out and "ℹ️" not in out        # flag lines dropped
 
-    def test_cash_with_reserve_shows_reserved_line(self):
-        d = _cash_delivery(cod_reserved_prepayment_amount=17000,
-                           expected_cash_to_collect=40000)
+    def test_reserved_balance_is_named_inside_the_paid_line(self, monkeypatch):
+        # Unit tests never load the DB catalog; seed the one placeholder key.
+        merged = {**i18n.translations.get("uz", {}),
+                  "staff.delivery.paid_from_balance": "{amount} balansdan"}
+        monkeypatch.setitem(i18n.translations, "uz", merged)
+        d = _cash_delivery(total_amount=35460, outstanding_amount=35460,
+                           cod_reserved_prepayment_amount=540,
+                           expected_cash_to_collect=34920, amount_paid=540)
         out = format_active_delivery_summary(d, "uz")
-        assert "💳" in out
-        assert "40,000" in out                            # to-collect < outstanding
+        paid_line = [l for l in out.splitlines() if l.startswith("🧾")][0]
+        collect_line = [l for l in out.splitlines() if l.startswith("💵")][0]
+        assert paid_line.count("540") == 2               # paid 540 (540 from balance)
+        assert "34,920" in collect_line
+        assert "💳" not in out                            # no separate reserved line
+
+    def test_paid_and_to_collect_add_up_to_the_total(self):
+        """TG_000620_26 after the card transfer: 34,920 card + 540 balance."""
+        d = _cash_delivery(total_amount=35460, amount_collected=35460,
+                           outstanding_amount=0, cod_reserved_prepayment_amount=0,
+                           expected_cash_to_collect=0, amount_paid=35460)
+        out = format_active_delivery_summary(d, "uz")
+        paid_line = [l for l in out.splitlines() if l.startswith("🧾")][0]
+        collect_line = [l for l in out.splitlines() if l.startswith("💵")][0]
+        assert "35,460" in paid_line
+        assert collect_line.split(":", 1)[1].strip().startswith("0")
 
     def test_non_cash_shows_total_and_no_cash_line_no_collected(self):
         # Payload must actually describe an order with nothing due. The
@@ -140,6 +161,7 @@ class TestFormatActiveDeliverySummary:
             amount_collected=60000,
             outstanding_amount=30000,
             expected_cash_to_collect=30000,
+            amount_paid=60000,
         )
         out = format_active_delivery_summary(d, "uz")
         collect_line = [l for l in out.splitlines() if l.startswith("💵")][0]

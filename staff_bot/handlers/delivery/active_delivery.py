@@ -306,6 +306,7 @@ class ActiveDeliveryHandler(BaseHandler):
                 'outstanding_amount': delivery.get('outstanding_amount', 0),
                 'cod_reserved_prepayment_amount': delivery.get('cod_reserved_prepayment_amount', 0),
                 'expected_cash_to_collect': delivery.get('expected_cash_to_collect', 0),
+                'amount_paid': delivery.get('amount_paid'),
                 # Destination: order address coordinates
                 'destination_lat': delivery.get('destination_latitude'),
                 'destination_lng': delivery.get('destination_longitude'),

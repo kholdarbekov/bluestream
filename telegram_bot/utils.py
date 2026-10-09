@@ -3,7 +3,7 @@ Utility functions for the Telegram Bot
 """
 import logging
 import asyncio
-from typing import Dict, Optional, Any
+from typing import Any, Dict, List, Optional
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from functools import wraps
@@ -880,12 +880,13 @@ class MessageBuilder:
     """Helper class for building formatted messages"""
 
     @staticmethod
-    def build_order_summary(order: Dict[str, Any], language: str = 'en') -> str:
+    def build_order_summary(order: Dict[str, Any], language: str = 'en', *, include_payment: bool = False) -> str:
         """Build order summary message.
 
         Every discount that moved the total is stated. Without it the total
         sits below the sum of the item lines this screen prints beneath it,
-        with nothing accounting for the difference.
+        with nothing accounting for the difference. ``include_payment`` adds
+        the Paid / To pay lines under the total (order details screen).
         """
         lines = [
             f"📋 {i18n.get('telegram.order.number', language, order.get('order_number', 'N/A'))}",
@@ -918,6 +919,8 @@ class MessageBuilder:
             ))
 
         lines.append(f"💰 {i18n.get('telegram.order.total', language, format_price(order.get('total_amount', 0)))}")
+        if include_payment:
+            lines.extend(MessageBuilder._build_payment_lines(order, language))
 
         if order.get('status'):
             from shared.constants import ORDER_STATUS_ICONS, DEFAULT_STATUS_ICON
@@ -931,3 +934,23 @@ class MessageBuilder:
             lines.append(f"📊 {heading}: {icon} {label}")
 
         return '\n'.join(lines)
+
+    @staticmethod
+    def _build_payment_lines(order: Dict[str, Any], language: str) -> List[str]:
+        """Paid / To pay lines for a live order, or [].
+
+        Both figures are the server's (``amount_paid``, ``net_outstanding_amount``)
+        and add up to the total; paid includes balance reserved for the order.
+        """
+        payment = order.get('payment_info') or {}
+        if order.get('status') in ('cancelled', 'returned') or payment.get('amount_paid') is None:
+            return []
+        to_pay = payment.get('net_outstanding_amount')
+        if to_pay is None:
+            to_pay = payment.get('outstanding_amount')
+        return [
+            i18n.get('telegram.orders.detail_paid_line', language,
+                     amount=format_price(float(payment.get('amount_paid') or 0))),
+            i18n.get('telegram.orders.detail_to_pay_line', language,
+                     amount=format_price(float(to_pay or 0))),
+        ]

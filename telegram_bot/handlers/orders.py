@@ -547,7 +547,7 @@ class OrderHandlers(BaseHandler):
                 delivery = response.data['data']['delivery']
 
             # Format order details
-            details_text = MessageBuilder.build_order_summary(order, language)
+            details_text = MessageBuilder.build_order_summary(order, language, include_payment=True)
             logger.info(f"order_details handler: details_text: {details_text}")
 
             # Add order items if available. A free loyalty-reward line (is_reward)

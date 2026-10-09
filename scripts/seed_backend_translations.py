@@ -4463,6 +4463,16 @@ BACKEND_TRANSLATIONS = {
         'uz': '🏷 Naqd to\'lov uchun chegirma — −{amount} UZS',
         'ru': '🏷 Скидка за оплату наличными — −{amount} UZS'
     },
+    'telegram.orders.detail_paid_line': {
+        'en': '✅ Paid: {amount} UZS',
+        'uz': '✅ To\'langan: {amount} UZS',
+        'ru': '✅ Оплачено: {amount} UZS'
+    },
+    'telegram.orders.detail_to_pay_line': {
+        'en': '💵 To pay: {amount} UZS',
+        'uz': '💵 To\'lash kerak: {amount} UZS',
+        'ru': '💵 К оплате: {amount} UZS'
+    },
     # `{icon}` is presentation, chosen by the rail (💰 cash / 💳 card /
     # 🏦 bank transfer) — never the rail's NAME. The name is already stated
     # two lines above (telegram.orders.payment_info), so repeating it here in

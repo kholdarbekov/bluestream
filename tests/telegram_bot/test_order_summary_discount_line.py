@@ -35,6 +35,8 @@ def mock_i18n(monkeypatch):
             "telegram.orders.estimate_reward_line": "Loyalty rewards: {amount}",
             "telegram.orders.order_tier_discount_line": "Cash-payment discount: {amount}",
             "telegram.orders.delivery_fee": "Delivery fee: {amount}",
+            "telegram.orders.detail_paid_line": "Paid: {amount}",
+            "telegram.orders.detail_to_pay_line": "To pay: {amount}",
         }
     }
 
@@ -73,3 +75,35 @@ def test_no_breakdown_when_nothing_is_discounted(app, mock_i18n):
     assert "Discount" not in summary
     assert "Loyalty rewards" not in summary
     assert "Cash-payment discount" not in summary
+
+
+def test_details_state_paid_and_left_to_pay(app, mock_i18n):
+    """TG_000620_26 after the card transfer: fully paid, nothing left."""
+    order = _order(
+        total_amount=35460,
+        status="confirmed",
+        payment_info={"amount_paid": 35460, "net_outstanding_amount": 0, "outstanding_amount": 0},
+    )
+
+    summary = MessageBuilder.build_order_summary(order, "en", include_payment=True)
+
+    assert "Paid: 35,460" in summary
+    assert "To pay: 0" in summary
+
+
+def test_payment_lines_sit_between_total_and_status(app, mock_i18n):
+    order = _order(payment_info={"amount_paid": 540, "net_outstanding_amount": 53460})
+
+    lines = MessageBuilder.build_order_summary(order, "en", include_payment=True).split("\n")
+
+    total_index = next(i for i, line in enumerate(lines) if line.startswith("💰"))
+    assert lines[total_index + 1] == "Paid: 540"
+    assert lines[total_index + 2] == "To pay: 53,460"
+
+
+def test_payment_lines_only_when_asked_and_never_for_dead_orders(app, mock_i18n):
+    order = _order(payment_info={"amount_paid": 0, "net_outstanding_amount": 54000})
+    assert "To pay" not in MessageBuilder.build_order_summary(order, "en")
+
+    dead = _order(status="cancelled", payment_info={"amount_paid": 54000, "net_outstanding_amount": 0})
+    assert "Paid" not in MessageBuilder.build_order_summary(dead, "en", include_payment=True)

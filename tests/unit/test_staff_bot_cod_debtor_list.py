@@ -188,6 +188,27 @@ def test_format_statement_includes_debtor_identity_header():
     assert "📞 +998900000999" in text
 
 
+def test_statement_rows_show_what_is_still_owed_after_reserved_balance():
+    """A row the customer's reserved balance already covers is not a debt to
+    collect; a partly covered row shows the net, not the gross."""
+    statement = {
+        "first_name": "Aziz",
+        "phone": "+998900000999",
+        "active_cod_debt_count": 2,
+        "items": [
+            {"order_number": "TG_COVERED", "outstanding_amount": 540,
+             "net_outstanding_amount": 0, "is_collectible_target": True},
+            {"order_number": "TG_PART", "outstanding_amount": 35460,
+             "net_outstanding_amount": 34920, "is_collectible_target": True},
+        ],
+    }
+
+    text = CashCollectionHandler._format_statement(statement, "en")
+
+    assert "TG_COVERED" not in text
+    assert "• TG_PART: 34,920" in text
+
+
 def test_flow_header_built_from_stored_identity():
     header = CashCollectionHandler._flow_header(
         {"customer_name": "Aziz Debtor", "customer_phone": "+998900000999"}

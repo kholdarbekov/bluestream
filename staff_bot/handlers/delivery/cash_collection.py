@@ -25,6 +25,17 @@ COLLECTION_OVERPAYMENT_CONFIRM = 106
 COD_DEBTORS_PER_PAGE = 10
 
 
+def _still_owed(item: dict) -> float:
+    """A statement row's net amount still owed (reserved balance netted out)."""
+    value = item.get('net_outstanding_amount')
+    if value is None:
+        value = item.get('outstanding_amount')
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 class CashCollectionHandler(BaseHandler):
     """Handle standalone COD debt collection outside delivery completion."""
 
@@ -409,7 +420,8 @@ class CashCollectionHandler(BaseHandler):
         # settle this", computed with the same predicate the collect endpoint
         # validates against, so these lines can never advertise a debt the flow
         # refuses. The `outstanding_amount` fallback keeps this bot working
-        # against a business_app older than that field.
+        # against a business_app older than that field. A row the customer's
+        # reserved balance already covers owes nothing at the door.
         collectible = [
             item
             for item in items
@@ -418,6 +430,7 @@ class CashCollectionHandler(BaseHandler):
                 if item.get('is_collectible_target') is not None
                 else float(item.get('outstanding_amount') or 0) > 0
             )
+            and _still_owed(item) > 0
         ]
         if not collectible:
             lines.append(i18n.get('staff.delivery.no_cod_debt', language))
@@ -427,7 +440,7 @@ class CashCollectionHandler(BaseHandler):
         for item in collectible[:5]:
             lines.append(
                 f"• {escape_html(item.get('order_number') or i18n.get('staff.order.unknown', language))}: "
-                f"{format_currency(item.get('outstanding_amount') or 0, language=language)}"
+                f"{format_currency(_still_owed(item), language=language)}"
             )
         return '\n'.join(lines)
 

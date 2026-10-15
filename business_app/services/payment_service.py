@@ -305,7 +305,8 @@ class PaymentService:
             # receivable ledger. Re-classifying those is an admin operation.
             raise ValidationError("Payment method cannot be changed once the order has left delivery")
 
-        # THE TIER DISCOUNT FOLLOWS THE RAIL.
+        # THE PRICE FOLLOWS THE RAIL: a contract line's price (spec 2026-10-09 §5.2 #1) and the
+        # COD-only loyalty tier discount.
         #
         # It is a COD-only benefit and must never reach a Click fiscal receipt:
         # build_click_fiscalization_payload asserts
@@ -317,14 +318,12 @@ class PaymentService:
         # The two guards above have already confined this to a zero-collected,
         # pre-delivery order: the only window in which re-pricing is safe.
         if rail_moves:
-            from business_app.services.loyalty_service import apply_tier_discount_for_rail
+            from business_app.services.rail_pricing import reprice_order_for_rail
 
             previous_total = Decimal(str(order.total_amount or 0))
-            previous_tier_discount = Decimal(str(order.tier_discount or 0))
+            quote = reprice_order_for_rail(order, payment_method, reason="customer changed the payment method")
 
-            new_tier_discount = apply_tier_discount_for_rail(order, payment_method)
-
-            if new_tier_discount != previous_tier_discount:
+            if quote.total != previous_total:
                 # Every caller prices `amount` off the PRE-move total. Re-price
                 # it, and re-derive the idempotency key from the new amount —
                 # PAY-005: a stale key makes a later create_payment miss this

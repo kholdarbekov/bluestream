@@ -123,7 +123,8 @@ def contract_customer(db, sample_user, sample_product):
         CorporateContractProductPrice(
             contract_id=contract.id,
             product_id=sample_product.id,
-            unit_price=CONTRACT_PRICE,
+            business_account_unit_price=CONTRACT_PRICE,
+            cash_unit_price=CONTRACT_PRICE,
             is_prepayment_eligible=True,
             is_active=True,
         )
@@ -269,9 +270,12 @@ def test_the_fixture_really_prices_the_contract_below_base(
         "rewrite this file's premise rather than deleting the assertion"
     )
 
+    # D5 (spec 2026-10-09): the cart is drawn before a method is chosen, so it states the catalogue...
     served = _served_cart(contract_customer.id)
-    assert served["subtotal"] == float(CONTRACT_PRICE) * QUANTITY
-    assert served["subtotal"] != float(raw_product_price["current_price"]) * QUANTITY
+    assert served["subtotal"] == float(BASE_PRICE) * QUANTITY
+    # ...and the cash quote the confirm screen renders is the contract price. They must DISAGREE.
+    estimate = _served_estimate(contract_customer.id, sample_product.id, QUANTITY, "cash")
+    assert estimate["pricing"]["items_subtotal"] == float(CONTRACT_PRICE) * QUANTITY
 
 
 # ---------------------------------------------------------------------------
@@ -324,15 +328,16 @@ async def test_the_per_line_amount_is_the_servers_line_total(
     """The item rows carry money too, and they were derived from the same
     contract-blind ``current_price``. They must be the server's ``total_price``."""
     served = _served_cart(contract_customer.id)
-    line = served["cart_items"][0]
-    assert line["total_price"] == float(CONTRACT_PRICE) * QUANTITY
+    assert served["cart_items"][0]["total_price"] == float(BASE_PRICE) * QUANTITY  # D5: pre-method cart
 
     estimate = _served_estimate(contract_customer.id, sample_product.id, QUANTITY, "cash")
+    quoted_line_total = estimate["items"][0]["subtotal"]
+    assert quoted_line_total == float(CONTRACT_PRICE) * QUANTITY
     screen = await _render_confirmation(monkeypatch, served, estimate_payload=estimate)
 
     from utils import format_price
 
-    assert format_price(line["total_price"]) in screen, screen
+    assert format_price(quoted_line_total) in screen, screen
     assert format_price(float(BASE_PRICE) * QUANTITY) not in screen, screen
 
 

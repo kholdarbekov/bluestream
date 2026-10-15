@@ -136,7 +136,7 @@ class CreateOrderHandler(BaseHandler):
         lines = (response.data or {}).get('items') or []
         return {line.get('product_id'): line.get('unit_price') for line in lines}, None
 
-    async def _quote_cart(self, context, token):
+    async def _quote_cart(self, context, token, *, payment_method=None):
         """Re-price the CART server-side and store the quote for the screens.
 
         Every money figure the operator reads out — each line total and the
@@ -157,6 +157,7 @@ class CreateOrderHandler(BaseHandler):
                 token,
                 order_data.get('client_id'),
                 [{'product_id': i['product_id'], 'quantity': i['quantity']} for i in items],
+                payment_method=payment_method,
             )
 
         if not response.success:
@@ -585,6 +586,17 @@ class CreateOrderHandler(BaseHandler):
                 )
                 return SELECT_PAYMENT
             flow['payment_method'] = method
+
+            # From here a contract client's price depends on the method (spec 2026-10-09 §4.3), and
+            # the operator reads the confirm screen's money down the phone: re-quote the basket ON
+            # the method. A refused quote keeps the operator on this keyboard, so no screen states a
+            # total the server has not priced for this method.
+            token = await self._get_auth_token(update, context)
+            quote_error = await self._quote_cart(context, token, payment_method=method)
+            if quote_error is not None:
+                flow.pop('payment_method', None)
+                await self._handle_api_response_error(update, quote_error, language)
+                return SELECT_PAYMENT
 
             # Ask for delivery notes
             text = i18n.get('staff.operator.enter_notes', language)

@@ -162,6 +162,23 @@ const contractBalanceQuery = useQuery({
   const ledgerItems = contractLedgerQuery.data?.data?.items || [];
   const availableUsers = usersQuery.data || [];
   const availableProducts = productsQuery.data || [];
+
+  // An empty contract price is the LIVE catalogue price for that payment method, never a copied
+  // figure (spec 2026-10-09 §3.1). The backend publishes the catalogue figure; this only labels it.
+  const catalogueLabel = (amount) => (
+    amount !== null && amount !== undefined
+      ? `${t('ui.corporate.catalogue_price', 'Catalogue')} (${formatAmount(amount)})`
+      : t('ui.corporate.catalogue_price', 'Catalogue')
+  );
+  const renderContractPrice = (value, record) => (
+    value !== null && value !== undefined
+      ? `${formatAmount(value)} ${selectedContract?.currency || 'UZS'}`
+      : catalogueLabel(record.catalogue_unit_price)
+  );
+  const cataloguePlaceholder = (productId) => catalogueLabel(
+    availableProducts.find((product) => product.id === productId)?.catalogue_unit_price
+  );
+  const toPriceOrNull = (value) => (value === undefined || value === null || value === '' ? null : value);
   const corporateUsers = useMemo(
     () => availableUsers.filter((user) => isEntityUser(user)),
     [availableUsers]
@@ -338,7 +355,8 @@ const contractBalanceQuery = useQuery({
       prices: selectedContract.prices?.length
         ? selectedContract.prices.map((price) => ({
             product_id: price.product_id,
-            unit_price: price.unit_price,
+            business_account_unit_price: price.business_account_unit_price,
+            cash_unit_price: price.cash_unit_price,
             is_prepayment_eligible: price.is_prepayment_eligible !== false,
             is_active: price.is_active !== false,
             notes: price.notes || ''
@@ -355,10 +373,11 @@ const contractBalanceQuery = useQuery({
 
   const handlePricesSubmit = (values) => {
     const priceRows = (values.prices || [])
-      .filter((row) => row && row.product_id && row.unit_price !== undefined && row.unit_price !== null)
+      .filter((row) => row && row.product_id)
       .map((row) => ({
         product_id: row.product_id,
-        unit_price: row.unit_price,
+        business_account_unit_price: toPriceOrNull(row.business_account_unit_price),
+        cash_unit_price: toPriceOrNull(row.cash_unit_price),
         is_prepayment_eligible: row.is_prepayment_eligible !== false,
         is_active: row.is_active !== false,
         notes: row.notes || ''
@@ -872,10 +891,10 @@ const contractBalanceQuery = useQuery({
                       )
                     },
                     {
-                      title: t('ui.corporate.unit_price', 'Unit Price'),
-                      dataIndex: 'contract_unit_price',
-                      key: 'contract_unit_price',
-                      render: (value) => (value !== null && value !== undefined ? `${formatAmount(value)} ${selectedContract.currency}` : '-')
+                      title: t('ui.corporate.business_account_price', 'Bank transfer price'),
+                      dataIndex: 'business_account_unit_price',
+                      key: 'business_account_unit_price',
+                      render: (value, record) => renderContractPrice(value, record)
                     },
                     {
                       title: t('ui.corporate.prepaid', 'Prepaid'),
@@ -941,10 +960,16 @@ const contractBalanceQuery = useQuery({
                       )
                     },
                     {
-                      title: t('ui.corporate.unit_price', 'Unit Price'),
-                      dataIndex: 'unit_price',
-                      key: 'unit_price',
-                      render: (value) => `${formatAmount(value)} ${selectedContract.currency}`
+                      title: t('ui.corporate.business_account_price', 'Bank transfer price'),
+                      dataIndex: 'business_account_unit_price',
+                      key: 'business_account_unit_price',
+                      render: (value, record) => renderContractPrice(value, record)
+                    },
+                    {
+                      title: t('ui.corporate.cash_price', 'Cash price'),
+                      dataIndex: 'cash_unit_price',
+                      key: 'cash_unit_price',
+                      render: (value, record) => renderContractPrice(value, record)
                     },
                     {
                       title: t('ui.corporate.prepayment_eligible', 'Prepayment'),
@@ -1217,7 +1242,7 @@ const contractBalanceQuery = useQuery({
                     )}
                   >
                     <Row gutter={16}>
-                      <Col span={14}>
+                      <Col span={24}>
                         <Form.Item
                           {...field}
                           name={[field.name, 'product_id']}
@@ -1233,17 +1258,40 @@ const contractBalanceQuery = useQuery({
                           </Select>
                         </Form.Item>
                       </Col>
-                      <Col span={10}>
-                        <Form.Item
-                          {...field}
-                          name={[field.name, 'unit_price']}
-                          label={t('ui.corporate.unit_price', 'Unit Price')}
-                          rules={[{ required: true, message: t('ui.corporate.unit_price_required', 'Unit price is required') }]}
-                        >
-                          <InputNumber min={0} step={100} style={{ width: '100%' }} />
-                        </Form.Item>
-                      </Col>
                     </Row>
+
+                    <Form.Item
+                      noStyle
+                      shouldUpdate={(previous, next) => (
+                        previous.prices?.[field.name]?.product_id !== next.prices?.[field.name]?.product_id
+                      )}
+                    >
+                      {() => {
+                        const placeholder = cataloguePlaceholder(
+                          pricesForm.getFieldValue(['prices', field.name, 'product_id'])
+                        );
+                        return (
+                          <Row gutter={16}>
+                            <Col span={12}>
+                              <Form.Item
+                                name={[field.name, 'business_account_unit_price']}
+                                label={t('ui.corporate.business_account_price', 'Bank transfer price')}
+                              >
+                                <InputNumber min={0} step={100} style={{ width: '100%' }} placeholder={placeholder} />
+                              </Form.Item>
+                            </Col>
+                            <Col span={12}>
+                              <Form.Item
+                                name={[field.name, 'cash_unit_price']}
+                                label={t('ui.corporate.cash_price', 'Cash price')}
+                              >
+                                <InputNumber min={0} step={100} style={{ width: '100%' }} placeholder={placeholder} />
+                              </Form.Item>
+                            </Col>
+                          </Row>
+                        );
+                      }}
+                    </Form.Item>
 
                     <Row gutter={16}>
                       <Col span={12}>

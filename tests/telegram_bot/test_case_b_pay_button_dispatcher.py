@@ -485,3 +485,60 @@ class TestAStalePaymentSwitchTapIsHarmless:
 
         update = harness.updates().tap(f"payment_switch_{ORDER_ID}")
         assert harness.handlers_matching(update), "payment_switch_ must stay claimed"
+
+
+# ---------------------------------------------------------------------------
+# Task 5 fix round 1 — the pay message quotes the money the link will charge.
+# ---------------------------------------------------------------------------
+
+PAY_MESSAGE_KEY = "telegram.payment.pay_message"
+
+
+def _seeded_pay_message() -> dict:
+    """The real seeded copy, every language, so the rendered amount is production's own."""
+    from scripts.seed_backend_translations import BACKEND_TRANSLATIONS
+
+    row = BACKEND_TRANSLATIONS.get(PAY_MESSAGE_KEY)
+    assert row, f"{PAY_MESSAGE_KEY} is rendered by send_payment_link but never seeded"
+    return {(language, PAY_MESSAGE_KEY): row[language] for language in ("en", "uz", "ru")}
+
+
+class TestThePayMessageQuotesTheRepricedAmount:
+    """A cash -> Click Retry re-prices the order on the server (spec 2026-10-09 §5.2 #1).
+
+    A contract customer's cash price (27 000) moves to the catalogue (30 000) when the rail
+    moves. The order dict the bot fetched BEFORE the tap still says 27 000; the link charges
+    the `data.payment.amount` that POST /payments/create returns. The message must quote that.
+    """
+
+    PRE_MOVE_TOTAL = 27000
+    REPRICED_AMOUNT = 30000
+
+    async def test_the_message_shows_the_payment_amount_not_the_stale_order_total(self, monkeypatch):
+        from utils import format_price
+
+        order = copy.deepcopy(PENDING_CASH)
+        order["total_amount"] = self.PRE_MOVE_TOTAL
+        order["payment_info"].update(amount=self.PRE_MOVE_TOTAL, outstanding_amount=self.PRE_MOVE_TOTAL)
+
+        harness = await build_bot_harness(monkeypatch, translations=_seeded_pay_message())
+        _serve_order(harness, order)
+        harness.backend.route(
+            "POST",
+            "/api/v1/payments/create",
+            lambda _call: {
+                "data": {
+                    "payment": {"id": 1229, "amount": self.REPRICED_AMOUNT, "paymentMethod": "click"},
+                    "payment_link": {"payment_url": CLICK_URL},
+                }
+            },
+        )
+
+        await harness.send(harness.updates().tap(f"payment_retry_{ORDER_ID}"))
+
+        pay_messages = [call.text for call in harness.telegram.calls if CLICK_URL in str(call.reply_markup)]
+        assert pay_messages, "the customer must be shown the Click pay message"
+        assert format_price(self.REPRICED_AMOUNT) in pay_messages[-1], pay_messages[-1]
+        assert format_price(self.PRE_MOVE_TOTAL) not in pay_messages[-1], (
+            "the bot quoted the pre-move order total next to a link for the re-priced amount"
+        )

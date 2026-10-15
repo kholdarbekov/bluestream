@@ -66,7 +66,7 @@ class CartService:
 
     @log_service_call(operation_type="cart_validate", track_performance=True)
     def validate_cart_items(
-        self, items: List[Dict[str, Any]], user: Optional[User] = None
+        self, items: List[Dict[str, Any]], user: Optional[User] = None, payment_method: Optional[str] = None
     ) -> Tuple[List[Dict[str, Any]], List[str]]:
         """
         Validate cart items and check availability
@@ -74,6 +74,7 @@ class CartService:
         Args:
             items: List of cart items with product_id and quantity
             user: Optional user for personalized validation
+            payment_method: The rail being quoted; None quotes the catalogue (spec 2026-10-09 D5).
 
         Returns:
             Tuple of (validated_items, error_messages)
@@ -136,7 +137,7 @@ class CartService:
                 continue
 
             # Calculate price
-            unit_price = self._calculate_unit_price(product, quantity, user)
+            unit_price = self._calculate_unit_price(product, quantity, user, payment_method)
 
             validated_items.append(
                 {
@@ -194,7 +195,7 @@ class CartService:
             raise NotFoundError(f"User with ID {user_id} not found")
 
         # Validate and price items
-        validated_items, errors = self.validate_cart_items(items, user)
+        validated_items, errors = self.validate_cart_items(items, user, payment_method=payment_method)
         if errors:
             raise ValidationError(f"Cart validation failed: {'; '.join(errors)}")
 
@@ -276,10 +277,15 @@ class CartService:
         total_before_discount = items_subtotal + delivery_fee
         final_total = float(total_dec)
 
-        # Ensure minimum order amount (before delivery and discounts)
+        # Ensure minimum order amount (before delivery and discounts). Same code as
+        # `OrderService.create_order`'s floor, plus the server's own figures: a contract price can
+        # sink one method's basket below the floor that the catalogue-priced cart cleared, and the
+        # bot's confirm screen states that shortfall from these numbers, never its own.
         if items_subtotal < self.min_order_amount:
             raise ValidationError(
-                f"Minimum order amount is {self.min_order_amount} UZS. " f"Current cart total: {items_subtotal} UZS"
+                f"Minimum order amount is {self.min_order_amount} UZS. " f"Current cart total: {items_subtotal} UZS",
+                error_code="ORDER_MIN_AMOUNT",
+                details={"min_amount": float(self.min_order_amount), "items_subtotal": float(items_subtotal)},
             )
 
         # Calculate potential loyalty points earned
@@ -542,6 +548,9 @@ class CartService:
         cart_payload["subtotal"] = float(summary.get("subtotal", 0) or 0)
         cart_payload["estimated_delivery_fee"] = float(summary.get("estimated_delivery_fee", 0) or 0)
         cart_payload["estimated_total"] = float(summary.get("estimated_total", 0) or 0)
+        # D5 (spec 2026-10-09): the cart is drawn before a method exists, so it states the catalogue;
+        # this flag lets the bot say a contract price will apply at checkout (§4.4).
+        cart_payload["contract_price_at_checkout"] = bool(summary.get("contract_price_at_checkout"))
         from business_app.services.cash_collection_service import CashCollectionService
 
         prepaid_balance = float(CashCollectionService().get_customer_prepaid_balance(user_id))
@@ -718,6 +727,7 @@ class CartService:
                 "subtotal": 0,
                 "estimated_delivery_fee": self.standard_delivery_fee,
                 "estimated_total": self.standard_delivery_fee,
+                "contract_price_at_checkout": False,
             }
 
         user = User.query.get(user_id)
@@ -729,7 +739,7 @@ class CartService:
             if not product or not product.is_active:
                 continue
 
-            unit_price = self._calculate_unit_price(product, cart_item.quantity, user)
+            unit_price, contract_price_at_checkout = self._price_cart_line(product, cart_item.quantity, user)
             item_total = unit_price * cart_item.quantity
             subtotal += item_total
             product_images = product.images or []
@@ -757,6 +767,7 @@ class CartService:
                     "stock_quantity": product.stock_quantity if product.track_inventory else None,
                     "available_quantity": available_quantity,
                     "reserved_quantity": reserved_quantity,
+                    "contract_price_at_checkout": contract_price_at_checkout,
                 }
             )
 
@@ -781,22 +792,33 @@ class CartService:
             "subtotal": subtotal,
             "estimated_delivery_fee": delivery_fee,
             "estimated_total": estimated_total,
+            "contract_price_at_checkout": any(item["contract_price_at_checkout"] for item in items_with_details),
         }
 
     # Private helper methods
 
-    def _calculate_unit_price(self, product: Product, quantity: int, user: Optional[User]) -> float:
-        """Calculate unit price with volume discounts"""
+    def _calculate_unit_price(
+        self, product: Product, quantity: int, user: Optional[User], payment_method: Optional[str] = None
+    ) -> float:
+        """Unit price for a cart line on `payment_method` (None: the pre-method catalogue)."""
+        return self._price_cart_line(product, quantity, user, payment_method)[0]
+
+    def _price_cart_line(
+        self, product: Product, quantity: int, user: Optional[User], payment_method: Optional[str] = None
+    ) -> Tuple[float, bool]:
+        """(unit price, a contract price waits at checkout) for one cart line.
+
+        Volume rules give the catalogue figure; the contract resolver then applies THE rule for
+        `payment_method` (spec 2026-10-09 §4.1). Before a method is chosen that is the catalogue.
+        """
         base_price = float(product.discount_price if product.discount_price else product.base_price)
         effective_price = base_price
 
-        # Check for volume-based price rules
         price_rule = self._get_best_price_rule(product.id, quantity, user)
         if price_rule:
             discount = self._calculate_rule_discount(price_rule, base_price)
             effective_price = max(0, base_price - discount)
 
-        # Contract pricing overrides fallback product/rule pricing for entity users.
         user_id = getattr(user, "id", None)
         if user_id:
             try:
@@ -806,8 +828,9 @@ class CartService:
                     user_id=user_id,
                     product_id=product.id,
                     fallback_price=Decimal(str(effective_price)),
+                    payment_method=payment_method,
                 )
-                return float(resolution["unit_price"])
+                return float(resolution["unit_price"]), bool(resolution["contract_price_at_checkout"])
             except ValidationError:
                 raise
             except Exception as exc:
@@ -818,7 +841,7 @@ class CartService:
                     exc,
                 )
 
-        return effective_price
+        return effective_price, False
 
     def _product_availability_result(self, product: Product, requested_quantity: int):
         """The reservation-aware availability result, or None when stock does not gate.

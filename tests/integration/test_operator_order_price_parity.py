@@ -50,6 +50,7 @@ from business_app.services.staff_service import StaffService
 from business_app.utils.password_security import hash_password
 from shared.enums import EntitySubtype, UserRole, UserType
 from staff_bot.handlers.operator.create_order import (
+    ENTER_NOTES,
     SELECT_PRODUCTS,
     SELECT_QUANTITY,
     CreateOrderHandler,
@@ -177,12 +178,15 @@ def _served_products(client, app, operator_user):
     return response.get_json()["data"]
 
 
-def _post_estimate(client, app, operator_user, client_id, items):
+def _post_estimate(client, app, operator_user, client_id, items, payment_method=None):
     """The REAL order-estimate route, called with a real operator JWT."""
     token = _operator_token(app, operator_user)
+    body = {"items": items}
+    if payment_method is not None:
+        body["payment_method"] = payment_method
     return client.post(
         f"/api/v1/staff/operator/users/{client_id}/order-estimate",
-        json={"items": items},
+        json=body,
         headers={"Authorization": f"Bearer {token}"},
     )
 
@@ -195,8 +199,8 @@ def _estimate_off_the_wire(client, app, operator_user):
     exact mistake that produced the 0-UZS bug this file was opened for.
     """
 
-    async def _call(_token, client_id, items):
-        response = _post_estimate(client, app, operator_user, client_id, items)
+    async def _call(_token, client_id, items, payment_method=None):
+        response = _post_estimate(client, app, operator_user, client_id, items, payment_method)
         if response.status_code != 200:
             return MagicMock(success=False, data=None, error=response.get_json())
         return _ok(response.get_json()["data"])
@@ -240,6 +244,7 @@ def _drive_operator_screens(
         "detail": detail_update,
         "cart": cart_update,
         "context": context,
+        "handler": handler,
     }
 
 
@@ -435,7 +440,8 @@ def contract_client(db, sample_user, priced_product):
         CorporateContractProductPrice(
             contract_id=contract.id,
             product_id=priced_product.id,
-            unit_price=Decimal("9000.00"),
+            business_account_unit_price=Decimal("9000.00"),
+            cash_unit_price=Decimal("9000.00"),
             is_prepayment_eligible=True,
             is_active=True,
         )
@@ -445,10 +451,13 @@ def contract_client(db, sample_user, priced_product):
 
 
 @pytest.mark.integration
-def test_operator_screen_shows_the_clients_contract_price(
+def test_operator_browsing_screens_quote_the_catalogue_until_the_method_is_picked(
     app, db, client, monkeypatch, operator, contract_client, priced_product, client_address
 ):
-    """🔴 THE INVARIANT THIS FILE WAS OPENED FOR. Do not delete this test.
+    """D5 (spec 2026-10-09): the product buttons and the cart are drawn BEFORE the payment
+    method, so they state the catalogue. The screen-equals-charge invariant this file was opened
+    for now lives on the CONFIRM screen, after the method is picked
+    (test_the_confirm_screen_quotes_what_the_order_charges, added with the staff-bot re-quote).
 
     WAS ``test_operator_screen_cannot_show_a_clients_contract_price``, a pin on
     the DIVERGENCE: ``GET /api/v1/products/`` resolves ``pricing.current_price``
@@ -469,33 +478,46 @@ def test_operator_screen_shows_the_clients_contract_price(
         client=client, app=app, operator_user=operator,
     )
     order = _charge(operator, contract_client, priced_product, QUANTITY, client_address)
+    assert float(order.subtotal) == 27000.0, "the contract must charge this client 9 000/unit on cash"
 
-    charged = float(order.subtotal)
-    assert charged == 27000.0, "the contract must price this client at 9 000/unit"
-
-    # 1. the cart line the operator reads out loud
     cart_text = _edited_text(screens["cart"])
-    assert f"{charged:,.0f}" in cart_text, cart_text
-    assert "45,000" not in cart_text, (
-        "the generic, OPERATOR-scoped price is back on the screen: " + cart_text
-    )
-
-    # 2. the stashed cart item — what the number on the screen was built from
-    shown = screens["context"].user_data["new_order"]["items"][0]["price"] * QUANTITY
-    assert shown == charged, (
-        f"the screen quoted {shown:,.0f} and the order charged {charged:,.0f}"
-    )
-
-    # 3. the product BUTTONS and the detail line, which are also money
+    assert "45,000" in cart_text, cart_text  # 3 × catalogue 15 000
     labels = _button_labels(_edited_markup(screens["product_list"]))
-    assert any("9,000" in label for label in labels), labels
-    assert not any("15,000" in label for label in labels), labels
-    assert "9,000" in _edited_text(screens["detail"]), _edited_text(screens["detail"])
+    assert any("15,000" in label for label in labels), labels
 
 
 # ---------------------------------------------------------------------------
 # THE ENDPOINT ITSELF
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+def test_the_confirm_screen_quotes_what_the_order_charges(
+    app, db, client, monkeypatch, operator, contract_client, priced_product, client_address
+):
+    """🔴 THE INVARIANT THIS FILE WAS OPENED FOR, after D5 (spec 2026-10-09). Do not delete this test.
+
+    The browsing screens state the catalogue; once the operator picks the method, the confirm
+    screen states the server's quote ON that method, and that is what the phone order charges.
+    """
+    served = _served_products(client, app, operator)
+    screens = _drive_operator_screens(
+        monkeypatch, served, priced_product.id, QUANTITY, contract_client.id, client_address.id,
+        client=client, app=app, operator_user=operator,
+    )
+    handler, context = screens["handler"], screens["context"]
+
+    state = asyncio.run(handler.select_payment(_update("staff_op_pay_cash"), context))
+    assert state == ENTER_NOTES
+    summary_update = _update("staff_op_skip_notes")
+    asyncio.run(handler.skip_notes(summary_update, context))
+
+    order = _charge(operator, contract_client, priced_product, QUANTITY, client_address)
+    charged = float(order.subtotal)
+    assert charged == 27000.0
+    summary = _edited_text(summary_update)
+    assert f"{charged:,.0f}" in summary, summary
+    assert "45,000" not in summary, summary
 
 
 @pytest.mark.integration
@@ -511,6 +533,7 @@ def test_the_estimate_equals_what_the_order_charges_for_a_contract_client(
     response = _post_estimate(
         client, app, operator, contract_client.id,
         [{"product_id": priced_product.id, "quantity": QUANTITY}],
+        payment_method="cash",
     )
     assert response.status_code == 200, response.get_data(as_text=True)
     estimate = response.get_json()["data"]

@@ -52,6 +52,7 @@ class ProductPricingSchema(BaseModel):
     total_price: MoneyFloat
     currency: str = Field(default="UZS")
     is_discounted: bool
+    contract_price_at_checkout: bool = False
 
 
 class ProductMediaSchema(BaseModel):
@@ -297,7 +298,8 @@ def serialize_product(product: Product, language: str = "uz", user=None, quantit
     try:
         # Build the product data manually since we need to calculate pricing and other dynamic data
         base_price = float(product.base_price)
-        current_price = calculate_product_price(product, user, quantity)
+        card_pricing = resolve_product_pricing(product, user, quantity)
+        current_price = card_pricing["current_price"]
 
         product_data = {
             "id": product.id,
@@ -318,6 +320,7 @@ def serialize_product(product: Product, language: str = "uz", user=None, quantit
                 "total_price": current_price * quantity,
                 "currency": "UZS",
                 "is_discounted": current_price < base_price,
+                "contract_price_at_checkout": card_pricing["contract_price_at_checkout"],
             },
             "media": {
                 "images": product.images,
@@ -476,7 +479,17 @@ def get_localized_field(obj, field_name: str, language: str) -> Optional[str]:
 
 
 def calculate_product_price(product, user, quantity: int) -> float:
-    """Calculate product price with discounts"""
+    """Catalogue price for a product card (bulk rules applied; never a contract price, D5)."""
+    return resolve_product_pricing(product, user, quantity)["current_price"]
+
+
+def resolve_product_pricing(product, user, quantity: int) -> Dict[str, Any]:
+    """Pre-method pricing for one product card (spec 2026-10-09 D5, §4.4).
+
+    ``current_price`` is the catalogue (bulk rules applied): a card is drawn before a payment
+    method exists. ``contract_price_at_checkout`` says a contract price will apply at checkout.
+    Both come from the contract resolver, called with no method, so the rule stays in one place.
+    """
     base_price = float(product.base_price)
     effective_price = base_price
 
@@ -499,7 +512,7 @@ def calculate_product_price(product, user, quantity: int) -> float:
     # `LoyaltyTierConfig.discount_percentage`, read live, and reduce the ORDER
     # TOTAL on the COD rail — never a catalogue price. Do not restore it.
 
-    # Corporate contract pricing is the canonical override for legal-entity users.
+    contract_price_at_checkout = False
     user_id = getattr(user, "id", None)
     if user_id:
         try:
@@ -510,7 +523,8 @@ def calculate_product_price(product, user, quantity: int) -> float:
                 product_id=product.id,
                 fallback_price=Decimal(str(effective_price)),
             )
-            return float(resolution["unit_price"])
+            effective_price = float(resolution["unit_price"])
+            contract_price_at_checkout = bool(resolution["contract_price_at_checkout"])
         except Exception as exc:
             logger.warning(
                 "Failed to resolve contract price for user_id=%s product_id=%s: %s",
@@ -519,7 +533,7 @@ def calculate_product_price(product, user, quantity: int) -> float:
                 exc,
             )
 
-    return effective_price
+    return {"current_price": effective_price, "contract_price_at_checkout": contract_price_at_checkout}
 
 
 def _stock_is_derived(product) -> bool:

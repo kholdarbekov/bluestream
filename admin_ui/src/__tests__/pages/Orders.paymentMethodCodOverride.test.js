@@ -221,4 +221,29 @@ describe('Orders payment-method edit — COD cap override', () => {
       });
     });
   });
+
+  it('shows the total before and after the change, as the preview states them', async () => {
+    setupBaseMocks();
+    adminService.previewOrderPaymentMethod.mockResolvedValue({
+      data: {
+        order_id: 771,
+        current_method: 'business_account',
+        new_method: 'click',
+        is_delivered: true,
+        blocking_reasons: [],
+        warnings: [],
+        current_total: 48000,
+        new_total: 52000,
+      },
+    });
+    const user = userEvent.setup();
+    await openPaymentMethodModal(user);
+
+    await pickNewMethod('click');
+    const reason = paymentMethodDialog().querySelector('textarea');
+    await user.type(reason, 'customer will pay by card instead');
+    fireEvent.click(screen.getByText(/Preview impacts/i));
+
+    await waitFor(() => expect(paymentMethodDialog().textContent).toContain('48,000 → 52,000 UZS'));
+  });
 });

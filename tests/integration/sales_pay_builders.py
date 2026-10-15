@@ -719,7 +719,8 @@ def _workplace_contract(db, customer, products):
             CorporateContractProductPrice(
                 contract_id=contract.id,
                 product_id=product.id,
-                unit_price=product.base_price,
+                business_account_unit_price=product.base_price,
+                cash_unit_price=product.base_price,
                 is_prepayment_eligible=True,
                 is_active=True,
             )

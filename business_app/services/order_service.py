@@ -182,7 +182,23 @@ class OrderService:
         # Validate and calculate order items
         items_data = order_data["items"]
         is_cash_order = self._requested_method_is_cash(order_data)
-        order_items, subtotal = self._process_order_items(items_data, user_id=user_id, is_cash_order=is_cash_order)
+        # Coverage first (spec 2026-10-09 §4.2): each line's covering contract row, priced at the
+        # catalogue. The business-account default and its validator read contract_id /
+        # contract_product_price_id, which do not depend on the method. The PRICE does.
+        order_items, _catalogue_subtotal = self._process_order_items(
+            items_data, user_id=user_id, is_cash_order=is_cash_order
+        )
+
+        # THE RAIL MUST BE KNOWN BEFORE THE ORDER CAN BE PRICED: a contract line's price and the
+        # COD-only loyalty tier discount both follow it. `_resolve_payment_method` reads only the
+        # payload and the lines' coverage, never a total.
+        payment_method = self._resolve_payment_method(
+            order_data,
+            user=user,
+            order_items=order_items,
+            bypass_cod_check=bypass_cod_check,
+        )
+        order_items, subtotal = self._price_items_for_method(order_items, payment_method)
 
         # Calculate delivery fee via DeliveryService (single source of truth).
         delivery_address = order_data["delivery_address"]
@@ -210,21 +226,6 @@ class OrderService:
             discount_amount = (subtotal * percentage / Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             if discount_amount > subtotal:
                 raise ValidationError("Subscription discount cannot exceed the order subtotal")
-
-        # THE RAIL MUST BE KNOWN BEFORE THE ORDER CAN BE PRICED. This call used
-        # to sit below the total; the loyalty tier discount is a COD-only
-        # benefit, so the rail is now an input to the price. Nothing in
-        # _resolve_payment_method reads total_amount (it normalizes the method,
-        # asserts customer-selectability, runs the two-armed COD cap and
-        # validates business-account coverage), so moving it up is safe. The
-        # MIN_ORDER_AMOUNT floor above stays gated on the GROSS basket and does
-        # not move.
-        payment_method = self._resolve_payment_method(
-            order_data,
-            user=user,
-            order_items=order_items,
-            bypass_cod_check=bypass_cod_check,
-        )
 
         # Loyalty tier discount — COD rail only. LoyaltyService is the ONE
         # place that decides whether it applies and at what live rate; this
@@ -1840,6 +1841,8 @@ class OrderService:
                     "quantity": quantity,
                     "unit_price": unit_price,
                     "total_price": total_price,
+                    "contract_price_row": resolution["contract_price_row"],
+                    "catalogue_unit_price": fallback_price,
                 }
             )
 
@@ -1860,6 +1863,28 @@ class OrderService:
         )
 
         return processed_items, subtotal
+
+    @staticmethod
+    def _price_items_for_method(
+        order_items: List[Dict[str, Any]], payment_method
+    ) -> Tuple[List[Dict[str, Any]], Decimal]:
+        """Price coverage-resolved lines for the order's method, without a second lookup.
+
+        `_process_order_items` already attached each line's covering row and catalogue price;
+        `contract_price_for_method` is the one rule that turns them into the charged price.
+        """
+        from business_app.services.corporate_contract_service import contract_price_for_method
+
+        priced: List[Dict[str, Any]] = []
+        subtotal = Decimal("0.00")
+        for item in order_items:
+            unit_price, _source = contract_price_for_method(
+                item["contract_price_row"], payment_method, item["catalogue_unit_price"]
+            )
+            total_price = unit_price * Decimal(str(item["quantity"]))
+            priced.append({**item, "unit_price": unit_price, "total_price": total_price})
+            subtotal += total_price
+        return priced, subtotal
 
     def _is_valid_status_transition(self, current_status: OrderStatus, new_status: OrderStatus) -> bool:
         """Check if status transition is valid (delegates to shared.status_transitions)."""

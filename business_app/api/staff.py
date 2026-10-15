@@ -164,6 +164,7 @@ def get_order_pool():
                 ),
                 "cod_reserved_prepayment_amount": cod_projection["cod_reserved_prepayment_amount"],
                 "expected_cash_to_collect": cod_projection["expected_cash_to_collect"],
+                "cash_settlement_amount": cod_projection["cash_settlement_amount"],
                 "amount_paid": cod_projection["amount_paid"],
                 "item_count": len(order.order_items) if order and order.order_items else 0,
                 "items": order_items,
@@ -439,6 +440,7 @@ def get_active_deliveries():
                 ),
                 "cod_reserved_prepayment_amount": cod_projection["cod_reserved_prepayment_amount"],
                 "expected_cash_to_collect": cod_projection["expected_cash_to_collect"],
+                "cash_settlement_amount": cod_projection["cash_settlement_amount"],
                 "amount_paid": cod_projection["amount_paid"],
                 "items": item_list,
                 "delivery_notes": order.delivery_notes or "",
@@ -712,6 +714,7 @@ def get_delivery_history():
                 ),
                 "cod_reserved_prepayment_amount": cod_projection["cod_reserved_prepayment_amount"],
                 "expected_cash_to_collect": cod_projection["expected_cash_to_collect"],
+                "cash_settlement_amount": cod_projection["cash_settlement_amount"],
                 "amount_paid": cod_projection["amount_paid"],
             }
         )
@@ -1086,7 +1089,17 @@ def get_client_order_estimate(user_id):
     if not data:
         raise ValidationError("Request body is required", error_code="STAFF_REQUEST_BODY_REQUIRED")
 
-    return success_response(StaffService.estimate_phone_order(user_id, data))
+    # The operator's quote on a chosen method is what `create_phone_order` charges: the same
+    # method parse, the same pricing call, and like the phone order no tier discount (spec 2026-10-09 §4.3).
+    payment_method = StaffService.parse_phone_order_method(data.get("payment_method"))
+    return success_response(
+        StaffService.estimate_phone_order(
+            user_id,
+            data,
+            payment_method=payment_method.value if payment_method is not None else None,
+            include_tier_discount=False,
+        )
+    )
 
 
 @staff_bp.route("/operator/users/<int:user_id>/payment-methods", methods=["GET"])

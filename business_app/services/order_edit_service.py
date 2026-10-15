@@ -92,6 +92,8 @@ class _ItemChange:
     unit_price: Decimal
     existing_item: Optional[OrderItem]
     direction: str  # "add" | "remove" | "increase" | "decrease" | "unchanged"
+    contract_id: Optional[int] = None
+    contract_product_price_id: Optional[int] = None
 
 
 @dataclass
@@ -539,10 +541,25 @@ class OrderEditService:
             # Unit price snapshot: existing items keep their snapshotted price
             # (so a price change in the catalog doesn't retroactively re-price
             # an existing line). New items use current product price.
+            contract_id = None
+            contract_product_price_id = None
             if existing_item is not None:
                 unit_price = Decimal(str(existing_item.unit_price))
             else:
-                unit_price = Decimal(str(product.calculate_price()))
+                # A NEW line is priced the way the order would have priced it: THE contract rule on
+                # the order's payment method (spec 2026-10-09 §5.5), never the contract-blind
+                # catalogue alone. Coverage is recorded on the line as at creation.
+                resolution = CorporateContractService().resolve_contract_pricing_for_user_product(
+                    user_id=order.user_id,
+                    product_id=product.id,
+                    fallback_price=Decimal(str(product.calculate_price(quantity=new_qty))),
+                    payment_method=order.payment_method,
+                    effective_at=order.created_at,
+                )
+                unit_price = resolution["unit_price"]
+                row = resolution["contract_price_row"]
+                contract_id = row.contract_id if row is not None else None
+                contract_product_price_id = row.id if row is not None else None
 
             changes.append(
                 _ItemChange(
@@ -554,6 +571,8 @@ class OrderEditService:
                     unit_price=unit_price,
                     existing_item=existing_item,
                     direction=direction,
+                    contract_id=contract_id,
+                    contract_product_price_id=contract_product_price_id,
                 )
             )
 
@@ -809,6 +828,8 @@ class OrderEditService:
                     unit_price=change.unit_price,
                     discount_amount=Decimal("0.00"),
                     total_price=change.unit_price * Decimal(change.new_quantity),
+                    contract_id=change.contract_id,
+                    contract_product_price_id=change.contract_product_price_id,
                 )
                 # Through the loaded collection, not a bare `session.add`: `_recompute_totals`
                 # sums `order.order_items`, which already holds the pre-edit lines and would
@@ -898,7 +919,7 @@ class OrderEditService:
         """
         has_corporate_lines = any(
             (change.existing_item is not None and change.existing_item.contract_id is not None)
-            or (change.direction == "add" and getattr(change.product, "contract_id", None))
+            or (change.direction == "add" and change.contract_id is not None)
             for change in plan.item_changes
         )
         summary: Dict[str, Any] = {"adjusted": False}

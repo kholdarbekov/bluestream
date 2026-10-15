@@ -2,8 +2,8 @@
 
 from collections import defaultdict
 from datetime import datetime, timezone
-from decimal import Decimal
-from typing import Any, Dict, List, Optional, Tuple
+from decimal import Decimal, InvalidOperation
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from sqlalchemy import and_, exists, func, or_
 from sqlalchemy.orm import joinedload
@@ -26,6 +26,43 @@ from shared.enums import PaymentMethod, UserType
 from business_app.utils.exceptions import NotFoundError, ValidationError
 from business_app.utils.translations import get_translation
 from shared.enums import CorporateContractTrackingMode
+from shared.payment_methods import canonical_rail
+
+
+PRICING_SOURCE_FALLBACK = "fallback"
+
+# Which price column a payment method reads, and the pricing_source it reports. A method that is
+# not listed (click, card, payme) and "no method chosen yet" (None) pay the catalogue: owner rulings
+# D2 and D5, spec docs/superpowers/specs/2026-10-09-corporate-contract-dual-pricing-design.md §4.1.
+_CONTRACT_PRICE_BY_METHOD = {
+    PaymentMethod.BUSINESS_ACCOUNT: ("business_account_unit_price", "contract_business_account"),
+    PaymentMethod.CASH: ("cash_unit_price", "contract_cash"),
+}
+
+
+def contract_price_for_method(
+    price_row: Optional[CorporateContractProductPrice],
+    payment_method: Union[str, PaymentMethod, None],
+    fallback_price: Decimal,
+) -> Tuple[Decimal, str]:
+    """THE rule: what one covered unit costs on one payment method.
+
+    business_account pays the bank-transfer price, cash pays the cash price. An empty price, any
+    other method and "not chosen yet" (None) pay ``fallback_price``, the caller's live catalogue
+    price. Returns ``(unit_price, pricing_source)``. Import it; never re-type the table.
+
+    ``canonical_rail`` hands anything it does not recognise back unchanged, a raw JSON list or dict
+    included; only a real ``PaymentMethod`` is looked up, so no input can raise here.
+    """
+    rail = canonical_rail(payment_method)
+    column_and_source = None
+    if price_row is not None and isinstance(rail, PaymentMethod):
+        column_and_source = _CONTRACT_PRICE_BY_METHOD.get(rail)
+    if column_and_source is not None:
+        value = getattr(price_row, column_and_source[0])
+        if value is not None:
+            return Decimal(str(value)), column_and_source[1]
+    return Decimal(str(fallback_price)), PRICING_SOURCE_FALLBACK
 
 
 class CorporateContractService:
@@ -422,7 +459,14 @@ class CorporateContractService:
                             },
                             "conflicting_price_row": {
                                 "id": other_row.id,
-                                "unit_price": float(other_row.unit_price) if other_row.unit_price is not None else None,
+                                "business_account_unit_price": (
+                                    float(other_row.business_account_unit_price)
+                                    if other_row.business_account_unit_price is not None
+                                    else None
+                                ),
+                                "cash_unit_price": (
+                                    float(other_row.cash_unit_price) if other_row.cash_unit_price is not None else None
+                                ),
                                 "is_prepayment_eligible": other_row.is_prepayment_eligible,
                             },
                         }
@@ -554,69 +598,23 @@ class CorporateContractService:
             .all()
         )
 
-    def _get_applicable_contract_price_rows(
-        self,
-        user_id: int,
-        product_id: int,
-        effective_at: Optional[datetime] = None,
-    ) -> List[CorporateContractProductPrice]:
-        effective_at = self._normalize_effective_at(effective_at)
-        contracts = self.list_active_contracts_for_user(user_id=user_id, effective_at=effective_at)
-        matches: List[CorporateContractProductPrice] = []
-        for contract in contracts:
-            for price_row in contract.product_prices:
-                if price_row.product_id == product_id and price_row.is_active:
-                    matches.append(price_row)
-        return matches
-
     def resolve_contract_pricing_for_user_product(
         self,
         user_id: int,
         product_id: int,
         fallback_price: Decimal,
+        *,
+        payment_method: Union[str, PaymentMethod, None] = None,
         effective_at: Optional[datetime] = None,
     ) -> Dict[str, Any]:
-        matches = self._get_applicable_contract_price_rows(
+        """One product's coverage and its price on ``payment_method`` (see the batch resolver)."""
+        return self.resolve_pricing_for_user_products(
             user_id=user_id,
-            product_id=product_id,
+            product_ids=[product_id],
+            fallback_prices={product_id: fallback_price},
+            payment_method=payment_method,
             effective_at=effective_at,
-        )
-        if not matches:
-            return {
-                "unit_price": Decimal(str(fallback_price)),
-                "contract": None,
-                "contract_price_row": None,
-            }
-        if len(matches) > 1:
-            contract_numbers = [row.contract.contract_number for row in matches if row.contract]
-            raise ValidationError(
-                self._translate(
-                    "api.orders.error.ambiguous_contract_pricing",
-                    "Ambiguous contract pricing for product "
-                    f"{product_id}. Multiple active contracts match: {', '.join(contract_numbers)}",
-                    product_id=product_id,
-                    contract_numbers=", ".join(contract_numbers),
-                )
-            )
-        match = matches[0]
-        return {
-            "unit_price": Decimal(str(match.unit_price)),
-            "contract": match.contract,
-            "contract_price_row": match,
-        }
-
-    def resolve_unit_price(
-        self,
-        user_id: int,
-        product_id: int,
-        fallback_price: Decimal,
-    ) -> Decimal:
-        resolved = self.resolve_contract_pricing_for_user_product(
-            user_id=user_id,
-            product_id=product_id,
-            fallback_price=fallback_price,
-        )
-        return Decimal(str(resolved["unit_price"]))
+        )[int(product_id)]
 
     def resolve_pricing_for_user_products(
         self,
@@ -624,78 +622,65 @@ class CorporateContractService:
         user_id: int,
         product_ids: List[int],
         fallback_prices: Dict[int, Decimal],
+        payment_method: Union[str, PaymentMethod, None] = None,
         effective_at: Optional[datetime] = None,
     ) -> Dict[int, Dict[str, Any]]:
-        """Resolve effective pricing metadata for multiple products for one user."""
+        """Coverage and price for several products of one user.
+
+        COVERAGE (``contract`` / ``contract_price_row``) does not depend on the method: the row
+        that covers a product covers it on every rail. The PRICE does, through
+        ``contract_price_for_method``. ``contract_price_at_checkout`` tells a pre-method screen that
+        a contract price is waiting (spec §4.4). Two active contracts covering one product are
+        refused on every method.
+        """
         unique_product_ids: List[int] = []
         for product_id in product_ids or []:
             normalized_id = int(product_id)
             if normalized_id not in unique_product_ids:
                 unique_product_ids.append(normalized_id)
-
         if not unique_product_ids:
             return {}
 
         fallback_lookup = {
             int(product_id): Decimal(str(price)) for product_id, price in (fallback_prices or {}).items()
         }
-        pricing_map: Dict[int, Dict[str, Any]] = {}
+        coverage: Dict[int, Optional[CorporateContractProductPrice]] = {pid: None for pid in unique_product_ids}
 
-        user = User.query.get(user_id)
-        if not self._is_legal_entity_user(user):
-            for product_id in unique_product_ids:
-                fallback_price = Decimal(str(fallback_lookup.get(product_id, Decimal("0.00"))))
-                pricing_map[product_id] = {
-                    "unit_price": fallback_price,
-                    "contract": None,
-                    "contract_price_row": None,
-                    "pricing_source": "fallback",
-                }
-            return pricing_map
+        if self._is_legal_entity_user(User.query.get(user_id)):
+            effective_at = self._normalize_effective_at(effective_at)
+            matches_by_product_id: Dict[int, List[CorporateContractProductPrice]] = defaultdict(list)
+            for contract in self.list_active_contracts_for_user(user_id=user_id, effective_at=effective_at):
+                for price_row in contract.product_prices:
+                    if price_row.is_active and price_row.product_id in coverage:
+                        matches_by_product_id[price_row.product_id].append(price_row)
 
-        effective_at = self._normalize_effective_at(effective_at)
-        contracts = self.list_active_contracts_for_user(user_id=user_id, effective_at=effective_at)
-        matches_by_product_id: Dict[int, List[CorporateContractProductPrice]] = defaultdict(list)
-
-        for contract in contracts:
-            for price_row in contract.product_prices:
-                if not price_row.is_active or price_row.product_id not in unique_product_ids:
-                    continue
-                matches_by_product_id[price_row.product_id].append(price_row)
-
-        for product_id in unique_product_ids:
-            fallback_price = Decimal(str(fallback_lookup.get(product_id, Decimal("0.00"))))
-            matches = matches_by_product_id.get(product_id, [])
-
-            if not matches:
-                pricing_map[product_id] = {
-                    "unit_price": fallback_price,
-                    "contract": None,
-                    "contract_price_row": None,
-                    "pricing_source": "fallback",
-                }
-                continue
-
-            if len(matches) > 1:
-                contract_numbers = [row.contract.contract_number for row in matches if row.contract]
-                raise ValidationError(
-                    self._translate(
-                        "api.orders.error.ambiguous_contract_pricing",
-                        "Ambiguous contract pricing for product "
-                        f"{product_id}. Multiple active contracts match: {', '.join(contract_numbers)}",
-                        product_id=product_id,
-                        contract_numbers=", ".join(contract_numbers),
+            for product_id, matches in matches_by_product_id.items():
+                if len(matches) > 1:
+                    contract_numbers = [row.contract.contract_number for row in matches if row.contract]
+                    raise ValidationError(
+                        self._translate(
+                            "api.orders.error.ambiguous_contract_pricing",
+                            "Ambiguous contract pricing for product "
+                            f"{product_id}. Multiple active contracts match: {', '.join(contract_numbers)}",
+                            product_id=product_id,
+                            contract_numbers=", ".join(contract_numbers),
+                        )
                     )
-                )
+                coverage[product_id] = matches[0]
 
-            match = matches[0]
+        pricing_map: Dict[int, Dict[str, Any]] = {}
+        for product_id in unique_product_ids:
+            row = coverage[product_id]
+            unit_price, pricing_source = contract_price_for_method(
+                row, payment_method, fallback_lookup.get(product_id, Decimal("0.00"))
+            )
             pricing_map[product_id] = {
-                "unit_price": Decimal(str(match.unit_price)),
-                "contract": match.contract,
-                "contract_price_row": match,
-                "pricing_source": "contract",
+                "unit_price": unit_price,
+                "contract": row.contract if row is not None else None,
+                "contract_price_row": row,
+                "pricing_source": pricing_source,
+                "contract_price_at_checkout": bool(row is not None and row.has_contract_price),
             }
-
         return pricing_map
 
     @staticmethod
@@ -1001,6 +986,12 @@ class CorporateContractService:
         prices: List[Dict[str, Any]],
         actor_user_id: Optional[int] = None,
     ) -> List[CorporateContractProductPrice]:
+        """Write each entry's two optional prices (spec 2026-10-09 §3.1, §6.1).
+
+        A missing or null price means "catalogue price for that method" and is stored as NULL. An
+        entry still carrying the retired single `unit_price` key is REFUSED: reading it as "both
+        absent" would silently move the customer onto the catalogue.
+        """
         contract = self.get_contract_by_id(contract_id)
         updated: List[CorporateContractProductPrice] = []
 
@@ -1008,12 +999,13 @@ class CorporateContractService:
             product_id = entry.get("product_id")
             if not product_id:
                 raise ValidationError("product_id is required for every price entry")
+            if "unit_price" in entry:
+                raise ValidationError(
+                    "unit_price is no longer accepted: send business_account_unit_price and "
+                    "cash_unit_price (either may be null for the catalogue price)"
+                )
             if not Product.query.get(product_id):
                 raise NotFoundError(f"Product {product_id} not found")
-
-            unit_price = entry.get("unit_price")
-            if unit_price is None:
-                raise ValidationError("unit_price is required for every price entry")
 
             row = CorporateContractProductPrice.query.filter_by(
                 contract_id=contract.id,
@@ -1026,7 +1018,10 @@ class CorporateContractService:
                 )
                 db.session.add(row)
 
-            row.unit_price = Decimal(str(unit_price))
+            row.business_account_unit_price = self._optional_contract_price(
+                entry.get("business_account_unit_price"), "business_account_unit_price"
+            )
+            row.cash_unit_price = self._optional_contract_price(entry.get("cash_unit_price"), "cash_unit_price")
             row.is_prepayment_eligible = bool(entry.get("is_prepayment_eligible", True))
             row.is_active = bool(entry.get("is_active", True))
             row.notes = entry.get("notes")
@@ -1035,6 +1030,18 @@ class CorporateContractService:
         self._validate_contract_price_overlaps(contract)
         db.session.flush()
         return updated
+
+    @staticmethod
+    def _optional_contract_price(value: Any, field_name: str) -> Optional[Decimal]:
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return None
+        try:
+            price = Decimal(str(value))
+        except (InvalidOperation, ValueError) as exc:
+            raise ValidationError(f"{field_name} must be a number") from exc
+        if price < 0:
+            raise ValidationError(f"{field_name} cannot be negative")
+        return price
 
     def _validate_contract_price_overlaps(self, contract: CorporateContract) -> None:
         preview = self.preview_contract_price_overlaps(
@@ -1143,7 +1150,7 @@ class CorporateContractService:
             if units <= 0:
                 continue
 
-            unit_price = Decimal(str(item.unit_price if item.unit_price is not None else price_row.unit_price))
+            unit_price = Decimal(str(item.unit_price))
             lines.append(
                 {
                     "order_item": item,
@@ -1615,6 +1622,75 @@ class CorporateContractService:
             },
         )
         return ledger_entry
+
+    REPRICE_TRUE_UP_KIND = "reprice_true_up"
+
+    def true_up_order_charge(
+        self,
+        order: Order,
+        *,
+        actor_user_id: Optional[int] = None,
+        reason: Optional[str] = None,
+    ) -> Optional[CorporatePrepaymentLedger]:
+        """Keep a delivered grocery order's AMOUNT-mode charge equal to its total (spec 2026-10-09 §5.3).
+
+        `charge_on_delivery` posts the order total once, at delivery. A later re-price changes the
+        total, so this posts the difference as an order-linked ADJUSTMENT and moves
+        `outstanding_amount` / `lifetime_charged` with it. Idempotent by construction: it compares
+        what the order has been charged with its total and posts nothing when they agree. No-op for
+        an order that was never charged.
+        """
+        rows = CorporatePrepaymentLedger.query.filter(
+            CorporatePrepaymentLedger.order_id == order.id,
+            CorporatePrepaymentLedger.event_type.in_(
+                [CorporatePrepaymentEventType.CHARGE, CorporatePrepaymentEventType.ADJUSTMENT]
+            ),
+        ).all()
+        charge = next((row for row in rows if row.event_type == CorporatePrepaymentEventType.CHARGE), None)
+        if charge is None:
+            return None
+
+        # "Charged" = the CHARGE plus only the true-ups posted here, on the same contract. Collection
+        # and payment-method reversals are ADJUSTMENTs on the order too, but they move other money.
+        entries = [
+            row
+            for row in rows
+            if row.contract_id == charge.contract_id
+            and (row.id == charge.id or (row.entry_metadata or {}).get("kind") == self.REPRICE_TRUE_UP_KIND)
+        ]
+
+        charged = sum((Decimal(str(entry.amount or 0)) for entry in entries), Decimal("0.00"))
+        delta = Decimal(str(order.total_amount or 0)) - charged
+        if delta == 0:
+            return None
+
+        account = self._get_or_create_locked_account(charge.contract_id)
+        account.outstanding_amount = Decimal(str(account.outstanding_amount or 0)) + delta
+        account.lifetime_charged = Decimal(str(account.lifetime_charged or 0)) + delta
+
+        entry = CorporatePrepaymentLedger(
+            contract_id=charge.contract_id,
+            account_id=account.id,
+            balance_id=None,
+            product_id=None,
+            order_id=order.id,
+            actor_user_id=actor_user_id,
+            event_type=CorporatePrepaymentEventType.ADJUSTMENT,
+            units=None,
+            unit_price_snapshot=None,
+            amount=delta,
+            currency=charge.currency,
+            notes=reason or "Order re-priced after delivery (payment method change)",
+            idempotency_key=f"reprice:order:{order.id}:{len(entries)}",
+            entry_metadata={
+                "kind": self.REPRICE_TRUE_UP_KIND,
+                "order_number": order.order_number,
+                "outstanding_after": float(account.outstanding_amount),
+            },
+        )
+        db.session.add(entry)
+        db.session.flush()
+        return entry
 
     def record_money_collection(
         self,
@@ -2194,11 +2270,13 @@ class CorporateContractService:
         balance = self._get_or_create_locked_balance(account.id, product_id)
         units_decimal = Decimal(str(units))
         amount_decimal = Decimal(str(amount)) if amount is not None else None
-        unit_price_snapshot = (
-            (amount_decimal / units_decimal)
-            if amount_decimal is not None and units_decimal != 0
-            else Decimal(str(price_row.unit_price))
-        )
+        if amount_decimal is not None and units_decimal != 0:
+            unit_price_snapshot = amount_decimal / units_decimal
+        else:
+            # Top-ups are paid by bank transfer, so THE rule's bank-transfer price is their unit price.
+            unit_price_snapshot = contract_price_for_method(
+                price_row, PaymentMethod.BUSINESS_ACCOUNT, price_row.product.catalogue_unit_price
+            )[0]
 
         balance.prepaid_units = Decimal(str(balance.prepaid_units or 0)) + units_decimal
         balance.last_topup_at = datetime.now(timezone.utc)
@@ -2306,9 +2384,17 @@ class CorporateContractService:
 
             product_balance.update(
                 {
-                    "contract_unit_price": (
-                        float(price_row.unit_price) if price_row and price_row.unit_price is not None else None
+                    "business_account_unit_price": (
+                        float(price_row.business_account_unit_price)
+                        if price_row and price_row.business_account_unit_price is not None
+                        else None
                     ),
+                    "cash_unit_price": (
+                        float(price_row.cash_unit_price)
+                        if price_row and price_row.cash_unit_price is not None
+                        else None
+                    ),
+                    "catalogue_unit_price": float(product.catalogue_unit_price) if product is not None else None,
                     "is_prepayment_eligible": bool(price_row.is_prepayment_eligible) if price_row else False,
                     "contract_price_row_id": price_row.id if price_row else None,
                 }

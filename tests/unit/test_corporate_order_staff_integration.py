@@ -71,7 +71,11 @@ def test_order_service_create_order_supports_business_account_and_reserve(
         return_value={
             'unit_price': Decimal("14000.00"),
             'contract': SimpleNamespace(id=91),
-            'contract_price_row': SimpleNamespace(id=901),
+            'contract_price_row': SimpleNamespace(
+                id=901, business_account_unit_price=Decimal("14000.00"), cash_unit_price=Decimal("14000.00")
+            ),
+            'pricing_source': 'contract_business_account',
+            'contract_price_at_checkout': True,
         },
     ) as resolve_price, patch(
         'business_app.services.corporate_contract_service.CorporateContractService.validate_business_account_order',
@@ -146,6 +150,8 @@ def test_staff_service_create_phone_order_supports_business_account_and_reserve(
             'unit_price': Decimal("13000.00"),
             'contract': SimpleNamespace(id=77),
             'contract_price_row': SimpleNamespace(id=707),
+            'pricing_source': 'contract_business_account',
+            'contract_price_at_checkout': True,
         },
     ) as resolve_price, patch(
         'business_app.services.corporate_contract_service.CorporateContractService.validate_business_account_order',
@@ -220,6 +226,8 @@ def test_order_service_business_account_requires_applicable_contract(
             'unit_price': Decimal("18000.00"),
             'contract': None,
             'contract_price_row': None,
+            'pricing_source': 'fallback',
+            'contract_price_at_checkout': False,
         },
     ):
         try:
@@ -259,6 +267,8 @@ def test_staff_service_business_account_requires_applicable_contract(
             'unit_price': Decimal("18000.00"),
             'contract': None,
             'contract_price_row': None,
+            'pricing_source': 'fallback',
+            'contract_price_at_checkout': False,
         },
     ):
         try:

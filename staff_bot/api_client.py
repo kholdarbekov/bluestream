@@ -762,7 +762,7 @@ class StaffAPIClient:
         )
 
     async def get_operator_order_estimate(
-        self, token: str, user_id: int, items: List[Dict]
+        self, token: str, user_id: int, items: List[Dict], payment_method: Optional[str] = None
     ) -> APIResponse:
         """Price a basket FOR THE CLIENT — the only money the operator screen renders.
 
@@ -775,12 +775,18 @@ class StaffAPIClient:
         OPERATOR — so a corporate-contract client's screen showed the generic
         price against a contract charge. Never render catalogue money to an
         operator; render THIS.
+
+        ``payment_method`` is sent once the operator has picked one: from then on a
+        contract client's price depends on it (spec 2026-10-09 §4.3).
         """
+        data = {'items': items}
+        if payment_method:
+            data['payment_method'] = payment_method
         return await self._make_request(
             'POST',
             f'{config.business_api.operator_endpoint}/users/{user_id}/order-estimate',
             token=token,
-            data={'items': items},
+            data=data,
         )
 
     async def add_client_address(self, token: str, user_id: int, address_data: Dict) -> APIResponse:

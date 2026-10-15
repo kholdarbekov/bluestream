@@ -154,14 +154,6 @@ _LEDGER: Dict[Tuple[str, str, str], str] = {
     ),
     (
         "telegram_bot/handlers/orders.py",
-        "OrderHandlers._show_order_confirmation",
-        "MIN_ORDER_AMOUNT - cart_total_amount",
-    ): (
-        "ONE-DECISION (gate shortfall). A shortfall against a shared constant, "
-        "computed off the SERVER's subtotal. Nothing is posted from it."
-    ),
-    (
-        "telegram_bot/handlers/orders.py",
         "OrderHandlers._build_cod_prepayment_brief",
         "normalized_order_total - potential_applied",
     ): (
@@ -197,9 +189,11 @@ _LEDGER: Dict[Tuple[str, str, str], str] = {
         "expression -- this one -- and its input is the SERVER's "
         "`cart['subtotal']`, not a client sum. `MIN_ORDER_AMOUNT` is a shared "
         "constant, not a server-published figure, so there is nothing to read "
-        "instead; nothing is posted from the result. Mirrors the identical "
-        "verdict on `OrderHandlers._show_order_confirmation`'s "
-        "`MIN_ORDER_AMOUNT - cart_total_amount`."
+        "instead; nothing is posted from the result. "
+        "`OrderHandlers._show_order_confirmation` calls this same helper (its "
+        "own `MIN_ORDER_AMOUNT - cart_total_amount` copy is gone), fed the "
+        "cart's subtotal or, when the chosen method's quote is refused with "
+        "ORDER_MIN_AMOUNT, the server's `details.items_subtotal`."
     ),
     (
         "telegram_bot/handlers/products.py",
@@ -632,7 +626,7 @@ def test_new_preview_surfaces_must_declare_their_write_half():
         # of quote_tier_discount's write halves are LoyaltyService methods.
         # OrderService.create_order calls it directly; PaymentService's rail
         # move and ClickPaymentProviderService's Click-rail restoration call it
-        # through the module-level apply_tier_discount_for_rail. All three call
+        # through rail_pricing.reprice_order_for_rail -> loyalty_service.tier_discount_for_rail. All three call
         # quote_tier_discount themselves and persist the result inside the same
         # transaction -- SHOW and SETTLE are the same invocation, ONE-DECISION
         # (re-run) at its strongest, not the split this file exists to catch.

@@ -43,6 +43,7 @@ from business_app.models.delivery import Delivery, DeliveryPerson
 from business_app.models.order import Order
 from business_app.models.payment import Payment
 from business_app.models.user import User, UserAddress
+from business_app.services.rail_pricing import quote_order_for_rail
 from shared.enums import (
     CorporateContractTrackingMode,
     DeliveryStatus,
@@ -212,7 +213,9 @@ def test_late_click_debit_after_tier_discounted_cash_settlement_revokes_the_disc
         client,
         order=order,
         payment=payment,
-        amount=discounted_total,
+        # Click debited the Click figure (undiscounted); a late debit is compared with the order
+        # quoted back on Click, not with the discounted cash total now stored (spec 2026-10-09 §5.4).
+        amount=undiscounted_total,
         click_trans_id="950101",
         click_paydoc_id="5231199101",
     )
@@ -237,7 +240,7 @@ def test_late_click_debit_after_tier_discounted_cash_settlement_revokes_the_disc
 
 # --------------------------------------------------------------------------- #
 # F1 -- the admin payment-method-edit rail move (cash -> business_account ->
-# click) was the third caller missing apply_tier_discount_for_rail.
+# click) was the third caller missing the rail re-price (rail_pricing.reprice_order_for_rail).
 # --------------------------------------------------------------------------- #
 
 BA_TIER_RATE = Decimal("2")
@@ -295,7 +298,8 @@ def loyalty_eligible_workplace(db, sample_product):
         CorporateContractProductPrice(
             contract_id=contract.id,
             product_id=sample_product.id,
-            unit_price=BA_UNIT_PRICE,
+            business_account_unit_price=BA_UNIT_PRICE,
+            cash_unit_price=BA_UNIT_PRICE,
             is_prepayment_eligible=True,
             is_active=True,
         )
@@ -382,7 +386,10 @@ def test_admin_two_hop_cash_to_business_account_to_click_never_carries_the_tier_
     assert Decimal(str(order.total_amount)) == undiscounted_total
     assert Decimal(str(payment.amount)) == undiscounted_total
 
-    # 3. Admin unwinds business_account -> click.
+    # 3. Admin unwinds business_account -> click. The contract line moves to the
+    #    catalogue price on Click (spec 2026-10-09 §5.2 #4), so the expected total
+    #    is the production quote's, captured BEFORE the hop.
+    expected_click_total = quote_order_for_rail(order, "click").total
     resp = app.test_client().post(
         f"/api/v1/admin/orders/{order.id}/payment-method",
         json={"new_method": "click", "reason": "F1 pin: business_account to click"},
@@ -397,8 +404,8 @@ def test_admin_two_hop_cash_to_business_account_to_click_never_carries_the_tier_
 
     # THE INVARIANT: a tier discount must never reach a fiscalized (Click)
     # receipt. Both the order and the payment row that mints the Click link
-    # must reflect the undiscounted total.
+    # must reflect the undiscounted Click total.
     assert Decimal(str(order.tier_discount)) == Decimal("0.00")
-    assert Decimal(str(order.total_amount)) == undiscounted_total
-    assert Decimal(str(payment.amount)) == undiscounted_total
-    assert Decimal(str(payment.outstanding_amount)) == undiscounted_total
+    assert Decimal(str(order.total_amount)) == expected_click_total
+    assert Decimal(str(payment.amount)) == expected_click_total
+    assert Decimal(str(payment.outstanding_amount)) == expected_click_total

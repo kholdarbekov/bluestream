@@ -43,6 +43,7 @@ from business_app.utils.state_validators import (
     assert_unassigned_for_pool_status,
 )
 from shared.enums import UserRole, UserStatus, OrderStatus, DeliveryStatus, PaymentMethod, UserType
+from shared.payment_methods import UnknownPaymentMethodError, normalize_payment_method
 from shared.staff_constants import (
     STAFF_BOT_ROLES,
     STAFF_ACTIONS,
@@ -221,7 +222,7 @@ class StaffService:
         return StaffService.ACTIVE_DELIVERY_STATUSES
 
     @staticmethod
-    def get_cod_collection_projection(order: Optional[Order]) -> Dict[str, float]:
+    def get_cod_collection_projection(order: Optional[Order]) -> Dict[str, Optional[float]]:
         """Compute the cash-collection projection for driver-facing workflows.
 
         RAIL-AGNOSTIC since 2026-08-08 (plan 2026-08-08-open-receivable-ssot).
@@ -232,7 +233,10 @@ class StaffService:
         total would make a driver collect the whole order from a customer who
         had already paid most of it by card — strictly worse than the invisible
         receivable it replaces. `net_open_receivable_amount` is the single
-        decision and there is no per-rail branch left.
+        decision behind `expected_cash_to_collect`, on every rail. The one
+        rail-dependent figure is `cash_settlement_amount`: the cash quote for an
+        unpaid electronic order settled at the door (`_cash_settlement_amount`,
+        spec 2026-10-09 §6.3), None for every other order.
         """
         total_amount = Decimal(str(getattr(order, "total_amount", 0) or 0))
         if not order:
@@ -240,6 +244,7 @@ class StaffService:
                 "cod_reserved_prepayment_amount": 0.0,
                 "expected_cash_to_collect": float(total_amount),
                 "amount_paid": 0.0,
+                "cash_settlement_amount": None,
             }
 
         payment = getattr(order, "payment", None)
@@ -250,6 +255,7 @@ class StaffService:
                 "cod_reserved_prepayment_amount": 0.0,
                 "expected_cash_to_collect": float(total_amount),
                 "amount_paid": 0.0,
+                "cash_settlement_amount": None,
             }
 
         # The clamp and the subtraction live in payment_projection so this
@@ -259,7 +265,31 @@ class StaffService:
             "cod_reserved_prepayment_amount": float(reserved_prepayment_amount(payment)),
             "expected_cash_to_collect": float(net_open_receivable_amount(payment)),
             "amount_paid": float(paid_amount(payment)),
+            "cash_settlement_amount": StaffService._cash_settlement_amount(order, payment),
         }
+
+    @staticmethod
+    def _cash_settlement_amount(order: Order, payment) -> Optional[float]:
+        """What the driver collects if this unpaid electronic order is settled in cash.
+
+        Converting re-prices the order onto the cash rail (`rail_pricing.reprice_order_for_rail`),
+        so the door figure is the cash QUOTE, not the Click receivable (spec 2026-10-09 §6.3).
+        None for every other order: `expected_cash_to_collect` already is the figure there.
+        """
+        from business_app.services.cash_collection_service import CashCollectionService
+        from business_app.services.rail_pricing import quote_order_for_rail
+
+        if not CashCollectionService.is_offline_settleable_electronic(order):
+            return None
+        try:
+            quote = quote_order_for_rail(order, PaymentMethod.CASH)
+        except ValidationError as exc:
+            # Ambiguous contract coverage (two active contracts on one product): contract writes
+            # refuse it, legacy data may not. One unquotable order must not fail the driver's whole
+            # list; it publishes no cash figure and the driver sees `expected_cash_to_collect`.
+            current_app.logger.warning("Cash settlement quote unavailable for order %s: %s", order.id, exc)
+            return None
+        return float(max(Decimal("0.00"), quote.total - paid_amount(payment)))
 
     @staticmethod
     def get_active_delivery_counts(delivery_person_ids: List[int]) -> Dict[int, int]:
@@ -1711,18 +1741,12 @@ class StaffService:
         # _OFFLINE_SETTLEABLE_STATUSES is the canonical set; reuse it (DRY).
         from business_app.services.cash_collection_service import CashCollectionService as _CCS
 
-        _electronic_methods = {PaymentMethod.CLICK, PaymentMethod.PAYME, PaymentMethod.CARD}
         order = delivery.order
         order_payment = order.payment if order else None
-        # EITHER rail, not just the order's. The gates below read the order's
-        # method while the allocator reads the payment's; when they disagree the
-        # driver's cash would post as customer credit and leave the order unpaid.
-        is_unsettled_electronic = bool(
-            order
-            and order_payment is not None
-            and {order.payment_method, order_payment.payment_method} & _electronic_methods
-            and order_payment.status in _CCS._OFFLINE_SETTLEABLE_STATUSES
-        )
+        # THE shared predicate (CashCollectionService.is_offline_settleable_electronic): EITHER rail,
+        # not just the order's. The gates below read the order's method while the allocator reads
+        # the payment's; when they disagree the driver's cash would post as customer credit.
+        is_unsettled_electronic = _CCS.is_offline_settleable_electronic(order)
         _raw_cash = metadata.get("cash_collected") if metadata else None
         try:
             driver_collected_cash = Decimal(str(_raw_cash)) > Decimal("0.00") if _raw_cash is not None else False
@@ -1743,7 +1767,7 @@ class StaffService:
         # payment so the card-paid portion keeps its fiscal record.
         # 🔴 THE RAIL CHECK IS LOAD-BEARING, not defensive tidiness.
         # `_validate_collection_context` permits a DELIVERY_COMPLETION against a
-        # non-CASH order ONLY for `_electronic_methods`. Without the same
+        # non-CASH order ONLY for `_ELECTRONIC_METHODS`. Without the same
         # restriction here, a BUSINESS_ACCOUNT (contract-billed) or
         # LOYALTY_POINTS order edited upward at the door would enter this arm,
         # hit that validator, raise, and the driver could not mark the delivery
@@ -1755,7 +1779,7 @@ class StaffService:
             and not is_cash_order
             and not settle_electronic_as_cash
             and order is not None
-            and order.payment_method in _electronic_methods
+            and order.payment_method in _CCS._ELECTRONIC_METHODS
             # `is_ledger_receivable`, not `has_open_receivable`: this must be the
             # SAME predicate `_validate_collection_context` applies downstream,
             # or this arm fires and post_collection then refuses — which would
@@ -2580,7 +2604,11 @@ class StaffService:
 
     @staticmethod
     def price_phone_order(
-        client_id: int, order_data: Dict[str, Any], *, payment_method: Optional[str] = None
+        client_id: int,
+        order_data: Dict[str, Any],
+        *,
+        payment_method: Optional[str] = None,
+        include_tier_discount: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """🔴 THE ONE PLACE A PHONE ORDER IS PRICED. Do not grow a second one.
 
@@ -2620,6 +2648,13 @@ class StaffService:
         Raises:
             NotFoundError: a requested product does not exist.
             ValidationError: contract pricing for a line is ambiguous.
+
+        ``payment_method`` prices every line through THE contract rule (spec 2026-10-09 §4.1):
+        bank-transfer price on business_account, cash price on cash, the catalogue otherwise or
+        while the method is still unknown. ``include_tier_discount`` defaults to "a method was
+        named" (the sales agent's confirm screen, whose order `create_order` charges with the tier
+        discount). The OPERATOR passes False: phone orders have never carried the tier discount, and
+        the operator's quote must equal `create_phone_order`'s charge.
         """
         from business_app.models.product import Product
         from business_app.services.corporate_contract_service import CorporateContractService
@@ -2644,6 +2679,7 @@ class StaffService:
                 user_id=client_id,
                 product_id=product_id,
                 fallback_price=fallback_price,
+                payment_method=payment_method,
             )
             unit_price = Decimal(str(resolution["unit_price"]))
             item_total = unit_price * Decimal(str(quantity))
@@ -2660,6 +2696,7 @@ class StaffService:
                     "quantity": quantity,
                     "unit_price": unit_price,
                     "total_price": item_total,
+                    "pricing_source": resolution["pricing_source"],
                 }
             )
 
@@ -2674,7 +2711,9 @@ class StaffService:
         discount_amount = Decimal("0.00")
         loyalty_discount = Decimal("0.00")
         tier_discount = Decimal("0.00")
-        if payment_method is not None:
+        if include_tier_discount is None:
+            include_tier_discount = payment_method is not None
+        if include_tier_discount and payment_method is not None:
             # The SAME expression `create_order` charges with (order_service.py, the
             # `quote_tier_discount` + `clamp_tier_discount` pair), not a second one: the tier
             # rate is admin-configurable and read live, so a quote that hard-coded zero told the
@@ -2707,8 +2746,28 @@ class StaffService:
         }
 
     @staticmethod
+    def parse_phone_order_method(raw: Any) -> Optional[PaymentMethod]:
+        """THE one parse of a phone order's payment method, for the operator's quote and the order alike.
+
+        Case, whitespace and the legacy ``card`` alias fold through ``normalize_payment_method``, so
+        "Cash" is cash on both halves. Anything else (an unknown word, a JSON list, dict or number)
+        is None: the quote prices it as "no method yet", and :meth:`create_phone_order` gives an
+        explicit but unrecognised value no business-account default.
+        """
+        if not isinstance(raw, str):
+            return None
+        try:
+            return normalize_payment_method(raw)
+        except UnknownPaymentMethodError:
+            return None
+
+    @staticmethod
     def estimate_phone_order(
-        client_id: int, order_data: Dict[str, Any], *, payment_method: Optional[str] = None
+        client_id: int,
+        order_data: Dict[str, Any],
+        *,
+        payment_method: Optional[str] = None,
+        include_tier_discount: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """READ-ONLY client-scoped quote for a phone-order basket.
 
@@ -2731,7 +2790,11 @@ class StaffService:
         if not items_data:
             raise ValidationError("Order must contain at least one item", error_code="STAFF_ORDER_ITEMS_REQUIRED")
 
-        pricing = StaffService.price_phone_order(client_id, order_data, payment_method=payment_method)
+        from business_app.services.corporate_contract_service import PRICING_SOURCE_FALLBACK
+
+        pricing = StaffService.price_phone_order(
+            client_id, order_data, payment_method=payment_method, include_tier_discount=include_tier_discount
+        )
 
         return {
             "client_id": client_id,
@@ -2743,7 +2806,7 @@ class StaffService:
                     "quantity": row["quantity"],
                     "unit_price": float(row["unit_price"]),
                     "total_price": float(row["total_price"]),
-                    "is_contract_price": row["contract_id"] is not None,
+                    "is_contract_price": row["pricing_source"] != PRICING_SOURCE_FALLBACK,
                 }
                 for row in pricing["items"]
             ],
@@ -2805,31 +2868,16 @@ class StaffService:
                     error_code="STAFF_INVALID_DELIVERY_ADDRESS",
                 )
 
-        # Process order items. The pricing lives in `price_phone_order` — the
-        # SAME call the operator's order-estimate endpoint makes, so the figure
-        # quoted on the phone and the figure charged here are one expression.
-        # Do NOT re-inline this loop.
         from business_app.services.corporate_contract_service import CorporateContractService
 
         corporate_service = CorporateContractService()
-        pricing = StaffService.price_phone_order(client_id, order_data)
-        order_items = pricing["items"]
-        subtotal = pricing["subtotal"]
-        delivery_fee = pricing["delivery_fee"]
-        total_amount = pricing["total_amount"]
-        # Written onto the row rather than left to the column default, so the
-        # order states the same breakdown the operator was quoted.
-        discount_amount = pricing["discount_amount"]
-        loyalty_discount = pricing["loyalty_discount"]
+        # Coverage first (spec 2026-10-09 §4.2): the business-account default and its validator
+        # read each line's contract_id / contract_product_price_id, which do not depend on the method.
+        coverage_lines = StaffService.price_phone_order(client_id, order_data)["items"]
 
-        # Map payment method
-        payment_method = None
+        # Map payment method: the SAME parse the operator's order-estimate route makes.
         payment_method_str = order_data.get("payment_method")
-        if payment_method_str:
-            try:
-                payment_method = PaymentMethod(payment_method_str)
-            except ValueError:
-                pass
+        payment_method = StaffService.parse_phone_order_method(payment_method_str)
         if payment_method == PaymentMethod.CASH:
             from business_app.services.cash_collection_service import CashCollectionService
 
@@ -2840,7 +2888,7 @@ class StaffService:
         if payment_method == PaymentMethod.BUSINESS_ACCOUNT:
             corporate_service.validate_business_account_order(
                 user=client,
-                order_items=order_items,
+                order_items=coverage_lines,
             )
 
         # Default qualifying workplace phone orders to business-account settlement
@@ -2848,9 +2896,28 @@ class StaffService:
         if payment_method is None and not payment_method_str:
             if corporate_service.order_qualifies_for_business_account(
                 user=client,
-                order_items=order_items,
+                order_items=coverage_lines,
             ):
                 payment_method = PaymentMethod.BUSINESS_ACCOUNT
+
+        # Then the price, on the method the order will carry. The pricing lives in
+        # `price_phone_order`, the SAME call the operator's order-estimate endpoint makes (with the
+        # same include_tier_discount=False), so the figure quoted on the phone and the figure charged
+        # here are one expression. Do NOT re-inline this loop.
+        pricing = StaffService.price_phone_order(
+            client_id,
+            order_data,
+            payment_method=payment_method.value if payment_method is not None else None,
+            include_tier_discount=False,
+        )
+        order_items = pricing["items"]
+        subtotal = pricing["subtotal"]
+        delivery_fee = pricing["delivery_fee"]
+        total_amount = pricing["total_amount"]
+        # Written onto the row rather than left to the column default, so the
+        # order states the same breakdown the operator was quoted.
+        discount_amount = pricing["discount_amount"]
+        loyalty_discount = pricing["loyalty_discount"]
 
         # ARCH-006: phone orders open as CONFIRMED, so the address + staff
         # creator invariants must hold before insert.

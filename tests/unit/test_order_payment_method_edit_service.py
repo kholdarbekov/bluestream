@@ -79,7 +79,8 @@ def covered_contract(db, workplace_user, sample_product):
     price_row = CorporateContractProductPrice(
         contract_id=contract.id,
         product_id=sample_product.id,
-        unit_price=Decimal("18000.00"),
+        business_account_unit_price=Decimal("18000.00"),
+        cash_unit_price=Decimal("18000.00"),
         is_prepayment_eligible=True,
         is_active=True,
     )

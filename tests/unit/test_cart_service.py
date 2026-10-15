@@ -78,15 +78,19 @@ class TestCartService:
             "unit_price": Decimal("12500.00"),
             "contract": None,
             "contract_price_row": None,
+            "pricing_source": "contract_cash",
+            "contract_price_at_checkout": True,
         }
 
         with patch(
             "business_app.utils.service_factory.get_corporate_contract_service",
             return_value=corporate_service,
         ):
+            # D5 (spec 2026-10-09): a contract price applies only on a NAMED method.
             validated, errors = cart_service.validate_cart_items(
                 [{"product_id": sample_product.id, "quantity": 2}],
                 sample_user,
+                payment_method="cash",
             )
 
         assert errors == []
@@ -96,6 +100,7 @@ class TestCartService:
             user_id=sample_user.id,
             product_id=sample_product.id,
             fallback_price=Decimal("15000.0"),
+            payment_method="cash",
         )
 
     def test_validate_cart_items_uses_reservation_aware_inventory(self, cart_service, sample_product):

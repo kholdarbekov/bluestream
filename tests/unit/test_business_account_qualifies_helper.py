@@ -80,7 +80,8 @@ def _make_units_contract(user_id, product, *, prepaid_units, allows_debt=False):
     price_row = CorporateContractProductPrice(
         contract_id=contract.id,
         product_id=product.id,
-        unit_price=Decimal("18000.00"),
+        business_account_unit_price=Decimal("18000.00"),
+        cash_unit_price=Decimal("18000.00"),
         is_prepayment_eligible=True,
         is_active=True,
     )

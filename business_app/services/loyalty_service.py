@@ -85,55 +85,28 @@ def clamp_tier_discount(
     return min(max(Decimal("0.00"), Decimal(str(amount or 0))), headroom)
 
 
-def apply_tier_discount_for_rail(order: Order, payment_method: Union[str, PaymentMethod, None]) -> Decimal:
-    """THE one expression of "the tier discount follows the rail".
+def tier_discount_for_rail(
+    user,
+    *,
+    subtotal: Decimal,
+    discount_amount: Decimal,
+    loyalty_discount: Decimal,
+    payment_method: Union[str, PaymentMethod, None],
+) -> Decimal:
+    """What the loyalty tier takes off ``subtotal`` on ``payment_method``. A quote; writes nothing.
 
-    Quotes and clamps a tier discount for ``order`` on ``payment_method`` when
-    that rail is COD, or ``Decimal("0.00")`` on any other rail, then writes
-    both ``order.tier_discount`` and ``order.total_amount`` (via
-    ``compute_order_total``) when the discount actually changed. Returns the
-    new tier discount so callers can tell whether anything moved by comparing
-    it against whatever ``order.tier_discount`` held before the call.
-
-    Four call sites: the rail move in ``PaymentService.create_payment``;
-    Case C's Click-rail restoration in
-    ``ClickPaymentProviderService._restore_click_rail_after_offline_settlement``;
-    and the admin payment-method edit's two rail-off-cash paths in
-    ``OrderPaymentMethodEditService`` (``_settle_as_business_account`` and
-    ``_unwind_to_click``) — a tier discount is a COD-only benefit and must
-    never reach a Click fiscal receipt (``build_click_fiscalization_payload``
-    prices ``received_card`` off ``order.total_amount`` while filling
-    per-item ``Discount`` from ``loyalty_discount`` ALONE), and must not
-    survive onto business_account either (revenue correctness: the corporate
-    account must be billed the undiscounted amount). Import it; never
-    re-type it.
+    COD only (`is_cod_rail`), clamped by `clamp_tier_discount`. The one expression behind every
+    stored tier discount on an EXISTING order: `rail_pricing.quote_order_for_rail` (and through it
+    every payment-method change) calls it. Import it; never re-type it.
     """
-    subtotal = Decimal(str(order.subtotal or 0))
-    order_discount = Decimal(str(order.discount_amount or 0))
-    reward_discount = Decimal(str(order.loyalty_discount or 0))
-    previous_tier_discount = Decimal(str(order.tier_discount or 0))
-
-    if is_cod_rail(payment_method):
-        new_tier_discount = clamp_tier_discount(
-            LoyaltyService().quote_tier_discount(order.user, subtotal, payment_method).amount,
-            subtotal=subtotal,
-            discount_amount=order_discount,
-            loyalty_discount=reward_discount,
-        )
-    else:
-        new_tier_discount = Decimal("0.00")
-
-    if new_tier_discount != previous_tier_discount:
-        order.tier_discount = new_tier_discount
-        order.total_amount = compute_order_total(
-            subtotal=subtotal,
-            discount_amount=order_discount,
-            delivery_fee=Decimal(str(order.delivery_fee or 0)),
-            loyalty_discount=reward_discount,
-            tier_discount=new_tier_discount,
-        )
-
-    return new_tier_discount
+    if not is_cod_rail(payment_method):
+        return Decimal("0.00")
+    return clamp_tier_discount(
+        LoyaltyService().quote_tier_discount(user, Decimal(str(subtotal)), payment_method).amount,
+        subtotal=Decimal(str(subtotal)),
+        discount_amount=Decimal(str(discount_amount)),
+        loyalty_discount=Decimal(str(loyalty_discount)),
+    )
 
 
 def _request_memo(key: str) -> Optional[dict]:

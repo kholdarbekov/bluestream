@@ -55,7 +55,8 @@ def _create_contract(user_id: int, product_id: int) -> CorporateContract:
         CorporateContractProductPrice(
             contract_id=contract.id,
             product_id=product_id,
-            unit_price=Decimal("14000.00"),
+            business_account_unit_price=Decimal("14000.00"),
+            cash_unit_price=Decimal("14000.00"),
             is_prepayment_eligible=True,
             is_active=True,
         )

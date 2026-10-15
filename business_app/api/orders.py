@@ -672,9 +672,15 @@ def agent_order_confirmation(order_id):
 
 
 @orders_bp.route("/cart/estimate", methods=["POST"])
+@handle_api_exception
 @jwt_required()
 def estimate_cart():
-    """Estimate cart total with discounts and delivery fee"""
+    """Estimate cart total with discounts and delivery fee.
+
+    A service refusal (`ValidationError`) is answered by `handle_api_exception`, the envelope the
+    twin route `POST /api/v1/cart/estimate` already speaks: top-level `error_code` and `details`.
+    The bot's confirm screen branches on `ORDER_MIN_AMOUNT` and reads the shortfall off `details`.
+    """
     try:
         current_user_id = get_jwt_identity()
 
@@ -710,8 +716,8 @@ def estimate_cart():
         return validation_error_response(e.errors())
     except NotFoundError:
         return not_found_response(message=get_translation("error.not_found"))
-    except ValidationError as e:
-        return validation_error_response(errors=str(e))
+    except ValidationError:
+        raise
     except ValueError as e:
         current_app.logger.warning(f"Estimate cart validation error: {e}")
         return error_response(message=get_translation("api.orders.error.invalid_request_data"), status_code=400)

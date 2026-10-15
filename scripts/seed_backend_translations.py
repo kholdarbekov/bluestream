@@ -3048,6 +3048,26 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Birlik narxi',
         'ru': 'Цена за единицу'
     },
+    'ui.corporate.business_account_price': {
+        'en': 'Bank transfer price',
+        'uz': "Bank o'tkazmasi narxi",
+        'ru': 'Цена (перечисление)'
+    },
+    'ui.corporate.cash_price': {
+        'en': 'Cash price',
+        'uz': 'Naqd pul narxi',
+        'ru': 'Цена (наличные)'
+    },
+    'ui.corporate.catalogue_price': {
+        'en': 'Catalogue',
+        'uz': 'Katalog',
+        'ru': 'Каталог'
+    },
+    'ui.orders.payment_method_total_change': {
+        'en': 'Total',
+        'uz': 'Jami',
+        'ru': 'Итого'
+    },
     'ui.corporate.unit_price_required': {
         'en': 'Unit price is required',
         'uz': 'Birlik narxi majburiy',
@@ -5984,6 +6004,13 @@ BACKEND_TRANSLATIONS = {
         'en': 'Minimum order: {min_qty}',
         'uz': 'Minimal buyurtma: {min_qty}',
         'ru': 'Минимальный заказ: {min_qty}'
+    },
+    # Spec 2026-10-09 §4.4: a contract customer browses at the catalogue (D5); the contract price
+    # applies once a payment method is chosen at checkout. Never mentions calling.
+    'telegram.products.contract_price_at_checkout': {
+        'en': '🤝 Your contract price applies at checkout',
+        'uz': "🤝 Shartnoma narxingiz buyurtmani rasmiylashtirishda qo'llanadi",
+        'ru': '🤝 Цена по договору применяется при оформлении заказа'
     },
     # A quantity TYPED at the cart quantity screen
     # (telegram_bot/handlers/products.py::handle_typed_quantity). The hint is

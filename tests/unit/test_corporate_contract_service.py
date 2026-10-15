@@ -132,7 +132,8 @@ def _create_contract_price(
     row = CorporateContractProductPrice(
         contract_id=contract_id,
         product_id=product_id,
-        unit_price=unit_price,
+        business_account_unit_price=unit_price,
+        cash_unit_price=unit_price,
         is_prepayment_eligible=is_prepayment_eligible,
         is_active=True,
     )
@@ -145,7 +146,7 @@ def _get_product_balance(account_id: int, product_id: int) -> CorporatePrepaymen
     return CorporatePrepaymentBalance.query.filter_by(account_id=account_id, product_id=product_id).first()
 
 
-def test_resolve_unit_price_uses_contract_override(db, sample_user):
+def test_the_cash_price_overrides_the_catalogue_on_cash(db, sample_user):
     sample_user.user_type = "entity"
     sample_user.entity_subtype = EntitySubtype.WORKPLACE
     db.session.commit()
@@ -156,16 +157,17 @@ def test_resolve_unit_price_uses_contract_override(db, sample_user):
 
     _create_contract_price(contract.id, product.id, Decimal("12500.00"))
 
-    overridden = service.resolve_unit_price(
+    overridden = service.resolve_contract_pricing_for_user_product(
         user_id=sample_user.id,
         product_id=product.id,
         fallback_price=Decimal("15000.00"),
-    )
-    fallback = service.resolve_unit_price(
+        payment_method="cash",
+    )["unit_price"]
+    fallback = service.resolve_contract_pricing_for_user_product(
         user_id=sample_user.id,
         product_id=999999,
         fallback_price=Decimal("15000.00"),
-    )
+    )["unit_price"]
 
     assert overridden == Decimal("12500.00")
     assert fallback == Decimal("15000.00")
@@ -189,10 +191,11 @@ def test_resolve_pricing_for_user_products_returns_contract_and_fallback(db, sam
             covered_product.id: Decimal("18000.00"),
             uncovered_product.id: Decimal("15000.00"),
         },
+        payment_method="business_account",
     )
 
     assert pricing_map[covered_product.id]["unit_price"] == Decimal("19000.00")
-    assert pricing_map[covered_product.id]["pricing_source"] == "contract"
+    assert pricing_map[covered_product.id]["pricing_source"] == "contract_business_account"
     assert pricing_map[covered_product.id]["contract"].id == contract.id
     assert pricing_map[covered_product.id]["contract_price_row"].id == price_row.id
 
@@ -370,7 +373,8 @@ def test_resolve_contract_pricing_rejects_overlapping_matching_contracts(db, sam
         CorporateContractProductPrice(
             contract_id=contract_two.id,
             product_id=product.id,
-            unit_price=Decimal("12000.00"),
+            business_account_unit_price=Decimal("12000.00"),
+            cash_unit_price=Decimal("12000.00"),
             is_prepayment_eligible=True,
             is_active=True,
         )

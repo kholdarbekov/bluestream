@@ -59,6 +59,8 @@ class PaymentMethodEditPlan:
     transition: Optional[Tuple[str, str]]
     blocking_reasons: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
+    current_total: Optional[Decimal] = None
+    new_total: Optional[Decimal] = None
 
     @property
     def is_editable(self) -> bool:
@@ -72,6 +74,8 @@ class PaymentMethodEditPlan:
             "is_delivered": self.is_delivered,
             "blocking_reasons": self.blocking_reasons,
             "warnings": self.warnings,
+            "current_total": float(self.current_total) if self.current_total is not None else None,
+            "new_total": float(self.new_total) if self.new_total is not None else None,
         }
 
 
@@ -204,6 +208,18 @@ class OrderPaymentMethodEditService:
         if current == "business_account" and is_delivered:
             warnings.append("delivered_business_account_marking_codes_may_need_manual_review")
 
+        # The admin confirms against the money that will be written (spec 2026-10-09 §5.2): the
+        # same quote `apply_edit`'s re-price applies. Ambiguous contract coverage (two active
+        # contracts on one product; contract writes refuse it, legacy data may not) makes that
+        # re-price raise, so it blocks the edit here rather than breaking the admin order page.
+        from business_app.services.rail_pricing import quote_order_for_rail
+
+        new_total: Optional[Decimal] = None
+        try:
+            new_total = quote_order_for_rail(order, target).total
+        except ValidationError as exc:
+            blocking.append(f"ambiguous_contract_pricing: {exc}")
+
         return PaymentMethodEditPlan(
             order_id=order.id,
             current_method=current,
@@ -212,6 +228,8 @@ class OrderPaymentMethodEditService:
             transition=transition if transition in ALLOWED_TRANSITIONS else None,
             blocking_reasons=blocking,
             warnings=warnings,
+            current_total=Decimal(str(order.total_amount or 0)),
+            new_total=new_total,
         )
 
     # ---- apply (transactional) ----
@@ -290,9 +308,7 @@ class OrderPaymentMethodEditService:
                 cash_service.release_pre_delivery_prepaid_settlement_for_order(
                     order.id, actor_user_id=actor_user_id, reason=reason
                 )
-                cash_service.release_reserved_prepayment_for_order(
-                    order.id, actor_user_id=actor_user_id, reason=reason
-                )
+                cash_service.release_reserved_prepayment_for_order(order.id, actor_user_id=actor_user_id, reason=reason)
 
             # 1. Flip method FIRST (payment + order). Critical precondition: while
             #    the payment still reads CASH a freed-cash auto-allocation could
@@ -303,20 +319,21 @@ class OrderPaymentMethodEditService:
             order.payment_method = PaymentMethod.BUSINESS_ACCOUNT
             db.session.flush()
 
-            # 1b. THE TIER DISCOUNT FOLLOWS THE RAIL. business_account is not a
+            # 1b. THE PRICE FOLLOWS THE RAIL (spec 2026-10-09 §5.2 #2): the bank-transfer
+            #     contract price, and no COD-only tier discount. business_account is not a
             #     COD rail, so a COD-only tier discount must not survive onto
             #     it: the corporate account must be billed the same
             #     undiscounted amount a fiscalized rail would be. This is a
             #     revenue-correctness point rather than a fiscal one
-            #     (business_account is never fiscalized) -- same rule as
-            #     apply_tier_discount_for_rail's other two call sites
-            #     (PaymentService.create_payment and Case C in
-            #     click_payment_provider_service.py). A no-op for the
-            #     click/payme -> business_account transitions, whose orders
-            #     never carried a tier discount to begin with.
-            from business_app.services.loyalty_service import apply_tier_discount_for_rail
+            #     (business_account is never fiscalized) -- same rule as the
+            #     other rail moves (PaymentService.create_payment and Case C in
+            #     click_payment_provider_service.py). The tier-discount half is a
+            #     no-op for the click/payme -> business_account transitions, whose
+            #     orders never carried a tier discount to begin with; their
+            #     contract lines still move from the catalogue to the bank-transfer price.
+            from business_app.services.rail_pricing import reprice_order_for_rail
 
-            apply_tier_discount_for_rail(order, PaymentMethod.BUSINESS_ACCOUNT)
+            reprice_order_for_rail(order, PaymentMethod.BUSINESS_ACCOUNT, actor_user_id=actor_user_id, reason=reason)
             if payment is not None:
                 payment.amount = order.total_amount
 
@@ -481,6 +498,13 @@ class OrderPaymentMethodEditService:
             #    this order never reserved/consumed any).
             self.corporate_service.reverse_order_prepayment(order.id, reason=reason, actor_user_id=actor_user_id)
 
+            # 1b. THE PRICE FOLLOWS THE RAIL (spec 2026-10-09 §5.2 #3): the contract CASH price, and
+            #     for a loyalty-eligible customer the COD tier discount. Before step 2, so the fresh
+            #     COD obligation is priced off the re-priced total.
+            from business_app.services.rail_pricing import reprice_order_for_rail
+
+            reprice_order_for_rail(order, PaymentMethod.CASH, actor_user_id=actor_user_id, reason=reason)
+
             # 2. Flip method and reset the payment to a fresh COD obligation.
             #    ensure_cod_payment_for_order requires order.payment_method ==
             #    CASH already, and does NOT reset a COMPLETED payment back to
@@ -491,6 +515,7 @@ class OrderPaymentMethodEditService:
                 payment.payment_method = PaymentMethod.CASH
                 payment.status = PaymentStatus.PENDING
                 payment.amount_collected = Decimal("0.00")
+                payment.amount = order.total_amount
                 payment.outstanding_amount = order.total_amount
                 payment.paid_at = None
             order.is_paid = False
@@ -564,7 +589,8 @@ class OrderPaymentMethodEditService:
                     error_code="MARKING_CODES_POOL_SHORT",
                 )
 
-            # 1b. THE TIER DISCOUNT FOLLOWS THE RAIL — it is a COD-only benefit
+            # 1b. THE PRICE FOLLOWS THE RAIL (spec 2026-10-09 §5.2 #4): the catalogue price for a
+            #     contract line. THE TIER DISCOUNT FOLLOWS THE RAIL — it is a COD-only benefit
             #     and must never reach a Click fiscal receipt:
             #     build_click_fiscalization_payload prices received_card off
             #     order.total_amount while filling per-item Discount from
@@ -574,9 +600,9 @@ class OrderPaymentMethodEditService:
             #     (ClickPaymentProviderService._restore_click_rail_after_offline_settlement)
             #     guards against. Revoke before the flip below so payment.amount
             #     and outstanding_amount are computed off the corrected total.
-            from business_app.services.loyalty_service import apply_tier_discount_for_rail
+            from business_app.services.rail_pricing import reprice_order_for_rail
 
-            apply_tier_discount_for_rail(order, PaymentMethod.CLICK)
+            reprice_order_for_rail(order, PaymentMethod.CLICK, actor_user_id=actor_user_id, reason=reason)
 
             # 2. Flip method and reset the payment to a fresh online obligation.
             order.payment_method = PaymentMethod.CLICK

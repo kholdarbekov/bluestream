@@ -2872,7 +2872,8 @@ class TestCashCollectionGroceryUnitsMirror:
         price_row = CorporateContractProductPrice(
             contract_id=contract.id,
             product_id=sample_product.id,
-            unit_price=Decimal("12000.00"),
+            business_account_unit_price=Decimal("12000.00"),
+            cash_unit_price=Decimal("12000.00"),
             is_prepayment_eligible=True,
             is_active=True,
         )
@@ -2886,7 +2887,7 @@ class TestCashCollectionGroceryUnitsMirror:
 
         from business_app.models.order import OrderItem
 
-        unit_price = Decimal(str(price_row.unit_price))
+        unit_price = Decimal(str(price_row.business_account_unit_price))
         total = unit_price * Decimal(str(quantity))
         order = Order(
             order_number=f"AD-UNITS-{uuid4().hex[:8]}",

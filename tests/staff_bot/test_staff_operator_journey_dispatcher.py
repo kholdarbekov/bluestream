@@ -1078,6 +1078,65 @@ async def test_an_operator_takes_an_order_end_to_end_and_the_backend_gets_the_ch
     assert operator.errors == []
 
 
+def _estimate_priced_on_the_method(call):
+    """The backend's quote once a method is named: here cash is a contract price below the
+    pre-method figure (spec 2026-10-09 §4.3)."""
+    body = _estimate(call)
+    if (call.data or {}).get("payment_method") == "cash":
+        for line in body["items"]:
+            line["unit_price"] = 26000.0
+            line["total_price"] = 26000.0 * line["quantity"]
+        body["subtotal"] = sum(line["total_price"] for line in body["items"])
+    return body
+
+
+async def _reach_the_payment_keyboard(operator):
+    ops, labels = await sign_in(operator)
+    await operator.send(ops.text(menu_label(labels, "staff.menu.create_order")))
+    await operator.send(ops.text(CLIENT_PHONE))
+    await operator.send(ops.tap(f"staff_op_order_{CLIENT_ID}"))
+    await operator.send(ops.tap(f"staff_op_addr_{EXISTING_ADDRESS_ID}"))
+    await operator.send(ops.tap(f"staff_op_product_{BIG_BOTTLE_ID}"))
+    await operator.send(ops.tap(f"staff_op_qty_{BIG_BOTTLE_ID}_3"))
+    await operator.send(ops.tap("staff_op_products_done"))
+    assert operator.conversation_state("staff_create_order") == SELECT_PAYMENT
+    return ops
+
+
+async def test_picking_a_method_requotes_the_basket_on_it_and_the_confirm_screen_reads_that_quote(operator):
+    operator.backend.route("POST", ESTIMATE_ENDPOINT, _estimate_priced_on_the_method)
+    ops = await _reach_the_payment_keyboard(operator)
+
+    await operator.send(ops.tap("staff_op_pay_cash"))
+
+    quotes = backend_calls(operator, "POST", ESTIMATE_ENDPOINT)
+    assert quotes[-1].data == {
+        "items": [{"product_id": BIG_BOTTLE_ID, "quantity": 3}],
+        "payment_method": "cash",
+    }
+    await operator.send(ops.text("Eshik oldiga qoldiring"))
+    summary = last_screen(operator)
+    uzs = _curated("staff.currency.uzs", "en")
+    assert f"{_curated('staff.operator.subtotal', 'en')}: 78,000 {uzs}" in summary.text, summary.text
+    assert "81,000" not in summary.text
+
+
+async def test_a_quote_the_backend_refuses_keeps_the_operator_on_the_payment_keyboard(operator):
+    def _refuse_once_a_method_is_named(call):
+        if (call.data or {}).get("payment_method"):
+            return staff_backend_failure("Ambiguous contract pricing for product 11", status_code=400)
+        return _estimate(call)
+
+    operator.backend.route("POST", ESTIMATE_ENDPOINT, _refuse_once_a_method_is_named)
+    ops = await _reach_the_payment_keyboard(operator)
+
+    await operator.send(ops.tap("staff_op_pay_cash"))
+
+    assert operator.conversation_state("staff_create_order") == SELECT_PAYMENT
+    assert "payment_method" not in user_data(operator)["new_order"]
+    assert backend_calls(operator, "POST", CREATE_ORDER_ENDPOINT) == []
+
+
 async def test_a_payment_method_the_backend_did_not_offer_is_refused_from_a_stale_keyboard(
     operator,
 ):

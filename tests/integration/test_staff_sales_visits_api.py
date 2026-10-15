@@ -138,7 +138,8 @@ def _fund_business_account(db, user_id, product):
         CorporateContractProductPrice(
             contract_id=contract.id,
             product_id=product.id,
-            unit_price=Decimal("15000.00"),
+            business_account_unit_price=Decimal("15000.00"),
+            cash_unit_price=Decimal("15000.00"),
             is_prepayment_eligible=True,
             is_active=True,
         )

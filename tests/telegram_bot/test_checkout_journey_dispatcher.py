@@ -210,6 +210,11 @@ class Shop:
         # discounting tier without standing up the whole loyalty schema — the
         # SHAPE is what the bot is being driven against here.
         self.estimate_pricing: dict = {}
+        # payment_method -> the 4xx BODY the server refuses that method's quote
+        # with. Keyed by method because the picker quotes the SAME endpoint with
+        # no method first: a contract price can sink one method's basket below
+        # the floor while the catalogue-priced picker quote still clears it.
+        self.estimate_refusals: dict[str, dict] = {}
 
         self.available_methods = [
             {"method": "cash", "is_active": True},
@@ -349,6 +354,9 @@ class Shop:
     def _estimate(self, call):
         """`CartService.calculate_cart_estimate`'s payload shape, priced by the
         SERVER — the bot may only read these numbers, never compute them."""
+        refusal = self.estimate_refusals.get((call.data or {}).get("payment_method"))
+        if refusal is not None:
+            return backend_failure(refusal["message"], status_code=refusal["status_code"], data=refusal)
         cart = self.cart_envelope()["data"]["cart"]
         subtotal = float(cart["subtotal"])
         pricing = {
@@ -900,6 +908,7 @@ async def test_the_cash_buttons_discount_suffix_comes_off_the_neutral_screens_ow
     add_address(bot, 900, "Uy", "Chilonzor 15")
     shop.estimate_pricing = {
         "tier_discount": 1800.0,
+        "cod_savings": 1800.0,
         "tier_name": "Nimbus",
         "tier_discount_percentage": 4.0,
         "final_total": 43200.0,
@@ -928,6 +937,7 @@ async def test_the_cash_buttons_discount_suffix_renders_a_fractional_rate(
     add_address(bot, 900, "Uy", "Chilonzor 15")
     shop.estimate_pricing = {
         "tier_discount": 900.0,
+        "cod_savings": 900.0,
         "tier_name": "Nimbus",
         "tier_discount_percentage": 2.5,
         "final_total": 44100.0,
@@ -938,6 +948,20 @@ async def test_the_cash_buttons_discount_suffix_renders_a_fractional_rate(
 
     picker = bot.telegram.last_shown()
     assert "💰 Naqd pul −2.5% 🏷" in picker.button_labels(), picker.button_labels()
+
+
+async def test_the_picker_quotes_the_basket_before_a_method_is_chosen(bot, shop, user):
+    """D5 (spec 2026-10-09): the picker is drawn BEFORE the method is chosen, so its basket block is
+    the method-less (catalogue) quote. A contract customer must not be shown the cash price as 'the'
+    total and then charged the bank-transfer price on the default method."""
+    add_address(bot, 900, "Uy", "Chilonzor 15")
+
+    await fill_cart(bot, user, BOTTLE_19L, quantity=3)
+    await reach_payment_picker(bot, user, 900)
+
+    quotes = [call for call in bot.backend.calls if call.endpoint == "/api/v1/orders/cart/estimate"]
+    assert quotes, "the picker must quote the basket"
+    assert "payment_method" not in (quotes[-1].data or {}), quotes[-1].data
 
 
 async def test_the_cash_button_carries_no_suffix_when_the_tier_discount_is_zero(
@@ -1048,6 +1072,54 @@ async def test_the_card_confirm_screen_no_longer_pitches_the_cash_saving(
     assert "Nimbus discount" not in screen.text, (
         "a fiscalized rail earns no discount; showing the line would be a lie"
     )
+    assert_no_swallowed_crash(bot)
+
+
+async def test_a_method_whose_contract_price_sinks_the_basket_below_the_minimum_offers_no_confirm(
+    bot, shop, user
+):
+    """Contract dual pricing (spec 2026-10-09, D5). The cart and the picker
+    price the basket at the catalogue (30,000), which clears the floor; the
+    cash quote is priced at the contract's cash price, which does not. The
+    server refuses that quote with `ORDER_MIN_AMOUNT` and its own figures —
+    the body `@handle_api_exception` builds, pinned over HTTP by
+    tests/integration/test_contract_price_follows_method.py::
+    test_a_basket_below_the_minimum_at_the_contract_price_is_refused_by_the_quote.
+
+    The confirm screen must state the shortfall on THAT method, off the
+    server's `items_subtotal`, and offer no Confirm — not a total-less screen
+    whose Confirm the order endpoint then refuses in untranslated English."""
+    add_address(bot, 900, "Uy", "Chilonzor 15")
+    contract_cash_subtotal = 18000.0
+    shortfall = min_order_shortfall(contract_cash_subtotal)
+    assert shortfall > 0, "precondition: the contract cash basket sits below the floor"
+    shop.estimate_refusals["cash"] = {
+        "error": "VALIDATION_ERROR",
+        "message": "Minimum order amount is 20000 UZS. Current cart total: 18000.0 UZS",
+        "status_code": 400,
+        "details": {
+            "min_amount": float(MIN_ORDER_AMOUNT),
+            "items_subtotal": contract_cash_subtotal,
+            "validation_errors": [],
+        },
+        "error_code": "ORDER_MIN_AMOUNT",
+    }
+
+    await fill_cart(bot, user, BOTTLE_19L, quantity=2)  # 30,000 at the catalogue
+    await reach_payment_picker(bot, user, 900)
+    assert "payment_cash" in bot.telegram.last_shown().callback_data(), (
+        "precondition: the catalogue-priced picker offers cash"
+    )
+    await bot.send(user.tap("payment_cash"))
+
+    screen = bot.telegram.last_shown()
+    assert "confirm_order" not in screen.callback_data(), (
+        "Confirm must be unreachable when the chosen method's quote is below the minimum"
+    )
+    assert "cart_view" in screen.callback_data(), "the customer must be sent back to the cart"
+    assert f"Minimum {MIN_ORDER_AMOUNT:,.0f} UZS" in screen.text, screen.text
+    assert f"Add {shortfall:,.0f} UZS more" in screen.text, screen.text
+    assert "Minimum order amount is" not in screen.text, "the server's English must not leak"
     assert_no_swallowed_crash(bot)
 
 

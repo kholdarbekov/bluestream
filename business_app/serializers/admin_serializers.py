@@ -836,6 +836,7 @@ def serialize_product_admin(product: Product) -> Dict[str, Any]:
             "price": float(product.base_price),  # Frontend expects 'price'
             "discount_price": float(product.discount_price) if product.discount_price else None,
             "current_price": float(getattr(product, "current_price", product.base_price)),
+            "catalogue_unit_price": float(product.catalogue_unit_price),
             "category_id": product.category_id,
             "volume": product.volume,
             "volume_unit": product.volume_unit,

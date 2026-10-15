@@ -4,6 +4,7 @@ from enum import Enum
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
     DateTime,
     Enum as SqlEnum,
@@ -21,6 +22,10 @@ from sqlalchemy.orm import relationship, backref
 from business_app import db
 from business_app.models import TimestampMixin
 from shared.enums import CorporateContractTrackingMode
+
+
+def _optional_money(value):
+    return float(value) if value is not None else None
 
 
 class CorporateContractStatus(Enum):
@@ -182,12 +187,23 @@ class CorporateContractProductPrice(db.Model, TimestampMixin):
             "contract_id",
             "is_active",
         ),
+        CheckConstraint(
+            "business_account_unit_price IS NULL OR business_account_unit_price >= 0",
+            name="ck_corporate_contract_product_prices_ba_price_nonneg",
+        ),
+        CheckConstraint(
+            "cash_unit_price IS NULL OR cash_unit_price >= 0",
+            name="ck_corporate_contract_product_prices_cash_price_nonneg",
+        ),
     )
 
     id = Column(Integer, primary_key=True)
     contract_id = Column(Integer, ForeignKey("corporate_contracts.id"), nullable=False, index=True)
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False, index=True)
-    unit_price = Column(Numeric(precision=10, scale=2), nullable=False)
+    # Spec 2026-10-09-corporate-contract-dual-pricing-design.md §3.1. NULL means "the catalogue
+    # price for this payment method", looked up live at order time — never a copied number.
+    business_account_unit_price = Column(Numeric(precision=10, scale=2), nullable=True)
+    cash_unit_price = Column(Numeric(precision=10, scale=2), nullable=True)
     is_prepayment_eligible = Column(Boolean, nullable=False, default=True, index=True)
     is_active = Column(Boolean, nullable=False, default=True, index=True)
     notes = Column(Text, nullable=True)
@@ -198,6 +214,11 @@ class CorporateContractProductPrice(db.Model, TimestampMixin):
         backref=backref("corporate_contract_prices", lazy="dynamic"),
     )
 
+    @property
+    def has_contract_price(self) -> bool:
+        """At least one payment method pays a contract price (drives the bot's checkout hint)."""
+        return self.business_account_unit_price is not None or self.cash_unit_price is not None
+
     def to_dict(self):
         return {
             "id": self.id,
@@ -206,7 +227,9 @@ class CorporateContractProductPrice(db.Model, TimestampMixin):
             "product_name": getattr(self.product, "name", None),
             "product_sku": getattr(self.product, "sku", None),
             "product_size": getattr(getattr(self.product, "size", None), "value", getattr(self.product, "size", None)),
-            "unit_price": float(self.unit_price) if self.unit_price is not None else None,
+            "business_account_unit_price": _optional_money(self.business_account_unit_price),
+            "cash_unit_price": _optional_money(self.cash_unit_price),
+            "catalogue_unit_price": (float(self.product.catalogue_unit_price) if self.product is not None else None),
             "is_prepayment_eligible": self.is_prepayment_eligible,
             "is_active": self.is_active,
             "notes": self.notes,

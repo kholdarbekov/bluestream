@@ -159,8 +159,13 @@ const humanizeAuditAction = (value) =>
 // every settle path allocates against it, so anything the admin is quoted or
 // pre-filled with must be this number, never `outstanding_amount`.
 // Falls back to the gross for payloads predating the field.
+// An unpaid electronic (Click) order is converted to cash when collected offline, which
+// re-prices it, so the figure to collect is the server's `cash_settlement_amount` (spec
+// 2026-10-09 §6.3) whenever the order carries one. A pure field read, no arithmetic here.
 export const collectableOutstanding = (order) =>
-  Number(order?.net_outstanding_amount ?? order?.outstanding_amount ?? 0);
+  Number(
+    order?.cash_settlement_amount ?? order?.net_outstanding_amount ?? order?.outstanding_amount ?? 0
+  );
 
 const Orders = () => {
   const { t } = useTranslation('orders');
@@ -335,14 +340,18 @@ const Orders = () => {
     if (userSearchDebounceRef.current) clearTimeout(userSearchDebounceRef.current);
   }, []);
 
+  // The listed price is the price of the payment method in play (spec 2026-10-09 §4.3): the
+  // create form's chosen method, or the edited order's own method. The server prices it.
+  const pricingPaymentMethod = isEditItemsModalVisible ? selectedOrder?.payment_method : watchedPaymentMethod;
   const { data: productsData } = useQuery({
-    queryKey: ['products-for-order', selectedUserId],
+    queryKey: ['products-for-order', selectedUserId, pricingPaymentMethod || null],
 
     queryFn: () =>
       adminService.getProducts({
         per_page: 100,
         is_active: true,
         ...(selectedUserId ? { pricing_user_id: selectedUserId } : {}),
+        ...(selectedUserId && pricingPaymentMethod ? { payment_method: pricingPaymentMethod } : {}),
       }),
 
     enabled: isCreateModalVisible || isEditItemsModalVisible,
@@ -2431,7 +2440,7 @@ const Orders = () => {
                             return (
                               <Option key={product.id} value={product.id}>
                                 {product.name} - {formatMoney(effectivePrice)} UZS
-                                {product.pricing_source === 'contract' ? ' (Contract)' : ''}
+                                {String(product.pricing_source || '').startsWith('contract') ? ' (Contract)' : ''}
                               </Option>
                             );
                           })}
@@ -3107,6 +3116,11 @@ const Orders = () => {
               <Descriptions.Item label={t('ui.orders.order_delivered', 'Order delivered')} span={2}>
                 {paymentMethodPreviewData?.is_delivered ? t('ui.common.yes', 'Yes') : t('ui.common.no', 'No')}
               </Descriptions.Item>
+              {paymentMethodPreviewData?.new_total !== undefined && paymentMethodPreviewData?.new_total !== null ? (
+                <Descriptions.Item label={t('ui.orders.payment_method_total_change', 'Total')} span={2}>
+                  {formatMoney(paymentMethodPreviewData.current_total)} → <strong>{formatMoney(paymentMethodPreviewData.new_total)}</strong> UZS
+                </Descriptions.Item>
+              ) : null}
               <Descriptions.Item
                 label={t('ui.orders.payment_method_cod_override', 'Override the cash-on-delivery debt cap')}
                 span={2}

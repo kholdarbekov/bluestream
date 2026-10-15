@@ -109,7 +109,8 @@ def _seed_order_627(db, workplace_user, sample_product, driver):
     price_row = CorporateContractProductPrice(
         contract_id=contract.id,
         product_id=sample_product.id,
-        unit_price=UNIT_PRICE,
+        business_account_unit_price=UNIT_PRICE,
+        cash_unit_price=UNIT_PRICE,
         is_prepayment_eligible=True,
         is_active=True,
     )

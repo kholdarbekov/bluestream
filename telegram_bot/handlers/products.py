@@ -50,6 +50,18 @@ class ProductHandlers(BaseHandler):
     """Product-related handlers"""
 
     @staticmethod
+    def _contract_price_hint(flagged: bool, language: str, *, markdown_v2: bool) -> Optional[str]:
+        """The one line telling a contract customer their price waits at checkout (spec 2026-10-09 §4.4).
+
+        The server decides (`contract_price_at_checkout`); this only renders it. Never names the
+        phone: customer copy points to the bot, not a call.
+        """
+        if not flagged:
+            return None
+        text = i18n.get('telegram.products.contract_price_at_checkout', language)
+        return escape_markdown(text, version=2) if markdown_v2 else text
+
+    @staticmethod
     def _get_effective_unit_price(product: Dict[str, Any]) -> float:
         """Resolve the best available display price with safe schema fallbacks."""
         pricing = product.get('pricing') or {}
@@ -1273,6 +1285,13 @@ class ProductHandlers(BaseHandler):
                 f"   💰 {price_str} UZS \\| 📦 {escape_markdown(str(product['specifications'].get('volume', 'N/A')), version=2)}{escape_markdown(product['specifications'].get('volume_unit', ''), version=2)}"
             )
 
+        hint = self._contract_price_hint(
+            any((product.get('pricing') or {}).get('contract_price_at_checkout') for product in products),
+            language,
+            markdown_v2=True,
+        )
+        if hint:
+            formatted_lines.append(hint)
         return "\n\n".join(formatted_lines)
 
     def _format_product_details(self, product: Dict, language: str) -> str:
@@ -1290,6 +1309,11 @@ class ProductHandlers(BaseHandler):
             f"📦 {i18n.get('telegram.products.volume_label', language)}: {escape_markdown(str(product['specifications'].get('volume', 'N/A')), version=2)}{escape_markdown(product['specifications'].get('volume_unit', ''), version=2)}",
             f"📊 {i18n.get('telegram.products.stock_label', language)}: {stock_status}",
         ]
+        hint = self._contract_price_hint(
+            bool((product.get('pricing') or {}).get('contract_price_at_checkout')), language, markdown_v2=True
+        )
+        if hint:
+            details.insert(2, hint)  # straight under the price line
 
         min_order_qty, _upper = self._purchase_bounds(product)
         if min_order_qty > 1:
@@ -1393,6 +1417,11 @@ class ProductHandlers(BaseHandler):
                     })
             cart_is_empty = subtotal <= 0
             lines.append(f"\n💰 {i18n.get('telegram.cart_total', language)}: {format_price(subtotal)} UZS")
+            # The cart is drawn before a method exists, so it states the catalogue (D5); say a
+            # contract price will apply at checkout. Plain text here, like the rest of this screen.
+            hint = self._contract_price_hint(bool(cart.get('contract_price_at_checkout')), language, markdown_v2=False)
+            if hint:
+                lines.append(hint)
 
             cod_prepayment = cart.get('cod_prepayment') or {}
             available_balance = float(cod_prepayment.get('available_balance') or 0)

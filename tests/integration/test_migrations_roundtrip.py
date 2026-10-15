@@ -590,7 +590,7 @@ def test_t_tier_17_backfills_single_tiers_refuses_live_commission_and_rolls_back
     - The downgrade refuses while a commission line exists, then while a statement exists.
     - With neither, it puts each default back into the v4 columns and each product's FIRST tier back
       as its v4 row. v3's two-tier schedules keep 800 and 1,000 and lose 900 and 1,500 (lossy, §3.5b).
-    - head → a4c7e9b2d5f8 then passes.
+    - pay v5 (c5d8e2f1a7b3) → a4c7e9b2d5f8 then passes.
     """
     from alembic import command
 
@@ -611,14 +611,14 @@ def test_t_tier_17_backfills_single_tiers_refuses_live_commission_and_rolls_back
 
         _add(db, _commission_line(w, amount=Decimal("9000")))
         with pytest.raises(RuntimeError, match=r"pay v5: 1 commission ledger lines and 0 statements exist"):
-            command.upgrade(config, "head")
+            command.upgrade(config, PAY_V5_REVISION)
         assert _revision(db.engine) == PAY_V4_REVISION
         assert _rows(db.engine, "SELECT count(*) FROM sales_pay_plan_rates") == [(2,)]
         with db.engine.connect() as conn:
             assert "from_unit" not in _schema_columns(conn, "sales_pay_plan_rates")
 
         _run(db.engine, _DELETE_COMMISSION_LINES)
-        command.upgrade(config, "head")
+        command.upgrade(config, PAY_V5_REVISION)
 
         assert _rows(
             db.engine,
@@ -686,6 +686,75 @@ def test_t_tier_17_backfills_single_tiers_refuses_live_commission_and_rolls_back
             (v3_id, w.water, "per_unit", Decimal("1000.00")),
         ]
 
-        command.upgrade(config, "head")
+        command.upgrade(config, PAY_V5_REVISION)
         command.downgrade(config, PAY_PARENT_REVISION)
         _assert_pay_schema(db.engine, present=False)
+
+
+CONTRACT_PRICE_PARENT_REVISION = "c5d8e2f1a7b3"
+
+
+@pytest.mark.integration
+def test_contract_price_split_copies_the_price_into_both_methods_and_rolls_back(ephemeral_pg_database):
+    """Spec 2026-10-09 §3.2. Upgrade: every row carries its old price in both columns. Downgrade:
+    bank-transfer price wins, then cash, then the product's base price."""
+    from alembic import command
+
+    from business_app import db
+    from business_app.models.corporate import CorporateContract, CorporateContractStatus
+    from business_app.models.product import Product, ProductCategory
+    from business_app.models.user import User
+    from shared.enums import UserRole, UserType
+
+    app = _migration_app(ephemeral_pg_database)
+    with app.app_context():
+        config = app.extensions["migrate"].migrate.get_config()
+        command.upgrade(config, CONTRACT_PRICE_PARENT_REVISION)
+
+        # Only corporate_contract_product_prices differs between the parent and head, so the ORM
+        # is safe for every other table; the price row itself goes in as raw SQL.
+        user = User(
+            email="split@example.com", phone="+998901110001", password_hash="x" * 60, first_name="S",
+            last_name="P", user_type=UserType.ENTITY, role=UserRole.CUSTOMER, is_verified=True,
+        )
+        category = ProductCategory(name="Water", description="d", is_active=True)
+        db.session.add_all([user, category])
+        db.session.flush()
+        product = Product(
+            name="Water 19L", description="d", category_id=category.id, size="19L", volume=19.0,
+            volume_unit="L", base_price=Decimal("15000.00"), stock_quantity=10, min_stock_level=1,
+            max_stock_level=100, is_active=True,
+        )
+        contract = CorporateContract(
+            user_id=user.id, contract_number="SPLIT-1", name="Split",
+            status=CorporateContractStatus.ACTIVE, currency="UZS", is_active=True,
+        )
+        db.session.add_all([product, contract])
+        db.session.commit()
+        contract_id, product_id = contract.id, product.id
+        db.session.remove()
+
+        _run(
+            db.engine,
+            "INSERT INTO corporate_contract_product_prices "
+            "(contract_id, product_id, unit_price, is_prepayment_eligible, is_active, created_at, updated_at) "
+            f"VALUES ({contract_id}, {product_id}, 18000.00, true, true, now(), now())",
+        )
+
+        command.upgrade(config, "head")
+        assert _rows(
+            db.engine, "SELECT business_account_unit_price, cash_unit_price FROM corporate_contract_product_prices"
+        ) == [(Decimal("18000.00"), Decimal("18000.00"))]
+        with db.engine.connect() as conn:
+            assert "unit_price" not in _schema_columns(conn, "corporate_contract_product_prices")
+
+        _run(db.engine, "UPDATE corporate_contract_product_prices SET business_account_unit_price = NULL, cash_unit_price = 16000")
+        command.downgrade(config, CONTRACT_PRICE_PARENT_REVISION)
+        assert _rows(db.engine, "SELECT unit_price FROM corporate_contract_product_prices") == [(Decimal("16000.00"),)]
+
+        command.upgrade(config, "head")
+        _run(db.engine, "UPDATE corporate_contract_product_prices SET business_account_unit_price = NULL, cash_unit_price = NULL")
+        command.downgrade(config, CONTRACT_PRICE_PARENT_REVISION)
+        assert _rows(db.engine, "SELECT unit_price FROM corporate_contract_product_prices") == [(Decimal("15000.00"),)]
+
+        command.upgrade(config, "head")

@@ -2631,6 +2631,7 @@ def get_order_details(order_id):
     """Get detailed information about a specific order including all items"""
     try:
         from business_app.serializers.order_serializers import payability_fields
+        from business_app.services.staff_service import StaffService
         from business_app.utils.payment_projection import get_payment_projection
 
         # Get order with all related data
@@ -2697,6 +2698,10 @@ def get_order_details(order_id):
             "net_outstanding_amount": (
                 float(payment_projection["net_outstanding_amount"]) if payment_projection else 0
             ),
+            # What settling an unpaid electronic order in cash or by card transfer collects: the
+            # conversion re-prices it onto the cash rail (spec 2026-10-09 §6.3). The driver screen's
+            # figure, from the same projection; None for every other order.
+            "cash_settlement_amount": StaffService.get_cod_collection_projection(order)["cash_settlement_amount"],
             "collection_events_count": (
                 len(getattr(order.payment, "cash_collection_allocations", []) or []) if order.payment else 0
             ),
@@ -2896,6 +2901,9 @@ def get_products_admin():
         is_active = parse_bool_arg("is_active")
         low_stock_only = parse_bool_arg("low_stock_only", default=False)
         pricing_user_id = request.args.get("pricing_user_id", type=int)
+        # The create/edit-order form re-asks whenever its payment method changes, so the price it
+        # lists is the price that method charges (spec 2026-10-09 §4.3). None lists the catalogue.
+        pricing_payment_method = request.args.get("payment_method") or None
 
         # Build query
         query = Product.query
@@ -2931,13 +2939,12 @@ def get_products_admin():
         pricing_map = {}
         if pricing_user_id and pagination.items:
             product_ids = [product.id for product in pagination.items]
-            fallback_prices = {
-                product.id: Decimal(str(product.calculate_price(quantity=1))) for product in pagination.items
-            }
+            fallback_prices = {product.id: product.catalogue_unit_price for product in pagination.items}
             pricing_map = get_corporate_contract_service().resolve_pricing_for_user_products(
                 user_id=pricing_user_id,
                 product_ids=product_ids,
                 fallback_prices=fallback_prices,
+                payment_method=pricing_payment_method,
             )
 
         serialized_items = []
@@ -2953,7 +2960,7 @@ def get_products_admin():
                         resolved["contract_price_row"].id if resolved.get("contract_price_row") else None
                     )
                 else:
-                    serialized["effective_unit_price"] = float(product.calculate_price(quantity=1))
+                    serialized["effective_unit_price"] = float(product.catalogue_unit_price)
                     serialized["pricing_source"] = "fallback"
                     serialized["pricing_contract_id"] = None
                     serialized["pricing_contract_product_price_id"] = None

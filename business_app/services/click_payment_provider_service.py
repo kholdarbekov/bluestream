@@ -18,6 +18,7 @@ from shared.enums import PaymentMethod, PaymentStatus
 from business_app.utils.exceptions import PaymentError, ProviderUnavailableError, ValidationError
 from business_app.utils.http_client import RetryConfig, request_with_retry
 from business_app.utils.payment_projection import (
+    order_is_dead,
     order_is_live_and_unpaid,
     order_is_payable_online,
     order_is_resolved,
@@ -534,10 +535,16 @@ class ClickPaymentProviderService:
         ).strip()
 
         requested_amount = self._normalize_amount(payload.get("amount"))
-        expected_amount = self._normalize_amount(payment.amount)
+        # Evaluated ONCE: the amount this COMPLETE must carry and where it is routed read the same answer.
+        converted_to_cash = self._was_converted_to_cash_after_click(payment)
+        expected_amount = self._expected_complete_amount(payment, converted_to_cash=converted_to_cash)
         if expected_amount != requested_amount:
             self._log_flow_step(
-                "complete_amount_mismatch",
+                (
+                    "complete_amount_mismatch_after_offline_settlement"
+                    if converted_to_cash
+                    else "complete_amount_mismatch"
+                ),
                 level="warning",
                 payment=payment,
                 requested_amount=str(requested_amount),
@@ -546,6 +553,10 @@ class ClickPaymentProviderService:
             response = {"error": -2, "error_note": "Incorrect amount"}
             self._append_callback_audit(payment, stage="complete", request_payload=payload, response_payload=response)
             return response
+
+        # A FINISHED payment is never rewritten by a callback. Computed once, before the error-code parse, so the
+        # missing-error branch and the terminal branch below read the same answer.
+        terminal = payment.status in {PaymentStatus.COMPLETED, PaymentStatus.CANCELLED, PaymentStatus.FAILED}
 
         try:
             click_error = self._normalize_error_code(payload.get("error"))
@@ -557,7 +568,14 @@ class ClickPaymentProviderService:
                 raw_error_field=payload.get("error"),
                 reason=str(exc),
             )
-            may_end = self._may_end_payment(payment, reason="click_complete_invalid_payload")
+            # An unparseable callback carries no evidence about the transaction, so it never ends a payment that
+            # is already finished (a paid order's COMPLETED payment would pass `_may_end_payment`, because the order
+            # has resolved) or one converted to cash, which is the cash rail's now.
+            may_end = (
+                not terminal
+                and not converted_to_cash
+                and self._may_end_payment(payment, reason="click_complete_invalid_payload")
+            )
             if may_end:
                 payment.status = PaymentStatus.CANCELLED
                 payment.failure_reason = "Click callback missing error code"
@@ -593,14 +611,17 @@ class ClickPaymentProviderService:
         incoming_paydoc_id = str(payload.get("click_paydoc_id") or "").strip()
         genuine_debit = click_error == 0 and bool(incoming_trans_id) and bool(incoming_paydoc_id)
 
-        if payment.status in {PaymentStatus.COMPLETED, PaymentStatus.CANCELLED, PaymentStatus.FAILED}:
-            if genuine_debit:
-                return self._reconcile_late_complete(
-                    payment,
-                    payload,
-                    original_winner_trans_id=original_winner_trans_id,
-                    merchant_prepare_id=merchant_prepare_id,
-                )
+        # A converted payment takes a genuine debit whatever its cash status: nothing collected yet,
+        # partly paid or paid (owner ruling 2026-10-15). It never reaches the live path below.
+        if genuine_debit and (terminal or converted_to_cash):
+            return self._reconcile_late_complete(
+                payment,
+                payload,
+                original_winner_trans_id=original_winner_trans_id,
+                merchant_prepare_id=merchant_prepare_id,
+                converted_to_cash=converted_to_cash,
+            )
+        if terminal:
             if payment.status == PaymentStatus.COMPLETED:
                 self._log_flow_step("complete_already_paid", payment=payment, level="info")
                 response = self._build_error_response(-4, "Already paid")
@@ -610,10 +631,12 @@ class ClickPaymentProviderService:
             self._append_callback_audit(payment, stage="complete", request_payload=payload, response_payload=response)
             db.session.flush()
             return response
+        if converted_to_cash:
+            return self._refuse_non_debit_on_converted_payment(payment, payload, click_error=click_error)
 
         # Live payment: this callback is the payment's own transaction — record
         # its identifiers for all live-flow outcomes (success, cancel, invalid).
-        # Terminal-status payments are handled above and must NOT be stamped.
+        # Terminal-status and converted payments are handled above and must NOT be stamped.
         self._apply_click_callback_identifiers(payment, payload, merchant_prepare_id)
 
         if click_error != 0:
@@ -705,6 +728,26 @@ class ClickPaymentProviderService:
         self._log_flow_step("complete_response_sent_success", payment=payment, response_error=response.get("error"))
         return response
 
+    def _refuse_non_debit_on_converted_payment(
+        self, payment: Payment, payload: Dict[str, Any], *, click_error: int
+    ) -> Dict[str, Any]:
+        """A Click cancel, or a success without both ids, on a payment converted to cash.
+
+        The cash rail owns the payment now, so this callback changes nothing on it: no CANCELLED
+        status, no identifier stamping. Answered as the terminal branch answers a non-debit.
+        """
+        if click_error != 0:
+            self._log_flow_step("complete_cancelled_after_cash_conversion", payment=payment, level="warning")
+            response = self._build_error_response(-9, "Transaction cancelled")
+        else:
+            self._log_flow_step(
+                "complete_success_missing_identifiers_after_cash_conversion", payment=payment, level="error"
+            )
+            response = self._build_error_response(-8, "Error in request")
+        self._append_callback_audit(payment, stage="complete", request_payload=payload, response_payload=response)
+        db.session.flush()
+        return response
+
     def _apply_click_callback_identifiers(self, payment: Payment, payload: Dict[str, Any], merchant_prepare_id) -> None:
         """Record this callback's identifiers on the payment. Called for the payment's
         own live-flow outcomes (success, cancel, invalid) and for accepted late-completes —
@@ -730,11 +773,14 @@ class ClickPaymentProviderService:
         *,
         original_winner_trans_id: str,
         merchant_prepare_id,
+        converted_to_cash: bool,
     ) -> Dict[str, Any]:
         """A GENUINE debit (error=0, both Click ids present) landed on a non-live
-        payment. Owner policy (spec 2026-07-08): accept & fulfill when the order
-        is still unsettled; auto-reverse a duplicate electronic charge; credit
-        the customer's prepaid balance when the order was settled offline."""
+        payment, or on a payment converted to cash. Owner policy (spec 2026-07-08):
+        accept & fulfill when the order is still unsettled; auto-reverse a duplicate
+        electronic charge; restore the Click rail after a cash conversion (rulings
+        2026-08-24, 2026-10-15); credit the customer's prepaid balance when the order
+        is dead or was settled by other means."""
         from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
 
         method_value = (
@@ -743,6 +789,18 @@ class ClickPaymentProviderService:
         electronic = method_value in {PaymentMethod.CLICK.value, PaymentMethod.CARD.value}
         incoming_trans_id = str(payload.get("click_trans_id") or "").strip()
         order = payment.order
+
+        # CASE C — the order was converted to cash (cash at the door, a personal card
+        # transfer) and the customer's Click payment has now landed anyway. Never refused,
+        # whatever the cash payment's status: the order goes back to Click and the cash is
+        # freed (owner ruling 2026-10-15). Routed FIRST: `electronic` is False here and the
+        # incoming trans id matches the one handle_prepare stamped, so falling through would
+        # answer "-4 Already paid" (Case D) while writing nothing: no receipt, money gone.
+        # A dead order is not restored; its Click money becomes prepaid balance, as before.
+        if converted_to_cash:
+            if order_is_dead(order):
+                return self._credit_late_debit(payment, payload)
+            return self._restore_click_rail_after_offline_settlement(payment, payload, merchant_prepare_id)
 
         if payment.status in {PaymentStatus.CANCELLED, PaymentStatus.FAILED}:
             # Re-fulfil whenever the order is still LIVE and unpaid — not merely
@@ -759,16 +817,6 @@ class ClickPaymentProviderService:
             return self._credit_late_debit(payment, payload)
 
         # payment.status == COMPLETED
-        #
-        # CASE C (policy 2026-08-24) — the order was settled as CASH at the door
-        # and a genuine Click debit has now landed. `electronic` is False here
-        # because convert_electronic_order_to_cash flipped the rail, and the
-        # incoming trans id matches the one handle_prepare stamped, so without
-        # this branch control falls into Case D below and answers "-4 Already
-        # paid" while writing NOTHING: no credit event, no receipt, money gone.
-        if self._was_settled_offline_after_electronic(payment):
-            return self._restore_click_rail_after_offline_settlement(payment, payload, merchant_prepare_id)
-
         if incoming_trans_id == original_winner_trans_id or (electronic and not original_winner_trans_id):
             # Case D: true protocol retry of the winning transaction (or winner
             # unknown — be conservative). Protocol-correct idempotent ack.
@@ -827,25 +875,41 @@ class ClickPaymentProviderService:
             db.session.flush()
             return response
 
-        # Case C: order settled offline (cash at the door / personal card) while
-        # this Click charge was in flight — keep the debit as prepaid credit.
+        # A paid non-electronic payment Click never prepared (no Click ids, so not
+        # a cash conversion, which is routed above) — keep the debit as prepaid credit.
         return self._credit_late_debit(payment, payload)
 
-    @staticmethod
-    def _was_settled_offline_after_electronic(payment: Payment) -> bool:
-        """Was this payment converted to CASH at the door after starting as Click?
+    def _expected_complete_amount(self, payment: Payment, *, converted_to_cash: bool) -> Decimal:
+        """What a Click COMPLETE must carry for this payment (spec 2026-10-09 §5.4, owner ruling D7).
 
-        Keyed on the Click identifiers surviving in ``provider_data`` — the rail
-        flip clears neither — plus the row now reading CASH/COMPLETED. Once the
-        rail has been restored this is False again, so a Click re-send falls
-        through to the normal Case D idempotent ack instead of crediting twice.
+        `payment.amount`, except after a Click -> cash conversion (Case C). Converting re-priced the
+        order onto the cash rail, so `payment.amount` no longer states what the Click link asked for;
+        the order quoted back on Click does. It is recalculated, not stored: if the catalogue, the
+        lines, the delivery fee or a discount changed in between, the amounts differ and Click is
+        answered -2, logged as `complete_amount_mismatch_after_offline_settlement`.
+        """
+        if converted_to_cash and payment.order is not None:
+            from business_app.services.rail_pricing import quote_order_for_rail
+
+            return self._normalize_amount(quote_order_for_rail(payment.order, PaymentMethod.CLICK).total)
+        return self._normalize_amount(payment.amount)
+
+    @staticmethod
+    def _was_converted_to_cash_after_click(payment: Payment) -> bool:
+        """Was this payment converted to CASH after Click had prepared a transaction on it?
+
+        Keyed on the Click identifiers surviving in ``provider_data`` — the rail flip
+        clears neither — plus the row now reading CASH, WHATEVER its status: nothing
+        collected yet, partly paid, paid or cancelled (owner ruling 2026-10-15). THE one
+        predicate behind both the amount a COMPLETE must carry and where it is routed,
+        so the two can never disagree. Once the rail has been restored this is False
+        again, so a Click re-send falls through to the Case D idempotent ack instead of
+        settling twice.
         """
         method_value = (
             payment.payment_method.value if hasattr(payment.payment_method, "value") else str(payment.payment_method)
         )
         if method_value != PaymentMethod.CASH.value:
-            return False
-        if payment.status != PaymentStatus.COMPLETED:
             return False
         click_data = (payment.provider_data or {}).get("click") or {}
         return bool(click_data.get("click_trans_id") or click_data.get("click_paydoc_id"))
@@ -855,16 +919,24 @@ class ClickPaymentProviderService:
     ) -> Dict[str, Any]:
         """Case C: settle the order on the rail that actually took the money.
 
-        Owner ruling 2026-08-24. Click processed a real debit, so Click is owed a
-        fiscal receipt and the order should book against the Click rail. The cash
-        the driver already banked becomes the customer's prepaid credit.
+        Owner rulings 2026-08-24 and 2026-10-15. Click processed a real debit, so Click
+        is owed a fiscal receipt and the order books against the Click rail, whatever the
+        cash payment's status (nothing collected yet, partly paid, paid). The cash the
+        conversion had taken is freed: it pays the customer's outstanding debts first, on
+        their own and their linked accounts, oldest first, and what is left is the
+        customer's prepaid balance.
 
-        🔴 ORDER OF OPERATIONS IS LOAD-BEARING. The allocations must be reversed
-        BEFORE the payment completes. ``_sync_completed_prepayment_projection``
-        forces ``amount_collected = amount`` on a completed prepaid payment, which
-        would silently swallow the driver's allocation and lose banknotes the
-        business has already taken in — the money bug ``open_receivable_clause``'s
-        docstring exists to describe.
+        🔴 ORDER OF OPERATIONS IS LOAD-BEARING.
+        1. Prepaid credit reserved for, or settled against, this order is released while
+           the payment still reads CASH: both release paths are CASH-gated (the same two
+           calls the admin payment-method edit makes before it flips a cash rail).
+        2. Every remaining allocation is reversed BEFORE the payment completes.
+           ``_sync_completed_prepayment_projection`` forces ``amount_collected = amount``
+           on a completed prepaid payment, which would silently swallow the driver's
+           allocation and lose banknotes the business has already taken in — the money
+           bug ``open_receivable_clause``'s docstring exists to describe.
+        3. The freed cash is re-applied only AFTER the payment is on Click and COMPLETED,
+           when it is no longer a cash debt the allocator could hand the money back to.
 
         ``reverse_allocation_to_payment`` is used rather than
         ``reverse_collection_event`` precisely because it touches neither
@@ -885,18 +957,29 @@ class ClickPaymentProviderService:
         )
 
         cash_service = CashCollectionService()
-        live_allocations = CashCollectionAllocation.query.filter(
-            CashCollectionAllocation.payment_id == payment.id,
-            CashCollectionAllocation.reversed_at.is_(None),
-        ).all()
-        reversed_total = Decimal("0.00")
-        for allocation in live_allocations:
-            reversed_total += Decimal(str(allocation.allocated_amount or 0))
+        reason = (
+            f"Late Click debit {incoming_trans_id} settled order {payment.order_id}; "
+            "its cash freed for the customer's debts, the rest prepaid balance"
+        )
+
+        def live_allocations():
+            return CashCollectionAllocation.query.filter(
+                CashCollectionAllocation.payment_id == payment.id,
+                CashCollectionAllocation.reversed_at.is_(None),
+            ).all()
+
+        # 1-2. Undo the cash side. Everything live now is freed by the end of this block.
+        freed = live_allocations()
+        freed_total = sum((Decimal(str(allocation.allocated_amount or 0)) for allocation in freed), Decimal("0.00"))
+        freed_event_ids = {allocation.cash_collection_event_id for allocation in freed}
+        if payment.order_id is not None:
+            cash_service.release_pre_delivery_prepaid_settlement_for_order(payment.order_id, reason=reason)
+            cash_service.release_reserved_prepayment_for_order(payment.order_id, reason=reason)
+        for allocation in live_allocations():  # what the releases left: door cash, card transfers
             cash_service.reverse_allocation_to_payment(
                 allocation.id,
                 reversed_by_user_id=None,
-                reason=f"Late Click debit {incoming_trans_id} settled order {payment.order_id}; "
-                "door cash re-booked as customer prepaid credit",
+                reason=reason,
                 commit=False,
             )
 
@@ -906,6 +989,7 @@ class ClickPaymentProviderService:
         if order is not None:
             order.payment_method = PaymentMethod.CLICK
 
+            # THE PRICE FOLLOWS THE RAIL (spec 2026-10-09 §5.2 #6): the catalogue price for a contract line, and
             # THE TIER DISCOUNT FOLLOWS THE RAIL — including back onto Click.
             # A tier discount is a COD-only benefit and must never reach a
             # Click fiscal receipt: build_click_fiscalization_payload prices
@@ -916,11 +1000,13 @@ class ClickPaymentProviderService:
             # prevent. Revoking is also arithmetically correct, not merely
             # safe: Click debited the ORIGINAL, undiscounted amount, so that
             # is what the receipt must state.
-            from business_app.services.loyalty_service import apply_tier_discount_for_rail
+            from business_app.services.rail_pricing import reprice_order_for_rail
 
-            apply_tier_discount_for_rail(order, PaymentMethod.CLICK)
-            # Click debited the undiscounted figure; re-price the payment to
-            # match the restored (possibly re-undiscounted) order total.
+            reprice_order_for_rail(
+                order, PaymentMethod.CLICK, reason=f"late Click debit {incoming_trans_id} restored the Click rail"
+            )
+            # Click debited the Click figure (handle_complete checked it against this same quote);
+            # re-price the payment to match the restored order total.
             payment.amount = order.total_amount
 
         self._apply_click_callback_identifiers(payment, payload, merchant_prepare_id)
@@ -940,6 +1026,10 @@ class ClickPaymentProviderService:
                 payment.id,
             )
 
+        # 3. The freed cash pays the customer's (and linked accounts') delivered debts, oldest first;
+        #    the rest is prepaid balance.
+        debts_paid, left_as_prepaid_balance = cash_service.reapply_unapplied_to_delivered_debts(freed_event_ids)
+
         audit_logger.log_event(
             event_type=AuditEventType.PAYMENT_PROCESSED,
             action="click_late_complete_rail_restored",
@@ -947,17 +1037,26 @@ class ClickPaymentProviderService:
             resource_type="payment",
             resource_id=str(payment.id),
             description=(
-                f"Late Click debit on offline-settled order {payment.order_id}: Click rail restored, "
-                f"{reversed_total} of door cash re-booked as customer {payment.user_id} prepaid credit"
+                f"Late Click debit on cash-converted order {payment.order_id}: Click rail restored; "
+                f"{freed_total} of cash freed, {len(debts_paid)} debt(s) paid, "
+                f"{left_as_prepaid_balance} left as customer {payment.user_id} prepaid balance"
             ),
             additional_data={
                 "click_trans_id": incoming_trans_id,
                 "click_paydoc_id": str(payload.get("click_paydoc_id") or ""),
-                "reversed_cash_amount": str(reversed_total),
-                "allocations_reversed": len(live_allocations),
+                "reversed_cash_amount": str(freed_total),
+                "allocations_reversed": len(freed),
+                "debts_paid": [
+                    {"order_number": row["order_number"], "amount": str(row["amount"])} for row in debts_paid
+                ],
+                "left_as_prepaid_balance": str(left_as_prepaid_balance),
             },
         )
 
+        # LAST, after the whole restore: both COMMIT (queue_click_fiscalization always, and
+        # _handle_successful_payment through update_order_status for a PENDING order) and both
+        # notify. Anything after them would run in a second transaction, without the locks
+        # this one holds, and would be lost to a Click retry answered -4 (Case D).
         if self.payment_service:
             self.payment_service._handle_successful_payment(payment)
             self.payment_service.queue_click_fiscalization(payment.id)

@@ -75,9 +75,12 @@ def get_cod_cash_projection(payload: Dict[str, Any]) -> Dict[str, float]:
     """Extract reserved COD prepayment and expected cash-to-collect values from payload."""
     reserved_prepayment = float(payload.get('cod_reserved_prepayment_amount') or 0)
 
-    # Keep explicit zero values from API payloads. Using chained `or` would
-    # treat 0 as falsy and incorrectly fall back to total/outstanding amounts.
-    expected_cash_to_collect_raw = payload.get('expected_cash_to_collect')
+    # An unpaid Click order settled in cash re-prices onto the CASH rail when the driver confirms
+    # (spec 2026-10-09 §6.3), so the figure to collect is the server's `cash_settlement_amount`
+    # whenever it publishes one. Explicit zeros are kept (no chained `or`).
+    expected_cash_to_collect_raw = payload.get('cash_settlement_amount')
+    if expected_cash_to_collect_raw is None:
+        expected_cash_to_collect_raw = payload.get('expected_cash_to_collect')
     if expected_cash_to_collect_raw is None:
         expected_cash_to_collect_raw = payload.get('outstanding_amount')
     if expected_cash_to_collect_raw is None:

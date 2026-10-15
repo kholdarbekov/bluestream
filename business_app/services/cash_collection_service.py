@@ -2007,6 +2007,92 @@ class CashCollectionService:
             db.session.flush()
         return allocation
 
+    def reapply_unapplied_to_delivered_debts(self, event_ids: Iterable[int]) -> Tuple[List[Dict[str, Any]], Decimal]:
+        """Settle the customer's DELIVERED debts, oldest first, from these events' unapplied cash.
+
+        For cash just freed by reversing its allocation off an order that no longer owes it: a late
+        Click debit restored the Click rail (``ClickPaymentProviderService.
+        _restore_click_rail_after_offline_settlement``, owner ruling 2026-10-15). Each event spills
+        through :meth:`_allocate_scoped`, the allocator a collection's surplus spills through, so a
+        debt is settled exactly as fresh cash would settle it. Never through
+        ``auto_reserve_against_pending_payments``: a reservation settles nothing.
+
+        The debts are the customer's own and their linked accounts' (owner-approved): the WALLET
+        cluster from :meth:`_credit_pool_for_anchor`, the very pool the prepaid balance is read from,
+        so the debts paid and the balance credited always cover the same people. Never the event's
+        frozen scope (``AllocationScope.from_event``): a place-scoped door collection would then pay
+        coworkers' debts.
+
+        Locks, in the order post_collection takes them (payments, then credit events): every event's
+        candidate payment batch in ONE id-ordered query (:meth:`_lock_payments_by_ids`), then the
+        events through THE event-lock point, :meth:`_lock_credit_events_by_ids`. Its spendable arm
+        (not voided, ``unapplied_amount > 0``) re-qualifies each row under the lock and refreshes it,
+        so cash a concurrent transaction voided or spent meanwhile is dropped rather than spent twice,
+        and ``unapplied_amount`` is written back from the row actually held. (Not the
+        ``must_hold_event_ids`` arm: that holds a row whatever its credit, and these rows are wanted
+        only for their credit.)
+
+        Runs in the caller's transaction, which must not commit before this returns. Returns
+        ``(debts_paid, left_as_prepaid_balance)``: one row per allocation made (order, payment,
+        amount), and what stays unapplied on the events, which IS the customer's prepaid balance.
+        """
+        from business_app.services.allocation_scope import AllocationScope
+
+        ids = sorted({int(event_id) for event_id in event_ids})
+        if not ids:
+            return [], Decimal("0.00")
+
+        def wallet_scope(customer_id: int) -> "AllocationScope":
+            pool = self._credit_pool_for_anchor(customer_id)
+            return AllocationScope.cluster(pool) if len(pool) > 1 else AllocationScope.personal(customer_id)
+
+        # Phase 1, no locks: an event's customer never changes, so it fixes the wallet scope up front.
+        customer_by_event = dict(
+            db.session.query(CashCollectionEvent.id, CashCollectionEvent.customer_id)
+            .filter(
+                CashCollectionEvent.id.in_(ids),
+                CashCollectionEvent.voided_at.is_(None),
+                CashCollectionEvent.unapplied_amount > 0,
+            )
+            .all()
+        )
+        scopes = {event_id: wallet_scope(customer_id) for event_id, customer_id in customer_by_event.items()}
+        candidate_ids: set = set()
+        for scope in scopes.values():
+            candidate_ids |= self._combine_candidate_ids(
+                *self._scoped_candidate_payment_ids(scope=scope, order_id=None)
+            )
+        self._lock_payments_by_ids(candidate_ids)
+        # Phase 2: the events themselves, re-qualified and refreshed under the lock.
+        locked_events = self._lock_credit_events_by_ids(scopes.keys())
+        events = [locked_events[event_id] for event_id in sorted(locked_events)]
+
+        debts_paid: List[Dict[str, Any]] = []
+        for event in events:
+            first_new = self._next_allocation_order(event.id)
+            # Mirrors post_collection's spill: "auto" allocations, and the customer is told the debt
+            # was paid (the confirmation is parked until commit, never published inline).
+            self._allocate_scoped(event=event, scope=scopes[event.id], order_id=None, allocation_mode="auto")
+            new_allocations = (
+                CashCollectionAllocation.query.filter(
+                    CashCollectionAllocation.cash_collection_event_id == event.id,
+                    CashCollectionAllocation.allocation_order >= first_new,
+                )
+                .order_by(CashCollectionAllocation.allocation_order.asc())
+                .all()
+            )
+            debts_paid.extend(
+                {
+                    "order_id": allocation.order_id,
+                    "order_number": (allocation.allocation_metadata or {}).get("order_number"),
+                    "payment_id": allocation.payment_id,
+                    "amount": self._to_decimal(allocation.allocated_amount),
+                }
+                for allocation in new_allocations
+            )
+        left_as_prepaid_balance = sum((self._to_decimal(event.unapplied_amount) for event in events), Decimal("0.00"))
+        return debts_paid, left_as_prepaid_balance
+
     RESERVABLE_ORDER_STATUSES = frozenset(
         {
             OrderStatus.PENDING,
@@ -3508,7 +3594,6 @@ class CashCollectionService:
                 raise NotFoundError("Order not found")
             if not self._scope_covers_order(scope, order):
                 raise ValidationError("Order does not belong to the selected customer")
-            _electronic_methods = {PaymentMethod.CLICK, PaymentMethod.PAYME, PaymentMethod.CARD}
             if order.payment_method != PaymentMethod.CASH:
                 # PERSONAL_CARD_TRANSFER and ADMIN_ADJUSTMENT may target a
                 # non-CASH order. The former records a card→owner transfer;
@@ -3541,10 +3626,10 @@ class CashCollectionService:
                 allowed_non_cash = (
                     (
                         source == CashCollectionSource.PERSONAL_CARD_TRANSFER
-                        and order.payment_method in _electronic_methods
+                        and order.payment_method in self._ELECTRONIC_METHODS
                     )
                     or source == CashCollectionSource.ADMIN_ADJUSTMENT
-                    or (order.payment_method in _electronic_methods and is_ledger_receivable(order.payment))
+                    or (order.payment_method in self._ELECTRONIC_METHODS and is_ledger_receivable(order.payment))
                 )
                 if not allowed_non_cash:
                     raise ValidationError("Only COD orders can be targeted for COD collections")
@@ -3597,6 +3682,25 @@ class CashCollectionService:
         PaymentStatus.FAILED,
     }
 
+    _ELECTRONIC_METHODS = frozenset({PaymentMethod.CLICK, PaymentMethod.PAYME, PaymentMethod.CARD})
+
+    @classmethod
+    def is_offline_settleable_electronic(cls, order) -> bool:
+        """An electronic order whose payment can still be settled offline (cash or card transfer).
+
+        EITHER rail, not just the order's: the gates read the order's method while the allocator
+        reads the payment's, and an order already reading CASH over an electronic payment row is
+        exactly the shape the conversion repairs. THE one predicate:
+        `StaffService.update_delivery_status`, `convert_electronic_order_to_cash` and the driver's
+        cash projection all ask it.
+        """
+        payment = getattr(order, "payment", None) if order is not None else None
+        return bool(
+            payment is not None
+            and {order.payment_method, payment.payment_method} & cls._ELECTRONIC_METHODS
+            and payment.status in cls._OFFLINE_SETTLEABLE_STATUSES
+        )
+
     def convert_electronic_order_to_cash(
         self,
         order: Order,
@@ -3623,10 +3727,9 @@ class CashCollectionService:
                 raise NotFoundError("Payment not found")
             return locked
 
-        _electronic_methods = {PaymentMethod.CLICK, PaymentMethod.PAYME, PaymentMethod.CARD}
-        if not {order.payment_method, payment.payment_method} & _electronic_methods:
-            raise ValidationError("Only electronic-method orders can be converted to cash")
-        if payment.status not in self._OFFLINE_SETTLEABLE_STATUSES:
+        if not self.is_offline_settleable_electronic(order):
+            if not {order.payment_method, payment.payment_method} & self._ELECTRONIC_METHODS:
+                raise ValidationError("Only electronic-method orders can be converted to cash")
             raise ValidationError(
                 "Only orders with a pending, cancelled or failed electronic payment " "can be settled offline"
             )
@@ -3648,6 +3751,16 @@ class CashCollectionService:
 
         payment.payment_method = PaymentMethod.CASH
         order.payment_method = PaymentMethod.CASH
+
+        # THE PRICE FOLLOWS THE RAIL (spec 2026-10-09 §5.2 #5): from here a contract customer pays
+        # the contract CASH price, and a loyalty-eligible customer the COD tier discount. Re-priced
+        # BEFORE the outstanding is re-derived, so the cash about to be allocated settles the cash
+        # total. A late Click debit for the original amount is still recognised: Case C quotes this
+        # order back on Click (ClickPaymentProviderService._expected_complete_amount).
+        from business_app.services.rail_pricing import reprice_order_for_rail
+
+        reprice_order_for_rail(order, PaymentMethod.CASH, actor_user_id=actor_user_id, reason=reason)
+        payment.amount = order.total_amount
 
         # A cancelled/failed payment may carry a stale outstanding_amount projection
         # (e.g. zero after the gateway cancelled it).  Re-derive it so the subsequent
@@ -3699,8 +3812,7 @@ class CashCollectionService:
         if not order:
             raise NotFoundError("Order not found")
 
-        _electronic_methods = {PaymentMethod.CLICK, PaymentMethod.PAYME, PaymentMethod.CARD}
-        if order.payment_method in _electronic_methods:
+        if order.payment_method in self._ELECTRONIC_METHODS:
             payment = order.payment
             if payment is None:
                 raise NotFoundError("Order has no payment to settle")
@@ -4454,12 +4566,16 @@ class CashCollectionService:
             target_outstanding = open_receivable_amount(payment)
             target_payment_id = payment.id
         else:
-            # An unsettled electronic order is converted to COD when the transfer
-            # is recorded, and a COD order with no payment row yet gets one;
-            # either way the target starts out owing the full order total.
-            if order.payment_method in {PaymentMethod.CLICK, PaymentMethod.PAYME, PaymentMethod.CARD}:
+            # An unsettled electronic order is converted to COD when the transfer is recorded, and
+            # the conversion re-prices it onto the CASH rail (spec 2026-10-09 §5.2 #5), so the target
+            # owes the cash QUOTE. A COD order with no payment row yet owes its own total.
+            if order.payment_method in self._ELECTRONIC_METHODS:
+                from business_app.services.rail_pricing import quote_order_for_rail
+
                 warnings.append("order_will_convert_to_cash")
-            target_outstanding = self._to_decimal(order.total_amount)
+                target_outstanding = quote_order_for_rail(order, PaymentMethod.CASH).total
+            else:
+                target_outstanding = self._to_decimal(order.total_amount)
             target_payment_id = None
 
         applied_to_order = min(amount, target_outstanding)

@@ -24,7 +24,7 @@ from utils import (
 from shared.constants import ORDER_STATUS_ICONS, DEFAULT_STATUS_ICON, DISPLAY_TIMEZONE
 from shared.business_config import COD_DEBT_AMOUNT_THRESHOLD, MIN_ORDER_AMOUNT
 from handlers.base import BaseHandler
-from handlers.products import product_handlers
+from handlers.products import min_order_shortfall, product_handlers
 
 logger = logging.getLogger('handlers')
 
@@ -1146,10 +1146,11 @@ class OrderHandlers(BaseHandler):
                 language,
             )
 
-            # What cash COSTS, shown where the rail is actually chosen. Quoted
-            # only when cash is on offer: pricing a rail the COD cap has already
-            # removed is a promise `create_order` would refuse.
-            cash_estimate = None
+            # THE PICKER IS DRAWN BEFORE THE METHOD IS CHOSEN (spec 2026-10-09 D5), so its basket is
+            # quoted with NO method: the catalogue, which for a contract customer is not any method's
+            # contract price. The same quote's `cod_savings` decorates the cash button below. Quoted
+            # only when cash is on offer, as before, since only the cash button reads it.
+            picker_estimate = None
             if any(button['type'] == 'cash' for button in payment_methods):
                 cart_resp = await client.get_cart(user_token)
                 cart_payload = (cart_resp.data or {}).get('data', {}).get('cart') if cart_resp.success else None
@@ -1157,10 +1158,9 @@ class OrderHandlers(BaseHandler):
                     estimate_resp = await client.estimate_cart(user_token, {
                         'items': self._order_items_from_cart(cart_payload),
                         'delivery_address_id': selected_address_id,
-                        'payment_method': 'cash',
                     })
                     if estimate_resp.success:
-                        cash_estimate = (estimate_resp.data or {}).get('data')
+                        picker_estimate = (estimate_resp.data or {}).get('data')
 
         # Pre-select the business-account default (Plan 3): if the API flags a
         # default method for this cart, seed it so the customer sees it chosen.
@@ -1189,7 +1189,7 @@ class OrderHandlers(BaseHandler):
         # plus the plain total, no rail assumed) — the discount moved onto the
         # cash BUTTON below, so this is `neutral=True`, never the confirm
         # screen's discounted rendering.
-        cash_block = self._build_estimate_block(cash_estimate, 'cash', language, neutral=True)
+        cash_block = self._build_estimate_block(picker_estimate, 'cash', language, neutral=True)
         if cash_block:
             payment_text += "\n\n" + cash_block
         restrictions = payment_payload.get('payment_restrictions') or {}
@@ -1201,10 +1201,11 @@ class OrderHandlers(BaseHandler):
         # Bronze/ineligible customer or a failed estimate leaves `tier_discount`
         # at 0, so the button stays plain with no suffix and no stray
         # separator.
-        cash_pricing = (cash_estimate or {}).get('pricing') or {}
-        tier_discount = float(cash_pricing.get('tier_discount') or 0)
-        if tier_discount > 0:
-            percentage = _format_rate(cash_pricing.get('tier_discount_percentage'))
+        picker_pricing = (picker_estimate or {}).get('pricing') or {}
+        # `cod_savings` is what moving to cash would take off THIS quote; the rate is the cash tier's.
+        cod_savings = float(picker_pricing.get('cod_savings') or 0)
+        if cod_savings > 0:
+            percentage = _format_rate(picker_pricing.get('tier_discount_percentage'))
             for method in payment_methods:
                 if method['type'] == 'cash':
                     method['name'] = f"{method['name']} −{percentage}% 🏷"
@@ -1748,6 +1749,17 @@ class OrderHandlers(BaseHandler):
             })
             estimate = (estimate_resp.data or {}).get('data') if estimate_resp.success else None
 
+        # The subtotal the minimum-order gate reads. The cart's is the catalogue
+        # price (D5, spec 2026-10-09), but a contract's cash or bank-transfer
+        # price can sink THIS method's basket below the floor the cart cleared.
+        # The server then refuses the quote with ORDER_MIN_AMOUNT and publishes
+        # its own subtotal in `details` (the `@handle_api_exception` body, whose
+        # `error_code` sits at the TOP level of `APIResponse.data`).
+        min_order_subtotal = cart_total_amount
+        refusal = estimate_resp.data if not estimate_resp.success else None
+        if isinstance(refusal, dict) and refusal.get('error_code') == 'ORDER_MIN_AMOUNT':
+            min_order_subtotal = float((refusal.get('details') or {}).get('items_subtotal') or 0)
+
         # Add address info
         address_id = context.user_data.get('selected_address_id')
         if address_id:
@@ -1818,18 +1830,20 @@ class OrderHandlers(BaseHandler):
         # Block confirm if per-product or order-level minimum isn't met.
         # MIN_ORDER_AMOUNT comes from shared.business_config (same env-driven SSOT
         # the backend reads) so the bot mirrors backend validation up-front.
-        amount_met = cart_total_amount >= MIN_ORDER_AMOUNT
+        # `min_order_shortfall` is the cart screen's ONE expression behind both
+        # the gate and the "add N more" copy, fed a server subtotal.
+        shortfall = min_order_shortfall(min_order_subtotal)
+        amount_met = shortfall <= 0
         qty_met = not min_qty_violations
         meets_minimum = amount_met and qty_met
 
         if not meets_minimum:
             confirmation_text += "\n\n────────────────\n"
             if not amount_met:
-                remaining_amount = MIN_ORDER_AMOUNT - cart_total_amount
                 confirmation_text += "⚠️ " + i18n.get(
                     'telegram.cart_min_order_warning', language,
                     min_amount=format_price(MIN_ORDER_AMOUNT),
-                    remaining=format_price(remaining_amount),
+                    remaining=format_price(shortfall),
                 ) + "\n"
             for v in min_qty_violations:
                 confirmation_text += "⚠️ " + i18n.get(

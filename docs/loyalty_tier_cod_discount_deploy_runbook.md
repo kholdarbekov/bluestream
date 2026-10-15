@@ -264,8 +264,8 @@ Then confirm the discount behaves, not just that it's described:
     "SELECT id, payment_method, tier_discount, total_amount FROM orders WHERE id = <order_id>;"
   ```
   Expect `tier_discount = 0.00` and `total_amount` back to the undiscounted figure —
-  `apply_tier_discount_for_rail` runs on both transitions, and neither `business_account` nor
-  `click` is a COD rail.
+  `rail_pricing.reprice_order_for_rail` → `loyalty_service.tier_discount_for_rail` runs on both
+  transitions, and neither `business_account` nor `click` is a COD rail.
 
 Two more channels publish prices but are **out of scope for this deploy** — only touch them if the
 owner has actually decided to:

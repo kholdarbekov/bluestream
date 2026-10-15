@@ -150,6 +150,14 @@ class PaymentHandlers(BaseHandler):
                     logger.error(f"No payment_url in response: {result.data}")
                     return PaymentLinkResult(False)
 
+                # Quote the money the link charges: the server's payment amount. The server re-prices
+                # the order when the rail moves (spec 2026-10-09 §5.2 #1), so the order figure fetched
+                # before this call is stale. No arithmetic here; the pre-move total is only a fallback
+                # for a response that carries no payment amount.
+                payment_amount = (response_data.get('payment') or {}).get('amount')
+                if payment_amount is not None:
+                    total_amount = payment_amount
+
             # 3. Send Message with Button
             msg_text = i18n.get(
                 'telegram.payment.pay_message',

@@ -188,6 +188,12 @@ class Product(db.Model, TimestampMixin, TranslatableMixin):
         final_price = self.discount_price if self.discount_price else self.base_price
         return max(final_price, 0)
 
+    @property
+    def catalogue_unit_price(self) -> Decimal:
+        """The live catalogue price of ONE unit: what an empty contract price falls back to on
+        admin screens (spec 2026-10-09 §3.1). Same expression an order is charged with."""
+        return Decimal(str(self.calculate_price(quantity=1)))
+
     def to_dict(self, user=None, quantity=1, language=None, include_all_translations=False):
         """Convert to dictionary with multilingual support"""
         result = self.to_dict_multilingual(language, include_all_translations)

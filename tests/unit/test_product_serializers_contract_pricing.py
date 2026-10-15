@@ -1,36 +1,46 @@
-"""Unit tests for contract-aware product serialization pricing."""
+"""serialize_product before a payment method is chosen (spec 2026-10-09 D5, §4.4)."""
 
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
 
 import pytest
 
+from business_app.models.corporate import (
+    CorporateContract,
+    CorporateContractProductPrice,
+    CorporateContractStatus,
+)
 from business_app.serializers.product_serializers import serialize_product
+from shared.enums import EntitySubtype
 
 
 @pytest.mark.unit
-def test_serialize_product_uses_contract_price_for_entity_user(sample_user, sample_product, db):
+def test_serialize_product_states_the_catalogue_and_flags_the_contract_price(sample_user, sample_product, db):
     sample_user.user_type = "entity"
-    db.session.add(sample_user)
+    sample_user.entity_subtype = EntitySubtype.WORKPLACE
+    contract = CorporateContract(
+        user_id=sample_user.id,
+        contract_number="C-SERIALIZER-1",
+        name="Serializer contract",
+        status=CorporateContractStatus.ACTIVE,
+        start_date=datetime.now(UTC) - timedelta(days=1),
+        currency="UZS",
+        is_active=True,
+    )
+    db.session.add(contract)
+    db.session.flush()
+    db.session.add(
+        CorporateContractProductPrice(
+            contract_id=contract.id,
+            product_id=sample_product.id,
+            business_account_unit_price=Decimal("12345.00"),
+            cash_unit_price=Decimal("13000.00"),
+            is_active=True,
+        )
+    )
     db.session.commit()
 
-    corporate_service = MagicMock()
-    corporate_service.resolve_contract_pricing_for_user_product.return_value = {
-        "unit_price": Decimal("12345.00"),
-        "contract": None,
-        "contract_price_row": None,
-    }
+    payload = serialize_product(sample_product, language="en", user=sample_user, quantity=1)
 
-    with patch(
-        "business_app.utils.service_factory.get_corporate_contract_service",
-        return_value=corporate_service,
-    ):
-        payload = serialize_product(sample_product, language="en", user=sample_user, quantity=1)
-
-    assert payload["pricing"]["current_price"] == 12345.0
-    assert payload["pricing"]["total_price"] == 12345.0
-    corporate_service.resolve_contract_pricing_for_user_product.assert_called_once_with(
-        user_id=sample_user.id,
-        product_id=sample_product.id,
-        fallback_price=Decimal("15000.0"),
-    )
+    assert payload["pricing"]["current_price"] == 15000.0
+    assert payload["pricing"]["contract_price_at_checkout"] is True

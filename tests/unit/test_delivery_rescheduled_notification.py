@@ -17,7 +17,8 @@ leave through `requests.post` in notification_service. The templates, the channe
 the date format and the persisted `Notification` row are all production code.
 
 conftest's autouse `block_external_side_effects` stubs `send_notification` class-wide so no
-test fires a real send. `live_send` puts the production implementation back, the technique
+test fires a real send. `live_send` puts the production implementation back through
+tests/notification_send_fakes.py::live_send_path, the technique
 tests/unit/test_notification_service_refactor.py uses.
 """
 
@@ -25,7 +26,7 @@ import re
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -37,12 +38,9 @@ from business_app.services.notification_service import NotificationService
 from business_app.tasks.notification_tasks import send_delivery_rescheduled_notification_task
 from business_app.utils.constants import NotificationChannel, NotificationType
 from shared.enums import DeliveryStatus, OrderStatus, PaymentMethod
-
-# Captured at import, before the autouse fixture swaps in its always-succeeds stub.
-_REAL_SEND_NOTIFICATION = NotificationService.send_notification
+from tests.notification_send_fakes import BREVO_URL, live_send_path
 
 TELEGRAM_URL = "https://api.telegram.org/bottest-token/sendMessage"
-BREVO_URL = "https://api.brevo.com/v3/smtp/email"
 COMPANY_PHONE = "+998712000000"
 ORDER_NUMBER = "TG_000512_26"
 NEW_DATE = date(2026, 9, 25)
@@ -61,18 +59,10 @@ _CLOCK_TIME = re.compile(r"\b\d{1,2}:\d{2}\b")
 
 @pytest.fixture
 def live_send(app, monkeypatch):
-    """The production send path with only `requests.post` faked. Yields the fake."""
-    monkeypatch.setattr(NotificationService, "send_notification", _REAL_SEND_NOTIFICATION)
-    monkeypatch.setitem(app.config, "TELEGRAM_BOT_TOKEN", "test-token")
-    monkeypatch.setitem(app.config, "BREVO_API_KEY", "brevo-test-key")
-    monkeypatch.setitem(app.config, "BREVO_SENDER_EMAIL", "noreply@aqua-element.uz")
-    monkeypatch.setitem(app.config, "COMPANY_NAME", "Aqua Element")
-    monkeypatch.setitem(app.config, "COMPANY_PHONE", COMPANY_PHONE)
-    monkeypatch.setitem(app.config, "COMPANY_TELEGRAM_BOT_URL", BOT_URL)
-    response = Mock(status_code=200)
-    # One body answers both providers: Telegram reads `ok`/`result`, Brevo reads `messageId`.
-    response.json.return_value = {"ok": True, "result": {"message_id": 501}, "messageId": "<brevo-501>"}
-    with patch("business_app.services.notification_service.requests.post", return_value=response) as post_mock:
+    """The production send path with only `requests.post` faked. Yields the fake. The bot token
+    makes Telegram sendable; the phone is set so a render that printed it would show it."""
+    extra = {"TELEGRAM_BOT_TOKEN": "test-token", "COMPANY_PHONE": COMPANY_PHONE}
+    with live_send_path(app, monkeypatch, bot_url=BOT_URL, extra_config=extra) as post_mock:
         yield post_mock
 
 
@@ -299,6 +289,11 @@ def test_a_notice_for_an_order_that_moved_on_is_dropped(
         (None, False, "c@example.com", True, [NotificationChannel.EMAIL]),
         ("810000001", False, None, True, []),
         ("810000001", True, None, False, []),
+        # Spec 2026-10-09 §7.1: a placeholder or a tombstone is "no email", whatever its case.
+        (None, False, "telegram_810000001@bluestream.local", True, []),
+        ("810000001", False, "telegram_810000001@bot.internal", True, []),
+        ("810000001", True, "deleted_42@bluestream.local", False, []),
+        (None, False, "Dilnoza.K@Example.COM", True, [NotificationChannel.EMAIL]),
     ],
     ids=[
         "connected",
@@ -307,6 +302,10 @@ def test_a_notice_for_an_order_that_moved_on_is_dropped(
         "never-linked",
         "bot-inactive-no-email",
         "not-allowed-no-email",
+        "registration-placeholder-is-no-email",
+        "bot-inactive-login-placeholder-is-no-email",
+        "tombstone-is-no-email",
+        "mixed-case-real-address",
     ],
 )
 def test_one_channel_telegram_else_email(telegram_id, is_bot_active, email, telegram_allowed, expected):

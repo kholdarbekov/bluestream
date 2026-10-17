@@ -30,6 +30,7 @@ from business_app.utils.validators import phone_validator
 from business_app.utils.exceptions import ValidationError, UnauthorizedError, ConflictError
 from business_app.utils.translations import get_translation
 from shared.enums import UserRole
+from shared.user_names import GENERATED_TELEGRAM_NAME
 from business_app.models.user import User
 from business_app import db
 from business_app.utils.api_responses import (
@@ -2331,7 +2332,7 @@ def sync_profile():
 
     # Update names if source is telegram and current names are empty/placeholder
     if sync_source == "telegram":
-        if data.get("first_name") and (not user.first_name or user.first_name == "Telegram User"):
+        if data.get("first_name") and (not user.first_name or user.first_name == GENERATED_TELEGRAM_NAME):
             user.first_name = data["first_name"]
             updated_fields.append("first_name")
         if data.get("last_name") and not user.last_name:
@@ -3450,8 +3451,10 @@ def verify_telegram_auth(auth_code):
     # Link the telegram account to web user
     user.telegram_id = telegram_id
     user.telegram_username = data.get("telegram_username")
-    user.is_bot_active = True
     user.last_bot_interaction = datetime.now(timezone.utc)
+    from business_app.services.telegram_reachability_service import TelegramReachabilityService
+
+    TelegramReachabilityService.mark_reachable(user, source="link", at=user.last_bot_interaction)
 
     # Update name if web user has incomplete info
     if data.get("first_name") and not user.first_name:

@@ -1364,3 +1364,61 @@ async def test_a_timed_out_registration_does_not_swallow_the_next_message_as_an_
     assert not [c for c in bot.backend.calls if c.endpoint == VERIFY_PHONE], (
         "the message after a timed-out signup was verified as an OTP"
     )
+
+
+@pytest.mark.parametrize(
+    "linked_user, expected",
+    [
+        (
+            {"first_name": "Kamola", "full_name": "Kamola Y", "company_name": None, "user_type": "individual"},
+            "Welcome back, Kamola! Accounts linked",
+        ),
+        (
+            {"first_name": "Telegram User", "full_name": "Telegram User", "company_name": None, "user_type": "individual"},
+            "Welcome back, friend! Accounts linked",
+        ),
+        (
+            {"first_name": None, "full_name": "", "company_name": None, "user_type": "individual"},
+            "Welcome back, friend! Accounts linked",
+        ),
+        (
+            {"first_name": "Ali", "full_name": "Ali Valiyev", "company_name": "Bahor market", "user_type": "entity"},
+            "Welcome back, Bahor market! Accounts linked",
+        ),
+        # Final review B2: `User.to_dict()` (the body link_phone_verify returns) builds `full_name`
+        # with an f-string, so a NULL first and last name arrive as the literal "None None".
+        (
+            {"first_name": None, "last_name": None, "full_name": "None None", "company_name": None,
+             "user_type": "individual"},
+            "Welcome back, friend! Accounts linked",
+        ),
+        (
+            {"first_name": None, "last_name": "Smith", "full_name": "None Smith", "company_name": None,
+             "user_type": "individual"},
+            "Welcome back, Smith! Accounts linked",
+        ),
+    ],
+    ids=["person", "generated-placeholder", "no-name-is-never-None", "entity-company",
+         "to-dict-none-none", "to-dict-none-last-name"],
+)
+async def test_the_link_greeting_names_the_customer_by_the_shared_rule(bot, user, monkeypatch, linked_user, expected):
+    """Spec 2026-10-09 §7.3: the bot's display-name site uses `greeting_name`, so it says what the
+    reminder will say: company for an entity, never "Telegram User", never "None"."""
+    monkeypatch.setitem(TRANSLATIONS, "telegram.common.user_fallback", "friend")
+    assert await reach_link_confirm_step(bot, user) == LINK_ACCOUNT_CONFIRM
+    await bot.send(user.tap("link_yes"))
+    bot.backend.route(
+        "POST",
+        LINK_VERIFY,
+        lambda _c: {
+            "data": {
+                "user": linked_user,
+                "tokens": {"access_token": "merged-access", "refresh_token": "merged-refresh", "expires_in": 3600},
+            }
+        },
+    )
+    bot.telegram.reset()
+
+    await bot.send(user.text("123456"))
+
+    assert last_text(bot) == expected

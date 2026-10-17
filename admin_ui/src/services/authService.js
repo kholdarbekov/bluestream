@@ -110,6 +110,13 @@ class AuthService {
       // Update stored user data
       localStorage.setItem('admin_user', JSON.stringify(user));
 
+      // The profile publishes the same `permissions` block as the login response. Keep the stored
+      // copy in step with the server, or an admin who logged in before a flag existed (e.g.
+      // `can_manage_lapsed_customers`) would not see its page until they log in again.
+      if (user.permissions && typeof user.permissions === 'object' && !Array.isArray(user.permissions)) {
+        localStorage.setItem('admin_permissions', JSON.stringify(user.permissions));
+      }
+
       // Check permissions are still valid
       if (!['admin', 'manager'].includes(user.role)) {
         this.clearStoredAuth();

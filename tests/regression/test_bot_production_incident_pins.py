@@ -1046,10 +1046,12 @@ async def test_incident_20260821_a_harness_built_bot_carries_both_middlewares(bo
         f"duplicates reach it first: {sorted(conversation_groups)}"
     )
 
-    # And the middlewares really are offered every update, catch-alls included.
+    # And the middlewares really are offered every update, catch-alls included. Group -9 is the
+    # Telegram-reachability recovery (spec 2026-10-09 §7.2 b): it sits between the logger and the
+    # guard and never stops dispatch, so the guard still sees a tap before any conversation.
     matched = bot.handlers_matching(user.tap("add_new_address"), include_catch_alls=True)
-    assert [group for group, _handler in matched][:2] == [-10, -5], (
-        f"the middlewares are not the first two handlers to see a tap: {matched}"
+    assert [group for group, _handler in matched][:3] == [-10, -9, -5], (
+        f"the middlewares are not the first three handlers to see a tap: {matched}"
     )
 
 

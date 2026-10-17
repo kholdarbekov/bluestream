@@ -10,6 +10,9 @@ from sqlalchemy import or_
 from business_app import db
 from business_app.models.user import User
 from shared.enums import UserStatus
+from shared.user_names import GENERATED_TELEGRAM_NAME
+from shared.validators import PLACEHOLDER_EMAIL_DOMAIN_LOCAL
+from business_app.services.telegram_reachability_service import TelegramReachabilityService
 from business_app.services.token_service import TokenService
 from business_app.services.loyalty_service import _invalidate_qualifying_points_memo
 
@@ -184,7 +187,6 @@ class CrossPlatformSyncService:
         # Save telegram data to transfer
         telegram_id = telegram_user.telegram_id
         telegram_username = telegram_user.telegram_username
-        is_bot_active = telegram_user.is_bot_active
         bot_state = telegram_user.bot_state
         last_bot_interaction = telegram_user.last_bot_interaction
         tg_first_name = telegram_user.first_name
@@ -204,7 +206,8 @@ class CrossPlatformSyncService:
         # Step 4: Transfer telegram-specific data to web user
         web_user.telegram_id = telegram_id
         web_user.telegram_username = telegram_username
-        web_user.is_bot_active = is_bot_active
+        # Reachability travels with the chat: both fields, one writer (spec §7.2 d).
+        TelegramReachabilityService.copy_state(web_user, telegram_user)
         web_user.bot_state = bot_state
         web_user.last_bot_interaction = last_bot_interaction
 
@@ -425,6 +428,13 @@ class CrossPlatformSyncService:
             )
         ).delete(synchronize_session=False)
 
+        # Reorder reminders (spec 2026-10-09 §10 Merges): the newer setting, every lapse and every
+        # event (reachability ones included) move to the survivor. Their user FKs are RESTRICT, so
+        # this runs before the caller's delete; all three merge branches come through here.
+        from business_app.services.reorder_reminders.actions import ReorderReminderActions
+
+        ReorderReminderActions.on_users_merged(primary_id, secondary_id)
+
         db.session.flush()
         logger.info(f"Transferred all user references from {secondary_id} to {primary_id}")
 
@@ -462,7 +472,7 @@ class CrossPlatformSyncService:
         self._transfer_user_references(primary_id, secondary_id)
 
         # Step 3: Clear email from secondary to avoid constraint violation (email is unique)
-        web_user.email = f"deleted_{secondary_id}@bluestream.local"
+        web_user.email = f"deleted_{secondary_id}@{PLACEHOLDER_EMAIL_DOMAIN_LOCAL}"
         web_user.phone = None
         db.session.flush()
 
@@ -472,7 +482,7 @@ class CrossPlatformSyncService:
         telegram_user.phone = web_phone or telegram_user.phone
 
         # Preserve primary telegram profile names; only backfill missing values
-        if web_first_name and (not telegram_user.first_name or telegram_user.first_name == "Telegram User"):
+        if web_first_name and (not telegram_user.first_name or telegram_user.first_name == GENERATED_TELEGRAM_NAME):
             telegram_user.first_name = web_first_name
         if web_last_name and not telegram_user.last_name:
             telegram_user.last_name = web_last_name
@@ -538,13 +548,13 @@ class CrossPlatformSyncService:
             db.session.flush()
             primary_user.telegram_id = secondary_telegram_id
             primary_user.telegram_username = secondary_user.telegram_username
-            primary_user.is_bot_active = secondary_user.is_bot_active
+            TelegramReachabilityService.copy_state(primary_user, secondary_user)
             primary_user.bot_state = secondary_user.bot_state
             primary_user.last_bot_interaction = secondary_user.last_bot_interaction
 
         # Step 4: Clear unique constraints on secondary before delete
         if secondary_user.email:
-            secondary_user.email = f"deleted_{secondary_id}@bluestream.local"
+            secondary_user.email = f"deleted_{secondary_id}@{PLACEHOLDER_EMAIL_DOMAIN_LOCAL}"
         if secondary_user.phone:
             secondary_user.phone = None
         db.session.flush()

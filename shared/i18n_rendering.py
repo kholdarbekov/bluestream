@@ -27,8 +27,9 @@ than like a bug. Nothing here raises.
 from __future__ import annotations
 
 import logging
+import os
 from string import Formatter
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -102,3 +103,103 @@ def render_translation(
         return humanise_key(key)
 
     return template
+
+
+# The full-width braces: they read as braces to a person and are not placeholder syntax to any
+# guard. Escapes, because the two glyphs are easy to mistake for ASCII in an editor.
+_BRACE_TABLE = str.maketrans({"{": "\uff5b", "}": "\uff5d"})
+
+
+def neutralise_braces(value: str | None) -> str | None:
+    """`value` with `{` and `}` replaced by their full-width forms (U+FF5B, U+FF5D).
+
+    The ONE way a customer-provided string (a name, a place label, an outlet name, a product name)
+    enters the template context of a PLACEHOLDER-STRICT email (`NotificationService`'s
+    `_PLACEHOLDER_STRICT_TYPES`). The strict guard skips an email whose rendered subject or body
+    still holds a literal ``{name}``, and a customer can type exactly that as their name. Without
+    this the customer's own reminder is dropped, and a staff digest naming them is dropped for
+    every recipient, again each morning while their row stays in view.
+
+    Apply it to the VALUE, never to a copy template: a template's own ``{placeholder}`` is what
+    `render_translation` fills. ``None`` and ``""`` come back unchanged, so a caller's "no name"
+    branch keeps working.
+    """
+    if not value:
+        return value
+    return value.translate(_BRACE_TABLE)
+
+
+# The languages customer copy is written in. The reorder-reminder copy is seeded, and its order
+# lines named, in exactly these (`shared.reorder_reminder_copy.LANGUAGES` is this tuple).
+SUPPORTED_LANGUAGES = ("uz", "ru", "en")
+# Spelled-out names a stored language field has held; the bots' `normalize_language` reads the same.
+_LANGUAGE_ALIASES = {"english": "en", "uzbek": "uz", "russian": "ru"}
+# The system default when the environment names none it supports: the backend's own
+# `BaseConfig.DEFAULT_LANGUAGE` (business_app/config/base.py).
+_SYSTEM_FALLBACK_LANGUAGE = "uz"
+
+
+def supported_language(value: Optional[str]) -> Optional[str]:
+    """The supported language a stored value names, or None when it names none.
+
+    Blanks and case are ignored, a spelled-out name reads as its code ("Russian" -> ru), and a
+    regional or script tag reads as its base language (`base_language`: "ru-RU", "ru_RU" -> ru).
+    """
+    text = str(value or "").strip().lower()
+    code = _LANGUAGE_ALIASES.get(text) or base_language(text)
+    return code if code in SUPPORTED_LANGUAGES else None
+
+
+def system_default_language() -> str:
+    """The system DEFAULT_LANGUAGE: the environment setting every service reads (the customer
+    bot's own fallback, `localization.default_language`, is this variable; .env sets uz), else uz,
+    the backend's `BaseConfig.DEFAULT_LANGUAGE`."""
+    return supported_language(os.environ.get("DEFAULT_LANGUAGE")) or _SYSTEM_FALLBACK_LANGUAGE
+
+
+def reminder_language(stored: Optional[str]) -> str:
+    """THE language a reorder reminder is written in, from the recipient's stored
+    `preferred_language` (final review B1/E1: one rule, one default).
+
+    The backend asks it ONCE per send: the Telegram payload carries the answer as `language` and
+    the customer bot renders the copy, the plurals, the order lines and the buttons in it; the
+    email is written in it (subject, template and copy); the worklist publishes it as
+    `recipient.reminder_language`, so staff follow up in the language the customer really reads.
+    A NULL, blank or unsupported value (a raw Telegram language_code such as "tr") reads as the
+    system DEFAULT_LANGUAGE, the one the customer bot falls back to (Telegram is the primary
+    channel).
+    """
+    return supported_language(stored) or system_default_language()
+
+
+def base_language(language: str) -> str:
+    """The base language of a locale tag: "ru-RU" and "ru_RU" both read as "ru". Empty for None.
+
+    The one spelling of that rule: the plural rule below and the reminder composer's item-name
+    choice both call it, so a regional code cannot mean one language in one place and another
+    in the other.
+    """
+    return (language or "").replace("_", "-").split("-", 1)[0].lower()
+
+
+def plural_category(language: str, n: int) -> str:
+    """CLDR plural category of the integer `n` in `language` (spec 2026-10-09 §7.5).
+
+    Russian: `one` (21, 101), `few` (2-4, 22-24), `many` (0, 5-20, 25-30, 111-114). English and
+    Uzbek: `one` for 1, `other` otherwise. A regional code ("ru-RU") uses its base language; any
+    other language follows English. `n` is a non-negative count. The one plural rule the bots,
+    the email and `business_app.utils.translations.get_plural_rules` all read.
+    """
+    base = base_language(language)
+    if base == "ru":
+        if n % 10 == 1 and n % 100 != 11:
+            return "one"
+        if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14):
+            return "few"
+        return "many"
+    return "one" if n == 1 else "other"
+
+
+def plural_key(base_key: str, language: str, n: int) -> str:
+    """The copy key for `n` of something: `<base_key>.<plural_category>`."""
+    return f"{base_key}.{plural_category(language, n)}"

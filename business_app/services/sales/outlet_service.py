@@ -8,11 +8,10 @@ commit inside themselves.
 import math
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from statistics import median
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from flask import current_app
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, func, or_
 
 from business_app import db
 from business_app.models.sales import (
@@ -32,6 +31,7 @@ from business_app.models.tryout import ProductTryout
 from business_app.models.user import User, UserAddress
 from business_app.services.sales import notifications, pay_rules
 from business_app.services.staff_service import StaffService
+from business_app.utils.delivery_cadence import typical_interval_days
 from business_app.utils.delivery_window import local_now, parse_window_time, validate_schedule
 from business_app.utils.exceptions import ConflictError, ForbiddenError, NotFoundError, ValidationError
 from business_app.utils.geo_validation import ensure_within_delivery_zone, is_in_delivery_zone
@@ -42,6 +42,9 @@ from shared.enums import EntitySubtype, OrderStatus, UserRole, UserStatus, UserT
 from shared.staff_constants import SALES_EVENT_OUTLET_APPROVED, SALES_EVENT_OUTLET_REJECTED, STAFF_ACTIONS
 from shared.user_search import expand_name_variants
 from shared.validators import normalize_phone_number
+
+if TYPE_CHECKING:
+    from business_app.services.reorder_reminders.facts import DormantOutletFacts
 
 PROSPECT_STAGES = ("prospect", "trial", "activation_requested")
 # The stages `approve` accepts an outlet FROM (C5, S-9). Same members as PROSPECT_STAGES, different
@@ -67,11 +70,15 @@ DUE_STAGES = ("active", "at_risk", "dormant", "trial")
 # not by an interval (R5) — and `prospect`/`activation_requested`/`lost` have no rhythm at all.
 SERVING_STAGES = ("active", "at_risk", "dormant")
 
-# How many inter-order gaps the median is taken over ("the last 5"), and the floor under that
-# median in days. The floor is what keeps a shop that takes a bottle every other day out of
-# `at_risk` after a single quiet weekend.
-INTERVAL_SAMPLE_SIZE = 5
-MIN_INTERVAL_DAYS = 7
+# The stages a delivery since the outlet entered them moves back to `active` (the stage job's
+# reactivation branch). `reactivated_outlet_ids` answers for these stages only.
+_REACTIVATABLE_STAGES = ("at_risk", "dormant")
+
+# An account with this many live (not lost) outlets is a chain in branch mode (D25 rule 5, R45).
+_BRANCH_MODE_MIN_OUTLETS = 2
+
+# Ids per IN list in `outlet_facts_by_user` and the batched stage and branch reads.
+_FACTS_BATCH = 500
 
 _SECONDS_PER_DAY = 86400.0
 
@@ -111,7 +118,12 @@ def _format_optional_phone(raw: Optional[str], error_code: str = "SALES_CONTACT_
     return formatted
 
 
-def _user_display_name(user: User) -> str:
+def user_display_name(user: User) -> str:
+    """The house staff-facing label for an account: company, else full name, else phone, else #id.
+
+    Public (reorder-reminders plan Task 20a, contract amendment 19): the Outlets and Visits pages,
+    the Lapsed customers worklist and the morning digest all name an account with this one rule.
+    """
     return user.company_name or user.full_name or user.phone or f"#{user.id}"
 
 
@@ -317,7 +329,82 @@ class OutletService:
         """
         if user_id is None:
             return 0
-        return Outlet.query.filter(Outlet.user_id == user_id, Outlet.stage != "lost").count()
+        return OutletService._live_outlet_counts([user_id]).get(user_id, 0)
+
+    @staticmethod
+    def _live_outlet_counts(user_ids) -> Dict[int, int]:
+        """`{user_id: live (not lost) outlets on that account}`, one GROUP BY per batch; an account
+        holding none is absent. THE count `account_outlet_count` and `order_scopes` both read."""
+        ids = sorted({int(user_id) for user_id in user_ids if user_id is not None})
+        counts: Dict[int, int] = {}
+        for offset in range(0, len(ids), _FACTS_BATCH):
+            rows = (
+                db.session.query(Outlet.user_id, func.count(Outlet.id))
+                .filter(Outlet.user_id.in_(ids[offset : offset + _FACTS_BATCH]), Outlet.stage != "lost")
+                .group_by(Outlet.user_id)
+                .all()
+            )
+            counts.update((user_id, int(count)) for user_id, count in rows)
+        return counts
+
+    @staticmethod
+    def account_has_any_outlet(user_ids: Sequence[int]) -> bool:
+        """E5 of the reorder-reminder rule (spec 2026-10-09 §5; D2, D16, D21): does any of these
+        accounts hold an outlet in ANY stage, `lost` included? Such accounts belong to the sales
+        domain and never get a customer reminder. Deliberately not `account_outlet_count`, which
+        drops lost outlets for branch mode (R45): two questions, one loader."""
+        return any(has_outlet for has_outlet, _dormant in OutletService.outlet_facts_by_user(user_ids).values())
+
+    @staticmethod
+    def outlet_facts_by_user(user_ids: Sequence[int]) -> Dict[int, Tuple[bool, List["DormantOutletFacts"]]]:
+        """`{user_id: (holds an outlet in any stage, [its dormant outlets])}` for the reminder facts.
+
+        A fixed number of queries for any number of accounts. A dormant outlet carries the moment it
+        went dormant (its latest `dormant` stage-history row, None when it has none) and the agent
+        whose plan it is on (`due_owner_id`), which the D21 worklist row shows. The stage is this
+        service's answer: the reminder side never re-derives at_risk or dormant. An outlet still
+        stored `dormant` that water has reached since it went dormant is NOT listed: that is the
+        stage job's own reactivation rule (`reactivated_outlet_ids`), asked now rather than at
+        01:10 tonight (final review A1).
+        """
+        from business_app.services.reorder_reminders.facts import DormantOutletFacts
+
+        ids = sorted({int(user_id) for user_id in user_ids if user_id is not None})
+        outlets: List[Outlet] = []
+        for offset in range(0, len(ids), _FACTS_BATCH):
+            outlets.extend(
+                Outlet.query.filter(Outlet.user_id.in_(ids[offset : offset + _FACTS_BATCH])).order_by(Outlet.id).all()
+            )
+        dormant = [row for row in outlets if row.stage == "dormant"]
+        # Still dormant by the stage job's OWN reactivation rule, not by the stored column alone,
+        # which only the 01:10 job moves: a shop that reordered this morning is not dormant now.
+        reactivated = OutletService.reactivated_outlet_ids(dormant)
+        dormant = [row for row in dormant if row.id not in reactivated]
+        since: Dict[int, datetime] = {}
+        if dormant:
+            rows = (
+                db.session.query(OutletStageHistory.outlet_id, func.max(OutletStageHistory.created_at))
+                .filter(
+                    OutletStageHistory.outlet_id.in_([row.id for row in dormant]),
+                    OutletStageHistory.to_stage == "dormant",
+                )
+                .group_by(OutletStageHistory.outlet_id)
+                .all()
+            )
+            since = {outlet_id: ensure_utc(created_at) for outlet_id, created_at in rows}
+        holders = {row.user_id for row in outlets}
+        dormant_by_user: Dict[int, List[DormantOutletFacts]] = {user_id: [] for user_id in ids}
+        for row in dormant:
+            dormant_by_user[row.user_id].append(
+                DormantOutletFacts(
+                    outlet_id=row.id,
+                    name=row.name,
+                    user_id=row.user_id,
+                    dormant_since=since.get(row.id),
+                    agent_user_id=OutletService.due_owner_id(row),
+                )
+            )
+        return {user_id: (user_id in holders, dormant_by_user[user_id]) for user_id in ids}
 
     @staticmethod
     def is_branch(outlet: Outlet) -> bool:
@@ -333,7 +420,7 @@ class OutletService:
         """
         if outlet is None or outlet.user_id is None:
             return False
-        return OutletService.account_outlet_count(outlet.user_id) >= 2
+        return OutletService.account_outlet_count(outlet.user_id) >= _BRANCH_MODE_MIN_OUTLETS
 
     @staticmethod
     def order_scope(outlet: Outlet):
@@ -350,10 +437,27 @@ class OutletService:
         the exact bug this helper exists to remove, inverted. It falls back to the account
         clause until the office gives it an address.
         """
+        return OutletService._scope_clause(outlet, branch=OutletService.is_branch(outlet))
+
+    @staticmethod
+    def order_scopes(outlets: Sequence[Outlet]) -> Dict[int, Any]:
+        """`{outlet id: order_scope(outlet)}` for many outlets, their accounts' branch mode read in
+        ONE count query (`_live_outlet_counts`) instead of one per outlet. The same clause as
+        `order_scope`, built by the same `_scope_clause`."""
+        counts = OutletService._live_outlet_counts(row.user_id for row in outlets)
+        return {
+            row.id: OutletService._scope_clause(row, branch=counts.get(row.user_id, 0) >= _BRANCH_MODE_MIN_OUTLETS)
+            for row in outlets
+        }
+
+    @staticmethod
+    def _scope_clause(outlet: Outlet, *, branch: bool):
+        """THE branch rule (see `order_scope`): the account's orders, narrowed to the outlet's own
+        delivery address only in branch mode and only when it has one."""
         from business_app.models.order import Order
 
         clauses = [Order.user_id == outlet.user_id]
-        if OutletService.is_branch(outlet) and outlet.address_id is not None:
+        if branch and outlet.address_id is not None:
             clauses.append(Order.delivery_address_id == outlet.address_id)
         return and_(*clauses)
 
@@ -371,7 +475,7 @@ class OutletService:
                     "kind": "customer",
                     "user_id": user.id,
                     "outlet_id": None,
-                    "name": _user_display_name(user),
+                    "name": user_display_name(user),
                     "phone": user.phone,
                     "distance_m": None,
                     "reason": "phone",
@@ -418,14 +522,14 @@ class OutletService:
             for address in addresses:
                 user = address.user
                 distance_km = calculate_distance(latitude, longitude, address.latitude, address.longitude)
-                if distance_km <= radius_km and _names_match(name, _user_display_name(user)):
+                if distance_km <= radius_km and _names_match(name, user_display_name(user)):
                     candidates.setdefault(
                         ("user", user.id),
                         {
                             "kind": "customer",
                             "user_id": user.id,
                             "outlet_id": None,
-                            "name": _user_display_name(user),
+                            "name": user_display_name(user),
                             "phone": user.phone,
                             "distance_m": round(distance_km * 1000),
                             "reason": "name_nearby",
@@ -1390,7 +1494,7 @@ class OutletService:
             return None
         return {
             "user_id": user.id,
-            "name": _user_display_name(user),
+            "name": user_display_name(user),
             "outlet_count": outlet_count,
         }
 
@@ -1773,31 +1877,60 @@ class OutletService:
         24-hour window would silently drop it. `created_at` is that table's only timestamp;
         an outlet with no history at all falls back to its own.
         """
-        row = (
-            OutletStageHistory.query.filter_by(outlet_id=outlet.id)
-            .order_by(OutletStageHistory.created_at.desc(), OutletStageHistory.id.desc())
-            .first()
-        )
-        return ensure_utc(row.created_at if row is not None else outlet.created_at)
+        return OutletService._stage_entered_at_by_outlet([outlet])[outlet.id]
 
     @staticmethod
-    def _typical_interval_days(outlet: Outlet, instants: List[datetime]) -> float:
-        """How often this shop normally buys, in days.
+    def _stage_entered_at_by_outlet(outlets: Sequence[Outlet]) -> Dict[int, datetime]:
+        """`_stage_entered_at` for many outlets, one query per batch: each outlet's newest
+        stage-history instant, else its own `created_at`."""
+        ids = sorted({row.id for row in outlets})
+        newest: Dict[int, datetime] = {}
+        for offset in range(0, len(ids), _FACTS_BATCH):
+            rows = (
+                db.session.query(OutletStageHistory.outlet_id, func.max(OutletStageHistory.created_at))
+                .filter(OutletStageHistory.outlet_id.in_(ids[offset : offset + _FACTS_BATCH]))
+                .group_by(OutletStageHistory.outlet_id)
+                .all()
+            )
+            newest.update(rows)
+        return {row.id: ensure_utc(newest.get(row.id) or row.created_at) for row in outlets}
 
-        The median of its last `INTERVAL_SAMPLE_SIZE` inter-order gaps, floored at
-        `MIN_INTERVAL_DAYS`. Fewer than two deliveries is not a rhythm, so the class cadence
-        stands in (R4) — `cadence_days` is the one place that answers "how often should we
-        be at this shop", so the fallback is not a second opinion about it.
+    @staticmethod
+    def reactivated_outlet_ids(outlets: Sequence[Outlet]) -> Set[int]:
+        """THE reactivation rule of the 01:10 stage job (`at_risk|dormant -> active`): the ids of the
+        given at_risk or dormant outlets that water reached after they entered that stage, i.e. an
+        order in the outlet's OWN `order_scope` (a chain branch reads only its own address) landed
+        after its newest stage-history row (`_stage_entered_at`).
+
+        One predicate, two readers: the stage job moves these outlets back to `active`, and the
+        reorder-reminder facts (`outlet_facts_by_user`) stop treating them as dormant at once, so a
+        shop that reordered this morning is not put back on the worklist by a stage column only
+        tonight's job will move (final review A1). The landing instant is
+        `ReplenishmentService.latest_landing_by_outlet`, the batched form of the question
+        `delivered_instants` answers. A fixed number of queries per batch of outlets.
         """
         from business_app.services.sales.replenishment_service import ReplenishmentService
 
-        if len(instants) < 2:
-            return float(ReplenishmentService.cadence_days(outlet))
-        gaps = [
-            (instants[index] - instants[index + 1]).total_seconds() / _SECONDS_PER_DAY
-            for index in range(len(instants) - 1)
-        ]
-        return max(float(median(gaps)), float(MIN_INTERVAL_DAYS))
+        candidates = [row for row in outlets if row.stage in _REACTIVATABLE_STAGES and row.user_id is not None]
+        if not candidates:
+            return set()
+        entered = OutletService._stage_entered_at_by_outlet(candidates)
+        landed = ReplenishmentService.latest_landing_by_outlet(candidates)
+        return {row.id for row in candidates if row.id in landed and landed[row.id] > entered[row.id]}
+
+    @staticmethod
+    def _typical_interval_days(outlet: Outlet, instants: List[datetime]) -> int:
+        """How often this shop normally buys, in whole days.
+
+        The shared delivery-day rule (`delivery_cadence.typical_interval_days`, D6) over the
+        shop's whole delivered history: same-day deliveries are one delivery day and gaps are whole
+        local days. Fewer than two delivery days is not a rhythm, so the class cadence stands in
+        (R4): `cadence_days` is the one place that answers "how often should we be at this shop",
+        so the fallback is not a second opinion about it.
+        """
+        from business_app.services.sales.replenishment_service import ReplenishmentService
+
+        return typical_interval_days(instants, min_days=2) or ReplenishmentService.cadence_days(outlet)
 
     @staticmethod
     def _activate_converted_tryouts() -> int:
@@ -1861,10 +1994,11 @@ class OutletService:
         `at_risk` tonight and cannot also go dormant in the same run. Two rows for one night
         would claim the shop was briefly at risk when nobody ever saw it that way.
 
-        "How recently did water reach this shop" is asked once, of
-        `ReplenishmentService.delivered_instants` — the module that already owns every
-        DELIVERED-history question — so the stage rule and the consumption rate can never
-        disagree about when an order landed.
+        "How recently did water reach this shop" is asked of `ReplenishmentService` — the module
+        that already owns every DELIVERED-history question — so the stage rule and the
+        consumption rate can never disagree about when an order landed. The reactivation branch
+        is `reactivated_outlet_ids`, the ONE predicate the reorder-reminder facts read too, so the
+        worklist and this job never disagree about whether a shop is still dormant.
         """
         from business_app.services.sales.replenishment_service import ReplenishmentService
 
@@ -1878,9 +2012,12 @@ class OutletService:
             .order_by(Outlet.id.asc())
             .all()
         )
+        reactivated = OutletService.reactivated_outlet_ids(outlets)
         for outlet in outlets:
             counts["scanned"] += 1
-            instants = ReplenishmentService.delivered_instants(outlet, limit=INTERVAL_SAMPLE_SIZE + 1)
+            # Full history: the usual gap needs six delivery DAYS, and a same-day burst makes six
+            # orders fewer days (spec 2026-10-09 §9.3).
+            instants = ReplenishmentService.delivered_instants(outlet)
             if not instants:
                 # Nothing has ever been delivered here, so "days since the last delivery" has
                 # no value — not a large one. Leave the stage alone.
@@ -1889,7 +2026,7 @@ class OutletService:
             threshold_days = ratio * OutletService._typical_interval_days(outlet, instants)
             stage_entered_at = OutletService._stage_entered_at(outlet)
             at_risk_days = (moment - stage_entered_at).total_seconds() / _SECONDS_PER_DAY
-            if outlet.stage in ("at_risk", "dormant") and instants[0] > stage_entered_at:
+            if outlet.id in reactivated:
                 OutletService.transition(outlet, "active", None, reason_code="job_reactivated")
                 counts["reactivated"] += 1
             elif outlet.stage == "active" and elapsed_days > threshold_days:
@@ -2173,7 +2310,7 @@ class OutletService:
         if outlet.user_id is None:
             data["account_name"] = data["branch_count"] = None
         else:
-            data["account_name"] = _user_display_name(outlet.user)
+            data["account_name"] = user_display_name(outlet.user)
             data["branch_count"] = OutletService.account_outlet_count(outlet.user_id)
         data["is_branch"] = OutletService.is_branch(outlet)
         data["open_receivable_scope"] = "account"

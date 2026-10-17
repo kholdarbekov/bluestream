@@ -4,6 +4,7 @@ from unittest.mock import Mock
 
 from flask_jwt_extended import create_access_token
 
+from business_app.models.notification import NotificationPreference
 from business_app.models.user import User
 from shared.enums import UserRole, UserType
 from business_app.utils.exceptions import NotFoundError
@@ -77,12 +78,16 @@ def test_admin_get_user_notification_settings_route_delegates_to_service(
     monkeypatch,
 ):
     service = Mock()
-    service.get_delivery_telegram_status_updates_setting.return_value = {
+    service.get_admin_notification_settings.return_value = {
         'delivery_telegram_status_updates_enabled': True,
         'delivery_telegram_status_updates_source': 'default',
         'telegram_connected': True,
         'bot_active': True,
         'updated_at': None,
+        'reorder_reminders': {
+            'enabled': True, 'changed_by_kind': None, 'changed_via': None, 'changed_at': None, 'reason': None,
+            'state': 'on',
+        },
     }
     monkeypatch.setattr('business_app.api.admin.get_notification_service', lambda: service)
 
@@ -95,7 +100,8 @@ def test_admin_get_user_notification_settings_route_delegates_to_service(
     payload = response.get_json()
     assert payload['success'] is True
     assert payload['data']['notification_settings']['delivery_telegram_status_updates_enabled'] is True
-    service.get_delivery_telegram_status_updates_setting.assert_called_once_with(sample_user.id)
+    assert payload['data']['notification_settings']['reorder_reminders']['enabled'] is True
+    service.get_admin_notification_settings.assert_called_once_with(sample_user.id)
 
 
 def test_manager_updates_user_notification_settings_route(
@@ -107,12 +113,16 @@ def test_manager_updates_user_notification_settings_route(
 ):
     manager_user = _create_manager_user(db)
     service = Mock()
-    service.set_delivery_telegram_status_updates_setting.return_value = {
+    service.update_admin_notification_settings.return_value = {
         'delivery_telegram_status_updates_enabled': False,
         'delivery_telegram_status_updates_source': 'explicit',
         'telegram_connected': True,
         'bot_active': True,
         'updated_at': '2026-03-05T10:00:00+00:00',
+        'reorder_reminders': {
+            'enabled': True, 'changed_by_kind': None, 'changed_via': None, 'changed_at': None, 'reason': None,
+            'state': 'on',
+        },
     }
     monkeypatch.setattr('business_app.api.admin.get_notification_service', lambda: service)
 
@@ -129,25 +139,17 @@ def test_manager_updates_user_notification_settings_route(
     payload = response.get_json()
     assert payload['success'] is True
     assert payload['data']['notification_settings']['delivery_telegram_status_updates_enabled'] is False
-    service.set_delivery_telegram_status_updates_setting.assert_called_once_with(
-        user_id=sample_user.id,
-        enabled=False,
-        source='admin',
-        actor_user_id=manager_user.id,
+    service.update_admin_notification_settings.assert_called_once_with(
+        sample_user.id,
         reason='Customer requested disable via phone',
+        actor_user_id=manager_user.id,
+        delivery_telegram_status_updates_enabled=False,
+        reorder_reminders_enabled=None,
     )
 
 
-def test_update_user_notification_settings_route_validates_reason(
-    client,
-    app,
-    db,
-    sample_user,
-    monkeypatch,
-):
+def test_update_user_notification_settings_route_validates_reason(client, app, db, sample_user):
     manager_user = _create_manager_user(db)
-    service = Mock()
-    monkeypatch.setattr('business_app.api.admin.get_notification_service', lambda: service)
 
     response = client.put(
         f'/api/v1/admin/users/{sample_user.id}/notification-settings',
@@ -159,19 +161,11 @@ def test_update_user_notification_settings_route_validates_reason(
     )
 
     assert response.status_code == 400
-    service.set_delivery_telegram_status_updates_setting.assert_not_called()
+    assert NotificationPreference.query.filter_by(user_id=sample_user.id).count() == 0
 
 
-def test_update_user_notification_settings_route_validates_boolean_toggle(
-    client,
-    app,
-    db,
-    sample_user,
-    monkeypatch,
-):
+def test_update_user_notification_settings_route_validates_boolean_toggle(client, app, db, sample_user):
     manager_user = _create_manager_user(db)
-    service = Mock()
-    monkeypatch.setattr('business_app.api.admin.get_notification_service', lambda: service)
 
     response = client.put(
         f'/api/v1/admin/users/{sample_user.id}/notification-settings',
@@ -183,7 +177,7 @@ def test_update_user_notification_settings_route_validates_boolean_toggle(
     )
 
     assert response.status_code == 400
-    service.set_delivery_telegram_status_updates_setting.assert_not_called()
+    assert NotificationPreference.query.filter_by(user_id=sample_user.id).count() == 0
 
 
 def test_get_user_notification_settings_route_returns_not_found_when_user_missing(
@@ -194,7 +188,7 @@ def test_get_user_notification_settings_route_returns_not_found_when_user_missin
     monkeypatch,
 ):
     service = Mock()
-    service.get_delivery_telegram_status_updates_setting.side_effect = NotFoundError('User not found')
+    service.get_admin_notification_settings.side_effect = NotFoundError('User not found')
     monkeypatch.setattr('business_app.api.admin.get_notification_service', lambda: service)
 
     response = client.get(
@@ -214,7 +208,7 @@ def test_update_user_notification_settings_route_returns_not_found_when_user_mis
 ):
     manager_user = _create_manager_user(db)
     service = Mock()
-    service.set_delivery_telegram_status_updates_setting.side_effect = NotFoundError('User not found')
+    service.update_admin_notification_settings.side_effect = NotFoundError('User not found')
     monkeypatch.setattr('business_app.api.admin.get_notification_service', lambda: service)
 
     response = client.put(
@@ -250,4 +244,4 @@ def test_update_user_notification_settings_route_forbids_operator_role(
     )
 
     assert response.status_code == 403
-    service.set_delivery_telegram_status_updates_setting.assert_not_called()
+    service.update_admin_notification_settings.assert_not_called()

@@ -52,6 +52,7 @@ from shared.staff_constants import (
     FAILED_DELIVERY_REASONS,
 )
 from shared.redis_keyspace import RedisKeyspace
+from shared.validators import is_deliverable_email
 from business_app import db
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -161,6 +162,31 @@ class StaffService:
         from sqlalchemy import String, cast
 
         return or_(User.role == UserRole(role), cast(User.staff_roles, String).ilike(f'%"{role}"%'))
+
+    @staticmethod
+    def active_admin_manager_recipients() -> List[User]:
+        """Every ACTIVE admin and manager with a deliverable email, by id (reorder-reminders §9.2).
+
+        "Holds admin or manager" is `staff_role_member_filter`, the one role-membership predicate
+        (users.role OR the staff_roles list); "active" is ``users.status``; "deliverable" is
+        `shared.validators.is_deliverable_email`, the one rule, which also drops the placeholder
+        addresses (``…@bluestream.local``, ``…@bot.internal``) and merge tombstones, so a
+        Telegram-only staff account never reaches the email provider. An account that holds both
+        roles is one row. Each recipient reads the digest in their own ``preferred_language``,
+        which the send resolves (`EmailTemplateService.resolve_language`); nothing here does.
+        """
+        candidates = (
+            User.query.filter(
+                or_(
+                    StaffService.staff_role_member_filter(UserRole.ADMIN.value),
+                    StaffService.staff_role_member_filter(UserRole.MANAGER.value),
+                ),
+                User.status == UserStatus.ACTIVE,
+            )
+            .order_by(User.id.asc())
+            .all()
+        )
+        return [user for user in candidates if is_deliverable_email(user.email)]
 
     @staticmethod
     def assert_delivery_person_active(user: User) -> None:

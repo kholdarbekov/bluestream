@@ -12,88 +12,22 @@ Postgres and several migrations use Postgres-only constructs (e.g. JSONB,
 ``ENCODE(DIGEST(...))``).
 """
 import json
-import os
-import uuid
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import create_engine, text
-from sqlalchemy.engine.url import make_url
-from sqlalchemy.exc import OperationalError
+from sqlalchemy import text
 
-
-REQUIRES_PG_REASON = (
-    "TST-004 migration roundtrip requires PostgreSQL. "
-    "Set DATABASE_URL to a Postgres URL with permission to CREATE/DROP databases."
-)
-
-
-def _resolve_database_url() -> str:
-    """Pick the most reliable Postgres DSN for the current environment.
-
-    Local dev sometimes has a stale ``DATABASE_URL`` in ``.env`` whose
-    password no longer matches the running ``postgres`` container's
-    ``POSTGRES_PASSWORD``. When ``POSTGRES_USER``/``PASSWORD``/``DB`` are all
-    set, build the DSN from them so we always agree with whatever credentials
-    the postgres service actually started with.
-    """
-    user = os.environ.get('POSTGRES_USER')
-    password = os.environ.get('POSTGRES_PASSWORD')
-    database = os.environ.get('POSTGRES_DB')
-    if user and password and database:
-        host = os.environ.get('POSTGRES_HOST', 'postgres')
-        port = os.environ.get('POSTGRES_PORT', '5432')
-        return f"postgresql://{user}:{password}@{host}:{port}/{database}"
-    return os.environ.get('DATABASE_URL', '')
-
-
-def _admin_engine_for(database_url: str):
-    """Engine pointed at the ``postgres`` maintenance DB for CREATE/DROP DATABASE."""
-    admin_url = make_url(database_url).set(database='postgres')
-    # ``str(URL)`` redacts the password as ``***`` — pass the URL object
-    # directly so SQLAlchemy keeps the real credential.
-    return create_engine(admin_url, isolation_level='AUTOCOMMIT')
+from tests.integration.conftest import transient_pg_database
 
 
 @pytest.fixture
 def ephemeral_pg_database():
-    """Create a transient Postgres database, yield its URL, drop on teardown."""
-    base_url = _resolve_database_url()
-    if not base_url.startswith(('postgresql://', 'postgresql+', 'postgres://')):
-        pytest.skip(REQUIRES_PG_REASON)
-
-    admin_engine = _admin_engine_for(base_url)
-    db_name = f"migr_rt_{uuid.uuid4().hex[:12]}"
-    quoted = f'"{db_name}"'
-
-    try:
-        with admin_engine.connect() as conn:
-            conn.execute(text(f'CREATE DATABASE {quoted}'))
-    except OperationalError as exc:
-        admin_engine.dispose()
-        pytest.skip(f"Postgres unreachable for migration roundtrip: {exc.orig}")
-
-    # render_as_string(hide_password=False) keeps the real credential;
-    # ``str(URL)`` would redact it to ``***``.
-    target_url = make_url(base_url).set(database=db_name).render_as_string(
-        hide_password=False
-    )
-    try:
-        yield target_url
-    finally:
-        with admin_engine.connect() as conn:
-            conn.execute(
-                text(
-                    "SELECT pg_terminate_backend(pid) "
-                    "FROM pg_stat_activity "
-                    "WHERE datname = :db AND pid <> pg_backend_pid()"
-                ),
-                {'db': db_name},
-            )
-            conn.execute(text(f'DROP DATABASE IF EXISTS {quoted}'))
-        admin_engine.dispose()
+    """A transient, EMPTY Postgres database — these tests replay the migrations
+    themselves, so they must not get the migrated template conftest hands out."""
+    with transient_pg_database("migr_rt") as url:
+        yield url
 
 
 @pytest.mark.integration
@@ -441,6 +375,20 @@ def _add(db, row):
     db.session.remove()
 
 
+def _insert_user(db, **columns):
+    """A `users` row written with Core, and its id. For fixtures staged BEFORE b4f1c7e9a2d3.
+
+    The ORM sends every mapped column, `None` included (SQLAlchemy's legacy insert behaviour), so an
+    ORM `User` fails at any revision that predates a column the model has since gained. Core sends
+    only what is given plus the column defaults, so the row lands at the older schema too.
+    """
+    from business_app.models.user import User
+
+    user_id = db.session.execute(User.__table__.insert().values(**columns)).inserted_primary_key[0]
+    db.session.commit()
+    return user_id
+
+
 def _revision(engine):
     return _rows(engine, "SELECT version_num FROM alembic_version")[0][0]
 
@@ -496,33 +444,36 @@ def _v4_plan_world(db):
     default, 19 L at 1,500 per unit) and v2 (November, 400 per unit by default, 19 L at 500), an agent
     with October terms, October open, and one agent order. The version and rate tables are v4-shaped
     here, so they are written in SQL. The other tables are the same in both schemas."""
+    from business_app.models.sales import Outlet
     from business_app.models.sales_pay import SalesAgentPayTerms, SalesPayPeriod, SalesPayPlan
-    from business_app.models.user import User
     from business_app.utils.constants import ORDER_SOURCE_SALES_AGENT
     from tests.integration.sales_pay_builders import make_product
-    from tests.integration.test_sales_agent_pg_constraints import _agent_and_outlet, _order
+    from tests.integration.test_sales_agent_pg_constraints import _order
 
-    agent, _outlet = _agent_and_outlet(db, phone="+998900000501", outlet_name="Tier Shop")
-    customer = User(phone="+998900000502", password_hash="not-a-real-hash", first_name="Store")
-    db.session.add(customer)
+    # Users go in with Core: this schema predates users.telegram_blocked_at (see `_insert_user`).
+    agent_id = _insert_user(
+        db, phone="+998900000501", password_hash="not-a-real-hash", first_name="Sardor", last_name="Agent"
+    )
+    customer_id = _insert_user(db, phone="+998900000502", password_hash="not-a-real-hash", first_name="Store")
+    db.session.add(Outlet(name="Tier Shop", outlet_type="grocery_store", stage="active"))
     db.session.commit()
     water = make_product(db, name="Water 19L", price="20000")
-    plan = SalesPayPlan(name="Standard", created_by_user_id=agent.id)
+    plan = SalesPayPlan(name="Standard", created_by_user_id=agent_id)
     period = SalesPayPeriod(month_start=OCT, status="open", is_shadow=False, holidays=[])
-    order = _order(db, user_id=customer.id, order_source=ORDER_SOURCE_SALES_AGENT, created_by_staff_id=agent.id)
+    order = _order(db, user_id=customer_id, order_source=ORDER_SOURCE_SALES_AGENT, created_by_staff_id=agent_id)
     db.session.add_all([plan, period, order])
     db.session.commit()
     terms = SalesAgentPayTerms(
-        agent_user_id=agent.id,
+        agent_user_id=agent_id,
         effective_month=OCT,
         base_salary=Decimal("2600000"),
         plan_id=plan.id,
-        created_by_user_id=agent.id,
+        created_by_user_id=agent_id,
     )
     db.session.add(terms)
     db.session.commit()
     w = SimpleNamespace(
-        agent=agent.id, water=water.id, plan=plan.id, period=period.id, order=order.id, terms=terms.id
+        agent=agent_id, water=water.id, plan=plan.id, period=period.id, order=order.id, terms=terms.id
     )
     db.session.remove()
     versions = []
@@ -703,7 +654,6 @@ def test_contract_price_split_copies_the_price_into_both_methods_and_rolls_back(
     from business_app import db
     from business_app.models.corporate import CorporateContract, CorporateContractStatus
     from business_app.models.product import Product, ProductCategory
-    from business_app.models.user import User
     from shared.enums import UserRole, UserType
 
     app = _migration_app(ephemeral_pg_database)
@@ -711,14 +661,15 @@ def test_contract_price_split_copies_the_price_into_both_methods_and_rolls_back(
         config = app.extensions["migrate"].migrate.get_config()
         command.upgrade(config, CONTRACT_PRICE_PARENT_REVISION)
 
-        # Only corporate_contract_product_prices differs between the parent and head, so the ORM
-        # is safe for every other table; the price row itself goes in as raw SQL.
-        user = User(
-            email="split@example.com", phone="+998901110001", password_hash="x" * 60, first_name="S",
+        # Only corporate_contract_product_prices and users.telegram_blocked_at differ between the
+        # parent and head, so the ORM is safe for every other table; the price row goes in as raw SQL
+        # and the user as Core (see `_insert_user`).
+        user_id = _insert_user(
+            db, email="split@example.com", phone="+998901110001", password_hash="x" * 60, first_name="S",
             last_name="P", user_type=UserType.ENTITY, role=UserRole.CUSTOMER, is_verified=True,
         )
         category = ProductCategory(name="Water", description="d", is_active=True)
-        db.session.add_all([user, category])
+        db.session.add(category)
         db.session.flush()
         product = Product(
             name="Water 19L", description="d", category_id=category.id, size="19L", volume=19.0,
@@ -726,7 +677,7 @@ def test_contract_price_split_copies_the_price_into_both_methods_and_rolls_back(
             max_stock_level=100, is_active=True,
         )
         contract = CorporateContract(
-            user_id=user.id, contract_number="SPLIT-1", name="Split",
+            user_id=user_id, contract_number="SPLIT-1", name="Split",
             status=CorporateContractStatus.ACTIVE, currency="UZS", is_active=True,
         )
         db.session.add_all([product, contract])
@@ -758,3 +709,38 @@ def test_contract_price_split_copies_the_price_into_both_methods_and_rolls_back(
         assert _rows(db.engine, "SELECT unit_price FROM corporate_contract_product_prices") == [(Decimal("15000.00"),)]
 
         command.upgrade(config, "head")
+
+
+REORDER_REMINDERS_REVISION = "b4f1c7e9a2d3"
+REORDER_REMINDERS_PARENT_REVISION = "e7b2c4d9a1f6"
+REORDER_REMINDER_TABLES = ("reorder_reminder_episodes", "reorder_reminder_events", "reorder_reminder_settings")
+
+
+@pytest.mark.integration
+def test_reorder_reminders_downgrade_removes_exactly_what_the_upgrade_added(ephemeral_pg_database):
+    """Spec 2026-10-09 §10. The parent has none of the three tables nor `users.telegram_blocked_at`; the
+    revision has all four; the second upgrade brings them back. (The base roundtrip above only proves
+    the downgrade runs, not that it took the right objects with it.)"""
+    from alembic import command
+
+    from business_app import db
+
+    def present():
+        with db.engine.connect() as conn:
+            return (
+                [bool(_schema_columns(conn, table)) for table in REORDER_REMINDER_TABLES],
+                "telegram_blocked_at" in _schema_columns(conn, "users"),
+            )
+
+    app = _migration_app(ephemeral_pg_database)
+    with app.app_context():
+        config = app.extensions["migrate"].migrate.get_config()
+        command.upgrade(config, REORDER_REMINDERS_REVISION)
+        assert present() == ([True, True, True], True)
+
+        command.downgrade(config, REORDER_REMINDERS_PARENT_REVISION)
+        assert present() == ([False, False, False], False)
+        assert _revision(db.engine) == REORDER_REMINDERS_PARENT_REVISION
+
+        command.upgrade(config, REORDER_REMINDERS_REVISION)
+        assert present() == ([True, True, True], True)

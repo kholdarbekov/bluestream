@@ -75,6 +75,7 @@ TRANSLATIONS = {
         "telegram.agent_order.declined",
         "telegram.agent_order.not_pending",
         "telegram.error.auth_failed",
+        "telegram.error.generic",
     )
 }
 
@@ -178,18 +179,24 @@ async def test_a_second_tap_on_an_already_answered_proposal_says_so(bot, user):
     assert toasts(bot) == [_seeded("telegram.agent_order.not_pending")]
 
 
-async def test_an_unmapped_backend_failure_surfaces_its_message(bot, user):
-    """Anything without a mapped error code falls through to the shared
-    `_handle_api_error` shim, so the customer still sees why it failed."""
+async def test_an_unmapped_backend_failure_reads_as_the_generic_error_and_is_logged(bot, user, caplog):
+    """Anything without a mapped error code goes through the shared failure toast (final review
+    E2, ruling: the same path as the reorder-reminder buttons): the customer reads the seeded
+    generic error in their own language, never the backend's English text or a transport error;
+    that text is logged. The proposal keeps its buttons."""
     bot.backend.route(
         "POST",
         CONFIRMATION_ENDPOINT,
         lambda _c: backend_failure("Order not found", status_code=404),
     )
 
-    await bot.send(user.tap(f"agent_order_confirm_{ORDER_ID}"))
+    with caplog.at_level("WARNING"):
+        await bot.send(user.tap(f"agent_order_confirm_{ORDER_ID}"))
 
-    assert toasts(bot) == ["❌ Order not found"]
+    assert toasts(bot) == [_seeded("telegram.error.generic")]
+    assert bot.telegram.of("editMessageText", "editMessageReplyMarkup") == []
+    logged = [record.getMessage() for record in caplog.records if record.levelname == "WARNING"]
+    assert any("Order not found" in line for line in logged), logged
 
 
 async def test_a_refused_ack_on_the_error_path_does_not_add_a_second_toast(bot, user):
@@ -215,7 +222,7 @@ async def test_a_refused_ack_on_the_error_path_does_not_add_a_second_toast(bot, 
 
     await bot.send(user.tap(f"agent_order_confirm_{ORDER_ID}"))
 
-    assert toasts(bot) == ["❌ Order not found"]
+    assert toasts(bot) == [_seeded("telegram.error.generic")]
 
 
 async def test_an_expired_login_leaves_the_proposal_answerable(bot, user, monkeypatch):
@@ -321,9 +328,9 @@ async def test_an_answered_proposal_loses_its_buttons_and_shows_the_answer(
 async def test_a_second_tap_retires_the_proposal_the_backend_says_is_answered(bot, user):
     """The 409 branch settles the message too, and only an assertion says so.
 
-    `_settle` is called from two places and the success branch is the only one
+    `_settle_callback_message` is called from two places and the success branch is the only one
     with an `editMessageText` assertion, so dropping the call here — or
-    reordering the `_ack`/`_settle` pair so the edit is skipped — stayed green
+    reordering the `_ack`/`_settle_callback_message` pair so the edit is skipped — stayed green
     while the store's proposal kept two live buttons over an order it had
     already answered: the very defect the settle was added for, on the branch a
     shopkeeper reaches MOST often.
@@ -349,7 +356,7 @@ async def test_a_second_tap_retires_the_proposal_the_backend_says_is_answered(bo
 
 
 async def test_a_refused_edit_never_costs_the_store_its_answer(bot, user):
-    """`_settle`'s tolerance, exercised rather than asserted in a docstring.
+    """`_settle_callback_message`'s tolerance, exercised rather than asserted in a docstring.
 
     Telegram refuses `editMessageText` routinely — past the 48h window, on a
     message the customer deleted, "message is not modified" for an answer that

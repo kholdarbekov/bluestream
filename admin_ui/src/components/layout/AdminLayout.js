@@ -31,16 +31,19 @@ import {
   BarcodeOutlined,
   MessageOutlined,
   ShopOutlined,
-  SyncOutlined
+  SyncOutlined,
+  ClockCircleOutlined
 } from '@ant-design/icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '../../stores/authStore';
 import { useRealTimeWithFallback } from '../../hooks/useRealTimeUpdates';
+import adminService from '../../services/adminService';
 import salesPayService from '../../services/salesPayService';
 import salesService from '../../services/salesService';
 import useResponsive from '../../hooks/useResponsive';
 import LanguageSwitcher from '../common/LanguageSwitcher';
 import { useTranslation } from 'react-i18next';
+import { LAPSED_CUSTOMERS_SUMMARY_KEY } from '../../utils/constants';
 
 const { Header, Sider, Content } = Layout;
 const { Title, Text } = Typography;
@@ -77,6 +80,17 @@ const AdminLayout = ({ children }) => {
     refetchInterval: 60_000,
   });
   const pendingApprovals = orderApprovalsBadge?.pending_count || 0;
+  const canManageLapsedCustomers = hasPermission('can_manage_lapsed_customers');
+  // Reorder-reminders spec §9.1: the badge is `summary.counts.follow_up`. It shares the page's
+  // summary query key, so an outcome recorded there refreshes the badge too; polled every minute.
+  const { data: lapsedSummary } = useQuery({
+    queryKey: LAPSED_CUSTOMERS_SUMMARY_KEY,
+    queryFn: () => adminService.getReorderReminderSummary(),
+    enabled: canManageLapsedCustomers,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  });
+  const lapsedFollowUps = lapsedSummary?.counts?.follow_up || 0;
 
   // Initialize real-time updates
   const { isConnected, connectionType } = useRealTimeWithFallback({
@@ -101,6 +115,17 @@ const AdminLayout = ({ children }) => {
       icon: <UserOutlined />,
       label: t('ui.nav.users')
     },
+    // Top level, next to Users: the layout has no Customers group (spec §9.1).
+    ...(canManageLapsedCustomers ? [{
+      key: '/lapsed-customers',
+      icon: <ClockCircleOutlined />,
+      label: (
+        <Space size={6}>
+          {t('ui.nav.lapsed_customers', 'Lapsed customers')}
+          <Badge count={lapsedFollowUps} size="small" />
+        </Space>
+      ),
+    }] : []),
     {
       key: '/orders',
       icon: <ShoppingCartOutlined />,

@@ -140,6 +140,42 @@ def validate_email(email: Optional[str]) -> Tuple[bool, str]:
     return True, "Email is valid"
 
 
+# --- Email deliverability (send decisions only) ---
+
+# The two domains this code base invents addresses on: the Telegram sign-up paths and the merge
+# tombstones build their placeholders from these constants (spec 2026-10-09 §7.1), and
+# `is_deliverable_email` refuses them, so the generator and the rule cannot drift apart.
+PLACEHOLDER_EMAIL_DOMAIN_LOCAL = "bluestream.local"
+PLACEHOLDER_EMAIL_DOMAIN_BOT = "bot.internal"
+PLACEHOLDER_EMAIL_DOMAINS = (PLACEHOLDER_EMAIL_DOMAIN_LOCAL, PLACEHOLDER_EMAIL_DOMAIN_BOT)
+
+# Top-level labels reserved for local networks (`.local`, RFC 6762) or private use (`.internal`):
+# mail sent there never arrives.
+_UNDELIVERABLE_TLDS = ("local", "internal")
+# One `@`, a non-empty local part, a dotted domain, no whitespace. Case-insensitive on purpose.
+_DELIVERABLE_SHAPE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s.]+$")
+
+
+def is_deliverable_email(email: Optional[str]) -> bool:
+    """True when a send decision may use `email` (spec 2026-10-09 §7.1).
+
+    Deliberately NOT `validate_email`: that one guards what a user types and refuses mixed case,
+    while a stored "Dilnoza.K@Example.COM" is a real mailbox. This one asks only whether mail can
+    arrive: a trimmed basic shape, not a placeholder domain, not a reserved top-level label.
+    """
+    if not email:
+        return False
+    candidate = str(email).strip()
+    if not _DELIVERABLE_SHAPE.match(candidate):
+        return False
+    labels = candidate.rsplit("@", 1)[1].lower().split(".")
+    if not all(labels):
+        return False
+    if ".".join(labels) in PLACEHOLDER_EMAIL_DOMAINS:
+        return False
+    return labels[-1] not in _UNDELIVERABLE_TLDS
+
+
 # --- Input sanitization ---
 
 _DANGEROUS_CHARS_RE = re.compile(r'[<>"\'\`&;|$(){}[\]\\]')

@@ -1,4 +1,4 @@
-"""Report email templates (daily/weekly/churn/demand/kpi) must render.
+"""Report email templates (daily/weekly/demand/kpi and the inventory/agent reports) must render.
 
 These admin report emails had no filesystem template, so render_template
 returned None every day at 18:00 UTC (WARNING + ERROR in prod) and no email
@@ -37,13 +37,6 @@ PAYLOADS = {
         "total_orders": 310,
         "customer_acquisition": 25,
         "key_insights": ["Revenue up 12%", "New product strong", "Retention improving"],
-    },
-    "churn_alert": {
-        "high_risk_count": 3,
-        "total_at_risk": 8,
-        "top_customers": [
-            {"user_id": 1, "user_name": "Ali Valiyev", "email": "a@x.uz", "churn_probability": 0.82, "risk_level": "high"},
-        ],
     },
     "demand_forecast": {
         "forecast_period": "30 days",
@@ -166,7 +159,6 @@ MARKERS = {
         "en": "Weekly Business Report",
         "ru": "Еженедельный бизнес-отчёт",
     },
-    "churn_alert": {"uz": "Mijozlar ketishi", "en": "Customer Churn", "ru": "Отток клиентов"},
     "demand_forecast": {"uz": "Talab prognozi", "en": "Demand Forecast", "ru": "Прогноз спроса"},
     "kpi_alert": {"uz": "KPI", "en": "KPI", "ru": "KPI"},
     "low_stock_alert": {
@@ -191,7 +183,6 @@ MARKERS = {
 SCALAR = {
     "daily_report": "42",
     "weekly_business_report": "310",
-    "churn_alert": "3",
     "demand_forecast": "900",
     "kpi_alert": "5",
     "low_stock_alert": "AE-19L-001",

@@ -38,7 +38,7 @@ if _sentry_dsn:
 
 from telegram import Update, BotCommand, ReplyKeyboardRemove
 from telegram.ext import (
-    Application, ApplicationHandlerStop, CommandHandler, MessageHandler,
+    Application, ApplicationHandlerStop, ChatMemberHandler, CommandHandler, MessageHandler,
     CallbackQueryHandler, ConversationHandler, filters, ContextTypes, TypeHandler
 )
 from telegram.error import TelegramError
@@ -65,7 +65,7 @@ from handlers import (
     product_handlers, order_handlers, subscription_handlers,
     profile_handlers, loyalty_handlers, admin_handlers,
     support_handlers, support_flow_handlers, payment_handlers, bottle_handlers,
-    quick_order_handlers, agent_order_handlers,
+    quick_order_handlers, agent_order_handlers, reorder_reminder_handlers,
 )
 # Import conversation states directly (they are module-level constants)
 from handlers.profile import (
@@ -648,6 +648,21 @@ class WaterBusinessBot:
         )
         logger.info("Quantity-screen middleware installed!")
 
+        # Telegram reachability (spec 2026-10-09 §7.2 a, b). Telegram announces a block or a
+        # return as a `my_chat_member` update; its handler reports it from a group of its own (1),
+        # where no group-0 handler can shadow it and it sits behind no text catch-all. The
+        # recovery middleware covers the `my_chat_member` updates a restart drops: any other
+        # update from a customer the backend still holds as blocked reports them reachable. It
+        # sits right after the debug logger, sees every update and never stops dispatch.
+        from handlers.chat_member import bot_membership_changed, report_recovery_middleware
+        self.application.add_handler(
+            TypeHandler(Update, report_recovery_middleware), group=-9
+        )
+        self.application.add_handler(
+            ChatMemberHandler(bot_membership_changed, ChatMemberHandler.MY_CHAT_MEMBER), group=1
+        )
+        logger.info("Telegram reachability reporting installed!")
+
 
         # Command handlers
         self.application.add_handler(CommandHandler("menu", main_menu_handler))
@@ -751,6 +766,10 @@ class WaterBusinessBot:
                 profile_handlers.toggle_delivery_telegram_status_notifications,
                 pattern="^toggle_delivery_telegram_status_(on|off)$",
             ),
+            CallbackQueryHandler(
+                profile_handlers.toggle_reorder_reminders,
+                pattern="^toggle_reorder_reminders_(on|off)$",
+            ),
             # add_phone_number is now handled by phone_verification_handler ConversationHandler
             CallbackQueryHandler(profile_handlers.verify_phone_number, pattern="^verify_phone_number$"),
             CallbackQueryHandler(profile_handlers.edit_profile, pattern="^edit_profile$"),
@@ -806,6 +825,13 @@ class WaterBusinessBot:
             # trailing segment with int().
             CallbackQueryHandler(agent_order_handlers.confirm, pattern=r"^agent_order_confirm_\d+$"),
             CallbackQueryHandler(agent_order_handlers.decline, pattern=r"^agent_order_decline_\d+$"),
+
+            # Reorder-reminder buttons pushed by
+            # telegram_bot/webhook_server.py::reorder_reminder_handler and built by
+            # keyboards.ReorderReminderKeyboards. No registered pattern is a prefix of "rr_".
+            # `\d+$` is load-bearing: the handler parses the trailing segment with int().
+            CallbackQueryHandler(reorder_reminder_handlers.later, pattern=r"^rr_later_\d+$"),
+            CallbackQueryHandler(reorder_reminder_handlers.stop, pattern=r"^rr_stop_\d+$"),
 
             # Admin callbacks (restricted - access control handled in handler)
             CallbackQueryHandler(admin_handlers.admin_orders, pattern="^admin_orders$"),

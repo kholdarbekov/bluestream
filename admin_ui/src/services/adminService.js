@@ -42,7 +42,6 @@ const normalizeOverviewAnalytics = (dashboardPayload, productsPayload, customers
   const delivery = dashboard.delivery || {};
   const growth = dashboard.growth || {};
   const customerAnalytics = customersPayload?.customer_analytics || {};
-  const churn = customerAnalytics.churn || {};
   const retention = customerAnalytics.retention || {};
   const acquisition = customerAnalytics.acquisition || {};
 
@@ -66,15 +65,12 @@ const normalizeOverviewAnalytics = (dashboardPayload, productsPayload, customers
       quantity_sold: toNumber(product.quantity_sold),
       order_count: toNumber(product.order_count)
     })),
+    // At-risk and inactive counts are the reorder-reminder service's (D17): the Analytics cards
+    // read `summary.counts`, so nothing here re-derives a lapse rule.
     customer_segments: {
       new: toNumber(acquisition.total_new_customers),
       active: toNumber(retention.current_period_customers),
-      loyal: toNumber(retention.retained_customers),
-      at_risk: toNumber(churn.churned_customers),
-      inactive: Math.max(
-        0,
-        toNumber(churn.total_customers) - toNumber(churn.active_customers)
-      )
+      loyal: toNumber(retention.retained_customers)
     },
     average_order_value: toNumber(revenue.average_order_value),
     completion_rate: toNumber(orders.completion_rate),
@@ -326,6 +322,30 @@ class AdminService {
   async updateUserNotificationSettings(userId, payload) {
     const response = await api.put(`/admin/users/${userId}/notification-settings`, payload);
     return response.data;
+  }
+
+  // Lapsed customers worklist (reorder-reminders spec §9.1)
+  async getReorderReminderSummary() {
+    const response = await api.get('/admin/reorder-reminders/summary');
+    return response.data?.data;
+  }
+
+  async listReorderReminderEpisodes({ tab, flag, search, page, perPage } = {}) {
+    const params = { tab, page, per_page: perPage };
+    if (flag) params.flag = flag;
+    if (search) params.search = search;
+    const response = await api.get('/admin/reorder-reminders/episodes', { params });
+    return response.data?.data;
+  }
+
+  // The backend strips the note and then caps it, so the caller sends it as typed (trimmed);
+  // a blank note is no note. `handledErrorCodes`: refusal codes the caller explains itself, so
+  // api.js does not toast them as well (see rescheduleOrder).
+  async resolveReorderReminderEpisode(episodeId, { outcome, note, handledErrorCodes } = {}) {
+    const body = { outcome };
+    if (note) body.note = note;
+    const response = await api.post(`/admin/reorder-reminders/episodes/${episodeId}/resolve`, body, { handledErrorCodes });
+    return response.data?.data;
   }
 
   async updateUserStatus(userId, status, reason) {

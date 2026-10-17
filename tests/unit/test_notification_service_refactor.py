@@ -958,10 +958,15 @@ def test_get_delivery_telegram_setting_defaults_to_enabled_without_override(db, 
     assert result['updated_at'] is None
 
 
-def test_set_delivery_telegram_setting_persists_explicit_override(db, sample_user):
+def test_admin_settings_update_persists_an_explicit_delivery_override(db, admin_user, sample_user):
     service = NotificationService()
 
-    updated = service.set_delivery_telegram_status_updates_setting(sample_user.id, enabled=False)
+    updated = service.update_admin_notification_settings(
+        sample_user.id,
+        reason='Customer requested disable via phone',
+        actor_user_id=admin_user.id,
+        delivery_telegram_status_updates_enabled=False,
+    )
     reloaded = service.get_delivery_telegram_status_updates_setting(sample_user.id)
 
     assert updated['delivery_telegram_status_updates_enabled'] is False
@@ -1091,28 +1096,26 @@ def test_delivery_update_email_template_renders_without_placeholder(app):
     assert 'AD_000342_26' in rendered['content']
 
 
-def test_set_delivery_telegram_setting_requires_reason_for_admin_source(db, sample_user):
+def test_admin_settings_update_requires_a_reason(db, admin_user, sample_user):
     service = NotificationService()
 
     with pytest.raises(ValidationError):
-        service.set_delivery_telegram_status_updates_setting(
+        service.update_admin_notification_settings(
             sample_user.id,
-            enabled=False,
-            source='admin',
-            actor_user_id=101,
             reason='',
+            actor_user_id=admin_user.id,
+            delivery_telegram_status_updates_enabled=False,
         )
 
 
-def test_set_delivery_telegram_setting_writes_admin_audit_log(db, admin_user, sample_user):
+def test_admin_settings_update_writes_the_delivery_audit_log(db, admin_user, sample_user):
     service = NotificationService()
 
-    service.set_delivery_telegram_status_updates_setting(
+    service.update_admin_notification_settings(
         sample_user.id,
-        enabled=False,
-        source='admin',
-        actor_user_id=admin_user.id,
         reason='Customer requested disable via phone',
+        actor_user_id=admin_user.id,
+        delivery_telegram_status_updates_enabled=False,
     )
 
     audit_entry = AuditLog.query.filter_by(
@@ -1126,14 +1129,14 @@ def test_set_delivery_telegram_setting_writes_admin_audit_log(db, admin_user, sa
     assert audit_entry.additional_data['reason'] == 'Customer requested disable via phone'
 
 
-def test_set_delivery_telegram_setting_rejects_unknown_source(db, sample_user):
+def test_admin_settings_update_requires_at_least_one_setting(db, admin_user, sample_user):
     service = NotificationService()
 
     with pytest.raises(ValidationError):
-        service.set_delivery_telegram_status_updates_setting(
+        service.update_admin_notification_settings(
             sample_user.id,
-            enabled=True,
-            source='system',
+            reason='Customer called support',
+            actor_user_id=admin_user.id,
         )
 
 

@@ -8,6 +8,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton,
 from i18n import i18n
 from config import config
 from shared.constants import ORDER_STATUS_ICONS, SUBSCRIPTION_STATUS_ICONS, DEFAULT_STATUS_ICON
+from shared import reorder_reminder_copy
 
 
 MAX_DISPLAYED_ADDRESSES = 5
@@ -1201,8 +1202,14 @@ class ProfileKeyboards:
     def notification_settings(
         language: str = 'en',
         delivery_telegram_status_updates_enabled: bool = True,
+        reorder_reminders_enabled: Optional[bool] = None,
     ) -> InlineKeyboardMarkup:
-        """Notification settings keyboard."""
+        """Notification settings keyboard.
+
+        `reorder_reminders_enabled` is the EFFECTIVE value the preferences API publishes (spec
+        2026-10-09 §8). None (a backend that does not publish it) draws no reminder row, rather
+        than a guessed one.
+        """
         toggle_enabled = bool(delivery_telegram_status_updates_enabled)
         toggle_callback = (
             'toggle_delivery_telegram_status_off'
@@ -1215,10 +1222,15 @@ class ProfileKeyboards:
             else i18n.get('telegram.notifications.toggle_enable_button', language)
         )
 
-        buttons = [
-            [{'text': toggle_text, 'callback_data': toggle_callback}],
-            [{'text': i18n.get('telegram.back', language), 'callback_data': 'menu_profile'}],
-        ]
+        buttons = [[{'text': toggle_text, 'callback_data': toggle_callback}]]
+        if reorder_reminders_enabled is not None:
+            buttons.append([{
+                'text': reorder_reminder_copy.settings_button(i18n.renderer(language), reorder_reminders_enabled),
+                'callback_data': (
+                    'toggle_reorder_reminders_off' if reorder_reminders_enabled else 'toggle_reorder_reminders_on'
+                ),
+            }])
+        buttons.append([{'text': i18n.get('telegram.back', language), 'callback_data': 'menu_profile'}])
 
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
@@ -1535,3 +1547,30 @@ class PaymentKeyboards:
             )]
         ]
         return InlineKeyboardMarkup(buttons)
+
+
+class ReorderReminderKeyboards:
+    """The buttons on a reorder reminder (spec 2026-10-09 §7.3).
+
+    Built here, not in the webhook, so the callback-contract test
+    (tests/telegram_bot/test_callback_contract_customer.py) harvests every callback it can emit.
+    """
+
+    @staticmethod
+    def reminder(
+        language: str, *, episode_id: int, reorder_order_id: Optional[int], show_later: bool, snooze_days: int
+    ) -> InlineKeyboardMarkup:
+        """Order again on every reminder; Later only when the backend says so (R1 of a two-step
+        ladder, `show_later`); Stop on every reminder.
+
+        `reorder_<id>` is the existing Quick Order flow on the RECIPIENT'S own order (the cart
+        is refilled and confirmed at checkout; nothing is placed on the tap). With no own
+        order the button opens the catalogue.
+        """
+        labels = reorder_reminder_copy.button_labels(i18n.renderer(language), language, snooze_days=snooze_days)
+        order_callback = f'reorder_{reorder_order_id}' if reorder_order_id else 'menu_products'
+        buttons = [[{'text': labels['order'], 'callback_data': order_callback}]]
+        if show_later:
+            buttons.append([{'text': labels['later'], 'callback_data': f'rr_later_{episode_id}'}])
+        buttons.append([{'text': labels['stop'], 'callback_data': f'rr_stop_{episode_id}'}])
+        return KeyboardBuilder.build_inline_keyboard(buttons)

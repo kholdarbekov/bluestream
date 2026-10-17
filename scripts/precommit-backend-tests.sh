@@ -60,6 +60,28 @@ if [[ -z "${image}" || -z "${network}" ]]; then
     exit 1
 fi
 
+# One run at a time. Two runs split the VM's CPUs (each slows several-fold) AND
+# share the per-worker Redis test DBs, where every test's flushdb() wipes the
+# other run's state — spurious failures that look like code bugs. Wait for any
+# pytest container (this runner's, or a hand-started `docker run … pytest`).
+running_pytest() { docker ps --no-trunc --format '{{.Names}}: {{.Command}}' | grep pytest || true; }
+if [[ -n "$(running_pytest)" ]]; then
+    echo "⏳ Another backend test run is in progress — waiting for it to finish (Ctrl-C to abort):"
+    running_pytest | cut -c1-160
+    while [[ -n "$(running_pytest)" ]]; do sleep 10; done
+fi
+
+# Drop the transient Postgres databases an interrupted run leaked (a Ctrl-C
+# skips fixture teardown). tests/integration/conftest.py names every database a
+# test creates `pytest_…` (TRANSIENT_DB_PREFIX); with no other run active, none
+# of them is in use.
+docker compose exec -T postgres sh -c 'psql -q -U "$POSTGRES_USER" -d postgres' >/dev/null <<'SQL' \
+    || echo "⚠ Could not drop leaked pytest_* databases; continuing."
+SELECT format('DROP DATABASE IF EXISTS %I WITH (FORCE)', datname)
+FROM pg_database WHERE datname LIKE 'pytest\_%'
+\gexec
+SQL
+
 # `.env` is loaded so the bot/ Celery/ payment modules can boot — many of
 # them validate required secrets (TELEGRAM_BOT_TOKEN, postgres_password, etc.)
 # at import time via shared/secrets_manager.py and would refuse to load
@@ -87,13 +109,13 @@ fi
 # Worksteal schedules dynamically and doesn't hit this bug. CI runners have
 # 2–4 cores so pytest.ini's loadfile stays safe there.
 #
-# `-n 4` caps concurrency. With the full compose stack (postgres + redis +
-# 2 celery workers + telegram_bot + staff_bot + flower + grafana + ...)
-# already consuming ~2 GB of the Docker Desktop VM, leaving each pytest
-# worker ~250 MB, more than 4 workers regularly OOM-kills random test
-# processes ("node down: Not properly terminated" in xdist output) and
-# surfaces as confusing intermittent failures unrelated to the code change.
-# Wall time at -n 4 is ~4 min versus ~3 min at -n 8 — cheap insurance.
+# Worker count is sized from the Docker VM, not hard-coded. Each xdist worker
+# peaks at ~0.85 GB (measured 2026-10-17: 3.4 GB for 4 workers) and the rest of
+# the compose stack holds ~2.5 GB of the same VM; too many workers OOM-kill
+# random test processes ("node down: Not properly terminated"). So a worker
+# needs a CPU plus 1 GB beyond that reserve. Capped at 12: conftest maps worker
+# gwN to Redis DB 15-N, and DBs 0-2 belong to the live stack (app + broker,
+# telegram_bot, staff_bot). PYTEST_WORKERS=<n> overrides.
 # Bot tests call api_client via BUSINESS_APP_URL, which .env points at the live
 # business_app. Override it to an unroutable host so an unmocked bot call fails
 # fast instead of writing to prod.
@@ -130,12 +152,20 @@ fi
 # shared/business_config.py::_bool treats unset AND empty as "no opinion" —
 # i.e. the shipped default — so forwarding an empty value is a no-op.
 
-# Argument passthrough. With no args we run the whole suite sharded across 4
-# workers (the pre-commit behaviour). With args we forward them verbatim and
-# drop -n 4, because xdist sharding a single test just adds startup cost and
-# scrambles the failure output TDD depends on.
+docker_cpus="$(docker info --format '{{.NCPU}}')"
+docker_mem_mib=$(( $(docker info --format '{{.MemTotal}}') / 1048576 ))
+workers=$(( (docker_mem_mib - 2560) / 1024 ))
+if (( workers > docker_cpus )); then workers=${docker_cpus}; fi
+if (( workers > 12 )); then workers=12; fi
+if (( workers < 1 )); then workers=1; fi
+workers="${PYTEST_WORKERS:-${workers}}"
+
+# Argument passthrough. With no args we run the whole suite sharded across the
+# workers above (the pre-commit behaviour) and report the 25 slowest tests. With
+# args we forward them verbatim and drop -n, because xdist sharding a single
+# test just adds startup cost and scrambles the failure output TDD depends on.
 if [ "$#" -eq 0 ]; then
-    pytest_args="tests/ --no-cov --no-header --dist=worksteal -n 4"
+    pytest_args="tests/ --no-cov --no-header --dist=worksteal -n ${workers} --durations=25"
 else
     # %q escapes each argument so the container's shell re-parses the exact
     # original argument boundaries. Without this, "$*" flattens the arguments
@@ -144,7 +174,19 @@ else
     pytest_args="${quoted}--no-cov --no-header"
 fi
 
-exec docker run --rm \
+# Every run is also written to logs/test-runs/ (gitignored; newest 20 kept), so
+# a slow or failed run leaves its output and timings behind instead of vanishing
+# with the --rm container. --init makes Ctrl-C reach pytest instead of leaving
+# an orphaned container that would hold up the next run's wait above.
+log_dir="${repo_root}/logs/test-runs"
+mkdir -p "${log_dir}"
+ls -1t "${log_dir}"/backend-*.log 2>/dev/null | tail -n +20 | while read -r old; do rm -f "${old}"; done || true
+log_file="${log_dir}/backend-$(date +%Y%m%d-%H%M%S).log"
+started=$(date +%s)
+echo "▶ $(date '+%F %T')  workers=${workers} (Docker VM: ${docker_cpus} CPUs, $(( docker_mem_mib / 1024 )) GiB)  log: ${log_file#"${repo_root}"/}" | tee "${log_file}"
+
+set +e
+docker run --rm --init \
     --network "${network}" \
     "${env_file_arg[@]}" \
     -v "${repo_root}:/app" \
@@ -160,4 +202,11 @@ exec docker run --rm \
     -e PLACE_COD_COLLECTION_ENABLED="${PLACE_COD_COLLECTION_ENABLED:-}" \
     -e UPDATE_API_SNAPSHOT="${UPDATE_API_SNAPSHOT:-}" \
     "${image}" \
-    sh -c "python -c 'import xdist' 2>/dev/null || pip install -q pytest-xdist==3.6.1 pytest-timeout==2.3.1 >&2; pytest ${pytest_args}"
+    sh -c "python -c 'import xdist' 2>/dev/null || pip install -q pytest-xdist==3.6.1 pytest-timeout==2.3.1 >&2; pytest ${pytest_args}" \
+    2>&1 | tee -a "${log_file}"
+status=${PIPESTATUS[0]}
+set -e
+
+elapsed=$(( $(date +%s) - started ))
+echo "■ $(date '+%F %T')  exit=${status}  wall=$(( elapsed / 60 ))m$(( elapsed % 60 ))s  log: ${log_file#"${repo_root}"/}" | tee -a "${log_file}"
+exit "${status}"

@@ -16,7 +16,13 @@ from business_app.models.subscription import Subscription
 from business_app.models.user import User
 from business_app.models.loyalty import LoyaltyReward
 from business_app.models.blog import BlogPost, BlogStatus
+from business_app.services.email_template_service import get_email_template_service
 from business_app.services.loyalty_service import LoyaltyService
+from business_app.services.reorder_reminders.tokens import (
+    resubscribe_by_token,
+    token_user_id,
+    unsubscribe_by_token,
+)
 from business_app.services.subscription_service import SubscriptionService
 from business_app.utils.agent_discovery import build_api_catalog_linkset, build_link_header
 from business_app.utils.markdown_negotiation import (
@@ -26,6 +32,7 @@ from business_app.utils.markdown_negotiation import (
     html_to_markdown,
     wants_markdown,
 )
+from business_app.utils.csrf_protection import csrf_protection
 from business_app.utils.helpers import get_current_language
 from business_app import db
 from business_app import limiter
@@ -1223,10 +1230,16 @@ def register():
     return render_template("frontend/register.html")
 
 
+# A page whose URL carries a live secret (a reset, verification or signed unsubscribe token) renders
+# with these: base.html drops the GA4 and Yandex Metrica snippets, which would send the full URL to
+# Google and Yandex, and search engines are told to leave the page out.
+SECRET_URL_PAGE = {"meta_robots": "noindex,nofollow", "suppress_analytics": True}
+
+
 @frontend_bp.route("/verify-email")
 def verify_email():
-    """Email verification page"""
-    return render_template("frontend/verify_email.html")
+    """Email verification page (the email links to it with ?token=)"""
+    return render_template("frontend/verify_email.html", **SECRET_URL_PAGE)
 
 
 @frontend_bp.route("/verify-phone")
@@ -1245,7 +1258,64 @@ def forgot_password():
 @frontend_bp.route("/reset-password/<token>")
 def reset_password(token=None):
     """Reset password page"""
-    return render_template("frontend/reset_password.html", token=token)
+    return render_template("frontend/reset_password.html", token=token, **SECRET_URL_PAGE)
+
+
+# Reorder-reminder email unsubscribe (spec 2026-10-09 §7.4). The signed token in the path is the
+# only authority (no session, no cookie), so a mailbox's cookie-less one-click POST
+# (List-Unsubscribe-Post) works. No CSRF token is asked for: each view carries
+# @csrf_protection.csrf.exempt (Flask-WTF's decorator on the app's CSRFProtect instance), so it
+# holds even if WTF_CSRF_CHECK_DEFAULT (False in production) is ever turned on. GET only shows the
+# confirm page, because link scanners and mail previews fetch it, and changes nothing. The email's
+# URL is built in business_app/services/reorder_reminders/tokens.py::unsubscribe_url.
+# Undo has its own route and its own timed token (tokens.py: UNDO_SALT), because the email's token
+# must never be able to switch anybody back on. The tokens sit in the URL, so the pages render
+# with SECRET_URL_PAGE.
+#
+# Rate limit, per IP and per route: a mailbox provider POSTs one-click unsubscribes for many
+# customers from a few shared addresses, and mail scanners GET every link, so the ceiling is high.
+REMINDERS_UNSUBSCRIBE_RATE_LIMIT = "120/hour"
+
+
+@frontend_bp.route("/reminders/unsubscribe/<token>", methods=["GET"])
+@csrf_protection.csrf.exempt
+@limiter.limit(REMINDERS_UNSUBSCRIBE_RATE_LIMIT)
+def reminders_unsubscribe(token):
+    return _reminders_unsubscribe_page("confirm" if token_user_id(token) else "expired", token=token)
+
+
+@frontend_bp.route("/reminders/unsubscribe/<token>", methods=["POST"])
+@csrf_protection.csrf.exempt
+@limiter.limit(REMINDERS_UNSUBSCRIBE_RATE_LIMIT)
+def reminders_unsubscribe_post(token):
+    unsubscribed = unsubscribe_by_token(token)
+    if unsubscribed is None:
+        return _reminders_unsubscribe_page("expired")
+    return _reminders_unsubscribe_page("done", undo_token=unsubscribed.undo_token)
+
+
+@frontend_bp.route("/reminders/unsubscribe/undo/<undo_token>", methods=["POST"])
+@csrf_protection.csrf.exempt
+@limiter.limit(REMINDERS_UNSUBSCRIBE_RATE_LIMIT)
+def reminders_unsubscribe_undo(undo_token):
+    return _reminders_unsubscribe_page("undone" if resubscribe_by_token(undo_token) else "expired")
+
+
+def _reminders_unsubscribe_page(state, *, token=None, undo_token=None):
+    # The page speaks the language the email was written in: its `?lang=` through the one rule the
+    # email's own copy uses ("ru-RU" is ru), else the visitor's. Set on `g` so the page chrome
+    # agrees with the body, and passed to every `|t` below: a per-worker cached template never
+    # carries one visitor's language to the next.
+    page_language = get_email_template_service().resolve_language(request.args.get("lang") or get_current_language())
+    g.language = page_language
+    return render_template(
+        "frontend/reminders_unsubscribe.html",
+        state=state,
+        token=token,
+        undo_token=undo_token,
+        page_language=page_language,
+        **SECRET_URL_PAGE,
+    )
 
 
 @frontend_bp.route("/profile-settings")

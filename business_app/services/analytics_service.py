@@ -6,7 +6,8 @@ Provides business intelligence, reporting, and predictive analytics
 from datetime import datetime, timedelta, UTC
 from typing import Dict, Any, List
 from flask import current_app
-from sqlalchemy import func, case
+from sqlalchemy import case, func, select
+from sqlalchemy.orm import aliased
 import pandas as pd
 import numpy as np
 from sklearn.linear_model import LinearRegression
@@ -19,6 +20,8 @@ from business_app.models.delivery import Delivery
 from business_app.models.product import Product
 from business_app.models.analytics import UserBehavior
 from business_app.models.order import OrderItem
+from business_app.utils.local_windows import local_date, local_day_bounds
+from business_app.utils.order_timing import delivered_order_instants_select
 from business_app.utils.timezone_utils import ensure_utc
 from shared.enums import OrderStatus, DeliveryStatus, UserStatus, UserType, EntitySubtype
 from shared import business_config
@@ -134,18 +137,43 @@ class AnalyticsService:
         page: int = 1,
         per_page: int = 50,
     ) -> Dict[str, Any]:
-        """List customers whose last DELIVERED order is older than `days_since` days.
+        """List customers whose linked-account cluster has had no delivery for `days_since` local days.
 
-        Never-ordered customers are included by default (their reference point is
-        User.created_at). Results are sorted most-inactive-first.
+        Rows stay per user, with that user's own delivered-order totals, but "last delivery" is the
+        latest delivered instant across the user's cluster (reorder-reminders spec §9.3, D9), from
+        the one SQL building block (`order_timing.delivered_order_instants_select`): the DELIVERED
+        history row, never `Order.created_at`. A customer with no delivery anywhere in the cluster
+        is measured from `User.created_at` and included by default. Days are local Tashkent days.
+        Filtering, sorting and pagination stay in SQL; most inactive first.
+
+        The delivery history is aggregated ONCE per statement, grouped by the customer key, and
+        joined to the users: never a subquery per user row.
         """
-        now = datetime.now(UTC)
-        threshold = now - timedelta(days=days_since)
+        # Imported here to keep analytics imports light. `days_since_rule` is the one "days since"
+        # rule (eligibility.days_since, master amendment 8), aliased because this method's own
+        # parameter is called `days_since`; `customer_key_sql` is the SQL spelling of the one
+        # customer key (facts.customer_key).
+        from business_app.services.reorder_reminders.eligibility import days_since as days_since_rule
+        from business_app.services.reorder_reminders.facts import customer_key_sql
 
+        today = local_date()
+        # Inactive when the last activity's LOCAL day is `days_since` or more days back, i.e. it
+        # falls before the start of the local day after that cutoff day.
+        cutoff = local_day_bounds(today - timedelta(days=days_since))[1]
+
+        instants = delivered_order_instants_select().subquery()
+        owner = aliased(User)
+        cluster_key = customer_key_sql(owner).label("cluster_key")
+        cluster_deliveries = (
+            select(cluster_key, func.max(instants.c.delivered_at).label("last_delivered_at"))
+            .select_from(instants.join(owner, owner.id == instants.c.user_id))
+            .group_by(cluster_key)
+            .subquery()
+        )
+        cluster_last_delivery = cluster_deliveries.c.last_delivered_at
         delivered_stats = (
             db.session.query(
                 Order.user_id.label("user_id"),
-                func.max(Order.created_at).label("last_order_date"),
                 func.count(Order.id).label("total_orders"),
                 func.coalesce(func.sum(Order.total_amount), 0).label("total_spent"),
             )
@@ -154,20 +182,22 @@ class AnalyticsService:
             .subquery()
         )
 
-        effective_activity = func.coalesce(delivered_stats.c.last_order_date, User.created_at)
+        effective_activity = func.coalesce(cluster_last_delivery, User.created_at)
 
         query = (
             db.session.query(
                 User,
-                delivered_stats.c.last_order_date,
+                cluster_last_delivery.label("last_order_date"),
                 delivered_stats.c.total_orders,
                 delivered_stats.c.total_spent,
                 effective_activity.label("effective_activity"),
             )
+            .select_from(User)
+            .outerjoin(cluster_deliveries, cluster_deliveries.c.cluster_key == customer_key_sql(User))
             .outerjoin(delivered_stats, delivered_stats.c.user_id == User.id)
             .filter(User.status == UserStatus.ACTIVE.value)
             .filter(User.user_type != UserType.STAFF)
-            .filter(effective_activity <= threshold)
+            .filter(effective_activity < cutoff)
         )
 
         if customer_type == "individual":
@@ -184,9 +214,9 @@ class AnalyticsService:
             )
 
         if not include_never_ordered:
-            query = query.filter(delivered_stats.c.last_order_date.isnot(None))
+            query = query.filter(cluster_last_delivery.isnot(None))
 
-        query = query.order_by(effective_activity.asc())
+        query = query.order_by(effective_activity.asc(), User.id.asc())
 
         total = query.count()
         rows = query.offset((page - 1) * per_page).limit(per_page).all()
@@ -202,8 +232,8 @@ class AnalyticsService:
                     "entity_subtype": user.entity_subtype.value if user.entity_subtype else None,
                     "total_orders": int(total_orders or 0),
                     "total_spent": float(total_spent or 0),
-                    "last_order_date": last_order_date.isoformat() if last_order_date else None,
-                    "days_since_last_order": (now - effective).days if effective else None,
+                    "last_order_date": ensure_utc(last_order_date).isoformat() if last_order_date else None,
+                    "days_since_last_order": days_since_rule(effective, today) if effective else None,
                     "never_ordered": last_order_date is None,
                 }
             )

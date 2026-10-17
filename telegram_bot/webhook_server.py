@@ -9,13 +9,18 @@ import ipaddress
 import logging
 import os
 from datetime import datetime, timezone
+from typing import Optional
+
 from aiohttp import web
+from telegram.error import Forbidden
 
 from config import config
 from database import db_manager
 from i18n import i18n
+from shared import reorder_reminder_copy
+from shared.i18n_rendering import SUPPORTED_LANGUAGES
 from shared.redis_failure import report_redis_failure
-from shared.redis_keyspace import RedisKeyspace
+from shared.redis_keyspace import REORDER_REMINDER_CLAIM_TTL_SECONDS, RedisKeyspace
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +36,16 @@ _AGENT_ORDER_ENDPOINT = 'agent-order-proposed'
 # (Layer 2's 'delivery-completed-order' keeps its own name — see
 # `_release_order_dedup`'s default.)
 _DELIVERY_ENDPOINT = 'delivery-completed'
+
+# The reorder reminder (spec 2026-10-09 §7.3). Same one-token rule as the two above: the
+# route path, both dedup layers' claims and both releases.
+_REORDER_REMINDER_ENDPOINT = 'reorder-reminder'
+
+# Answered with HTTP 410 when Telegram refuses the send because this account blocked the bot
+# (or was deleted). The backend send task reads the STATUS (`trigger_bot_webhook` drops
+# non-200 bodies, keeping only their `message`), marks the account blocked and does not retry
+# (spec §7.2 c).
+_BOT_BLOCKED_CODE = 'BOT_BLOCKED'
 
 
 # BOT-007: IP allow-list for /internal/* webhook endpoints.
@@ -95,6 +110,26 @@ def _html_escaped(value) -> str:
     order.
     """
     return html.escape(str(value if value is not None else ''))
+
+
+def _order_id_or_none(value) -> Optional[int]:
+    """The positive whole order id `value` stands for, or None.
+
+    Feeds the Order-again button's ``reorder_<id>`` callback, which the bot only claims as
+    ``^reorder_\\d+$``. Anything else would ship a button that does nothing: ``9001.0``, ``"abc"``,
+    ``-5``, ``True`` (``int(True)`` is 1, someone else's order). A whole float or a numeric
+    string is coerced (``9001.0`` -> 9001); everything else is None, which makes the keyboard
+    open the catalogue instead.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, float) and not value.is_integer():
+        return None
+    try:
+        order_id = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return order_id if order_id > 0 else None
 
 
 @web.middleware
@@ -331,12 +366,16 @@ class WebhookServer:
         """Set Telegram Application instance"""
         self.bot_app = application
 
-    async def _is_duplicate_webhook(self, endpoint: str, request_id: str) -> bool:
+    async def _is_duplicate_webhook(self, endpoint: str, request_id: str, ttl_seconds: Optional[int] = None) -> bool:
         """BOT-008: Redis-backed webhook dedup.
 
         Uses ``SET NX EX`` to claim the request_id atomically. Returns True if
         the key already existed (duplicate), False if we just claimed it.
-        TTL = 24h matches the upper bound on backend retry storms (PAY-002).
+        TTL = 24h (``_dedup_ttl_seconds``) matches the upper bound on backend
+        retry storms (PAY-002); a route whose sender can legitimately re-push
+        later than that passes its own ``ttl_seconds``. ``ttl_seconds`` applies to the Redis
+        claim only: the in-memory fallback below keeps its fixed 300 s window whatever the
+        caller asks for.
 
         Falls back to the in-memory ``_processed_orders`` dict only when Redis
         is unreachable. The fallback is single-replica only — multi-replica
@@ -361,7 +400,10 @@ class WebhookServer:
                 key = RedisKeyspace.bot_webhook_dedup(endpoint, request_id)
                 # SET NX returns True if key was set (we claimed it), None if it existed.
                 claimed = await token_manager.redis.set(
-                    key, "1", nx=True, ex=self._dedup_ttl_seconds
+                    key,
+                    "1",
+                    nx=True,
+                    ex=self._dedup_ttl_seconds if ttl_seconds is None else ttl_seconds,
                 )
                 return not claimed
         except Exception as exc:
@@ -440,6 +482,7 @@ class WebhookServer:
         self.app.router.add_post(f'/internal/{_DELIVERY_ENDPOINT}', self.delivery_completed_handler)
         self.app.router.add_post(f'/internal/{_AGENT_ORDER_ENDPOINT}',
                                  self.agent_order_proposed_handler)
+        self.app.router.add_post(f'/internal/{_REORDER_REMINDER_ENDPOINT}', self.reorder_reminder_handler)
         self.app.router.add_get('/internal/stats', stats_handler)
         self.app.router.add_get('/health', health_handler)
 
@@ -961,6 +1004,154 @@ class WebhookServer:
                 'message': 'Internal server error'
             }, status=500)
 
+    async def reorder_reminder_handler(self, request):
+        """
+        Handle reorder-reminder webhook from backend (spec 2026-10-09 §7.3).
+
+        POST /internal/reorder-reminder
+        {
+            "telegram_id": "810000001",
+            "episode_id": 77,
+            "step": 1,                     # 1 or 2
+            "silent": false,               # step >= 2 -> disable_notification
+            "show_later": true,            # R1 of a two-step ladder only
+            "name": "Alice",               # shared.user_names.greeting_name, or null
+            "days": 12,                    # whole local days since the supply delivery
+            "gap": 7,                      # usual gap in days, or null on the preset
+            "snooze_days": 14,
+            "reorder_order_id": 9001,      # the recipient's own newest delivered order, or null
+            "items": [{"qty": 2, "names": {"uz": "Toza suv 19 l", "ru": "Чистая вода 19 л",
+                                           "en": "Pure Water 19L"}}],
+            "language": "ru",              # shared.i18n_rendering.reminder_language, resolved
+            "timestamp": "2026-09-13T05:00:00+00:00"   # added by trigger_bot_webhook; unused
+        }
+
+        `language` is THE reminder language, decided once by the backend
+        (`shared.i18n_rendering.reminder_language` over the recipient's stored value; final review
+        B1/E1), the one the email is written in and the worklist names. It is the only language
+        that reaches the copy, the plurals, the item names and the buttons: this route never reads
+        the customer's stored language, so the bot cannot answer the question a second way. Each
+        item names its product in all three languages (master amendment 13) and the composer
+        prints the one in `language`, so a line and its sentence never disagree. A payload whose
+        `language` is not one of the seeded codes is refused (400) before any claim is taken.
+
+        Built by business_app/services/reorder_reminders/messaging.py::telegram_payload and
+        sent by its `_send_telegram` with X-Request-ID `reorder-reminder:<episode>:<step>`,
+        stable across the Celery retries and the daily run's re-publish. Structure mirrors
+        `agent_order_proposed_handler`. Three differences: the copy is assembled by
+        `shared.reorder_reminder_copy` (the assembly the email uses too), both dedup claims are
+        held `REORDER_REMINDER_CLAIM_TTL_SECONDS`, and a send Telegram refuses because the
+        customer blocked the bot answers 410 BOT_BLOCKED, with both claims released.
+        """
+        try:
+            if not await verify_webhook_signature(request):
+                logger.warning(f"Invalid webhook signature from {request.remote}")
+                return web.json_response({'success': False, 'message': 'Invalid signature'}, status=401)
+
+            if not self.bot_app:
+                logger.error("Bot application not initialized in webhook server")
+                return web.json_response({'success': False, 'message': 'Bot not initialized'}, status=503)
+
+            try:
+                data = await request.json()
+            except Exception:
+                return web.json_response({'success': False, 'message': 'Invalid JSON'}, status=400)
+
+            telegram_id = data.get('telegram_id')
+            episode_id = data.get('episode_id')
+            step = data.get('step')
+            language = data.get('language')
+            if not telegram_id or not episode_id or not step:
+                return web.json_response(
+                    {'success': False, 'message': 'Missing required fields: telegram_id, episode_id, step'}, status=400
+                )
+            if language not in SUPPORTED_LANGUAGES:
+                return web.json_response(
+                    {'success': False, 'message': f'language must be one of {", ".join(SUPPORTED_LANGUAGES)}'},
+                    status=400,
+                )
+
+            # Layer 1, the stable X-Request-ID, collapses an HTTP replay, the backend's Celery
+            # retries and the run's re-publish of a queued send. Layer 2, (episode, step),
+            # collapses a second push of the same reminder under another id. One endpoint
+            # name, so the failure branches release both.
+            request_id = request.headers.get('X-Request-ID')
+            episode_key = f"episode:{episode_id}:step:{step}"
+            if request_id and await self._is_duplicate_webhook(
+                _REORDER_REMINDER_ENDPOINT, request_id, REORDER_REMINDER_CLAIM_TTL_SECONDS
+            ):
+                logger.info("Duplicate reorder-reminder webhook (request_id=%s), skipping", request_id)
+                return web.json_response({'success': True, 'message': 'Already processed (deduplicated)'})
+            if await self._is_duplicate_webhook(
+                _REORDER_REMINDER_ENDPOINT, episode_key, REORDER_REMINDER_CLAIM_TTL_SECONDS
+            ):
+                logger.info("Duplicate reorder-reminder webhook for %s, skipping", episode_key)
+                return web.json_response({'success': True, 'message': 'Already processed (deduplicated)'})
+
+            async def release_claims():
+                if request_id:
+                    await self._release_webhook_dedup(_REORDER_REMINDER_ENDPOINT, request_id)
+                await self._release_webhook_dedup(_REORDER_REMINDER_ENDPOINT, episode_key)
+
+            # BOTH keys are claimed, so every failure from here on releases them. The copy and
+            # the keyboard are built from backend data; a held key would answer the Celery retry
+            # "already processed" and lose the reminder for good.
+            try:
+                from keyboards import ReorderReminderKeyboards
+
+                name = data.get('name')
+                gap = data.get('gap')
+                # Names are free text an operator typed and the message is sent as HTML, so
+                # they are escaped BEFORE the composer sees them. `qty` is passed as sent: an
+                # int cannot carry markup, and the composer refuses any line whose quantity is
+                # not a positive int (`reorder_reminder_copy.printable`).
+                items = [
+                    {
+                        'qty': item.get('qty'),
+                        'names': {code: _html_escaped(value) for code, value in (item.get('names') or {}).items()},
+                    }
+                    for item in (data.get('items') or [])
+                ]
+                text = reorder_reminder_copy.telegram_text(
+                    i18n.renderer(language),
+                    language,
+                    step=int(step),
+                    name=_html_escaped(name) if name else None,
+                    days=int(data.get('days') or 0),
+                    gap=int(gap) if gap is not None else None,
+                    items=items,
+                )
+                keyboard = ReorderReminderKeyboards.reminder(
+                    language,
+                    episode_id=int(episode_id),
+                    reorder_order_id=_order_id_or_none(data.get('reorder_order_id')),
+                    show_later=bool(data.get('show_later')),
+                    snooze_days=int(data.get('snooze_days') or 0),
+                )
+                await self.bot_app.bot.send_message(
+                    chat_id=telegram_id,
+                    text=text,
+                    parse_mode='HTML',
+                    reply_markup=keyboard,
+                    disable_notification=bool(data.get('silent')),
+                )
+            except Forbidden as exc:
+                await release_claims()
+                logger.info("Reorder reminder %s not delivered, bot blocked: %s", episode_key, exc)
+                return web.json_response(
+                    {'success': False, 'error_code': _BOT_BLOCKED_CODE, 'message': 'Bot was blocked by the user'},
+                    status=410,
+                )
+            except Exception:
+                await release_claims()
+                raise
+
+            return web.json_response({'success': True, 'message': 'Notification sent'})
+
+        except Exception as e:
+            logger.error(f"Error processing reorder reminder: {e}", exc_info=True)
+            return web.json_response({'success': False, 'message': 'Internal server error'}, status=500)
+
     async def start(self):
         """Start the webhook server"""
         try:
@@ -979,6 +1170,7 @@ class WebhookServer:
             logger.info(f"  POST http://{self.host}:{self.port}/internal/payment-success")
             logger.info(f"  POST http://{self.host}:{self.port}/internal/delivery-completed")
             logger.info(f"  POST http://{self.host}:{self.port}/internal/{_AGENT_ORDER_ENDPOINT}")
+            logger.info(f"  POST http://{self.host}:{self.port}/internal/{_REORDER_REMINDER_ENDPOINT}")
             logger.info(f"  GET  http://{self.host}:{self.port}/internal/stats")
             logger.info(f"  GET  http://{self.host}:{self.port}/health")
 

@@ -15,8 +15,8 @@ export const useAuthStore = create(
       // non-sensitive UX state (user profile, permissions, auth flag).
       // The server is the sole source of truth for auth validity.
       initialize: async () => {
-        const user = authService.getCurrentUser();
-        const permissions = authService.getPermissions();
+        let user = authService.getCurrentUser();
+        let permissions = authService.getPermissions();
         let isAuthenticated = authService.isAuthenticated();
 
         // If we have a cached user, verify with the server. The HttpOnly
@@ -33,6 +33,10 @@ export const useAuthStore = create(
               });
               return;
             }
+            // `checkAuthStatus` just refreshed the stored profile and permissions from the server;
+            // publish those, not the copies read above, so the role and the flags never disagree.
+            user = authService.getCurrentUser();
+            permissions = authService.getPermissions();
           } catch (error) {
             console.error('Auth verification failed:', error);
             isAuthenticated = false;

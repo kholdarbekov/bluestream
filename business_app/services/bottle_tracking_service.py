@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Dict, Iterable, List, Optional, Tuple, TYPE_CHECKING
 
 from flask import current_app
 from sqlalchemy import event as sa_event, false as sa_false, func, or_, select, text
@@ -2460,29 +2460,60 @@ class BottleTrackingService:
         """The DISTINCT places this customer's addresses belong to.
 
         Deduplication is mandatory, not cosmetic: one person with two addresses
-        at the same place would otherwise be counted twice.
+        at the same place would otherwise be counted twice. The one-customer form
+        of `get_customer_scopes_by_user`, which holds the rule.
         """
-        from business_app.models.user import UserAddress
+        return BottleTrackingService.get_customer_scopes_by_user([user_id]).get(user_id, [])
 
+    @staticmethod
+    def get_customer_scopes_by_user(user_ids: Iterable[int]) -> Dict[int, List[BottleBalance]]:
+        """`{user_id: the DISTINCT places its addresses belong to}`, in two queries for any number
+        of customers (a page of worklist rows). A user with no place balance is absent.
+
+        A place is the address group when the address is grouped, else the address itself. Each
+        user's list holds a place once, however many of its addresses sit there, highest balance
+        first.
+        """
+        ids = sorted({int(user_id) for user_id in user_ids})
+        if not ids:
+            return {}
         addresses = (
-            db.session.query(UserAddress.id, UserAddress.address_group_id).filter(UserAddress.user_id == user_id).all()
+            db.session.query(UserAddress.user_id, UserAddress.id, UserAddress.address_group_id)
+            .filter(UserAddress.user_id.in_(ids))
+            .all()
         )
-        group_ids = {g for _, g in addresses if g is not None}
-        solo_ids = {a for a, g in addresses if g is None}
-        if not group_ids and not solo_ids:
-            return []
+        users_by_group: Dict[int, set] = {}
+        user_by_solo: Dict[int, int] = {}
+        for owner_id, address_id, group_id in addresses:
+            if group_id is not None:
+                users_by_group.setdefault(group_id, set()).add(owner_id)
+            else:
+                user_by_solo[address_id] = owner_id
+        if not users_by_group and not user_by_solo:
+            return {}
 
         clauses = []
-        if group_ids:
-            clauses.append(BottleBalance.address_group_id.in_(group_ids))
-        if solo_ids:
-            clauses.append((BottleBalance.address_id.in_(solo_ids)) & (BottleBalance.address_group_id.is_(None)))
-        return (
+        if users_by_group:
+            clauses.append(BottleBalance.address_group_id.in_(sorted(users_by_group)))
+        if user_by_solo:
+            clauses.append(
+                (BottleBalance.address_id.in_(sorted(user_by_solo))) & (BottleBalance.address_group_id.is_(None))
+            )
+        balances = (
             BottleBalance.query.filter(or_(*clauses))
             .options(joinedload(BottleBalance.address))
             .order_by(BottleBalance.balance.desc())
             .all()
         )
+        scopes: Dict[int, List[BottleBalance]] = {}
+        for balance in balances:
+            if balance.address_group_id is not None:
+                owners = users_by_group.get(balance.address_group_id, ())
+            else:
+                owners = (user_by_solo[balance.address_id],) if balance.address_id in user_by_solo else ()
+            for owner_id in sorted(owners):
+                scopes.setdefault(owner_id, []).append(balance)
+        return scopes
 
     @staticmethod
     def get_customer_place_rows(user_id: int) -> List[Dict]:

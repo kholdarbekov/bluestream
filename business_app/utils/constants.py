@@ -68,6 +68,16 @@ class NotificationType(Enum):
     LOYALTY_TIER_DOWNGRADE = "loyalty_tier_downgrade"
     LOYALTY_POINTS_EXPIRED = "loyalty_points_expired"
 
+    # Reorder reminders (spec 2026-10-09 §7.4): the email half of a lapsed-customer reminder.
+    # Courtesy copy, so placeholder-strict. Deliberately in NO preference group: a group toggle
+    # would be a second opt-out that decides nothing (the one opt-out is
+    # reorder_reminder_settings).
+    REORDER_REMINDER = "reorder_reminder"
+    # The morning digest of new Lapsed-customers escalations to admins and managers (spec §9.2).
+    # Placeholder-strict like the reminder, and in NO preference group either: staff cannot opt
+    # out of it, so a toggle for it would decide nothing.
+    REORDER_ESCALATION_DIGEST = "reorder_escalation_digest"
+
 
 class NotificationChannel(Enum):
     """Notification channel enumeration"""

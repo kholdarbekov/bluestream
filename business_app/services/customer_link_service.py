@@ -9,7 +9,7 @@ import hashlib
 import logging
 import math
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Sequence
 
 from flask import current_app
 from sqlalchemy import func, or_
@@ -30,6 +30,9 @@ from business_app.utils.exceptions import ValidationError
 from business_app.utils.helpers import calculate_distance
 from shared.enums import BottleLedgerEventType, OrderStatus, UserRole, UserStatus, UserType
 
+if TYPE_CHECKING:
+    from business_app.services.reorder_reminders.facts import MemberFacts
+
 logger = logging.getLogger(__name__)
 
 # Audit convention (see the place-group section below): CustomerLinkEvent has
@@ -40,6 +43,9 @@ PLACE_GROUP_EVENT_TYPES = (
     "add_to_place_group",
     "remove_from_place_group",
 )
+
+# Ids per IN list in the batched place reads below.
+_PLACE_BATCH = 500
 
 
 class CustomerLinkService:
@@ -149,6 +155,50 @@ class CustomerLinkService:
     def _is_active(user) -> bool:
         status = user.status.value if hasattr(user.status, "value") else user.status
         return status == UserStatus.ACTIVE.value
+
+    @staticmethod
+    def notification_recipient(members: Sequence["MemberFacts"]) -> Optional["MemberFacts"]:
+        """The ONE answer to "which linked account do we message" (reorder reminders, spec §4, D19).
+
+        Candidates are ACTIVE, non-staff members that can order (E2). Preference order:
+        (1) connected, unblocked Telegram, latest interaction first; (2) unblocked with a
+        deliverable email, oldest account first; (3) any unblocked, oldest first; (4) blocked
+        members last, oldest first. Ties fall to the lowest id. A blocked account is returned only
+        when every candidate is blocked, and is then never messaged (§7.1); a block on one account
+        does not stop a linked sibling being reminded on its own channel. Pure: it reads only the
+        facts it is given, unlike the stored `primary_user_id`, which can be stale or NULL.
+        """
+        from business_app.services.notification_service import NotificationService
+        from shared.validators import is_deliverable_email
+
+        candidates = [
+            member
+            for member in members
+            if member.status == UserStatus.ACTIVE.value and not member.is_staff and member.can_order
+        ]
+        if not candidates:
+            return None
+
+        def oldest(member):
+            return (member.created_at, member.user_id)
+
+        unblocked = [member for member in candidates if member.telegram_blocked_at is None]
+        on_telegram = [member for member in unblocked if NotificationService._user_has_connected_telegram(member)]
+        if on_telegram:
+            return min(
+                on_telegram,
+                key=lambda member: (
+                    member.last_bot_interaction is None,
+                    -(member.last_bot_interaction.timestamp() if member.last_bot_interaction else 0.0),
+                    member.user_id,
+                ),
+            )
+        with_email = [member for member in unblocked if is_deliverable_email(member.email)]
+        if with_email:
+            return min(with_email, key=oldest)
+        if unblocked:
+            return min(unblocked, key=oldest)
+        return min(candidates, key=oldest)
 
     def _refresh_primary(self, canonical_id: int) -> Optional[int]:
         """Point the canonical's primary at the oldest ACTIVE member (fallback: oldest member)."""
@@ -458,8 +508,49 @@ class CustomerLinkService:
         """Sorted member address ids of a place group ([] when missing/empty)."""
         if group_id is None:
             return []
-        rows = db.session.query(UserAddress.id).filter(UserAddress.address_group_id == group_id).all()
-        return sorted(r[0] for r in rows)
+        return self.place_group_address_ids_by_group([group_id]).get(group_id, [])
+
+    @staticmethod
+    def place_group_address_ids_by_group(group_ids: Iterable[int]) -> Dict[int, List[int]]:
+        """`{group_id: sorted member address ids}` in one query per 500 groups.
+
+        The batched twin of `get_place_group_address_ids`, which delegates here, so "a place's
+        addresses" is spelled once. A missing or empty group is absent from the result.
+        """
+        ids = sorted({int(group_id) for group_id in group_ids if group_id is not None})
+        members: Dict[int, List[int]] = {}
+        for offset in range(0, len(ids), _PLACE_BATCH):
+            rows = (
+                db.session.query(UserAddress.id, UserAddress.address_group_id)
+                .filter(UserAddress.address_group_id.in_(ids[offset : offset + _PLACE_BATCH]))
+                .all()
+            )
+            for address_id, group_id in rows:
+                members.setdefault(group_id, []).append(address_id)
+        return {group_id: sorted(address_ids) for group_id, address_ids in members.items()}
+
+    @staticmethod
+    def place_group_ids_by_user(user_ids: Iterable[int]) -> Dict[int, List[int]]:
+        """`{user_id: sorted ids of the place groups its addresses belong to}`, batched.
+
+        Membership is read now, never stored elsewhere (spec 2026-10-09 §4 "Place group"). A user
+        with no grouped address is absent. Plain FK SELECT, like every resolver here.
+        """
+        ids = sorted({int(user_id) for user_id in user_ids})
+        groups: Dict[int, set] = {}
+        for offset in range(0, len(ids), _PLACE_BATCH):
+            rows = (
+                db.session.query(UserAddress.user_id, UserAddress.address_group_id)
+                .filter(
+                    UserAddress.user_id.in_(ids[offset : offset + _PLACE_BATCH]),
+                    UserAddress.address_group_id.isnot(None),
+                )
+                .distinct()
+                .all()
+            )
+            for user_id, group_id in rows:
+                groups.setdefault(user_id, set()).add(group_id)
+        return {user_id: sorted(group_ids) for user_id, group_ids in groups.items()}
 
     def get_place_group_events(self, group_id: int, limit: int = 200) -> list:
         """This place group's audit trail, newest first.

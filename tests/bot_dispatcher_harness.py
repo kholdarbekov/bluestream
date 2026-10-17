@@ -483,6 +483,32 @@ class UpdateFactory:
             ),
         })
 
+    def bot_membership(self, new_status: str, old_status: str = "member", *, date: int = 1_700_000_100,
+                       chat_type: str = "private") -> Update:
+        """Telegram's `my_chat_member` update: this customer blocked the bot (`"kicked"`) or came
+        back to it (`"member"`). `date` defaults to 100 s after every message this factory builds."""
+        bot_user = {"id": 424242, "is_bot": True, "first_name": "BlueStream"}
+
+        def member(status):
+            payload = {"status": status, "user": bot_user}
+            if status == "kicked":
+                payload["until_date"] = 0
+            return payload
+
+        chat = {"id": self.chat_id, "type": chat_type}
+        if chat_type != "private":
+            chat["title"] = "Office"
+        return self._build({
+            "update_id": self._next_update_id(),
+            "my_chat_member": {
+                "chat": chat,
+                "from": self._user,
+                "date": date,
+                "old_chat_member": member(old_status),
+                "new_chat_member": member(new_status),
+            },
+        })
+
     def tap(self, callback_data: str, message_id: int = None) -> Update:
         """An inline-button tap on the message the customer is looking at."""
         return self._build({

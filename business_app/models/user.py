@@ -20,6 +20,7 @@ from business_app.utils.user_types import is_entity_user_type, is_staff_user_typ
 from shared.enums import EntitySubtype
 from shared.constants import DISPLAY_TIMEZONE
 from shared.validators import validate_email, sanitize_user_input, validate_uzbekistan_phone
+from shared.user_names import joined_name
 
 
 class User(db.Model, TimestampMixin):
@@ -115,6 +116,9 @@ class User(db.Model, TimestampMixin):
     is_bot_active = Column(Boolean, default=False, index=True)
     bot_state = Column(Text, nullable=True)  # JSON string for bot conversation state
     last_bot_interaction = Column(DateTime(timezone=True), nullable=True)
+    # When Telegram last told us this customer blocked the bot (spec 2026-10-09 §7.2); NULL = not
+    # known to be blocked. Written ONLY by TelegramReachabilityService, together with is_bot_active.
+    telegram_blocked_at = Column(DateTime(timezone=True), nullable=True)
 
     # Staff bot fields
     staff_roles = Column(JSON, default=list)  # e.g. ["delivery_driver", "operator"]
@@ -139,13 +143,8 @@ class User(db.Model, TimestampMixin):
 
     @property
     def full_name(self) -> str:
-        """Get full name by combining first and last names"""
-        parts = []
-        if self.first_name:
-            parts.append(self.first_name)
-        if self.last_name:
-            parts.append(self.last_name)
-        return " ".join(parts)
+        """First and last name, the missing parts dropped (`shared.user_names.joined_name`)."""
+        return joined_name(self.first_name, self.last_name)
 
     @property
     def email_verified(self) -> bool:

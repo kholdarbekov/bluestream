@@ -4,7 +4,7 @@ User profile and registration handlers
 import logging
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from typing import Dict, Any
+from typing import Any, Dict, Optional
 from telegram import constants, Update, ReplyKeyboardRemove
 from telegram.helpers import escape_markdown
 from telegram.ext import ContextTypes, ConversationHandler
@@ -12,6 +12,7 @@ from telegram.error import BadRequest
 
 from eligibility import main_menu_for
 from i18n import i18n
+from shared import reorder_reminder_copy
 from keyboards import ProfileKeyboards, MenuKeyboards, LanguageKeyboards, KeyboardBuilder
 from shared.constants import (
     TASHKENT_DISTRICTS,
@@ -20,6 +21,8 @@ from shared.constants import (
     get_all_districts,
     is_within_tashkent,
 )
+from shared.enums import UserType
+from shared.user_names import greeting_name, joined_name
 from handlers.menu import main_menu_handler
 # Conversation states live in `handlers.conversation_states`. The
 # optional-detail step table (`_ADDRESS_STEPS` / `_SKIP_TARGETS` /
@@ -246,12 +249,20 @@ class ProfileHandlers(BaseHandler):
         enabled = preferences.get('delivery_telegram_status_updates_enabled')
         return enabled if isinstance(enabled, bool) else True
 
+    def _extract_reorder_reminders_enabled(self, api_payload: Dict[str, Any]) -> Optional[bool]:
+        """The EFFECTIVE reorder-reminder setting the backend publishes (spec 2026-10-09 §8), or
+        None when it publishes none. The screen then simply has no reminder row."""
+        preferences = (api_payload or {}).get('data', {}).get('preferences', {})
+        enabled = (preferences.get('reorder_reminders') or {}).get('enabled')
+        return enabled if isinstance(enabled, bool) else None
+
     async def _render_notification_settings(
         self,
         update: Update,
         language: str,
         delivery_telegram_status_updates_enabled: bool,
         callback_toast: str | None = None,
+        reorder_reminders_enabled: Optional[bool] = None,
     ) -> None:
         """Render notification settings UI."""
         status_key = (
@@ -265,9 +276,12 @@ class ProfileHandlers(BaseHandler):
             f"{i18n.get('telegram.notifications.delivery_status_updates_description', language)}\n\n"
             f"{i18n.get(status_key, language)}"
         )
+        if reorder_reminders_enabled is not None:
+            text += f"\n\n{reorder_reminder_copy.settings_status(i18n.renderer(language), reorder_reminders_enabled)}"
         keyboard = ProfileKeyboards.notification_settings(
             language=language,
             delivery_telegram_status_updates_enabled=delivery_telegram_status_updates_enabled,
+            reorder_reminders_enabled=reorder_reminders_enabled,
         )
 
         if update.callback_query:
@@ -301,11 +315,13 @@ class ProfileHandlers(BaseHandler):
                     return
 
                 enabled = self._extract_delivery_telegram_status_updates_enabled(response.data)
+                reminders_enabled = self._extract_reorder_reminders_enabled(response.data)
 
             await self._render_notification_settings(
                 update,
                 language,
                 delivery_telegram_status_updates_enabled=enabled,
+                reorder_reminders_enabled=reminders_enabled,
             )
         except Exception as e:
             await self._handle_error(update, exc=e, operation="notification_settings")
@@ -316,6 +332,19 @@ class ProfileHandlers(BaseHandler):
         context: ContextTypes.DEFAULT_TYPE,
     ):
         """Toggle Telegram delivery status notifications and refresh notification settings screen."""
+        await self._apply_notification_toggle(update, context, 'delivery_telegram_status_updates_enabled')
+
+    async def toggle_reorder_reminders(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Profile -> Notifications: reorder reminders on/off (spec 2026-10-09 §8). The body
+        says only on/off; the backend records the route as telegram_settings from this bot's
+        User-Agent."""
+        await self._apply_notification_toggle(update, context, 'reorder_reminders_enabled')
+
+    async def _apply_notification_toggle(self, update: Update, context: ContextTypes.DEFAULT_TYPE, field: str):
+        """One PUT of one field, then the screen redrawn from the backend's answer. Shared by
+        both toggles on the screen, so they cannot drift apart: each sends only ITS field (a
+        delivery flip must never write a reminder setting), and the redrawn screen shows what the
+        backend published, never what the tap asked for."""
         try:
             user = await user_middleware(update)
             if not user:
@@ -324,9 +353,7 @@ class ProfileHandlers(BaseHandler):
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-
-            toggle_to = query.data.rsplit('_', 1)[-1]
-            enabled = toggle_to == 'on'
+            enabled = query.data.rsplit('_', 1)[-1] == 'on'
 
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
@@ -334,10 +361,7 @@ class ProfileHandlers(BaseHandler):
                     await self._handle_auth_error(update, language)
                     return
 
-                response = await client.update_notification_preferences(
-                    user_token,
-                    {'delivery_telegram_status_updates_enabled': enabled},
-                )
+                response = await client.update_notification_preferences(user_token, {field: enabled})
                 if not response.success:
                     await self._ack(query,
                         i18n.get('telegram.notifications.update_failed', language),
@@ -345,19 +369,20 @@ class ProfileHandlers(BaseHandler):
                     )
                     return
 
-                refreshed_enabled = self._extract_delivery_telegram_status_updates_enabled(response.data)
-
             await self._render_notification_settings(
                 update,
                 language,
-                delivery_telegram_status_updates_enabled=refreshed_enabled,
+                delivery_telegram_status_updates_enabled=self._extract_delivery_telegram_status_updates_enabled(
+                    response.data
+                ),
+                reorder_reminders_enabled=self._extract_reorder_reminders_enabled(response.data),
                 callback_toast=i18n.get('telegram.notifications.update_success', language),
             )
         except Exception as e:
-            logger.error(f"Error toggling delivery telegram notifications: {e}")
+            logger.error(f"Error toggling notification setting {field}: {e}")
             if update.callback_query:
                 await self._ack(update.callback_query,
-                    i18n.get('telegram.notifications.update_failed', 'en'),
+                    i18n.get('telegram.notifications.update_failed', await self._resolve_language(update)),
                     show_alert=True,
                 )
 
@@ -1428,7 +1453,16 @@ class ProfileHandlers(BaseHandler):
                                 logger.info(f"Updated cached tokens after account merge for user {user_id}")
 
                         user_data = verify_payload.get('user', {})
-                        name = user_data.get('first_name', i18n.get('telegram.common.user_fallback', language))
+                        # One naming rule for the bot and the email (spec 2026-10-09 §7.3): first
+                        # name, company for an entity, never "Telegram User" and never "None". The
+                        # full name is joined from its parts: the body's own `full_name` comes from
+                        # `User.to_dict()`, which prints a missing part as "None" ("None None").
+                        name = greeting_name(
+                            first_name=user_data.get('first_name'),
+                            full_name=joined_name(user_data.get('first_name'), user_data.get('last_name')),
+                            company_name=user_data.get('company_name'),
+                            is_entity=user_data.get('user_type') == UserType.ENTITY.value,
+                        ) or i18n.get('telegram.common.user_fallback', language)
 
                         await update.message.reply_text(
                             i18n.get('telegram.phone.accounts_linked_success', language, name=name),

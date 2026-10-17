@@ -149,7 +149,9 @@ class SessionCleanupService:
                 if sessions_removed > 0:
                     logger.info(f"Deactivated {sessions_removed} sessions for inactive users")
 
-            # Clean up bot states for users inactive for extended periods
+            # Clean up bot states for users inactive for extended periods. Only bot_state is
+            # written: the filter already requires is_bot_active == False, and reachability is
+            # TelegramReachabilityService's alone (spec 2026-10-09 §7.2 d).
             bot_cleanup_cutoff = now - timedelta(days=180)  # 6 months
             bot_states_cleared = User.query.filter(
                 and_(
@@ -157,7 +159,7 @@ class SessionCleanupService:
                     User.bot_state.isnot(None),
                     User.is_bot_active == False,  # noqa: E712
                 )
-            ).update({"bot_state": None, "is_bot_active": False}, synchronize_session="fetch")
+            ).update({"bot_state": None}, synchronize_session="fetch")
 
             stats["bot_states_cleared"] = bot_states_cleared
             if bot_states_cleared > 0:

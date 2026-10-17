@@ -743,6 +743,19 @@ class BusinessAPIClient:
         return await self._make_request('POST', f'/api/v1/orders/{order_id}/agent-confirmation',
                                        user_token=user_token, data=data)
 
+    async def snooze_reorder_reminder(self, user_token: str, episode_id: int) -> APIResponse:
+        """Remind me later on a reorder reminder. No body; the backend answers
+        {"success": true, "data": {"snooze_days": n}} or a top-level
+        REORDER_REMINDER_NOT_ACTIVE once the reminder has moved on."""
+        return await self._make_request('POST', f'/api/v1/reorder-reminders/{episode_id}/later',
+                                       user_token=user_token)
+
+    async def stop_reorder_reminders(self, user_token: str, episode_id: Optional[int]) -> APIResponse:
+        """Stop these reminders. The episode only links the event; the route records
+        `telegram_button` itself."""
+        return await self._make_request('POST', '/api/v1/reorder-reminders/stop',
+                                       user_token=user_token, data={'episode_id': episode_id})
+
     async def track_order(self, user_token: str, order_id: int) -> APIResponse:
         """Get order tracking information with status timeline"""
         return await self._make_request('GET', f'/api/v1/orders/{order_id}/track',
@@ -1139,6 +1152,30 @@ class BusinessAPIClient:
             '/api/v1/auth/link-phone-account/send-otp',
             data={'telegram_id': telegram_id, 'phone': phone}
         )
+
+    async def report_telegram_reachability(
+        self, telegram_id: str, status: str, at: datetime, *, source: str = "my_chat_member"
+    ) -> bool:
+        """Tell the backend this customer blocked (`"blocked"`) or reached (`"reachable"`) the bot.
+
+        Spec 2026-10-09 §7.2 (a, b). Signed like telegram-login (`sign=True`): no customer JWT
+        travels, so the HMAC over the exact bytes is the only proof the bot sent it. `at` is the
+        update's own date, which lets the backend ignore a report older than the block it holds.
+        `_make_request` retries connection errors and timeouts; a refusal is logged and answered
+        False, never raised, so the handler or middleware that reports never breaks its update.
+        """
+        response = await self._make_request(
+            'POST',
+            '/api/v1/bot/telegram-reachability',
+            data={'telegram_id': str(telegram_id), 'status': status, 'at': at.isoformat(), 'source': source},
+            sign=True,
+        )
+        if not response.success:
+            logger.warning(
+                "Telegram reachability report refused: telegram_id=%s status=%s source=%s error=%s",
+                telegram_id, status, source, response.error,
+            )
+        return bool(response.success)
 
     async def link_phone_verify(self, telegram_id: int, otp: str) -> APIResponse:
         """

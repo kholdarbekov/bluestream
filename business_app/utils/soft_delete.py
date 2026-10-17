@@ -41,32 +41,38 @@ def install_soft_delete_filter(session_cls: type = Session) -> None:
     """Attach the global soft-delete filter to the given Session class.
 
     Call once during app startup (after models are imported). Safe to call more
-    than once; SQLAlchemy's listener registry dedupes on (target, identifier,
-    fn) triples.
+    than once: the listener is ONE module-level function, so a repeat call is a
+    no-op. It used to be a closure defined inside this function — a new object
+    per call, which SQLAlchemy's (target, identifier, fn) dedupe cannot match —
+    so every create_app() stacked another copy onto the global Session class and
+    each copy rewrote every SELECT. Tests build an app per pg-backed test, which
+    left hundreds of copies per xdist worker and slowed the suite to hours.
     """
+    if not event.contains(session_cls, "do_orm_execute", _apply_soft_delete_filter):
+        event.listen(session_cls, "do_orm_execute", _apply_soft_delete_filter)
 
-    @event.listens_for(session_cls, "do_orm_execute")
-    def _apply_soft_delete_filter(execute_state) -> None:  # pragma: no cover - exercised via ORM
-        try:
-            if not execute_state.is_select:
-                return
-            if execute_state.is_column_load or execute_state.is_relationship_load:
-                return
-            if execute_state.execution_options.get(_INCLUDE_DELETED_OPTION, False):
-                return
-            if _flask_scope_wants_deleted():
-                return
 
-            execute_state.statement = execute_state.statement.options(
-                with_loader_criteria(
-                    SoftDeleteMixin,
-                    lambda cls: cls.deleted_at.is_(None),
-                    include_aliases=True,
-                )
-            )
-        except Exception:
-            # Never take the app down over a query-rewrite glitch.
+def _apply_soft_delete_filter(execute_state) -> None:  # pragma: no cover - exercised via ORM
+    try:
+        if not execute_state.is_select:
             return
+        if execute_state.is_column_load or execute_state.is_relationship_load:
+            return
+        if execute_state.execution_options.get(_INCLUDE_DELETED_OPTION, False):
+            return
+        if _flask_scope_wants_deleted():
+            return
+
+        execute_state.statement = execute_state.statement.options(
+            with_loader_criteria(
+                SoftDeleteMixin,
+                lambda cls: cls.deleted_at.is_(None),
+                include_aliases=True,
+            )
+        )
+    except Exception:
+        # Never take the app down over a query-rewrite glitch.
+        return
 
 
 def _flask_scope_wants_deleted() -> bool:

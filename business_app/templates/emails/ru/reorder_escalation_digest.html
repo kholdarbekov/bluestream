@@ -1,0 +1,43 @@
+{% extends "emails/base.html" %}
+{# Same data contract and footer override as en/reorder_escalation_digest.html. #}
+
+{% block title %}Пропавшие клиенты - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Пропавшие клиенты</h1>
+{% endblock %}
+
+{% block content %}
+{% set labels = (flag_labels or {}).get(language, {}) %}
+<h2>Клиенты требуют внимания</h2>
+
+<div class="warning-box">
+    <p>Новых клиентов для связи: <strong>{{ escalated_count }}</strong></p>
+</div>
+
+{% if top %}
+<table class="details-table">
+    <tr>
+        <th>Клиент</th>
+        <th>Просрочка, дней</th>
+        <th>Причина</th>
+    </tr>
+    {% for row in top %}
+    <tr>
+        <td>{{ row.name }}</td>
+        <td>{{ row.days_overdue }}</td>
+        <td>{{ labels.get(row.flag, row.flag) }}</td>
+    </tr>
+    {% endfor %}
+</table>
+{% endif %}
+
+<p style="text-align: center;">
+    <a href="{{ worklist_url }}" class="btn-primary">Открыть список пропавших клиентов</a>
+</p>
+{% endblock %}
+
+{% block footer %}
+<p>&copy; {{ current_year }} {{ company_name }}</p>
+<p style="font-size: 11px; color: #94a3b8;">Эта сводка отправляется администраторам и менеджерам {{ company_name }}.</p>
+{% endblock %}

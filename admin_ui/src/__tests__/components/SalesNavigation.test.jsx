@@ -66,6 +66,12 @@ const PENDING_COUNT_PAGE = {
   pending_count: 3,
 };
 vi.mock('../../pages/SalesCompensation', () => ({ default: () => <div>compensation-page</div> }));
+// The layout's Lapsed customers badge (reorder-reminders §9.1) reads the reminder summary; the
+// default mock grants every permission, so it runs here too.
+vi.mock('../../services/adminService', () => ({
+  __esModule: true,
+  default: { getReorderReminderSummary: vi.fn().mockResolvedValue({ counts: { follow_up: 0, reminding: 0 } }) },
+}));
 
 // The layout's Compensation badge reads A1. Every method is a spy, so a manager's session can
 // be shown to call none of them (§10.6).

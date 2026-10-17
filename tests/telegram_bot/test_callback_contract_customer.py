@@ -95,6 +95,7 @@ from keyboards import (
     PaymentKeyboards,
     ProductKeyboards,
     ProfileKeyboards,
+    ReorderReminderKeyboards,
     SubscriptionKeyboards,
 )
 
@@ -367,6 +368,10 @@ async def test_the_collision_check_samples_the_branches_it_claims_to(bot):
     assert set(_samples_matching("^toggle_delivery_telegram_status_(on|off)$")) == {
         "toggle_delivery_telegram_status_on",
         "toggle_delivery_telegram_status_off",
+    }
+    assert set(_samples_matching("^toggle_reorder_reminders_(on|off)$")) == {
+        "toggle_reorder_reminders_on",
+        "toggle_reorder_reminders_off",
     }
     assert set(_samples_matching("^(pause|resume|cancel)_sub_")) == {
         "pause_sub_",
@@ -792,12 +797,15 @@ def _keyboard_callbacks(lang: str = "uz") -> list[tuple[str, str]]:
         )
     add("ProfileKeyboards.profile_edit_menu", ProfileKeyboards.profile_edit_menu(lang))
     for enabled in (True, False):
-        add(
-            f"ProfileKeyboards.notification_settings(enabled={enabled})",
-            ProfileKeyboards.notification_settings(
-                lang, delivery_telegram_status_updates_enabled=enabled
-            ),
-        )
+        for reminders in (True, False, None):
+            add(
+                f"ProfileKeyboards.notification_settings(enabled={enabled}, reminders={reminders})",
+                ProfileKeyboards.notification_settings(
+                    lang,
+                    delivery_telegram_status_updates_enabled=enabled,
+                    reorder_reminders_enabled=reminders,
+                ),
+            )
     add(
         "ProfileKeyboards.addresses_management",
         ProfileKeyboards.addresses_management(_ADDRESSES, lang),
@@ -843,6 +851,16 @@ def _keyboard_callbacks(lang: str = "uz") -> list[tuple[str, str]]:
         PaymentKeyboards.payment_failed(51, lang, may_pay=True, may_cancel=True),
     )
     add("PaymentKeyboards.payment_link", PaymentKeyboards.payment_link("https://pay.example/1", lang))
+
+    # -- reorder reminders (spec 2026-10-09 §7.3) ------------------------------
+    # Both shapes of Order again (own order / catalogue) and the R1 / R2 rows.
+    for reorder_order_id, show_later in ((9001, True), (None, False)):
+        add(
+            f"ReorderReminderKeyboards.reminder(order={reorder_order_id}, later={show_later})",
+            ReorderReminderKeyboards.reminder(
+                lang, episode_id=77, reorder_order_id=reorder_order_id, show_later=show_later, snooze_days=14
+            ),
+        )
 
     return out
 
@@ -1208,13 +1226,17 @@ async def test_middlewares_run_before_conversations_which_run_before_the_catch_a
         for handler in handlers
         if isinstance(handler, TypeHandler)
     )
-    assert len(middleware_groups) == 3, (
-        f"expected exactly the three dispatcher middlewares, found groups "
+    assert len(middleware_groups) == 4, (
+        f"expected exactly the four dispatcher middlewares, found groups "
         f"{middleware_groups}"
     )
     assert middleware_groups[0] == debug_logger_group == -10
-    assert middleware_groups[1] == -5, "the callback-dedup guard moved out of group -5"
-    assert middleware_groups[2] == -4, (
+    assert middleware_groups[1] == -9, (
+        "the Telegram-reachability recovery middleware (spec 2026-10-09 §7.2 b) "
+        "moved out of group -9"
+    )
+    assert middleware_groups[2] == -5, "the callback-dedup guard moved out of group -5"
+    assert middleware_groups[3] == -4, (
         "the quantity-screen middleware must sit between the dedup guard and "
         "the conversations"
     )
@@ -1303,10 +1325,10 @@ async def test_both_dispatcher_middlewares_claim_every_update(bot, user):
         type_handlers = [
             handler for _group, handler in claimed if isinstance(handler, TypeHandler)
         ]
-        assert len(type_handlers) == 3, (
+        assert len(type_handlers) == 4, (
             f"{update} is seen by {len(type_handlers)} middleware(s); the debug "
-            "logger, the callback-dedup guard and the quantity-screen window "
-            "must all see every update"
+            "logger, the reachability recovery, the callback-dedup guard and the "
+            "quantity-screen window must all see every update"
         )
 
 

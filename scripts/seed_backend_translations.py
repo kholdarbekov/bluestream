@@ -2038,11 +2038,6 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Mijoz turi',
         'ru': 'Тип клиента'
     },
-    'ui.analytics.days_since_last_order': {
-        'en': 'Days Since Last Order',
-        'uz': 'Oxirgi buyurtmadan beri kunlar',
-        'ru': 'Дней с последнего заказа'
-    },
     'ui.analytics.days_threshold': {
         'en': 'Days Threshold',
         'uz': 'Kunlar chegarasi',
@@ -3292,6 +3287,11 @@ BACKEND_TRANSLATIONS = {
         'en': 'Reason is required',
         'uz': 'Sabab ko\'rsatish majburiy',
         'ru': 'Необходимо указать причину'
+    },
+    'api.notifications.validation.setting_field_required': {
+        'en': 'Send at least one setting to change',
+        'uz': 'Kamida bitta o\'zgartiriladigan sozlamani yuboring',
+        'ru': 'Укажите хотя бы одну настройку для изменения'
     },
 
     # ============================================================================
@@ -6852,7 +6852,7 @@ BACKEND_TRANSLATIONS = {
         'ru': '❌ Заказ отклонён.'
     },
     # An answered proposal now loses its buttons and gains the answer
-    # (telegram_bot/handlers/agent_orders.py::_settle), so a second tap means the
+    # (telegram_bot/handlers/base.py::BaseHandler._settle_callback_message), so a second tap means the
     # edit was refused (past the 48h window, a deleted message) or the answer came
     # from elsewhere. Still ordinary, still needs this sentence.
     # The backend answers 409 SALES_CONFIRMATION_NOT_PENDING and the
@@ -7801,8 +7801,6 @@ ADMIN_UI_BACKFILL_TRANSLATIONS = {
     'ui.analytics.sales_performance_over_time': _ui_tr('Sales Performance Over Time', 'Vaqt davomida sotuvlar samaradorligi', 'Динамика продаж'),
     'ui.analytics.sales_trends': _ui_tr('Sales Trends', 'Sotuvlar tendentsiyasi', 'Тенденции продаж'),
     'ui.analytics.segment_active': _ui_tr('Active', 'Faol', 'Активные'),
-    'ui.analytics.segment_at_risk': _ui_tr('At Risk', 'Xavf ostida', 'Под угрозой'),
-    'ui.analytics.segment_inactive': _ui_tr('Inactive', 'Faol emas', 'Неактивные'),
     'ui.analytics.segment_loyal': _ui_tr('Loyal', 'Sodiq', 'Лояльные'),
     'ui.analytics.segment_new': _ui_tr('New', 'Yangi', 'Новые'),
     'ui.analytics.top_products': _ui_tr('Top Products', 'Eng yaxshi mahsulotlar', 'Лучшие товары'),
@@ -8845,6 +8843,631 @@ LOYALTY_GUIDE_TRANSLATIONS = {
     },
 }
 BACKEND_TRANSLATIONS.update(LOYALTY_GUIDE_TRANSLATIONS)
+
+
+# ============================================================================
+# Reorder reminders - customer copy (docs/superpowers/specs/
+# 2026-10-09-lapsed-customer-reorder-reminders-design.md §7.5).
+# Rendered ONLY through shared/reorder_reminder_copy.py: the customer bot's
+# message, its buttons, the Later/Stop confirmations, the Profile ->
+# Notifications line and the reminder email all read these rows. Every
+# language carries the same placeholders and no string asks the customer to
+# call (tests/unit/test_reorder_reminder_copy_is_seeded.py). The `days.*` rows
+# are CLDR integer plural forms picked by shared.i18n_rendering.plural_key
+# (ru one/few/many, en and uz one/other); all four are seeded in every
+# language. Native-speaker review is required before REORDER_REMINDERS_MODE=on.
+# ============================================================================
+REORDER_REMINDER_TRANSLATIONS = {
+    'telegram.reorder_reminder.greeting': {
+        'en': 'Hi {name}!',
+        'uz': 'Assalomu alaykum, {name}!',
+        'ru': 'Здравствуйте, {name}!',
+    },
+    'telegram.reorder_reminder.greeting_noname': {
+        'en': 'Hello!',
+        'uz': 'Assalomu alaykum!',
+        'ru': 'Здравствуйте!',
+    },
+    'telegram.reorder_reminder.r1_personal': {
+        'en': '{greeting} Your last water delivery was {days_phrase} ago, '
+              'and you usually order about every {gap_phrase}.',
+        'uz': '{greeting} Oxirgi suv yetkazib berilganiga {days_phrase} boʻldi, '
+              'odatda esa taxminan har {gap_phrase}da buyurtma berasiz.',
+        'ru': '{greeting} Последняя доставка воды была {days_phrase} назад, '
+              'а обычно вы заказываете примерно раз в {gap_phrase}.',
+    },
+    'telegram.reorder_reminder.r1_preset': {
+        'en': '{greeting} Your last water delivery was {days_phrase} ago. Running low?',
+        'uz': '{greeting} Oxirgi suv yetkazib berilganiga {days_phrase} boʻldi. Suvingiz tugayaptimi?',
+        'ru': '{greeting} Последняя доставка воды была {days_phrase} назад. Вода заканчивается?',
+    },
+    'telegram.reorder_reminder.r2': {
+        'en': '{greeting} Just a quick reminder.',
+        'uz': '{greeting} Kichik eslatma.',
+        'ru': '{greeting} Небольшое напоминание.',
+    },
+    'telegram.reorder_reminder.tap_line': {
+        'en': "Tap 🛒 Order again and we'll bring your usual {items}.",
+        'uz': '«🛒 Yana buyurtma berish» tugmasini bosing — odatdagidek {items} olib kelamiz.',
+        'ru': 'Нажмите «🛒 Заказать снова» — привезём как обычно: {items}.',
+    },
+    'telegram.reorder_reminder.email_cta_line': {
+        'en': "Order on our website or in our Telegram bot and we'll bring your usual {items}.",
+        'uz': 'Saytimizda yoki Telegram-botimizda buyurtma bering — odatdagidek {items} olib kelamiz.',
+        'ru': 'Закажите на сайте или в нашем Telegram-боте — привезём как обычно: {items}.',
+    },
+    'telegram.reorder_reminder.item': {
+        'en': '{qty} × {name}',
+        'uz': '{qty} ta {name}',
+        'ru': '{qty} × {name}',
+    },
+    'telegram.reorder_reminder.items_fallback': {
+        'en': 'water',
+        'uz': 'suv',
+        'ru': 'воду',
+    },
+    'telegram.reorder_reminder.days.one': {'en': '{n} day', 'uz': '{n} kun', 'ru': '{n} день'},
+    'telegram.reorder_reminder.days.few': {'en': '{n} days', 'uz': '{n} kun', 'ru': '{n} дня'},
+    'telegram.reorder_reminder.days.many': {'en': '{n} days', 'uz': '{n} kun', 'ru': '{n} дней'},
+    'telegram.reorder_reminder.days.other': {'en': '{n} days', 'uz': '{n} kun', 'ru': '{n} дня'},
+    'telegram.reorder_reminder.btn_order': {
+        'en': '🛒 Order again',
+        'uz': '🛒 Yana buyurtma berish',
+        'ru': '🛒 Заказать снова',
+    },
+    'telegram.reorder_reminder.btn_later': {
+        'en': '⏰ Remind me in {snooze_phrase}',
+        'uz': '⏰ {snooze_phrase}dan keyin eslatish',
+        'ru': '⏰ Напомнить через {snooze_phrase}',
+    },
+    'telegram.reorder_reminder.btn_stop': {
+        'en': '🔕 Stop these reminders',
+        'uz': '🔕 Eslatmalarni oʻchirish',
+        'ru': '🔕 Не напоминать',
+    },
+    'telegram.reorder_reminder.later_ok': {
+        'en': "⏰ OK — we'll remind you in {snooze_phrase}.",
+        'uz': '⏰ Yaxshi — {snooze_phrase}dan keyin eslatamiz.',
+        'ru': '⏰ Хорошо — напомним через {snooze_phrase}.',
+    },
+    'telegram.reorder_reminder.stop_ok': {
+        'en': '🔕 Done — no more reorder reminders. Order and delivery updates will still arrive. '
+              'You can turn reorder reminders back on in {profile_label} → {notifications_label}.',
+        'uz': '🔕 Tayyor — qayta buyurtma eslatmalari endi yuborilmaydi. Buyurtma va yetkazib berish '
+              'xabarlari kelishda davom etadi. Eslatmalarni «{profile_label}» → «{notifications_label}» '
+              'boʻlimida qayta yoqishingiz mumkin.',
+        'ru': '🔕 Готово — напоминания о повторном заказе больше не придут. Уведомления о заказах и '
+              'доставке останутся. Включить напоминания снова можно в разделе «{profile_label}» → '
+              '«{notifications_label}».',
+    },
+    'telegram.reorder_reminder.expired': {
+        'en': 'This reminder is no longer active.',
+        'uz': 'Bu eslatma endi amal qilmaydi.',
+        'ru': 'Это напоминание уже неактуально.',
+    },
+    'telegram.reorder_reminder.email_btn_website': {
+        'en': 'Order on the website',
+        'uz': 'Saytda buyurtma berish',
+        'ru': 'Заказать на сайте',
+    },
+    'telegram.reorder_reminder.email_btn_telegram': {
+        'en': 'Order in Telegram',
+        'uz': 'Telegramda buyurtma berish',
+        'ru': 'Заказать в Telegram',
+    },
+    'telegram.reorder_reminder.email_unsubscribe_line': {
+        'en': "Don't want these reminders? Unsubscribe",
+        'uz': 'Bunday eslatmalarni olishni xohlamaysizmi? Obunani bekor qilish',
+        'ru': 'Не хотите получать такие напоминания? Отписаться',
+    },
+    'telegram.reorder_reminder.settings_on': {
+        'en': 'Reorder reminders: On',
+        'uz': 'Buyurtma eslatmalari: yoqilgan',
+        'ru': 'Напоминания о заказе: вкл.',
+    },
+    'telegram.reorder_reminder.settings_off': {
+        'en': 'Reorder reminders: Off',
+        'uz': 'Buyurtma eslatmalari: oʻchirilgan',
+        'ru': 'Напоминания о заказе: выкл.',
+    },
+    'telegram.reorder_reminder.settings_button_on': {
+        'en': '🔔 Turn reorder reminders on',
+        'uz': '🔔 Buyurtma eslatmalarini yoqish',
+        'ru': '🔔 Включить напоминания о заказе',
+    },
+    'telegram.reorder_reminder.settings_button_off': {
+        'en': '🔕 Turn reorder reminders off',
+        'uz': '🔕 Buyurtma eslatmalarini oʻchirish',
+        'ru': '🔕 Выключить напоминания о заказе',
+    },
+}
+BACKEND_TRANSLATIONS.update(REORDER_REMINDER_TRANSLATIONS)
+
+# The reorder-reminder unsubscribe page (frontend/reminders_unsubscribe.html, spec §7.4),
+# looked up by the storefront `|t` filter in the language of the email's `?lang=` link. Never
+# "call us": the expired page points to the website profile settings (the switch an email-only
+# customer has, Task 19c) and to the bot only as an extra (final review E3; native review pending).
+REORDER_UNSUBSCRIBE_PAGE_TRANSLATIONS = {
+    'reorder_unsubscribe.title': {
+        'en': 'Reorder reminders',
+        'uz': 'Buyurtma eslatmalari',
+        'ru': 'Напоминания о заказе',
+    },
+    'reorder_unsubscribe.confirm_text': {
+        'en': 'Stop reminders to reorder water? Order and delivery updates will still arrive.',
+        'uz': 'Suvni qayta buyurtma qilish eslatmalari oʻchirilsinmi? Buyurtma va yetkazib berish '
+              'xabarlari kelishda davom etadi.',
+        'ru': 'Отключить напоминания о повторном заказе воды? Уведомления о заказах и доставке останутся.',
+    },
+    'reorder_unsubscribe.confirm_button': {
+        'en': 'Unsubscribe',
+        'uz': 'Obunani bekor qilish',
+        'ru': 'Отписаться',
+    },
+    'reorder_unsubscribe.done_text': {
+        'en': 'Done — you will no longer receive reorder reminders.',
+        'uz': 'Tayyor — qayta buyurtma eslatmalari endi yuborilmaydi.',
+        'ru': 'Готово — напоминания о повторном заказе больше не придут.',
+    },
+    'reorder_unsubscribe.undo_button': {
+        'en': 'Undo',
+        'uz': 'Ortga qaytarish',
+        'ru': 'Отменить',
+    },
+    'reorder_unsubscribe.undone_text': {
+        'en': 'Reorder reminders are back on.',
+        'uz': 'Qayta buyurtma eslatmalari yana yoqildi.',
+        'ru': 'Напоминания о повторном заказе снова включены.',
+    },
+    'reorder_unsubscribe.expired_text': {
+        'en': 'This link is no longer active. You can manage reminders in your profile settings on our website '
+              'or in our Telegram bot.',
+        'uz': 'Bu havola endi amal qilmaydi. Eslatmalarni saytdagi profil sozlamalarida yoki Telegram-botimizda '
+              'boshqarishingiz mumkin.',
+        'ru': 'Эта ссылка больше не действует. Управлять напоминаниями можно в настройках профиля на нашем сайте '
+              'или в нашем Telegram-боте.',
+    },
+    'reorder_unsubscribe.home_link': {
+        'en': 'Back to the home page',
+        'uz': 'Bosh sahifaga qaytish',
+        'ru': 'На главную',
+    },
+}
+BACKEND_TRANSLATIONS.update(REORDER_UNSUBSCRIBE_PAGE_TRANSLATIONS)
+
+# The storefront profile's Reorder reminders switch (profile_settings.html + profile-settings.js,
+# spec §8). Dotless English SOURCE strings: the storefront `|t` filter looks the key up verbatim, and
+# `_category_for` files them under 'general'. They deliberately do not use the
+# `telegram.reorder_reminder.` prefix, which belongs to the bot/email copy that
+# shared/reorder_reminder_copy.py alone composes (tests/unit/test_reorder_reminder_copy_is_seeded.py).
+# Never "call us": the switch only states what it does.
+REORDER_REMINDER_WEB_TRANSLATIONS = {
+    'Reorder reminders': {
+        'en': 'Reorder reminders',
+        'uz': 'Buyurtma eslatmalari',
+        'ru': 'Напоминания о заказе',
+    },
+    'Remind me when it is usually time to reorder water': {
+        'en': 'Remind me when it is usually time to reorder water',
+        'uz': 'Odatda suv buyurtma qiladigan vaqtimda eslatib turing',
+        'ru': 'Напоминать, когда обычно пора заказать воду',
+    },
+    'Reorder reminder setting saved': {
+        'en': 'Reorder reminder setting saved',
+        'uz': 'Buyurtma eslatmasi sozlamasi saqlandi',
+        'ru': 'Настройка напоминаний сохранена',
+    },
+    'Failed to save the reorder reminder setting': {
+        'en': 'Failed to save the reorder reminder setting',
+        'uz': 'Buyurtma eslatmasi sozlamasini saqlab boʻlmadi',
+        'ru': 'Не удалось сохранить настройку напоминаний',
+    },
+}
+BACKEND_TRANSLATIONS.update(REORDER_REMINDER_WEB_TRANSLATIONS)
+
+
+# ===========================================================================
+# Admin UI — reorder-reminder setting (Users page switch; the label helper
+# admin_ui/src/utils/reorderReminderSetting.js is shared with the Lapsed
+# customers page). Reorder-reminders spec §8, plan Task 21b.
+#
+# These are dotted `ui.*` keys, so `_category_for` files them under the shared
+# `ui` category. AdminUiTranslationService serves that category in the `common`
+# bundle, which every namespace falls back to (admin_ui/src/i18n.js fallbackNS),
+# and `ui.users.*` also in the `users` bundle by prefix — the namespace Users.js
+# loads. The seeded `en` value must equal the call site's inline fallback.
+# ===========================================================================
+
+ADMIN_UI_REORDER_REMINDER_SETTING_TRANSLATIONS = {
+    'ui.users.reorder_reminders_setting': _ui_tr(
+        'Reorder reminders', 'Qayta buyurtma eslatmalari', 'Напоминания о повторном заказе'
+    ),
+    'ui.users.reorder_reminders_setting_help': _ui_tr(
+        'Up to two reminders when the customer is late against their usual ordering rhythm.',
+        "Mijoz odatdagi buyurtma ritmidan kechiksa, ko'pi bilan ikkita eslatma.",
+        'Не более двух напоминаний, когда клиент опаздывает относительно своего обычного ритма заказов.',
+    ),
+    'ui.users.reorder_reminders_reason_prompt_enable': _ui_tr(
+        'Please provide a reason for turning reorder reminders on.',
+        'Qayta buyurtma eslatmalarini yoqish sababini kiriting.',
+        'Укажите причину включения напоминаний о повторном заказе.',
+    ),
+    'ui.users.reorder_reminders_reason_prompt_disable': _ui_tr(
+        'Please provide a reason for turning reorder reminders off.',
+        "Qayta buyurtma eslatmalarini o'chirish sababini kiriting.",
+        'Укажите причину отключения напоминаний о повторном заказе.',
+    ),
+    # Spec §8: an admin off upgrades a customer's own off to a staff off (Users page action).
+    'ui.users.reorder_reminders_exclude': _ui_tr(
+        'Exclude (staff off)',
+        "Chiqarib tashlash (xodim o'chirishi)",
+        'Исключить (отключено сотрудником)',
+    ),
+    'ui.users.reorder_reminders_exclude_help': _ui_tr(
+        'The customer switched reminders off. Excluding records a staff off with your reason; '
+        'a later Stop by the customer will not change it.',
+        "Mijoz eslatmalarni o'zi o'chirgan. Chiqarib tashlash sizning sababingiz bilan xodim "
+        "o'chirishini qayd etadi; mijozning keyingi Stop bosishi uni o'zgartirmaydi.",
+        'Клиент сам отключил напоминания. Исключение фиксирует отключение сотрудником с вашей '
+        'причиной; последующий «Стоп» клиента его не изменит.',
+    ),
+    'ui.users.reorder_reminders_reason_prompt_exclude': _ui_tr(
+        'Please provide a reason for excluding this customer from reorder reminders (staff off).',
+        "Mijozni qayta buyurtma eslatmalaridan chiqarib tashlash (xodim o'chirishi) sababini kiriting.",
+        'Укажите причину исключения клиента из напоминаний о повторном заказе (отключение сотрудником).',
+    ),
+    'ui.users.reorder_reminders_reason': _ui_tr('Reason: {{reason}}', 'Sabab: {{reason}}', 'Причина: {{reason}}'),
+    'ui.reorder_reminders.setting_on': _ui_tr('Reminders on', 'Eslatmalar yoqilgan', 'Напоминания включены'),
+    'ui.reorder_reminders.setting_off': _ui_tr('Reminders off', "Eslatmalar o'chirilgan", 'Напоминания выключены'),
+    'ui.reorder_reminders.source.default': _ui_tr('never changed', "hech qachon o'zgartirilmagan", 'не менялось'),
+    'ui.reorder_reminders.source.customer': _ui_tr('by the customer', 'mijoz tomonidan', 'клиентом'),
+    'ui.reorder_reminders.source.admin': _ui_tr('by staff', 'xodim tomonidan', 'сотрудником'),
+    'ui.reorder_reminders.via.telegram_button': _ui_tr(
+        'Telegram reminder button', 'Telegram eslatma tugmasi', 'кнопка в напоминании Telegram'
+    ),
+    'ui.reorder_reminders.via.telegram_settings': _ui_tr(
+        'Telegram bot settings', 'Telegram bot sozlamalari', 'настройки Telegram-бота'
+    ),
+    'ui.reorder_reminders.via.email_link': _ui_tr(
+        'email unsubscribe link', 'emaildagi obunani bekor qilish havolasi', 'ссылка отписки в письме'
+    ),
+    'ui.reorder_reminders.via.web_settings': _ui_tr('website settings', 'sayt sozlamalari', 'настройки на сайте'),
+    'ui.reorder_reminders.via.admin_ui': _ui_tr('admin panel', 'admin panel', 'админ-панель'),
+    'ui.reorder_reminders.via.worklist': _ui_tr(
+        'Lapsed customers outcome', "Yo'qolgan mijozlar natijasi", 'итог в списке пропавших клиентов'
+    ),
+}
+
+BACKEND_TRANSLATIONS.update(ADMIN_UI_REORDER_REMINDER_SETTING_TRANSLATIONS)
+
+
+# ===========================================================================
+# Lapsed customers — escalation flag labels. One copy for the admin UI page
+# (Task 23a) and the morning digest email (Task 22b): one row per value of
+# `ESCALATION_FLAGS` (business_app/models/reorder_reminder.py), guarded by
+# tests/unit/test_reorder_escalation_digest_registration.py. Spec §9.1, §9.2.
+# Dotted `ui.*` keys, so `_category_for` files them under the shared `ui`
+# category (the admin UI `common` bundle).
+# ===========================================================================
+
+ADMIN_UI_LAPSED_FLAG_TRANSLATIONS = {
+    'ui.lapsed.flag.no_response': _ui_tr('No response', "Javob yo'q", 'Нет ответа'),
+    'ui.lapsed.flag.no_channel': _ui_tr('No way to reach', "Bog'lanish kanali yo'q", 'Нет канала связи'),
+    'ui.lapsed.flag.stopped': _ui_tr('Turned reminders off', "Eslatmalarni o'chirgan", 'Отключил напоминания'),
+    'ui.lapsed.flag.blocked': _ui_tr('Blocked the bot', 'Botni bloklagan', 'Заблокировал бота'),
+    'ui.lapsed.flag.snoozed': _ui_tr(
+        'Asked to be reminded later', "Keyinroq eslatishni so'ragan", 'Просил напомнить позже'
+    ),
+    'ui.lapsed.flag.replied': _ui_tr('Replied', 'Javob yozgan', 'Ответил'),
+    'ui.lapsed.flag.stuck_order': _ui_tr('Stuck order', 'Tiqilib qolgan buyurtma', 'Зависший заказ'),
+    'ui.lapsed.flag.long_lapsed': _ui_tr('Long lapsed', "Uzoq vaqt buyurtma yo'q", 'Давно без заказов'),
+    'ui.lapsed.flag.outlet_dormant': _ui_tr(
+        'Dormant outlet', "Faol bo'lmagan savdo nuqtasi", 'Неактивная торговая точка'
+    ),
+}
+
+BACKEND_TRANSLATIONS.update(ADMIN_UI_LAPSED_FLAG_TRANSLATIONS)
+
+
+# ===========================================================================
+# Admin UI — Lapsed customers worklist page (reorder-reminders spec §9.1,
+# plan Task 23a). The flag labels are ADMIN_UI_LAPSED_FLAG_TRANSLATIONS above.
+# ===========================================================================
+
+ADMIN_UI_LAPSED_CUSTOMERS_TRANSLATIONS = {
+    'ui.nav.lapsed_customers': _ui_tr('Lapsed customers', "Yo'qolgan mijozlar", 'Пропавшие клиенты'),
+    'ui.lapsed.title': _ui_tr('Lapsed customers', "Yo'qolgan mijozlar", 'Пропавшие клиенты'),
+    'ui.lapsed.hint': _ui_tr(
+        'Customers who stopped ordering against their own rhythm. Record an outcome for every row you work.',
+        "O'z ritmiga ko'ra buyurtma berishni to'xtatgan mijozlar. Ishlagan har bir qator uchun natijani yozing.",
+        'Клиенты, которые перестали заказывать в своём обычном ритме. Фиксируйте итог по каждой отработанной строке.',
+    ),
+    'ui.lapsed.call_hours': _ui_tr(
+        'Call customers only between 09:00 and 18:00.',
+        "Mijozlarga faqat 09:00 dan 18:00 gacha qo'ng'iroq qiling.",
+        'Звоните клиентам только с 09:00 до 18:00.',
+    ),
+    'ui.lapsed.mode_dry_run': _ui_tr(
+        'Dry-run — simulated rows, discarded at go-live.',
+        "Sinov rejimi — taqlidiy qatorlar, ishga tushirilganda o'chiriladi.",
+        'Тестовый режим — смоделированные строки, удаляются при запуске.',
+    ),
+    'ui.lapsed.mode_off': _ui_tr(
+        'Off — no reminders are sent.', "O'chirilgan — eslatmalar yuborilmaydi.", 'Выключено — напоминания не отправляются.'
+    ),
+    'ui.lapsed.settings_title': _ui_tr(
+        'Reminder settings (read-only)', "Eslatma sozlamalari (faqat o'qish uchun)", 'Настройки напоминаний (только чтение)'
+    ),
+    'ui.lapsed.settings.fallback_days': _ui_tr('Preset threshold, days', 'Standart chegara, kun', 'Стандартный порог, дней'),
+    'ui.lapsed.settings.ratio': _ui_tr(
+        'Personal threshold × usual gap', 'Shaxsiy chegara × odatiy oraliq', 'Личный порог × обычный интервал'
+    ),
+    'ui.lapsed.settings.min_deliveries': _ui_tr(
+        'Delivery days for a personal rhythm', 'Shaxsiy ritm uchun yetkazib berish kunlari', 'Дней доставки для личного ритма'
+    ),
+    'ui.lapsed.settings.max_per_episode': _ui_tr('Reminders per lapse', 'Har bir uzilishga eslatmalar', 'Напоминаний на один перерыв'),
+    'ui.lapsed.settings.gap_days': _ui_tr('Days between reminders', 'Eslatmalar orasidagi kunlar', 'Дней между напоминаниями'),
+    'ui.lapsed.settings.snooze_days': _ui_tr(
+        '"Remind me later" delay, days', '"Keyinroq eslatish" kechikishi, kun', 'Отсрочка «Напомнить позже», дней'
+    ),
+    'ui.lapsed.settings.escalate_after_days': _ui_tr(
+        'Escalate after the last reminder, days',
+        "Oxirgi eslatmadan keyin xodimga o'tkazish, kun",
+        'Передать сотрудникам после последнего напоминания, дней',
+    ),
+    'ui.lapsed.settings.fresh_days': _ui_tr('Fresh lapse window, days', 'Yangi uzilish oynasi, kun', 'Окно свежего перерыва, дней'),
+    'ui.lapsed.settings.live_order_grace_days': _ui_tr(
+        'Live order grace, days', 'Faol buyurtma uchun muhlat, kun', 'Ожидание активного заказа, дней'
+    ),
+    'ui.lapsed.settings.local_time': _ui_tr(
+        'Daily run (local time)', 'Kunlik ishga tushish (mahalliy vaqt)', 'Ежедневный запуск (местное время)'
+    ),
+    'ui.lapsed.metrics_title': _ui_tr('Last 30 days', 'Oxirgi 30 kun', 'Последние 30 дней'),
+    'ui.lapsed.metric.lapses_started': _ui_tr('Lapses started', 'Boshlangan uzilishlar', 'Начатые перерывы'),
+    'ui.lapsed.metric.reminders_sent': _ui_tr('Reminders sent', 'Yuborilgan eslatmalar', 'Отправлено напоминаний'),
+    'ui.lapsed.metric.reminders_simulated': _ui_tr(
+        'Reminders simulated', 'Taqlid qilingan eslatmalar', 'Смоделировано напоминаний'
+    ),
+    'ui.lapsed.metric.reordered_after_reminder': _ui_tr(
+        'Reordered after a reminder', 'Eslatmadan keyin qayta buyurtma berdi', 'Заказали после напоминания'
+    ),
+    'ui.lapsed.metric.place_resupplied': _ui_tr(
+        'Place resupplied by another member', "Joyni boshqa a'zo ta'minladi", 'Место пополнил другой участник'
+    ),
+    'ui.lapsed.metric.reordered_before_contact': _ui_tr(
+        'Reordered before contact', "Bog'lanishdan oldin buyurtma berdi", 'Заказали до связи'
+    ),
+    'ui.lapsed.metric.stuck_order_delivered': _ui_tr(
+        'Stuck order delivered', 'Tiqilgan buyurtma yetkazildi', 'Зависший заказ доставлен'
+    ),
+    'ui.lapsed.metric.switched_off_by_customers': _ui_tr(
+        'Switched off by customers', "Mijozlar o'chirgan", 'Отключили клиенты'
+    ),
+    'ui.lapsed.metric.blocks_after_reminder': _ui_tr(
+        'Bot blocks within 3 days of a reminder',
+        'Eslatmadan keyin 3 kun ichida botni bloklash',
+        'Блокировки бота в течение 3 дней после напоминания',
+    ),
+    'ui.lapsed.metric.escalated_by_flag': _ui_tr(
+        'Escalated, by reason', "Xodimga o'tkazilgan, sabab bo'yicha", 'Передано сотрудникам, по причинам'
+    ),
+    'ui.lapsed.channel.telegram': _ui_tr('Telegram', 'Telegram', 'Telegram'),
+    'ui.lapsed.channel.email': _ui_tr('Email', 'Email', 'Email'),
+    'ui.lapsed.tab.follow_up': _ui_tr('Needs follow-up', "E'tibor talab qiladi", 'Требуют внимания'),
+    'ui.lapsed.tab.reminding': _ui_tr('Being reminded', 'Eslatilmoqda', 'Получают напоминания'),
+    'ui.lapsed.tab.paused': _ui_tr('Paused', "To'xtatilgan", 'Приостановлено'),
+    'ui.lapsed.tab.resolved': _ui_tr('Resolved', 'Hal qilingan', 'Закрыто'),
+    'ui.lapsed.suspend.subscription': _ui_tr('Live subscription', 'Faol obuna', 'Активная подписка'),
+    'ui.lapsed.suspend.outlet': _ui_tr('Sales outlet account', 'Savdo nuqtasi hisobi', 'Аккаунт торговой точки'),
+    'ui.lapsed.suspend.admin_off': _ui_tr(
+        'Reminders off by staff', "Eslatmalar xodim tomonidan o'chirilgan", 'Напоминания отключены сотрудником'
+    ),
+    'ui.lapsed.suspend.no_recipient': _ui_tr(
+        'No reachable account', "Bog'lanish mumkin bo'lgan hisob yo'q", 'Нет доступного аккаунта'
+    ),
+    'ui.lapsed.outcome.reordered': _ui_tr('Ordered / will order', 'Buyurtma berdi / beradi', 'Заказал / закажет'),
+    'ui.lapsed.outcome.away': _ui_tr('Away', 'Uzoqda', 'В отъезде'),
+    'ui.lapsed.outcome.moved': _ui_tr('Moved', "Ko'chib ketgan", 'Переехал'),
+    'ui.lapsed.outcome.other_supplier': _ui_tr(
+        'Uses another supplier', 'Boshqa yetkazib beruvchidan foydalanadi', 'Пользуется другим поставщиком'
+    ),
+    'ui.lapsed.outcome.price': _ui_tr('Price', 'Narx', 'Цена'),
+    'ui.lapsed.outcome.service_issue': _ui_tr('Service issue', "Xizmat bilan bog'liq muammo", 'Проблема с сервисом'),
+    'ui.lapsed.outcome.unreachable': _ui_tr('Unreachable', "Bog'lanib bo'lmadi", 'Не удалось связаться'),
+    'ui.lapsed.outcome.do_not_contact': _ui_tr('Do not contact', "Bog'lanmang", 'Не связываться'),
+    'ui.lapsed.outcome.other': _ui_tr('Other', 'Boshqa', 'Другое'),
+    'ui.lapsed.event.opened': _ui_tr('Lapse opened', 'Uzilish ochildi', 'Перерыв открыт'),
+    'ui.lapsed.event.reminder_queued': _ui_tr('Reminder queued', "Eslatma navbatga qo'yildi", 'Напоминание в очереди'),
+    'ui.lapsed.event.reminder_sent': _ui_tr('Reminder sent', 'Eslatma yuborildi', 'Напоминание отправлено'),
+    'ui.lapsed.event.reminder_failed': _ui_tr('Reminder failed', 'Eslatma yuborilmadi', 'Напоминание не отправлено'),
+    'ui.lapsed.event.reminder_skipped': _ui_tr(
+        'Reminder skipped', "Eslatma o'tkazib yuborildi", 'Напоминание пропущено'
+    ),
+    'ui.lapsed.event.reminder_simulated': _ui_tr(
+        'Reminder simulated', 'Eslatma taqlid qilindi', 'Напоминание смоделировано'
+    ),
+    'ui.lapsed.event.later': _ui_tr(
+        'Asked to be reminded later', "Keyinroq eslatishni so'radi", 'Попросил напомнить позже'
+    ),
+    'ui.lapsed.event.stop': _ui_tr("Stopped reminders", "Eslatmalarni to'xtatdi", 'Отключил напоминания'),
+    'ui.lapsed.event.replied': _ui_tr('Replied', 'Javob yozdi', 'Ответил'),
+    'ui.lapsed.event.escalated': _ui_tr('Passed to staff', "Xodimga o'tkazildi", 'Передано сотрудникам'),
+    'ui.lapsed.event.suspended': _ui_tr('Paused', "To'xtatildi", 'Приостановлено'),
+    'ui.lapsed.event.resumed': _ui_tr('Resumed', 'Davom ettirildi', 'Возобновлено'),
+    'ui.lapsed.event.resolved': _ui_tr('Outcome recorded', 'Natija yozildi', 'Итог записан'),
+    'ui.lapsed.event.closed': _ui_tr(
+        'Closed by a new delivery', 'Yangi yetkazib berish bilan yopildi', 'Закрыто новой доставкой'
+    ),
+    'ui.lapsed.event.setting_changed': _ui_tr("Setting changed", "Sozlama o'zgartirildi", 'Настройка изменена'),
+    'ui.lapsed.event.blocked': _ui_tr('Blocked the bot', 'Botni blokladi', 'Заблокировал бота'),
+    'ui.lapsed.event.unblocked': _ui_tr('Unblocked the bot', 'Botni blokdan chiqardi', 'Разблокировал бота'),
+    'ui.lapsed.search_placeholder': _ui_tr(
+        'Search by name or phone', "Ism yoki telefon bo'yicha qidirish", 'Поиск по имени или телефону'
+    ),
+    'ui.lapsed.col.customer': _ui_tr('Customer', 'Mijoz', 'Клиент'),
+    'ui.lapsed.col.lapse': _ui_tr('Lapse', 'Uzilish', 'Перерыв'),
+    'ui.lapsed.col.reminders': _ui_tr('Reminders', 'Eslatmalar', 'Напоминания'),
+    'ui.lapsed.col.status': _ui_tr('Reason', 'Sabab', 'Причина'),
+    'ui.lapsed.col.value': _ui_tr('Value', 'Qiymat', 'Ценность'),
+    'ui.lapsed.col.actions': _ui_tr('Actions', 'Amallar', 'Действия'),
+    'ui.lapsed.recipient': _ui_tr('reminded account', 'eslatma oluvchi hisob', 'получатель напоминаний'),
+    'ui.lapsed.blocked_bot': _ui_tr('blocked bot', 'botni bloklagan', 'заблокировал бота'),
+    'ui.lapsed.dry_run_row': _ui_tr('Simulated', 'Taqlidiy', 'Смоделировано'),
+    'ui.lapsed.last_delivery': _ui_tr(
+        'Last delivery {{date}} · {{days}} days ago',
+        'Oxirgi yetkazib berish {{date}} · {{days}} kun oldin',
+        'Последняя доставка {{date}} · {{days}} дн. назад',
+    ),
+    'ui.lapsed.rhythm_personal': _ui_tr(
+        'Usual gap {{gap}} days · threshold {{threshold}}',
+        'Odatiy oraliq {{gap}} kun · chegara {{threshold}}',
+        'Обычный интервал {{gap}} дн. · порог {{threshold}}',
+    ),
+    'ui.lapsed.rhythm_preset': _ui_tr(
+        'Preset · threshold {{threshold}} days', 'Standart · chegara {{threshold}} kun', 'Стандарт · порог {{threshold}} дн.'
+    ),
+    'ui.lapsed.days_overdue': _ui_tr(
+        '{{days}} days overdue (due {{date}})', '{{days}} kun kechikdi (muddat {{date}})', 'Просрочка {{days}} дн. (срок {{date}})'
+    ),
+    'ui.lapsed.step': _ui_tr('Step {{step}}', '{{step}}-qadam', 'Шаг {{step}}'),
+    'ui.lapsed.step_next': _ui_tr(
+        'Step {{step}} · next {{date}}', '{{step}}-qadam · keyingisi {{date}}', 'Шаг {{step}} · следующий {{date}}'
+    ),
+    'ui.lapsed.reply': _ui_tr(
+        'Customer replied: “{{excerpt}}”', 'Mijoz javobi: “{{excerpt}}”', 'Ответ клиента: «{{excerpt}}»'
+    ),
+    'ui.lapsed.stuck_order': _ui_tr(
+        'Order {{number}} · {{status}} · {{days}} days old',
+        'Buyurtma {{number}} · {{status}} · {{days}} kun oldin',
+        'Заказ {{number}} · {{status}} · {{days}} дн.',
+    ),
+    'ui.lapsed.awaiting_new_date': _ui_tr('awaiting a new date', 'yangi sana kutilmoqda', 'ожидает новую дату'),
+    'ui.lapsed.place_title': _ui_tr('Shared place: {{label}}', 'Umumiy joy: {{label}}', 'Общее место: {{label}}'),
+    'ui.lapsed.place_member': _ui_tr(
+        '{{name}} · {{phone}} · last delivery {{date}}',
+        '{{name}} · {{phone}} · oxirgi yetkazib berish {{date}}',
+        '{{name}} · {{phone}} · последняя доставка {{date}}',
+    ),
+    'ui.lapsed.place_member_never': _ui_tr(
+        '{{name}} · {{phone}} · no delivery here',
+        "{{name}} · {{phone}} · bu yerga yetkazib berilmagan",
+        '{{name}} · {{phone}} · сюда не доставляли',
+    ),
+    'ui.lapsed.outlet': _ui_tr(
+        'Outlet {{name}} · dormant since {{date}} · agent {{agent}}',
+        'Savdo nuqtasi {{name}} · {{date}} dan beri faol emas · agent {{agent}}',
+        'Точка {{name}} · неактивна с {{date}} · агент {{agent}}',
+    ),
+    'ui.lapsed.outlet_no_agent': _ui_tr('none', "yo'q", 'нет'),
+    'ui.lapsed.restriction_stopped': _ui_tr(
+        'Customer switched reorder reminders off on {{date}} via {{via}} — service follow-up only.',
+        "Mijoz {{date}} kuni {{via}} orqali qayta buyurtma eslatmalarini o'chirgan — faqat xizmat bo'yicha bog'laning.",
+        'Клиент отключил напоминания о повторном заказе {{date}} через {{via}} — только сервисный контакт.',
+    ),
+    'ui.lapsed.restriction_blocked': _ui_tr(
+        'Customer blocked the bot on {{date}}.', 'Mijoz {{date}} kuni botni bloklagan.', 'Клиент заблокировал бота {{date}}.'
+    ),
+    'ui.lapsed.value': _ui_tr(
+        '{{deliveries}} deliveries · {{bottles}} bottles held · debt {{debt}}',
+        "{{deliveries}} ta yetkazib berish · qo'lida {{bottles}} ta idish · qarz {{debt}}",
+        'Доставок: {{deliveries}} · бутылей на руках: {{bottles}} · долг {{debt}}',
+    ),
+    'ui.lapsed.action.resolve': _ui_tr('Record outcome', 'Natijani yozish', 'Записать итог'),
+    'ui.lapsed.action.turn_off': _ui_tr('Turn off reminders', "Eslatmalarni o'chirish", 'Отключить напоминания'),
+    'ui.lapsed.resolve_title': _ui_tr('Record the outcome', 'Natijani yozing', 'Запишите итог'),
+    'ui.lapsed.resolve_outcome': _ui_tr('Outcome', 'Natija', 'Итог'),
+    'ui.lapsed.resolve_note': _ui_tr('Note (optional)', 'Izoh (ixtiyoriy)', 'Комментарий (необязательно)'),
+    'ui.lapsed.resolve_ok': _ui_tr('Outcome saved', 'Natija saqlandi', 'Итог сохранён'),
+    'ui.lapsed.turn_off_title': _ui_tr(
+        'Turn off reorder reminders', "Qayta buyurtma eslatmalarini o'chirish", 'Отключить напоминания о повторном заказе'
+    ),
+    'ui.lapsed.turn_off_hint': _ui_tr(
+        'The customer gets no more reorder reminders. Order and delivery updates continue.',
+        'Mijozga boshqa qayta buyurtma eslatmalari yuborilmaydi. Buyurtma va yetkazib berish xabarlari davom etadi.',
+        'Клиент больше не получит напоминаний о повторном заказе. Уведомления о заказах и доставке продолжатся.',
+    ),
+    'ui.lapsed.turn_off_reason': _ui_tr('Reason', 'Sabab', 'Причина'),
+    'ui.lapsed.turn_off_ok': _ui_tr('Reminders turned off', "Eslatmalar o'chirildi", 'Напоминания отключены'),
+    'ui.lapsed.reason_required': _ui_tr('Reason is required', "Sabab ko'rsatish majburiy", 'Необходимо указать причину'),
+    'ui.lapsed.empty': _ui_tr('Nothing here.', "Bu yerda hech narsa yo'q.", 'Здесь пусто.'),
+    'ui.lapsed.outcome_label': _ui_tr('Outcome: {{outcome}}', 'Natija: {{outcome}}', 'Итог: {{outcome}}'),
+    'ui.lapsed.place_title_address': _ui_tr(
+        'Shared place: {{label}} · {{address}}',
+        'Umumiy joy: {{label}} · {{address}}',
+        'Общее место: {{label}} · {{address}}',
+    ),
+    'ui.lapsed.outcomes_unavailable': _ui_tr(
+        'The list of outcomes is not available. Close this window and reload the page to try again.',
+        "Natijalar ro'yxati mavjud emas. Bu oynani yopib, sahifani qayta yuklang va qaytadan urinib ko'ring.",
+        'Список итогов недоступен. Закройте это окно и перезагрузите страницу, чтобы повторить попытку.',
+    ),
+    'ui.lapsed.pending_close': _ui_tr(
+        'Already reordered — closes at the next run',
+        'Allaqachon buyurtma bergan — keyingi ishga tushirishda yopiladi',
+        'Уже заказал — закроется при следующем запуске',
+    ),
+    'ui.lapsed.not_resolvable': _ui_tr(
+        'This lapse was already handled by someone else. The list has been refreshed.',
+        "Bu uzilish allaqachon boshqa xodim tomonidan ko'rib chiqilgan. Ro'yxat yangilandi.",
+        'Этот случай уже обработан другим сотрудником. Список обновлён.',
+    ),
+    'ui.lapsed.outlets_unavailable': _ui_tr(
+        'Outlet details are unavailable',
+        "Savdo nuqtasi ma'lumotlari mavjud emas",
+        'Данные о торговых точках недоступны',
+    ),
+    'ui.lapsed.reminder_language': _ui_tr('Reminder language', 'Eslatma tili', 'Язык напоминания'),
+    # The stuck order's own status, one row per live status (`ACTIVE_ORDER_STATUSES`).
+    'ui.lapsed.order_status.pending': _ui_tr('pending', 'kutilmoqda', 'ожидает'),
+    'ui.lapsed.order_status.confirmed': _ui_tr('confirmed', 'tasdiqlangan', 'подтверждён'),
+    'ui.lapsed.order_status.preparing': _ui_tr('preparing', 'tayyorlanmoqda', 'готовится'),
+    'ui.lapsed.order_status.out_for_delivery': _ui_tr('out for delivery', 'yetkazib berishga chiqqan', 'в пути'),
+    'ui.lapsed.open_list': _ui_tr(
+        'Open Lapsed customers', "Yo'qolgan mijozlarni ochish", 'Открыть список пропавших клиентов'
+    ),
+    # Task 24b: the Analytics inactive-customers table measures the last DELIVERY of the customer's
+    # linked-account cluster (spec §9.3), so its two columns are renamed. They replace
+    # `ui.analytics.days_since_last_order`; `ui.analytics.last_order` stays, the churn table shares it.
+    'ui.analytics.last_delivery': _ui_tr('Last Delivery', 'Oxirgi yetkazib berish', 'Последняя доставка'),
+    'ui.analytics.days_since_last_delivery': _ui_tr(
+        'Days Since Last Delivery', 'Oxirgi yetkazib berishdan beri kunlar', 'Дней с последней доставки'
+    ),
+}
+
+BACKEND_TRANSLATIONS.update(ADMIN_UI_LAPSED_CUSTOMERS_TRANSLATIONS)
+
+
+# ===========================================================================
+# Privacy notice: the reorder-reminder purpose (reorder-reminders spec §16,
+# §17 item 6; plan Task 24c). Rendered on /privacy, section 2.
+# COUNSEL REVIEW PENDING: approve or edit before REORDER_REMINDERS_MODE=on.
+# ===========================================================================
+
+PRIVACY_REORDER_REMINDER_TRANSLATIONS = {
+    'landing.privacy.reorder_reminders_purpose': {
+        'en': (
+            "Reorder reminders based on your order history and your own ordering rhythm: when you are "
+            "later than usual to reorder, we may send you up to two reminders by Telegram or email. You can "
+            "stop them at any time from the message itself, in the bot's notification settings, in your "
+            "profile settings on our website, or with the unsubscribe link in the email."
+        ),
+        'uz': (
+            "Buyurtmalar tarixingizga asoslangan qayta buyurtma eslatmalari (o'zingizning buyurtma berish "
+            "odatingizga ko'ra): odatdagidan kechroq buyurtma bersangiz, sizga Telegram yoki email orqali "
+            "ko'pi bilan ikkita eslatma yuborishimiz mumkin. Ularni istalgan vaqtda xabarning o'zidan, botning "
+            "bildirishnoma sozlamalarida, saytdagi profil sozlamalarida yoki emaildagi obunani bekor qilish "
+            "havolasi orqali to'xtatishingiz mumkin."
+        ),
+        'ru': (
+            'Напоминания о повторном заказе на основе истории ваших заказов и вашей обычной частоты заказов: '
+            'если вы заказываете позже обычного, мы можем отправить вам не более двух напоминаний в Telegram '
+            'или по электронной почте. Отключить их можно в любой момент: прямо в сообщении, в настройках '
+            'уведомлений бота, в настройках профиля на сайте или по ссылке для отписки в письме.'
+        ),
+    },
+}
+
+BACKEND_TRANSLATIONS.update(PRIVACY_REORDER_REMINDER_TRANSLATIONS)
 
 
 def main():

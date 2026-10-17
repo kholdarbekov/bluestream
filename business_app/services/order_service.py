@@ -105,6 +105,27 @@ class OrderService:
             self._delivery_service = DeliveryService()
         return self._delivery_service
 
+    @staticmethod
+    def customer_order_refusal(user: User) -> Optional[str]:
+        """Why `user` may not place an order at all, or None when they may.
+
+        The ONE expression of the rule. `create_order` raises this message, and the reorder-reminder
+        recipient rule asks `customer_can_order` (spec 2026-10-09 §5 E2), so a reminder never
+        invites an account this service would refuse. A phone is required; an entity needs its
+        subtype (workplace or grocery store) assigned by an admin first, and legacy entity rows
+        stay NULL until then.
+        """
+        if not user.phone:
+            return "Phone number is required to place an order. Please update your profile."
+        if user.is_entity_user and user.normalized_entity_subtype is None:
+            return "Entity subtype must be assigned by admin before placing orders"
+        return None
+
+    @staticmethod
+    def customer_can_order(user: User) -> bool:
+        """`customer_order_refusal` as a yes/no, for callers that only need the answer."""
+        return OrderService.customer_order_refusal(user) is None
+
     @log_service_call(operation_type="order", track_performance=True)
     @log_business_event(event_type="created", entity_type="order")
     def create_order(
@@ -169,15 +190,10 @@ class OrderService:
             if not LoyaltyService.is_user_loyalty_eligible(user):
                 raise ValidationError("Loyalty rewards are not available for this account")
 
-        # Require phone number for placing orders
-        if not user.phone:
-            raise ValidationError("Phone number is required to place an order. Please update your profile.")
-
-        # Entity users must have an entity_subtype assigned (workplace vs grocery
-        # store) before they can place orders. Legacy entity rows are NULL until
-        # an admin sets it.
-        if user.is_entity_user and user.normalized_entity_subtype is None:
-            raise ValidationError("Entity subtype must be assigned by admin before placing orders")
+        # Who may order at all: one rule, shared with the reorder-reminder recipient rule.
+        refusal = self.customer_order_refusal(user)
+        if refusal is not None:
+            raise ValidationError(refusal)
 
         # Validate and calculate order items
         items_data = order_data["items"]

@@ -2,6 +2,7 @@
 
 import hashlib
 import hmac
+import json
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
@@ -201,3 +202,52 @@ class TestAuthenticateUserSignsLoginRequest:
         assert fake_http.last_kwargs.get("json") == {"product_id": 1}
         assert fake_http.last_kwargs.get("content") is None
         assert "X-Bot-Webhook-Signature" not in (fake_http.last_headers or {})
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+class TestReportTelegramReachability:
+    """Spec 2026-10-09 §7.2 (a, b): the bot tells the backend a customer blocked or reached it,
+    signed like telegram-login because no customer JWT travels with it."""
+
+    AT = datetime(2026, 10, 14, 9, 30, tzinfo=timezone.utc)
+
+    async def test_the_report_is_signed_over_the_exact_bytes_sent(self):
+        client = BusinessAPIClient()
+        client.max_retries = 0
+        fake_http = _FakeHTTPClient(_FakeResponse(200, payload={"success": True, "data": {"changed": True}}))
+        client._client = fake_http
+
+        assert await client.report_telegram_reachability("700100200", "blocked", self.AT) is True
+
+        assert fake_http.last_url.endswith("/api/v1/bot/telegram-reachability")
+        sent = fake_http.last_kwargs["content"]
+        assert json.loads(sent) == {
+            "telegram_id": "700100200",
+            "status": "blocked",
+            "at": "2026-10-14T09:30:00+00:00",
+            "source": "my_chat_member",
+        }
+        assert fake_http.last_kwargs.get("json") is None
+        expected = hmac.new(bot_config.security.webhook_secret.encode("utf-8"), sent, hashlib.sha256).hexdigest()
+        assert fake_http.last_headers["X-Bot-Webhook-Signature"] == expected
+
+    async def test_a_refused_report_answers_false_and_never_raises(self):
+        client = BusinessAPIClient()
+        client._make_request = AsyncMock(
+            return_value=APIResponse(success=False, error="Invalid signature", status_code=401)
+        )
+
+        assert await client.report_telegram_reachability("700100200", "reachable", self.AT, source="recovery") is False
+
+        client._make_request.assert_awaited_once_with(
+            "POST",
+            "/api/v1/bot/telegram-reachability",
+            data={
+                "telegram_id": "700100200",
+                "status": "reachable",
+                "at": "2026-10-14T09:30:00+00:00",
+                "source": "recovery",
+            },
+            sign=True,
+        )

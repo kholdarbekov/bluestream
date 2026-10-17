@@ -1261,7 +1261,7 @@ def get_user_payment_methods_admin(user_id):
 def get_user_notification_settings(user_id):
     """Get customer notification settings manageable by support/admin staff."""
     try:
-        settings = get_notification_service().get_delivery_telegram_status_updates_setting(user_id)
+        settings = get_notification_service().get_admin_notification_settings(user_id)
         return success_response(data={"notification_settings": settings})
     except NotFoundError:
         return not_found_response(resource_type="User")
@@ -1273,28 +1273,25 @@ def get_user_notification_settings(user_id):
 @admin_bp.route("/users/<int:user_id>/notification-settings", methods=["PUT"])
 @jwt_required()
 @manager_or_higher_required
-@validate_json(["delivery_telegram_status_updates_enabled", "reason"])
+@validate_json()
 def update_user_notification_settings(user_id):
-    """Update customer notification settings on behalf of the customer."""
+    """Update customer notification settings on behalf of the customer (spec §8, partial).
+
+    `delivery_telegram_status_updates_enabled` and `reorder_reminders_enabled` are each optional
+    and at least one is required; every write needs a `reason`. The service validates and writes
+    only the fields present. A refusal's `error_code` (the reminder setting's REASON_REQUIRED /
+    REORDER_REMINDER_SETTING_INVALID) is published as `data.error_code`.
+    """
     try:
-        actor_user_id = int(get_jwt_identity())
-        payload = request.get_json() or {}
-        enabled = payload.get("delivery_telegram_status_updates_enabled")
-        reason = (payload.get("reason") or "").strip()
-
-        if not isinstance(enabled, bool):
-            return validation_error_response(
-                get_translation("api.notifications.validation.delivery_telegram_toggle_boolean")
-            )
-        if not reason:
-            return validation_error_response(get_translation("api.notifications.validation.reason_required"))
-
-        settings = get_notification_service().set_delivery_telegram_status_updates_setting(
-            user_id=user_id,
-            enabled=enabled,
-            source="admin",
-            actor_user_id=actor_user_id,
-            reason=reason,
+        payload = request.get_json()
+        if not isinstance(payload, dict):
+            payload = {}
+        settings = get_notification_service().update_admin_notification_settings(
+            user_id,
+            reason=payload.get("reason"),
+            actor_user_id=int(get_jwt_identity()),
+            delivery_telegram_status_updates_enabled=payload.get("delivery_telegram_status_updates_enabled"),
+            reorder_reminders_enabled=payload.get("reorder_reminders_enabled"),
         )
         return success_response(
             data={"notification_settings": settings},
@@ -1303,7 +1300,8 @@ def update_user_notification_settings(user_id):
     except NotFoundError:
         return not_found_response(resource_type="User")
     except ValidationError as e:
-        return validation_error_response(str(e))
+        # Passed straight through (amendment 20): set()'s own code reaches the client.
+        return validation_error_response(e.message, error_code=e.error_code)
     except Exception as e:
         current_app.logger.error(f"Update user notification settings error: {e}")
         return internal_error_response("Failed to update user notification settings")
@@ -4598,7 +4596,11 @@ def get_delivery_routes_analytics():
 @jwt_required()
 @validate_admin_action(["view_users"])
 def get_inactive_customers():
-    """List customers inactive for at least N days, sorted most-inactive-first."""
+    """List customers inactive for at least N local days, sorted most-inactive-first.
+
+    Inactive means N local days since the last delivery of the customer's linked-account cluster
+    (never-delivered customers are measured from sign-up). Rows are per user.
+    """
     try:
         params = InactiveCustomersQuerySchema.model_validate(request.args.to_dict())
     except PydanticValidationError as e:

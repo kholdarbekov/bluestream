@@ -31,6 +31,11 @@
 
             <h2>2. How We Use Information</h2>
             <p>Data is used to process orders, coordinate delivery, provide support, detect fraud, send operational notifications, and maintain platform security and reliability.</p>
+            {# Reorder-reminder purpose (reorder-reminders spec §16, §17 item 6; ZRU-547 Art. 19).
+               COUNSEL REVIEW PENDING before REORDER_REMINDERS_MODE=on; the copy is the seeded key
+               `landing.privacy.reorder_reminders_purpose`. `current_language` makes the lookup run per
+               request: a constant-only `|t` is folded into the compiled, language-shared template. #}
+            <p id="privacy-reorder-reminders">{{ 'landing.privacy.reorder_reminders_purpose'|t(current_language) }}</p>
 
             <h2>3. Payment and Transaction Data</h2>
             <p>Payment processing is handled through integrated payment providers. We store only the data necessary for order reconciliation, support, and compliance workflows.</p>

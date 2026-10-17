@@ -561,6 +561,54 @@ describe('AdminService', () => {
     });
   });
 
+  describe('Lapsed customers worklist', () => {
+    it('reads the summary and a page of rows with only the filters that are set', async () => {
+      api.get.mockResolvedValueOnce({ data: { success: true, data: { counts: { follow_up: 2, reminding: 1 } } } })
+        .mockResolvedValueOnce({ data: { success: true, data: { items: [], meta: { total: 0 } } } })
+        .mockResolvedValueOnce({ data: { success: true, data: { items: [], meta: { total: 0 } } } });
+
+      const summary = await adminService.getReorderReminderSummary();
+      const page = await adminService.listReorderReminderEpisodes({ tab: 'follow_up', flag: null, search: '', page: 2, perPage: 20 });
+      await adminService.listReorderReminderEpisodes({ tab: 'resolved', flag: 'stuck_order', search: 'Dilshod', page: 3, perPage: 50 });
+
+      expect(api.get).toHaveBeenNthCalledWith(1, '/admin/reorder-reminders/summary');
+      expect(api.get).toHaveBeenNthCalledWith(2, '/admin/reorder-reminders/episodes', {
+        params: { tab: 'follow_up', page: 2, per_page: 20 },
+      });
+      expect(api.get).toHaveBeenNthCalledWith(3, '/admin/reorder-reminders/episodes', {
+        params: { tab: 'resolved', page: 3, per_page: 50, flag: 'stuck_order', search: 'Dilshod' },
+      });
+      expect(summary).toEqual({ counts: { follow_up: 2, reminding: 1 } });
+      expect(page).toEqual({ items: [], meta: { total: 0 } });
+    });
+
+    it('posts the outcome, with the note only when one was typed', async () => {
+      api.post.mockResolvedValue({ data: { success: true, data: { episode: { episode_id: 5 } } } });
+
+      const saved = await adminService.resolveReorderReminderEpisode(5, { outcome: 'away', note: '' });
+      await adminService.resolveReorderReminderEpisode(5, { outcome: 'moved', note: 'Samarkand' });
+
+      const [firstUrl, firstBody] = api.post.mock.calls[0];
+      const [secondUrl, secondBody] = api.post.mock.calls[1];
+      expect(firstUrl).toBe('/admin/reorder-reminders/episodes/5/resolve');
+      expect(firstBody).toEqual({ outcome: 'away' });
+      expect(Object.keys(firstBody)).toEqual(['outcome']);
+      expect(secondUrl).toBe('/admin/reorder-reminders/episodes/5/resolve');
+      expect(secondBody).toEqual({ outcome: 'moved', note: 'Samarkand' });
+      expect(saved).toEqual({ episode: { episode_id: 5 } });
+    });
+
+    it('passes the caller\'s handled refusal codes to api.js, and none when the caller names none', async () => {
+      api.post.mockResolvedValue({ data: { success: true, data: {} } });
+
+      await adminService.resolveReorderReminderEpisode(7, { outcome: 'other', handledErrorCodes: ['SOME_CODE'] });
+      await adminService.resolveReorderReminderEpisode(8, { outcome: 'other' });
+
+      expect(api.post.mock.calls[0][2]).toEqual({ handledErrorCodes: ['SOME_CODE'] });
+      expect(api.post.mock.calls[1][2]).toEqual({ handledErrorCodes: undefined });
+    });
+  });
+
   describe('getAnalytics', () => {
     it('fetches analytics data successfully', async () => {
       api.get
@@ -613,6 +661,10 @@ describe('AdminService', () => {
         growth_rate: 15.5,
         top_products: [{ id: 1, name: 'Water', sales: 80000 }]
       });
+      // D17: the JS no longer derives at-risk or inactive figures; the reminder service publishes them.
+      // The payload above still carries `churn` (the backend keeps publishing it): it is ignored.
+      expect(result.customer_segments).toEqual({ new: 40, active: 120, loyal: 75 });
+      expect(Object.keys(result.customer_segments)).toEqual(['new', 'active', 'loyal']);
     });
   });
 

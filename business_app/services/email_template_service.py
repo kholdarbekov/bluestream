@@ -11,6 +11,8 @@ from datetime import datetime, UTC
 from flask import current_app
 from jinja2 import Environment, FileSystemLoader, TemplateNotFound
 
+from shared.i18n_rendering import base_language
+
 logger = logging.getLogger(__name__)
 
 
@@ -42,6 +44,8 @@ class EmailTemplateService:
         "subscription_cancelled": "subscription_cancelled",
         "reward_redeemed": "reward_redeemed",
         "agent_performance": "agent_performance",
+        "reorder_reminder": "reorder_reminder",
+        "reorder_escalation_digest": "reorder_escalation_digest",
     }
 
     # Email subjects by template and language
@@ -132,11 +136,6 @@ class EmailTemplateService:
             "en": "Agent Performance (week of {week_start}) - {company_name}",
             "ru": "Эффективность агентов (неделя от {week_start}) - {company_name}",
         },
-        "churn_alert": {
-            "uz": "Mijozlar ketishi xavfi: {high_risk_count} ta yuqori xavf - {company_name}",
-            "en": "Customer Churn Alert: {high_risk_count} high-risk - {company_name}",
-            "ru": "Отток клиентов: {high_risk_count} в зоне высокого риска - {company_name}",
-        },
         "demand_forecast": {
             "uz": "Talab prognozi ({forecast_period}) - {company_name}",
             "en": "Demand Forecast ({forecast_period}) - {company_name}",
@@ -168,6 +167,24 @@ class EmailTemplateService:
             "uz": "⛔ Asl Belgisi tokenini yangilash muvaffaqiyatsiz — fiskalizatsiya bloklandi - {company_name}",
             "en": "⛔ Asl Belgisi token refresh FAILED — fiscalization blocked - {company_name}",
             "ru": "⛔ Не удалось обновить токен Asl Belgisi — фискализация заблокирована - {company_name}",
+        },
+        # Reorder reminder (spec 2026-10-09 §7.4). `{greeting}` is the ONLY placeholder: it
+        # arrives pre-rendered in template_data (a raw `{name}` is never used), and the
+        # placeholder-strict guard skips a send that still carries it.
+        "reorder_reminder": {
+            "uz": "{greeting} Suv buyurtma qilish vaqti keldimi?",
+            "en": "{greeting} Time for fresh water?",
+            "ru": "{greeting} Пора заказать свежую воду?",
+        },
+        # Lapsed-customers morning digest to admins and managers (spec 2026-10-09 §9.2). The
+        # placeholders are `{escalated_count}` and the common `{company_name}`; the
+        # placeholder-strict guard skips a send whose count never arrived. The ru subject is a
+        # label ("новых: N"), not "N новых": a word that follows the number would have to agree
+        # with it (1 новый, 2 новых), and one escalation is the commonest morning.
+        "reorder_escalation_digest": {
+            "uz": "Yo'qolgan mijozlar: {escalated_count} ta yangi - {company_name}",
+            "en": "Lapsed customers: {escalated_count} new to follow up - {company_name}",
+            "ru": "Пропавшие клиенты (новых: {escalated_count}) - {company_name}",
         },
     }
 
@@ -256,6 +273,18 @@ class EmailTemplateService:
         """
         return self.TEMPLATE_MAPPING.get(notification_type, notification_type)
 
+    def resolve_language(self, language: Optional[str]) -> str:
+        """The ONE language an email renders in: a supported code, else DEFAULT_LANGUAGE.
+
+        A regional or upper-case code reads as its base language ("ru-RU", "ru_RU" and "RU" are
+        ru) by `shared.i18n_rendering.base_language`, the rule the plural choice and the reminder
+        composer's item names use too. Shared by `get_subject`, `render_template` and callers
+        that pre-render copy for a template (the reorder reminder, spec §7.4/D15), so the
+        subject, the body and the copy inside it can never be in different languages.
+        """
+        code = base_language(language)
+        return code if code in self.SUPPORTED_LANGUAGES else self.DEFAULT_LANGUAGE
+
     def get_subject(self, template_name: str, language: str, template_data: Dict[str, Any]) -> str:
         """
         Get the email subject for a template.
@@ -268,8 +297,7 @@ class EmailTemplateService:
         Returns:
             Rendered email subject string
         """
-        if language not in self.SUPPORTED_LANGUAGES:
-            language = self.DEFAULT_LANGUAGE
+        language = self.resolve_language(language)
 
         subjects = self.EMAIL_SUBJECTS.get(template_name, {})
         subject_template = subjects.get(language) or subjects.get(self.DEFAULT_LANGUAGE, "")
@@ -295,8 +323,7 @@ class EmailTemplateService:
         Returns:
             Rendered HTML content or None if template not found
         """
-        if language not in self.SUPPORTED_LANGUAGES:
-            language = self.DEFAULT_LANGUAGE
+        language = self.resolve_language(language)
 
         # Build template path
         template_path = f"{language}/{template_name}.html"

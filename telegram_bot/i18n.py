@@ -4,7 +4,7 @@ Multi-language support with translation management
 """
 import json
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Callable
 from pathlib import Path
 
 from config import config
@@ -156,6 +156,21 @@ class Translation:
             translation = self.humanised_missing_key(key)
 
         return render_translation(key, translation, args, kwargs)
+
+    def renderer(self, language: str) -> Callable[..., str]:
+        """`render(key, **values)` bound to one language: the callable
+        `shared.reorder_reminder_copy` assembles copy through.
+
+        Resolves `self.get` at CALL time, so a test that patches `get` on this instance is
+        honoured, and the copy keeps get()'s rendering rule (never raises, never a raw
+        `{placeholder}`). `key` is POSITIONAL-ONLY, exactly as in :meth:`get`, so a copy
+        placeholder named `{key}` can be filled through `**values` without a collision.
+        """
+
+        def render(key: str, /, **values) -> str:
+            return self.get(key, language, **values)
+
+        return render
 
     def _track_missing_key(self, key: str, language: str):
         """Track missing translation keys for monitoring"""

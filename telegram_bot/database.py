@@ -451,6 +451,15 @@ class BotUserRepository:
         )
         return True if value is None else bool(value)
 
+    async def get_telegram_blocked_at(self, telegram_id) -> Optional[datetime]:
+        """When the backend last recorded this customer blocking the bot, or None (spec 2026-10-09 §7.2 b).
+
+        Read-only: the backend's TelegramReachabilityService is the column's only writer.
+        """
+        return await self.db.fetchval(
+            "SELECT telegram_blocked_at FROM users WHERE telegram_id = $1", str(telegram_id)
+        )
+
     async def clear_user_session(self, telegram_id: int):
         """Clear user session data and bot state"""
         # Clear bot state in users table

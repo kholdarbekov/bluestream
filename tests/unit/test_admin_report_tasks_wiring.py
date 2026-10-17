@@ -1,7 +1,8 @@
-"""TDD proof-of-life tests for 4 admin-report Celery tasks being wired into
-the beat schedule (task C3): two inventory tasks (inventory_tasks.py) and two
-analytics/ML tasks (analytics_tasks.py), plus the churn task fixed and wired
-in a follow-up pass.
+"""TDD proof-of-life tests for the admin-report Celery tasks wired into the
+beat schedule (task C3): two inventory tasks (inventory_tasks.py) and the
+analytics/ML demand forecast (analytics_tasks.py). The churn task, fixed and
+wired in a follow-up pass, was retired by the reorder-reminders spec (D9); its
+history stays below because the churn maths it exercised is still live.
 
 Each task test proves the task actually runs against seeded data AND that
 its admin-notification step genuinely dispatches (not silently swallowed)
@@ -26,9 +27,9 @@ History (see git blame / prior report for the earlier state of this file):
   added for the "inventory_report" and "reorder_suggestions" types (en/uz/ru
   under business_app/templates/emails/, + EMAIL_SUBJECTS entries in
   email_template_service.py), following the exact same convention already
-  used for "daily_report"/"weekly_business_report"/"churn_alert"/
-  "demand_forecast"/"kpi_alert". send_low_stock_alert_task (same file, same
-  bug, invoked from InventoryService on real-time stock drops) was fixed the
+  used for "daily_report"/"weekly_business_report"/"demand_forecast"/
+  "kpi_alert" (and, until D9 retired it, "churn_alert"). send_low_stock_alert_task
+  (same file, same bug, invoked from InventoryService on real-time stock drops) was fixed the
   same way as a bonus (not originally in scope) with its own
   "low_stock_alert" template.
 
@@ -36,7 +37,8 @@ History (see git blame / prior report for the earlier state of this file):
   ``send_notification(admin.id, "demand_forecast", template_data=...)`` --
   audited for the same wrong-method bug and found clean, so left untouched.
 
-- generate_churn_prediction_report was held back for a real bug in
+- generate_churn_prediction_report (RETIRED by D9; its beat entry, template and
+  tests are gone, ``predict_customer_churn`` stays) was held back for a real bug in
   ``AnalyticsService._calculate_churn_from_stats``: it mixed a plain python
   float with a ``decimal.Decimal`` (``factors[factor] *
   Decimal(str(weights[factor]))``), raising ``TypeError`` for every active
@@ -56,9 +58,10 @@ History (see git blame / prior report for the earlier state of this file):
   ``business_app.utils.timezone_utils.ensure_utc()`` SSOT helper (already
   used by ``TimestampMixin.created_at_utc``) on both operands -- a one-line-
   per-site, no-behavior-change-on-Postgres fix that also makes this test
-  pass against real (non-monkeypatched) seeded data. Now wired weekly,
-  Monday 08:45 (after weekly-business-report at 08:00 and
-  generate-demand-forecast at 08:30).
+  pass against real (non-monkeypatched) seeded data. It was wired weekly,
+  Monday 08:45, until D9 retired the task and its beat entry; the
+  ``_calculate_churn_from_stats`` fixes stay, ``predict_customer_churn``
+  still runs them.
 """
 
 import sys
@@ -70,7 +73,6 @@ from unittest.mock import patch
 import pytest
 
 from business_app.models.analytics import AnalyticsReport
-from business_app.models.order import Order
 from business_app.models.product import Product
 from business_app.services.analytics_service import AnalyticsService
 from business_app.tasks import analytics_tasks, inventory_tasks
@@ -119,22 +121,6 @@ def _make_product(
     db.session.add(product)
     db.session.commit()
     return product
-
-
-def _make_order(db, user, *, order_number, created_at, total_amount="18000.00"):
-    order = Order(
-        user_id=user.id,
-        order_number=order_number,
-        subtotal=Decimal(total_amount),
-        delivery_fee=Decimal("0.00"),
-        discount_amount=Decimal("0.00"),
-        loyalty_discount=Decimal("0.00"),
-        total_amount=Decimal(total_amount),
-        created_at=created_at,
-    )
-    db.session.add(order)
-    db.session.commit()
-    return order
 
 
 @pytest.mark.unit
@@ -217,44 +203,6 @@ class TestSendLowStockAlertTask:
 
 
 @pytest.mark.unit
-class TestGenerateChurnPredictionReport:
-    """AnalyticsService._calculate_churn_from_stats had two real bugs (see
-    module docstring): a float*Decimal TypeError, and (once that was fixed)
-    a naive/aware datetime subtraction that only manifests on SQLite. Both
-    are fixed; this runs the real (non-monkeypatched) computation against a
-    seeded user + order."""
-
-    def test_runs_clean_against_seeded_active_user_with_orders(self, db, sample_user, admin_user):
-        _make_order(
-            db,
-            sample_user,
-            order_number="ORD-CHURN-1",
-            created_at=datetime.now(timezone.utc) - timedelta(days=10),
-        )
-
-        with patch(
-            "business_app.services.notification_service.NotificationService.send_notification"
-        ) as mock_send:
-            result = analytics_tasks.generate_churn_prediction_report.run()
-
-        assert "error" not in result, f"task failed: {result}"
-        assert "report_id" in result
-
-        report = AnalyticsReport.query.get(result["report_id"])
-        assert report is not None
-        assert report.report_type == "churn_prediction"
-
-        # Only dispatches when there's at least one high-risk customer;
-        # this seeded user (single old order, no other activity) reliably
-        # lands high-risk under the real (fixed) computation.
-        if result["high_risk_customers"] > 0:
-            mock_send.assert_called_once()
-            call = mock_send.call_args
-            assert call.args[0] == admin_user.id
-            assert call.args[1] == "churn_alert"
-
-
-@pytest.mark.unit
 class TestGenerateDemandForecast:
     def test_runs_clean_with_sufficient_historical_data(self, db, sample_user, admin_user, monkeypatch):
         """35 days of historical demand data, monkeypatched at the
@@ -311,14 +259,13 @@ class TestGenerateDemandForecast:
 
 @pytest.mark.unit
 class TestNewBeatScheduleEntries:
-    """All 4 tasks above must have real beat_schedule entries whose dotted
+    """Every task above must have a real beat_schedule entry whose dotted
     task path resolves to a registered, importable Celery task."""
 
     NEW_BEAT_KEYS = (
         "generate-inventory-report",
         "auto-reorder-products",
         "generate-demand-forecast",
-        "generate-churn-prediction-report",
         # Weekly sales-agent KPI email (plan Task 6 / ruling R14): Monday 08:10
         # LOCAL, after weekly-business-report at 08:00.
         "weekly-agent-performance-report",

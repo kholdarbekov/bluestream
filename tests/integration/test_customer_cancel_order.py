@@ -175,6 +175,7 @@ def customer_told(monkeypatch):
         priority="normal",
         template_override=None,
         campaign_id=None,
+        email_headers=None,
     ):
         told.append(("notification", str(user_id), notification_type, (template_data or {}).get("order_number")))
         return {}

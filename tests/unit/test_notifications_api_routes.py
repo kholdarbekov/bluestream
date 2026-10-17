@@ -37,6 +37,7 @@ def _preferences_view(user_id: int) -> SimpleNamespace:
         digest_enabled=False,
         digest_frequency='weekly',
         updated_at=None,
+        reorder_reminders={'enabled': True, 'changed_by_kind': None, 'changed_via': None, 'changed_at': None},
     )
 
 
@@ -50,6 +51,9 @@ def test_get_notification_preferences_route_delegates_to_service(client, app, sa
     assert response.status_code == 200
     body = response.get_json()
     assert body['data']['preferences']['delivery_telegram_status_updates_enabled'] is True
+    assert body['data']['preferences']['reorder_reminders'] == {
+        'enabled': True, 'changed_by_kind': None, 'changed_via': None, 'changed_at': None,
+    }
     service.create_default_preferences.assert_called_once()
     assert int(service.create_default_preferences.call_args.args[0]) == sample_user.id
 
@@ -79,6 +83,8 @@ def test_update_notification_preferences_route_delegates_to_service(client, app,
     kwargs = service.update_notification_preferences_for_user.call_args.kwargs
     assert int(kwargs['user_id']) == sample_user.id
     assert kwargs['payload'] == payload
+    # No X-Platform header and the test client's User-Agent: detect_platform reads "web".
+    assert kwargs['platform'] == 'web'
 
 
 def test_register_push_token_route_maps_validation_error(client, app, sample_user, monkeypatch):

@@ -38,6 +38,15 @@ from __future__ import annotations
 from enum import Enum
 
 
+# How long a reorder reminder's send claims are held: the customer bot route's two dedup claims
+# (the request id and the episode step, telegram_bot/webhook_server.py) and the backend's email
+# claim (`reorder_reminders_email_claim`, business_app/services/reorder_reminders/messaging.py).
+# Not the 24 h webhook default: the daily run re-publishes a step's queued send about 24 h after the
+# first push, and an episode can stay at one step for up to REORDER_REMINDER_GAP_DAYS, so a claim
+# that lapsed sooner could send the same reminder twice. One constant for both services.
+REORDER_REMINDER_CLAIM_TTL_SECONDS = 31 * 24 * 60 * 60
+
+
 class RedisUsageTier(Enum):
     TIER_SECURITY = 'security'
     TIER_RELIABILITY = 'reliability'
@@ -85,7 +94,9 @@ class RedisKeyspace:
     # backend → customer bot. Keyed by `(endpoint, request_id)` so the same
     # request_id replayed against a different endpoint doesn't false-positive.
     # 24h TTL: cross-replica safe, survives bot restarts, matches PAY-002 SLA
-    # for backend retry storms (gateway-side already capped at <24h).
+    # for backend retry storms (gateway-side already capped at <24h). A route whose
+    # sender can re-push later than that passes its own TTL to `_is_duplicate_webhook`
+    # (`/internal/reorder-reminder` holds its claims 31 days).
     @staticmethod
     def bot_webhook_dedup(endpoint: str, request_id: str) -> str:
         return f"bot:webhook_dedup:{endpoint}:{request_id}"
@@ -187,6 +198,25 @@ class RedisKeyspace:
     def sales_pay_fresh(agent_user_id: int) -> str:
         return f"sales_pay:fresh:{agent_user_id}"
 
+    # Tier: RELIABILITY. The daily reorder-reminder run's lock (`SET NX EX`, deleted by its holder
+    # only). Every transition the run makes is a conditional update, so the lock only stops two runs
+    # doing the same work twice; without Redis the run is skipped (fail closed), and the stale guard
+    # and the next day's run absorb the gap.
+    @staticmethod
+    def reorder_reminders_run_lock() -> str:
+        return "bs:reorder_reminders:run_lock"
+
+    # Tier: RELIABILITY. The claim on a reorder-reminder EMAIL for one (episode, step) (`SET NX EX`,
+    # taken just before the Brevo call and never released: an email is never retried, spec §12).
+    # It closes the two windows the event log cannot: a re-published copy overlapping the original,
+    # and a worker that dies between Brevo's 2xx and the `reminder_sent` commit. Unlike the run lock
+    # it fails OPEN: without Redis the email still goes out, as the customer bot's reminder route
+    # falls back to its in-memory check, because the event log's once-per-step guard still holds
+    # and an outage must not silence every email.
+    @staticmethod
+    def reorder_reminders_email_claim(episode_id: int, step: int) -> str:
+        return f"bs:reorder_reminders:email_claim:{episode_id}:{step}"
+
     # ---- Scan patterns ---------------------------------------------------
     # SCAN patterns use `*` wildcards. Callers should prefer these helpers
     # over inlining `f"{prefix}:*"` so the wildcard shape stays in sync
@@ -232,6 +262,8 @@ KEYSPACE_TIERS: dict[str, RedisUsageTier] = {
     'inventory_reservation':             RedisUsageTier.TIER_RESERVATION,
     'reservation_details':               RedisUsageTier.TIER_RESERVATION,
     'sales_pay_fresh':                   RedisUsageTier.TIER_CACHE,
+    'reorder_reminders_run_lock':        RedisUsageTier.TIER_RELIABILITY,
+    'reorder_reminders_email_claim':     RedisUsageTier.TIER_RELIABILITY,
 }
 
 

@@ -107,6 +107,21 @@ class SupportConversationService:
             msg.delivery_status = SupportMessageDeliveryStatus.FAILED
             msg.delivery_error = (delivery.get("error") or "Delivery failed")[:500]
 
+    @staticmethod
+    def _notify_reorder_reminders(user_id: int, excerpt: str) -> None:
+        """D14 (spec 2026-10-09 §6 Reply): a message while a reorder lapse is open escalates it.
+
+        Called only after the message is committed, and wrapped, so a reminder failure can never
+        cost the customer's message. The excerpt is this inbox's own preview, so the worklist and
+        the inbox show the same words.
+        """
+        try:
+            from business_app.services.reorder_reminders.actions import ReorderReminderActions
+
+            ReorderReminderActions.on_customer_reply(user_id, excerpt=excerpt)
+        except Exception:  # noqa: BLE001
+            logger.exception("Reorder-reminder reply hook failed for user %s", user_id)
+
     def record_inbound_message(
         self,
         user_id: int,
@@ -166,11 +181,8 @@ class SupportConversationService:
         )
         db.session.add(msg)
         db.session.flush()
-        self._touch(
-            conv,
-            build_preview(message_type, content, attachment_file_name),
-            SupportMessageDirection.INBOUND,
-        )
+        preview = build_preview(message_type, content, attachment_file_name)
+        self._touch(conv, preview, SupportMessageDirection.INBOUND)
         db.session.commit()
         logger.info(
             "Recorded inbound support message %s (%s) for user %s",
@@ -178,6 +190,7 @@ class SupportConversationService:
             message_type.value,
             user_id,
         )
+        self._notify_reorder_reminders(user_id, preview)
         return msg
 
     def send_message_to_user(self, target_user_id: int, admin_user_id: int, content: str) -> dict:

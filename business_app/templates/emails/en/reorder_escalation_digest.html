@@ -1,0 +1,52 @@
+{% extends "emails/base.html" %}
+{#
+  The Lapsed customers morning digest for admins and managers (spec 2026-10-09 §9.2).
+
+  Reads `escalated_count`, `top` ([{name, days_overdue, flag}]), `flag_labels` ({language:
+  {flag: label}}, the seeded `ui.lapsed.flag.*` rows) and `worklist_url`. Customer names are
+  escaped by the environment's autoescape; do not mark them `safe`.
+
+  The footer is overridden: no tel: link and no "update your preferences" line. The type is in no
+  preference group, so there is nothing for a recipient to update.
+#}
+
+{% block title %}Lapsed customers - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Lapsed customers</h1>
+{% endblock %}
+
+{% block content %}
+{% set labels = (flag_labels or {}).get(language, {}) %}
+<h2>Customers need follow-up</h2>
+
+<div class="warning-box">
+    <p>New customers to follow up: <strong>{{ escalated_count }}</strong></p>
+</div>
+
+{% if top %}
+<table class="details-table">
+    <tr>
+        <th>Customer</th>
+        <th>Days overdue</th>
+        <th>Reason</th>
+    </tr>
+    {% for row in top %}
+    <tr>
+        <td>{{ row.name }}</td>
+        <td>{{ row.days_overdue }}</td>
+        <td>{{ labels.get(row.flag, row.flag) }}</td>
+    </tr>
+    {% endfor %}
+</table>
+{% endif %}
+
+<p style="text-align: center;">
+    <a href="{{ worklist_url }}" class="btn-primary">Open the Lapsed customers list</a>
+</p>
+{% endblock %}
+
+{% block footer %}
+<p>&copy; {{ current_year }} {{ company_name }}</p>
+<p style="font-size: 11px; color: #94a3b8;">This summary goes to the admins and managers of {{ company_name }}.</p>
+{% endblock %}

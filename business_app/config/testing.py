@@ -50,6 +50,14 @@ class TestingConfig(BaseConfig):
     CACHE_TYPE = "simple"
     CACHE_DEFAULT_TIMEOUT = 1  # Short timeout for testing
 
+    # bcrypt cost for every test app (the minimum utils/password_security allows).
+    # Must be declared here, not left to inherit BaseConfig's production 12:
+    # setup_password_security() replaces a PROCESS-WIDE hasher on each create_app()
+    # using the rounds of whichever app context is active, so every Postgres-backed
+    # test (which builds an app inside the session app's context) used to flip the
+    # whole worker to 12 rounds — ~230 ms per fixture user instead of ~1 ms.
+    BCRYPT_ROUNDS = 4
+
     # JWT Configuration - long enough that no token can lapse mid-test.
     #
     # Raised from 10s/30s. Under `-n 4` the full suite runs ~31 minutes, and a

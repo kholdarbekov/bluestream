@@ -6,6 +6,7 @@ month, the bonus window, the pipeline) and the outlet stage job (`ReplenishmentS
 delivered_instants`) both read this one function.
 """
 
+import inspect
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -15,7 +16,13 @@ from business_app.models.order import Order, OrderStatusHistory
 from business_app.models.sales import Outlet
 from business_app.services.sales import replenishment_service
 from business_app.services.sales.replenishment_service import ReplenishmentService
-from business_app.utils.order_timing import DELIVERED_INSTANTS_CHUNK, delivered_instants_by_order
+from business_app.utils import order_timing
+from business_app.utils.order_timing import (
+    DELIVERED_INSTANTS_CHUNK,
+    delivered_instants_by_order,
+    delivered_order_instants_select,
+)
+from business_app.utils.timezone_utils import ensure_utc
 from shared.enums import OrderStatus
 
 pytestmark = pytest.mark.unit
@@ -118,3 +125,82 @@ def test_the_outlet_stage_job_asks_the_primitive(db, sample_user, second_sample_
 
     assert ReplenishmentService.delivered_instants(outlet, limit=2) == [THIRD, SECOND]
     assert asked == [sorted([first.id, second.id, third.id])]
+
+
+def test_the_outlet_reads_its_whole_history_when_no_limit_is_given(db, sample_user, monkeypatch):
+    """§9.3: the stage job asks for FULL history, because the usual gap needs six delivery DAYS and
+    a same-day burst makes six orders fewer days. Newest first, every landed order."""
+    outlet = Outlet(name="Bahor market", outlet_type="grocery_store", stage="active", user_id=sample_user.id)
+    db.session.add(outlet)
+    db.session.commit()
+    first = _order(db, sample_user, "SA_000916_26")
+    second = _order(db, sample_user, "SA_000917_26")
+    third = _order(db, sample_user, "SA_000918_26")
+    monkeypatch.setattr(
+        replenishment_service,
+        "delivered_instants_by_order",
+        lambda order_ids: {first.id: FIRST, second.id: SECOND, third.id: THIRD},
+    )
+
+    assert ReplenishmentService.delivered_instants(outlet) == [THIRD, SECOND, FIRST]
+
+
+def _select_rows(db, *criteria):
+    statement = delivered_order_instants_select()
+    for criterion in criteria:
+        statement = statement.where(criterion)
+    return [
+        (row.order_id, row.user_id, row.delivery_address_id, ensure_utc(row.delivered_at))
+        for row in db.session.execute(statement.order_by(Order.id)).all()
+    ]
+
+
+def test_the_select_lists_each_still_delivered_order_once_with_its_latest_instant(
+    db, sample_user, user_address
+):
+    """One row per order whose CURRENT status is DELIVERED, dated by its latest DELIVERED row and
+    carrying the address it went to. A returned order is no longer a delivery; a legacy delivered
+    order with no DELIVERED history row has no instant and is left out, never dated NULL (Review
+    Focus 2); an order on its way is not delivered yet."""
+    redelivered = _order(db, sample_user, "SA_000921_26")
+    redelivered.delivery_address_id = user_address.id
+    db.session.commit()
+    _history(db, redelivered, OrderStatus.OUT_FOR_DELIVERY, OrderStatus.DELIVERED, FIRST)
+    _history(db, redelivered, OrderStatus.OUT_FOR_DELIVERY, OrderStatus.DELIVERED, SECOND)
+    returned = _order(db, sample_user, "SA_000922_26", status=OrderStatus.RETURNED)
+    _history(db, returned, OrderStatus.OUT_FOR_DELIVERY, OrderStatus.DELIVERED, THIRD)
+    _order(db, sample_user, "SA_000923_26")  # legacy: DELIVERED, no history row
+    on_the_way = _order(db, sample_user, "SA_000924_26", status=OrderStatus.OUT_FOR_DELIVERY)
+    _history(db, on_the_way, OrderStatus.CONFIRMED, OrderStatus.OUT_FOR_DELIVERY, FIRST)
+
+    assert _select_rows(db, Order.user_id == sample_user.id) == [
+        (redelivered.id, sample_user.id, user_address.id, SECOND)
+    ]
+
+
+def test_the_select_and_the_per_order_reader_answer_with_the_same_instant(db, sample_user, second_sample_user):
+    """Two public readers, one rule: for every still-delivered order they agree to the second."""
+    ids = []
+    for customer, number, instants in (
+        (sample_user, "SA_000931_26", (FIRST,)),
+        (sample_user, "SA_000932_26", (FIRST, THIRD)),
+        (second_sample_user, "SA_000933_26", (SECOND,)),
+    ):
+        order = _order(db, customer, number)
+        for instant in instants:
+            _history(db, order, OrderStatus.OUT_FOR_DELIVERY, OrderStatus.DELIVERED, instant)
+        ids.append(order.id)
+
+    from_select = {order_id: delivered_at for order_id, _user, _address, delivered_at in _select_rows(db)}
+
+    assert from_select == delivered_instants_by_order(ids)
+    assert from_select == {ids[0]: FIRST, ids[1]: THIRD, ids[2]: SECOND}
+
+
+def test_the_latest_delivered_rule_is_spelled_once():
+    """§4: both readers are built from ONE building block. A second `max(changed_at)` is a second
+    rule that can drift."""
+    source = inspect.getsource(order_timing)
+
+    assert source.count("func.max(OrderStatusHistory.changed_at)") == 1
+    assert source.count("OrderStatusHistory.new_status == OrderStatus.DELIVERED") == 1

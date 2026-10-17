@@ -143,8 +143,11 @@
     <link href="{{ url_for('static', filename='css/responsive.css') }}" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/custom-base.css') }}" rel="stylesheet">
 
+    {# ---- Page-view analytics. A page that carries a secret in its URL (a reset, verification or
+        signed link token) renders with SECRET_URL_PAGE (frontend/routes.py), which sets
+        suppress_analytics, so neither script runs and the URL never reaches Google or Yandex. ---- #}
     {# ---- Google Analytics 4 (renders only when GA4_MEASUREMENT_ID is set) ---- #}
-    {% if analytics.ga4_measurement_id %}
+    {% if analytics.ga4_measurement_id and not suppress_analytics %}
     <script async src="https://www.googletagmanager.com/gtag/js?id={{ analytics.ga4_measurement_id }}"></script>
     <script>
         window.dataLayer = window.dataLayer || [];
@@ -159,7 +162,7 @@
 
     {# ---- Yandex Metrica (mandatory for ru/uz market — feeds Yandex AI / Алиса /
         Yandex Webmaster). Renders only when YANDEX_METRICA_ID is set. ---- #}
-    {% if analytics.yandex_metrica_id %}
+    {% if analytics.yandex_metrica_id and not suppress_analytics %}
     <script type="text/javascript">
         (function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
         m[i].l=1*new Date();

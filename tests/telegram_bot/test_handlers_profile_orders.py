@@ -470,7 +470,7 @@ class TestProfileHandlerFlows:
         monkeypatch.setattr(
             profile_module.ProfileKeyboards,
             "notification_settings",
-            lambda language, delivery_telegram_status_updates_enabled: (
+            lambda language, delivery_telegram_status_updates_enabled, reorder_reminders_enabled=None: (
                 f"kbd:{language}:{delivery_telegram_status_updates_enabled}"
             ),
         )
@@ -535,7 +535,7 @@ class TestProfileHandlerFlows:
         monkeypatch.setattr(
             profile_module.ProfileKeyboards,
             "notification_settings",
-            lambda language, delivery_telegram_status_updates_enabled: (
+            lambda language, delivery_telegram_status_updates_enabled, reorder_reminders_enabled=None: (
                 f"kbd:{language}:{delivery_telegram_status_updates_enabled}"
             ),
         )

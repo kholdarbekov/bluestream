@@ -53,11 +53,14 @@ from shared.enums import (
 )
 from business_app.utils.translations import get_translation
 from business_app.utils.helpers import scrub_bot_token
+from shared.validators import is_deliverable_email
+from business_app.services.customer_link_service import CustomerLinkService
 from business_app.services.email_template_service import get_email_template_service
 from business_app.services.bottle_tracking_service import (
     BottleTrackingService,
     format_bottle_quantity,
 )
+from business_app.services.reorder_reminders.settings import ReorderReminderSettingsService
 from business_app.utils.bot_webhook import trigger_bot_webhook
 from business_app.utils.payment_projection import get_payment_projection, net_open_receivable_amount
 from business_app import db, redis_client
@@ -100,12 +103,26 @@ _PLACEHOLDER_STRICT_TYPES = frozenset(
         NotificationType.LOYALTY_TIER_UPGRADE.value,
         NotificationType.LOYALTY_TIER_DOWNGRADE.value,
         NotificationType.LOYALTY_POINTS_EXPIRED.value,
+        NotificationType.REORDER_REMINDER.value,
+        NotificationType.REORDER_ESCALATION_DIGEST.value,
     }
 )
 
 # A placeholder is a bare snake_case identifier in braces. CSS blocks
 # ("body { font-family: x; }") and JSON ('{"a": 1}') never match.
 _PLACEHOLDER_RE = re.compile(r"\{([a-z_][a-z0-9_]*)\}", re.IGNORECASE)
+
+
+def reorder_reminder_settings_via(platform: Optional[str]) -> str:
+    """Which route a customer's reorder-reminder switch came through (spec 2026-10-09 §8).
+
+    PUT /notifications/preferences has two clients, told apart by the platform detection that
+    already exists (middleware/auth_middleware.py::detect_platform): the customer bot's User-Agent
+    reads "telegram", and the storefront sends X-Platform: web. The body never names the route, so
+    a client cannot claim to be the other one.
+    """
+    return "telegram_settings" if platform == "telegram" else "web_settings"
+
 
 # Configure logger to ensure it outputs in both Flask and Celery
 # if not logger.handlers:
@@ -448,9 +465,19 @@ class NotificationService:
         priority: str = "normal",
         template_override=None,
         campaign_id: Optional[int] = None,
+        email_headers: Optional[Dict[str, str]] = None,
+        language: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Send notification to user across specified channels
+
+        `email_headers` are extra headers for the EMAIL channel only (spec 2026-10-09 §7.4: the
+        reorder reminder's List-Unsubscribe / List-Unsubscribe-Post). No other type uses them.
+
+        `language` is the language a caller already resolved for this send; None reads the user's
+        stored `preferred_language`, as before. The reorder reminder passes THE reminder language
+        (`shared.i18n_rendering.reminder_language`), so its template and subject are in the
+        language its pre-rendered copy is written in, never the email service's own default.
 
         Args:
             user_id: User ID
@@ -470,8 +497,8 @@ class NotificationService:
         if channels is None:
             channels = self._get_user_preferred_channels(user_id, notification_type)
 
-        # Get user's language preference
-        user_language = getattr(user, "preferred_language", "en")
+        # The caller's resolved language, else the user's language preference
+        user_language = language or getattr(user, "preferred_language", "en")
 
         template_data = template_data or {}
         results = {}
@@ -480,7 +507,12 @@ class NotificationService:
             try:
                 if channel == NotificationChannel.EMAIL:
                     result = self._send_email_notification(
-                        user, notification_type, template_data, user_language, template_override=template_override
+                        user,
+                        notification_type,
+                        template_data,
+                        user_language,
+                        template_override=template_override,
+                        email_headers=email_headers,
                     )
                 elif channel == NotificationChannel.SMS:
                     # SMS is OTP-only (see OTP_SMS_TEMPLATES). OTPs are
@@ -1181,12 +1213,42 @@ class NotificationService:
             delivery_telegram_status_updates_enabled=delivery_telegram_setting[
                 "delivery_telegram_status_updates_enabled"
             ],
+            reorder_reminders=self.reorder_reminders_view(user_id),
             _mapped_preferences=mapped,
             _all_types=all_types,
         )
 
-    def update_notification_preferences_for_user(self, user_id: int, payload: Dict[str, Any]):
-        """Update notification preferences from API payload and return current view."""
+    @staticmethod
+    def reorder_reminders_view(user_id: Any, *, include_reason: bool = False) -> Dict[str, Any]:
+        """The customer's EFFECTIVE reorder-reminder setting in its one published shape (spec
+        2026-10-09 §8 "Publishing"; master amendment 15).
+
+        The latest change across the customer's linked accounts, exactly as
+        ReorderReminderSettingsService decides it, published by `EffectiveSetting.to_dict`. The
+        customer preferences GET/PUT publish it without the admin's staff-only `reason`; the admin
+        notification-settings GET (Task 21a) passes include_reason=True. No other code shapes this
+        dict.
+        """
+        member_ids = CustomerLinkService().get_cluster_user_ids(NotificationService._coerce_user_id(user_id))
+        return ReorderReminderSettingsService.effective_for(member_ids).to_dict(include_reason=include_reason)
+
+    def update_notification_preferences_for_user(
+        self, user_id: int, payload: Dict[str, Any], *, platform: Optional[str] = None
+    ):
+        """Update notification preferences from API payload and return current view.
+
+        `platform` is `request.platform` from `detect_platform`; it only names the route a
+        `reorder_reminders_enabled` change came through (`reorder_reminder_settings_via`).
+
+        `reorder_reminders_enabled` is written only when the payload carries a boolean. Omitted
+        (or null) means "unchanged": saving any other preference writes no reminder setting, event
+        or audit row. The clients send the key only when the switch changed. A non-boolean is
+        refused before anything is written.
+        """
+        reorder_reminders_enabled = payload.get("reorder_reminders_enabled")
+        if reorder_reminders_enabled is not None and not isinstance(reorder_reminders_enabled, bool):
+            raise ValidationError("reorder_reminders_enabled must be a boolean")
+
         self._map_preferences(NotificationPreference.query.filter_by(user_id=user_id, is_enabled=True).all())
         all_types = self._all_managed_types()
 
@@ -1258,6 +1320,19 @@ class NotificationService:
                 enabled=delivery_telegram_status_updates_enabled,
             )
 
+        if reorder_reminders_enabled is not None:
+            # The one writer of the setting (spec §8). A customer's off over an off is a no-op
+            # there (D20); a customer's on always applies (D7). It commits this PUT's other
+            # changes with its own.
+            customer_id = self._coerce_user_id(user_id)
+            ReorderReminderSettingsService.set(
+                customer_id,
+                reorder_reminders_enabled,
+                actor_kind="customer",
+                via=reorder_reminder_settings_via(platform),
+                actor_user_id=customer_id,
+            )
+
         db.session.commit()
         return self.get_notification_preferences_view(user_id)
 
@@ -1293,69 +1368,119 @@ class NotificationService:
             "updated_at": updated_at.isoformat() if updated_at else None,
         }
 
-    def set_delivery_telegram_status_updates_setting(
+    def get_admin_notification_settings(self, user_id: int) -> Dict[str, Any]:
+        """The admin GET (spec §8): the delivery setting plus the EFFECTIVE reorder-reminder
+        setting across the customer's cluster, with its source and the staff-only reason.
+
+        The reminder value comes from `reorder_reminders_view`, the one publisher the customer
+        preferences GET also uses (amendment 15); only `include_reason` differs.
+        """
+        normalized_user_id = self._coerce_user_id(user_id)
+        settings = self.get_delivery_telegram_status_updates_setting(normalized_user_id)
+        settings["reorder_reminders"] = self.reorder_reminders_view(normalized_user_id, include_reason=True)
+        return settings
+
+    def update_admin_notification_settings(
         self,
         user_id: int,
-        enabled: bool,
         *,
-        source: str = "user",
-        actor_user_id: Optional[int] = None,
-        reason: Optional[str] = None,
+        reason: Optional[str],
+        actor_user_id: int,
+        delivery_telegram_status_updates_enabled: Optional[bool] = None,
+        reorder_reminders_enabled: Optional[bool] = None,
     ) -> Dict[str, Any]:
-        """Persist Telegram delivery-status setting with optional admin audit trail."""
+        """The admin partial PUT (spec §8): write and audit only the fields present.
+
+        `None` means "not in the body"; at least one field is required. This method checks only
+        that and the delivery field's own rules (amendment 20): a boolean, and the reason its admin
+        audit row records. The reminder field goes, as sent, through the setting's one writer
+        (admin, `admin_ui`): `set()` refuses a non-boolean with `REORDER_REMINDER_SETTING_INVALID`
+        and a missing reason with `REASON_REQUIRED`, appends the `setting_changed` event, writes
+        the SETTINGS_CHANGED audit and, on "off", suspends the customer's active episodes.
+
+        Ordering: every validation runs first, then the delivery row is staged, and `set()` runs
+        LAST because it commits (its own contract). So a refused delivery field leaves no reminder
+        row, and a refused reminder field rolls the staged delivery row back with it. A
+        reminder-only write creates no delivery-preference row.
+        """
         normalized_user_id = self._coerce_user_id(user_id)
-
-        if not isinstance(enabled, bool):
-            raise ValidationError("delivery_telegram_status_updates_enabled must be a boolean")
-        if source not in {"user", "admin"}:
-            raise ValidationError("source must be either user or admin")
-
+        if delivery_telegram_status_updates_enabled is None and reorder_reminders_enabled is None:
+            raise ValidationError(get_translation("api.notifications.validation.setting_field_required"))
+        # A non-string reason (a number, a list, a boolean) counts as missing, never as a 500.
+        reason = reason if isinstance(reason, str) else None
         reason_text = (reason or "").strip()
-        if source == "admin":
+        if delivery_telegram_status_updates_enabled is not None:
+            if not isinstance(delivery_telegram_status_updates_enabled, bool):
+                raise ValidationError(get_translation("api.notifications.validation.delivery_telegram_toggle_boolean"))
             if not reason_text:
-                raise ValidationError("Reason is required for admin updates")
+                raise ValidationError(get_translation("api.notifications.validation.reason_required"))
 
-        current = self.get_delivery_telegram_status_updates_setting(normalized_user_id)
-        self._set_delivery_telegram_status_updates_row(user_id=normalized_user_id, enabled=enabled)
-        db.session.commit()
-
-        updated = self.get_delivery_telegram_status_updates_setting(normalized_user_id)
-        if source == "admin":
-            try:
-                from business_app.models.audit import AuditEventType, AuditSeverity
-                from business_app.utils.audit_logger import audit_logger
-
-                audit_logger.log_event(
-                    event_type=AuditEventType.USER_UPDATED,
-                    action="admin_update_delivery_telegram_notification_setting",
-                    severity=AuditSeverity.MEDIUM,
-                    resource_type="user",
-                    resource_id=str(normalized_user_id),
-                    description="Admin updated Telegram delivery notification setting",
-                    old_values={
-                        "delivery_telegram_status_updates_enabled": current["delivery_telegram_status_updates_enabled"],
-                        "delivery_telegram_status_updates_source": current["delivery_telegram_status_updates_source"],
-                    },
-                    new_values={
-                        "delivery_telegram_status_updates_enabled": updated["delivery_telegram_status_updates_enabled"],
-                        "delivery_telegram_status_updates_source": updated["delivery_telegram_status_updates_source"],
-                    },
-                    additional_data={
-                        "reason": reason_text,
-                        "actor_user_id": actor_user_id,
-                        "setting_key": self.DELIVERY_TELEGRAM_STATUS_UPDATES_PREF_KEY,
-                    },
-                    success=True,
+        # Raises NotFoundError for a missing user before anything is written.
+        before = self.get_delivery_telegram_status_updates_setting(normalized_user_id)
+        try:
+            if delivery_telegram_status_updates_enabled is not None:
+                self._set_delivery_telegram_status_updates_row(
+                    user_id=normalized_user_id, enabled=delivery_telegram_status_updates_enabled
                 )
-            except Exception as exc:
-                logger.warning(
-                    "Failed to write admin notification setting audit log: user_id=%s actor_user_id=%s error=%s",
+            if reorder_reminders_enabled is not None:
+                # LAST: it commits, and it owns this field's type and reason rules and codes.
+                ReorderReminderSettingsService.set(
                     normalized_user_id,
-                    actor_user_id,
-                    exc,
+                    reorder_reminders_enabled,
+                    actor_kind="admin",
+                    via="admin_ui",
+                    reason=reason,
+                    actor_user_id=actor_user_id,
                 )
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            raise
 
-        return updated
+        if delivery_telegram_status_updates_enabled is not None:
+            self._audit_admin_delivery_telegram_setting(
+                normalized_user_id, before=before, reason=reason_text, actor_user_id=actor_user_id
+            )
+        return self.get_admin_notification_settings(normalized_user_id)
+
+    def _audit_admin_delivery_telegram_setting(
+        self, user_id: int, *, before: Dict[str, Any], reason: str, actor_user_id: int
+    ) -> None:
+        """The delivery setting's admin audit entry, written after the commit it describes."""
+        after = self.get_delivery_telegram_status_updates_setting(user_id)
+        try:
+            from business_app.models.audit import AuditEventType, AuditSeverity
+            from business_app.utils.audit_logger import audit_logger
+
+            audit_logger.log_event(
+                event_type=AuditEventType.USER_UPDATED,
+                action="admin_update_delivery_telegram_notification_setting",
+                severity=AuditSeverity.MEDIUM,
+                resource_type="user",
+                resource_id=str(user_id),
+                description="Admin updated Telegram delivery notification setting",
+                old_values={
+                    "delivery_telegram_status_updates_enabled": before["delivery_telegram_status_updates_enabled"],
+                    "delivery_telegram_status_updates_source": before["delivery_telegram_status_updates_source"],
+                },
+                new_values={
+                    "delivery_telegram_status_updates_enabled": after["delivery_telegram_status_updates_enabled"],
+                    "delivery_telegram_status_updates_source": after["delivery_telegram_status_updates_source"],
+                },
+                additional_data={
+                    "reason": reason,
+                    "actor_user_id": actor_user_id,
+                    "setting_key": self.DELIVERY_TELEGRAM_STATUS_UPDATES_PREF_KEY,
+                },
+                success=True,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to write admin notification setting audit log: user_id=%s actor_user_id=%s error=%s",
+                user_id,
+                actor_user_id,
+                exc,
+            )
 
     def register_push_token_for_user(
         self,
@@ -2981,6 +3106,9 @@ class NotificationService:
                 NotificationChannel.EMAIL,
                 NotificationChannel.TELEGRAM,
             ],
+            # The Telegram reminder goes through the customer bot's webhook, not here.
+            NotificationType.REORDER_REMINDER.value: [NotificationChannel.EMAIL],
+            NotificationType.REORDER_ESCALATION_DIGEST.value: [NotificationChannel.EMAIL],
         }
         return defaults.get(notification_type, [NotificationChannel.EMAIL])
 
@@ -3129,7 +3257,10 @@ class NotificationService:
         """
         if telegram_allowed and NotificationService._user_has_connected_telegram(user):
             return [NotificationChannel.TELEGRAM]
-        if getattr(user, "email", None):
+        # A placeholder (`telegram_…@bluestream.local`, `…@bot.internal`) or a merge tombstone is an
+        # email column with a value and no mailbox behind it: it counts as "no email" (spec
+        # 2026-10-09 §7.1), so a customer with no bot and no real address gets no notice at all.
+        if is_deliverable_email(getattr(user, "email", None)):
             return [NotificationChannel.EMAIL]
         return []
 
@@ -3590,6 +3721,7 @@ class NotificationService:
         template_data: Dict[str, Any],
         language: str,
         template_override=None,
+        email_headers: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """Send email notification using Brevo API with file-based templates"""
         if not self.brevo_api_key:
@@ -3598,13 +3730,22 @@ class NotificationService:
         if not user.email:
             return {"success": False, "error": get_translation("error.validation.no_email_address")}
 
+        # The ONE Brevo call refuses an address that can never receive mail, whatever the
+        # notification type and however the channel was chosen (spec 2026-10-09 §7.1 item 2).
+        # Skipped, not failed: `_create_notification_record` writes no audit row for a skip.
+        if not is_deliverable_email(user.email):
+            logger.info("Email skipped: address is not deliverable: user_id=%s", getattr(user, "id", None))
+            return {"success": False, "skipped": True, "reason": "undeliverable_email"}
+
         # Get notification type string
         notification_type_str = (
             notification_type.value if hasattr(notification_type, "value") else str(notification_type)
         )
 
         # Add user info to template data
-        user_name = f"{user.first_name} {user.last_name}".strip() or user.email
+        # `User.full_name` joins only the parts that are set, so a missing name is never printed
+        # as "None"; a name of blanks strips to nothing and the address stands in for it.
+        user_name = user.full_name.strip() or user.email
         template_data_with_user = {"user_name": user_name, "user_email": user.email, **template_data}
 
         # Try file-based templates first
@@ -3661,6 +3802,8 @@ class NotificationService:
             "subject": subject,
             "htmlContent": content,
         }
+        if email_headers:
+            payload["headers"] = dict(email_headers)
 
         try:
             response = requests.post(url, headers=headers, json=payload, timeout=30)
@@ -3671,11 +3814,19 @@ class NotificationService:
         except requests.exceptions.HTTPError as e:
             error_detail = ""
             try:
-                error_detail = e.response.json() if e.response else str(e)
+                # `is not None`: a requests Response is falsy for a 4xx/5xx, the very statuses here.
+                error_detail = e.response.json() if e.response is not None else str(e)
             except:  # noqa: E722
                 error_detail = str(e)
             logger.error(f"Brevo API error: {error_detail}")
-            return {"success": False, "error": f"Email API error: {error_detail}"}
+            # Brevo's HTTP status lets a caller tell a provider outage (429/5xx) from a refusal
+            # (4xx); the reorder reminder records it as `email_<status>` (spec 2026-10-09 §12).
+            # `getattr`, never `if e.response`: a requests Response is falsy for an error status.
+            return {
+                "success": False,
+                "error": f"Email API error: {error_detail}",
+                "status_code": getattr(e.response, "status_code", None),
+            }
         except Exception as e:
             logger.exception("Email sending failed")
             return {"success": False, "error": str(e)}
@@ -4166,6 +4317,8 @@ class NotificationService:
             NotificationType.LOYALTY_TIER_UPGRADE: [NotificationChannel.EMAIL, NotificationChannel.TELEGRAM],
             NotificationType.LOYALTY_TIER_DOWNGRADE: [NotificationChannel.EMAIL, NotificationChannel.TELEGRAM],
             NotificationType.LOYALTY_POINTS_EXPIRED: [NotificationChannel.EMAIL, NotificationChannel.TELEGRAM],
+            NotificationType.REORDER_REMINDER: [NotificationChannel.EMAIL],
+            NotificationType.REORDER_ESCALATION_DIGEST: [NotificationChannel.EMAIL],
         }
 
         return default_channels.get(notification_type, [NotificationChannel.EMAIL])

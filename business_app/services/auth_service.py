@@ -19,6 +19,9 @@ from business_app.utils.helpers import generate_otp, format_phone_number, genera
 from business_app.utils.password_security import hash_password, verify_password, needs_password_rehash
 from shared.enums import UserRole, UserStatus, UserType
 from shared import business_config
+from shared.user_names import GENERATED_TELEGRAM_NAME
+from shared.validators import PLACEHOLDER_EMAIL_DOMAIN_BOT, PLACEHOLDER_EMAIL_DOMAIN_LOCAL
+from business_app.services.telegram_reachability_service import TelegramReachabilityService
 from business_app.utils.user_types import infer_non_staff_user_type, normalize_entity_subtype
 from shared.enums import EntitySubtype
 from business_app.utils.translations import get_translation
@@ -129,7 +132,6 @@ class AuthService:
             "telegram_id",
             "registration_source",
             "telegram_username",
-            "is_bot_active",
             "bot_state",
             "last_bot_interaction",
         }
@@ -950,9 +952,9 @@ class AuthService:
         telegram_id = data["telegram_id"]
         user = User(
             telegram_id=str(telegram_id),
-            first_name=data.get("first_name", "Telegram User"),
+            first_name=data.get("first_name", GENERATED_TELEGRAM_NAME),
             last_name=data.get("last_name", ""),
-            email=f"telegram_{telegram_id}@bluestream.local",  # Placeholder email
+            email=f"telegram_{telegram_id}@{PLACEHOLDER_EMAIL_DOMAIN_LOCAL}",  # Placeholder email
             phone=None,  # Phone collected later
             password_hash="telegram_user",  # Placeholder, no password needed
             role=UserRole.CUSTOMER,
@@ -961,10 +963,11 @@ class AuthService:
             registration_source="telegram",
             preferred_language=data.get("language_code", "en"),
             telegram_username=data.get("username"),
-            is_bot_active=True,
             bot_state="{}",
             last_bot_interaction=datetime.now(timezone.utc),
         )
+        # Registered through the bot, so the bot works for them (spec 2026-10-09 §7.2 d).
+        TelegramReachabilityService.mark_reachable(user, source="register", at=user.last_bot_interaction)
         db.session.add(user)
         db.session.commit()
 
@@ -1484,6 +1487,10 @@ class AuthService:
             # The same-day hold's queue (C14, §5.6): the admin UI's Order approvals nav, route guard
             # and badge read this; `manager_or_higher_required` on OA1-OA3 states the same rule.
             "can_review_agent_orders": False,
+            # The Lapsed customers worklist (reorder-reminders spec §9.1, §14): the admin UI's nav item,
+            # badge, route guard and Analytics cards read this; `manager_or_higher_required` on every
+            # /admin/reorder-reminders route states the same rule.
+            "can_manage_lapsed_customers": False,
         }
         # Get role value for comparison (handle both enum and string)
         role_value = user.role.value if hasattr(user.role, "value") else user.role
@@ -1505,6 +1512,7 @@ class AuthService:
                     "can_manage_translations": role_value == UserRole.ADMIN.value,
                     "can_manage_sales_pay": role_value == UserRole.ADMIN.value,
                     "can_review_agent_orders": True,
+                    "can_manage_lapsed_customers": True,
                 }
             )
         elif role_value == UserRole.OPERATOR.value:
@@ -1738,7 +1746,7 @@ class AuthService:
 
         user.telegram_id = telegram_id
 
-        if data.get("first_name") and (not user.first_name or user.first_name == "Telegram User"):
+        if data.get("first_name") and (not user.first_name or user.first_name == GENERATED_TELEGRAM_NAME):
             user.first_name = data.get("first_name")
         if data.get("last_name") and not user.last_name:
             user.last_name = data.get("last_name")
@@ -2419,9 +2427,9 @@ class AuthService:
 
                 user = User(
                     telegram_id=str(telegram_id),
-                    first_name=first_name or "Telegram User",
+                    first_name=first_name or GENERATED_TELEGRAM_NAME,
                     last_name=last_name or "",
-                    email=f"telegram_{telegram_id}@bot.internal",  # Placeholder email with proper domain
+                    email=f"telegram_{telegram_id}@{PLACEHOLDER_EMAIL_DOMAIN_BOT}",  # Placeholder email
                     phone=None,  # No phone initially
                     password_hash=secure_password_hash,  # Secure random password hash
                     role=UserRole.CUSTOMER.value,  # Use enum
@@ -2430,10 +2438,10 @@ class AuthService:
                     registration_source="telegram",
                     # Bot-specific fields in unified table
                     telegram_username=username,
-                    is_bot_active=True,
                     bot_state="{}",  # Empty initial state
                     last_bot_interaction=datetime.now(timezone.utc),
                 )
+                TelegramReachabilityService.mark_reachable(user, source="telegram_login", at=user.last_bot_interaction)
 
                 logger.info(f"Adding new user to unified database: telegram_id={telegram_id}, username={username}")
                 db.session.add(user)
@@ -2459,7 +2467,7 @@ class AuthService:
             # Update basic user info
             if first_name and first_name != user.first_name:
                 can_update_first_name = (
-                    is_telegram_only_user or not user.first_name or user.first_name == "Telegram User"
+                    is_telegram_only_user or not user.first_name or user.first_name == GENERATED_TELEGRAM_NAME
                 )
                 if can_update_first_name:
                     logger.info(f"Updating first_name: {user.first_name} -> {first_name}")
@@ -2483,9 +2491,10 @@ class AuthService:
                 user.telegram_username = username
                 updates_made = True
 
-            # Update bot activity
-            user.is_bot_active = True
+            # Update bot activity. The bot logs a customer in when they use it, so the login is
+            # evidence the chat works; a block newer than this instant is kept (spec §7.2).
             user.last_bot_interaction = datetime.now(timezone.utc)
+            TelegramReachabilityService.mark_reachable(user, source="telegram_login", at=user.last_bot_interaction)
             user.last_login = datetime.now(timezone.utc)
             updates_made = True
 

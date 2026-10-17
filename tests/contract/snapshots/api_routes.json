@@ -1337,6 +1337,27 @@
     "rule": "/api/v1/admin/products/<int:product_id>/stock"
   },
   {
+    "endpoint": "admin_reorder_reminders.list_reorder_reminder_episodes",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/reorder-reminders/episodes"
+  },
+  {
+    "endpoint": "admin_reorder_reminders.resolve_reorder_reminder_episode",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/reorder-reminders/episodes/<int:episode_id>/resolve"
+  },
+  {
+    "endpoint": "admin_reorder_reminders.get_reorder_reminder_summary",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/reorder-reminders/summary"
+  },
+  {
     "endpoint": "admin.generate_report",
     "methods": [
       "POST"
@@ -2983,6 +3004,13 @@
     "rule": "/api/v1/bot/stats"
   },
   {
+    "endpoint": "bot.report_telegram_reachability",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/bot/telegram-reachability"
+  },
+  {
     "endpoint": "cart.get_cart",
     "methods": [
       "GET"
@@ -3751,6 +3779,20 @@
       "GET"
     ],
     "rule": "/api/v1/products/search-suggestions"
+  },
+  {
+    "endpoint": "reorder_reminders.snooze_reorder_reminder",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/reorder-reminders/<int:episode_id>/later"
+  },
+  {
+    "endpoint": "reorder_reminders.stop_reorder_reminders",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/reorder-reminders/stop"
   },
   {
     "endpoint": "session_management.trigger_cleanup",

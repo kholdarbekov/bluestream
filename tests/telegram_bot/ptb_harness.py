@@ -76,6 +76,9 @@ class BackendCall:
     # `Authorization: Bearer …` header, so a test cannot read the header and
     # would otherwise have no way to prove an authed call was authed.
     user_token: Optional[str] = None
+    # Whether the wrapper asked `_make_request` to HMAC-sign the body (`sign=True`). Recorded for
+    # the same reason: the signature header is built inside the seam, so this is the only witness.
+    sign: bool = False
 
 
 class FakeBackend:
@@ -99,7 +102,9 @@ class FakeBackend:
         self.routes[(method.upper(), endpoint)] = responder
 
     async def handle(self, method, endpoint, data=None, params=None, **_kwargs):
-        call = BackendCall(method.upper(), endpoint, data, params, _kwargs.get("user_token"))
+        call = BackendCall(
+            method.upper(), endpoint, data, params, _kwargs.get("user_token"), bool(_kwargs.get("sign"))
+        )
         self.calls.append(call)
 
         responder = self.routes.get((call.method, endpoint))
@@ -241,6 +246,10 @@ class FakeDatabase:
         return []
 
     async def fetchval(self, query, *args):
+        if "telegram_blocked_at" in query:
+            # `BotUserRepository.get_telegram_blocked_at`, the recovery middleware's read. Absent
+            # from the default row: a customer the backend does not hold as blocked.
+            return (self.user or {}).get("telegram_blocked_at")
         if "preferred_language" in query:
             return (self.user or {}).get("preferred_language")
         if "loyalty" in query.lower():

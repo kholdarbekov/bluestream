@@ -3,7 +3,7 @@ Business configuration — the single source of truth for env-driven business,
 money, and auth tunables shared across every service (backend, Celery, the
 customer telegram_bot, and the staff_bot).
 
-This is a PURE module: it imports only ``os`` and holds no Flask / app-context
+This is a PURE module: it imports only ``os`` and ``logging`` and holds no Flask / app-context
 state, so it is safe to import from ``business_app`` (including at config-class
 definition time), Celery workers, and both bots — exactly like
 ``shared/constants.py::DISPLAY_TIMEZONE``.
@@ -15,7 +15,10 @@ literal)`` fallbacks elsewhere — read ``current_app.config["KEY"]`` (backend) 
 import the name from here (bots).
 """
 
+import logging
 import os
+
+_logger = logging.getLogger(__name__)
 
 
 def _int(name: str, default: int) -> int:
@@ -61,6 +64,23 @@ def _str(name: str, default: str) -> str:
     if raw is None or raw.strip() == "":
         return default
     return raw.strip()
+
+
+def _lenient(name: str, default, convert):
+    """Read an env var through `convert`, falling back to `default` WITHOUT raising.
+
+    For knobs that a bot imports but never needs in order to start: an unparsable value is
+    logged as an error naming the variable and the value, and the default is used. Range checks
+    belong to the consumer (see the reorder-reminder section at the end of this module).
+    """
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return convert(raw.strip())
+    except (TypeError, ValueError):
+        _logger.error("%s=%r is not a valid value; using the default %r", name, raw, default)
+        return default
 
 
 # ─── Orders ─────────────────────────────────────────────────────────────
@@ -261,7 +281,9 @@ SALES_RATE_HISTORY_DAYS = _int("SALES_RATE_HISTORY_DAYS", 60)
 
 # ─── Sales agents (phase 2b — nightly jobs, digest, nearby) ─────────────
 # `active → at_risk` when the days since the outlet's last DELIVERED order
-# exceed this multiple of that outlet's OWN median inter-order interval (D23).
+# exceed this multiple of that outlet's usual interval: the median of the whole
+# local-day gaps between its newest delivery days, floored at 7
+# (business_app/utils/delivery_cadence.py::typical_interval_days, D23).
 # A float deliberately, and the damage lands on the first deployed override:
 # read through `_int`, `SALES_AT_RISK_RATIO=1.5` raises `ValueError` at import,
 # so only whole multiples would ever load and a `1` would flag every outlet
@@ -323,3 +345,56 @@ SALES_PAY_ONDEMAND_SYNC_SECONDS = _int("SALES_PAY_ONDEMAND_SYNC_SECONDS", 120)
 # How long a held agent order's stock stays reserved while it waits for a manager. It is not a
 # decision deadline: a manager may still approve it the next morning.
 SALES_STAFF_APPROVAL_HOLD_HOURS = _int("SALES_STAFF_APPROVAL_HOLD_HOURS", 12)
+
+
+# ─── Lapsed-customer reorder reminders (spec 2026-10-09 §11) ────────────
+# Read through `_lenient`, not `_int`/`_float`: both bots import this module, so a typo in a
+# reminder knob must cost a logged error and the default, never a bot that will not start
+# (review R18). The RANGE rules — the mode vocabulary (an unknown mode reads as off), 1..2
+# reminders per lapse, a 09:00–15:59 run time — are applied once, by
+# business_app/services/reorder_reminders/config.py::ReminderConfig.from_mapping, which falls
+# back to THIS dict, so each default literal still lives here exactly once.
+REORDER_REMINDER_DEFAULTS = {
+    # off | dry_run | on. Ships off: dry_run first, then on after copy review and counsel (§16).
+    "REORDER_REMINDERS_MODE": "off",
+    # The threshold itself when history is too short: "no order for more than 30 days" (D1).
+    "REORDER_REMINDER_FALLBACK_DAYS": 30,
+    # Lapsed once the days since the supply delivery exceed this multiple of the usual gap.
+    "REORDER_REMINDER_RATIO": 1.5,
+    # Delivery days needed before the customer's own rhythm replaces the preset.
+    "REORDER_REMINDER_MIN_DELIVERIES": 3,
+    # Reminders per lapse. The copy (R1, silent R2) and the Later button assume at most 2.
+    "REORDER_REMINDER_MAX_PER_EPISODE": 2,
+    # Days between reminder 1 and reminder 2.
+    "REORDER_REMINDER_GAP_DAYS": 7,
+    # How far "Remind me later" on reminder 1 pushes reminder 2 (D13).
+    "REORDER_REMINDER_SNOOZE_DAYS": 14,
+    # Days after the last reminder before staff are asked to follow up.
+    "REORDER_REMINDER_ESCALATE_AFTER_DAYS": 7,
+    # A lapse whose due day is older than this gets no message, only a worklist row (D11).
+    "REORDER_REMINDER_FRESH_DAYS": 14,
+    # A live order younger than this, or dated today or later, is on its way; else stuck (D12).
+    "REORDER_REMINDER_LIVE_ORDER_GRACE_DAYS": 7,
+    # The daily run, local "HH:MM", valid 09:00–15:59 so sends and retries end before 18:00.
+    "REORDER_REMINDER_LOCAL_TIME": "10:00",
+    # Where the admin UI lives; the escalation digest links to its Lapsed customers page.
+    "ADMIN_UI_BASE_URL": "https://admin.aqua-element.uz",
+}
+
+
+def _reminder_knob(name: str, convert=str):
+    return _lenient(name, REORDER_REMINDER_DEFAULTS[name], convert)
+
+
+REORDER_REMINDERS_MODE = _reminder_knob("REORDER_REMINDERS_MODE")
+REORDER_REMINDER_FALLBACK_DAYS = _reminder_knob("REORDER_REMINDER_FALLBACK_DAYS", int)
+REORDER_REMINDER_RATIO = _reminder_knob("REORDER_REMINDER_RATIO", float)
+REORDER_REMINDER_MIN_DELIVERIES = _reminder_knob("REORDER_REMINDER_MIN_DELIVERIES", int)
+REORDER_REMINDER_MAX_PER_EPISODE = _reminder_knob("REORDER_REMINDER_MAX_PER_EPISODE", int)
+REORDER_REMINDER_GAP_DAYS = _reminder_knob("REORDER_REMINDER_GAP_DAYS", int)
+REORDER_REMINDER_SNOOZE_DAYS = _reminder_knob("REORDER_REMINDER_SNOOZE_DAYS", int)
+REORDER_REMINDER_ESCALATE_AFTER_DAYS = _reminder_knob("REORDER_REMINDER_ESCALATE_AFTER_DAYS", int)
+REORDER_REMINDER_FRESH_DAYS = _reminder_knob("REORDER_REMINDER_FRESH_DAYS", int)
+REORDER_REMINDER_LIVE_ORDER_GRACE_DAYS = _reminder_knob("REORDER_REMINDER_LIVE_ORDER_GRACE_DAYS", int)
+REORDER_REMINDER_LOCAL_TIME = _reminder_knob("REORDER_REMINDER_LOCAL_TIME")
+ADMIN_UI_BASE_URL = _reminder_knob("ADMIN_UI_BASE_URL")

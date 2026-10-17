@@ -72,6 +72,26 @@ class BaseHandler:
             logger.info("Callback ack refused (cosmetic; the handler continues): %s", exc)
             return False
 
+    async def _ack_failed_call(self, query: Any, response: Any, language: str, *, operation: str) -> bool:
+        """Answer a tap whose backend call failed for a reason the button does not branch on.
+
+        `response.error` is technical text the customer can do nothing with, and it is English:
+        the API client's 'HTTP 502', 'Connection failed after 3 retries: ...', 'Request timed out
+        ...', 'Service temporarily unavailable (circuit breaker open)', or the backend's own
+        `message` (a 429's "Rate limit exceeded ..."). It goes to the log; the customer reads the
+        seeded `telegram.error.generic` in their own language (final review E2). The message keeps
+        its buttons, because nothing was answered: the customer can tap again. One expression for
+        every inline-button flow that answers this way (the reorder-reminder Later/Stop buttons and
+        the agent-order proposal), through `_ack`, so a refused ack never costs the flow either.
+        """
+        logger.warning(
+            "%s: the backend call failed (status %s): %s",
+            operation,
+            getattr(response, "status_code", None),
+            getattr(response, "error", None),
+        )
+        return await self._ack(query, i18n.get('telegram.error.generic', language))
+
     async def _delete_callback_message(self, query: Any) -> bool:
         """Drop the bubble a tap came from — and never let that cost the work.
 
@@ -198,6 +218,45 @@ class BaseHandler:
                 await update.message.reply_text(text)
         except Exception as e:
             logger.error(f"Failed to deliver error reply to user: {e}")
+
+    @staticmethod
+    def _response_error_code(response) -> str | None:
+        """The structured `error_code` off a failed APIResponse, or None.
+
+        `@handle_api_exception` puts it at the TOP level of the error body
+        (business_app/utils/error_handlers.py:76-77), and `_make_request` hands the whole body
+        back as `APIResponse.data`. The other envelope, `validation_error_response`, nests it
+        under `data.error_code`: reading that shape here would make a branch dead in
+        production while a fabricated test payload kept it green.
+        """
+        body = getattr(response, 'data', None)
+        if not isinstance(body, dict):
+            return None
+        return body.get('error_code')
+
+    async def _settle_callback_message(self, query, note: str) -> None:
+        """Retire an answered message: drop its buttons, append the answer.
+
+        Editing the text with NO `reply_markup` does both in one call, because Telegram removes
+        the inline keyboard of a message edited without one. The message's own text stays as
+        the record of what was answered. `note` is our own seeded copy, so it needs no escaping
+        under the parse_mode='HTML' the message was sent with.
+
+        Never lets tidy-up cost the answer, like `_ack`: the backend has already committed by
+        the time this runs, and Telegram refuses `editMessageText` routinely (past the 48h
+        window, a deleted message, "message is not modified"). It is deliberately NOT
+        `_edit_or_replace_callback_message`, whose fallback deletes the bubble: the message is
+        the record, and a refused edit is no reason to destroy it.
+        """
+        message = getattr(query, 'message', None)
+        body = getattr(message, 'text_html', None) if message is not None else None
+        try:
+            await query.edit_message_text(
+                text=f'{body}\n\n{note}' if body else note,
+                parse_mode='HTML',
+            )
+        except Exception as exc:
+            logger.info("Could not retire the answered message (cosmetic): %s", exc)
 
     async def _handle_error(
         self,

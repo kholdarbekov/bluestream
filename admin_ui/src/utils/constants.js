@@ -29,6 +29,11 @@ export const POLL_INTERVALS = {
   HOURLY: 3600000, // 1h — slow-changing reference data
 };
 
+// ─── Shared react-query keys ──────────────────────────────────────────────
+// The Lapsed customers summary (reorder-reminders spec §9.1, D17): the page header, the nav badge
+// and the Analytics cards read ONE cache entry, and the page's writes invalidate its prefix.
+export const LAPSED_CUSTOMERS_SUMMARY_KEY = ['lapsedCustomers', 'summary'];
+
 // ─── UI timing (ms) ─────────────────────────────────────────────────────────
 export const UI_DELAYS = {
   TOAST_AUTO_DISMISS: 5000,

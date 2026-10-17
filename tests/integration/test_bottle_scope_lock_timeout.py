@@ -47,60 +47,27 @@ import pytest
 from sqlalchemy import event, text
 from sqlalchemy.exc import OperationalError
 
-from tests.integration.conftest import (
-    REQUIRES_PG_REASON,
-    _admin_engine_for,
-    _resolve_database_url,
-)
+from tests.integration.conftest import transient_pg_database
 
 UTC = _tz.utc
 
 
 # --------------------------------------------------------------------------- #
-# Module-scoped migrated database (one `alembic upgrade head`, not one per test)
+# Module-scoped migrated database (one copy of the worker's template, not one per test)
 # --------------------------------------------------------------------------- #
 
 
 @pytest.fixture(scope="module")
-def lt_url():
-    from sqlalchemy.engine.url import make_url
-
-    base_url = _resolve_database_url()
-    if not base_url.startswith(("postgresql://", "postgresql+", "postgres://")):
-        pytest.skip(REQUIRES_PG_REASON)
-
-    admin_engine = _admin_engine_for(base_url)
-    db_name = f"locktimeout_{uuid.uuid4().hex[:12]}"
-    try:
-        with admin_engine.connect() as conn:
-            conn.execute(text(f'CREATE DATABASE "{db_name}"'))
-    except OperationalError as exc:
-        admin_engine.dispose()
-        pytest.skip(f"Postgres unreachable for integration test: {exc.orig}")
-
-    target = make_url(base_url).set(database=db_name).render_as_string(hide_password=False)
-    try:
-        yield target
-    finally:
-        with admin_engine.connect() as conn:
-            conn.execute(
-                text(
-                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                    "WHERE datname = :db AND pid <> pg_backend_pid()"
-                ),
-                {"db": db_name},
-            )
-            conn.execute(text(f'DROP DATABASE IF EXISTS "{db_name}"'))
-        admin_engine.dispose()
+def lt_url(migrated_pg_template):
+    with transient_pg_database("locktimeout", template=migrated_pg_template) as url:
+        yield url
 
 
 @pytest.fixture(scope="module")
 def lt_base_app(lt_url):
-    from flask_migrate import upgrade
-
     from business_app import create_app
 
-    app = create_app(
+    yield create_app(
         {
             "TESTING": True,
             "SQLALCHEMY_DATABASE_URI": lt_url,
@@ -111,9 +78,6 @@ def lt_base_app(lt_url):
             "WTF_CSRF_ENABLED": False,
         }
     )
-    with app.app_context():
-        upgrade(revision="head")
-    yield app
 
 
 @pytest.fixture

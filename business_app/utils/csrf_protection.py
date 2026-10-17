@@ -100,6 +100,11 @@ class CSRFProtectionManager:
         for endpoint in public_endpoints:
             self.csrf.exempt(endpoint)
 
+        # Views that a signed token in their own URL authorises (a mailbox's cookie-less one-click
+        # POST has no session and no CSRF token) are exempted where they are defined, with
+        # @csrf_protection.csrf.exempt (business_app/frontend/routes.py: the reorder-reminder
+        # unsubscribe). Flask-WTF matches "<module>.<function>", not the endpoint names above.
+
     def generate_csrf_token(self, user_id: Optional[int] = None) -> str:
         """
         Generate a CSRF token for the current session or user

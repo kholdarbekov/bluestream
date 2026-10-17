@@ -205,6 +205,21 @@
     flex: 1;
 }
 
+/* A disabled switch (the reorder-reminders switch until the API answers, and while it saves) offers
+   nothing to press: no pointer cursor, no hover highlight. */
+.check-box input.check:disabled,
+.check-box input.check:disabled + label {
+    cursor: default;
+}
+
+.check-box input.check:disabled + label {
+    color: #888;
+}
+
+.check-box:has(input.check:disabled):hover {
+    background: #f8f9fa;
+}
+
 /* Badges */
 .badge-success {
     background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%) !important;
@@ -390,6 +405,26 @@
     </div>
 </div>
 
+<!-- Reorder reminders (spec 2026-10-09 §8): ONE switch over the effective value the preferences
+     API publishes. profile-settings.js reads `preferences.reorder_reminders.enabled` and saves
+     `reorder_reminders_enabled` from the switch's own change handler only. The server records the
+     route as web_settings from the X-Platform header base.js sends, never from this page. The
+     switch is outside #preferencesForm on purpose (that form stays inert, spec §18) and starts
+     disabled: it is enabled only once the published value arrives. -->
+<div class="settings-section mb-4">
+    <div class="card">
+        <div class="card-header">
+            <h5><i class="far fa-bell"></i> {{ 'Reorder reminders'|t }}</h5>
+        </div>
+        <div class="card-body">
+            <div class="check-box">
+                <input class="check" type="checkbox" id="reorderRemindersSwitch" name="reorder_reminders_enabled" autocomplete="off" disabled>
+                <label for="reorderRemindersSwitch">{{ 'Remind me when it is usually time to reorder water'|t }}</label>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Preferences -->
 <div class="settings-section mb-4">
     <div class="card">
@@ -441,6 +476,8 @@
         'contact_failed': 'Failed to update contact information' | t,
         'verify_new_phone': 'Would you like to verify your new phone number now?' | t,
         'preferences_saved': 'Preferences saved successfully!' | t,
+        'reorder_reminders_saved': 'Reorder reminder setting saved' | t,
+        'reorder_reminders_failed': 'Failed to save the reorder reminder setting' | t,
         'verification_sent': 'Verification email sent! Please check your inbox.' | t,
         'verification_failed': 'Failed to send verification email' | t,
         'network_error': 'Network error. Please try again.' | t,

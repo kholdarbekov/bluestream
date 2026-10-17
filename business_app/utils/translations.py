@@ -8,6 +8,7 @@ from flask import current_app, g
 import redis
 from business_app.models.translation import Translation
 from business_app import db
+from shared.i18n_rendering import plural_category
 import logging
 
 logger = logging.getLogger(__name__)
@@ -416,37 +417,42 @@ def import_translations_from_dict(translations_data: Dict[str, Dict[str, str]], 
     return translation_service.import_translations(translations_data, category)
 
 
+# The FORM NAMES each language's callers already use. Only the arithmetic moved, to
+# `shared.i18n_rendering.plural_category` (spec 2026-10-09 §7.5), so existing callers see no change.
+_PLURAL_FORMS = {
+    "uz": ("singular", "plural"),
+    "en": ("singular", "plural"),
+    "ru": ("one", "few", "other"),
+}
+_FORM_INDEX_BY_CATEGORY = {
+    "uz": {"one": 0, "other": 1},
+    "en": {"one": 0, "other": 1},
+    # CLDR "many" (0, 5-20, 25-30, ...) is what this module has always called "other".
+    "ru": {"one": 0, "few": 1, "many": 2, "other": 2},
+}
+
+
 def get_plural_rules(language: str) -> Dict[str, Any]:
     """
     Get pluralization rules for a language
 
-    Simplified plural rules for supported languages:
-    - Uzbek (uz): 2 forms - singular (n == 1), plural (other)
-    - English (en): 2 forms - singular (n == 1), plural (other)
-    - Russian (ru): 3 forms - one (n % 10 == 1 and n % 100 != 11),
-                             few (n % 10 in [2,3,4] and n % 100 not in [12,13,14]),
-                             other
+    Forms per supported language (the arithmetic is `shared.i18n_rendering.plural_category`):
+    - Uzbek (uz), English (en): singular (n == 1), plural (other)
+    - Russian (ru): one, few, other (CLDR "many")
+    Any other code, including a regional one such as "ru-RU", gets the English rules.
 
     Args:
         language: Language code (uz, en, ru)
 
     Returns:
-        Dictionary with plural rules
+        Dictionary with plural rules: "forms" and "rule" (n -> index into forms)
     """
-    rules = {
-        "uz": {"forms": ["singular", "plural"], "rule": lambda n: 0 if n == 1 else 1},
-        "en": {"forms": ["singular", "plural"], "rule": lambda n: 0 if n == 1 else 1},
-        "ru": {
-            "forms": ["one", "few", "other"],
-            "rule": lambda n: (
-                0
-                if (n % 10 == 1 and n % 100 != 11)
-                else 1 if (n % 10 in [2, 3, 4] and n % 100 not in [12, 13, 14]) else 2
-            ),
-        },
+    code = language if language in _PLURAL_FORMS else "en"  # Default to English rules
+    index_by_category = _FORM_INDEX_BY_CATEGORY[code]
+    return {
+        "forms": list(_PLURAL_FORMS[code]),
+        "rule": lambda n: index_by_category[plural_category(code, n)],
     }
-
-    return rules.get(language, rules["en"])  # Default to English rules
 
 
 def get_plural_translation(key: str, count: int, language: str = None, **kwargs) -> str:

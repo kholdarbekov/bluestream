@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, UTC
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
 
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import contains_eager, joinedload
@@ -509,16 +509,37 @@ class CashCollectionService:
         from business_app.services.customer_link_service import CustomerLinkService
 
         cluster_ids = CustomerLinkService().get_cluster_user_ids(customer_id)
-        payments = (
-            Payment.query.join(Order, Payment.order_id == Order.id)
-            .filter(
-                Payment.user_id.in_(cluster_ids),
-                unpaid_after_delivery_clause(),
-                Order.status == OrderStatus.DELIVERED,
+        return self.get_net_open_cod_debt_totals_by_cluster({customer_id: cluster_ids})[customer_id]
+
+    def get_net_open_cod_debt_totals_by_cluster(
+        self, member_ids_by_key: Mapping[Any, Iterable[int]]
+    ) -> Dict[Any, Decimal]:
+        """:meth:`get_cluster_net_open_cod_debt_total` for many clusters in ONE query.
+
+        ``{key: the cluster's member ids}`` -> ``{key: its NET open COD debt}``, for a page of
+        clusters (the Lapsed-customers worklist). The single-cluster method delegates here, so the
+        rows (``unpaid_after_delivery_clause`` on DELIVERED orders) and the NET subtraction
+        (``net_open_receivable_amount``) are spelled once.
+        """
+        keys_by_user: Dict[int, List[Any]] = {}
+        for key, member_ids in member_ids_by_key.items():
+            for user_id in member_ids:
+                keys_by_user.setdefault(int(user_id), []).append(key)
+        totals: Dict[Any, Decimal] = {key: Decimal("0.00") for key in member_ids_by_key}
+        if keys_by_user:
+            payments = (
+                Payment.query.join(Order, Payment.order_id == Order.id)
+                .filter(
+                    Payment.user_id.in_(sorted(keys_by_user)),
+                    unpaid_after_delivery_clause(),
+                    Order.status == OrderStatus.DELIVERED,
+                )
+                .all()
             )
-            .all()
-        )
-        return self._to_decimal(sum((net_open_receivable_amount(p) for p in payments), Decimal("0.00")))
+            for payment in payments:
+                for key in keys_by_user.get(payment.user_id, ()):
+                    totals[key] += net_open_receivable_amount(payment)
+        return {key: self._to_decimal(total) for key, total in totals.items()}
 
     def get_place_net_open_cod_debt_total(self, address_id: int) -> Decimal:
         """NET open COD debt at one address's place group — THE CAP'S PLACE INPUT.

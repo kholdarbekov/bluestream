@@ -75,9 +75,9 @@ def _per_worker_redis_url(base_url: str) -> str:
     instance. The autouse ``reset_redis_state`` fixture calls ``flushdb()``,
     which would wipe other workers' setup state if every worker shared one DB.
     Map ``gwN`` to ``DB (15 - N mod 15)`` so workers stay isolated within
-    Redis's default 16-DB range while never touching DB 0 — that's the live
-    broker/cache the compose stack runs on (collisions only start at 15+
-    workers, far above the runner's ``-n 4``). Falls back to ``base_url`` for
+    Redis's default 16-DB range. DBs 0-2 belong to the live compose stack
+    (app + broker, telegram_bot, staff_bot), so at most 12 workers are safe —
+    scripts/precommit-backend-tests.sh caps its worker count there. Falls back to ``base_url`` for
     the master process or unrecognised worker names.
     """
     worker = os.environ.get('PYTEST_XDIST_WORKER', 'master')
@@ -326,7 +326,8 @@ def block_external_side_effects(monkeypatch):
     # was silently swallowed under test.
     def _mock_send_notification(_self, user_id, notification_type, channels=None,
                                 template_data=None, priority='normal',
-                                template_override=None, campaign_id=None):
+                                template_override=None, campaign_id=None,
+                                email_headers=None, language=None):
         if channels:
             response = {}
             for channel in channels:

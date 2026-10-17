@@ -18,6 +18,7 @@ from handlers.payments import payment_handlers
 from handlers.bottles import BottleBalanceHandler
 from handlers.support import support_flow_handlers
 from handlers.agent_orders import agent_order_handlers
+from handlers.reorder_reminders import reorder_reminder_handlers
 
 bottle_handlers = BottleBalanceHandler()
 
@@ -109,5 +110,6 @@ __all__ = [
     'support_flow_handlers',
     'payment_handlers',
     'bottle_handlers',
-    'agent_order_handlers'
+    'agent_order_handlers',
+    'reorder_reminder_handlers',
 ]

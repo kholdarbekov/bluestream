@@ -5,9 +5,17 @@ Endpoints for managing Telegram bot operations
 
 import logging
 from flask import Blueprint, request, jsonify
+from pydantic import ValidationError as PydanticValidationError
 
 from business_app.config import get_config
+from business_app.serializers.bot_serializers import TelegramReachabilityReport
+from business_app.services.telegram_reachability_service import (
+    REACHABILITY_REPORT_INVALID,
+    TelegramReachabilityService,
+)
+from business_app.utils.api_responses import success_response, validation_error_response
 from business_app.utils.decorators import require_auth, require_admin, verify_webhook_signature
+from business_app.utils.exceptions import ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -181,3 +189,23 @@ def get_bot_stats():
     except Exception as e:
         logger.error(f"Error in get_bot_stats: {e}", exc_info=True)
         return jsonify({"success": False, "message": "Internal server error"}), 500
+
+
+@bot_bp.route("/telegram-reachability", methods=["POST"])
+@verify_webhook_signature()
+def report_telegram_reachability():
+    """The customer bot reports that a customer blocked or reached it (spec 2026-10-09 §7.2 a, b).
+
+    Signed like telegram-login: no customer JWT travels, so the HMAC over the exact body is the
+    only proof the bot sent it. Body `{"telegram_id", "status": "blocked"|"reachable", "at":
+    ISO-8601 with offset, "source": "my_chat_member"|"recovery"}`. Answers `{"changed": bool}`; an
+    unknown telegram_id is `changed: false`, not an error, so the bot never retries it.
+    """
+    try:
+        report = TelegramReachabilityReport(**(request.get_json(silent=True) or {}))
+        changed = TelegramReachabilityService.record_from_bot(
+            report.telegram_id, report.status, report.at, source=report.source
+        )
+    except (PydanticValidationError, ValidationError) as exc:
+        return validation_error_response(str(exc), error_code=REACHABILITY_REPORT_INVALID)
+    return success_response(data={"changed": changed})

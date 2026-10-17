@@ -52,9 +52,18 @@ import api from '../services/api';
 import useResponsive from '../hooks/useResponsive';
 import AddressMapPicker from '../components/AddressMapPicker';
 import { formatLocalDate, formatLocaleDateTime } from '../utils/dateUtils';
+import { apiErrorCode } from '../utils/apiError';
+import { describeReminderSetting, REMINDER_SETTING_STATE } from '../utils/reorderReminderSetting';
 import exportUtils from '../utils/exportUtils';
 
 const { Option } = Select;
+
+// The two fields of the partial admin settings PUT (spec §8). Each toggle sends only its own.
+const DELIVERY_TELEGRAM_FIELD = 'delivery_telegram_status_updates_enabled';
+const REORDER_REMINDERS_FIELD = 'reorder_reminders_enabled';
+// The reminder field's "no reason" refusal (set()'s own code). A both-field PUT with a blank reason
+// is refused by the delivery rule instead, with no code, so this is never the only signal.
+const REASON_REQUIRED_CODE = 'REASON_REQUIRED';
 
 // Lazy-loaded so the heavy Leaflet/map bundle (and its leaflet.heat dep) is only
 // fetched when the "Map" tab is opened, keeping the default list view lean.
@@ -292,8 +301,8 @@ const Users = () => {
   });
 
   const updateUserNotificationSettingsMutation = useMutation({
-    mutationFn: ({ userId, enabled, reason }) => adminService.updateUserNotificationSettings(userId, {
-      delivery_telegram_status_updates_enabled: enabled,
+    mutationFn: ({ userId, field, enabled, reason }) => adminService.updateUserNotificationSettings(userId, {
+      [field]: enabled,
       reason
     }),
 
@@ -305,13 +314,26 @@ const Users = () => {
       message.success(
         response?.message || t('ui.users.notification_settings_updated', 'Notification settings updated')
       );
+      // `pendingNotificationToggle` stays: it names the prompt the closing modal still shows.
       setIsNotificationReasonModalVisible(false);
-      setPendingNotificationToggle(null);
       setNotificationReason('');
     },
 
     onError: (error) => {
-      const errorMessage = error.response?.data?.message || t('ui.users.notification_settings_update_failed', 'Failed to update notification settings');
+      // Best first: the page's localized reason-required copy for the reminder field's own code
+      // (the server's text for that refusal is an untranslated literal), then the server's
+      // localized text (`errors[0]`, which a refusal without a code carries, e.g. the delivery
+      // rule's blank-reason message), the response's message, then the generic failure copy. The
+      // modal stays open for a retry.
+      const serverText = Array.isArray(error.response?.data?.errors)
+        ? error.response.data.errors.find(Boolean)
+        : null;
+      const errorMessage = (apiErrorCode(error) === REASON_REQUIRED_CODE
+        ? t('ui.users.notification_change_reason_required', 'Reason is required')
+        : null)
+        || (serverText ? String(serverText) : null)
+        || error.response?.data?.message
+        || t('ui.users.notification_settings_update_failed', 'Failed to update notification settings');
       message.error(errorMessage);
     },
   });
@@ -864,28 +886,69 @@ const Users = () => {
     });
   };
 
-  const handleNotificationToggleRequest = (enabled) => {
-    setPendingNotificationToggle(enabled);
+  const requestNotificationChange = (toggle) => {
+    setPendingNotificationToggle(toggle);
     setNotificationReason('');
     setIsNotificationReasonModalVisible(true);
   };
 
-  const handleNotificationSettingsUpdateConfirm = () => {
-    if (!selectedUser) {
-      return;
+  const handleNotificationToggleRequest = (field) => (enabled) => requestNotificationChange({ field, enabled });
+
+  // Spec §8: an admin off always applies, so it upgrades a customer's own off to a staff off. The
+  // switch alone cannot say it (over an off it only turns reminders on), so this is its own action.
+  // It sends the same `{reorder_reminders_enabled: false, reason}` as switching reminders off.
+  const handleReminderExcludeRequest = () => requestNotificationChange({
+    field: REORDER_REMINDERS_FIELD,
+    enabled: false,
+    staffOff: true
+  });
+
+  const notificationReasonPrompt = () => {
+    const { field, enabled, staffOff } = pendingNotificationToggle || {};
+    if (field === REORDER_REMINDERS_FIELD) {
+      if (staffOff) {
+        return t(
+          'ui.users.reorder_reminders_reason_prompt_exclude',
+          'Please provide a reason for excluding this customer from reorder reminders (staff off).'
+        );
+      }
+      return enabled
+        ? t(
+          'ui.users.reorder_reminders_reason_prompt_enable',
+          'Please provide a reason for turning reorder reminders on.'
+        )
+        : t(
+          'ui.users.reorder_reminders_reason_prompt_disable',
+          'Please provide a reason for turning reorder reminders off.'
+        );
     }
-    const reason = notificationReason.trim();
-    if (!reason) {
-      message.error(
-        t('ui.users.notification_change_reason_required', 'Reason is required')
+    return enabled
+      ? t(
+        'ui.users.notification_change_reason_prompt_enable',
+        'Please provide a reason for enabling Telegram delivery updates.'
+      )
+      : t(
+        'ui.users.notification_change_reason_prompt_disable',
+        'Please provide a reason for disabling Telegram delivery updates.'
       );
+  };
+
+  // Every settings change needs a reason; the modal's Confirm stays disabled until there is one.
+  const trimmedNotificationReason = notificationReason.trim();
+  // The switches show a setting only once the backend published one: a pending or failed GET
+  // leaves them disabled and off rather than inventing an "on".
+  const notificationSettingsPublished = Boolean(notificationSettings);
+
+  const handleNotificationSettingsUpdateConfirm = () => {
+    if (!selectedUser || !pendingNotificationToggle || !trimmedNotificationReason) {
       return;
     }
 
     updateUserNotificationSettingsMutation.mutate({
       userId: selectedUser.id,
-      enabled: Boolean(pendingNotificationToggle),
-      reason
+      field: pendingNotificationToggle.field,
+      enabled: Boolean(pendingNotificationToggle.enabled),
+      reason: trimmedNotificationReason
     });
   };
 
@@ -1605,9 +1668,71 @@ const Users = () => {
                     </Col>
                     <Col xs={24} sm={8} style={{ textAlign: responsive.isMobileDevice ? 'left' : 'right' }}>
                       <Switch
-                        checked={notificationSettings?.delivery_telegram_status_updates_enabled ?? true}
+                        aria-label={t(
+                          'ui.users.delivery_telegram_updates_setting',
+                          'Telegram delivery updates (in transit, arrived)'
+                        )}
+                        checked={notificationSettingsPublished
+                          && (notificationSettings.delivery_telegram_status_updates_enabled ?? true)}
+                        disabled={!notificationSettingsPublished}
                         loading={updateUserNotificationSettingsMutation.isPending}
-                        onChange={handleNotificationToggleRequest}
+                        onChange={handleNotificationToggleRequest(DELIVERY_TELEGRAM_FIELD)}
+                      />
+                    </Col>
+                  </Row>
+
+                  <Row gutter={[12, 12]} align="middle" justify="space-between">
+                    <Col xs={24} sm={16}>
+                      <div style={{ fontWeight: 600 }}>
+                        {t('ui.users.reorder_reminders_setting', 'Reorder reminders')}
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#666', marginTop: 4 }}>
+                        {t(
+                          'ui.users.reorder_reminders_setting_help',
+                          'Up to two reminders when the customer is late against their usual ordering rhythm.'
+                        )}
+                      </div>
+                      {/* The published setting, as published: who changed it, how, when (not re-derived). */}
+                      <div style={{ fontSize: '12px', marginTop: 4 }} data-testid="reorder-reminders-source">
+                        {describeReminderSetting(t, notificationSettings?.reorder_reminders)}
+                      </div>
+                      {notificationSettings?.reorder_reminders?.reason ? (
+                        <div style={{ fontSize: '12px', color: '#666', marginTop: 4 }}>
+                          {t('ui.users.reorder_reminders_reason', 'Reason: {{reason}}', {
+                            reason: notificationSettings.reorder_reminders.reason,
+                          })}
+                        </div>
+                      ) : null}
+                      {/* A customer's own off, as the backend publishes it: staff may record an admin
+                          off over it (spec §8), which the on/off switch cannot express. */}
+                      {notificationSettings?.reorder_reminders?.state === REMINDER_SETTING_STATE.CUSTOMER_OFF ? (
+                        <div style={{ marginTop: 8 }}>
+                          <Button
+                            size="small"
+                            danger
+                            disabled={updateUserNotificationSettingsMutation.isPending}
+                            onClick={handleReminderExcludeRequest}
+                          >
+                            {t('ui.users.reorder_reminders_exclude', 'Exclude (staff off)')}
+                          </Button>
+                          <div style={{ fontSize: '12px', color: '#666', marginTop: 4 }}>
+                            {t(
+                              'ui.users.reorder_reminders_exclude_help',
+                              'The customer switched reminders off. Excluding records a staff off with your reason; '
+                              + 'a later Stop by the customer will not change it.'
+                            )}
+                          </div>
+                        </div>
+                      ) : null}
+                    </Col>
+                    <Col xs={24} sm={8} style={{ textAlign: responsive.isMobileDevice ? 'left' : 'right' }}>
+                      <Switch
+                        aria-label={t('ui.users.reorder_reminders_setting', 'Reorder reminders')}
+                        checked={notificationSettingsPublished
+                          && (notificationSettings.reorder_reminders?.enabled ?? true)}
+                        disabled={!notificationSettingsPublished}
+                        loading={updateUserNotificationSettingsMutation.isPending}
+                        onChange={handleNotificationToggleRequest(REORDER_REMINDERS_FIELD)}
                       />
                     </Col>
                   </Row>
@@ -1794,25 +1919,17 @@ const Users = () => {
         open={isNotificationReasonModalVisible}
         onCancel={() => {
           setIsNotificationReasonModalVisible(false);
-          setPendingNotificationToggle(null);
           setNotificationReason('');
         }}
         onOk={handleNotificationSettingsUpdateConfirm}
+        okButtonProps={{ disabled: !trimmedNotificationReason }}
         confirmLoading={updateUserNotificationSettingsMutation.isPending}
         okText={t('ui.common.confirm', 'Confirm')}
         cancelText={t('ui.common.cancel', 'Cancel')}
       >
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
           <div style={{ fontSize: '13px' }}>
-            {pendingNotificationToggle
-              ? t(
-                'ui.users.notification_change_reason_prompt_enable',
-                'Please provide a reason for enabling Telegram delivery updates.'
-              )
-              : t(
-                'ui.users.notification_change_reason_prompt_disable',
-                'Please provide a reason for disabling Telegram delivery updates.'
-              )}
+            {notificationReasonPrompt()}
           </div>
           <Input.TextArea
             rows={4}

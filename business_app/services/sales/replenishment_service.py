@@ -21,11 +21,11 @@ writes the column and leaves the transaction to its caller (`VisitService.close`
 
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import ROUND_CEILING, ROUND_HALF_UP, Decimal
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 from zoneinfo import ZoneInfo
 
 from flask import current_app
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, literal, or_, select, union_all
 from sqlalchemy.orm import aliased
 
 from business_app import db
@@ -48,6 +48,10 @@ RATE_QUANTUM = Decimal("0.001")
 # answer when no returnable SKU is flagged at all, and treating it as "unset" would make the
 # nightly job re-query the whole product table for every outlet — the cost L30 reports.
 _CATALOGUE_UNSET = object()
+
+# Outlets per UNION ALL statement in `latest_landing_by_outlet` (well under SQLite's 500
+# compound-SELECT terms).
+_LANDING_BATCH = 100
 
 # The agent picks a DATE at visit close; the due list needs an instant. 09:00
 # local is the start of the trading day the agent meant.
@@ -286,8 +290,9 @@ class ReplenishmentService:
         return int(row[0]) if row else None
 
     @staticmethod
-    def delivered_instants(outlet: Outlet, *, limit: int) -> List[datetime]:
-        """When this outlet's last `limit` orders actually landed, newest first.
+    def delivered_instants(outlet: Outlet, *, limit: Optional[int] = None) -> List[datetime]:
+        """When this outlet's last `limit` orders actually landed, newest first; every one when
+        `limit` is None (the stage job's full-history mode, spec 2026-10-09 §9.3).
 
         The stage job's one input. The instant is `order_timing.delivered_instants_by_order`'s,
         the same one sales-agent pay credits on (spec 2026-09-28 §4.3.2), so the stage job and
@@ -311,13 +316,50 @@ class ReplenishmentService:
 
         from business_app.services.sales.outlet_service import OutletService
 
-        landed_ids = [
-            order_id
-            for (order_id,) in db.session.query(Order.id)
-            .filter(OutletService.order_scope(outlet), Order.status == OrderStatus.DELIVERED)
-            .all()
-        ]
+        landed = ReplenishmentService._landed_orders(OutletService.order_scope(outlet))
+        landed_ids = db.session.execute(landed).scalars().all()
         return sorted(delivered_instants_by_order(landed_ids).values(), reverse=True)[:limit]
+
+    @staticmethod
+    def _landed_orders(scope):
+        """`SELECT orders.id` of the orders that landed at an outlet: DELIVERED, inside its
+        `order_scope`. The one spelling `delivered_instants` and `latest_landing_by_outlet` share."""
+        return select(Order.id).where(scope, Order.status == OrderStatus.DELIVERED)
+
+    @staticmethod
+    def latest_landing_by_outlet(outlets: Sequence[Outlet]) -> Dict[int, datetime]:
+        """`{outlet id: when its newest order landed}`: `delivered_instants(outlet)[0]` for many
+        outlets at once, with the same orders (`_landed_orders` over `OutletService.order_scopes`)
+        and the same instants (`delivered_instants_by_order`). An outlet nothing has landed at, or
+        one with no customer account, is absent.
+
+        A fixed number of queries per `_LANDING_BATCH` outlets: one for their accounts' branch mode,
+        one UNION ALL of the per-outlet scopes, and the instants of the orders found. The stage
+        job's reactivation rule (`OutletService.reactivated_outlet_ids`) reads it, for the job and
+        for the reorder-reminder facts alike.
+        """
+        from business_app.services.sales.outlet_service import OutletService
+
+        linked = [row for row in outlets if row.user_id]
+        if not linked:
+            return {}
+        scopes = OutletService.order_scopes(linked)
+        orders_by_outlet: Dict[int, List[int]] = {}
+        for offset in range(0, len(linked), _LANDING_BATCH):
+            arms = [
+                ReplenishmentService._landed_orders(scopes[row.id]).add_columns(literal(row.id).label("outlet_id"))
+                for row in linked[offset : offset + _LANDING_BATCH]
+            ]
+            statement = arms[0] if len(arms) == 1 else union_all(*arms)
+            for order_id, outlet_id in db.session.execute(statement).all():
+                orders_by_outlet.setdefault(outlet_id, []).append(order_id)
+        instants = delivered_instants_by_order(order_id for ids in orders_by_outlet.values() for order_id in ids)
+        latest: Dict[int, datetime] = {}
+        for outlet_id, order_ids in orders_by_outlet.items():
+            landed = [instants[order_id] for order_id in order_ids if order_id in instants]
+            if landed:
+                latest[outlet_id] = max(landed)
+        return latest
 
     @staticmethod
     def _recent_checks(

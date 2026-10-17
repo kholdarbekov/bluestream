@@ -6,6 +6,7 @@ This file should be placed in business_app/api/notifications.py
 from flask import Blueprint, current_app, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
+from business_app.middleware.auth_middleware import detect_platform
 from business_app.serializers.notification_serializers import (
     serialize_notification,
     serialize_notification_preferences,
@@ -165,9 +166,22 @@ def get_notification_preferences():
 
 @notifications_bp.route("/preferences", methods=["PUT"])
 @jwt_required()
+@detect_platform()
 @validate_json()
 def update_notification_preferences():
-    """Update user's notification preferences"""
+    """Update user's notification preferences.
+
+    `reorder_reminders_enabled` (boolean) switches the customer's reorder reminders (spec
+    2026-10-09 §8). Contract: a client sends the key ONLY when the switch changed. Omitted (or
+    null) means "unchanged" and writes nothing for the reminders, so saving any other preference
+    never writes a setting row, event or audit entry. A non-boolean is a 400.
+
+    The route the change is recorded under is never taken from the body: `detect_platform` names the
+    client (the bot's User-Agent -> "telegram", the storefront's X-Platform: web -> "web"), and the
+    service records `telegram_settings` or `web_settings` from it. The response publishes the
+    effective setting as `preferences.reorder_reminders`
+    ({enabled, changed_by_kind, changed_via, changed_at}); a customer never sees the admin's reason.
+    """
     try:
         current_user_id = get_jwt_identity()
         payload = request.get_json() or {}
@@ -175,6 +189,7 @@ def update_notification_preferences():
         preferences = get_notification_service().update_notification_preferences_for_user(
             user_id=current_user_id,
             payload=payload,
+            platform=getattr(request, "platform", None),
         )
 
         return success_response(

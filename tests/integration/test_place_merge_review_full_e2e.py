@@ -3238,7 +3238,26 @@ def test_the_api_contract_snapshot_still_lists_the_merge_preview_route(db):
     # POST .../bottles/session/join-request/approve and .../decline (approve/decline_bottle_session_join_request);
     # the old POST .../bottles/session/join was RENAMED to .../join-request (request_to_join_bottle_session),
     # net zero. Unrelated to place-merge; only the estate-wide count moved.
-    assert len(routes) == 656
+    # 656 -> 657: reorder-reminder reachability (Phase 1 Task 4) -- the signed bot route POST
+    # /api/v1/bot/telegram-reachability (report_telegram_reachability). Unrelated to place-merge;
+    # only the estate-wide count moved.
+    # 657 -> 659: lapsed-customer reorder reminders -- customer Later / Stop on `reorder_reminders`
+    # (JWT; Later has a per-login rate limit, Stop none): POST /api/v1/reorder-reminders/<int:episode_id>/later
+    # (snooze_reorder_reminder) and POST /api/v1/reorder-reminders/stop (stop_reorder_reminders).
+    # Unrelated to place-merge; only the estate-wide count moved.
+    # 659 -> 660: lapsed-customer reorder reminders (Task 20a) -- the staff worklist on
+    # `admin_reorder_reminders` behind `manager_or_higher_required`: GET
+    # /api/v1/admin/reorder-reminders/episodes (list_reorder_reminder_episodes). Unrelated to
+    # place-merge; only the estate-wide count moved.
+    # 660 -> 661: lapsed-customer reorder reminders (Task 20b) -- the worklist's summary (mode,
+    # settings, badge counts, 30-day metrics, vocabularies) on `admin_reorder_reminders` behind
+    # `manager_or_higher_required`: GET /api/v1/admin/reorder-reminders/summary
+    # (get_reorder_reminder_summary). Unrelated to place-merge; only the estate-wide count moved.
+    # 661 -> 662: lapsed-customer reorder reminders (Task 20c) -- the mandatory outcome on
+    # `admin_reorder_reminders` behind `manager_or_higher_required`: POST
+    # /api/v1/admin/reorder-reminders/episodes/<int:episode_id>/resolve
+    # (resolve_reorder_reminder_episode). Unrelated to place-merge; only the estate-wide count moved.
+    assert len(routes) == 662
     entry = next(r for r in routes if r["rule"] == "/api/v1/admin/place-groups/merge-preview")
     assert entry["methods"] == ["GET"]
     assert entry["endpoint"] == "admin.get_place_group_merge_preview"

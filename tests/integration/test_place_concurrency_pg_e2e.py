@@ -45,11 +45,10 @@ WHAT IS PROVEN HERE
 TEST-INFRA CHOICE, STATED PLAINLY
 ---------------------------------
 ``tests/integration/conftest.py``'s ``pg_app`` is FUNCTION-scoped: every test
-pays a full ``alembic upgrade head``. This file needs ~50 Postgres tests, and
-50 migration runs is minutes of wall clock for zero extra signal. It therefore
-declares its OWN MODULE-scoped app over the same ephemeral-database helpers
-from that conftest (``_resolve_database_url`` / ``_admin_engine_for``), and
-pushes a FRESH app context per test — which, under Flask-SQLAlchemy 3, means a
+gets its own copy of the worker's migrated template database. This file needs
+~50 Postgres tests that build on ONE shared state, so it declares its OWN
+MODULE-scoped database (``transient_pg_database`` over that same template) and
+app, and pushes a FRESH app context per test — which, under Flask-SQLAlchemy 3, means a
 fresh session per test, so no ORM identity state leaks. ``pytest.ini`` pins
 ``--dist=loadfile``, so the whole module lands on one xdist worker and the
 module-scoped database is never shared across processes.
@@ -165,11 +164,7 @@ from business_app.services.customer_link_service import CustomerLinkService
 from business_app.utils.exceptions import ValidationError
 from business_app.utils.password_security import hash_password
 from shared.enums import OrderStatus, UserRole, UserStatus, UserType
-from tests.integration.conftest import (
-    REQUIRES_PG_REASON,
-    _admin_engine_for,
-    _resolve_database_url,
-)
+from tests.integration.conftest import transient_pg_database
 
 
 pytestmark = [pytest.mark.integration, pytest.mark.e2e]
@@ -190,49 +185,19 @@ def D(value) -> Decimal:
 
 
 @pytest.fixture(scope="module")
-def place_pg_url():
-    """A transient, EMPTY Postgres database; dropped on module teardown."""
-    base_url = _resolve_database_url()
-    if not base_url.startswith(("postgresql://", "postgresql+", "postgres://")):
-        pytest.skip(REQUIRES_PG_REASON)
-
-    from sqlalchemy.engine.url import make_url
-    from sqlalchemy.exc import OperationalError
-
-    admin_engine = _admin_engine_for(base_url)
-    db_name = f"place_e2e_{uuid.uuid4().hex[:12]}"
-    quoted = f'"{db_name}"'
-    try:
-        with admin_engine.connect() as conn:
-            conn.execute(text(f"CREATE DATABASE {quoted}"))
-    except OperationalError as exc:
-        admin_engine.dispose()
-        pytest.skip(f"Postgres unreachable for integration test: {exc.orig}")
-
-    target = make_url(base_url).set(database=db_name).render_as_string(hide_password=False)
-    try:
-        yield target
-    finally:
-        with admin_engine.connect() as conn:
-            conn.execute(
-                text(
-                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                    "WHERE datname = :db AND pid <> pg_backend_pid()"
-                ),
-                {"db": db_name},
-            )
-            conn.execute(text(f"DROP DATABASE IF EXISTS {quoted}"))
-        admin_engine.dispose()
+def place_pg_url(migrated_pg_template):
+    """A transient Postgres database carrying the REAL migration chain (a copy of
+    the worker's migrated template); dropped on module teardown."""
+    with transient_pg_database("place_e2e", template=migrated_pg_template) as url:
+        yield url
 
 
 @pytest.fixture(scope="module")
 def place_pg_app(place_pg_url):
-    """A Flask app on that database with the REAL migration chain applied."""
-    from flask_migrate import upgrade
-
+    """A Flask app on that database."""
     from business_app import create_app
 
-    app = create_app(
+    yield create_app(
         {
             "TESTING": True,
             "SQLALCHEMY_DATABASE_URI": place_pg_url,
@@ -243,9 +208,6 @@ def place_pg_app(place_pg_url):
             "WTF_CSRF_ENABLED": False,
         }
     )
-    with app.app_context():
-        upgrade(revision="head")
-    yield app
 
 
 @pytest.fixture

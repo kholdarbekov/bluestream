@@ -238,7 +238,7 @@ class TestStageSweep:
 
         Both branches belong to ONE account and are class A (cadence 7, ratio 1.5 => 10.5 days).
         Account-wide, the sweep saw two deliveries one day apart, read the median gap as 1 day,
-        floored it to MIN_INTERVAL_DAYS and measured "days since the last delivery" from the
+        floored it to CADENCE_MIN_GAP_DAYS and measured "days since the last delivery" from the
         SIBLING's order: 10 days, under the threshold, so the shop that had taken nothing for
         eleven days stayed `active` for ever. Per branch, each shop answers for itself.
         """
@@ -293,6 +293,67 @@ class TestStageSweep:
             _delivered(db, owner, sample_product, days_ago=8 + 2 * index, number=f"SA_00012{index}_26")
 
         assert OutletService.update_stages(now=FROZEN_UTC)["at_risk"] == 0
+        assert outlet.stage == "active"
+
+    def test_a_same_day_burst_is_one_delivery_day_not_a_seven_day_rhythm(self, db, sample_product):
+        """D6. Two orders on one local day (11:00 and 08:00) are ONE delivery day. The days are 20
+        and 40 days ago, so the gap is 20, the threshold 30 and 20 quiet days are normal. Counted
+        per order, the 3-hour "gap" pulled the median to 10 and called this shop at risk."""
+        owner = _owner(db, "+998901234621")
+        outlet = _outlet(db, owner, name="Burst shop", outlet_class="A")
+        _delivered(db, owner, sample_product, days_ago=40, number="SA_000150_26")
+        _delivered(db, owner, sample_product, days_ago=20, number="SA_000151_26")
+        _delivered(
+            db, owner, sample_product, days_ago=20, number="SA_000152_26", anchor=FROZEN_UTC - timedelta(hours=3)
+        )
+
+        counts = OutletService.update_stages(now=FROZEN_UTC)
+
+        assert counts["at_risk"] == 0
+        assert outlet.stage == "active"
+        assert _stage_rows(outlet) == []
+
+    def test_gaps_are_whole_local_days_not_fractional_hours(self, db, sample_product):
+        """D6. 23:00 on 12 Sep and 01:00 on 20 Sep (Tashkent) are 7 days 2 hours apart but 8
+        calendar days: threshold 12, and 11.4 quiet days are normal. Fractional (10.6) or UTC-date
+        (10.5) thresholds would have called it at risk."""
+        owner = _owner(db, "+998901234622")
+        outlet = _outlet(db, owner, name="Night shop", outlet_class="A")
+        _delivered(
+            db, owner, sample_product, days_ago=0, number="SA_000153_26", anchor=datetime(2026, 9, 12, 18, 0, tzinfo=UTC)
+        )
+        _delivered(
+            db, owner, sample_product, days_ago=0, number="SA_000154_26", anchor=datetime(2026, 9, 19, 20, 0, tzinfo=UTC)
+        )
+
+        counts = OutletService.update_stages(now=FROZEN_UTC)
+
+        assert counts["at_risk"] == 0
+        assert outlet.stage == "active"
+
+    def test_the_usual_gap_reads_six_delivery_days_from_the_whole_history(self, db, sample_product):
+        """§9.3 full-history mode. Three recent days each carry a burst (12, 17, 22 days ago) and
+        three older days sit 30 apart (52, 82, 112). Six delivery DAYS give gaps 5, 5, 30, 30, 30:
+        median 30, threshold 45, so 12 quiet days are normal. The old "last 6 ORDERS" window saw
+        only the bursts and called it at risk."""
+        owner = _owner(db, "+998901234623")
+        outlet = _outlet(db, owner, name="Bursty but monthly", outlet_class="A")
+        for index, days_ago in enumerate((12, 17, 22)):
+            _delivered(db, owner, sample_product, days_ago=days_ago, number=f"SA_00016{index}_26")
+            _delivered(
+                db,
+                owner,
+                sample_product,
+                days_ago=days_ago,
+                number=f"SA_00017{index}_26",
+                anchor=FROZEN_UTC - timedelta(hours=3),
+            )
+        for index, days_ago in enumerate((52, 82, 112)):
+            _delivered(db, owner, sample_product, days_ago=days_ago, number=f"SA_00018{index}_26")
+
+        counts = OutletService.update_stages(now=FROZEN_UTC)
+
+        assert counts["at_risk"] == 0
         assert outlet.stage == "active"
 
     def test_an_outlet_that_has_been_at_risk_past_the_dormant_window_goes_dormant(self, db, sample_product):

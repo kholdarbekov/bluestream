@@ -570,6 +570,22 @@ class BaseConfig:
     SALES_PAY_ONDEMAND_SYNC_SECONDS = business_config.SALES_PAY_ONDEMAND_SYNC_SECONDS
     SALES_STAFF_APPROVAL_HOLD_HOURS = business_config.SALES_STAFF_APPROVAL_HOLD_HOURS
 
+    # Lapsed-customer reorder reminders (spec 2026-10-09 §11). Same single-default rule: one
+    # derivation line each. Read them through reorder_reminders.config.current_config(), which
+    # applies the range rules; never read these keys raw.
+    REORDER_REMINDERS_MODE = business_config.REORDER_REMINDERS_MODE
+    REORDER_REMINDER_FALLBACK_DAYS = business_config.REORDER_REMINDER_FALLBACK_DAYS
+    REORDER_REMINDER_RATIO = business_config.REORDER_REMINDER_RATIO
+    REORDER_REMINDER_MIN_DELIVERIES = business_config.REORDER_REMINDER_MIN_DELIVERIES
+    REORDER_REMINDER_MAX_PER_EPISODE = business_config.REORDER_REMINDER_MAX_PER_EPISODE
+    REORDER_REMINDER_GAP_DAYS = business_config.REORDER_REMINDER_GAP_DAYS
+    REORDER_REMINDER_SNOOZE_DAYS = business_config.REORDER_REMINDER_SNOOZE_DAYS
+    REORDER_REMINDER_ESCALATE_AFTER_DAYS = business_config.REORDER_REMINDER_ESCALATE_AFTER_DAYS
+    REORDER_REMINDER_FRESH_DAYS = business_config.REORDER_REMINDER_FRESH_DAYS
+    REORDER_REMINDER_LIVE_ORDER_GRACE_DAYS = business_config.REORDER_REMINDER_LIVE_ORDER_GRACE_DAYS
+    REORDER_REMINDER_LOCAL_TIME = business_config.REORDER_REMINDER_LOCAL_TIME
+    ADMIN_UI_BASE_URL = business_config.ADMIN_UI_BASE_URL
+
     # Loyalty Program Configuration
     # Earning is DB-driven (LoyaltyProgram.uzs_per_point); this is the legacy
     # fallback ratio. Points redeem only via rewards — no points→UZS conversion.

@@ -99,6 +99,84 @@
         });
     }
 
+    // Reorder reminders (spec 2026-10-09 §8). The switch shows the EFFECTIVE value the
+    // preferences API publishes, and that value is the only thing that ever enables it: the
+    // switch starts disabled and stays so until a published value arrives. After a save it is
+    // redrawn from the server's answer, never from the clicked state (a customer's "off" over an
+    // admin's off changes nothing on the server, and the switch must show what is published). A
+    // save that fails, or that answers without a published value, puts the last published value
+    // back. This is the only place the page sends the field; the server names the route from the
+    // X-Platform header apiRequest adds.
+    var reorderSwitch = document.getElementById('reorderRemindersSwitch');
+    if (reorderSwitch) {
+        var publishedReorder = null;
+
+        // Draws a published state. Returns false, drawing nothing, when there is none.
+        var renderReorderReminders = function (state) {
+            if (!state) {
+                return false;
+            }
+            publishedReorder = state;
+            reorderSwitch.checked = !!state.enabled;
+            reorderSwitch.disabled = false;
+            return true;
+        };
+
+        var revertReorderReminders = function () {
+            renderReorderReminders(publishedReorder);
+        };
+
+        var failReorderSave = function () {
+            revertReorderReminders();
+            showNotification(PAGE_DATA.i18n.reorder_reminders_failed, 'error');
+        };
+
+        var loadReorderReminders = async function () {
+            try {
+                var response = await apiRequest('/notifications/preferences', { method: 'GET' });
+                if (!response.ok) {
+                    return;
+                }
+                var result = await response.json();
+                renderReorderReminders(result.data.preferences.reorder_reminders);
+            } catch (error) {
+                showNotification(PAGE_DATA.i18n.network_error, 'error');
+            }
+        };
+
+        reorderSwitch.addEventListener('change', async function () {
+            var wanted = reorderSwitch.checked;
+            var hadFocus = document.activeElement === reorderSwitch;
+            reorderSwitch.disabled = true;
+            try {
+                var response = await apiRequest('/notifications/preferences', {
+                    method: 'PUT',
+                    body: JSON.stringify({ reorder_reminders_enabled: wanted })
+                });
+                if (!response.ok) {
+                    failReorderSave();
+                    return;
+                }
+                var result = await response.json();
+                if (!renderReorderReminders(result.data.preferences.reorder_reminders)) {
+                    failReorderSave();
+                    return;
+                }
+                showNotification(PAGE_DATA.i18n.reorder_reminders_saved, 'success');
+            } catch (error) {
+                revertReorderReminders();
+                showNotification(PAGE_DATA.i18n.network_error, 'error');
+            } finally {
+                // A disabled control drops keyboard focus; give it back once it is usable again.
+                if (hadFocus && !reorderSwitch.disabled) {
+                    reorderSwitch.focus();
+                }
+            }
+        });
+
+        loadReorderReminders();
+    }
+
     var resendEmailBtn = document.querySelector('[data-action="resend-email-verification"]');
     if (resendEmailBtn) {
         resendEmailBtn.addEventListener('click', resendEmailVerification);

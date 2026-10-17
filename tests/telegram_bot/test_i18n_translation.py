@@ -39,6 +39,38 @@ class TestTranslation:
 
         assert tr.get("telegram.greeting", "en", name="Umar") == "Hello Umar!"
 
+    def test_renderer_returns_what_get_returns_for_its_language(self):
+        tr = Translation()
+        tr.translations = {
+            "en": {"telegram.greeting": "Hello {name}!"},
+            "ru": {"telegram.greeting": "Здравствуйте, {name}!"},
+        }
+
+        render = tr.renderer("ru-RU")
+
+        assert render("telegram.greeting", name="Umar") == "Здравствуйте, Umar!"
+        assert render("telegram.greeting", name="Umar") == tr.get("telegram.greeting", "ru-RU", name="Umar")
+
+    def test_renderer_fills_a_placeholder_named_key(self):
+        """`key` is positional-only, as in `get`: a copy placeholder called `{key}` is a value like
+        any other and must not collide with the lookup key."""
+        tr = Translation()
+        tr.translations = {"en": {"telegram.some_key": "Code: {key}"}}
+
+        rendered = tr.renderer("en")("telegram.some_key", key="x")
+
+        assert rendered == "Code: x"
+        assert rendered == tr.get("telegram.some_key", "en", key="x")
+
+    def test_renderer_resolves_get_at_call_time(self):
+        tr = Translation()
+        tr.translations = {"en": {"telegram.hello": "Hello"}}
+        render = tr.renderer("en")
+
+        tr.get = lambda key, language, **values: f"patched:{key}:{language}"
+
+        assert render("telegram.hello") == "patched:telegram.hello:en"
+
     def test_check_completeness_reports_missing_keys_and_critical_gaps(self):
         tr = Translation()
         tr.supported_languages = ["en", "uz", "ru"]

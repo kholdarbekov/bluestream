@@ -35,6 +35,7 @@ import {
 } from '@ant-design/icons';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 import dayjs from 'dayjs';
 import { formatDate } from '../utils/dateUtils';
 import { formatMoneyUZS } from '../utils/formatMoney';
@@ -45,6 +46,8 @@ import PieChart from '../components/charts/PieChart';
 import adminService from '../services/adminService';
 import salesService from '../services/salesService';
 import exportUtils from '../utils/exportUtils';
+import { useAuthStore } from '../stores/authStore';
+import { LAPSED_CUSTOMERS_SUMMARY_KEY } from '../utils/constants';
 
 const { Option } = Select;
 const { RangePicker } = DatePicker;
@@ -196,8 +199,8 @@ const buildExportRows = (activeTab, overviewData, salesTrends, churnData, delive
       'Customer Type': c.entity_subtype || c.customer_type,
       'Total Orders': c.total_orders,
       'Total Spent': c.total_spent,
-      'Last Order': c.never_ordered ? 'Never' : c.last_order_date,
-      'Days Since Last Order': c.days_since_last_order
+      'Last Delivery': c.never_ordered ? 'Never' : c.last_order_date,
+      'Days Since Last Delivery': c.days_since_last_order
     }));
   }
 
@@ -231,6 +234,8 @@ const Analytics = () => {
   const [includeNeverOrdered, setIncludeNeverOrdered] = useState(true);
   const [inactivePage, setInactivePage] = useState(1);
   const [inactivePerPage, setInactivePerPage] = useState(50);
+  const { hasPermission } = useAuthStore();
+  const canManageLapsedCustomers = hasPermission('can_manage_lapsed_customers');
 
   const startDate = dateRange?.[0]?.format('YYYY-MM-DD');
   const endDate = dateRange?.[1]?.format('YYYY-MM-DD');
@@ -239,6 +244,17 @@ const Analytics = () => {
     start_date: startDate,
     end_date: endDate
   };
+
+  // D17: the two lapse cards show the reminder service's counts, read through the same cache entry
+  // as the Lapsed customers page and its nav badge (which polls it); no JS arithmetic, no timer here.
+  const { data: lapsedSummary } = useQuery({
+    queryKey: LAPSED_CUSTOMERS_SUMMARY_KEY,
+    queryFn: () => adminService.getReorderReminderSummary(),
+    enabled: canManageLapsedCustomers,
+    staleTime: 30_000,
+  });
+  // Absent while loading and when the read failed: a card must never show 0 for "unknown".
+  const lapsedCounts = lapsedSummary?.counts;
 
   const { data: analyticsData = {}, isLoading } = useQuery({
     queryKey: ['analytics', timeframe, startDate, endDate],
@@ -364,16 +380,12 @@ const Analytics = () => {
     labels: [
       t('ui.analytics.segment_new'),
       t('ui.analytics.segment_active'),
-      t('ui.analytics.segment_loyal'),
-      t('ui.analytics.segment_at_risk'),
-      t('ui.analytics.segment_inactive')
+      t('ui.analytics.segment_loyal')
     ],
     values: [
       analyticsData.customer_segments?.new || 0,
       analyticsData.customer_segments?.active || 0,
-      analyticsData.customer_segments?.loyal || 0,
-      analyticsData.customer_segments?.at_risk || 0,
-      analyticsData.customer_segments?.inactive || 0
+      analyticsData.customer_segments?.loyal || 0
     ]
   };
 
@@ -391,11 +403,6 @@ const Analytics = () => {
     items.push({
       title: t('ui.analytics.growth_rate'),
       description: `${(analyticsData.growth_rate || 0).toFixed(1)}% revenue growth for the selected range.`
-    });
-
-    items.push({
-      title: t('ui.analytics.customer_segments'),
-      description: `${analyticsData.customer_segments?.at_risk || 0} customers currently look at risk.`
     });
 
     items.push({
@@ -589,14 +596,16 @@ const Analytics = () => {
       render: (v) => formatMoneyUZS(v ?? 0)
     },
     {
-      title: t('ui.analytics.last_order'),
+      // The backend measures the last DELIVERY of the customer's linked-account cluster (reorder
+      // reminders spec §9.3); the payload keys keep their `*_order*` names.
+      title: t('ui.analytics.last_delivery', 'Last Delivery'),
       dataIndex: 'last_order_date',
       key: 'last_order_date',
       width: 140,
       render: (d, r) => (r.never_ordered ? <Tag>{t('ui.analytics.never')}</Tag> : formatDate(d))
     },
     {
-      title: t('ui.analytics.days_since_last_order', { defaultValue: 'Days Since Last Order' }),
+      title: t('ui.analytics.days_since_last_delivery', 'Days Since Last Delivery'),
       dataIndex: 'days_since_last_order',
       key: 'days_since_last_order',
       width: 160
@@ -740,6 +749,36 @@ const Analytics = () => {
               </Card>
             </Col>
           </Row>
+
+          {canManageLapsedCustomers && lapsedCounts ? (
+            <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+              <Col xs={24} sm={12}>
+                <Link to="/lapsed-customers" title={t('ui.lapsed.open_list', 'Open Lapsed customers')}>
+                  <Card hoverable>
+                    <div data-testid="analytics-being-reminded">
+                      <Statistic
+                        title={t('ui.lapsed.tab.reminding', 'Being reminded')}
+                        value={lapsedCounts.reminding}
+                      />
+                    </div>
+                  </Card>
+                </Link>
+              </Col>
+              <Col xs={24} sm={12}>
+                <Link to="/lapsed-customers" title={t('ui.lapsed.open_list', 'Open Lapsed customers')}>
+                  <Card hoverable>
+                    <div data-testid="analytics-needs-follow-up">
+                      <Statistic
+                        title={t('ui.lapsed.tab.follow_up', 'Needs follow-up')}
+                        value={lapsedCounts.follow_up}
+                        prefix={<WarningOutlined />}
+                      />
+                    </div>
+                  </Card>
+                </Link>
+              </Col>
+            </Row>
+          ) : null}
 
           <Row gutter={[16, 16]}>
             <Col xs={24} lg={16}>

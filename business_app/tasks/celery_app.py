@@ -37,6 +37,20 @@ def _digest_crontab(raw):
     return crontab(hour=int(parts[0]), minute=int(parts[1]))
 
 
+def _reorder_reminder_crontab(config):
+    """`REORDER_REMINDER_LOCAL_TIME` as a beat crontab, read LENIENTLY (spec §11).
+
+    The opposite choice from `_digest_crontab`, on purpose: `ReminderConfig` validates the value
+    (09:00–15:59, so the sends and their retries finish before PP-265's 18:00) and logs and replaces
+    a bad one with 10:00, because a typo in a reminder knob must not take the whole beat schedule,
+    backups included, down with it.
+    """
+    from business_app.services.reorder_reminders.config import ReminderConfig
+
+    run_time = ReminderConfig.from_mapping(config).local_time
+    return crontab(hour=run_time.hour, minute=run_time.minute)
+
+
 _flask_app = None
 
 
@@ -72,6 +86,7 @@ def make_celery(app=None):
             "business_app.tasks.customer_link_tasks",
             "business_app.tasks.sales_agent_tasks",
             "business_app.tasks.heartbeat_tasks",
+            "business_app.tasks.reorder_reminder_tasks",
         ],
     )
 
@@ -255,6 +270,18 @@ def make_celery(app=None):
             "task": "sales.notify_managers_exception_summary",
             "schedule": crontab(hour=8, minute=0),
         },
+        # Lapsed-customer reorder reminders (spec 2026-10-09 §12), once a day at the owner's LOCAL
+        # time (REORDER_REMINDER_LOCAL_TIME, default 10:00; celery.conf.timezone is DISPLAY_TIMEZONE).
+        # WHY: the run sends at most two reminders per lapse and only inside 09:00–18:00, so it must
+        # start early enough for the send tasks and their retries to finish before 18:00. It runs in
+        # every mode: `off` still closes worklist rows whose customers reordered. The time is read
+        # leniently, unlike the agents' digest: a typo falls back to 10:00 instead of aborting
+        # every beat entry.
+        "reorder-reminders-daily": {
+            "task": "reminders.run_daily",
+            "schedule": _reorder_reminder_crontab(app.config),
+            "options": {"time_limit": 1800},
+        },
         # Cancel orders left PENDING and unpaid for 24h. Hourly, offset from
         # the :00 tasks. See the design spec §5.2 — this task had never run.
         "cancel-abandoned-orders": {
@@ -326,22 +353,9 @@ def make_celery(app=None):
             "schedule": crontab(hour=8, minute=30, day_of_week=1),  # Monday at 8:30 AM
             "options": {"time_limit": 3600},
         },
-        # Weekly churn-risk report emailed to admins/ops. Previously held back
-        # -- AnalyticsService._calculate_churn_from_stats mixed a plain float
-        # with a Decimal (weighted-sum TypeError) and separately subtracted a
-        # timezone-aware "now" from a possibly-naive stored datetime; both are
-        # fixed (float coercion + ensure_utc()) -- see
-        # tests/unit/test_admin_report_tasks_wiring.py.
-        "generate-churn-prediction-report": {
-            "task": "business_app.tasks.analytics_tasks.generate_churn_prediction_report",
-            "schedule": crontab(hour=8, minute=45, day_of_week=1),  # Monday at 8:45 AM
-            "options": {"time_limit": 3600},
-        },
-        # Update customer segments monthly
-        "update-customer-segments": {
-            "task": "business_app.tasks.analytics_tasks.update_customer_segments",
-            "schedule": crontab(hour=3, minute=0, day_of_month=1),  # 1st day of month at 3 AM
-        },
+        # The weekly churn_alert report and the monthly customer-segments job were retired by the
+        # reorder-reminders spec (D9): lapsed customers now reach staff through the Lapsed
+        # customers worklist and its morning digest (`reminders.run_daily`).
         # Clean up old audit logs weekly (Sunday at 3 AM)
         # Configuration can be overridden via environment variables:
         # - AUDIT_LOG_RETENTION_DAYS (default: 90)
@@ -575,6 +589,8 @@ celery.conf.task_annotations = {
     # Payment processing
     "business_app.tasks.payment_tasks.process_payment_webhook": {"rate_limit": "60/m"},
     "business_app.tasks.payment_tasks.retry_failed_payments": {"rate_limit": "10/m"},
+    # Reorder reminders: about ten sends a second per worker, well under Telegram's ~30 msg/s.
+    "reminders.send_reminder": {"rate_limit": "10/s"},
 }
 
 

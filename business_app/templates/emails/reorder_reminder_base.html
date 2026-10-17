@@ -1,0 +1,34 @@
+{% extends "emails/base.html" %}
+{#
+  The reorder reminder email, ONE layout for uz/ru/en (spec 2026-10-09 §7.4).
+
+  Every visible sentence arrives pre-rendered in template_data from the SAME seeded rows the
+  Telegram message uses (business_app/services/reorder_reminders/messaging.py
+  ::email_template_data via shared/reorder_reminder_copy.py), so the copy has one store and one
+  native-speaker review. The per-language files only extend this one.
+
+  The links arrive built too (`shop_url`, `unsubscribe_url`), on ONE spelling of the website
+  base (tokens.site_url), so a trailing slash in COMPANY_WEBSITE can never double up here.
+
+  The footer is overridden: no tel: link (customers are pointed to the bot chat, never a
+  phone) and no dead "update your preferences" line. The one opt-out is the signed unsubscribe
+  link, the same URL the List-Unsubscribe header carries.
+#}
+
+{% block content %}
+<p>{{ statement }}</p>
+<p>{{ cta_line }}</p>
+<p style="text-align: center;">
+    <a href="{{ shop_url }}" class="btn-primary">{{ btn_website }}</a>
+    <a href="{{ company_telegram_bot_url }}" class="btn-primary">{{ btn_telegram }}</a>
+</p>
+{% endblock %}
+
+{% block footer %}
+<p>&copy; {{ current_year }} {{ company_name }}</p>
+<p><a href="{{ company_telegram_bot_url }}">{{ company_telegram_bot_url }}</a></p>
+<hr class="divider">
+<p style="font-size: 11px; color: #94a3b8;">
+    <a href="{{ unsubscribe_url }}">{{ unsubscribe_line }}</a>
+</p>
+{% endblock %}

@@ -12,12 +12,17 @@ the genuine constraints fire exactly as they do in production. Use these for
 constraint / invariant enforcement tests; keep the fast SQLite fixtures for the
 bulk of behavioural edge cases.
 
+Each xdist worker migrates ONE template database (``migrated_pg_template``) and
+every test gets a copy of it: ``CREATE DATABASE … TEMPLATE`` costs ~0.3 s where
+replaying all migrations into an empty database cost ~2 s, across ~1,400 tests.
+
 Tests are skipped (not failed) when no Postgres DSN is reachable, so the suite
 still runs anywhere.
 """
 
 import os
 import uuid
+from contextlib import contextmanager
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -31,6 +36,11 @@ REQUIRES_PG_REASON = (
     "Postgres-backed integration test requires a Postgres DATABASE_URL "
     "with permission to CREATE/DROP databases."
 )
+
+# Every database a test creates is named under this prefix, so
+# scripts/precommit-backend-tests.sh can drop the ones an interrupted run leaked
+# (a Ctrl-C skips fixture teardown) without ever touching a real database.
+TRANSIENT_DB_PREFIX = "pytest_"
 
 
 def _resolve_database_url() -> str:
@@ -50,27 +60,32 @@ def _admin_engine_for(database_url: str):
     return create_engine(admin_url, isolation_level="AUTOCOMMIT")
 
 
-@pytest.fixture
-def ephemeral_pg_database():
-    """Create a transient Postgres database, yield its URL, drop on teardown."""
+@contextmanager
+def transient_pg_database(name: str, template: str | None = None):
+    """CREATE a uniquely named database, yield its URL, DROP it on exit.
+
+    With ``template`` the new database is a copy of that one (see
+    ``migrated_pg_template``); without it the database is empty. Only an
+    unreachable server skips the test — a failing CREATE (e.g. a template that
+    still has a session open) raises, so a broken harness can never pass as a
+    wall of skips.
+    """
     base_url = _resolve_database_url()
     if not base_url.startswith(("postgresql://", "postgresql+", "postgres://")):
         pytest.skip(REQUIRES_PG_REASON)
 
     admin_engine = _admin_engine_for(base_url)
-    db_name = f"e2e_{uuid.uuid4().hex[:12]}"
-    quoted = f'"{db_name}"'
-
+    db_name = f"{TRANSIENT_DB_PREFIX}{name}_{uuid.uuid4().hex[:12]}"
     try:
-        with admin_engine.connect() as conn:
-            conn.execute(text(f"CREATE DATABASE {quoted}"))
+        conn = admin_engine.connect()
     except OperationalError as exc:
         admin_engine.dispose()
         pytest.skip(f"Postgres unreachable for integration test: {exc.orig}")
+    with conn:
+        conn.execute(text(f'CREATE DATABASE "{db_name}"' + (f' TEMPLATE "{template}"' if template else "")))
 
-    target_url = make_url(base_url).set(database=db_name).render_as_string(hide_password=False)
     try:
-        yield target_url
+        yield make_url(base_url).set(database=db_name).render_as_string(hide_password=False)
     finally:
         with admin_engine.connect() as conn:
             conn.execute(
@@ -80,8 +95,50 @@ def ephemeral_pg_database():
                 ),
                 {"db": db_name},
             )
-            conn.execute(text(f"DROP DATABASE IF EXISTS {quoted}"))
+            conn.execute(text(f'DROP DATABASE IF EXISTS "{db_name}"'))
         admin_engine.dispose()
+
+
+def _pg_app_config(database_url: str) -> dict:
+    return {
+        "TESTING": True,
+        "SQLALCHEMY_DATABASE_URI": database_url,
+        "SQLALCHEMY_TRACK_MODIFICATIONS": False,
+        "SECRET_KEY": "test-secret-key-for-pg-e2e-32-characters",
+        "JWT_SECRET_KEY": "test-jwt-secret-key-for-pg-e2e",
+        "CELERY_ALWAYS_EAGER": True,
+        "WTF_CSRF_ENABLED": False,
+    }
+
+
+@pytest.fixture(scope="session")
+def migrated_pg_template():
+    """Name of a database holding the REAL migration chain, built once per worker.
+
+    Only ever used as a ``CREATE DATABASE … TEMPLATE`` source. Postgres refuses
+    to copy a database that has a session open, so the migrating app's pool is
+    disposed before anything clones it.
+    """
+    from flask_migrate import upgrade
+
+    from business_app import create_app, db
+
+    with transient_pg_database("template") as url:
+        app = create_app(_pg_app_config(url))
+        with app.app_context():
+            upgrade(revision="head")
+            db.session.remove()
+            db.engine.dispose()
+        yield make_url(url).database
+
+
+@pytest.fixture
+def ephemeral_pg_database(migrated_pg_template):
+    """URL of a transient, fully-migrated Postgres database (a fresh copy of the
+    worker's template), dropped on teardown. ``pg_app`` is bound to this same
+    database, so a test can open its own raw connections to it."""
+    with transient_pg_database("e2e", template=migrated_pg_template) as url:
+        yield url
 
 
 @pytest.fixture
@@ -93,22 +150,10 @@ def pg_app(ephemeral_pg_database):
     app context for the test body.
     """
     from business_app import create_app
-    from flask_migrate import upgrade
 
-    app = create_app(
-        {
-            "TESTING": True,
-            "SQLALCHEMY_DATABASE_URI": ephemeral_pg_database,
-            "SQLALCHEMY_TRACK_MODIFICATIONS": False,
-            "SECRET_KEY": "test-secret-key-for-pg-e2e-32-characters",
-            "JWT_SECRET_KEY": "test-jwt-secret-key-for-pg-e2e",
-            "CELERY_ALWAYS_EAGER": True,
-            "WTF_CSRF_ENABLED": False,
-        }
-    )
+    app = create_app(_pg_app_config(ephemeral_pg_database))
 
     with app.app_context():
-        upgrade(revision="head")
         yield app
 
 
@@ -159,6 +204,15 @@ def no_fiscalization(monkeypatch):
         lambda self, payment_id: None,
         raising=True,
     )
+
+
+@pytest.fixture
+def analytics_configured(app, monkeypatch):
+    """GA4 and Yandex Metrica IDs set, as production sets them, so base.html renders both page-view
+    snippets. Returns the markers that betray either snippet in a rendered page."""
+    monkeypatch.setitem(app.config, "GA4_MEASUREMENT_ID", "G-TESTTOKEN1")
+    monkeypatch.setitem(app.config, "YANDEX_METRICA_ID", "98765432")
+    return ("googletagmanager", "gtag(", "G-TESTTOKEN1", "mc.yandex.ru", "ym(", "98765432")
 
 
 @pytest.fixture

@@ -32,6 +32,7 @@ import Visits from './pages/Visits';
 import SalesCompensation from './pages/SalesCompensation';
 import PenaltyProposals from './pages/PenaltyProposals';
 import SalesOrderApprovals from './pages/SalesOrderApprovals';
+import LapsedCustomers from './pages/LapsedCustomers';
 import StaffManagement from './pages/StaffManagement';
 import Prepayments from './pages/Prepayments';
 import MarkingCodeOperations from './pages/MarkingCodeOperations';
@@ -60,6 +61,16 @@ function App() {
                   <Route path="/" element={<Navigate to="/dashboard" />} />
                   <Route path="/dashboard" element={<Dashboard />} />
                   <Route path="/users" element={<Users />} />
+                  {/* Reorder-reminders spec §9.1: admins and managers (`can_manage_lapsed_customers`).
+                      The path is the one the morning digest's link names (digest.WORKLIST_PATH). */}
+                  <Route
+                    path="/lapsed-customers"
+                    element={(
+                      <PermissionGuard permission="can_manage_lapsed_customers" fallback={<Navigate to="/dashboard" replace />}>
+                        <LapsedCustomers />
+                      </PermissionGuard>
+                    )}
+                  />
                   <Route path="/orders" element={<Orders />} />
                   <Route path="/subscriptions" element={<Subscriptions />} />
                   <Route path="/corporate-contracts" element={<CorporateContracts />} />

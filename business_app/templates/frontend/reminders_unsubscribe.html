@@ -1,0 +1,38 @@
+{% extends "frontend/base.html" %}
+
+{# Every string is `|t(page_language)`: with a literal key and no language Jinja would fold the
+   lookup into the compiled (per-worker cached) template, in the first visitor's language. #}
+{% block title %}{{ 'reorder_unsubscribe.title'|t(page_language) }} - {{ company_name }}{% endblock %}
+
+{% block content %}
+        <section class="contact-section">
+            <div class="auto-container">
+                <div class="row clearfix">
+                    <div class="col-lg-8 col-md-12 col-sm-12 offset-lg-2">
+                        <div class="sec-title centred" data-unsubscribe-state="{{ state }}">
+                            <h2>{{ 'reorder_unsubscribe.title'|t(page_language) }}</h2>
+                            {% if state == 'confirm' %}
+                            <p>{{ 'reorder_unsubscribe.confirm_text'|t(page_language) }}</p>
+                            <form method="post" action="{{ url_for('frontend.reminders_unsubscribe_post', token=token, lang=page_language) }}">
+                                <button type="submit" class="theme-btn btn-one" data-action="unsubscribe">{{ 'reorder_unsubscribe.confirm_button'|t(page_language) }}</button>
+                            </form>
+                            {% elif state == 'done' %}
+                            <p>{{ 'reorder_unsubscribe.done_text'|t(page_language) }}</p>
+                            {# No undo_token: this click changed nothing (already off), so there is nothing to undo. #}
+                            {% if undo_token %}
+                            <form method="post" action="{{ url_for('frontend.reminders_unsubscribe_undo', undo_token=undo_token, lang=page_language) }}">
+                                <button type="submit" class="theme-btn btn-one" data-action="undo">{{ 'reorder_unsubscribe.undo_button'|t(page_language) }}</button>
+                            </form>
+                            {% endif %}
+                            {% elif state == 'undone' %}
+                            <p>{{ 'reorder_unsubscribe.undone_text'|t(page_language) }}</p>
+                            {% else %}
+                            <p>{{ 'reorder_unsubscribe.expired_text'|t(page_language) }}</p>
+                            {% endif %}
+                            <p><a href="{{ external_url_for_lang('frontend.index', lang=page_language) }}">{{ 'reorder_unsubscribe.home_link'|t(page_language) }}</a></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+{% endblock %}

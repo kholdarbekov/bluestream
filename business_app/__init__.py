@@ -73,6 +73,8 @@ def register_blueprints(app: Flask):
     from business_app.api.staff_tryouts import staff_tryouts_bp
     from business_app.api.staff_sales import staff_sales_bp
     from business_app.api.support import support_bp
+    from business_app.api.reorder_reminders import reorder_reminders_bp
+    from business_app.api.admin_reorder_reminders import admin_reorder_reminders_bp
     from business_app.frontend import frontend_bp
 
     # API blueprints
@@ -102,6 +104,8 @@ def register_blueprints(app: Flask):
     app.register_blueprint(staff_tryouts_bp, url_prefix=f"{api_prefix}/staff")
     app.register_blueprint(staff_sales_bp, url_prefix=f"{api_prefix}/staff")
     app.register_blueprint(support_bp, url_prefix=f"{api_prefix}/support")
+    app.register_blueprint(reorder_reminders_bp, url_prefix=f"{api_prefix}/reorder-reminders")
+    app.register_blueprint(admin_reorder_reminders_bp, url_prefix=f"{api_prefix}/admin")
     app.register_blueprint(frontend_bp)
 
 
@@ -155,6 +159,13 @@ def register_cli_commands(app):
     init_cli(app)
 
 
+# Frontend pages a LINK opens in the language the link names (`?lang=`), whatever the visitor's
+# browser prefers: the reorder-reminder email's unsubscribe page. The hook below strips the default
+# language from a frontend URL with a 301 and then picks the language from the session or
+# Accept-Language, which would show an Uzbek email's page in the browser's language.
+FRONTEND_LINK_LANGUAGE_ENDPOINTS = frozenset({"frontend.reminders_unsubscribe"})
+
+
 def setup_request_handlers(app):
     """Setup request context handlers"""
 
@@ -198,6 +209,7 @@ def setup_request_handlers(app):
             and request.endpoint.startswith("frontend.")
             and not request.path.startswith("/api/")
             and url_lang == default_language
+            and request.endpoint not in FRONTEND_LINK_LANGUAGE_ENDPOINTS
         ):
             parsed_url = urlsplit(request.url)
             filtered_query = [
@@ -578,9 +590,11 @@ def create_app(config_class=None):
     from business_app.utils.payment_confirmation_dispatch import (
         register_payment_confirmation_dispatch,
     )
+    from business_app.utils.reorder_reminder_dispatch import register_reorder_reminder_dispatch
 
     register_loyalty_award_dispatch(db)
     register_payment_confirmation_dispatch(db)
+    register_reorder_reminder_dispatch(db)
     migrate.init_app(app, db, directory="business_app/migrations")
     jwt.init_app(app)
     cors.init_app(app, origins=app.config["CORS_ORIGINS"], supports_credentials=True)

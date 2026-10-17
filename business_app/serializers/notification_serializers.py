@@ -464,6 +464,10 @@ def serialize_notification_preferences(preferences) -> Dict[str, Any]:
                 "delivery_telegram_status_updates_enabled",
                 True,
             ),
+            # Spec 2026-10-09 §8: the EFFECTIVE reorder-reminder setting across the customer's
+            # linked accounts, with its source, exactly as NotificationService.reorder_reminders_view
+            # published it (without the admin's staff-only `reason`). Passed through, never re-shaped.
+            "reorder_reminders": preferences.reorder_reminders,
             # Category preferences
             "order_notifications": preferences.order_notifications,
             "delivery_notifications": preferences.delivery_notifications,
@@ -497,6 +501,7 @@ def serialize_notification_preferences(preferences) -> Dict[str, Any]:
                 "delivery_telegram_status_updates_enabled",
                 True,
             ),
+            "reorder_reminders": getattr(preferences, "reorder_reminders", None),
         }
 
 

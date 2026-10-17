@@ -3066,11 +3066,11 @@ def test_a_stranded_own_scope_row_for_a_grouped_address_is_invisible_to_the_driv
     app, db, http
 ):
     """DOCUMENTING A PRE-PLAN-C DATA SHAPE (the one case where the balance ROW is
-    the subject). ``get_customer_scopes`` builds ``solo_ids`` only from addresses
-    whose ``address_group_id IS NULL``, so a leftover own-scope row belonging to
-    an address that IS grouped matches neither clause: the driver is offered the
-    group's figure and the stranded bottles are unreachable from every staff
-    surface. §7.2's absorb closes this AT JOIN TIME, which is why the row is
+    the subject). ``get_customer_scopes`` (through ``get_customer_scopes_by_user``)
+    builds ``user_by_solo`` only from addresses whose ``address_group_id IS NULL``,
+    so a leftover own-scope row belonging to an address that IS grouped matches
+    neither clause: the driver is offered the group's figure and the stranded
+    bottles are unreachable from every staff surface. §7.2's absorb closes this AT JOIN TIME, which is why the row is
     built here by hand — a join can no longer produce it."""
     admin = _staff(db, UserRole.ADMIN)
     driver = _staff(db, UserRole.DELIVERY_DRIVER)

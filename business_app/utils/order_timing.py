@@ -4,6 +4,8 @@
   DELIVERED row in `order_status_history`, per order. `orders` has no delivered column, and
   `update_order_status` is the only writer that always leaves that row; an admin-marked delivery
   leaves `actual_delivery_time` NULL. Sales-agent pay and the outlet stage job read it.
+  `delivered_order_instants_select` is its composable SQL twin (spec 2026-10-09 §4, §9.3) for
+  queries that join on it; both start from the one block `_latest_delivered_rows`.
 * `delivered_at_utc` anchors the post-delivery EDIT windows (order-item edits and collected-cash
   edits). It answers differently for an admin-marked delivery, and it stays that way: moving the
   edit window onto the history row would change those orders' 72 h window.
@@ -12,16 +14,34 @@
 from datetime import datetime, timezone
 from typing import Dict, Iterable, Optional
 
-from sqlalchemy import func
+from sqlalchemy import Select, func, select
 
 from business_app import db
-from business_app.models.order import OrderStatusHistory
+from business_app.models.order import Order, OrderStatusHistory
 from business_app.utils.timezone_utils import ensure_utc
 from shared.enums import OrderStatus
 
 # Ids per `IN` list. A sync over a busy agent's lookback can pass thousands of ids; one statement
 # per chunk keeps every bind list well inside the drivers' limits.
 DELIVERED_INSTANTS_CHUNK = 500
+
+
+def _latest_delivered_rows() -> Select:
+    """THE delivered-instant building block: `(order_id, delivered_at)`, one row per order that has
+    a DELIVERED history row, dated by the LATEST one (`max(changed_at)`).
+
+    A re-delivered order carries two DELIVERED rows and the first would date a delivery the
+    customer no longer has. Both public readers below start from this block and neither restates
+    it (tests/unit/test_order_timing_delivered_instants.py pins the single spelling).
+    """
+    return (
+        select(
+            OrderStatusHistory.order_id.label("order_id"),
+            func.max(OrderStatusHistory.changed_at).label("delivered_at"),
+        )
+        .where(OrderStatusHistory.new_status == OrderStatus.DELIVERED)
+        .group_by(OrderStatusHistory.order_id)
+    )
 
 
 def delivered_instants_by_order(order_ids: Iterable[int]) -> Dict[int, datetime]:
@@ -36,18 +56,35 @@ def delivered_instants_by_order(order_ids: Iterable[int]) -> Dict[int, datetime]
     ids = sorted({int(order_id) for order_id in order_ids})
     instants: Dict[int, datetime] = {}
     for offset in range(0, len(ids), DELIVERED_INSTANTS_CHUNK):
-        rows = (
-            db.session.query(OrderStatusHistory.order_id, func.max(OrderStatusHistory.changed_at))
-            .filter(
-                OrderStatusHistory.order_id.in_(ids[offset : offset + DELIVERED_INSTANTS_CHUNK]),
-                OrderStatusHistory.new_status == OrderStatus.DELIVERED,
-            )
-            .group_by(OrderStatusHistory.order_id)
-            .all()
-        )
+        chunk = ids[offset : offset + DELIVERED_INSTANTS_CHUNK]
+        rows = db.session.execute(_latest_delivered_rows().where(OrderStatusHistory.order_id.in_(chunk))).all()
         for order_id, changed_at in rows:
             instants[order_id] = ensure_utc(changed_at)
     return instants
+
+
+def delivered_order_instants_select() -> Select:
+    """Every order that is STILL delivered, with its delivered instant, as one composable SELECT.
+
+    Columns `order_id, user_id, delivery_address_id, delivered_at` (`delivered_at` comes back naive
+    on SQLite: callers pass it through `ensure_utc`). Restricted to `Order.status == DELIVERED`,
+    the question `ReplenishmentService.delivered_instants` already asks; callers add their own
+    `.where(...)` (whose orders, which addresses). The inner join drops a legacy delivered order
+    that has no DELIVERED history row, so it is never counted with a NULL date (Review Focus 2).
+    The instant is `_latest_delivered_rows`'s, the block `delivered_instants_by_order` reads, so
+    the two readers cannot disagree.
+    """
+    latest = _latest_delivered_rows().subquery("latest_delivered")
+    return (
+        select(
+            Order.id.label("order_id"),
+            Order.user_id.label("user_id"),
+            Order.delivery_address_id.label("delivery_address_id"),
+            latest.c.delivered_at.label("delivered_at"),
+        )
+        .join(latest, latest.c.order_id == Order.id)
+        .where(Order.status == OrderStatus.DELIVERED)
+    )
 
 
 def delivered_at_utc(order) -> Optional[datetime]:

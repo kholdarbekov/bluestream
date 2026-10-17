@@ -135,6 +135,11 @@ class SubscriptionStatus(Enum):
     TRIAL = 'trial'
 
 
+# A subscription that still supplies the customer: reorder reminders leave them alone (spec
+# 2026-10-09 §5 E4). The ~10 older inline `ACTIVE or PAUSED` checks are a §18 follow-up.
+LIVE_SUBSCRIPTION_STATUSES = frozenset({SubscriptionStatus.ACTIVE, SubscriptionStatus.PAUSED})
+
+
 class SubscriptionFrequency(Enum):
     """Subscription frequency enumeration"""
     DAILY = 'daily'

@@ -510,7 +510,7 @@ def test_the_manager_fan_out_skips_the_excluded_and_survives_a_bad_recipient(db,
 
     # The production signature, so a drifted call raises here instead of being swallowed.
     def fake(_self, user_id, notification_type, channels=None, template_data=None, priority="normal",
-             template_override=None, campaign_id=None):
+             template_override=None, campaign_id=None, email_headers=None):
         calls.append((user_id, notification_type, channels, template_data, template_override))
         if user_id == admin_user.id:
             raise RuntimeError("inbox write failed")

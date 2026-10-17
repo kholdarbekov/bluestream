@@ -4,7 +4,7 @@ Handles user account linking and synchronization between web app and Telegram bo
 """
 
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Tuple
 from sqlalchemy import or_
 
 from business_app import db
@@ -14,7 +14,7 @@ from shared.user_names import GENERATED_TELEGRAM_NAME
 from shared.validators import PLACEHOLDER_EMAIL_DOMAIN_LOCAL
 from business_app.services.telegram_reachability_service import TelegramReachabilityService
 from business_app.services.token_service import TokenService
-from business_app.services.loyalty_service import _invalidate_qualifying_points_memo
+from business_app.services.loyalty_service import LoyaltyService, _invalidate_qualifying_points_memo
 
 logger = logging.getLogger(__name__)
 
@@ -270,6 +270,8 @@ class CrossPlatformSyncService:
 
         primary_points = LoyaltyPoints.query.filter_by(user_id=primary_id).first()
 
+        dropped_welcome, spent_welcome = self._drop_duplicate_welcome_bonus(primary_id, secondary_id)
+
         # The ledger is the single source of truth for the balance — always move
         # the secondary user's lots onto the primary so none are orphaned when
         # the secondary user is deleted.
@@ -296,11 +298,38 @@ class CrossPlatformSyncService:
             primary_points = secondary_points
             db.session.flush()
 
+        if dropped_welcome:
+            primary_points.total_earned = (primary_points.total_earned or 0) - dropped_welcome
+        if spent_welcome:
+            # Points already spent from the dropped lot stay spent: redraw them FIFO.
+            LoyaltyService()._consume_lots_fifo(primary_id, spent_welcome)
+
         # Recompute the cached balance from the merged ledger (SSOT).
         primary_points.calculate_current_balance()
 
         db.session.flush()
         logger.info(f"Merged loyalty membership from user {secondary_id} to user {primary_id}")
+
+    def _drop_duplicate_welcome_bonus(self, primary_id: int, secondary_id: int) -> Tuple[int, int]:
+        """Delete the secondary's welcome-bonus lots when the primary already has one,
+        so a merged account never holds two. Returns (points dropped, points already
+        spent from them that must be redrawn from the merged ledger)."""
+        if not LoyaltyService.get_welcome_bonus_lots(primary_id):
+            return 0, 0
+
+        dropped = spent = 0
+        for lot in LoyaltyService.get_welcome_bonus_lots(secondary_id):
+            dropped += lot.points
+            if not lot.is_expired:
+                spent += lot.points - (lot.remaining_points if lot.remaining_points is not None else lot.points)
+            db.session.delete(lot)
+
+        if dropped:
+            db.session.flush()
+            logger.info(
+                f"Dropped duplicate welcome bonus ({dropped} pts) of user {secondary_id} merging into {primary_id}"
+            )
+        return dropped, spent
 
     def _transfer_user_references(self, primary_id: int, secondary_id: int):
         """Transfer all foreign key references from secondary user to primary user."""

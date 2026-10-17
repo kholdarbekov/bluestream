@@ -125,6 +125,8 @@ def _request_memo(key: str) -> Optional[dict]:
     return memo
 
 
+WELCOME_BONUS_DESCRIPTION = "Welcome bonus"
+
 _TIER_LADDER_MEMO_KEY = "_loyalty_tier_ladder_memo"
 _QUALIFYING_POINTS_MEMO_KEY = "_loyalty_qualifying_points_memo"
 _LOYALTY_ACCOUNT_MEMO_KEY = "_loyalty_account_memo"
@@ -527,15 +529,27 @@ class LoyaltyService:
         if signup_bonus <= 0:
             return 0
 
-        already = LoyaltyTransaction.query.filter(
-            LoyaltyTransaction.user_id == user_id,
-            LoyaltyTransaction.transaction_type == LoyaltyTransactionType.BONUS,
-        ).all()
-        if any((t.extra_data or {}).get("action_type") == LoyaltyActionType.WELCOME_BONUS.value for t in already):
+        if self.get_welcome_bonus_lots(user_id):
             return 0
 
-        self.award_points(user_id, signup_bonus, "Welcome bonus", action_type=LoyaltyActionType.WELCOME_BONUS)
+        self.award_points(user_id, signup_bonus, WELCOME_BONUS_DESCRIPTION, action_type=LoyaltyActionType.WELCOME_BONUS)
         return signup_bonus
+
+    @staticmethod
+    def get_welcome_bonus_lots(user_id: int) -> List[LoyaltyTransaction]:
+        """The user's signup welcome-bonus rows, oldest first. Gifts and /earn-points
+        credits reuse the WELCOME_BONUS action_type, so the description is matched too;
+        action_type lives in JSON extra_data and is matched in Python for portability."""
+        bonuses = (
+            LoyaltyTransaction.query.filter(
+                LoyaltyTransaction.user_id == user_id,
+                LoyaltyTransaction.transaction_type == LoyaltyTransactionType.BONUS,
+                LoyaltyTransaction.description == WELCOME_BONUS_DESCRIPTION,
+            )
+            .order_by(LoyaltyTransaction.created_at.asc(), LoyaltyTransaction.id.asc())
+            .all()
+        )
+        return [t for t in bonuses if (t.extra_data or {}).get("action_type") == LoyaltyActionType.WELCOME_BONUS.value]
 
     def get_points_summary_for_user(self, user_id: int) -> Dict[str, Any]:
         """Get points summary payload for API.

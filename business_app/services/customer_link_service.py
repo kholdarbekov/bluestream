@@ -42,7 +42,19 @@ PLACE_GROUP_EVENT_TYPES = (
     "create_place_group",
     "add_to_place_group",
     "remove_from_place_group",
+    "rename_place_group",
 )
+
+# A place group needs at least this many addresses to exist. Create's minimum,
+# the dissolve-on-last-removal rule and the detail's `removal_dissolves_group`
+# all read this one number.
+MIN_PLACE_GROUP_ADDRESSES = 2
+
+
+def _place_group_survives(address_count: int) -> bool:
+    """The ONE rule for whether a place group with this many addresses still exists."""
+    return address_count >= MIN_PLACE_GROUP_ADDRESSES
+
 
 # Ids per IN list in the batched place reads below.
 _PLACE_BATCH = 500
@@ -656,11 +668,18 @@ class CustomerLinkService:
             "label": group.label,
             "place_balance": place_balance,
             "members": members,
+            # The server's answer to "would removing one address dissolve this
+            # place?" — the UI warns on it and never counts members itself.
+            "removal_dissolves_group": not _place_group_survives(len(addresses) - 1),
             "events": self.get_place_group_events(group_id),
         }
 
     def list_place_groups(self, page: int = 1, per_page: int = 20, search: Optional[str] = None) -> Dict[str, Any]:
-        """Every place group, paginated, with the exposure it carries.
+        """Every place group that still has a member, paginated, with the exposure it carries.
+
+        A dissolved group (no ``UserAddress`` points at it any more) is hidden
+        here and not counted in ``pagination.total``; its detail stays reachable
+        through ``get_place_group_detail``.
 
         The estate-wide counterpart to ``get_place_group_detail``. Until now the
         only way to reach a group was through one customer's detail modal
@@ -679,12 +698,12 @@ class CustomerLinkService:
         contributed two addresses renders "(4 members)". ``address_count`` is
         the separate figure, reported alongside it rather than conflated.
 
-        COD exposure comes from the PUBLIC reader
-        ``CashCollectionService.get_place_cod_debtor_rows``: ONE estate-wide
-        grouped query yielding both figures, instead of an N+1 of
+        COD exposure comes from ``CashCollectionService.get_place_cod_exposure_by_group``
+        — the same decision the admin customer map's place pins read: ONE
+        estate-wide grouped query yielding both figures, instead of an N+1 of
         ``get_place_open_cod_debt_total`` per rendered row. Both readers select
-        on exactly the same predicate (CASH payment, outstanding > 0, DELIVERED
-        order, ``delivery_address_id`` in the group), so a place absent from it
+        on exactly the same predicate (open receivable, DELIVERED order,
+        ``delivery_address_id`` in the group), so a place absent from it
         genuinely has no open delivered COD debt and renders 0.0 / 0.
 
         ``bottle_exposure`` is the OTHER half of what a place carries: what it
@@ -717,6 +736,15 @@ class CustomerLinkService:
         if text_query:
             query = query.filter(AddressGroup.label.ilike(f"%{text_query}%"))
 
+        # A dissolved group keeps its row (the detail route still resolves it),
+        # but it is no longer a place anyone can act on, so the list and its
+        # total both leave it out.
+        query = query.filter(
+            AddressGroup.id.in_(
+                db.session.query(UserAddress.address_group_id).filter(UserAddress.address_group_id.isnot(None))
+            )
+        )
+
         total = int(query.count())
         pages = (total + safe_per_page - 1) // safe_per_page
         pagination = {
@@ -748,11 +776,8 @@ class CustomerLinkService:
             .group_by(UserAddress.address_group_id)
             .all()
         }
-        # The reader clamps its own limit at 1000 and sorts by outstanding
-        # DESC, so a hypothetical estate with >1000 simultaneously-indebted
-        # places would render its smallest debts as 0. That ceiling belongs to
-        # the reader, which this task may not modify (engine firewall).
-        exposure = {row["place_group_id"]: row for row in CashCollectionService().get_place_cod_debtor_rows(limit=1000)}
+        # Its row ceiling and its miss rule (0.0 / 0) live in the helper.
+        exposure = CashCollectionService().get_place_cod_exposure_by_group()
         # ...and one more for the bottles the page's places are holding. Scoped
         # to THIS page's ids, so unlike the COD reader above it carries no
         # estate-wide ceiling.
@@ -761,7 +786,7 @@ class CustomerLinkService:
         items = []
         for group in groups:
             member_count, address_count = counts.get(group.id, (0, 0))
-            cod = exposure.get(group.id)
+            cod = exposure[group.id]
             items.append(
                 {
                     "id": group.id,
@@ -769,8 +794,8 @@ class CustomerLinkService:
                     "member_count": member_count,
                     "address_count": address_count,
                     # Already a float on the reader's side — do NOT re-wrap.
-                    "place_open_cod_debt_total": cod["total_outstanding_amount"] if cod else 0.0,
-                    "active_cod_debt_count": cod["active_cod_debt_count"] if cod else 0,
+                    "place_open_cod_debt_total": cod.total_outstanding_amount,
+                    "active_cod_debt_count": cod.active_cod_debt_count,
                     # What the place HOLDS, beside what it OWES. A ``Decimal``
                     # in the ledger, a JSON number here, and the miss is 0.0
                     # rather than a minted balance row.
@@ -1673,7 +1698,7 @@ class CustomerLinkService:
         """
         from business_app.services.bottle_tracking_service import BottleTrackingService
 
-        if len(set(address_ids)) < 2:
+        if len(set(address_ids)) < MIN_PLACE_GROUP_ADDRESSES:
             raise ValidationError(
                 "A place group needs at least two addresses",
                 error_code="PLACE_GROUP_MIN_ADDRESSES",
@@ -1774,11 +1799,7 @@ class CustomerLinkService:
             raise ValidationError("Place group not found", error_code="PLACE_GROUP_NOT_FOUND")
         if not address_ids:
             return group
-        if db.session.query(UserAddress.id).filter(UserAddress.address_group_id == group.id).first() is None:
-            raise ValidationError(
-                "This place group has no members and cannot be re-used; create a new place",
-                error_code="PLACE_GROUP_DISSOLVED",
-            )
+        self._assert_group_has_members(group)
         addresses = self._load_addresses(address_ids)
         self._assert_place_group_eligible(addresses)
 
@@ -1862,6 +1883,58 @@ class CustomerLinkService:
                 error_code="PLACE_SPLIT_INVALID",
             )
         return leaving.quantize(Decimal("0.01"))
+
+    @staticmethod
+    def _assert_group_has_members(group: AddressGroup) -> None:
+        """Refuse any edit of a memberless (dissolved) group; its row only survives for history."""
+        if db.session.query(UserAddress.id).filter(UserAddress.address_group_id == group.id).first() is None:
+            raise ValidationError(
+                "This place group has no members and cannot be re-used; create a new place",
+                error_code="PLACE_GROUP_DISSOLVED",
+            )
+
+    def rename_place_group(self, group_id: int, label: str, acting_admin_id: int, reason: str) -> AddressGroup:
+        """Change a place group's label; the old and new label land on the audit trail."""
+        from business_app.services.bottle_tracking_service import BottleTrackingService
+
+        if not (reason or "").strip():
+            raise ValidationError(
+                "A reason is required to rename a place group", error_code="PLACE_GROUP_REASON_REQUIRED"
+            )
+        new_label = (label or "").strip()
+        if not 1 <= len(new_label) <= 100:
+            raise ValidationError("Place label must be 1 to 100 characters", error_code="PLACE_GROUP_LABEL_INVALID")
+
+        BottleTrackingService._apply_scope_lock_timeout()
+        try:
+            group = self._lock_place_group(group_id)
+        except OperationalError as exc:
+            if BottleTrackingService._is_lock_not_available(exc):
+                self._raise_place_busy(group_id, exc)
+            raise
+        if group is None:
+            raise ValidationError("Place group not found", error_code="PLACE_GROUP_NOT_FOUND")
+        self._assert_group_has_members(group)
+
+        old_label = group.label
+        if old_label == new_label:
+            return group
+
+        group.label = new_label
+        marker = f' | "{old_label}" \u2192 "{new_label}"' if old_label else f' | \u2014 \u2192 "{new_label}"'
+        base = f"[group {group_id}] {reason.strip()}"
+        db.session.add(
+            CustomerLinkEvent(
+                event_type="rename_place_group",
+                canonical_customer_id=None,
+                acting_admin_id=acting_admin_id,
+                member_user_ids=self.get_place_group_user_ids(group_id),
+                reason=base[: 500 - len(marker)] + marker,
+                event_metadata={"old_label": old_label, "new_label": new_label},
+            )
+        )
+        db.session.commit()
+        return group
 
     def remove_address_from_group(
         self, address_id: int, acting_admin_id: int, reason: str, bottles_leaving=None
@@ -2099,7 +2172,7 @@ class CustomerLinkService:
             .order_by(UserAddress.id.asc())
             .all()
         )
-        if len(remaining) > 1:
+        if _place_group_survives(len(remaining)):
             return False
 
         # Zero remaining => the address that just left IS the last member out.

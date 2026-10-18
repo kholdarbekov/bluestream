@@ -1138,7 +1138,7 @@ def get_users():
 @jwt_required()
 @validate_admin_action(["view_users"])
 def get_customer_map_pins():
-    """All ordering customers' geocoded address pins for the admin map (no pagination)."""
+    """Admin map pins (no pagination): one per ungrouped geocoded address, one per shared place."""
     try:
         rows = CustomerMapService.get_customer_map_pins()
         pins = [
@@ -14060,6 +14060,7 @@ def get_place_group_detail(group_id):
                     {**m, "suggested_bottles_leaving": float(m["suggested_bottles_leaving"])} for m in detail["members"]
                 ],
                 "cod": CashCollectionService().get_place_cod_statement(group_id),
+                "removal_dissolves_group": detail["removal_dissolves_group"],
                 "events": detail["events"],
             }
         )
@@ -14111,6 +14112,37 @@ def add_place_group_addresses(group_id):
         _rollback_db_session()
         current_app.logger.error(f"Add place group addresses error: {e}")
         return internal_error_response("Failed to add addresses")
+
+
+@admin_bp.route("/place-groups/<int:group_id>", methods=["PATCH"])
+@jwt_required()
+@validate_admin_action(["manage_users"])
+def rename_place_group_admin(group_id):
+    """Rename a place group (body: label, reason)."""
+    try:
+        body = request.get_json(silent=True) or {}
+        reason = (body.get("reason") or "").strip()
+        if not reason:
+            return validation_error_response("reason is required")
+        group = CustomerLinkService().rename_place_group(
+            group_id,
+            label=body.get("label"),
+            acting_admin_id=_acting_admin_id(),
+            reason=reason,
+        )
+        return success_response(
+            data={"place_group_id": group.id, "label": group.label},
+            message="Place group renamed",
+        )
+    except ValidationError as e:
+        _rollback_db_session()
+        if getattr(e, "error_code", None) == "PLACE_GROUP_NOT_FOUND":
+            return not_found_response(resource_type="PlaceGroup", message="Place group not found")
+        return validation_error_response(getattr(e, "message", str(e)), error_code=getattr(e, "error_code", None))
+    except Exception as e:  # noqa: BLE001
+        _rollback_db_session()
+        current_app.logger.error(f"Rename place group error: {e}")
+        return internal_error_response("Failed to rename place group")
 
 
 @admin_bp.route("/place-groups/<int:group_id>/addresses/<int:address_id>", methods=["DELETE"])

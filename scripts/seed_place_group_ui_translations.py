@@ -52,6 +52,11 @@ KEYS = {
         "uz": "Manzil",
         "ru": "Адрес",
     },
+    "ui.users.place_groups.load_failed": {
+        "en": "Could not load this place group.",
+        "uz": "Bu joy guruhini yuklab bo'lmadi.",
+        "ru": "Не удалось загрузить группу адресов.",
+    },
     "ui.users.place_groups.no_groups": {
         "en": "No place groups for this customer yet",
         "uz": "Bu mijoz uchun hali manzil guruhi yo'q",
@@ -308,6 +313,26 @@ KEYS = {
         "en": "Address removed from place group",
         "uz": "Manzil guruhdan chiqarildi",
         "ru": "Адрес удалён из группы адресов",
+    },
+    "ui.users.place_groups.rename_action": {
+        "en": "Rename",
+        "uz": "Nomini o'zgartirish",
+        "ru": "Переименовать",
+    },
+    "ui.users.place_groups.rename_title": {
+        "en": "Rename this place group?",
+        "uz": "Bu joy guruhining nomini o'zgartirasizmi?",
+        "ru": "Переименовать эту группу адресов?",
+    },
+    "ui.users.place_groups.rename_success": {
+        "en": "Place group renamed",
+        "uz": "Joy guruhi nomi o'zgartirildi",
+        "ru": "Группа адресов переименована",
+    },
+    "ui.users.place_groups.event.rename_place_group": {
+        "en": "Place group renamed",
+        "uz": "Joy guruhi nomi o'zgartirildi",
+        "ru": "Группа адресов переименована",
     },
     "ui.users.place_groups.dismiss_success": {
         "en": "Suggestion dismissed",
@@ -651,6 +676,41 @@ KEYS = {
         "en": "Actions",
         "uz": "Amallar",
         "ru": "Действия",
+    },
+    "ui.users.grouped_addresses.edit_action": {
+        "en": "Edit",
+        "uz": "Tahrirlash",
+        "ru": "Изменить",
+    },
+    "ui.users.grouped_addresses.edit_title": {
+        "en": "Edit place group",
+        "uz": "Joy guruhini tahrirlash",
+        "ru": "Изменить группу адресов",
+    },
+    "ui.users.place_groups.remove_dissolves_warning": {
+        "en": "Only one address will be left, so this place group will be dissolved. The remaining address keeps the place history.",
+        "uz": "Faqat bitta manzil qoladi, shuning uchun bu joy guruhi tarqatiladi. Qolgan manzil joy tarixini saqlab qoladi.",
+        "ru": "Останется только один адрес, поэтому группа адресов будет расформирована. Оставшийся адрес сохранит историю места.",
+    },
+    "ui.users.place_groups.remove_dissolved_success": {
+        "en": "Address removed; the place group was dissolved",
+        "uz": "Manzil chiqarildi; joy guruhi tarqatildi",
+        "ru": "Адрес удалён; группа адресов расформирована",
+    },
+    "ui.users.place_groups.error_group_dissolved": {
+        "en": "This place group was dissolved and can no longer be edited.",
+        "uz": "Bu joy guruhi tarqatilgan va uni endi tahrirlab bo'lmaydi.",
+        "ru": "Эта группа адресов расформирована и больше не редактируется.",
+    },
+    "ui.users.place_groups.error_place_busy": {
+        "en": "Another administrator is editing this place right now. Nothing was saved; try again in a moment.",
+        "uz": "Bu joyni hozir boshqa administrator tahrirlamoqda. Hech narsa saqlanmadi; birozdan keyin qayta urinib ko'ring.",
+        "ru": "Это место сейчас редактирует другой администратор. Ничего не сохранено; попробуйте чуть позже.",
+    },
+    "ui.users.place_groups.error_label_invalid": {
+        "en": "The label must be 1 to 100 characters.",
+        "uz": "Nom 1 dan 100 tagacha belgidan iborat bo'lishi kerak.",
+        "ru": "Название должно содержать от 1 до 100 символов.",
     },
 }
 

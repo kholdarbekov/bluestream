@@ -157,10 +157,13 @@ def test_fine_rows_carry_names_not_ids(app, db, place, sample_user):
     assert row["place_label"]
 
 
-def test_map_pins_flag_a_shared_place_and_its_member_count(app, db, place, sample_user,
-                                                           second_sample_user, seeded_orders_for_map):
+def test_map_pins_publish_one_place_pin_with_its_members(app, db, place, sample_user,
+                                                         second_sample_user, seeded_orders_for_map):
     from business_app.services.customer_map_service import CustomerMapService
 
-    pins = {p["address_id"]: p for p in CustomerMapService.get_customer_map_pins()}
-    assert pins[place["a1"].id]["is_shared_place"] is True
-    assert pins[place["a1"].id]["place_member_count"] == 2
+    pin = next(
+        p for p in CustomerMapService.get_customer_map_pins() if p["place_group_id"] == place["group"].id
+    )
+    assert pin["kind"] == "place"
+    assert pin["is_shared_place"] is True
+    assert len(pin["members"]) == 2

@@ -24,7 +24,7 @@ from business_app.models.user import User, UserAddress
 from business_app.models.order import Order
 from business_app.models.payment import Payment
 from business_app.models.customer_link import CanonicalCustomer
-from business_app.services.cash_collection_service import CashCollectionService
+from business_app.services.cash_collection_service import CashCollectionService, PlaceCodExposure
 from business_app.services.customer_link_service import CustomerLinkService
 from business_app.utils.exceptions import NotFoundError
 from business_app.utils.password_security import hash_password
@@ -301,6 +301,22 @@ class TestDebtorRows:
         u2 = _user(db, "b@example.com", "+998900000002")
         _place(db, [_address(db, u1), _address(db, u2)], admin)
         assert CashCollectionService().get_place_cod_debtor_rows() == []
+
+    def test_place_exposure_by_group_reads_a_place_and_defaults_a_miss(self, db):
+        """The one place-debt decision the Grouped Addresses list and the admin
+        map both read: an indebted place's totals, and 0.0 / 0 for a place the
+        reader leaves out."""
+        admin = _user(db, "adm@example.com", "+998900000009")
+        users = [_user(db, f"p{i}@example.com", f"+99890000000{i}") for i in range(1, 5)]
+        addresses = [_address(db, u) for u in users]
+        indebted = _place(db, addresses[:2], admin, label="indebted")
+        clear = _place(db, addresses[2:], admin, label="clear")
+        _delivered_cod_debt(db, users[0], "ORD-1", address=addresses[0], outstanding=Decimal("12000.00"))
+
+        exposure = CashCollectionService().get_place_cod_exposure_by_group()
+
+        assert exposure[indebted.id] == PlaceCodExposure(total_outstanding_amount=12000.0, active_cod_debt_count=1)
+        assert exposure[clear.id] == PlaceCodExposure(total_outstanding_amount=0.0, active_cod_debt_count=0)
 
     def test_unlinked_ungrouped_rows_unchanged(self, db):
         u = _user(db, "solo@example.com", "+998900000007")

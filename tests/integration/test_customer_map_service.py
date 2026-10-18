@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from business_app import db
@@ -5,7 +6,7 @@ from business_app.models.user import User, UserAddress
 from business_app.models.order import Order
 from business_app.models.bottle import BottleBalance
 from business_app.models.payment import Payment
-from business_app.services.customer_map_service import CustomerMapService
+from business_app.services.customer_map_service import COUNTED_ORDER_STATUSES, CustomerMapService
 from shared.enums import UserRole, UserType, EntitySubtype, OrderStatus, PaymentMethod
 from business_app.utils.password_security import hash_password
 
@@ -25,8 +26,10 @@ def _addr(user_id, lat, lng, is_default=True):
     return a
 
 
-def _order(user_id, status):
+def _order(user_id, status, created_at=None):
     o = Order(user_id=user_id, status=status, total_amount=Decimal("50000"))
+    if created_at is not None:
+        o.created_at = created_at
     db.session.add(o); db.session.commit()
     return o
 
@@ -114,3 +117,52 @@ def test_cod_debt_and_restriction(app, db):
         assert Decimal(str(gpin["outstanding_debt"])) > 0
         assert gpin["active_cod_debt_count"] == 2
         assert gpin["cod_restricted"] is False  # grocery stores are exempt
+
+
+T0 = datetime(2026, 9, 1, 12, 0, 0)
+
+
+def test_a_pending_only_customer_still_appears_without_a_date(app, db):
+    with app.app_context():
+        u = _customer("pendingonly@ex.com", "+998900000008")
+        _addr(u.id, 41.36, 69.33)
+        _order(u.id, OrderStatus.PENDING, created_at=T0)
+
+        pins = CustomerMapService.get_customer_map_pins()
+        pin = next(p for p in pins if p["user_id"] == u.id)
+        assert pin["last_order_date"] is None
+        assert pin["order_count"] == 0
+
+
+def test_a_confirmed_order_dates_the_pin_and_a_later_pending_one_does_not(app, db):
+    with app.app_context():
+        u = _customer("confirmedthenpending@ex.com", "+998900000009")
+        _addr(u.id, 41.37, 69.34)
+        _order(u.id, OrderStatus.CONFIRMED, created_at=T0)
+        _order(u.id, OrderStatus.PENDING, created_at=T0 + timedelta(days=1))
+
+        pin = next(p for p in CustomerMapService.get_customer_map_pins() if p["user_id"] == u.id)
+        assert pin["last_order_date"].replace(tzinfo=None) == T0
+        assert pin["order_count"] == 1
+
+
+def test_a_returned_order_does_not_count(app, db):
+    with app.app_context():
+        u = _customer("returned@ex.com", "+998900000010")
+        _addr(u.id, 41.38, 69.35)
+        _order(u.id, OrderStatus.DELIVERED, created_at=T0)
+        _order(u.id, OrderStatus.RETURNED, created_at=T0 + timedelta(days=2))
+
+        pin = next(p for p in CustomerMapService.get_customer_map_pins() if p["user_id"] == u.id)
+        assert pin["last_order_date"].replace(tzinfo=None) == T0
+        assert pin["order_count"] == 1
+
+
+def test_counted_order_statuses_are_pinned():
+    """A new OrderStatus must be a conscious decision about the map's dates and counts."""
+    assert COUNTED_ORDER_STATUSES == {
+        OrderStatus.CONFIRMED,
+        OrderStatus.PREPARING,
+        OrderStatus.OUT_FOR_DELIVERY,
+        OrderStatus.DELIVERED,
+    }

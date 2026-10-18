@@ -452,6 +452,13 @@ class AdminService {
     return response.data;
   }
 
+  // Rename is reason-gated like every other group edit; the backend trims the
+  // label and records the old -> new pair in the group history.
+  async renamePlaceGroup(groupId, label, reason) {
+    const response = await api.patch(`/admin/place-groups/${groupId}`, { label, reason });
+    return response.data;
+  }
+
   // The merged bottle history an admin reviews before joining (spec 7.4). The
   // preview accepts the exclusions so the figures it returns are the ones the
   // admin is actually deciding against.

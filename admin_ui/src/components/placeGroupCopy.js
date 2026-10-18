@@ -101,6 +101,27 @@ export const PLACE_GROUP_ERROR_MESSAGES = new Map([
       'A reason is required for this change.',
     ],
   ],
+  [
+    'PLACE_GROUP_DISSOLVED',
+    [
+      'ui.users.place_groups.error_group_dissolved',
+      'This place group was dissolved and can no longer be edited.',
+    ],
+  ],
+  [
+    'BOTTLE_SCOPE_LOCK_TIMEOUT',
+    [
+      'ui.users.place_groups.error_place_busy',
+      'Another administrator is editing this place right now. Nothing was saved; try again in a moment.',
+    ],
+  ],
+  [
+    'PLACE_GROUP_LABEL_INVALID',
+    [
+      'ui.users.place_groups.error_label_invalid',
+      'The label must be 1 to 100 characters.',
+    ],
+  ],
 ]);
 
 /**
@@ -123,6 +144,10 @@ export const PLACE_GROUP_EVENT_LABELS = new Map([
   [
     'remove_from_place_group',
     ['ui.users.place_groups.event.remove_from_place_group', 'Address removed from the place group'],
+  ],
+  [
+    'rename_place_group',
+    ['ui.users.place_groups.event.rename_place_group', 'Place group renamed'],
   ],
   [
     'dismiss_place_suggestion',

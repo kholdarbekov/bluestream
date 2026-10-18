@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Alert,
   Button,
   Checkbox,
   Input,
@@ -89,8 +90,10 @@ const projectedBalance = (preview) =>
  *   action  - null (closed) or { kind, payload }
  *             create : { addressIds?, members? }        pre-picked + pre-listed
  *             add    : { groupId, addressIds?, members? }
- *             remove : { groupId, addressId, placeBalance, suggestedBottlesLeaving }
+ *             remove : { groupId, addressId, placeBalance, suggestedBottlesLeaving,
+ *                        removalDissolvesGroup }
  *             dismiss: { addressIdA, addressIdB }
+ *             rename : { groupId, currentLabel }       label input pre-filled from currentLabel
  *   pending - the caller's mutation is in flight
  *   onConfirm({ addressIds, label, reason, bottlesLeaving, merge })
  *   onCancel()
@@ -141,7 +144,7 @@ export default function PlaceGroupConfirmModal({ action, pending = false, onConf
     if (action) {
       const payload = action.payload || {};
       setReason('');
-      setLabel('');
+      setLabel(action.kind === 'rename' ? payload.currentLabel || '' : '');
       setPickedIds(payload.addressIds || []);
       // Pre-fill the picker so the admin sees exactly what will be grouped and
       // can still widen the set before confirming.
@@ -329,7 +332,9 @@ export default function PlaceGroupConfirmModal({ action, pending = false, onConf
   const confirmDisabled =
     !reason.trim() ||
     (action?.kind === 'create' && pickedIds.length < 2) ||
-    (action?.kind === 'add' && pickedIds.length < 1);
+    (action?.kind === 'add' && pickedIds.length < 1) ||
+    (action?.kind === 'rename' &&
+      (!label.trim() || label.trim() === (action.payload?.currentLabel || '')));
 
   const modalTitle = () => {
     if (action?.kind === 'dismiss') {
@@ -337,6 +342,9 @@ export default function PlaceGroupConfirmModal({ action, pending = false, onConf
     }
     if (action?.kind === 'remove') {
       return t('ui.users.place_groups.remove_title', 'Remove this address from the place group?');
+    }
+    if (action?.kind === 'rename') {
+      return t('ui.users.place_groups.rename_title', 'Rename this place group?');
     }
     if (action?.kind === 'add') {
       return t('ui.users.place_groups.add_title', 'Add an address to this place group?');
@@ -398,12 +406,22 @@ export default function PlaceGroupConfirmModal({ action, pending = false, onConf
               )}
             />
           )}
-          {action?.kind === 'create' && (
+          {(action?.kind === 'create' || action?.kind === 'rename') && (
             <Input
               value={label}
               onChange={(event) => setLabel(event.target.value)}
               placeholder={t('ui.users.place_groups.label_placeholder', 'Label (e.g. Acme office)')}
               maxLength={100}
+            />
+          )}
+          {action?.kind === 'remove' && action.payload?.removalDissolvesGroup && (
+            <Alert
+              type="warning"
+              showIcon
+              message={t(
+                'ui.users.place_groups.remove_dissolves_warning',
+                'Only one address will be left, so this place group will be dissolved. The remaining address keeps the place history.'
+              )}
             />
           )}
           {action?.kind === 'remove' && (

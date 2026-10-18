@@ -53,6 +53,13 @@ KEYS = {
     # per-account framing this badge exists to deny. "yagona zaxira" is one
     # shared STOCK of bottles, matching EN "one pool" / RU "один пул".
     "ui.users.map.shared_place":    ("shared place — one pool", "umumiy joy — yagona zaxira", "общее место — один пул"),
+    "ui.users.map.last_order_here": ("Last order here", "Bu yerga oxirgi buyurtma", "Последний заказ сюда"),
+    "ui.users.map.never_here":      ("never here", "bu yerga buyurtma bo'lmagan", "сюда не заказывали"),
+    "ui.users.map.unpaid_here":     ("Unpaid here", "Bu yerda to'lanmagan", "Не оплачено здесь"),
+    "ui.users.map.unpaid_orders":   ("unpaid orders", "to'lanmagan buyurtma", "неоплаченных заказов"),
+    "ui.users.map.people_here":     ("People at this place", "Bu joydagi mijozlar", "Клиенты в этом месте"),
+    "ui.users.map.profile":         ("Profile", "Profil", "Профиль"),
+    "ui.users.map.legend_none":     ("No confirmed order yet", "Tasdiqlangan buyurtma yo'q", "Нет подтверждённых заказов"),
 }
 
 def run():

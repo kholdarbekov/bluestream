@@ -44,6 +44,16 @@ const createWrapper = () => {
   );
 };
 
+/** Same wrapper, but hands back the client so a test can spy on invalidations. */
+const createSpiedWrapper = () => {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+  const wrapper = ({ children }) => (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  );
+  return { wrapper, invalidate };
+};
+
 const USER = { id: 11, first_name: 'Alice', last_name: 'Tester', phone: '+998900000001' };
 
 // ---------------------------------------------------------------------------
@@ -79,6 +89,7 @@ const GROUP_DETAIL_KEYS = new Set([
   // Opaque on purpose: `cod` is CashCollectionService.get_place_cod_statement,
   // the money axis, and is not re-keyed by this plan.
   'cod',
+  'removal_dissolves_group',
   'events',
 ]);
 
@@ -323,6 +334,7 @@ describe('PlaceGroupPanel', () => {
           },
         ],
         cod: { total_outstanding_amount: 35000, active_cod_debt_count: 2, items: [] },
+        removal_dissolves_group: false,
         events: [],
       }),
     });
@@ -381,6 +393,42 @@ describe('PlaceGroupPanel', () => {
     });
   });
 
+  it('refreshes the list, the map and every customer after an add', async () => {
+    const user = userEvent.setup();
+    adminService.addPlaceGroupAddresses.mockResolvedValue({ data: { place_group_id: 7 } });
+    const { wrapper, invalidate } = createSpiedWrapper();
+    render(<PlaceGroupPanel user={USER} />, { wrapper });
+
+    await user.click(await screen.findByRole('button', { name: /Add address/ }));
+    await user.type(await screen.findByRole('combobox'), 'Carol');
+    await waitFor(() => expect(adminService.searchAddresses).toHaveBeenCalledWith('Carol', true));
+    await pickOption(user, /Carol Neighbor/);
+    await openModalAndConfirm(user, 'new hire');
+
+    await waitFor(() => expect(adminService.addPlaceGroupAddresses).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['customerMapPins'] });
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['placeGroupsList'] });
+    });
+  });
+
+  it('tells the customer window to reload after a removal', async () => {
+    const user = userEvent.setup();
+    adminService.removePlaceGroupAddress.mockResolvedValue({
+      data: { place_group_id: 7, bottles_leaving: 0 },
+    });
+    const onGroupChanged = vi.fn();
+    render(<PlaceGroupPanel user={USER} onGroupChanged={onGroupChanged} />, {
+      wrapper: createWrapper(),
+    });
+
+    const bobRow = (await screen.findByText(/Bob Coworker/)).closest('li');
+    await user.click(within(bobRow).getByRole('button', { name: /Remove/ }));
+    await openModalAndConfirm(user, 'moved');
+
+    await waitFor(() => expect(onGroupChanged).toHaveBeenCalledTimes(1));
+  });
+
   it('renders nothing without a user', () => {
     const { container } = render(<PlaceGroupPanel user={null} />, { wrapper: createWrapper() });
     expect(container.textContent).toBe('');
@@ -415,6 +463,7 @@ describe('PlaceGroupPanel', () => {
         place_balance: 0,
         members: [],
         cod: { total_outstanding_amount: 0, active_cod_debt_count: 0, items: [] },
+        removal_dissolves_group: false,
         events: [
           {
             id: 51,
@@ -436,6 +485,58 @@ describe('PlaceGroupPanel', () => {
     expect(screen.getByText(/Place group created/)).toBeInTheDocument();
     expect(screen.queryByText(/create_place_group/)).not.toBeInTheDocument();
     expect(screen.queryByText(/\[group 7\]/)).not.toBeInTheDocument();
+  });
+
+  it('renames a group with the current label pre-filled and a required reason', async () => {
+    const user = userEvent.setup();
+    adminService.renamePlaceGroup.mockResolvedValue({
+      data: { place_group_id: 7, label: 'Acme HQ' },
+    });
+
+    render(<PlaceGroupPanel user={USER} />, { wrapper: createWrapper() });
+
+    await user.click(await screen.findByRole('button', { name: /^Rename$/ }));
+    const labelInput = await screen.findByPlaceholderText(/Label/);
+    expect(labelInput).toHaveValue('Acme office');
+    // Unchanged label: nothing to confirm yet.
+    await user.type(await screen.findByPlaceholderText(/Reason/), 'new sign');
+    expect(screen.getByRole('button', { name: /^OK$/ })).toBeDisabled();
+
+    await user.clear(labelInput);
+    await user.type(labelInput, 'Acme HQ');
+    await user.click(screen.getByRole('button', { name: /^OK$/ }));
+
+    await waitFor(() =>
+      expect(adminService.renamePlaceGroup.mock.calls[0]).toEqual([7, 'Acme HQ', 'new sign'])
+    );
+  });
+
+  it("shows a rename in the group history in the admin's language", async () => {
+    adminService.getPlaceGroup.mockResolvedValue({
+      data: placeGroupDetail({
+        place_group_id: 7,
+        label: 'Acme HQ',
+        place_balance: 0,
+        members: [],
+        cod: { total_outstanding_amount: 0, active_cod_debt_count: 0, items: [] },
+        removal_dissolves_group: false,
+        events: [
+          {
+            id: 52,
+            event_type: 'rename_place_group',
+            acting_admin_id: 3,
+            member_user_ids: [],
+            reason: '[group 7] new sign | "Acme office" → "Acme HQ"',
+            created_at: '2026-07-21T09:30:00+00:00',
+          },
+        ],
+      }),
+    });
+
+    render(<PlaceGroupPanel user={USER} />, { wrapper: createWrapper() });
+
+    expect(await screen.findByText(/Place group renamed/)).toBeInTheDocument();
+    expect(screen.queryByText(/rename_place_group/)).not.toBeInTheDocument();
   });
 
   // -------------------------------------------------------------------------
@@ -687,6 +788,7 @@ describe('PlaceGroupPanel', () => {
           },
         ],
         cod: { total_outstanding_amount: 0, active_cod_debt_count: 0, items: [] },
+        removal_dissolves_group: false,
         events: [],
       }),
     });
@@ -982,6 +1084,108 @@ describe('PlaceGroupPanel', () => {
     await waitFor(() =>
       expect(message.error).toHaveBeenCalledWith(
         expect.stringContaining('changed while you were reviewing')
+      )
+    );
+  });
+
+  it('warns before removing one of the last two addresses', async () => {
+    const user = userEvent.setup();
+    adminService.getPlaceGroup.mockResolvedValue({
+      data: placeGroupDetail({
+        place_group_id: 7,
+        label: 'Acme office',
+        place_balance: 5,
+        members: [
+          {
+            address_id: 1,
+            address_title: 'Office',
+            full_address: 'Office st 1',
+            suggested_bottles_leaving: 2,
+            owner: { id: 11, first_name: 'Alice', last_name: 'Tester', phone: '+998900000001' },
+          },
+          {
+            address_id: 3,
+            address_title: 'Office',
+            full_address: 'Office st 1',
+            suggested_bottles_leaving: 3,
+            owner: { id: 22, first_name: 'Bob', last_name: 'Coworker', phone: '+998900000002' },
+          },
+        ],
+        cod: { total_outstanding_amount: 0, active_cod_debt_count: 0, items: [] },
+        removal_dissolves_group: true,
+        events: [],
+      }),
+    });
+
+    render(<PlaceGroupPanel user={USER} />, { wrapper: createWrapper() });
+
+    const bobRow = (await screen.findByText(/Bob Coworker/)).closest('li');
+    await user.click(within(bobRow).getByRole('button', { name: /Remove/ }));
+
+    expect(
+      await screen.findByText(/Only one address will be left, so this place group will be dissolved/)
+    ).toBeInTheDocument();
+  });
+
+  it('does not warn when the group survives the removal', async () => {
+    const user = userEvent.setup();
+    render(<PlaceGroupPanel user={USER} />, { wrapper: createWrapper() });
+
+    const bobRow = (await screen.findByText(/Bob Coworker/)).closest('li');
+    await user.click(within(bobRow).getByRole('button', { name: /Remove/ }));
+    await screen.findByPlaceholderText(/Reason/);
+
+    expect(screen.queryByText(/will be dissolved/)).not.toBeInTheDocument();
+  });
+
+  it('explains that a dissolved group can no longer be edited', async () => {
+    const user = userEvent.setup();
+    adminService.addPlaceGroupAddresses.mockRejectedValue({
+      response: {
+        data: {
+          success: false,
+          message: 'Validation failed',
+          data: { error_code: 'PLACE_GROUP_DISSOLVED' },
+        },
+      },
+    });
+
+    render(<PlaceGroupPanel user={USER} />, { wrapper: createWrapper() });
+
+    await user.click(await screen.findByRole('button', { name: /Add address/ }));
+    await user.type(await screen.findByRole('combobox'), 'Carol');
+    await waitFor(() => expect(adminService.searchAddresses).toHaveBeenCalledWith('Carol', true));
+    await pickOption(user, /Carol Neighbor/);
+    await openModalAndConfirm(user, 'new hire');
+
+    await waitFor(() =>
+      expect(message.error).toHaveBeenCalledWith(
+        'This place group was dissolved and can no longer be edited.'
+      )
+    );
+  });
+
+  it("explains a busy place in the admin's language", async () => {
+    const user = userEvent.setup();
+    adminService.removePlaceGroupAddress.mockRejectedValue({
+      response: {
+        data: {
+          success: false,
+          message: 'Validation failed',
+          data: { error_code: 'BOTTLE_SCOPE_LOCK_TIMEOUT' },
+        },
+      },
+    });
+
+    render(<PlaceGroupPanel user={USER} />, { wrapper: createWrapper() });
+
+    const bobRow = (await screen.findByText(/Bob Coworker/)).closest('li');
+    await user.click(within(bobRow).getByRole('button', { name: /Remove/ }));
+    await openModalAndConfirm(user, 'moved');
+
+    await waitFor(() =>
+      expect(message.error).toHaveBeenCalledWith(
+        'Another administrator is editing this place right now. Nothing was saved; try again in a moment.'
       )
     );
   });

@@ -1204,6 +1204,13 @@
     "rule": "/api/v1/admin/place-groups/<int:group_id>"
   },
   {
+    "endpoint": "admin.rename_place_group_admin",
+    "methods": [
+      "PATCH"
+    ],
+    "rule": "/api/v1/admin/place-groups/<int:group_id>"
+  },
+  {
     "endpoint": "admin.add_place_group_addresses",
     "methods": [
       "POST"

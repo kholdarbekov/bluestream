@@ -337,6 +337,9 @@ MAPPED_FENCE_CODES = {
     "MERGE_REASON_REQUIRED": "ui.users.place_groups.error_merge_reason",
     "PLACE_GROUP_MIN_ADDRESSES": "ui.users.place_groups.error_min_addresses",
     "PLACE_GROUP_REASON_REQUIRED": "ui.users.place_groups.error_reason_required",
+    "PLACE_GROUP_DISSOLVED": "ui.users.place_groups.error_group_dissolved",
+    "BOTTLE_SCOPE_LOCK_TIMEOUT": "ui.users.place_groups.error_place_busy",
+    "PLACE_GROUP_LABEL_INVALID": "ui.users.place_groups.error_label_invalid",
 }
 
 # CustomerLinkEvent.event_type values the place-group audit list renders.
@@ -344,6 +347,7 @@ PLACE_GROUP_EVENT_TYPES = (
     "create_place_group",
     "add_to_place_group",
     "remove_from_place_group",
+    "rename_place_group",
     "dismiss_place_suggestion",
     "link",
     "unlink",
@@ -2203,6 +2207,7 @@ def _dotted_ui_fallbacks():
     found = {}
     for rel in (
         "src/components/PlaceGroupPanel.jsx",
+        "src/components/PlaceGroupCard.jsx",
         # The three A1.3 modules: the confirm flow and the fence-code/audit copy
         # were EXTRACTED out of the panel, and the estate-wide tab is new. Their
         # call sites are the same call sites — they just live next door now.
@@ -2464,7 +2469,7 @@ def test_place_group_min_addresses_should_have_translated_admin_copy(place_seeds
 # ===========================================================================
 @pytest.mark.integration
 def test_the_place_audit_history_renders_a_translated_event_type(place_seeds):
-    """WAS THE DEFECT: ``PlaceGroupPanel.jsx`` rendered ``{event.event_type}``
+    """WAS THE DEFECT: ``PlaceGroupPanel.jsx`` (now ``PlaceGroupCard.jsx``) rendered ``{event.event_type}``
     with no ``t()`` at all and no seed defined a key for any of these values, so
     a Russian admin reading the place history — their only record of who changed
     a place and why — saw English snake_case.
@@ -2476,7 +2481,7 @@ def test_the_place_audit_history_renders_a_translated_event_type(place_seeds):
     Two files since A1.3: the audit list still RENDERS in the panel, while the
     label map it renders through was extracted to ``placeGroupCopy.js``.
     """
-    panel = (REPO_ROOT / "admin_ui" / "src" / "components" / "PlaceGroupPanel.jsx").read_text(
+    panel = (REPO_ROOT / "admin_ui" / "src" / "components" / "PlaceGroupCard.jsx").read_text(
         encoding="utf-8"
     )
     copy = (REPO_ROOT / "admin_ui" / "src" / "components" / "placeGroupCopy.js").read_text(

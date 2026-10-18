@@ -19,13 +19,15 @@ from shared.enums import BottleFineStatus, BottleLedgerEventType
 
 
 @pytest.mark.unit
-def test_both_pins_at_one_place_show_the_place_balance(
+def test_the_place_pin_shows_the_place_balance_once(
     app, db, place, sample_user, second_sample_user, seeded_orders_for_map
 ):
-    """Two coworkers' pins at ONE physical place read the SAME pooled balance.
+    """Two coworkers at ONE physical place draw ONE pin, reading the pooled balance.
 
-    The +7 is recorded against a1 only. Before the place re-key each pin showed
-    its own (user, address) slice — 7 and 0. Both now show the place's 7.
+    The +7 is recorded against a1 only. Before the place re-key each member pin
+    showed its own (user, address) slice — 7 and 0; after it, both coincident
+    pins showed 7, which still read as 14 bottles at a glance. The place now
+    draws a single pin carrying the place's 7.
     """
     BottleTrackingService()._create_ledger_entry(
         user_id=sample_user.id, address_id=place["a1"].id,
@@ -36,15 +38,11 @@ def test_both_pins_at_one_place_show_the_place_balance(
     from business_app.services.customer_map_service import CustomerMapService
 
     all_pins = CustomerMapService.get_customer_map_pins()
-    # The two conditional outer joins must not FAN OUT: one pin per address,
-    # or `address_count` (len of the per-user row list) silently doubles.
-    assert [p["address_id"] for p in all_pins].count(place["a1"].id) == 1
-    assert len(all_pins) == 2
-    assert {p["address_count"] for p in all_pins} == {1}
-
-    pins = {p["address_id"]: p for p in all_pins}
-    assert float(pins[place["a1"].id]["bottle_balance"]) == 7.0
-    assert float(pins[place["a2"].id]["bottle_balance"]) == 7.0
+    # Both members' only addresses are grouped, so the place pin is the whole map.
+    assert len(all_pins) == 1
+    place_pins = [p for p in all_pins if p["place_group_id"] == place["group"].id]
+    assert len(place_pins) == 1
+    assert float(place_pins[0]["bottle_balance"]) == 7.0
 
 
 @pytest.mark.unit
@@ -83,17 +81,17 @@ def test_grouped_address_with_stale_solo_row_agrees_with_the_service(
 
     from business_app.services.customer_map_service import CustomerMapService
 
-    pins = {p["address_id"]: p for p in CustomerMapService.get_customer_map_pins()}
+    place_pin = next(
+        p for p in CustomerMapService.get_customer_map_pins() if p["place_group_id"] == place["group"].id
+    )
 
     # The map is a read model over the SAME scope resolution as the service; it
-    # may never contradict it.
+    # may never contradict it, whichever member address the service is asked about.
     for addr in (a1, a2):
-        assert float(pins[addr.id]["bottle_balance"]) == float(
+        assert float(place_pin["bottle_balance"]) == float(
             BottleTrackingService.get_place_balance(addr.id)
         )
-    # ...and the two members of one place must agree with each other.
-    assert pins[a1.id]["bottle_balance"] == pins[a2.id]["bottle_balance"]
-    assert float(pins[a1.id]["bottle_balance"]) == 0.0
+    assert float(place_pin["bottle_balance"]) == 0.0
 
 
 @pytest.mark.unit
@@ -102,20 +100,22 @@ def test_grouped_place_row_wins_over_a_stale_solo_row(
 ):
     """Both a group row AND a stale address-keyed row present: the PLACE wins.
 
-    Guards the COALESCE precedence independently of the solo arm's gating — if a
-    future edit reorders the two arms, the grouped pin would silently fall back
-    to the strand.
+    Guards the place pin's balance source independently of the strand test above
+    — if a future edit reads the representative address's own row, the place pin
+    would silently fall back to the strand's 4.
     """
-    a1, a2 = place["a1"], place["a2"]
+    a1 = place["a1"]
     db.session.add(BottleBalance(address_group_id=place["group"].id, balance=Decimal("9.00")))
     db.session.add(BottleBalance(address_id=a1.id, balance=Decimal("4.00")))
     db.session.flush()
 
     from business_app.services.customer_map_service import CustomerMapService
 
-    pins = {p["address_id"]: p for p in CustomerMapService.get_customer_map_pins()}
-    assert float(pins[a1.id]["bottle_balance"]) == 9.0
-    assert float(pins[a2.id]["bottle_balance"]) == 9.0
+    place_pin = next(
+        p for p in CustomerMapService.get_customer_map_pins() if p["place_group_id"] == place["group"].id
+    )
+    assert float(place_pin["bottle_balance"]) == 9.0
+    assert float(place_pin["bottle_balance"]) == float(BottleTrackingService.get_place_balance(a1.id))
 
 
 @pytest.mark.unit

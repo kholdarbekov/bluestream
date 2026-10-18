@@ -285,3 +285,54 @@ def test_neither_route_creates_a_group(client, db, admin_auth_headers):
     # could have auto-grouped, and still did not.
     assert len(suggestions.get_json()["data"]) == 1
     assert AddressGroup.query.count() == before
+
+
+@pytest.mark.integration
+def test_dissolved_groups_are_neither_listed_nor_counted(client, db, admin_auth_headers):
+    """A group whose last member left is dissolved: the list must hide it.
+
+    Driven through the real routes the Grouped Addresses tab uses. The first
+    group has two addresses, so removing one leaves fewer than two and the
+    group dissolves (``dissolved: True``). A second live group keeps the list
+    non-empty so the total is checked against a real surviving row.
+    """
+    u1 = _customer("dis1@example.com", "+998900000101")
+    u2 = _customer("dis2@example.com", "+998900000102")
+    u3 = _customer("dis3@example.com", "+998900000103")
+    u4 = _customer("dis4@example.com", "+998900000104")
+    a1, a2 = _address(u1), _address(u2)
+    a3, a4 = _address(u3), _address(u4)
+
+    dissolving = client.post(
+        "/api/v1/admin/place-groups",
+        json={"addressIds": [a1.id, a2.id], "label": "Dissolving", "reason": "temp pairing"},
+        headers=admin_auth_headers,
+    )
+    assert dissolving.status_code == 201, dissolving.get_json()
+    dissolved_id = dissolving.get_json()["data"]["place_group_id"]
+
+    live = client.post(
+        "/api/v1/admin/place-groups",
+        json={"addressIds": [a3.id, a4.id], "label": "Live", "reason": "office"},
+        headers=admin_auth_headers,
+    )
+    assert live.status_code == 201, live.get_json()
+    live_id = live.get_json()["data"]["place_group_id"]
+
+    # Removing one of two members leaves fewer than two, so the group dissolves.
+    dissolve = client.delete(
+        f"/api/v1/admin/place-groups/{dissolved_id}/addresses/{a1.id}",
+        json={"reason": "moved out", "bottlesLeaving": 0},
+        headers=admin_auth_headers,
+    )
+    assert dissolve.status_code == 200, dissolve.get_json()
+    assert dissolve.get_json()["data"]["dissolved"] is True
+
+    body = client.get("/api/v1/admin/place-groups", headers=admin_auth_headers).get_json()["data"]
+    assert dissolved_id not in [item["id"] for item in body["items"]]
+    assert live_id in [item["id"] for item in body["items"]]
+    assert body["pagination"]["total"] == 1
+
+    # Hidden from the list, but the detail page still resolves it (the audit trail lives there).
+    detail = client.get(f"/api/v1/admin/place-groups/{dissolved_id}", headers=admin_auth_headers)
+    assert detail.status_code == 200

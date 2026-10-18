@@ -153,6 +153,16 @@ describe('OperationsMap layers', () => {
     );
     expect(screen.getAllByTestId('circle-marker')).toHaveLength(1);
   });
+
+  it('keys a place marker by its group, not an address', () => {
+    const customers = [
+      { kind: 'place', placeGroupId: 7, addressId: 3, lat: 41.3, lng: 69.2, lastOrderDate: null },
+      { kind: 'address', placeGroupId: null, addressId: 3, lat: 41.4, lng: 69.3, lastOrderDate: null },
+    ];
+    render(<OperationsMap {...baseProps} customers={customers}
+      visibleLayers={{ customers: true, orders: false, drivers: false }} />);
+    expect(screen.getAllByTestId('circle-marker').map((n) => n.dataset.key)).toEqual(['place-7', 'c-3']);
+  });
 });
 
 describe('OperationsMap check-in layer', () => {

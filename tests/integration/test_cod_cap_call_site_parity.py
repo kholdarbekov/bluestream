@@ -444,22 +444,27 @@ def test_place_arm_restricts_address_aware_sites_only(
     """
     coworker = make_user(db)
     coworker_address = make_address(db, coworker)
-    make_place_group(db, coworker_address, user_address, label="capped-office")
+    office = make_place_group(db, coworker_address, user_address, label="capped-office")
     for _ in range(_LIMIT):
         delivered_cod_order(db, coworker, address=coworker_address, total=_OVER_EACH)
 
-    # orderer needs SOME order history for the customer-map pin to exist at
-    # all (its query INNER-joins on last_order); fully settled, so it adds
+    # orderer needs SOME order history for the customer-map place pin to exist
+    # at all (a member must pass the last_order gate); fully settled, so it adds
     # nothing to either arm's count or total.
     delivered_cod_order(db, orderer, address=user_address, total=Decimal("100.00"), outstanding=Decimal("0.00"))
 
     svc = CashCollectionService()
 
+    # The orderer's only address is grouped, so the map lists them as a member
+    # row of the place pin rather than drawing a pin of their own.
+    place_pin = next(
+        p for p in CustomerMapService.get_customer_map_pins() if p["place_group_id"] == office.id
+    )
     person_arm_only = {
         "is_customer_cod_restricted": svc.is_customer_cod_restricted(orderer.id),
         "get_cod_restricted_flags": svc.get_cod_restricted_flags([orderer.id])[orderer.id],
-        "customer_map_pin": next(
-            p for p in CustomerMapService.get_customer_map_pins() if p["user_id"] == orderer.id
+        "customer_map_member_row": next(
+            m for m in place_pin["members"] if m["user_id"] == orderer.id
         )["cod_restricted"],
     }
     assert set(person_arm_only.values()) == {False}, person_arm_only

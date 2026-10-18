@@ -148,10 +148,12 @@ const OperationsMap = ({
       {visibleLayers.customers && customers.map((p) => {
         const d = daysSince(p.lastOrderDate, now);
         const color = colorForDays(d, thresholds.t1, thresholds.t2);
+        // A place is ONE marker keyed by its group; its coincident addresses must not collide.
+        const markerKey = p.kind === 'place' ? `place-${p.placeGroupId}` : `c-${p.addressId}`;
         return (
           <CircleMarker
-            key={`c-${p.addressId}`}
-            data-key={`c-${p.addressId}`}
+            key={markerKey}
+            data-key={markerKey}
             center={[p.lat, p.lng]}
             radius={8}
             pathOptions={{

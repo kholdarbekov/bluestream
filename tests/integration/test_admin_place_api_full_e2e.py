@@ -7,7 +7,7 @@ different error envelopes:
   * `business_app/api/admin_bottles.py` — 17 routes, `validate_admin_action`
     with `view_orders` / `manage_orders`, failures through
     `handle_api_exception` -> `{error, message, error_code, status_code}`.
-  * `business_app/api/admin.py`'s place-group family — 9 routes,
+  * `business_app/api/admin.py`'s place-group family — 10 routes,
     `view_users` / `manage_users`, failures through `validation_error_response`
     -> `{success:false, message:'Validation failed', errors:[...],
     data:{error_code}}`.
@@ -414,6 +414,7 @@ def _place_write_routes(*, group_id, address_id, other_address_id, canonical_id=
         ("post", f"{API}/place-groups/{group_id}/addresses",
          {"addressIds": [other_address_id], "reason": "r"}),
         ("delete", f"{API}/place-groups/{group_id}/addresses/{address_id}", {"reason": "r"}),
+        ("patch", f"{API}/place-groups/{group_id}", {"label": "renamed", "reason": "r"}),
         ("post", f"{API}/place-group-suggestions/dismiss",
          {"addressIdA": address_id, "addressIdB": other_address_id, "reason": "r"}),
         ("post", f"{API}/canonical-customers/{canonical_id}/address-groups",
@@ -608,7 +609,7 @@ class TestUnauthenticated:
         ) + _place_write_routes(
             group_id=world["group"].id, address_id=world["a1"].id, other_address_id=world["solo"].id,
         )
-        assert len(routes) == 9, "the place-group family has 9 routes; update this inventory"
+        assert len(routes) == 10, "the place-group family has 10 routes; update this inventory"
 
         for method, url, payload in routes:
             resp = _call(fresh, method, url, payload)
@@ -871,12 +872,15 @@ class TestManagerTier:
         assert fresh.get(f"{API}/addresses/search?q=Karimov", headers=headers).status_code == 200
 
         members_before = CustomerLinkService().get_place_group_address_ids(world["group"].id)
+        label_before = detail.get_json()["data"]["label"]
         for method, url, payload in _place_write_routes(
             group_id=world["group"].id, address_id=world["a1"].id, other_address_id=world["solo"].id,
         ):
             resp = _call(fresh, method, url, payload, headers)
             assert resp.status_code == 403, f"{method.upper()} {url} -> {resp.status_code}"
         assert CustomerLinkService().get_place_group_address_ids(world["group"].id) == members_before
+        after = fresh.get(f"{API}/place-groups/{world['group'].id}", headers=headers)
+        assert after.get_json()["data"]["label"] == label_before
 
     def test_the_admin_address_delete_route_uses_a_DIFFERENT_decorator(self, app, db):
         """`DELETE /admin/users/<u>/addresses/<a>` is guarded by

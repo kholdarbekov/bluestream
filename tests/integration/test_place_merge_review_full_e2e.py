@@ -3257,7 +3257,10 @@ def test_the_api_contract_snapshot_still_lists_the_merge_preview_route(db):
     # `admin_reorder_reminders` behind `manager_or_higher_required`: POST
     # /api/v1/admin/reorder-reminders/episodes/<int:episode_id>/resolve
     # (resolve_reorder_reminder_episode). Unrelated to place-merge; only the estate-wide count moved.
-    assert len(routes) == 662
+    # 662 -> 663: PATCH /api/v1/admin/place-groups/<int:group_id> (admin.rename_place_group_admin)
+    # -- rename a place group (Task 6). Same URL as the existing GET detail; only the estate-wide
+    # count moved.
+    assert len(routes) == 663
     entry = next(r for r in routes if r["rule"] == "/api/v1/admin/place-groups/merge-preview")
     assert entry["methods"] == ["GET"]
     assert entry["endpoint"] == "admin.get_place_group_merge_preview"

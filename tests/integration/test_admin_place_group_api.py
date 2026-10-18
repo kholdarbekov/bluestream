@@ -564,6 +564,7 @@ def test_place_group_routes_require_admin(client, db, auth_headers):
         ("get", "/api/v1/admin/place-groups/1", None),
         ("post", "/api/v1/admin/place-groups/1/addresses", {"addressIds": [1], "reason": "r"}),
         ("delete", "/api/v1/admin/place-groups/1/addresses/1", {"reason": "r"}),
+        ("patch", "/api/v1/admin/place-groups/1", {"label": "x", "reason": "r"}),
         ("get", "/api/v1/admin/addresses/search?q=abc", None),
         ("get", "/api/v1/admin/users/1/place-group-suggestions", None),
         ("post", "/api/v1/admin/place-group-suggestions/dismiss",
@@ -574,3 +575,135 @@ def test_place_group_routes_require_admin(client, db, auth_headers):
         resp = call(url, json=payload, headers=auth_headers) if payload is not None \
             else call(url, headers=auth_headers)
         assert resp.status_code in (401, 403), f"{method.upper()} {url} -> {resp.status_code}"
+
+
+@pytest.mark.integration
+def test_detail_says_whether_removing_an_address_dissolves_the_group(client, db, admin_auth_headers):
+    users = [_customer(f"dis{i}@example.com", f"+99890000100{i}") for i in range(5)]
+    addrs = [_address(u) for u in users]
+
+    def _create(ids):
+        r = client.post("/api/v1/admin/place-groups",
+                        json={"addressIds": ids, "reason": "same place"},
+                        headers=admin_auth_headers)
+        assert r.status_code == 201, r.get_json()
+        return r.get_json()["data"]["place_group_id"]
+
+    def _detail(gid):
+        r = client.get(f"/api/v1/admin/place-groups/{gid}", headers=admin_auth_headers)
+        assert r.status_code == 200, r.get_json()
+        return r.get_json()["data"]
+
+    group_a = _create([addrs[0].id, addrs[1].id])
+    group_b = _create([addrs[2].id, addrs[3].id, addrs[4].id])
+
+    detail_a, detail_b = _detail(group_a), _detail(group_b)
+    assert detail_a["removal_dissolves_group"] is True
+    assert detail_b["removal_dissolves_group"] is False
+    # Group level only: members keep their existing key set.
+    assert all("removal_dissolves_group" not in m for m in detail_a["members"])
+
+    removed = client.delete(f"/api/v1/admin/place-groups/{group_a}/addresses/{addrs[0].id}",
+                            json={"reason": "moved out"}, headers=admin_auth_headers)
+    assert removed.status_code == 200, removed.get_json()
+    assert removed.get_json()["data"]["dissolved"] is True
+
+
+# ---- rename a group -------------------------------------------------------
+
+def _group(client, headers, tag, label=None):
+    users = [_customer(f"ren{tag}{i}@example.com", f"+99890002{tag}{i}0") for i in range(2)]
+    addrs = [_address(u) for u in users]
+    body = {"addressIds": [a.id for a in addrs], "reason": "same place"}
+    if label is not None:
+        body["label"] = label
+    r = client.post("/api/v1/admin/place-groups", json=body, headers=headers)
+    assert r.status_code == 201, r.get_json()
+    return r.get_json()["data"]["place_group_id"], addrs
+
+
+def _rename(client, headers, gid, payload):
+    return client.patch(f"/api/v1/admin/place-groups/{gid}", json=payload, headers=headers)
+
+
+def _events(client, headers, gid):
+    r = client.get(f"/api/v1/admin/place-groups/{gid}", headers=headers)
+    assert r.status_code == 200, r.get_json()
+    return r.get_json()["data"]
+
+
+@pytest.mark.integration
+def test_rename_updates_the_label_and_records_it_in_history(client, db, admin_auth_headers):
+    gid, _ = _group(client, admin_auth_headers, "1", label="office")
+    r = _rename(client, admin_auth_headers, gid, {"label": "  HQ  ", "reason": "new sign"})
+    assert r.status_code == 200, r.get_json()
+    assert r.get_json()["data"] == {"place_group_id": gid, "label": "HQ"}
+    assert r.get_json()["message"] == "Place group renamed"
+    data = _events(client, admin_auth_headers, gid)
+    assert data["label"] == "HQ"
+    assert data["events"][0]["event_type"] == "rename_place_group"
+    assert data["events"][0]["reason"] == f'[group {gid}] new sign | "office" \u2192 "HQ"'
+
+
+@pytest.mark.integration
+def test_renaming_an_unlabeled_group_records_a_dash_for_the_old_label(client, db, admin_auth_headers):
+    gid, _ = _group(client, admin_auth_headers, "2")
+    r = _rename(client, admin_auth_headers, gid, {"label": "HQ", "reason": "name it"})
+    assert r.status_code == 200, r.get_json()
+    events = _events(client, admin_auth_headers, gid)["events"]
+    assert events[0]["reason"].endswith(' | \u2014 \u2192 "HQ"')
+
+
+@pytest.mark.integration
+def test_rename_with_the_same_label_changes_nothing(client, db, admin_auth_headers):
+    gid, _ = _group(client, admin_auth_headers, "3", label="office")
+    before = len(_events(client, admin_auth_headers, gid)["events"])
+    r = _rename(client, admin_auth_headers, gid, {"label": " office ", "reason": "noop"})
+    assert r.status_code == 200, r.get_json()
+    assert len(_events(client, admin_auth_headers, gid)["events"]) == before
+
+
+@pytest.mark.integration
+def test_rename_requires_a_reason(client, db, admin_auth_headers):
+    gid, _ = _group(client, admin_auth_headers, "4", label="office")
+    r = _rename(client, admin_auth_headers, gid, {"label": "HQ", "reason": "  "})
+    assert r.status_code == 400
+    assert "reason is required" in str(r.get_json())
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("label", ["   ", "x" * 101])
+def test_rename_rejects_a_blank_or_overlong_label(client, db, admin_auth_headers, label):
+    gid, _ = _group(client, admin_auth_headers, "5", label="office")
+    r = _rename(client, admin_auth_headers, gid, {"label": label, "reason": "r"})
+    assert r.status_code == 400
+    assert r.get_json()["data"]["error_code"] == "PLACE_GROUP_LABEL_INVALID"
+    assert _events(client, admin_auth_headers, gid)["label"] == "office"
+
+
+@pytest.mark.integration
+def test_rename_refuses_a_dissolved_group(client, db, admin_auth_headers):
+    gid, addrs = _group(client, admin_auth_headers, "6", label="office")
+    removed = client.delete(f"/api/v1/admin/place-groups/{gid}/addresses/{addrs[0].id}",
+                            json={"reason": "left"}, headers=admin_auth_headers)
+    assert removed.status_code == 200, removed.get_json()
+    r = _rename(client, admin_auth_headers, gid, {"label": "HQ", "reason": "r"})
+    assert r.status_code == 400
+    assert r.get_json()["data"]["error_code"] == "PLACE_GROUP_DISSOLVED"
+
+
+@pytest.mark.integration
+def test_rename_of_an_unknown_group_is_404(client, db, admin_auth_headers):
+    r = _rename(client, admin_auth_headers, 999999, {"label": "HQ", "reason": "r"})
+    assert r.status_code == 404
+
+
+@pytest.mark.integration
+def test_a_manager_cannot_rename(client, db, admin_auth_headers, manager_user, app):
+    from flask_jwt_extended import create_access_token
+    gid, _ = _group(client, admin_auth_headers, "7", label="office")
+    with app.app_context():
+        token = create_access_token(identity=str(manager_user.id))
+    r = _rename(client, {"Authorization": f"Bearer {token}"}, gid, {"label": "HQ", "reason": "r"})
+    assert r.status_code == 403
+    assert _events(client, admin_auth_headers, gid)["label"] == "office"

@@ -247,6 +247,9 @@ def _extract_ui_fallbacks():
     found = {}
     for rel in (
         "src/components/PlaceGroupPanel.jsx",
+        # The per-group card (detail, members, history, add/remove) was
+        # extracted out of the panel so other surfaces can render it.
+        "src/components/PlaceGroupCard.jsx",
         # A1.3 split the panel: the fence-code / audit-label maps went to
         # `placeGroupCopy.js` and the whole confirm flow (picker, label, split,
         # merge review, mandatory reason) to `PlaceGroupConfirmModal.jsx`, so
@@ -301,6 +304,7 @@ def test_ui_seed_covers_every_place_group_key_rendered_by_the_panel():
         (REPO_ROOT / "admin_ui" / rel).read_text(encoding="utf-8")
         for rel in (
             "src/components/PlaceGroupPanel.jsx",
+            "src/components/PlaceGroupCard.jsx",
             "src/components/placeGroupCopy.js",
             "src/components/PlaceGroupConfirmModal.jsx",
             "src/components/GroupedAddressesPanel.jsx",
@@ -342,7 +346,13 @@ def test_ui_seed_covers_every_place_group_key_rendered_by_the_panel():
     #     to narrow the pool (a bounding box truncates a transitive component
     #     and voids dismissals — plan E19), so the pass is now requested rather
     #     than billed on every user-drawer open.
-    assert len(used) == 56
+    #   * plus 5 (61) for the dissolve flow: the remove-dissolves warning, the
+    #     dissolved-success toast and the three error codes (PLACE_GROUP_DISSOLVED,
+    #     BOTTLE_SCOPE_LOCK_TIMEOUT, PLACE_GROUP_LABEL_INVALID).
+    #   * plus 3 (64) for rename from the card: the action button, the dialog
+    #     title and the success toast (the dotted event label is not counted).
+    #   * plus 1 (65) for `load_failed`, the card's load-error alert.
+    assert len(used) == 65
 
 
 @pytest.mark.unit
@@ -484,6 +494,31 @@ def test_customer_map_seed_owns_the_shared_place_badge():
     fallbacks = _extract_ui_fallbacks()
     assert key in fallbacks, f"{key} has no t(...) call site in the scanned admin UI"
     assert en == fallbacks[key], "seeded English drifted from the CustomerMap.js fallback"
+
+
+# Seeded by scripts/seed_dispatch_translations.py (category ui_users), not the map seed.
+_DISPATCH_OWNED_MAP_KEYS = {
+    "ui.users.map.layer_orders",
+    "ui.users.map.layer_drivers",
+    "ui.users.map.open_dispatch",
+}
+
+
+@pytest.mark.unit
+def test_every_customer_map_key_is_seeded_with_its_jsx_fallback():
+    """Every ``ui.users.map.*`` key CustomerMap.js renders has a seeded row whose
+    ``en`` is the JSX fallback byte for byte (the place popup + legend keys included)."""
+    mod = _load("seed_customer_map_translations")
+    text = (REPO_ROOT / "admin_ui" / "src/components/CustomerMap.js").read_text(encoding="utf-8")
+    used = {}
+    for _, key, expr in _JS_PAIR.findall(text):
+        if key.startswith("ui.users.map.") and key not in _DISPATCH_OWNED_MAP_KEYS:
+            used[key] = "".join(_unquote_js(lit) for lit in re.findall(_JS_STRING, expr, re.S))
+    assert used, "no ui.users.map.* call sites found in CustomerMap.js"
+    missing = sorted(k for k in used if k not in mod.KEYS)
+    assert not missing, f"CustomerMap.js renders keys with no seeded copy: {missing}"
+    for key, fallback in used.items():
+        assert mod.KEYS[key][0] == fallback, key
 
 
 @pytest.mark.unit

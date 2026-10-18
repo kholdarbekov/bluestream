@@ -328,9 +328,10 @@ def test_customer_map_pin_key_set_matches_the_live_route(
     (business_app/api/admin.py). A service-level pin test cannot see that hop, so
     dropping `by_alias=True` — or adding any serialization interceptor between
     the schema and the response — leaves the whole backend suite green while the
-    shared-place badge vanishes, the glyph reverts to solid and `heatWeight`'s
-    divisor falls back to 1, restoring the "21 bottles for one 7-bottle office"
-    over-count this plan exists to remove.
+    place marker loses its kind, its group key and its member list.
+
+    Both pin kinds carry every key, so ONE key set must equal BOTH the place pin
+    and an address pin; the place's member rows have their own set.
     """
     resp = client.get("/api/v1/admin/customers/map-pins", headers=admin_auth_headers)
     assert resp.status_code == 200, resp.get_json()
@@ -341,11 +342,16 @@ def test_customer_map_pin_key_set_matches_the_live_route(
     # indexes by them — otherwise dropping `by_alias=True` surfaces as a bare
     # KeyError instead of naming what broke and where.
     for alias, consumer, damage in (
-        ("addressId", "CustomerMap.js (pin key + popup)", "no pin renders at all"),
-        ("isSharedPlace", "CustomerMap.js:156,157,192",
+        ("addressId", "OperationsMap.jsx (address pin key)", "no address pin renders at all"),
+        ("kind", "CustomerMap.js / OperationsMap.jsx (address vs place marker)",
+         "a place marker renders as one customer's address pin"),
+        ("isSharedPlace", "CustomerMap.js / OperationsMap.jsx (badge + dashed glyph)",
          "the shared-place badge disappears and the glyph reverts to solid"),
-        ("placeMemberCount", "customerMapLogic.js:55 (heatWeight divisor)",
-         "the divisor falls back to 1, reading one 7-bottle office as 21 bottles"),
+        ("hasDebt", "customerMapLogic.js ('Has debt' filter)",
+         "a place whose member owes elsewhere drops out of the debt filter"),
+        ("placeGroupId", "OperationsMap.jsx (place marker key)",
+         "every place marker collides on one key"),
+        ("members", "CustomerMap.js (place popup)", "the place popup lists nobody"),
     ):
         missing = [p for p in pins if alias not in p]
         assert not missing, (
@@ -358,20 +364,22 @@ def test_customer_map_pin_key_set_matches_the_live_route(
             f"A pin actually served: {sorted(missing[0])}"
         )
 
-    by_address = {p["addressId"]: p for p in pins}
-    shared = by_address[place["a1"].id]
-    solo = by_address[user_address.id]
+    shared = next(p for p in pins if p["placeGroupId"] == place["group"].id)
+    solo = next(p for p in pins if p["kind"] == "address" and p["addressId"] == user_address.id)
 
     # ...and the aliased values still carry the shared/solo distinction, so a
     # presence-only guard cannot pass on an all-defaults payload.
-    assert shared["isSharedPlace"] is True and shared["placeMemberCount"] == 2
-    assert solo["isSharedPlace"] is False and solo["placeMemberCount"] == 1
+    assert shared["kind"] == "place" and shared["isSharedPlace"] is True and len(shared["members"]) == 2
+    assert solo["isSharedPlace"] is False and solo["members"] == []
 
     # Whole-shape pin, same idiom as the sets above: the fixture in
     # CustomerMap.test.jsx is hand-written camelCase and would otherwise rot in
     # lockstep with any rename.
-    assert _declared_key_set(CUSTOMER_MAP_TEST, "MAP_PIN_KEYS") == set(shared), _explain(
+    assert _declared_key_set(CUSTOMER_MAP_TEST, "MAP_PIN_KEYS") == set(shared) == set(solo), _explain(
         CUSTOMER_MAP_TEST, "MAP_PIN_KEYS"
+    )
+    assert _declared_key_set(CUSTOMER_MAP_TEST, "MAP_PLACE_MEMBER_KEYS") == set(shared["members"][0]), _explain(
+        CUSTOMER_MAP_TEST, "MAP_PLACE_MEMBER_KEYS"
     )
 
 

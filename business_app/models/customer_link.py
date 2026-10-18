@@ -107,6 +107,7 @@ class CustomerLinkEvent(db.Model, TimestampMixin):
     id = Column(Integer, primary_key=True)
     # link | unlink | add_to_group | eject | set_primary | dismiss
     # | create_place_group | add_to_place_group | remove_from_place_group
+    # | rename_place_group
     # | dismiss_place_suggestion
     event_type = Column(String(30), nullable=False)
     canonical_customer_id = Column(

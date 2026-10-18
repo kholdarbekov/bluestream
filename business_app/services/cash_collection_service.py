@@ -149,6 +149,29 @@ class PersonalCardTransferPlan:
         }
 
 
+@dataclass(frozen=True)
+class PlaceCodExposure:
+    """A place group's open delivered COD debt: what the place OWES."""
+
+    total_outstanding_amount: float = 0.0
+    active_cod_debt_count: int = 0
+
+
+class PlaceCodExposureByGroup:
+    """Read-only ``place_group_id -> PlaceCodExposure``, the miss rule included.
+
+    Indexing is the only read: a place with no open debt is absent from the
+    reader and reads ``PlaceCodExposure()`` (0.0 / 0) here, so no caller keeps
+    its own default.
+    """
+
+    def __init__(self, by_group: Dict[int, PlaceCodExposure]):
+        self._by_group = by_group
+
+    def __getitem__(self, group_id: int) -> PlaceCodExposure:
+        return self._by_group.get(group_id, PlaceCodExposure())
+
+
 class CashCollectionService:
     """COD receivable and cash collection service."""
 
@@ -2406,6 +2429,29 @@ class CashCollectionService:
             }
             for r in rows
         ]
+
+    def get_place_cod_exposure_by_group(self) -> PlaceCodExposureByGroup:
+        """Every indebted place's open delivered COD debt, keyed by group id.
+
+        The ONE decision behind each estate-wide surface that shows what a place
+        owes — the Grouped Addresses list (``CustomerLinkService.list_place_groups``)
+        and the admin customer map's place pins — so the two can only disagree
+        if this method changes for both.
+
+        It reads :meth:`get_place_cod_debtor_rows` at that reader's 1000-row
+        ceiling. The reader sorts by outstanding DESC, so a hypothetical estate
+        with >1000 simultaneously-indebted places would read its smallest debts
+        as 0 on both surfaces alike. The total is already a float.
+        """
+        return PlaceCodExposureByGroup(
+            {
+                row["place_group_id"]: PlaceCodExposure(
+                    total_outstanding_amount=row["total_outstanding_amount"],
+                    active_cod_debt_count=row["active_cod_debt_count"],
+                )
+                for row in self.get_place_cod_debtor_rows(limit=1000)
+            }
+        )
 
     def _collapse_debtor_rows_by_cluster(self, rows) -> List[Dict[str, Any]]:
         """Collapse per-account debtor rows into one row per linked person.

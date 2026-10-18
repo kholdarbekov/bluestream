@@ -1,26 +1,14 @@
 import React, { useMemo, useState } from 'react';
-import {
-  Card,
-  List,
-  Tag,
-  Button,
-  Space,
-  Statistic,
-  message,
-  Divider,
-  Typography,
-} from 'antd';
+import { Card, List, Button, Space, message, Divider, Typography } from 'antd';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import dayjs from 'dayjs';
 import adminService from '../services/adminService';
 import PlaceGroupConfirmModal from './PlaceGroupConfirmModal';
-import { placeGroupErrorMessage, placeGroupEventText } from './placeGroupCopy';
+import PlaceGroupCard from './PlaceGroupCard';
+import { placeGroupErrorMessage } from './placeGroupCopy';
+import { invalidatePlaceGroupQueries } from './placeGroupQueries';
 
 const { Text } = Typography;
-
-/** Group-scoped audit reasons are stored as "[group 7] ..." — that prefix is an internal scope key. */
-const displayReason = (reason) => (reason || '').replace(/^\[group \d+\]\s*/, '');
 
 /**
  * Place-group management (Phase 2c, spec 9): the WHERE axis. Place groups are
@@ -39,12 +27,12 @@ const displayReason = (reason) => (reason || '').replace(/^\[group \d+\]\s*/, ''
  * with the estate-wide "Grouped Addresses" tab so there is ONE confirm flow
  * with ONE reason rule rather than two copies drifting apart.
  */
-export default function PlaceGroupPanel({ user }) {
+export default function PlaceGroupPanel({ user, onGroupChanged }) {
   const { t } = useTranslation('users');
   const queryClient = useQueryClient();
   const userId = user?.id;
 
-  // action: { kind: 'create' | 'add' | 'remove' | 'dismiss', payload }
+  // action: { kind: 'create' | 'dismiss', payload } — add/remove live on PlaceGroupCard
   const [action, setAction] = useState(null);
 
   const addressesQuery = useQuery({
@@ -60,16 +48,6 @@ export default function PlaceGroupPanel({ user }) {
     () => [...new Set(addresses.map((a) => a.address_group_id).filter((id) => id != null))],
     [addresses]
   );
-
-  const groupsQuery = useQuery({
-    queryKey: ['placeGroups', userId, groupIds.join(',')],
-    queryFn: async () => {
-      const details = await Promise.all(groupIds.map((id) => adminService.getPlaceGroup(id)));
-      return details.map((detail) => detail?.data).filter(Boolean);
-    },
-    enabled: groupIds.length > 0,
-  });
-  const groups = groupsQuery.data || [];
 
   /**
    * Co-location suggestions are OPT-IN, not fire-on-open.
@@ -106,18 +84,13 @@ export default function PlaceGroupPanel({ user }) {
     ? suggestionsQuery.data?.data?.suggestions || []
     : [];
 
-  const invalidatePlaceData = () => {
-    queryClient.invalidateQueries({ queryKey: ['placeGroupAddresses', userId] });
-    queryClient.invalidateQueries({ queryKey: ['placeGroups', userId] });
-    queryClient.invalidateQueries({ queryKey: ['placeGroupSuggestions', userId] });
-  };
-
   const closeAction = () => setAction(null);
 
   const onMutationSuccess = (successKey, successFallback) => () => {
     message.success(t(successKey, successFallback));
     closeAction();
-    invalidatePlaceData();
+    invalidatePlaceGroupQueries(queryClient);
+    onGroupChanged?.();
   };
 
   const onMutationError = (error) => {
@@ -130,23 +103,6 @@ export default function PlaceGroupPanel({ user }) {
     mutationFn: ({ addressIds, groupLabel, actionReason, merge }) =>
       adminService.createPlaceGroup(addressIds, groupLabel, actionReason, merge),
     onSuccess: onMutationSuccess('ui.users.place_groups.create_success', 'Place group created'),
-    onError: onMutationError,
-  });
-
-  const addMutation = useMutation({
-    mutationFn: ({ groupId, addressIds, actionReason, merge }) =>
-      adminService.addPlaceGroupAddresses(groupId, addressIds, actionReason, merge),
-    onSuccess: onMutationSuccess('ui.users.place_groups.add_success', 'Address added to place group'),
-    onError: onMutationError,
-  });
-
-  const removeMutation = useMutation({
-    mutationFn: ({ groupId, addressId, actionReason, splitBottles }) =>
-      adminService.removePlaceGroupAddress(groupId, addressId, actionReason, splitBottles),
-    onSuccess: onMutationSuccess(
-      'ui.users.place_groups.remove_success',
-      'Address removed from place group'
-    ),
     onError: onMutationError,
   });
 
@@ -172,26 +128,6 @@ export default function PlaceGroupPanel({ user }) {
 
   const startManualCreate = () => setAction({ kind: 'create', payload: {} });
 
-  const startAdd = (groupId) => setAction({ kind: 'add', payload: { groupId } });
-
-  /**
-   * The member object is what carries `suggested_bottles_leaving` — the
-   * backend's pre-fill for the split, derived from THIS address's own attributed
-   * entries at the place and already capped at what the place holds. Without it
-   * every removal defaulted to 0 and the bottles silently stayed behind.
-   */
-  const startRemove = (group, member) => {
-    setAction({
-      kind: 'remove',
-      payload: {
-        groupId: group?.place_group_id,
-        addressId: member?.address_id,
-        placeBalance: group?.place_balance,
-        suggestedBottlesLeaving: member?.suggested_bottles_leaving,
-      },
-    });
-  };
-
   const startDismiss = (suggestion) => {
     const [first, second] = suggestion.members;
     setAction({
@@ -203,27 +139,13 @@ export default function PlaceGroupPanel({ user }) {
     });
   };
 
-  const handleConfirm = ({ addressIds, label, reason, bottlesLeaving, merge }) => {
+  const handleConfirm = ({ addressIds, label, reason, merge }) => {
     if (action.kind === 'create') {
       createMutation.mutate({
         addressIds,
         groupLabel: label,
         actionReason: reason,
         merge,
-      });
-    } else if (action.kind === 'add') {
-      addMutation.mutate({
-        groupId: action.payload.groupId,
-        addressIds,
-        actionReason: reason,
-        merge,
-      });
-    } else if (action.kind === 'remove') {
-      removeMutation.mutate({
-        groupId: action.payload.groupId,
-        addressId: action.payload.addressId,
-        actionReason: reason,
-        splitBottles: bottlesLeaving,
       });
     } else if (action.kind === 'dismiss') {
       dismissMutation.mutate({
@@ -236,8 +158,6 @@ export default function PlaceGroupPanel({ user }) {
 
   const modalIsPending =
     (action?.kind === 'create' && createMutation.isPending) ||
-    (action?.kind === 'add' && addMutation.isPending) ||
-    (action?.kind === 'remove' && removeMutation.isPending) ||
     (action?.kind === 'dismiss' && dismissMutation.isPending);
 
   return (
@@ -247,97 +167,13 @@ export default function PlaceGroupPanel({ user }) {
       style={{ marginBottom: 12 }}
     >
       {/* Section 1: the groups this customer's addresses belong to */}
-      {groups.length === 0 ? (
+      {groupIds.length === 0 ? (
         <Text type="secondary">
           {t('ui.users.place_groups.no_groups', 'No place groups for this customer yet')}
         </Text>
       ) : (
-        groups.map((group) => (
-          <div key={group.place_group_id} style={{ marginBottom: 12 }}>
-            <Space wrap align="start">
-              <Tag color="geekblue">
-                {group.label ||
-                  `${t('ui.users.place_groups.unnamed', 'Place')} #${group.place_group_id}`}
-              </Tag>
-              <Statistic
-                title={t('ui.users.place_groups.union_balance', 'Bottles at this place')}
-                value={group.place_balance ?? 0}
-                valueStyle={{ fontSize: 16 }}
-              />
-              <Statistic
-                title={t('ui.users.place_groups.place_cod_total', 'Place COD debt')}
-                value={group.cod?.total_outstanding_amount ?? 0}
-                valueStyle={{ fontSize: 16 }}
-              />
-              <Statistic
-                title={t('ui.users.place_groups.place_cod_count', 'Unpaid COD orders')}
-                value={group.cod?.active_cod_debt_count ?? 0}
-                valueStyle={{ fontSize: 16 }}
-              />
-              <Button size="small" onClick={() => startAdd(group.place_group_id)}>
-                {t('ui.users.place_groups.add_action', 'Add address')}
-              </Button>
-            </Space>
-
-            <List
-              size="small"
-              dataSource={group.members || []}
-              locale={{
-                emptyText: t('ui.users.place_groups.no_members', 'No addresses in this place group'),
-              }}
-              renderItem={(member) => (
-                <List.Item
-                  key={member.address_id}
-                  actions={[
-                    <Button
-                      key="remove"
-                      size="small"
-                      danger
-                      onClick={() => startRemove(group, member)}
-                    >
-                      {t('ui.users.place_groups.remove', 'Remove')}
-                    </Button>,
-                  ]}
-                >
-                  <Space direction="vertical" size={0}>
-                    <Text>
-                      {[member.owner?.first_name, member.owner?.last_name]
-                        .filter(Boolean)
-                        .join(' ')}{' '}
-                      · {member.owner?.phone}
-                    </Text>
-                    {/* No per-member bottle count: the place holds ONE pool
-                        (the statistic above) and it cannot be sliced per
-                        coworker — `members` carries no balance at all. */}
-                    <Text type="secondary">
-                      {member.address_title || member.full_address}
-                    </Text>
-                  </Space>
-                </List.Item>
-              )}
-            />
-
-            <List
-              size="small"
-              header={
-                <Text type="secondary">
-                  {t('ui.users.place_groups.audit_title', 'Place group history')}
-                </Text>
-              }
-              dataSource={group.events || []}
-              locale={{
-                emptyText: t('ui.users.place_groups.no_events', 'No changes recorded yet'),
-              }}
-              renderItem={(event) => (
-                <List.Item key={event.id}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    {event.created_at ? dayjs(event.created_at).format('YYYY-MM-DD HH:mm') : ''} ·{' '}
-                    {placeGroupEventText(event.event_type, t)} · {displayReason(event.reason)}
-                  </Text>
-                </List.Item>
-              )}
-            />
-          </div>
+        groupIds.map((id) => (
+          <PlaceGroupCard key={id} groupId={id} onChanged={onGroupChanged} />
         ))
       )}
 

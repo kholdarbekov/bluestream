@@ -1275,7 +1275,10 @@ const Users = () => {
             <LinkedAccountsPanel user={selectedUser} />
 
             {/* Place groups (same physical place, may span customers) — the WHERE axis */}
-            <PlaceGroupPanel user={selectedUser} />
+            <PlaceGroupPanel
+              user={selectedUser}
+              onGroupChanged={() => fetchUserCodStatement(selectedUser)}
+            />
 
             {selectedUser.role === 'customer' && (
               <Card

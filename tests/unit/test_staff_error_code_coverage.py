@@ -115,6 +115,7 @@ NOT_STAFF_FACING: dict[str, str] = {
     "PLACE_GROUP_DISSOLVED": f"{_NOT_ON_ROUTE} (customer_link_service.py:1689: admin place groups)",
     "PLACE_GROUP_ENTITY_MEMBER": f"{_NOT_ON_ROUTE} (customer_link_service.py:821: admin place groups)",
     "PLACE_GROUP_GROCERY_MEMBER": f"{_NOT_ON_ROUTE} (customer_link_service.py:814: admin place groups)",
+    "PLACE_GROUP_LABEL_INVALID": f"{_NOT_ON_ROUTE} (customer_link_service.py: admin place groups, rename)",
     "PLACE_GROUP_MIN_ADDRESSES": f"{_NOT_ON_ROUTE} (customer_link_service.py:1588: admin place groups)",
     "PLACE_GROUP_NOT_FOUND": f"{_NOT_ON_ROUTE} (customer_link_service.py:1683/1846/1865/1887: admin place groups)",
     "PLACE_GROUP_REASON_REQUIRED": f"{_NOT_ON_ROUTE} (customer_link_service.py:1837: admin place groups)",

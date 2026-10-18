@@ -507,6 +507,7 @@ __all__ = [
     "SystemMaintenanceRequest",
     "AdminResponseSchema",
     "InactiveCustomersQuerySchema",
+    "CustomerMapPlaceMemberSchema",
     "CustomerMapPinSchema",
     "UserRole",
     "UserStatus",
@@ -1048,15 +1049,35 @@ def generate_admin_dashboard_data() -> Dict[str, Any]:
     return dashboard.model_dump()
 
 
+class CustomerMapPlaceMemberSchema(BaseModel):
+    """One owner of an address in a shared place, listed on that place's map pin."""
+
+    model_config = ConfigDict(from_attributes=True, alias_generator=to_camel, populate_by_name=True)
+
+    user_id: int
+    full_name: str
+    phone: Optional[str] = None
+    # That owner's newest counted order to any of the place's addresses.
+    last_order_date: Optional[datetime] = None
+    outstanding_debt: MoneyFloat = Field(default=0)
+    active_cod_debt_count: int = 0
+    cod_restricted: bool = False
+
+
 class CustomerMapPinSchema(BaseModel):
-    """One customer address pin for the admin map."""
+    """One admin-map pin: an ungrouped address (`kind="address"`) or a shared place (`kind="place"`).
+
+    Both kinds carry every key; a place pin has no single owner (`user_id` None)
+    and lists its owners under `members`.
+    """
 
     # populate_by_name=True lets model_validate accept the snake_case dicts the
     # service produces (without it, alias_generator=to_camel forces camelCase input).
     model_config = ConfigDict(from_attributes=True, alias_generator=to_camel, populate_by_name=True)
 
+    kind: Literal["address", "place"] = "address"
     address_id: int
-    user_id: int
+    user_id: Optional[int] = None
     full_name: str
     phone: Optional[str] = None
     user_type: str
@@ -1074,7 +1095,13 @@ class CustomerMapPinSchema(BaseModel):
     active_cod_debt_count: int = 0
     cod_restricted: bool = False
     is_shared_place: bool = False
-    place_member_count: int = 1
+    # Place pins: place debt > 0 OR any member's own debt > 0. Published so the
+    # UI's "Has debt" filter never re-derives the rule.
+    has_debt: bool = False
+    place_group_id: Optional[int] = None
+    place_label: Optional[str] = None
+    last_order_by: Optional[str] = None
+    members: List[CustomerMapPlaceMemberSchema] = Field(default_factory=list)
 
 
 # Helper functions (would typically query the database)

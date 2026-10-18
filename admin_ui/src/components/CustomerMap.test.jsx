@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { describe, it, expect, vi } from 'vitest';
 
@@ -29,44 +29,47 @@ vi.mock('./HeatLayer', () => ({
 // `CustomerMapPinSchema` (`alias_generator=to_camel`) plus the route's
 // `model_dump(by_alias=True)`. Two guards, the same split PlaceGroupPanel.test.jsx
 // uses:
-//   1. `mapPin` rejects a fixture that disagrees with MAP_PIN_KEYS — no invented
+//   1. `mapPin` rejects a fixture that disagrees with MAP_PIN_KEYS (and any
+//      `members[]` row that disagrees with MAP_PLACE_MEMBER_KEYS) — no invented
 //      key, and no MISSING key either, since a rename lands as "the old key is
 //      gone" and an extras-only validator is blind to exactly that; and
-//   2. MAP_PIN_KEYS is itself pinned against the LIVE `GET /admin/customers/map-pins`
+//   2. both sets are themselves pinned against the LIVE `GET /admin/customers/map-pins`
 //      response by tests/unit/test_admin_ui_payload_fixture_contracts.py
-//      (`test_customer_map_pin_key_set_matches_the_live_route`), which parses this
-//      set straight out of this file. Drop `by_alias=True` and that guard goes red,
+//      (`test_customer_map_pin_key_set_matches_the_live_route`), which parses them
+//      straight out of this file. Drop `by_alias=True` and that guard goes red,
 //      naming this file — without it, the set and the fixture would go stale
 //      together and agree with each other perfectly.
 // Declared via vi.hoisted because vi.mock's factory is hoisted above module-scope
 // consts and would otherwise hit the TDZ.
 const { mapPin } = vi.hoisted(() => {
+  // Both pin kinds — an ungrouped address (`kind: 'address'`) and a shared place
+  // (`kind: 'place'`) — carry EVERY key; a place pin has no single owner
+  // (`userId: null`) and lists its owners under `members`.
   const MAP_PIN_KEYS = new Set([
-    'addressId', 'userId', 'fullName', 'phone', 'userType', 'entitySubtype',
+    'kind', 'addressId', 'userId', 'fullName', 'phone', 'userType', 'entitySubtype',
     'lat', 'lng', 'isDefault', 'addressLabel', 'addressIndex', 'addressCount',
     'lastOrderDate', 'orderCount', 'bottleBalance', 'outstandingDebt',
-    'activeCodDebtCount', 'codRestricted',
-    // The place axis. `CustomerMap.js` reads `isSharedPlace` for the badge and
-    // the dashed glyph; `customerMapLogic.js` divides the heat weight by
-    // `placeMemberCount`, and a missing key silently falls back to a divisor of 1.
-    'isSharedPlace', 'placeMemberCount',
+    'activeCodDebtCount', 'codRestricted', 'isSharedPlace', 'hasDebt',
+    'placeGroupId', 'placeLabel', 'lastOrderBy', 'members',
   ]);
+  // One row of a place pin's `members`, pinned against the live route the same way.
+  const MAP_PLACE_MEMBER_KEYS = new Set(['userId', 'fullName', 'phone', 'lastOrderDate', 'outstandingDebt', 'activeCodDebtCount', 'codRestricted']);
 
   const where = 'See CustomerMapPinSchema in business_app/serializers/admin_serializers.py.';
+  const checkKeys = (row, keys, what) => {
+    const invented = Object.keys(row).filter((key) => !keys.has(key));
+    if (invented.length) {
+      throw new Error(`${what} fixture invents keys the backend never emits: ${invented.join(', ')}. ${where}`);
+    }
+    const missing = [...keys].filter((key) => !(key in row));
+    if (missing.length) {
+      throw new Error(`${what} fixture is missing keys the backend always emits: ${missing.join(', ')}. ${where}`);
+    }
+  };
   return {
     mapPin: (pin) => {
-      const invented = Object.keys(pin).filter((key) => !MAP_PIN_KEYS.has(key));
-      if (invented.length) {
-        throw new Error(
-          `Customer-map pin fixture invents keys the backend never emits: ${invented.join(', ')}. ${where}`
-        );
-      }
-      const missing = [...MAP_PIN_KEYS].filter((key) => !(key in pin));
-      if (missing.length) {
-        throw new Error(
-          `Customer-map pin fixture is missing keys the backend always emits: ${missing.join(', ')}. ${where}`
-        );
-      }
+      checkKeys(pin, MAP_PIN_KEYS, 'Customer-map pin');
+      pin.members.forEach((member) => checkKeys(member, MAP_PLACE_MEMBER_KEYS, 'Customer-map place member'));
       return pin;
     },
   };
@@ -76,27 +79,39 @@ vi.mock('../services/adminService', () => ({
   default: {
     getCustomerMapPins: vi.fn().mockResolvedValue({
       data: { pins: [
-        mapPin({ addressId: 1, userId: 1, fullName: 'Recent Guy', phone: '+998900000001',
+        mapPin({ kind: 'address', addressId: 1, userId: 1, fullName: 'Recent Guy', phone: '+998900000001',
           userType: 'individual', entitySubtype: null, lat: 41.31, lng: 69.28,
           isDefault: true, addressLabel: 'A1', addressIndex: 1, addressCount: 1,
           lastOrderDate: new Date().toISOString(), orderCount: 3,
           bottleBalance: 2, outstandingDebt: 0, activeCodDebtCount: 0, codRestricted: false,
-          isSharedPlace: false, placeMemberCount: 1 }),
-        mapPin({ addressId: 2, userId: 2, fullName: 'Idle Guy', phone: '+998900000002',
+          isSharedPlace: false, hasDebt: false, placeGroupId: null, placeLabel: null,
+          lastOrderBy: null, members: [] }),
+        mapPin({ kind: 'address', addressId: 2, userId: 2, fullName: 'Idle Guy', phone: '+998900000002',
           userType: 'entity', entitySubtype: 'grocery_store', lat: 41.32, lng: 69.29,
           isDefault: true, addressLabel: 'A2', addressIndex: 1, addressCount: 1,
           lastOrderDate: '2026-01-01T00:00:00Z', orderCount: 1,
           bottleBalance: 0, outstandingDebt: 9000, activeCodDebtCount: 1, codRestricted: false,
-          isSharedPlace: false, placeMemberCount: 1 }),
-        // Coincident with pin 1 (same lat/lng): a coworker at a shared workplace.
-        // `bottleBalance` is the PLACE pool, so this 7 is the same 7 the other two
-        // members of the group report — it must not read as a third 7.
-        mapPin({ addressId: 3, userId: 3, fullName: 'Shared Office Coworker', phone: '+998900000003',
-          userType: 'entity', entitySubtype: 'workplace', lat: 41.31, lng: 69.28,
-          isDefault: true, addressLabel: 'A3', addressIndex: 1, addressCount: 1,
+          isSharedPlace: false, hasDebt: true, placeGroupId: null, placeLabel: null,
+          lastOrderBy: null, members: [] }),
+        // A shared workplace: ONE pin for the whole place, coincident with pin 1
+        // (same lat/lng). `bottleBalance` is the place pool, reported once.
+        mapPin({ kind: 'place', addressId: 3, userId: null, fullName: '', phone: null,
+          userType: 'individual', entitySubtype: null, lat: 41.31, lng: 69.28,
+          isDefault: false, addressLabel: 'A3', addressIndex: 1, addressCount: 1,
           lastOrderDate: new Date().toISOString(), orderCount: 5,
           bottleBalance: 7, outstandingDebt: 0, activeCodDebtCount: 0, codRestricted: false,
-          isSharedPlace: true, placeMemberCount: 3 }),
+          isSharedPlace: true, hasDebt: false, placeGroupId: 7, placeLabel: 'Acme office',
+          lastOrderBy: 'Walk-in Carol',
+          members: [
+            { userId: 3, fullName: 'Recent Alice', phone: '+998900000003',
+              lastOrderDate: new Date().toISOString(), outstandingDebt: 0, activeCodDebtCount: 0,
+              codRestricted: false },
+            { userId: 5, fullName: 'Old Bob', phone: '+998900000005',
+              lastOrderDate: '2026-01-01T00:00:00Z', outstandingDebt: 0, activeCodDebtCount: 0,
+              codRestricted: false },
+            { userId: 4, fullName: 'Office Newcomer', phone: '+998900000004',
+              lastOrderDate: null, outstandingDebt: 0, activeCodDebtCount: 0, codRestricted: false },
+          ] }),
       ] },
     }),
   },
@@ -142,6 +157,33 @@ describe('CustomerMap', () => {
     await waitFor(() => expect(screen.getByTestId('heat')).toBeInTheDocument());
   });
 
+  it('lays the "no confirmed order" legend entry and the Showing count out as separate items with a gap', async () => {
+    renderMap();
+    await waitFor(() => expect(screen.getAllByTestId('pin')).toHaveLength(3));
+    const none = screen.getByText('No confirmed order yet');
+    const showing = screen.getByText(/^Showing/);
+    expect(none).not.toBe(showing);
+    expect(none.contains(showing)).toBe(false);
+    // Both sit in ONE antd Space (each its own item), so they cannot run together.
+    const space = none.closest('.ant-space-horizontal').parentElement.closest('.ant-space-horizontal');
+    expect(space).not.toBeNull();
+    expect(space.contains(showing)).toBe(true);
+    expect(none.closest('.ant-space-item').parentElement.closest('.ant-space-item'))
+      .not.toBe(showing.closest('.ant-space-item'));
+  });
+
+  it('shows the address text under the title of an unlabeled place popup', async () => {
+    const pins = (await adminService.getCustomerMapPins()).data.pins;
+    adminService.getCustomerMapPins.mockResolvedValueOnce({
+      data: { pins: pins.map((p) => (p.kind === 'place' ? { ...p, placeLabel: null } : p)) },
+    });
+    renderMap();
+    await waitFor(() => expect(screen.getAllByTestId('pin')).toHaveLength(3));
+    // The fixture place's address text is "A3"; the title falls back to Place #7.
+    const placePopup = screen.getAllByTestId('popup').find((el) => within(el).queryByText('Place #7'));
+    expect(within(placePopup).getByText('A3')).toBeInTheDocument();
+  });
+
   it('a shared-place pin is badged so coincident pins do not read as independent totals', async () => {
     renderMap();
     await waitFor(() => expect(screen.getAllByTestId('pin')).toHaveLength(3));
@@ -159,18 +201,17 @@ describe('CustomerMap', () => {
     expect(pins.map((el) => el.getAttribute('data-dash'))).toEqual(['', '', '3']);
   });
 
-  it('weights the heat layer by place, so one office is not counted thrice', async () => {
+  it('counts a shared place once on the heat layer', async () => {
     renderMap();
     await waitFor(() => expect(screen.getAllByTestId('pin')).toHaveLength(3));
     fireEvent.click(screen.getByRole('radio', { name: /heatmap/i }));
     await waitFor(() => expect(screen.getByTestId('heat')).toBeInTheDocument());
     const points = JSON.parse(screen.getByTestId('heat').getAttribute('data-points'));
     expect(points).toHaveLength(3);
-    expect(points[0]).toEqual([41.31, 69.28, 1]);   // solo place: one unit
-    expect(points[1]).toEqual([41.32, 69.29, 1]);   // solo place with NO bottles: still one unit
-    expect(points[2][2]).toBeCloseTo(1 / 3);        // shared place: 3 pins sharing one unit
-    // The three coincident pins of the office sum to one solo customer's heat.
-    expect(points[2][2] * 3).toBeCloseTo(points[0][2]);
+    expect(points[0]).toEqual([41.31, 69.28, 1]);   // solo address: one unit
+    expect(points[1]).toEqual([41.32, 69.29, 1]);   // solo address with NO bottles: still one unit
+    // The office is ONE place pin however many members it has: one unit, not one per member.
+    expect(points[2]).toEqual([41.31, 69.28, 1]);
   });
 
   it('leaves the zero-balance customer visible on the heat layer', async () => {
@@ -189,5 +230,46 @@ describe('CustomerMap', () => {
       expect(Number.isFinite(intensity)).toBe(true);
       expect(intensity).toBeGreaterThan(0);
     }
+  });
+
+  it('does not paint a place red when one member ordered recently', async () => {
+    renderMap();
+    await waitFor(() => expect(screen.getAllByTestId('pin')).toHaveLength(3));
+    // The place date is the newest order to the place, not the oldest member's.
+    expect(screen.getAllByTestId('pin')[2].getAttribute('data-color')).toBe('hsl(120, 70%, 45%)');
+  });
+
+  it('lists every member of a place with their own last order here', async () => {
+    renderMap();
+    await waitFor(() => expect(screen.getAllByTestId('pin')).toHaveLength(3));
+    expect(screen.getByText(/Recent Alice/)).toBeInTheDocument();
+    expect(screen.getByText(/Old Bob/)).toBeInTheDocument();
+    expect(screen.getByText(/never here/)).toBeInTheDocument();
+    expect(screen.getByText('People at this place')).toBeInTheDocument();
+  });
+
+  it('opens a member profile from the place popup', async () => {
+    const onViewUser = vi.fn();
+    renderMap({ onViewUser });
+    await waitFor(() => expect(screen.getAllByTestId('pin')).toHaveLength(3));
+    const bob = screen.getByText(/Old Bob/).closest('[data-member]');
+    fireEvent.click(within(bob).getByText('Profile'));
+    expect(onViewUser).toHaveBeenCalledWith(5);
+  });
+
+  it('renders an unlabeled place as Place #id', async () => {
+    const pins = (await adminService.getCustomerMapPins()).data.pins;
+    adminService.getCustomerMapPins.mockResolvedValueOnce({
+      data: { pins: pins.map((p) => (p.kind === 'place' ? { ...p, placeLabel: null } : p)) },
+    });
+    renderMap();
+    await waitFor(() => expect(screen.getAllByTestId('pin')).toHaveLength(3));
+    expect(screen.getByText('Place #7')).toBeInTheDocument();
+  });
+
+  it('shows a grey legend entry for places with no confirmed order', async () => {
+    renderMap();
+    await waitFor(() => expect(screen.getAllByTestId('pin')).toHaveLength(3));
+    expect(screen.getByText('No confirmed order yet')).toBeInTheDocument();
   });
 });

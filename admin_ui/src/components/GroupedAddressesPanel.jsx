@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
-import { Button, Card, Input, Space, Table, Tag, Typography, message } from 'antd';
+import { Button, Card, Drawer, Input, Space, Table, Tag, Typography, message } from 'antd';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import adminService from '../services/adminService';
+import PlaceGroupCard from './PlaceGroupCard';
 import PlaceGroupConfirmModal from './PlaceGroupConfirmModal';
 import { placeGroupErrorMessage } from './placeGroupCopy';
+import { invalidatePlaceGroupQueries } from './placeGroupQueries';
 import { formatMoney } from '../utils/formatMoney';
 
 const { Text } = Typography;
@@ -29,6 +31,10 @@ const SUGGESTION_LIMIT = 20;
  * deliberately no bulk "accept all" control and no auto-grouping (spec §2.1
  * lists seven distinct ways that fails dangerously), and grouping two addresses
  * has money consequences the moment place-scoped COD collection is on.
+ *
+ * Each existing group row has an Edit action that opens a drawer holding the
+ * shared `PlaceGroupCard` — the same add/remove card and confirm flow the
+ * per-customer panel uses, so a group is edited one way from every surface.
  */
 export default function GroupedAddressesPanel() {
   const { t } = useTranslation('users');
@@ -38,6 +44,8 @@ export default function GroupedAddressesPanel() {
   const [search, setSearch] = useState('');
   // action: null | { kind: 'create' | 'dismiss', payload } — the shared dialog.
   const [action, setAction] = useState(null);
+  // The place group open in the edit drawer (null = closed).
+  const [editingGroupId, setEditingGroupId] = useState(null);
 
   const groupsQuery = useQuery({
     queryKey: ['placeGroupsList', page, search],
@@ -54,17 +62,12 @@ export default function GroupedAddressesPanel() {
   });
   const suggestions = suggestionsQuery.data?.data || [];
 
-  const invalidatePlaceData = () => {
-    queryClient.invalidateQueries({ queryKey: ['placeGroupsList'] });
-    queryClient.invalidateQueries({ queryKey: ['placeGroupSuggestionsGlobal'] });
-  };
-
   const closeAction = () => setAction(null);
 
   const onMutationSuccess = (successKey, successFallback) => () => {
     message.success(t(successKey, successFallback));
     closeAction();
-    invalidatePlaceData();
+    invalidatePlaceGroupQueries(queryClient);
   };
 
   const onMutationError = (error) => {
@@ -178,6 +181,15 @@ export default function GroupedAddressesPanel() {
       dataIndex: 'bottle_exposure',
       key: 'bottle_exposure',
     },
+    {
+      title: t('ui.users.grouped_addresses.col_actions', 'Actions'),
+      key: 'actions',
+      render: (_, row) => (
+        <Button size="small" onClick={() => setEditingGroupId(row.id)}>
+          {t('ui.users.grouped_addresses.edit_action', 'Edit')}
+        </Button>
+      ),
+    },
   ];
 
   const suggestionColumns = [
@@ -277,6 +289,19 @@ export default function GroupedAddressesPanel() {
           pagination={false}
         />
       </Card>
+
+      <Drawer
+        open={editingGroupId !== null}
+        width={640}
+        destroyOnHidden
+        title={t('ui.users.grouped_addresses.edit_title', 'Edit place group')}
+        onClose={() => setEditingGroupId(null)}
+      >
+        <PlaceGroupCard
+          groupId={editingGroupId}
+          onDissolved={() => setEditingGroupId(null)}
+        />
+      </Drawer>
 
       <PlaceGroupConfirmModal
         action={action}

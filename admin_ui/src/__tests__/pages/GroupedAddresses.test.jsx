@@ -1,6 +1,7 @@
 import React from 'react';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { message } from 'antd';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router-dom';
 
@@ -354,5 +355,150 @@ describe('Users "Grouped Addresses" tab', () => {
     // without a button that says "all".
     const suggestions = (await screen.findByText('Suggested candidates')).closest('.ant-card');
     expect(within(suggestions).queryAllByRole('checkbox')).toHaveLength(0);
+  });
+
+  describe('editing a group from the list', () => {
+    // The hand-written detail below must keep the backend's shape. The canonical,
+    // contract-pinned sets are GROUP_DETAIL_KEYS / GROUP_MEMBER_KEYS in
+    // components/PlaceGroupPanel.test.jsx (read by
+    // tests/unit/test_admin_ui_payload_fixture_contracts.py); these lists mirror
+    // them on purpose and are checked both ways (no invented key, no missing key).
+    const EXPECTED_DETAIL_KEYS = [
+      'place_group_id', 'label', 'place_balance', 'members', 'cod',
+      'removal_dissolves_group', 'events',
+    ];
+    const EXPECTED_MEMBER_KEYS = [
+      'address_id', 'address_title', 'full_address', 'suggested_bottles_leaving', 'owner',
+    ];
+    const assertDetailKeys = (value) => {
+      expect(Object.keys(value).sort()).toEqual([...EXPECTED_DETAIL_KEYS].sort());
+      value.members.forEach((m) =>
+        expect(Object.keys(m).sort()).toEqual([...EXPECTED_MEMBER_KEYS].sort()));
+      return value;
+    };
+
+    const detail = assertDetailKeys({
+      place_group_id: 12,
+      label: 'Office A',
+      place_balance: 4,
+      members: [
+        {
+          address_id: 30,
+          address_title: 'Desk',
+          full_address: 'Office st 1',
+          suggested_bottles_leaving: 0,
+          owner: { id: 41, first_name: 'Dana', last_name: 'Deskowner', phone: '+998900000041' },
+        },
+        {
+          address_id: 31,
+          address_title: 'Floor',
+          full_address: 'Office st 2',
+          suggested_bottles_leaving: 0,
+          owner: { id: 42, first_name: 'Eli', last_name: 'Floorowner', phone: '+998900000042' },
+        },
+      ],
+      cod: { total_outstanding_amount: 0, active_cod_debt_count: 0 },
+      events: [],
+      removal_dissolves_group: false,
+    });
+
+    beforeEach(() => {
+      adminService.getPlaceGroup.mockResolvedValue({ data: detail });
+      adminService.searchAddresses.mockResolvedValue({
+        data: {
+          addresses: [
+            {
+              address_id: 9,
+              title: 'Home',
+              full_address: 'Home st 2',
+              address_group_id: null,
+              owner: { id: 33, first_name: 'Carol', last_name: 'Neighbor', phone: '+998900000003' },
+            },
+          ],
+        },
+      });
+    });
+
+    const openEditor = async (user) => {
+      await openTab(user);
+      await user.click(await screen.findByRole('button', { name: /^Edit$/ }));
+      expect(await screen.findByText('Edit place group')).toBeInTheDocument();
+      expect(adminService.getPlaceGroup).toHaveBeenCalledWith(12);
+    };
+
+    const confirmWithReason = async (user, reason) => {
+      await user.type(await screen.findByPlaceholderText(/Reason/), reason);
+      await user.click(screen.getByRole('button', { name: /^OK$/ }));
+    };
+
+    it('opens a group from the list and adds an address through the shared confirm modal', async () => {
+      const user = userEvent.setup();
+      adminService.addPlaceGroupAddresses.mockResolvedValue({ data: { place_group_id: 12 } });
+      render(<Users />, { wrapper: createWrapper() });
+      await openEditor(user);
+
+      expect(await screen.findByText(/Dana Deskowner/)).toBeInTheDocument();
+      await user.click(await screen.findByRole('button', { name: /Add address/ }));
+      await user.type(await screen.findByRole('combobox'), 'Carol');
+      await waitFor(() => expect(adminService.searchAddresses).toHaveBeenCalledWith('Carol', true));
+      const dropdown = await waitFor(() => {
+        const el = document.querySelector('.ant-select-dropdown');
+        expect(el).not.toBeNull();
+        return el;
+      });
+      await user.click(await within(dropdown).findByText(/Carol Neighbor/));
+      await confirmWithReason(user, 'new hire');
+
+      await waitFor(() =>
+        expect(adminService.addPlaceGroupAddresses.mock.calls[0]).toEqual([12, [9], 'new hire', {}])
+      );
+    });
+
+    it('removes an address from the list editor', async () => {
+      const user = userEvent.setup();
+      adminService.removePlaceGroupAddress.mockResolvedValue({
+        data: { place_group_id: 12, bottles_leaving: 0 },
+      });
+      render(<Users />, { wrapper: createWrapper() });
+      await openEditor(user);
+
+      const row = (await screen.findByText(/Eli Floorowner/)).closest('li');
+      await user.click(within(row).getByRole('button', { name: /Remove/ }));
+      await confirmWithReason(user, 'moved');
+
+      await waitFor(() =>
+        expect(adminService.removePlaceGroupAddress.mock.calls[0]).toEqual([12, 31, 'moved', 0])
+      );
+    });
+
+    it('tells the admin when the group detail cannot be loaded instead of a blank editor', async () => {
+      const user = userEvent.setup();
+      adminService.getPlaceGroup.mockRejectedValue(new Error('boom'));
+      render(<Users />, { wrapper: createWrapper() });
+      await openTab(user);
+      await user.click(await screen.findByRole('button', { name: /^Edit$/ }));
+      expect(await screen.findByText('Could not load this place group.')).toBeInTheDocument();
+    });
+
+    it('says the group was dissolved and closes the list editor', async () => {
+      const user = userEvent.setup();
+      adminService.removePlaceGroupAddress.mockResolvedValue({
+        data: { place_group_id: 12, bottles_leaving: 0, dissolved: true },
+      });
+      render(<Users />, { wrapper: createWrapper() });
+      await openEditor(user);
+
+      const row = (await screen.findByText(/Eli Floorowner/)).closest('li');
+      await user.click(within(row).getByRole('button', { name: /Remove/ }));
+      await confirmWithReason(user, 'moved');
+
+      await waitFor(() =>
+        expect(message.success).toHaveBeenCalledWith(
+          'Address removed; the place group was dissolved'
+        )
+      );
+      expect(message.success).not.toHaveBeenCalledWith('Address removed from place group');
+      await waitFor(() => expect(screen.queryByText('Edit place group')).not.toBeInTheDocument());
+    });
   });
 });

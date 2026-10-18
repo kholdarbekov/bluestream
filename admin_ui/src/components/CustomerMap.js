@@ -10,7 +10,7 @@ import { Link, useInRouterContext } from 'react-router-dom';
 import adminService from '../services/adminService';
 import OperationsMap from './OperationsMap';
 import {
-  loadThresholds, saveThresholds, applyFilters, heatWeight,
+  loadThresholds, saveThresholds, applyFilters, daysSince,
 } from '../utils/customerMapLogic';
 import { formatMoney } from '../utils/formatMoney';
 
@@ -74,12 +74,7 @@ const CustomerMap = ({ onViewUser, height = 640 }) => {
     () => applyFilters(pins, { idleMinDays, bottleOnly, debtOnly, type }, now),
     [pins, idleMinDays, bottleOnly, debtOnly, type], // eslint-disable-line react-hooks/exhaustive-deps
   );
-  // One PLACE = one unit of heat, split across its pins: every pin of a shared
-  // workplace is coincident and reports the SAME pool, so an unweighted layer
-  // counts one office once per member. The weight never reaches 0 — a
-  // zero-balance customer is still a customer and has to stay on the map. See
-  // `heatWeight`.
-  const heatPoints = useMemo(() => visible.map((p) => [p.lat, p.lng, heatWeight(p)]), [visible]);
+  const heatPoints = useMemo(() => visible.map((p) => [p.lat, p.lng, 1]), [visible]);
 
   const updateThreshold = (next) => {
     const clean = { t1: next.t1 ?? t1, t2: next.t2 ?? t2 };
@@ -88,7 +83,7 @@ const CustomerMap = ({ onViewUser, height = 640 }) => {
     saveThresholds(clean);
   };
 
-  const renderCustomerPopup = useCallback((p, d, color) => (
+  const renderAddressPopup = (p, d, color) => (
     <Space direction="vertical" size={2}>
       <Text strong>{p.fullName}</Text>
       <Space size={4}>
@@ -115,14 +110,6 @@ const CustomerMap = ({ onViewUser, height = 640 }) => {
         {p.addressCount > 1 && (
           <Text type="secondary"> ({t('ui.users.map.address', 'address')} {p.addressIndex}/{p.addressCount})</Text>
         )}
-        {/* This number is the whole PLACE's pool, repeated verbatim on every
-            coworker's pin. Without the badge an admin reading a 3-member office
-            totals 7+7+7 = 21 bottles that do not exist. */}
-        {p.isSharedPlace && (
-          <Tag color="purple" style={{ marginLeft: 6 }}>
-            {t('ui.users.map.shared_place', 'shared place — one pool')}
-          </Tag>
-        )}
       </Text>
       <Text>{t('ui.users.map.debt', 'Debt')}: {formatMoney(p.outstandingDebt)} UZS</Text>
       <Button type="link" size="small" style={{ padding: 0 }}
@@ -130,7 +117,58 @@ const CustomerMap = ({ onViewUser, height = 640 }) => {
         {t('ui.users.map.view_profile', 'View full profile')}
       </Button>
     </Space>
-  ), [t, onViewUser]);
+  );
+  const renderPlacePopup = (p, d, color) => (
+    <Space direction="vertical" size={2}>
+      <Space size={4}>
+        <Text strong>{p.placeLabel || `${t('ui.users.place_groups.unnamed', 'Place')} #${p.placeGroupId}`}</Text>
+        <Tag color="purple">{t('ui.users.map.shared_place', 'shared place — one pool')}</Tag>
+      </Space>
+      <Text type="secondary">{p.addressLabel}</Text>
+      <Text>
+        {t('ui.users.map.last_order_here', 'Last order here')}:{' '}
+        {d === null ? '—' : `${d} ${t('ui.users.map.days_ago', 'days ago')}`}
+        <span style={{ display: 'inline-block', width: 10, height: 10, marginLeft: 6,
+          borderRadius: 5, background: color }} />
+        {p.lastOrderBy && <Text type="secondary"> ({p.lastOrderBy})</Text>}
+      </Text>
+      <Text>{t('ui.users.map.bottles', 'Bottles')}: {p.bottleBalance}</Text>
+      <Text>
+        {t('ui.users.map.unpaid_here', 'Unpaid here')}: {formatMoney(p.outstandingDebt)} UZS
+        {' · '}{p.activeCodDebtCount} {t('ui.users.map.unpaid_orders', 'unpaid orders')}
+      </Text>
+      <Text strong>{t('ui.users.map.people_here', 'People at this place')}</Text>
+      {(p.members || []).map((m) => {
+        const md = daysSince(m.lastOrderDate);
+        return (
+          <div key={m.userId} data-member={m.userId}>
+            <Space size={4} wrap>
+              <Text>{m.fullName}</Text>
+              <Text type="secondary">{m.phone}</Text>
+              <Text type="secondary">
+                {md === null
+                  ? t('ui.users.map.never_here', 'never here')
+                  : `${md} ${t('ui.users.map.days_ago', 'days ago')}`}
+              </Text>
+              {Number(m.outstandingDebt) > 0 && (
+                <Text type="secondary">{t('ui.users.map.debt', 'Debt')}: {formatMoney(m.outstandingDebt)} UZS</Text>
+              )}
+              {m.codRestricted && <Tag color="red">{t('ui.users.map.cod_restricted', 'COD restricted')}</Tag>}
+              <Button type="link" size="small" style={{ padding: 0 }}
+                onClick={() => onViewUser && onViewUser(m.userId)}>
+                {t('ui.users.map.profile', 'Profile')}
+              </Button>
+            </Space>
+          </div>
+        );
+      })}
+    </Space>
+  );
+
+  const renderCustomerPopup = useCallback(
+    (p, d, color) => (p.kind === 'place' ? renderPlacePopup(p, d, color) : renderAddressPopup(p, d, color)),
+    [t, onViewUser], // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
   return (
     <Card styles={{ body: { padding: 12 } }}>
@@ -200,9 +238,15 @@ const CustomerMap = ({ onViewUser, height = 640 }) => {
           <Text type="secondary">{t('ui.users.map.legend_recent', 'Recent')} (≤{t1}d)</Text>
           <Text type="secondary">{t('ui.users.map.legend_idle', 'Idle')} (≥{t2}d)</Text>
         </Space>
-        <Text type="secondary">
-          {t('ui.users.map.showing', 'Showing')} {visible.length}/{pins.length}
-        </Text>
+        <Space size="middle" wrap>
+          <Space size={4}>
+            <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 5, background: '#9ca3af' }} />
+            <Text type="secondary">{t('ui.users.map.legend_none', 'No confirmed order yet')}</Text>
+          </Space>
+          <Text type="secondary">
+            {t('ui.users.map.showing', 'Showing')} {visible.length}/{pins.length}
+          </Text>
+        </Space>
       </div>
 
       {isLoading ? (

@@ -842,6 +842,15 @@ describe('AdminService', () => {
       expect(result).toEqual({ success: true, data: { place_group_id: 7 } });
     });
 
+    it('renames a place group with a reason', async () => {
+      api.patch.mockResolvedValue({ data: { success: true, data: { place_group_id: 7, label: 'HQ' } } });
+
+      const result = await adminService.renamePlaceGroup(7, 'HQ', 'new sign');
+
+      expect(api.patch).toHaveBeenCalledWith('/admin/place-groups/7', { label: 'HQ', reason: 'new sign' });
+      expect(result).toEqual({ success: true, data: { place_group_id: 7, label: 'HQ' } });
+    });
+
     it('fetches one place group detail', async () => {
       api.get.mockResolvedValue({ data: { success: true, data: { place_group_id: 7 } } });
 

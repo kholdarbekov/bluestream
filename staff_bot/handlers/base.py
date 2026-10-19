@@ -22,6 +22,7 @@ from staff_bot.utils import auth_refusals, flow_state
 from staff_bot.api_client import api_client
 from staff_bot.utils.answered_callbacks import callback_already_answered
 from staff_bot.utils.api_errors import ErrorDetailCopy, displayable_backend_reason, render_detail_copy
+from staff_bot.utils.delivery_snapshot import find_active_row, snapshot_from_active_row
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,14 @@ class BaseHandler:
         # delivery-status call sites render it as a stale card, not an alert
         # (`_handle_api_response_error`).
         'STAFF_DELIVERY_NOT_OWNED': 'staff.error.api.delivery_not_owned',
+        # R10 (admin-order-address-change spec): an admin changed the order's
+        # address after the screen this Arrived, Delivered or Failed step was
+        # tapped on was drawn. Rendered as a stale card too, re-anchored on the
+        # fresh row (`_handle_api_response_error`).
+        'STAFF_DELIVERY_ADDRESS_CHANGED': 'staff.error.api.delivery_address_changed',
+        # A status PUT whose `delivery_address_id` is not an integer: the bot
+        # always sends an int, so this is a bad build, not a driver's input.
+        'STAFF_INVALID_DELIVERY_ADDRESS_ID': 'staff.error.api.validation',
         # The place-scope lock ladder timed out (Postgres 55P03) — an admin is
         # regrouping this address right now. Transient and RETRYABLE, so it gets
         # its own "try again in a moment" copy instead of the generic conflict
@@ -609,6 +618,8 @@ class BaseHandler:
         update: Update,
         context: ContextTypes.DEFAULT_TYPE,
         delivery_id,
+        *,
+        refresh: bool = False,
     ):
         """Re-anchor ``current_delivery`` on the delivery the driver TAPPED.
 
@@ -626,6 +637,11 @@ class BaseHandler:
 
         Returns the snapshot to act on, or ``None`` when the tapped delivery can
         no longer be found — the caller MUST refuse to act on that.
+
+        ``refresh=True`` re-reads even when the snapshot already names that
+        delivery: the backend said the snapshot itself is stale (R10's
+        STAFF_DELIVERY_ADDRESS_CHANGED). A failed re-read still returns None and
+        leaves the snapshot as it was.
 
         A MISSING snapshot re-reads, it does not pass. This used to return the
         empty dict on the stated grounds that "there is nothing to compare, and
@@ -650,13 +666,14 @@ class BaseHandler:
         """
         info = context.user_data.get('current_delivery') or {}
         current_id = info.get('delivery_id')
-        if delivery_id is None or current_id == delivery_id:
+        if delivery_id is None or (current_id == delivery_id and not refresh):
             return info
 
         logger.info(
-            "current_delivery snapshot (%s) does not match the tapped delivery "
-            "(%s); re-anchoring from /delivery/active",
-            current_id, delivery_id,
+            "current_delivery snapshot (%s) %s (%s); re-anchoring from /delivery/active",
+            current_id,
+            "was refused as stale for delivery" if refresh else "does not match the tapped delivery",
+            delivery_id,
         )
         token = await self._get_auth_token(update, context)
         if not token:
@@ -667,23 +684,12 @@ class BaseHandler:
         if not response.success:
             return None
 
-        data = response.data
-        rows = data if isinstance(data, list) else (data or {}).get('items', [])
-        for row in rows or []:
-            if (row.get('delivery_id') or row.get('id')) != delivery_id:
-                continue
-            # The row IS the card payload `view_active_delivery` whitelists
-            # from; copy it wholesale and add only the derived keys that
-            # handler renames, so this can never fall behind that whitelist.
-            snapshot = dict(row)
-            snapshot['delivery_id'] = delivery_id
-            snapshot.setdefault('origin_lat', row.get('current_location_lat'))
-            snapshot.setdefault('origin_lng', row.get('current_location_lng'))
-            snapshot.setdefault('destination_lat', row.get('destination_latitude'))
-            snapshot.setdefault('destination_lng', row.get('destination_longitude'))
-            context.user_data['current_delivery'] = snapshot
-            return snapshot
-        return None
+        row = find_active_row(response.data, delivery_id)
+        if row is None:
+            return None
+        snapshot = snapshot_from_active_row(row, delivery_id)
+        context.user_data['current_delivery'] = snapshot
+        return snapshot
 
     async def _require_flow(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
                             key: str):
@@ -910,24 +916,29 @@ class BaseHandler:
 
         ``context`` is passed by the three ``update_delivery_status`` call sites
         in ``StatusUpdateHandler``, the only screens that can meet
-        ``STAFF_DELIVERY_NOT_OWNED``, or ``STAFF_INVALID_STATUS_TRANSITION``
-        naming a ``current_status`` in ``STALE_CARD_STATUSES``. Both refusals
-        mean a STALE CARD, not bad input. Dispatch rescheduled, reassigned or
-        pooled the delivery after the driver opened it, or the order was
-        cancelled under it (the cancel cascade leaves the CANCELLED delivery on
-        the driver, so the ownership check passes and only the transition guard
-        refuses), and the backend wrote nothing. An alert alone would
-        leave ``current_delivery`` naming a stop the driver no longer holds. It
-        would also leave the at-door cash flow armed, so the next amount they
-        typed would be submitted again.
+        ``STAFF_DELIVERY_NOT_OWNED`` (R20), ``STAFF_DELIVERY_ADDRESS_CHANGED``
+        (R10), or ``STAFF_INVALID_STATUS_TRANSITION`` naming a
+        ``current_status`` in ``STALE_CARD_STATUSES``. Each refusal means a
+        STALE CARD, not bad input. Dispatch rescheduled, reassigned or pooled
+        the delivery after the driver opened it, an admin changed its address,
+        or the order was cancelled under it (the cancel cascade leaves the
+        CANCELLED delivery on the driver, so the ownership check passes and only
+        the transition guard refuses), and the backend wrote nothing. An alert
+        alone would leave ``current_delivery`` naming a stop the driver no
+        longer holds, or an address it no longer has. It would also leave the
+        at-door cash flow armed, so the next amount they typed would be
+        submitted again.
 
-        So the handler forgets the snapshot and leaves the flow through THE exit
-        every other screen uses (``flow_state.clear_pending_flows``, which also
-        drops the Redis mirror and drains deferred pool offers). It then answers
-        the way ``_refuse_stale_card`` does: one sentence and the way back to
-        the active list. ``current_delivery`` is popped by hand because it is
-        session state that ``clear_pending_flows`` deliberately keeps. Here the
-        snapshot itself is what went stale. Every other caller keeps the alert.
+        So the handler leaves the flow through THE exit every other screen uses
+        (``flow_state.clear_pending_flows``, which also drops the Redis mirror,
+        drains deferred pool offers and drops the flow's captured address). It
+        then answers the way ``_refuse_stale_card`` does: one sentence and the
+        way back to the active list. ``clear_pending_flows`` deliberately keeps
+        ``current_delivery``, which is session state, so the snapshot is handled
+        by hand. A stop that is no longer the driver's is forgotten (popped).
+        A stop whose address changed is still theirs, so its snapshot is re-read
+        instead (``refresh=True``) and the next screen names the new address.
+        Every other caller keeps the alert.
 
         A refusal naming current == requested is a replay of a change that DID
         land (``_status_already_applied``), never a stale card; the callers
@@ -941,9 +952,14 @@ class BaseHandler:
             and details.get('current_status') in self.STALE_CARD_STATUSES
             and not self._status_already_applied(response)
         )
-        if context is not None and (error_code == 'STAFF_DELIVERY_NOT_OWNED' or terminal):
-            context.user_data.pop('current_delivery', None)
+        address_changed = error_code == 'STAFF_DELIVERY_ADDRESS_CHANGED'
+        if context is not None and (address_changed or error_code == 'STAFF_DELIVERY_NOT_OWNED' or terminal):
+            snapshot_id = (context.user_data.get('current_delivery') or {}).get('delivery_id')
+            if not address_changed:
+                context.user_data.pop('current_delivery', None)
             await flow_state.clear_pending_flows(context, update)
+            if address_changed and snapshot_id is not None:
+                await self._anchor_current_delivery(update, context, snapshot_id, refresh=True)
             await self._refuse_stale_card(
                 update,
                 language,

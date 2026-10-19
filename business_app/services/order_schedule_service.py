@@ -10,7 +10,7 @@ moved to a later day). Every driver-facing surface keys off a claimable
 import logging
 from dataclasses import dataclass
 from datetime import date, datetime, time, timezone
-from typing import Any, Callable, Dict, FrozenSet, Iterable, Optional, Tuple
+from typing import Any, Dict, FrozenSet, Iterable, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from flask import current_app, g, has_app_context
@@ -61,6 +61,9 @@ class RescheduleOutcome:
     old_driver_user_id: Optional[int]
     old_driver_telegram_id: Optional[str]
     old_driver_order_info: Optional[dict]
+    # R16: a driver held the stop (`driver_holding_stop`), so the reschedule takes it off their
+    # route and tells them. Decided once, here, and read by the post-commit notices.
+    driver_loses_stop: bool
     notify_customer: bool
     customer_channel: Optional[str]
     audit: dict
@@ -267,11 +270,43 @@ class OrderScheduleService:
         eager-loads the delivery, so answering this for a whole page costs no
         query.
         """
-        if order.status not in ACTIVE_ORDER_STATUSES:
+        window = cls.schedule_window_block(order)
+        if window == "order":
             return "ORDER_NOT_RESCHEDULABLE"
+        if window == "delivery":
+            return "DELIVERY_NOT_RESCHEDULABLE"
+        return None
+
+    @classmethod
+    def schedule_window_block(cls, order: Order) -> Optional[str]:
+        """Which part of the order closes the schedule window: "order", "delivery", or None while it is open.
+
+        The status window the reschedule and the admin address change both read, so an
+        order that may move to another day may also move to another address. Each caller
+        maps the part to its own code. The order is checked first. Reads `order.status` and
+        `order.delivery` only.
+        """
+        if order.status not in ACTIVE_ORDER_STATUSES:
+            return "order"
         delivery = order.delivery
         if delivery is not None and delivery.status not in cls.RESCHEDULABLE_DELIVERY_STATUSES:
-            return "DELIVERY_NOT_RESCHEDULABLE"
+            return "delivery"
+        return None
+
+    @classmethod
+    def driver_holding_stop(cls, delivery: Optional[Delivery]) -> Optional[int]:
+        """The driver (a users.id) whose route still carries this stop, or None.
+
+        A driver holds the stop while the delivery sits in `DRIVER_NOTICE_DELIVERY_STATUSES`.
+        A FAILED row keeps its `delivery_person_id` but no longer holds the stop. The
+        reschedule's `losing_stop` guard and the address change's driver notice ask here.
+        """
+        if (
+            delivery is not None
+            and delivery.delivery_person_id is not None
+            and delivery.status in cls.DRIVER_NOTICE_DELIVERY_STATUSES
+        ):
+            return delivery.delivery_person_id
         return None
 
     @classmethod
@@ -480,15 +515,11 @@ class OrderScheduleService:
         reschedulable = block_code is None
         delivery = order.delivery
         losing_stop = None
-        if (
-            reschedulable
-            and delivery is not None
-            and delivery.status in cls.DRIVER_NOTICE_DELIVERY_STATUSES
-            and delivery.delivery_person_id is not None
-        ):
+        holder_id = cls.driver_holding_stop(delivery) if reschedulable else None
+        if holder_id is not None:
             # `delivery_person_id` is a users.id; the name comes from that user.
             driver = delivery.delivery_person
-            losing_stop = {"id": delivery.delivery_person_id, "name": driver.full_name if driver is not None else ""}
+            losing_stop = {"id": holder_id, "name": driver.full_name if driver is not None else ""}
         min_date, max_date = cls.reschedule_date_bounds(order)
         metadata.update(
             {
@@ -751,6 +782,39 @@ class OrderScheduleService:
         return Delivery.query.filter_by(order_id=order_id).with_for_update().populate_existing().one_or_none()
 
     @classmethod
+    def lock_delivery_then_order(cls, order_id: int) -> Tuple[Optional[Delivery], Order]:
+        """The order's delivery (or None) and the order, both locked and re-read from the database.
+
+        Delivery first, then Order: the order `update_delivery_status`,
+        `return_delivery_to_pool` and `assign_driver` take them in, so a
+        driver's tap and a reschedule or an address change queue on the row
+        instead of deadlocking. Call it inside the caller's transaction, which
+        holds both locks until it ends.
+
+        Raises NotFoundError (ORDER_NOT_FOUND).
+        """
+        from business_app import db
+        from business_app.utils.exceptions import NotFoundError
+
+        delivery = cls._lock_delivery(order_id)
+        order = db.session.get(Order, order_id, with_for_update=True, populate_existing=True)
+        if order is None:
+            raise NotFoundError("Order not found", error_code="ORDER_NOT_FOUND")
+        if delivery is None:
+            # A release may have committed after the first read and before
+            # the Order lock. With the Order held, nothing else can create
+            # the row, so this read is final. It takes the row lock after
+            # the Order's -- the reverse order, but only for a row created
+            # an instant ago, and Postgres aborts one side of a deadlock
+            # rather than hanging.
+            delivery = cls._lock_delivery(order_id)
+        # `order.delivery` may still hold what an earlier read saw (None,
+        # before that release). Expire it so the eligibility helpers the
+        # caller runs next, which read it, get the row locked above.
+        db.session.expire(order, ["delivery"])
+        return delivery, order
+
+    @classmethod
     def _refuse_disallowed_schedule(
         cls,
         order: Order,
@@ -824,10 +888,8 @@ class OrderScheduleService:
     ) -> RescheduleOutcome:
         """Lock, validate, write and commit one reschedule (spec §3.4 steps 1-5).
 
-        Delivery first, then Order: the order `update_delivery_status`,
-        `return_delivery_to_pool` and `assign_driver` take them in, so a
-        driver's tap and a reschedule queue on the row instead of deadlocking.
-        Everything after the locks reads only the two locked instances.
+        The locks are `lock_delivery_then_order`'s, in its order. Everything
+        after the locks reads only the two locked instances.
 
         The whole body is one transaction, so a refusal rolls back, lets go of
         both locks at once, and leaves nothing half-written.
@@ -836,27 +898,12 @@ class OrderScheduleService:
         from business_app.services.delivery_service import DeliveryService
         from business_app.services.staff_service import StaffService
         from business_app.utils.delivery_window import format_delivery_window
-        from business_app.utils.exceptions import NotFoundError, ValidationError
+        from business_app.utils.exceptions import ValidationError
         from business_app.utils.staff_order_info import build_staff_order_info
         from business_app.utils.transactions import atomic_transaction
 
         with atomic_transaction():
-            delivery = cls._lock_delivery(order_id)
-            order = db.session.get(Order, order_id, with_for_update=True, populate_existing=True)
-            if order is None:
-                raise NotFoundError("Order not found", error_code="ORDER_NOT_FOUND")
-            if delivery is None:
-                # A release may have committed after the first read and before
-                # the Order lock. With the Order held, nothing else can create
-                # the row, so this read is final. It takes the row lock after
-                # the Order's -- the reverse order, but only for a row created
-                # an instant ago, and Postgres aborts one side of a deadlock
-                # rather than hanging.
-                delivery = cls._lock_delivery(order_id)
-            # `order.delivery` may still hold what an earlier read saw (None,
-            # before that release). Expire it so the eligibility helpers below,
-            # which read it, get the row locked above.
-            db.session.expire(order, ["delivery"])
+            delivery, order = cls.lock_delivery_then_order(order_id)
 
             block_code = cls.reschedule_block_code(order)
             if block_code == "ORDER_NOT_RESCHEDULABLE":
@@ -889,7 +936,7 @@ class OrderScheduleService:
 
             # The pre-write picture the post-commit notices need (step 4).
             old_driver_user_id = delivery.delivery_person_id if delivery is not None else None
-            driver_loses_stop = pre_status in cls.DRIVER_NOTICE_DELIVERY_STATUSES
+            driver_loses_stop = cls.driver_holding_stop(delivery) is not None
             old_driver = db.session.get(User, old_driver_user_id) if driver_loses_stop else None
             old_driver_telegram_id = old_driver.telegram_id if old_driver is not None else None
             old_driver_order_info = build_staff_order_info(delivery) if driver_loses_stop else None
@@ -955,6 +1002,7 @@ class OrderScheduleService:
             old_driver_user_id=old_driver_user_id,
             old_driver_telegram_id=old_driver_telegram_id,
             old_driver_order_info=old_driver_order_info,
+            driver_loses_stop=driver_loses_stop,
             notify_customer=notify_customer,
             customer_channel=customer_channel,
             # JSON-safe values only: the audit row's column is JSON, and a
@@ -979,37 +1027,40 @@ class OrderScheduleService:
     def _run_post_commit(cls, outcome: RescheduleOutcome) -> None:
         """The side effects of a committed reschedule (spec §3.4 step 6).
 
-        Each step is isolated by `_best_effort`, so a broker or webhook outage
+        Each step is isolated by `best_effort_step`, so a broker or webhook outage
         in one cannot swallow the others. The customer notice matters most
         when the driver's does not go out, and the reverse.
         """
         from business_app import db
+        from business_app.utils.transactions import best_effort_step
 
+        event = "order_reschedule_post_commit_failed"
         if outcome.landed_status == DeliveryStatus.SCHEDULED and outcome.pre_status != DeliveryStatus.SCHEDULED:
             # Newly in today's pool. A same-day edit of a row that was already
             # in the pool is not a new order to anyone, so it is not
             # re-broadcast. A PENDING order's row never lands `scheduled`
             # (R23's corollary), so an unpaid order is never offered here.
-            cls._best_effort(outcome.order_id, "offer_to_drivers", cls._offer_to_drivers, outcome.delivery_id)
+            best_effort_step(event, outcome.order_id, "offer_to_drivers", cls._offer_to_drivers, outcome.delivery_id)
         if outcome.delivery_id is None:
             # No row: only the order's date moved, so ask the release gate, as
             # before this feature. An undated or due-today order gets its
             # delivery now rather than at the next sweep tick; `create_delivery`
             # makes its own offer, which is why the branch above skips no-row
             # orders.
-            cls._best_effort(
+            best_effort_step(
+                event,
                 outcome.order_id,
                 "release",
                 lambda: cls.ensure_delivery_if_due(db.session.get(Order, outcome.order_id)),
             )
         if outcome.notify_customer:
-            cls._best_effort(outcome.order_id, "customer_notice", cls._notify_customer, outcome.order_id)
-        if outcome.pre_status in cls.DRIVER_NOTICE_DELIVERY_STATUSES:
-            cls._best_effort(outcome.order_id, "driver_notice", cls._notify_old_driver, outcome)
-            cls._best_effort(
-                outcome.order_id, "route_refresh", cls._refresh_old_drivers_route, outcome.old_driver_user_id
+            best_effort_step(event, outcome.order_id, "customer_notice", cls._notify_customer, outcome.order_id)
+        if outcome.driver_loses_stop:
+            best_effort_step(event, outcome.order_id, "driver_notice", cls._notify_old_driver, outcome)
+            best_effort_step(
+                event, outcome.order_id, "route_refresh", cls._refresh_old_drivers_route, outcome.old_driver_user_id
             )
-        cls._best_effort(outcome.order_id, "audit", cls._log_reschedule_audit, outcome)
+        best_effort_step(event, outcome.order_id, "audit", cls._log_reschedule_audit, outcome)
 
     @staticmethod
     def _offer_to_drivers(delivery_id: int) -> None:
@@ -1047,23 +1098,6 @@ class OrderScheduleService:
         from business_app.services.route_edit_service import RouteEditService
 
         RouteEditService._notify_route_updated(driver_user_id)
-
-    @staticmethod
-    def _best_effort(order_id: int, step: str, fn: Callable[..., Any], *args: Any) -> None:
-        """Run one post-commit side effect of a reschedule, isolated from the rest.
-
-        The reschedule is already committed. Raising here would tell the admin
-        it failed when it did not, and would skip every step after this one.
-        The rollback clears a session a failed step may have left unusable, so
-        the next step starts clean; nothing of the reschedule is left to lose.
-        """
-        from business_app import db
-
-        try:
-            fn(*args)
-        except Exception:  # noqa: BLE001
-            db.session.rollback()
-            logger.exception("order_reschedule_post_commit_failed order=%s step=%s", order_id, step)
 
     @staticmethod
     def _log_reschedule_audit(outcome: RescheduleOutcome) -> None:

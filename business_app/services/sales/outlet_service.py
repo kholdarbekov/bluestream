@@ -461,6 +461,27 @@ class OutletService:
             clauses.append(Order.delivery_address_id == outlet.address_id)
         return and_(*clauses)
 
+    @staticmethod
+    def _claims(outlet: Outlet, *, branch: bool, address_id: Optional[int]) -> bool:
+        """Whether this outlet's orders include one delivered to `address_id`: the Python twin of
+        `_scope_clause`'s address arm. Account-wide outside branch mode and for a branch with no
+        address of its own; otherwise only the branch's own address."""
+        return not branch or outlet.address_id is None or outlet.address_id == address_id
+
+    @staticmethod
+    def outlets_for_delivery(user_id: Optional[int], address_id: Optional[int]) -> List[Outlet]:
+        """The live outlets of `user_id` whose order history an order delivered to `address_id` joins.
+
+        The twin of `order_scope` asked per ADDRESS instead of per outlet: the same `is_branch`
+        answer, the same `_claims` rule, so the branch an address change names is the branch the
+        order will be counted under. Lost outlets never claim (R45). Sorted by id.
+        """
+        if user_id is None:
+            return []
+        live = Outlet.query.filter(Outlet.user_id == user_id, Outlet.stage != "lost").order_by(Outlet.id).all()
+        branch = OutletService.is_branch(live[0]) if live else False
+        return [outlet for outlet in live if OutletService._claims(outlet, branch=branch, address_id=address_id)]
+
     # ------------------------------------------------------------------ dedupe
     @staticmethod
     def find_duplicates(

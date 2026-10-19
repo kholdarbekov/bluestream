@@ -36,7 +36,7 @@ NOT_STAFF_FACING: dict[str, str] = {
     "ACCOUNT_MATCH_FOUND": f"{_NOT_ON_ROUTE} (api/auth.py:1921 /auth/telegram-register, customer bot)",
     "AUTH_FAILED": f"{_NOT_ON_ROUTE} (auth_middleware.py:100/153/277: /auth/admin/* and unused decorators)",
     "AUTH_REQUIRED": f"{_NOT_ON_ROUTE} (auth_middleware.py:32/65/128/221/303/495: /auth/platform-status, "
-    "/auth/suggest-auto-link, /auth/admin/*)",
+    "/auth/admin/*)",
     "EMAIL_VERIFICATION_REQUIRED": f"{_NOT_ON_ROUTE} (auth_middleware.py:511 require_verified_user, used by no route)",
     "INSUFFICIENT_PERMISSIONS": f"{_NOT_ON_ROUTE} (auth_middleware.py:90 require_role: /auth/admin/*)",
     "INVALID_OTP": f"{_NOT_ON_ROUTE} (auth_service.py:748: /auth/phone/register/verify)",
@@ -81,6 +81,16 @@ NOT_STAFF_FACING: dict[str, str] = {
     "SALES_ORDER_APPROVAL_NOT_FOUND": f"{_NOT_ON_ROUTE} (api/admin_sales.py: order-approval queue)",
     "SALES_ORDER_APPROVAL_NOT_PENDING": f"{_NOT_ON_ROUTE} (api/admin_sales.py: order-approval queue)",
     # Admin order edits, cash corrections, reports.
+    "ORDER_ADDRESS_LOCKED": f"{_NOT_ON_ROUTE} (order_address_change_service.py assert_open: admin "
+    "/orders/<id>/address-options, /orders/<id>/delivery-address)",
+    "DELIVERY_ADDRESS_LOCKED": f"{_NOT_ON_ROUTE} (order_address_change_service.py assert_open: admin "
+    "/orders/<id>/address-options, /orders/<id>/delivery-address)",
+    "ADDRESS_CURRENT": f"{_NOT_ON_ROUTE} (order_address_change_service.py change: admin PATCH "
+    "/orders/<id>/delivery-address)",
+    "ADDRESS_NO_PIN": f"{_NOT_ON_ROUTE} (order_address_change_service.py change: admin PATCH "
+    "/orders/<id>/delivery-address)",
+    "ADDRESS_OUTSIDE_ZONE": f"{_NOT_ON_ROUTE} (order_address_change_service.py change: admin PATCH "
+    "/orders/<id>/delivery-address)",
     "BOTTLE_CORRECTION_SCOPE_NOT_LIVE": f"{_NOT_ON_ROUTE} (order_edit_service.py:962: admin /orders/<id>/edit)",
     "BOTTLE_SESSION_ACTIVE_CONFLICT": f"{_NOT_ON_ROUTE} (bottle_tracking_service.py:3404: admin order edit)",
     "BOTTLE_SESSION_NOT_REOPENABLE": f"{_NOT_ON_ROUTE} (bottle_tracking_service.py:3387: admin order edit)",
@@ -160,7 +170,8 @@ NOT_STAFF_FACING: dict[str, str] = {
     "SALES_PAY_MONTH_INVALID": f"{_BOT_NEVER_SENDS} (GET /staff/sales/me/earnings/lines ?month= and "
     f"/staff/sales/me/statements/<month>: the bot only echoes months the backend gave it){_FALLBACK}",
     # The admin outlet-plan routes too (final-review I1); the staff outlet PUT never carries class or cadence.
-    "SALES_PAY_SELF_DECISION": f"{_NOT_ON_ROUTE} (pay_rules.check_self_decision: M2, OA2/OA3, admin outlet plan)",
+    "SALES_PAY_SELF_DECISION": f"{_NOT_ON_ROUTE} (pay_rules.check_self_decision: M2, OA2/OA3, admin outlet plan, "
+    "admin order address change)",
     # Sales-agent pay: a retired penalty type (compensation spec §4.16).
     "SALES_PAY_PENALTY_TYPE_INACTIVE": f"{_NOT_ON_ROUTE} (api/admin_sales_pay.py: admin pay)",
     # Staff routes the bot reaches, but never with the input or timing these need.
@@ -180,6 +191,9 @@ NOT_STAFF_FACING: dict[str, str] = {
     f"and amount (staff.py:683){_FALLBACK}",
     "STAFF_INVALID_ACCURACY": f"{_BOT_NEVER_SENDS}: horizontal_accuracy is Telegram's own 0-1500 m value, never "
     f"NaN or negative (staff_service.py:2069/2074){_FALLBACK}",
+    "INVALID_DELIVERY_ADDRESS": f"{_BOT_NEVER_SENDS}: the agent's visit order sends no address; the backend passes "
+    f"the outlet's own address_id (visit_service.py:613), refused only if that row belongs to another "
+    f"account{_FALLBACK}",
     "DELIVERY_DATE_REQUIRED": f"{_BOT_NEVER_SENDS}: re-dispatch always passes a date, the one the operator tapped "
     f"or local today when none is sent (order_schedule_service.py _apply_reschedule, staff_service.py "
     f"redispatch_failed_delivery){_FALLBACK}",

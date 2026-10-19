@@ -15,6 +15,10 @@ This module provides two primitives:
     ``atomic_transaction()``. Use for service methods that should be atomic
     end-to-end.
 
+And one for the side effects that run after such a commit:
+
+  - ``best_effort_step()`` — run one post-commit step, isolated from the rest.
+
 Usage:
 
     from business_app.utils.transactions import atomic_transaction, transactional
@@ -95,3 +99,19 @@ def transactional(func: F) -> F:
             return func(*args, **kwargs)
 
     return wrapper  # type: ignore[return-value]
+
+
+def best_effort_step(event: str, order_id: int, step: str, fn: Callable[..., Any], *args: Any) -> None:
+    """Run one post-commit side effect of an order write, isolated from the rest.
+
+    The write is already committed. Raising here would tell the caller it failed
+    when it did not, and would skip every step after this one. The rollback
+    clears a session a failed step may have left unusable, so the next step
+    starts clean; nothing of the write is left to lose. `event` names the log
+    line, so each flow keeps its own (the reschedule's and the address change's).
+    """
+    try:
+        fn(*args)
+    except Exception:  # noqa: BLE001
+        db.session.rollback()
+        logger.exception("%s order=%s step=%s", event, order_id, step)

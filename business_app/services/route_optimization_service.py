@@ -66,6 +66,14 @@ DRIVER_INITIATED_TRIGGERS = frozenset(
 # to re-optimize — they stay gated.
 EXPLICIT_REQUEST_TRIGGERS = ("manual", "admin_dispatch_reset")
 
+# Triggers whose cause was already announced to the driver by its own message (the admin's
+# address change sends "Address changed"), so the route push that follows stays silent.
+# Deliberately in neither DRIVER_INITIATED_TRIGGERS nor EXPLICIT_REQUEST_TRIGGERS: the driver
+# did not cause it and nobody asked for a fresh optimum, so hysteresis and the manual-override
+# policy still apply.
+ADDRESS_CHANGE_TRIGGER = "address_change"
+ANNOUNCED_TRIGGERS = frozenset({ADDRESS_CHANGE_TRIGGER})
+
 LOCATION_FRESH_DEFAULT_SECONDS = 1800  # 30 min
 
 # Uncertainty radius, in metres, beyond which a reported fix is refused outright
@@ -783,6 +791,7 @@ class RouteOptimizationService:
             "set_changed": set(prev_ids) != set(new_ids),
             "sequence_changed": prev_ids != new_ids,
             "driver_initiated": trigger in DRIVER_INITIATED_TRIGGERS,
+            "announced": trigger in ANNOUNCED_TRIGGERS,
             "trigger": trigger,
             "computed_at": datetime.now(timezone.utc).isoformat(),
         }

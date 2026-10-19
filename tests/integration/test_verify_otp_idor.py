@@ -41,20 +41,24 @@ def test_verify_otp_with_body_user_id_and_no_jwt_is_unauthorized(app, db):
 def test_verify_phone_with_jwt_ignores_body_user_id(app, db, sample_user):
     """A body-supplied `user_id` must never override the JWT identity.
 
-    Seeds a valid pending-phone + OTP pair for the REAL (JWT) user, then
-    posts a different (non-existent) `user_id` in the body. If the endpoint
-    still honored the body value it would 404 (no pending phone for
+    Requests a code for a new number through `/send-otp` for the REAL (JWT)
+    user, then posts a different (non-existent) `user_id` in the body. If the
+    endpoint still honored the body value it would 404 (no pending phone for
     999999); instead it must act on the authenticated user and succeed.
     """
     fresh_client = app.test_client()
     r = _redis_client(app)
 
-    otp = "654321"
     new_phone = "+998907654321"
-    r.setex(f"sms_verification:{sample_user.id}", 300, otp)
-    r.setex(f"pending_phone:{sample_user.id}", 300, new_phone)
-
     token = create_access_token(identity=str(sample_user.id))
+
+    sent = fresh_client.post(
+        "/api/v1/auth/send-otp",
+        json={"phone": new_phone},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert sent.status_code == 200
+    otp = r.get(f"sms_verification:{sample_user.id}").decode()
 
     resp = fresh_client.post(
         "/api/v1/auth/verify-phone",

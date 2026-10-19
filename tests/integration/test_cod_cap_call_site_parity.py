@@ -16,10 +16,11 @@ test, and asserts they produced the SAME boolean. Two sites can each look
 correct in isolation and still disagree with each other; only asking them
 together, side by side, catches that.
 
-Sites covered here (14 checks across 4 read surfaces + 5 write guards, found
+Sites covered here (16 checks across 5 read surfaces + 6 write guards, found
 by grep-walking every caller of ``is_customer_cod_restricted`` /
 ``get_cod_restricted_flags`` / ``get_cod_restriction_context`` /
-``validate_customer_can_use_cod`` / ``cod_cap_reached`` in business_app/).
+``validate_customer_can_use_cod`` / ``cod_cap_reached`` / ``place_cod_capped``
+in business_app/).
 Every surface with a real HTTP endpoint is driven over that endpoint, not the
 service method directly, so a regression in a route's own auth decorator or
 body validation also fails this pin -- sites 1-4 have no route of their own
@@ -40,10 +41,19 @@ directly on purpose:
  12. POST /api/v1/admin/orders/<id>/payment-method/preview                (switch-to-cash write guard)
  13. POST /api/v1/admin/orders/<id>/collected-cash/preview                (admin cash-correction warning)
  14. GET  /api/v1/admin/staff/cash-reconciliation/users/search            (cash-collection search dropdown)
+ 15. GET  /api/v1/admin/orders/<id>/address-options                       (address change: option greyed)
+ 16. PATCH /api/v1/admin/orders/<id>/delivery-address                     (address change write guard)
 
 Sites 9-14 were not in the plan's minimum list; they surfaced from the audit
 and are exhaustiveness, not padding -- each is an independent expression that
 could, in principle, re-derive the cap instead of delegating to it.
+
+Sites 15-16 are the admin address change (R11 of
+docs/superpowers/specs/2026-10-18-admin-order-address-change-design.md). Only
+the PLACE arm counts there, by owner decision: a customer's own debts never
+block a move. So they are asked in the place-arm test, not in
+``_every_site_says``, whose scenarios are person-arm ones; two tests below pin
+that a person cap and a non-cash order never block the move.
 
 Deliberately NOT in this loop, with the reason recorded so a future reader
 does not "fix" the gap:
@@ -85,7 +95,8 @@ from business_app.services.cash_collection_service import CashCollectionService
 from business_app.services.customer_map_service import CustomerMapService
 from business_app.utils.exceptions import ValidationError
 from shared.business_config import COD_ACTIVE_DEBT_LIMIT, COD_DEBT_AMOUNT_THRESHOLD
-from shared.enums import CashCollectionSource, EntitySubtype, PaymentMethod, UserType
+from shared.enums import CashCollectionSource, EntitySubtype, OrderStatus, PaymentMethod, UserType
+from tests.integration.test_admin_order_address_change import address_fanout  # noqa: F401  fixture
 from tests.unit._scope_money_helpers import delivered_cod_order, make_address, make_place_group, make_user
 
 CASH = "cash"
@@ -111,6 +122,36 @@ def _auth(app, user_id, role=None):
     with app.app_context():
         token = create_access_token(identity=str(user_id), additional_claims=claims)
     return {"Authorization": f"Bearer {token}"}
+
+
+def _admin_code(resp) -> Optional[str]:
+    """The admin routes nest the refusal code under ``data`` (the staff route's is top-level)."""
+    return (resp.get_json().get("data") or {}).get("error_code")
+
+
+def _option(client, headers, order_id: int, address_id: int) -> dict:
+    """The address-change option the admin modal draws for ``address_id`` (site 15)."""
+    resp = client.get(f"/api/v1/admin/orders/{order_id}/address-options", headers=headers)
+    assert resp.status_code == 200, resp.get_json()
+    return next(o for o in resp.get_json()["data"]["options"] if o["id"] == address_id)
+
+
+def _change_address(client, headers, order_id: int, address_id: int):
+    """The address-change write (site 16), with the body the admin modal sends."""
+    return client.patch(
+        f"/api/v1/admin/orders/{order_id}/delivery-address", json={"address_id": address_id}, headers=headers
+    )
+
+
+def _cap_the_place_of(db, address):
+    """Group ``address`` with a coworker's office that holds LIMIT over-threshold COD debts,
+    so the PLACE arm caps it while its own customer owes nothing."""
+    coworker = make_user(db)
+    coworker_address = make_address(db, coworker)
+    office = make_place_group(db, coworker_address, address, label="capped-office")
+    for _ in range(_LIMIT):
+        delivered_cod_order(db, coworker, address=coworker_address, total=_OVER_EACH)
+    return office
 
 
 @pytest.fixture
@@ -420,7 +461,7 @@ def test_grocery_store_is_unrestricted_everywhere(
 
 @pytest.mark.integration
 def test_place_arm_restricts_address_aware_sites_only(
-    app, db, client, orderer, user_address, sample_product, auth_headers, admin_user, operator_user
+    app, db, client, orderer, user_address, sample_product, auth_headers, admin_user, operator_user, address_fanout
 ):
     """A customer with ZERO personal debt, whose delivery address is grouped
     with a coworker's capped office, must be refused cash AT THAT ADDRESS by
@@ -442,11 +483,7 @@ def test_place_arm_restricts_address_aware_sites_only(
       * site 13 (``OrderCashEditService.preview``) by
         ``tests/unit/test_corrections_frozen_scope.py::test_cap_warning_fires_on_the_PLACE_arm_with_the_cluster_under_the_limit``
     """
-    coworker = make_user(db)
-    coworker_address = make_address(db, coworker)
-    office = make_place_group(db, coworker_address, user_address, label="capped-office")
-    for _ in range(_LIMIT):
-        delivered_cod_order(db, coworker, address=coworker_address, total=_OVER_EACH)
+    office = _cap_the_place_of(db, user_address)
 
     # orderer needs SOME order history for the customer-map place pin to exist
     # at all (a member must pass the last_order gate); fully settled, so it adds
@@ -535,6 +572,20 @@ def test_place_arm_restricts_address_aware_sites_only(
     assert place_details["place_debt_count"] == _LIMIT == ctx["place_active_cod_debt_count"], place_details
     place_arm_aware["staff_phone_order_refuses_cash"] = True
 
+    # 15/16 -- an admin moving a live CASH order of the orderer from an ungrouped
+    # home into the capped place. Not yet delivered, so it adds no debt to either arm.
+    home = make_address(db, orderer)
+    moving, _payment = delivered_cod_order(db, orderer, address=home, status=OrderStatus.CONFIRMED)
+    admin_headers = _auth(app, admin_user.id, role="admin")
+    place_arm_aware["admin_change_address_option_greys_capped_place"] = (
+        _option(client, admin_headers, moving.id, user_address.id)["disabled_reason"] == "COD_PLACE_CAPPED"
+    )
+    refused = _change_address(client, admin_headers, moving.id, user_address.id)
+    place_arm_aware["admin_change_address_refuses_capped_place"] = (refused.status_code, _admin_code(refused)) == (
+        400,
+        "COD_DEBT_LIMIT_REACHED",
+    )
+
     assert set(place_arm_aware.values()) == {True}, place_arm_aware
 
     # site 14 (the cash-collection search dropdown) is address-less, like the
@@ -547,3 +598,41 @@ def test_place_arm_restricts_address_aware_sites_only(
     assert search_resp.status_code == 200, search_resp.get_json()
     search_row = next(i for i in search_resp.get_json()["data"]["items"] if i["id"] == orderer.id)
     assert search_row["cod_restricted"] is False, search_row
+
+
+@pytest.mark.integration
+def test_person_debts_never_block_an_address_change(app, db, client, orderer, user_address, admin_user, address_fanout):
+    """R11: only the PLACE arm counts for the address change. A customer over their own cap still
+    has a live cash order moved to another of their addresses."""
+    for _ in range(_LIMIT):
+        delivered_cod_order(db, orderer, address=user_address, total=_OVER_EACH)
+    assert CashCollectionService().is_customer_cod_restricted(orderer.id) is True  # person-capped
+    moving, _payment = delivered_cod_order(db, orderer, address=user_address, status=OrderStatus.CONFIRMED)
+    home = make_address(db, orderer)
+    admin_headers = _auth(app, admin_user.id, role="admin")
+
+    option = _option(client, admin_headers, moving.id, home.id)
+    resp = _change_address(client, admin_headers, moving.id, home.id)
+
+    assert (option["selectable"], option["disabled_reason"]) == (True, None)
+    assert resp.status_code == 200, resp.get_json()
+
+
+@pytest.mark.integration
+def test_a_card_order_moves_into_a_capped_place(app, db, client, orderer, user_address, admin_user, address_fanout):
+    """R11: a non-cash order is never checked, so it moves into a capped place."""
+    _cap_the_place_of(db, user_address)
+    assert CashCollectionService().place_cod_capped(orderer.id, user_address.id) is True
+    home = make_address(db, orderer)
+    moving, _payment = delivered_cod_order(
+        db, orderer, address=home, status=OrderStatus.CONFIRMED, payment_method=PaymentMethod.CARD
+    )
+    admin_headers = _auth(app, admin_user.id, role="admin")
+
+    option = _option(client, admin_headers, moving.id, user_address.id)
+    resp = _change_address(client, admin_headers, moving.id, user_address.id)
+
+    assert option["selectable"] is True
+    assert resp.status_code == 200, resp.get_json()
+    db.session.expire_all()
+    assert db.session.get(Order, moving.id).delivery_address_id == user_address.id

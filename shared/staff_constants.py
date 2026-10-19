@@ -41,6 +41,13 @@ STAFF_ACTIONS = {
 # Do not edit this dict directly. Update shared/status_transitions.py instead.
 DELIVERY_STATUS_TRANSITIONS = driver_delivery_transitions_as_strings()
 
+# R10 (spec 2026-10-18-admin-order-address-change): the driver steps that answer for
+# the address the driver's screen was drawn with. The staff bot sends that address id
+# with these steps only, and StaffService.update_delivery_status refuses one the admin
+# has since replaced (STAFF_DELIVERY_ADDRESS_CHANGED). Picked up and in transit do not
+# depend on the address. The one copy, read by the backend and the bot.
+ADDRESS_BOUND_DELIVERY_STATUSES = frozenset({"arrived", "delivered", "failed"})
+
 # Order status sync when delivery status changes
 DELIVERY_TO_ORDER_STATUS_SYNC = {
     'picked_up': 'out_for_delivery',

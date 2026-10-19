@@ -183,3 +183,57 @@ def test_an_outlet_with_no_account_is_never_a_branch(db):
     assert OutletService.account_outlet_count(None) == 0
     assert OutletService.is_branch(outlet) is False
     assert Order.query.filter(OutletService.order_scope(outlet)).all() == []
+
+
+def test_outlets_for_delivery_is_the_python_twin_of_order_scope(db):
+    """The admin address change names the branch an address belongs to with the SAME rule the
+    outlet's order history uses: asked per address, per outlet, both must agree."""
+    chain = _chain(db, "+998901238441")
+    a1 = _address(db, chain, "1 Branch St", is_default=True)
+    a2 = _address(db, chain, "2 Branch St", pin=FAR)
+    a3 = _address(db, chain, "3 Closed St")
+    o1, o2 = _outlet(db, chain, "Branch 1", a1), _outlet(db, chain, "Branch 2", a2)
+    wide = _outlet(db, chain, "Account-wide", None)
+    lost = _outlet(db, chain, "Closed", a3)
+    lost.stage = "lost"
+    db.session.commit()
+
+    for i, addr in enumerate((a1, a2, a3)):
+        order = _order(db, chain, f"TW-{i}", addr)
+        claimed = OutletService.outlets_for_delivery(chain.id, order.delivery_address_id)
+        assert lost not in claimed
+        assert [o.id for o in claimed] == sorted(o.id for o in claimed)
+        for outlet in (o1, o2, wide):
+            in_scope = Order.query.filter(Order.id == order.id, OutletService.order_scope(outlet)).count() == 1
+            assert (outlet in claimed) is in_scope, (outlet.name, addr.full_address)
+
+
+def test_a_single_outlet_account_claims_every_address(db):
+    chain = _chain(db, "+998901238442")
+    a1, a2 = _address(db, chain, "1 Only St"), _address(db, chain, "2 Other St", pin=FAR)
+    only = _outlet(db, chain, "Only", a1)
+
+    assert OutletService.outlets_for_delivery(chain.id, a2.id) == [only]
+    assert OutletService.outlets_for_delivery(chain.id, None) == [only]
+    assert OutletService.outlets_for_delivery(None, a2.id) == []
+
+
+def test_a_lost_sibling_leaves_the_live_outlet_claiming_every_address(db):
+    """C1: branch mode is `is_branch`'s answer, so one live + one lost outlet is NOT a branch account."""
+    chain = _chain(db, "+998901238443")
+    a1, a2 = _address(db, chain, "1 Live St"), _address(db, chain, "2 Junk St", pin=FAR)
+    live = _outlet(db, chain, "Live", a1)
+    junk = _outlet(db, chain, "Junk", a2)
+    junk.stage = "lost"
+    db.session.commit()
+
+    assert OutletService.is_branch(live) is False
+    assert OutletService.outlets_for_delivery(chain.id, a2.id) == [live]
+
+    # The Python claim must agree with the SQL scope: an order at the lost outlet's address is in
+    # the live outlet's `order_scope` (account-wide), so the live outlet claims that address.
+    order = _order(db, chain, "TG_C1_0001", a2)
+    claimed = OutletService.outlets_for_delivery(chain.id, a2.id)
+    in_scope = Order.query.filter(Order.id == order.id, OutletService.order_scope(live)).count() == 1
+    assert in_scope is True
+    assert (live in claimed) is in_scope

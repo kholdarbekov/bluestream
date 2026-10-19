@@ -10,15 +10,12 @@ from telegram.ext import ContextTypes
 
 from staff_bot.handlers.base import BaseHandler
 from staff_bot.handlers.delivery import route_card
+from staff_bot.handlers.delivery.stop_views import navigate_view, stop_detail_view
 from staff_bot.api_client import api_client
-from staff_bot.keyboards.delivery import DeliveryKeyboards
 from staff_bot.keyboards.common import CommonKeyboards
 from staff_bot.utils import route_card_state
-from staff_bot.utils.formatters import (
-    escape_html,
-    format_active_delivery_summary,
-    format_local_time,
-)
+from staff_bot.utils.delivery_snapshot import find_active_row
+from staff_bot.utils.formatters import format_local_time
 from staff_bot.permissions import require_auth, require_delivery_driver
 from staff_bot.i18n import i18n
 
@@ -262,14 +259,7 @@ class ActiveDeliveryHandler(BaseHandler):
                 await self._handle_api_response_error(update, response, language)
                 return
 
-            deliveries = response.data if isinstance(response.data, list) else response.data.get('items', [])
-
-            delivery = None
-            for d in deliveries:
-                if (d.get('delivery_id') or d.get('id')) == delivery_id:
-                    delivery = d
-                    break
-
+            delivery = find_active_row(response.data, delivery_id)
             if not delivery:
                 await query.edit_message_text(
                     i18n.get('staff.delivery.not_found', language),
@@ -279,7 +269,7 @@ class ActiveDeliveryHandler(BaseHandler):
 
             # Build detailed view — shared compact card (identical to the list card).
             status = delivery.get('status', '')
-            text = format_active_delivery_summary(delivery, language, include_money=True)
+            text, keyboard = stop_detail_view(delivery, language)
 
             # Cache a snapshot for the status-change handlers, which read order
             # context solely from current_delivery. Store RAW values (the brief
@@ -292,6 +282,9 @@ class ActiveDeliveryHandler(BaseHandler):
                 'customer_name': delivery.get('customer_name'),
                 'customer_phone': delivery.get('customer_phone'),
                 'status': status,
+                # R10: the address this stop view was drawn with. It draws the
+                # later screens' buttons; a flow already started keeps its own.
+                'delivery_address_id': delivery.get('delivery_address_id'),
                 'district': delivery.get('district'),
                 'address': delivery.get('address'),
                 'apartment_number': delivery.get('apartment_number'),
@@ -331,8 +324,14 @@ class ActiveDeliveryHandler(BaseHandler):
                 'place_active_cod_debt_count': delivery.get('place_active_cod_debt_count', 0),
             }
 
-            keyboard = DeliveryKeyboards.active_delivery_actions(language, delivery_id, status)
             await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
+            # The borrowed card now shows this stop's detail: an "Address
+            # changed" alert for it redraws exactly this message (spec D8b).
+            await route_card_state.note_borrowed_screen(
+                update.effective_user.id, delivery_id=delivery_id,
+                screen=route_card_state.SCREEN_STOP,
+                chat_id=query.message.chat_id, message_id=query.message.message_id,
+            )
 
         except Exception as e:
             logger.error(f"Error viewing active delivery: {e}", exc_info=True)
@@ -494,6 +493,11 @@ class ActiveDeliveryHandler(BaseHandler):
         language = await self._get_language(update, context)
 
         try:
+            # This screen replaces whatever the card showed, so that screen's
+            # redraw marker goes first (spec D8b); Navigate notes its own once
+            # it is drawn.
+            await route_card_state.mark_borrowed(update.effective_user.id)
+
             # Parse: staff_navigate_{delivery_id}
             delivery_id = int(query.data.split('_')[-1])
 
@@ -511,11 +515,8 @@ class ActiveDeliveryHandler(BaseHandler):
                 await self._refuse_stale_card(update, language)
                 return
 
-            address = escape_html(delivery_info.get('address', ''))
-            destination_lat = delivery_info.get('destination_lat')
-            destination_lng = delivery_info.get('destination_lng')
-
-            if destination_lat is None or destination_lng is None:
+            view = navigate_view(delivery_info, language)
+            if view is None:
                 await self._notify_user(
                     update,
                     i18n.get('staff.delivery.no_address', language),
@@ -523,29 +524,12 @@ class ActiveDeliveryHandler(BaseHandler):
                 )
                 return
 
-            maps_url = (
-                f"https://yandex.com/maps/?rtext=~{destination_lat},{destination_lng}&rtt=auto"
-            )
-
-            from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-            keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton(
-                    f"🗺 {i18n.get('staff.delivery.open_maps', language)}",
-                    url=maps_url
-                )
-            ], [
-                InlineKeyboardButton(
-                    f"⬅️ {i18n.get('staff.back', language)}",
-                    callback_data=f"staff_view_active_{delivery_info.get('delivery_id', 0)}"
-                )
-            ]])
-
-            await query.edit_message_text(
-                f"📍 {i18n.get('staff.delivery.navigate_text', language)}\n"
-                f"{address}\n"
-                f"({destination_lat}, {destination_lng})",
-                reply_markup=keyboard,
-                parse_mode='HTML'
+            text, keyboard = view
+            await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
+            await route_card_state.note_borrowed_screen(
+                update.effective_user.id, delivery_id=delivery_id,
+                screen=route_card_state.SCREEN_NAVIGATE,
+                chat_id=query.message.chat_id, message_id=query.message.message_id,
             )
 
         except Exception as e:

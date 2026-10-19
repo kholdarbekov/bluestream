@@ -3260,7 +3260,13 @@ def test_the_api_contract_snapshot_still_lists_the_merge_preview_route(db):
     # 662 -> 663: PATCH /api/v1/admin/place-groups/<int:group_id> (admin.rename_place_group_admin)
     # -- rename a place group (Task 6). Same URL as the existing GET detail; only the estate-wide
     # count moved.
-    assert len(routes) == 663
+    # 663 -> 655: eight unused identity routes deleted from business_app/api/auth.py (link-telegram,
+    # link-web-account, sync-profile, suggest-auto-link, generate-telegram-auth, generate-web-auth,
+    # verify-telegram-auth, verify-web-auth). Unrelated to place-merge; only the estate-wide count moved.
+    # 655 -> 657: GET /api/v1/admin/orders/<int:order_id>/address-options (admin.get_order_address_options)
+    # and PATCH /api/v1/admin/orders/<int:order_id>/delivery-address (admin.change_order_delivery_address)
+    # -- the admin order address change. Unrelated to place-merge; only the estate-wide count moved.
+    assert len(routes) == 657
     entry = next(r for r in routes if r["rule"] == "/api/v1/admin/place-groups/merge-preview")
     assert entry["methods"] == ["GET"]
     assert entry["endpoint"] == "admin.get_place_group_merge_preview"

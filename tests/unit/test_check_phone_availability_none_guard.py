@@ -1,5 +1,3 @@
-import json
-
 import pytest
 from flask_jwt_extended import create_access_token
 
@@ -56,25 +54,23 @@ def test_verify_phone_link_reasserts_invariants_before_merge(app, db, monkeypatc
     # telegram_id. Between staging and verify, web_user got a telegram_id (e.g.
     # it was itself linked elsewhere). The destructive merge must NOT proceed.
     telegram_user = _make_user(db, telegram_id="222", registration_source="telegram")
-    web_user = _make_user(
-        db,
-        email="web@example.com",
-        phone="+998901234567",
-        telegram_id="999",  # invariant violation: web_user already has a telegram_id
-        registration_source="web",
-    )
+    web_user = _make_user(db, email="web@example.com", phone="+998901234567", registration_source="web")
 
-    link_data = {
-        "phone": "+998901234567",
-        "web_user_id": web_user.id,
-        "telegram_user_id": telegram_user.id,
-    }
+    # Stage the link through the real send path, keeping the code the web
+    # account's phone received, so the flow reaches the merge-time re-assertion.
+    sent = []
 
+    def _sms_task(user_id, otp_code, phone_number=None):
+        sent.append((phone_number, otp_code))
+
+    monkeypatch.setattr("business_app.services.auth_service.send_verification_sms_task", _sms_task)
     svc = AuthService()
-    # Craft the stale redis payload and make OTP verification succeed so the
-    # flow reaches the merge-time invariant re-assertion.
-    monkeypatch.setattr(svc.redis_client, "get", lambda key: json.dumps(link_data).encode("utf-8"))
-    monkeypatch.setattr(svc, "verify_phone", lambda user_id, otp: True)
+    svc.send_phone_link_otp(web_user.phone, telegram_user.telegram_id)
+    [(sent_to, otp)] = sent
+    assert sent_to == web_user.phone
+
+    web_user.telegram_id = "999"  # invariant violation: web_user got a telegram_id after staging
+    db.session.commit()
 
     merge_called = {"value": False}
 
@@ -87,7 +83,7 @@ def test_verify_phone_link_reasserts_invariants_before_merge(app, db, monkeypatc
     monkeypatch.setattr(cps_module.cross_platform_sync_service, "auto_link_accounts", _fail_if_merge)
 
     with pytest.raises(ConflictError):
-        svc.verify_phone_link_and_merge_accounts(telegram_id="222", otp="123456")
+        svc.verify_phone_link_and_merge_accounts(telegram_id="222", otp=otp)
 
     assert merge_called["value"] is False
 

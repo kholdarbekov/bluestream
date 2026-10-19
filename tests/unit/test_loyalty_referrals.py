@@ -57,15 +57,15 @@ class TestReferrals:
         assert User.query.get(sample_user.id).referral_code == code
         assert service.get_user_referral_code(sample_user.id) == code  # stable
 
-    def test_telegram_register_applies_deep_link_referral_code(self, client, program, db):
+    def test_telegram_register_applies_deep_link_referral_code(self, signed_bot_post, program, db):
         # A new bot user arriving via t.me/<bot>?start=ref_CODE: the bot forwards
         # referral_code to telegram-register, which must create the pending referral.
         referrer = _user(db, "ref-tg@e.com", "+998900000010")
         code = LoyaltyService().get_user_referral_code(referrer.id)
 
-        resp = client.post(
+        resp = signed_bot_post(
             "/api/v1/auth/telegram-register",
-            json={
+            {
                 "telegram_id": 778899001,
                 "first_name": "New",
                 "last_name": "Referee",
@@ -80,15 +80,15 @@ class TestReferrals:
         assert new_user.referred_by_user_id == referrer.id
         assert ReferralProgram.query.filter_by(referee_id=new_user.id, referrer_id=referrer.id).count() == 1
 
-    def test_telegram_register_grants_welcome_bonus(self, client, service, program, db):
+    def test_telegram_register_grants_welcome_bonus(self, signed_bot_post, service, program, db):
         # Telegram registration must grant the welcome/signup bonus, like the web
         # and phone registration paths — it previously didn't (the route omitted it).
         program.signup_bonus = 100
         db.session.commit()
 
-        resp = client.post(
+        resp = signed_bot_post(
             "/api/v1/auth/telegram-register",
-            json={"telegram_id": 778899050, "first_name": "WB", "language_code": "en"},
+            {"telegram_id": 778899050, "first_name": "WB", "language_code": "en"},
         )
 
         assert resp.status_code == 201
@@ -103,11 +103,11 @@ class TestReferrals:
             for t in bonuses
         )
 
-    def test_telegram_register_succeeds_when_referral_code_invalid(self, client, db):
+    def test_telegram_register_succeeds_when_referral_code_invalid(self, signed_bot_post, db):
         # Bad/invalid codes must not block registration (non-fatal).
-        resp = client.post(
+        resp = signed_bot_post(
             "/api/v1/auth/telegram-register",
-            json={
+            {
                 "telegram_id": 778899002,
                 "first_name": "New",
                 "language_code": "en",

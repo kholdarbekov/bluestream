@@ -60,7 +60,7 @@ def test_staff_api_uses_shared_staff_decorator_and_address_helpers():
     text = STAFF_API_FILE.read_text(encoding="utf-8")
 
     assert "from business_app.utils.decorators import require_staff_roles" in text
-    assert "from business_app.utils.address_helpers import get_address_label, get_address_line" in text
+    assert "from business_app.utils.address_helpers import door_fields, get_address_label, get_address_line" in text
     assert "def require_staff_roles(" not in text
     assert "def _address_line(" not in text
     assert "def _address_label(" not in text

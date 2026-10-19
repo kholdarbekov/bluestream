@@ -484,6 +484,7 @@ async def test_a_brand_new_customer_who_taps_share_contact_finishes_registration
 
     await bot.send(user.tap("set_language_uz"))
 
+    assert [c.sign for c in posts(bot, REGISTER)] == [True], "registration carries no JWT; it must be signed"
     assert payloads(bot, REGISTER) == [
         {
             "telegram_id": DEFAULT_USER_ID,
@@ -510,6 +511,7 @@ async def test_a_brand_new_customer_who_taps_share_contact_finishes_registration
     bot.telegram.reset()
     await bot.send(user.contact(MY_PHONE_AS_TELEGRAM_SENDS_IT))
 
+    assert [c.sign for c in posts(bot, CHECK_PHONE)] == [True]
     assert payloads(bot, CHECK_PHONE) == [
         {"telegram_id": DEFAULT_USER_ID, "phone": MY_PHONE_E164}
     ], "Telegram hands over '998...' with no '+'; the backend is only ever told E.164"
@@ -698,6 +700,7 @@ async def test_a_phone_that_already_has_an_account_offers_a_link_and_the_code_me
     bot.telegram.reset()
     await bot.send(user.tap("link_yes"))
 
+    assert [c.sign for c in posts(bot, LINK_SEND_OTP)] == [True]
     assert payloads(bot, LINK_SEND_OTP) == [
         {"telegram_id": DEFAULT_USER_ID, "phone": MY_PHONE_E164}
     ]
@@ -720,6 +723,7 @@ async def test_a_phone_that_already_has_an_account_offers_a_link_and_the_code_me
     bot.telegram.reset()
     await bot.send(user.text("123456"))
 
+    assert [c.sign for c in posts(bot, LINK_VERIFY)] == [True]
     assert payloads(bot, LINK_VERIFY) == [{"telegram_id": DEFAULT_USER_ID, "otp": "123456"}]
     assert last_text(bot) == "Welcome back, Kamola! Accounts linked"
     assert state(bot) is None

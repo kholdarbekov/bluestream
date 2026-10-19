@@ -3,7 +3,7 @@ Delivery-related keyboards for Staff Bot
 """
 from decimal import Decimal, InvalidOperation
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 
 from staff_bot.i18n import i18n
 from shared.staff_constants import DELIVERY_STATUS_TRANSITIONS, FAILED_DELIVERY_REASONS
@@ -81,10 +81,17 @@ class DeliveryKeyboards:
 
     @staticmethod
     def active_delivery_actions(
-        language: str, delivery_id: int, current_status: str
+        language: str, delivery_id: int, current_status: str, address_id: Optional[int] = None
     ) -> InlineKeyboardMarkup:
-        """Action buttons for an active delivery based on current status"""
+        """Action buttons for an active delivery based on current status.
+
+        ``address_id`` is the order address the screen's text was drawn from. Each
+        status button carries it after a colon, so the step the driver taps answers
+        for the address they were looking at (R10, read back by
+        :meth:`parse_status_callback`). None draws no suffix.
+        """
         keyboard = []
+        drawn = f":{address_id}" if address_id is not None else ""
 
         # Status transition buttons
         allowed_next = DELIVERY_STATUS_TRANSITIONS.get(current_status, [])
@@ -101,7 +108,7 @@ class DeliveryKeyboards:
 
             keyboard.append([InlineKeyboardButton(
                 f"{emoji} {i18n.get(f'staff.delivery.status.{next_status}', language)}",
-                callback_data=f"staff_status_{delivery_id}_{next_status}"
+                callback_data=f"staff_status_{delivery_id}_{next_status}{drawn}"
             )])
 
         # Navigate button (opens Yandex Maps route)
@@ -117,6 +124,57 @@ class DeliveryKeyboards:
         )])
 
         return InlineKeyboardMarkup(keyboard)
+
+    @staticmethod
+    def parse_status_callback(data) -> Tuple[int, str, Optional[int]]:
+        """Read back ``(delivery_id, status, address_id)`` from a status button.
+
+        The inverse of the callback minted in :meth:`active_delivery_actions`.
+        ``address_id`` is None for a button that carries no suffix (drawn before
+        R10, or from a row with no address). A malformed delivery id still raises
+        ``ValueError``, as the bare ``split('_')`` parse did.
+        """
+        head, _, drawn = str(data).partition(":")
+        parts = head.split("_")
+        return int(parts[2]), "_".join(parts[3:]), int(drawn) if drawn.isdigit() else None
+
+    @staticmethod
+    def single_stop_nav_url(lat, lng) -> str:
+        """Yandex Maps route to one stop from the driver's own position (the leading `~`).
+
+        The one copy: the Navigate screen and the "Address changed" alert both open it.
+        """
+        return f"https://yandex.com/maps/?rtext=~{lat},{lng}&rtt=auto"
+
+    @staticmethod
+    def _open_maps_row(language: str, lat, lng) -> List[InlineKeyboardButton]:
+        """The 🗺 Open Maps URL row both single-stop keyboards lead with."""
+        return [InlineKeyboardButton(
+            f"🗺 {i18n.get('staff.delivery.open_maps', language)}",
+            url=DeliveryKeyboards.single_stop_nav_url(lat, lng),
+        )]
+
+    @staticmethod
+    def navigate_actions(language: str, delivery_id: int, lat, lng) -> InlineKeyboardMarkup:
+        """The Navigate screen: open the route in maps, or go back to the stop."""
+        return InlineKeyboardMarkup([
+            DeliveryKeyboards._open_maps_row(language, lat, lng),
+            [InlineKeyboardButton(
+                f"⬅️ {i18n.get('staff.back', language)}",
+                callback_data=f"staff_view_active_{delivery_id}",
+            )],
+        ])
+
+    @staticmethod
+    def address_changed_actions(language: str, delivery_id: int, lat, lng) -> InlineKeyboardMarkup:
+        """The "Address changed" alert: navigate to the NEW place, or open the stop."""
+        return InlineKeyboardMarkup([
+            DeliveryKeyboards._open_maps_row(language, lat, lng),
+            [InlineKeyboardButton(
+                f"📋 {i18n.get('staff.route.open_stop', language)}",
+                callback_data=f"staff_view_active_{delivery_id}",
+            )],
+        ])
 
     @staticmethod
     def failed_reasons(language: str, delivery_id: int) -> InlineKeyboardMarkup:

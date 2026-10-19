@@ -408,3 +408,31 @@ def push_delivery_failed(self, delivery_id: int, attempts: int, telegram_id: int
     if not _send_staff_webhook("/internal/delivery-failed", payload):
         raise self.retry(exc=RuntimeError(f"delivery-failed webhook failed for delivery {delivery_id}"))
     return {"success": True, "delivery_id": delivery_id}
+
+
+@shared_task(name="staff.notify_order_address_changed", bind=True, max_retries=3, default_retry_delay=60)
+def notify_order_address_changed(self, delivery_id: int, driver_id: int, payload: dict) -> dict:
+    """Tell the driver on a stop that an admin changed its address (the only loud push of the change).
+
+    Re-read on every run, retries included. When the delivery is gone, another driver holds the stop
+    now, or the order's address is no longer the one this alert was built for, the alert is stale: the
+    newer change queued its own. A stale run sends nothing and is not retried. The event id is built
+    from the task id, which a retry keeps, so the staff bot's dedup collapses a send that did land.
+    """
+    from business_app.models.delivery import Delivery
+    from business_app.services.order_schedule_service import OrderScheduleService
+
+    delivery = Delivery.query.get(delivery_id)
+    order = delivery.order if delivery is not None else None
+    if (
+        order is None
+        or OrderScheduleService.driver_holding_stop(delivery) != driver_id
+        or order.delivery_address_id != payload["delivery_address_id"]
+    ):
+        logger.info("order-address-changed alert for delivery %s not sent: it is stale", delivery_id)
+        return {"success": False, "reason": "stale", "delivery_id": delivery_id}
+    if not _send_staff_webhook(
+        "/internal/order-address-changed", {**payload, "event_id": f"order_address_changed:{self.request.id}"}
+    ):
+        raise self.retry(exc=RuntimeError(f"order-address-changed webhook failed for delivery {delivery_id}"))
+    return {"success": True, "delivery_id": delivery_id}

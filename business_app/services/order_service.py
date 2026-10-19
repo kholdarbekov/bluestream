@@ -739,7 +739,7 @@ class OrderService:
             user_id=user_id,
         ).first()
         if not address:
-            raise ValidationError("Invalid delivery address")
+            raise ValidationError("Invalid delivery address", error_code="INVALID_DELIVERY_ADDRESS")
         return user, address
 
     def get_user_or_raise(self, user_id: int) -> User:

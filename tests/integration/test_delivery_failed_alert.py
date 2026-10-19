@@ -148,11 +148,10 @@ def _webhook(monkeypatch, *answers):
     return sent
 
 
-def _retries(monkeypatch):
-    """`push_delivery_failed.retry`, faked: records the call and raises `Retry` as Celery
-    does. Patched in the instance dict, the way `_patch_task_publish` patches `delay`, so
-    nothing outlives the test."""
-    task = staff_tasks.push_delivery_failed
+def _retries(monkeypatch, task=staff_tasks.push_delivery_failed):
+    """`task.retry`, faked: records the call and raises `Retry` as Celery does. Patched in
+    the instance dict, the way `_patch_task_publish` patches `delay`, so nothing outlives
+    the test."""
     signature = inspect.signature(task.retry)
     calls = []
 

@@ -635,7 +635,7 @@ class BusinessAPIClient:
             'telegram_id': telegram_id,
             **user_data
         }
-        return await self._make_request('POST', '/api/v1/auth/telegram-register', data=data)
+        return await self._make_request('POST', '/api/v1/auth/telegram-register', data=data, sign=True)
 
     # Product methods
     async def get_products(self, user_token: str, category: Optional[str] = None,
@@ -1133,7 +1133,8 @@ class BusinessAPIClient:
         return await self._make_request(
             'POST',
             '/api/v1/auth/check-phone-availability',
-            data={'telegram_id': telegram_id, 'phone': phone}
+            data={'telegram_id': telegram_id, 'phone': phone},
+            sign=True,
         )
 
     async def link_phone_send_otp(self, telegram_id: int, phone: str) -> APIResponse:
@@ -1150,7 +1151,8 @@ class BusinessAPIClient:
         return await self._make_request(
             'POST',
             '/api/v1/auth/link-phone-account/send-otp',
-            data={'telegram_id': telegram_id, 'phone': phone}
+            data={'telegram_id': telegram_id, 'phone': phone},
+            sign=True,
         )
 
     async def report_telegram_reachability(
@@ -1191,7 +1193,8 @@ class BusinessAPIClient:
         return await self._make_request(
             'POST',
             '/api/v1/auth/link-phone-account/verify',
-            data={'telegram_id': telegram_id, 'otp': otp}
+            data={'telegram_id': telegram_id, 'otp': otp},
+            sign=True,
         )
 
 

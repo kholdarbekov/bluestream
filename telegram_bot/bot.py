@@ -1171,7 +1171,7 @@ class WaterBusinessBot:
         # Phone verification conversation - for adding/updating phone number and name
         phone_verification_timeout = self._flow_timeout(
             'telegram.phone.verification_flow_timed_out',
-            'pending_phone',
+            'pending_phone', 'pending_phone_verification',
         )
         phone_verification_handler = ConversationHandler(
             entry_points=[
@@ -1186,6 +1186,13 @@ class WaterBusinessBot:
                     MessageHandler(
                         filters.TEXT & ~filters.COMMAND,
                         self._consumes(profile_handlers.phone_verify_text_received),
+                    ),
+                ],
+                # A typed number is saved only once its SMS code is verified.
+                profile_handlers.PHONE_VERIFY_OTP: [
+                    MessageHandler(
+                        filters.TEXT & ~filters.COMMAND,
+                        self._consumes(profile_handlers.phone_verify_otp_received),
                     ),
                 ],
                 profile_handlers.PHONE_VERIFY_NAME: [

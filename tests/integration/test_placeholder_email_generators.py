@@ -14,10 +14,10 @@ from shared.validators import PLACEHOLDER_EMAIL_DOMAIN_BOT, PLACEHOLDER_EMAIL_DO
 pytestmark = pytest.mark.integration
 
 
-def test_telegram_registration_writes_a_bluestream_local_placeholder(client, db):
-    response = client.post(
+def test_telegram_registration_writes_a_bluestream_local_placeholder(signed_bot_post, db):
+    response = signed_bot_post(
         "/api/v1/auth/telegram-register",
-        json={"telegram_id": 778899101, "first_name": "Kamola", "language_code": "uz"},
+        {"telegram_id": 778899101, "first_name": "Kamola", "language_code": "uz"},
     )
 
     assert response.status_code == 201, response.get_data(as_text=True)

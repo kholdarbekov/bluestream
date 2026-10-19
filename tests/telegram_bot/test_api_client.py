@@ -251,3 +251,58 @@ class TestReportTelegramReachability:
             },
             sign=True,
         )
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+class TestIdentityCallsAreSigned:
+    """The four customer-bot calls that travel with no user JWT are signed like telegram-login:
+    the HMAC over the exact bytes on the wire is the only proof the bot sent them."""
+
+    CALLS = [
+        (
+            "register_telegram_user",
+            ("700100200", {"first_name": "Kamola", "language_code": "uz"}),
+            "/api/v1/auth/telegram-register",
+            {"telegram_id": "700100200", "first_name": "Kamola", "language_code": "uz"},
+        ),
+        (
+            "check_phone_availability",
+            ("700100200", "+998901234567"),
+            "/api/v1/auth/check-phone-availability",
+            {"telegram_id": "700100200", "phone": "+998901234567"},
+        ),
+        (
+            "link_phone_send_otp",
+            ("700100200", "+998901234567"),
+            "/api/v1/auth/link-phone-account/send-otp",
+            {"telegram_id": "700100200", "phone": "+998901234567"},
+        ),
+        (
+            "link_phone_verify",
+            ("700100200", "123456"),
+            "/api/v1/auth/link-phone-account/verify",
+            {"telegram_id": "700100200", "otp": "123456"},
+        ),
+    ]
+
+    @pytest.mark.parametrize("method,args,endpoint,body", CALLS, ids=[c[0] for c in CALLS])
+    async def test_the_call_is_signed_over_the_exact_bytes_sent(self, method, args, endpoint, body):
+        client = BusinessAPIClient()
+        client.max_retries = 0
+        fake_http = _FakeHTTPClient(_FakeResponse(200, payload={"success": True, "data": {"ok": True}}))
+        client._client = fake_http
+
+        response = await getattr(client, method)(*args)
+
+        assert response.success is True
+        assert fake_http.last_url.endswith(endpoint)
+        sent = fake_http.last_kwargs.get("content")
+        assert sent is not None
+        assert fake_http.last_kwargs.get("json") is None
+        assert json.loads(sent) == body
+
+        secret = bot_config.security.webhook_secret
+        assert secret, "test env must seed BOT_WEBHOOK_SECRET (see tests/conftest.py)"
+        expected = hmac.new(secret.encode("utf-8"), sent, hashlib.sha256).hexdigest()
+        assert fake_http.last_headers["X-Bot-Webhook-Signature"] == expected

@@ -79,6 +79,10 @@ def registrations(bot):
     return [c.data for c in bot.backend.calls if c.endpoint == REGISTER]
 
 
+def registration_signs(bot):
+    return [c.sign for c in bot.backend.calls if c.endpoint == REGISTER]
+
+
 def restart(bot):
     """Everything the process actually loses on a deploy."""
     bot.application.user_data[DEFAULT_USER_ID].clear()
@@ -114,6 +118,7 @@ async def test_the_language_tap_creates_the_account_even_after_a_restart(bot, us
         f"{[c.endpoint for c in bot.backend.calls]}"
     )
     assert registrations(bot)[0]["language_code"] == "ru"
+    assert registration_signs(bot) == [True], "registration carries no JWT; it must be signed"
 
 
 async def test_the_customer_is_asked_for_their_phone_not_shown_a_menu(bot, user):

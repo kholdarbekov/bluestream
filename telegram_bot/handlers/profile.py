@@ -38,7 +38,7 @@ from handlers.address_flow import (
     ADDRESS_REGION, ADDRESS_DISTRICT, ADDRESS_STREET, ADDRESS_BUILDING,
     ADDRESS_APARTMENT, ADDRESS_FLOOR,
     ADDRESS_DELIVERY_INSTRUCTIONS, ADDRESS_GEOCODE_CONFIRM,
-    PHONE_VERIFY_PHONE, PHONE_VERIFY_NAME,
+    PHONE_VERIFY_PHONE, PHONE_VERIFY_NAME, PHONE_VERIFY_OTP,
     LINK_ACCOUNT_CONFIRM, LINK_ACCOUNT_OTP, REGISTER_OTP,
     _ADDRESS_STEPS, _SKIP_TARGETS, _ADDRESS_FIELD_DATA_KEYS,
     _cleared_by_skip, render_prompt, RenderTarget, handle_input,
@@ -551,7 +551,15 @@ class ProfileHandlers(BaseHandler):
             return ConversationHandler.END
 
     async def phone_verify_text_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle typed phone number during phone verification flow."""
+        """Handle a typed phone number during the phone verification flow.
+
+        A typed number is not Telegram-trusted, so nothing is written here: it
+        is staged by /send-otp and saved only when its code is verified
+        (phone_verify_otp_received). Writing it straight into `users.phone`
+        let a customer park somebody else's number on their account and lock
+        the real owner out.
+        tests/telegram_bot/test_change_phone_journey_dispatcher.py
+        """
         try:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
@@ -567,33 +575,100 @@ class ProfileHandlers(BaseHandler):
             phone = normalize_phone_number(phone_text)
             logger.info(f"Phone text received for user {user_id}: {phone}")
 
-            # Typed phone input is not Telegram-trusted contact, keep it unverified.
-            await self.user_repo.set_user_phone(user_id, phone)
-            context.user_data['pending_phone'] = phone
-
-            # Keep backend profile phone in sync.
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
-                if user_token:
-                    try:
-                        await client.update_user_profile(user_token, {'phone': phone})
-                        logger.info(f"Phone updated via API for user {user_id} from text input")
-                    except Exception as api_error:
-                        logger.warning(f"Failed to update phone via API from text input: {api_error}")
+                if not user_token:
+                    await update.message.reply_text(
+                        i18n.get('telegram.auth.failed_try_again', language),
+                        reply_markup=ProfileKeyboards.phone_request(language)
+                    )
+                    return PHONE_VERIFY_PHONE
 
-            await update.message.reply_text(
-                i18n.get('telegram.phone.phone_accepted', language),
-                reply_markup=ReplyKeyboardRemove()
-            )
-            await update.message.reply_text(i18n.get('telegram.enter_name', language))
-
-            return PHONE_VERIFY_NAME
+                return await self._send_typed_phone_code(
+                    update, context, client, user_token, phone, language,
+                    phone_state=PHONE_VERIFY_PHONE, code_state=PHONE_VERIFY_OTP,
+                )
 
         except Exception as e:
             logger.error(f"Error in phone_verify_text_received: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             return ConversationHandler.END
+
+    async def phone_verify_otp_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Verify the code for a number typed in Profile → Phone (PHONE_VERIFY_OTP).
+
+        The backend's /verify-phone saves the number; then the flow goes on to
+        the name step, as it does after a shared contact.
+        """
+        async def _verified(update, language):
+            await update.message.reply_text(i18n.get('telegram.phone.phone_verified', language))
+            await update.message.reply_text(i18n.get('telegram.enter_name', language))
+            return PHONE_VERIFY_NAME
+
+        # This flow's own closing copy points back to My Profile; registration's
+        # points to /start.
+        return await self._receive_typed_phone_code(
+            update, context,
+            code_state=PHONE_VERIFY_OTP,
+            on_verified=_verified,
+            missing_key='telegram.phone.verification_flow_timed_out',
+            expired_key='telegram.phone.verification_flow_timed_out',
+        )
+
+    async def _send_typed_phone_code(self, update, context, client, user_token, phone, language,
+                                     *, phone_state, code_state):
+        """Send the code for a TYPED number and move to the flow's code step.
+
+        Shared by registration's typed branch (PHONE → REGISTER_OTP) and
+        Profile → Phone (PHONE_VERIFY_PHONE → PHONE_VERIFY_OTP). /send-otp only
+        stages the number; nothing is saved until _receive_typed_phone_code's
+        /verify-phone succeeds. A refusal keeps the customer on ``phone_state``
+        with the share-contact keyboard, so they can try another number.
+        """
+        otp_response = await client.send_phone_verification(user_token, phone)
+        if not otp_response.success:
+            logger.error(f"Failed to send phone verification OTP: {otp_response.error}")
+            if otp_response.status_code == 409:
+                # Another account already holds this number, in any typed format.
+                refusal = i18n.get('telegram.phone.already_registered_use_different', language)
+            else:
+                refusal = i18n.get(
+                    'telegram.phone.verification_sms_send_failed',
+                    language,
+                    error=otp_response.error
+                )
+            await update.message.reply_text(
+                refusal,
+                reply_markup=ProfileKeyboards.phone_request(language)
+            )
+            return phone_state
+
+        # Remove contact keyboard and ask for OTP
+        await update.message.reply_text(
+            i18n.get('telegram.phone.phone_accepted', language),
+            reply_markup=ReplyKeyboardRemove()
+        )
+
+        otp_data = otp_response.data.get('data', {}) if isinstance(otp_response.data, dict) else {}
+        phone_masked = otp_data.get('phone_masked', phone)
+
+        await update.message.reply_text(
+            i18n.get(
+                'telegram.phone.verification_code_sent_to_phone_prompt',
+                language,
+                phone_masked=phone_masked
+            )
+        )
+
+        # Stay INSIDE the conversation and capture the OTP in ``code_state``.
+        # We deliberately do NOT set the global 'awaiting_otp' flag here — the
+        # in-conversation handler owns this path, so /cancel and /start behave
+        # correctly during OTP entry and the global catch-all won't fire.
+        context.user_data['pending_phone_verification'] = phone
+
+        logger.info(f"Phone verification OTP sent to {phone} for user {update.effective_user.id}")
+        return code_state
 
     async def phone_verify_name_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle name input during phone verification flow"""
@@ -669,6 +744,7 @@ class ProfileHandlers(BaseHandler):
 
             # Clear pending data
             context.user_data.pop('pending_phone', None)
+            context.user_data.pop('pending_phone_verification', None)
 
             if update.callback_query:
                 await self._ack(update.callback_query)
@@ -1176,46 +1252,11 @@ class ProfileHandlers(BaseHandler):
                             )
                             return PHONE
 
-                        otp_response = await client.send_phone_verification(user_token, phone)
-                        if not otp_response.success:
-                            logger.error(f"Failed to send OTP during registration: {otp_response.error}")
-                            await update.message.reply_text(
-                                i18n.get(
-                                    'telegram.phone.verification_sms_send_failed',
-                                    language,
-                                    error=otp_response.error
-                                ),
-                                reply_markup=ProfileKeyboards.phone_request(language)
-                            )
-                            return PHONE
-
-                        # Remove contact keyboard and ask for OTP
-                        await update.message.reply_text(
-                            i18n.get('telegram.phone.phone_accepted', language),
-                            reply_markup=ReplyKeyboardRemove()
+                        # The code is captured in REGISTER_OTP (register_otp_received).
+                        return await self._send_typed_phone_code(
+                            update, context, client, user_token, phone, language,
+                            phone_state=PHONE, code_state=REGISTER_OTP,
                         )
-
-                        otp_data = otp_response.data.get('data', {}) if isinstance(otp_response.data, dict) else {}
-                        phone_masked = otp_data.get('phone_masked', phone)
-
-                        await update.message.reply_text(
-                            i18n.get(
-                                'telegram.phone.verification_code_sent_to_phone_prompt',
-                                language,
-                                phone_masked=phone_masked
-                            )
-                        )
-
-                        # Stay INSIDE the conversation and capture the OTP via
-                        # the dedicated REGISTER_OTP state (register_otp_received).
-                        # We deliberately do NOT set the global 'awaiting_otp'
-                        # flag here anymore — the in-conversation handler owns
-                        # this path now, so /cancel and /start behave correctly
-                        # during OTP entry and the global catch-all won't fire.
-                        context.user_data['pending_phone_verification'] = phone
-
-                        logger.info(f"Registration OTP sent to {phone} for user {user_id}")
-                        return REGISTER_OTP
 
                     elif response.success and not response_data.get('available'):
                         # Phone exists - check if linking is possible
@@ -1508,13 +1549,41 @@ class ProfileHandlers(BaseHandler):
         endpoint (client.link_phone_verify), which would be wrong/dangerous on
         the fresh-registration path.
 
-        DRY note: the actual verify call (get_auth_token + verify_phone_otp) is
-        ~3 lines and is deliberately duplicated from bot._handle_otp_verification
-        rather than extracted into a shared helper — that method is on the bot
+        DRY note: the verify core is _receive_typed_phone_code, shared with
+        Profile → Phone (phone_verify_otp_received). It is deliberately NOT
+        shared with bot._handle_otp_verification: that method is on the bot
         class in bot.py while this is on ProfileHandlers in profile.py, so a
-        shared helper would force awkward cross-class/cross-module coupling. The
-        surrounding success/error UX (conversation states, main-menu keyboard,
-        re-prompt vs. END) differs entirely between the two paths.
+        shared helper would force awkward cross-class/cross-module coupling for
+        a ~3-line verify call, and the surrounding success/error UX
+        (conversation states, main-menu keyboard, re-prompt vs. END) differs
+        entirely between the two paths.
+        """
+        async def _registration_complete(update, language):
+            # Same completion message the contact path uses.
+            await update.message.reply_text(
+                i18n.get('telegram.registration_complete', language),
+                reply_markup=await main_menu_for(update.effective_user.id, language)
+            )
+            return ConversationHandler.END
+
+        return await self._receive_typed_phone_code(
+            update, context,
+            code_state=REGISTER_OTP,
+            on_verified=_registration_complete,
+            missing_key='telegram.phone.session_expired_start_again',
+            expired_key='telegram.phone.verification_code_expired_start_again',
+        )
+
+    async def _receive_typed_phone_code(self, update, context, *, code_state, on_verified,
+                                        missing_key, expired_key):
+        """Verify the code sent by _send_typed_phone_code, inside a conversation.
+
+        /verify-phone is the only writer of a typed number: it saves the number
+        the code was sent to, and only when the code matches. A wrong code or a
+        backend error re-prompts in ``code_state``; an unrecoverable one says
+        ``missing_key`` / ``expired_key`` and ends. On success the pending
+        number is dropped and ``on_verified(update, language)`` sends the
+        flow's own copy and returns its next state.
         """
         try:
             user_id = update.effective_user.id
@@ -1526,15 +1595,13 @@ class ProfileHandlers(BaseHandler):
                 await update.message.reply_text(
                     i18n.get('telegram.bot.otp.invalid_format', language)
                 )
-                return REGISTER_OTP
+                return code_state
 
             # Defensive: if the pending phone is missing (stale/restarted state),
             # end cleanly instead of verifying against no pending context
             # (mirrors link_account_otp's missing-phone guard).
             if not context.user_data.get('pending_phone_verification'):
-                await update.message.reply_text(
-                    i18n.get('telegram.phone.session_expired_start_again', language)
-                )
+                await update.message.reply_text(i18n.get(missing_key, language))
                 return ConversationHandler.END
 
             try:
@@ -1547,21 +1614,13 @@ class ProfileHandlers(BaseHandler):
                         context.user_data.pop('pending_phone_verification', None)
                         return ConversationHandler.END
 
-                    # Correct registration endpoint (NOT link_phone_verify).
+                    # Correct verify endpoint (NOT link_phone_verify).
                     response = await client.verify_phone_otp(user_token, otp)
 
                     if response.success:
-                        # Registration complete — clear pending state and show
-                        # the same completion message the contact path uses.
                         context.user_data.pop('pending_phone_verification', None)
-
-                        await update.message.reply_text(
-                            i18n.get('telegram.registration_complete', language),
-                            reply_markup=await main_menu_for(update.effective_user.id, language)
-                        )
-
-                        logger.info(f"Registration OTP verified for user {user_id}")
-                        return ConversationHandler.END
+                        logger.info(f"Phone verification OTP verified for user {user_id}")
+                        return await on_verified(update, language)
 
                     error_msg = response.error or i18n.get(
                         'telegram.phone.invalid_verification_code_default', language
@@ -1569,9 +1628,7 @@ class ProfileHandlers(BaseHandler):
 
                     # Expired / not-found: the code is unrecoverable, so end.
                     if 'expired' in error_msg.lower() or 'not found' in error_msg.lower():
-                        await update.message.reply_text(
-                            i18n.get('telegram.phone.verification_code_expired_start_again', language)
-                        )
+                        await update.message.reply_text(i18n.get(expired_key, language))
                         context.user_data.pop('pending_phone_verification', None)
                         return ConversationHandler.END
 
@@ -1583,17 +1640,17 @@ class ProfileHandlers(BaseHandler):
                             error=error_msg
                         )
                     )
-                    return REGISTER_OTP
+                    return code_state
 
             except Exception as api_error:
-                logger.error(f"API error verifying registration OTP: {api_error}")
+                logger.error(f"API error verifying phone verification OTP: {api_error}")
                 await update.message.reply_text(
                     i18n.get('telegram.phone.verification_failed_retry', language)
                 )
-                return REGISTER_OTP
+                return code_state
 
         except Exception as e:
-            logger.error(f"Error in register_otp_received: {e}")
+            logger.error(f"Error in _receive_typed_phone_code: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             return ConversationHandler.END
@@ -4001,3 +4058,4 @@ profile_handlers.ADDRESS_DELIVERY_INSTRUCTIONS = ADDRESS_DELIVERY_INSTRUCTIONS
 profile_handlers.ADDRESS_GEOCODE_CONFIRM = ADDRESS_GEOCODE_CONFIRM
 profile_handlers.PHONE_VERIFY_PHONE = PHONE_VERIFY_PHONE
 profile_handlers.PHONE_VERIFY_NAME = PHONE_VERIFY_NAME
+profile_handlers.PHONE_VERIFY_OTP = PHONE_VERIFY_OTP

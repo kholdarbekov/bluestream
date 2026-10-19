@@ -4,6 +4,7 @@ import pytest
 
 from business_app.services.cash_collection_service import CashCollectionService
 from business_app.utils.exceptions import ValidationError
+from shared.business_config import COD_ACTIVE_DEBT_LIMIT, COD_DEBT_AMOUNT_THRESHOLD
 from tests.unit._scope_money_helpers import (
     delivered_cod_order,
     link_users,
@@ -189,3 +190,67 @@ class TestPlaceCodCap:
         assert ctx["restriction_scope"] is None
         assert ctx["place_active_cod_debt_count"] is None
         assert svc.validate_customer_can_use_cod(u.id)["cod_restricted"] is False
+
+
+# Amounts derived from the SSOT config, so the pin keeps meaning whatever the limits are set to.
+_LIMIT = COD_ACTIVE_DEBT_LIMIT
+_OVER_EACH = (Decimal(COD_DEBT_AMOUNT_THRESHOLD) / _LIMIT * 2).quantize(Decimal("0.01"))
+
+
+def _capped_office(db, *, me_kwargs=None):
+    """`me` has a grouped address `mine` at an office whose coworker owes the full cap."""
+    me = make_user(db, **(me_kwargs or {}))
+    coworker = make_user(db)
+    mine, coworker_address = make_address(db, me), make_address(db, coworker)
+    make_place_group(db, coworker_address, mine)
+    for _ in range(_LIMIT):
+        delivered_cod_order(db, coworker, address=coworker_address, total=_OVER_EACH)
+    return me, mine
+
+
+@pytest.mark.unit
+class TestPlaceCodCapped:
+    def test_an_ungrouped_address_is_never_capped(self, db):
+        me = make_user(db)
+        svc = CashCollectionService()
+        assert svc.place_cod_capped(me.id, make_address(db, me).id) is False
+        assert svc.place_cod_capped(me.id, None) is False
+
+    def test_a_capped_place_is_capped_and_agrees_with_the_context(self, db):
+        me, mine = _capped_office(db)
+        svc = CashCollectionService()
+        assert svc.place_cod_capped(me.id, mine.id) is True
+        assert svc.get_cod_restriction_context(me.id, delivery_address_id=mine.id)["restriction_scope"] == "place"
+
+    def test_a_capped_person_does_not_hide_a_capped_place(self, db):
+        """R11: the person arm wins the context's scope, but the place still answers its own question
+        and the context still publishes the place's net total."""
+        me, mine = _capped_office(db)
+        home = make_address(db, me)  # ungrouped: these debts stay personal
+        for _ in range(_LIMIT):
+            delivered_cod_order(db, me, address=home, total=_OVER_EACH)
+        svc = CashCollectionService()
+        ctx = svc.get_cod_restriction_context(me.id, delivery_address_id=mine.id)
+        assert (ctx["restriction_scope"], ctx["place_net_open_cod_debt_total"]) == (
+            "person",
+            float(_LIMIT * _OVER_EACH),
+        )
+        assert svc.place_cod_capped(me.id, mine.id) is True
+
+    def test_a_capped_person_at_an_open_place_is_not_capped(self, db):
+        me = make_user(db)
+        home = make_address(db, me)
+        for _ in range(_LIMIT):
+            delivered_cod_order(db, me, address=home, total=_OVER_EACH)
+        ungrouped = make_address(db, me)
+        assert CashCollectionService().place_cod_capped(me.id, ungrouped.id) is False
+
+    @pytest.mark.parametrize("flag", ["exempt", "grocery"])
+    def test_exempt_and_grocery_customers_are_never_capped(self, db, flag):
+        # C9: the control proves the place IS capped for an ordinary customer first.
+        control, control_address = _capped_office(db)
+        svc = CashCollectionService()
+        assert svc.place_cod_capped(control.id, control_address.id) is True
+
+        me, mine = _capped_office(db, me_kwargs={flag: True})
+        assert svc.place_cod_capped(me.id, mine.id) is False

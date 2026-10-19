@@ -97,43 +97,6 @@ def test_delete_user_address_blocks_subscription_linked_address(auth_service, db
         auth_service.delete_user_address(sample_user.id, linked.id)
 
 
-def test_link_web_account_uses_merge_service_and_returns_tokens(auth_service, db, sample_user):
-    telegram_user = User(
-        telegram_id="777888999",
-        email="telegram_777888999@bot.internal",
-        phone=None,
-        password_hash=hash_password("TempPassword123!"),
-        first_name="Telegram",
-        last_name="User",
-        role=UserRole.CUSTOMER,
-        status=UserStatus.ACTIVE,
-        registration_source="telegram",
-    )
-    db.session.add(telegram_user)
-    db.session.commit()
-
-    with (
-        patch(
-            "business_app.services.cross_platform_sync_service.cross_platform_sync_service.auto_link_accounts",
-            return_value={"success": True},
-        ) as merge_mock,
-        patch.object(
-            auth_service,
-            "_generate_tokens",
-            return_value={"access_token": "access", "refresh_token": "refresh"},
-        ),
-    ):
-        result = auth_service.link_web_account(
-            telegram_id="777888999",
-            email=sample_user.email,
-            password="TestPassword123!",
-        )
-
-    assert result["user"].id == sample_user.id
-    assert result["tokens"]["access_token"] == "access"
-    merge_mock.assert_called_once()
-
-
 def test_check_phone_availability_for_telegram_returns_masked_existing_user(auth_service, db, sample_user):
     result = auth_service.check_phone_availability_for_telegram(
         phone=sample_user.phone,
@@ -181,7 +144,7 @@ def test_send_phone_link_otp_rejects_when_phone_already_linked(auth_service, db,
         auth_service.send_phone_link_otp(sample_user.phone, "777123000")
 
 
-def test_verify_phone_link_and_merge_accounts_returns_tokens(auth_service, db, sample_user):
+def test_verify_phone_link_and_merge_accounts_returns_tokens(db, sample_user):
     telegram_user = User(
         telegram_id="555666777",
         email="telegram_555666777@bot.internal",
@@ -196,24 +159,22 @@ def test_verify_phone_link_and_merge_accounts_returns_tokens(auth_service, db, s
     db.session.add(telegram_user)
     db.session.commit()
 
-    auth_service.redis_client.get.return_value = (
-        f'{{"phone":"{sample_user.phone}","web_user_id":{sample_user.id},"telegram_user_id":{telegram_user.id}}}'
-        .encode("utf-8")
-    )
+    service = AuthService()
+    service.redis_client = _InMemoryRedis()
+    otp = _stage_link(service, sample_user, telegram_user)
 
     with (
-        patch.object(auth_service, "verify_phone", return_value=True),
         patch(
             "business_app.services.cross_platform_sync_service.cross_platform_sync_service.auto_link_accounts",
             return_value={"success": True},
         ),
         patch.object(
-            auth_service,
+            service,
             "_generate_tokens",
             return_value={"access_token": "a", "refresh_token": "r"},
         ),
     ):
-        result = auth_service.verify_phone_link_and_merge_accounts("555666777", "123456")
+        result = service.verify_phone_link_and_merge_accounts("555666777", otp)
 
     assert result["linked"] is True
     assert result["tokens"]["access_token"] == "a"
@@ -271,13 +232,26 @@ class _InMemoryRedis:
         return True
 
 
+def _stage_link(service, web_user, telegram_user):
+    """Stage a link through the real send path; returns the code the web account's phone received."""
+    sent = []
+
+    def _sms_task(user_id, otp_code, phone_number=None):
+        sent.append((phone_number, otp_code))
+
+    with patch("business_app.services.auth_service.send_verification_sms_task", side_effect=_sms_task):
+        service.send_phone_link_otp(web_user.phone, telegram_user.telegram_id)
+
+    [(phone, otp)] = sent
+    assert phone == web_user.phone
+    return otp
+
+
 def test_link_flow_preserves_otp_when_merge_fails(db, sample_user):
     """Prod incident 2026-06-23: the OTP was consumed by verify_phone BEFORE the
     merge ran, so a merge failure also burned the (correct) code — the
     customer's retry was then rejected as 'invalid OTP'. The valid code must
-    survive a failed merge so a retry works."""
-    import json
-
+    survive a failed merge so a retry with it works."""
     telegram_user = User(
         telegram_id="909090909",
         email="telegram_909090909@bot.internal",
@@ -292,34 +266,26 @@ def test_link_flow_preserves_otp_when_merge_fails(db, sample_user):
     db.session.add(telegram_user)
     db.session.commit()
 
-    otp = "654321"
-    link_key = f"phone_link:{telegram_user.telegram_id}"
-    otp_key = f"sms_verification:{telegram_user.id}"
-
-    fake = _InMemoryRedis()
-    fake.setex(
-        link_key,
-        600,
-        json.dumps(
-            {
-                "phone": sample_user.phone,
-                "web_user_id": sample_user.id,
-                "telegram_user_id": telegram_user.id,
-            }
-        ),
-    )
-    fake.setex(otp_key, 300, otp)
-
     service = AuthService()
-    service.redis_client = fake
+    service.redis_client = _InMemoryRedis()
+    otp = _stage_link(service, sample_user, telegram_user)
 
     with patch(
         "business_app.services.cross_platform_sync_service.cross_platform_sync_service.auto_link_accounts",
         return_value={"success": False, "error": "transient merge failure"},
     ):
-        with pytest.raises(ValidationError):
+        with pytest.raises(ValidationError) as failed:
             service.verify_phone_link_and_merge_accounts(telegram_user.telegram_id, otp)
+    assert failed.value.message == "transient merge failure"
 
-    stored = fake.get(otp_key)
-    assert stored is not None, "correct OTP was burned by the failed merge"
-    assert stored.decode() == otp
+    with (
+        patch(
+            "business_app.services.cross_platform_sync_service.cross_platform_sync_service.auto_link_accounts",
+            return_value={"success": True},
+        ),
+        patch.object(service, "_generate_tokens", return_value={"access_token": "a", "refresh_token": "r"}),
+    ):
+        result = service.verify_phone_link_and_merge_accounts(telegram_user.telegram_id, otp)
+
+    assert result["linked"] is True
+    assert result["user"].id == sample_user.id

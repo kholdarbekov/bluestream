@@ -334,3 +334,19 @@ class TestMaterialityPersistence:
             assert m["head_changed"] is False  # first unstarted stays d2
             assert m["driver_initiated"] is True
             assert m["trigger"] == "delivery"
+
+
+class TestAnnouncedTriggers:
+    def test_an_address_change_is_announced_not_driver_initiated(self, app, db, driver, customer):
+        a = _make_delivery(db, customer.id, driver.id, "ORD-M-A1", 41.30, 69.26)
+        b = _make_delivery(db, customer.id, driver.id, "ORD-M-A2", 41.30, 69.33)
+        with app.app_context():
+            service = RouteOptimizationService()
+            m = service.compute_materiality(
+                prev_order=[a.id, b.id], new_order=[b.id, a.id], deliveries=[a, b], trigger="address_change"
+            )
+            manual = service.compute_materiality(
+                prev_order=[a.id, b.id], new_order=[b.id, a.id], deliveries=[a, b], trigger="manual"
+            )
+        assert (m["announced"], m["driver_initiated"], m["head_changed"]) == (True, False, True)
+        assert manual["announced"] is False

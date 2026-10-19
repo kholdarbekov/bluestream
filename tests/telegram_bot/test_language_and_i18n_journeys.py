@@ -258,7 +258,7 @@ def customer_speaking(language: str) -> LanguageAwareDatabase:
     """A registered customer whose stored ``preferred_language`` is ``language``.
 
     Passed RAW — including deliberately malformed values like ``ru-RU`` — because
-    that column really does hold whatever Telegram or ``sync-profile`` last put
+    that column really does hold whatever Telegram or ``PUT /auth/profile`` last put
     in it, unvalidated.
     """
     database = LanguageAwareDatabase()
@@ -574,7 +574,7 @@ async def test_an_impatient_double_tap_on_a_language_button_syncs_once(uz_bot):
 )
 def test_normalize_language_maps_every_shape_that_reaches_the_column(stored, expected):
     """`preferred_language` is written raw from Telegram AND from
-    `POST /api/v1/auth/sync-profile`, neither of which validates it. Every value
+    `PUT /api/v1/auth/profile`, neither of which validates it. Every value
     below has a plausible route into that column; each must land on a code the
     translation table is actually keyed by, or `get()` serves the fallback
     language and reports success."""

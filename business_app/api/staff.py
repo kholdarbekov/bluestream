@@ -11,7 +11,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from business_app.services.order_schedule_service import OrderScheduleService
 from business_app.services.staff_service import StaffService
 from business_app.utils.service_factory import get_corporate_contract_service
-from business_app.utils.address_helpers import get_address_label, get_address_line
+from business_app.utils.address_helpers import door_fields, get_address_label, get_address_line
 from business_app.utils.decorators import require_staff_roles, verify_webhook_signature
 from business_app.utils.delivery_window import format_delivery_window, parse_schedule
 from business_app.utils.error_handlers import handle_api_exception
@@ -237,6 +237,12 @@ def update_delivery_status(delivery_id):
     Only the delivery's current driver may move it. A card drawn before a
     reschedule, reassign or return to the pool is answered with 409
     STAFF_DELIVERY_NOT_OWNED, and nothing is written (R20).
+
+    The optional top-level ``delivery_address_id`` is the order address the
+    driver's screen was drawn with. An Arrived, Delivered or Failed step whose
+    address the admin has since changed is answered with 409
+    STAFF_DELIVERY_ADDRESS_CHANGED, and nothing is written (R10). A body with no
+    id is not checked, so an older bot build keeps working during a deploy.
     """
     current_user_id = get_jwt_identity()
     data = request.get_json()
@@ -245,12 +251,22 @@ def update_delivery_status(delivery_id):
         raise ValidationError("status field is required", error_code="STAFF_STATUS_REQUIRED")
 
     metadata = data.get("metadata", {})
+    raw = data.get("delivery_address_id")
+    try:
+        # A string id would never equal the FK, and every tap would be refused 409.
+        expected_address_id = None if raw is None else int(raw)
+    except (TypeError, ValueError):
+        raise ValidationError(
+            "delivery_address_id must be an integer",
+            error_code="STAFF_INVALID_DELIVERY_ADDRESS_ID",
+        )
     delivery = StaffService.update_delivery_status(
         delivery_id,
         data["status"],
         current_user_id,
         metadata,
         acting_driver_id=int(current_user_id),
+        expected_address_id=expected_address_id,
     )
 
     return success_response(
@@ -423,8 +439,10 @@ def get_active_deliveries():
                     f"{order.user.first_name} {order.user.last_name or ''}".strip() if order and order.user else ""
                 ),
                 "customer_phone": order.user.phone if order and order.user else "",
-                "address": get_address_line(address),
-                "district": address.district if address else "",
+                **door_fields(address),
+                # R10: the staff bot's status buttons carry the address the stop view
+                # was drawn with, and the status PUT sends it back.
+                "delivery_address_id": order.delivery_address_id if order else None,
                 "total_amount": float(order.total_amount) if order and order.total_amount else 0,
                 "payment_method": order.payment_method.value if order and order.payment_method else "cash",
                 "payment_status": (
@@ -444,12 +462,8 @@ def get_active_deliveries():
                 "amount_paid": cod_projection["amount_paid"],
                 "items": item_list,
                 "delivery_notes": order.delivery_notes or "",
-                "delivery_instructions": address.delivery_instructions or "" if address else "",
-                # Structured door details the customer bot collects. Without
-                # these the driver only ever sees the street line and has to
-                # phone the customer for the flat/floor.
-                "apartment_number": address.apartment_number or "" if address else "",
-                "floor_number": address.floor_number or "" if address else "",
+                # `door_fields` above carries the structured door details the customer bot
+                # collects, so the driver is not left phoning the customer for the flat/floor.
                 # Destination coordinates (order address)
                 "destination_latitude": address.latitude if address else None,
                 "destination_longitude": address.longitude if address else None,

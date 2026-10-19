@@ -1091,4 +1091,31 @@ describe('AdminService', () => {
       expect(result).toEqual(envelope);
     });
   });
+
+  describe('getOrderAddressOptions', () => {
+    it('GETs the address options with the codes its caller explains', async () => {
+      const envelope = { success: true, data: { options: [], current_address_id: 12, current_branch: null, driver: null } };
+      api.get.mockResolvedValue({ data: envelope });
+      const handledErrorCodes = ['ORDER_ADDRESS_LOCKED', 'ORDER_AWAITING_STAFF_APPROVAL'];
+
+      const result = await adminService.getOrderAddressOptions(321, { handledErrorCodes });
+
+      expect(api.get).toHaveBeenCalledWith('/admin/orders/321/address-options', { handledErrorCodes });
+      expect(result).toEqual(envelope);
+    });
+  });
+
+  describe('changeOrderAddress', () => {
+    it('PATCHes the delivery-address route with the payload as built and the codes its caller explains', async () => {
+      const envelope = { success: true, data: { order: { id: 321, delivery_address_id: 47 } } };
+      api.patch.mockResolvedValue({ data: envelope });
+      const payload = { address_id: 47, note: 'Customer moved to the office' };
+      const handledErrorCodes = ['ADDRESS_NO_PIN', 'COD_DEBT_LIMIT_REACHED', 'SALES_PAY_SELF_DECISION'];
+
+      const result = await adminService.changeOrderAddress(321, payload, { handledErrorCodes });
+
+      expect(api.patch).toHaveBeenCalledWith('/admin/orders/321/delivery-address', payload, { handledErrorCodes });
+      expect(result).toEqual(envelope);
+    });
+  });
 });

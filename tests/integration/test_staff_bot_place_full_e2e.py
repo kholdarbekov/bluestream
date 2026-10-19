@@ -98,6 +98,7 @@ from shared.enums import (
     UserRole,
     UserType,
 )
+from staff_bot.api_client import StaffAPIClient
 from staff_bot.handlers.delivery.bottle_collection import BottleCollectionHandler
 from staff_bot.i18n import i18n
 from staff_bot.keyboards.delivery import DeliveryKeyboards
@@ -225,10 +226,9 @@ class _Bridge:
     async def get_active_deliveries(self, token):
         return self._request("GET", "/api/v1/staff/delivery/active")
 
-    async def update_delivery_status(self, token, delivery_id, status, metadata=None):
-        payload = {"status": status}
-        if metadata:
-            payload["metadata"] = metadata
+    async def update_delivery_status(self, token, delivery_id, status, metadata=None, *, delivery_address_id=None):
+        # The real client's body, imported rather than copied.
+        payload = StaffAPIClient.delivery_status_body(status, metadata, delivery_address_id=delivery_address_id)
         return self._request("PUT", f"/api/v1/staff/delivery/{delivery_id}/status", payload)
 
 

@@ -174,8 +174,8 @@ PENDING_FLOW_USER_DATA_KEYS = (
     'pending_confirm_transfer_qty',
     'pending_join_session_id',
     'pending_invite_driver_id',
-    # Stamped by the delivery status flow; write-only today (see the WRITE-side
-    # rule above).
+    # Stamped by `initiate_status_change`. Its `flow_address_id` is what the three
+    # status PUTs send (R10). Dropped with the flow, like every key here.
     'pending_status',
 )
 

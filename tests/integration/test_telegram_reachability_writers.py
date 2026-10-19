@@ -11,7 +11,6 @@ import pytest
 from business_app.models.reorder_reminder import ReorderReminderEvent
 from business_app.models.user import User
 from business_app.services.cross_platform_sync_service import cross_platform_sync_service
-from business_app.services.token_service import TokenService
 from business_app.utils.password_security import hash_password
 from business_app.utils.timezone_utils import ensure_utc
 from shared.enums import UserRole, UserStatus, UserType
@@ -67,10 +66,10 @@ def _event_kinds(user_id):
     ]
 
 
-def test_registering_through_the_bot_makes_the_customer_reachable(client, db):
-    response = client.post(
+def test_registering_through_the_bot_makes_the_customer_reachable(signed_bot_post, db):
+    response = signed_bot_post(
         "/api/v1/auth/telegram-register",
-        json={"telegram_id": 778899201, "first_name": "Kamola", "language_code": "uz"},
+        {"telegram_id": 778899201, "first_name": "Kamola", "language_code": "uz"},
     )
 
     assert response.status_code == 201, response.get_data(as_text=True)
@@ -112,35 +111,6 @@ def test_a_first_bot_login_creates_a_reachable_customer(app, client, db):
     user = User.query.filter_by(telegram_id="810000701").one()
     assert _state(db, user.id) == ("810000701", True, None)
     assert _event_kinds(user.id) == []
-
-
-def test_linking_telegram_from_the_website_makes_the_customer_reachable(client, db):
-    """`/auth/verify-telegram-auth/<code>`: the site issued a code, the bot redeemed it."""
-    user = _customer(
-        db,
-        phone="+998901110901",
-        email="kamola901@example.com",
-        source="web",
-        blocked_at=datetime.now(UTC) - timedelta(days=3),
-    )
-    token_service = TokenService()
-    token_service._ensure_redis_connection()
-    if not token_service.redis_available:
-        pytest.skip("verify-telegram-auth reads its code from Redis")
-    token_service.redis_client.setex(
-        "telegram_auth:K4M0LA77",
-        300,
-        json.dumps({"user_id": user.id, "email": user.email, "created_at": datetime.now(UTC).isoformat(), "type": "telegram_auth"}),
-    )
-
-    response = client.post(
-        "/api/v1/auth/verify-telegram-auth/K4M0LA77",
-        json={"telegram_id": "810000901", "telegram_username": "kamola_test"},
-    )
-
-    assert response.status_code == 200, response.get_data(as_text=True)
-    assert _state(db, user.id) == ("810000901", True, None)
-    assert _event_kinds(user.id) == [("unblocked", "link")]
 
 
 def test_merging_a_telegram_account_into_a_web_account_moves_its_block(db):

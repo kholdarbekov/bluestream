@@ -63,21 +63,21 @@ class TestAuthenticationAPI:
         assert body['success'] is True
         assert 'access_token' in body['data']
 
-    def test_check_phone_availability_rejects_invalid_phone(self, client, db):
+    def test_check_phone_availability_rejects_invalid_phone(self, signed_bot_post, db):
         # An un-normalizable phone must be rejected at the boundary with a clean
         # 400, never reach the service and return 200 with available:false (which
         # would degrade into a filter_by(phone=None) collision).
-        response = client.post(
+        response = signed_bot_post(
             '/api/v1/auth/check-phone-availability',
-            json={'phone': 'garbage', 'telegram_id': 987654321},
+            {'phone': 'garbage', 'telegram_id': 987654321},
         )
 
         assert response.status_code == 400
 
-    def test_link_phone_send_otp_rejects_invalid_phone(self, client, db):
-        response = client.post(
+    def test_link_phone_send_otp_rejects_invalid_phone(self, signed_bot_post, db):
+        response = signed_bot_post(
             '/api/v1/auth/link-phone-account/send-otp',
-            json={'phone': 'garbage', 'telegram_id': 987654322},
+            {'phone': 'garbage', 'telegram_id': 987654322},
         )
 
         assert response.status_code == 400

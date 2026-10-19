@@ -246,11 +246,15 @@ def optimize_driver_route_task(self, driver_id: int, trigger: str = "auto"):
             return {"optimized": False, "reason": skip_reason or "no_active_deliveries"}
 
         # THE single push gate (route-UX plan 2026-08-11 §5.2):
-        #   sounded ⟺ head_changed AND NOT driver_initiated.
+        #   sounded ⟺ head_changed AND NOT driver_initiated AND NOT announced.
         # Missing materiality fails SILENT — this is a noise-reduction
         # project; never default to loud.
         materiality = (route.extra_data or {}).get("materiality") or {}
-        sound = bool(materiality.get("head_changed")) and not bool(materiality.get("driver_initiated"))
+        sound = (
+            bool(materiality.get("head_changed"))
+            and not bool(materiality.get("driver_initiated"))
+            and not bool(materiality.get("announced"))
+        )
         try:
             # Stable across a `self.retry()` re-run (Celery keeps the same
             # task id across retries of one dispatch), so a retried push

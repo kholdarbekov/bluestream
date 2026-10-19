@@ -3745,8 +3745,7 @@ class TestTheAccountMergeDeletePath:
 
         The branch is deliberate. `auto_link_accounts` routes web+telegram to
         `_link_web_primary_telegram_secondary`, which is the ONE merge branch
-        production actually reaches (`AuthService.link_web_account` and
-        `complete_telegram_web_link` both call it that way). Its SAME-platform
+        production actually reaches. Its SAME-platform
         sibling is unreachable on a real database: `_merge_same_platform_accounts`
         sets `secondary_user.phone = None` before the delete and `users.phone` is
         NOT NULL in the migrated Postgres schema (the model says nullable, the
@@ -4367,7 +4366,7 @@ class TestOnRealPostgres:
         failure into `{'success': False, 'error': ...}`, and here it does not —
         the exception escapes the service (the handler touches the failed
         session before rolling it back), so the caller gets a 500 rather than
-        the friendly refusal `AuthService.link_web_account` is written to raise.
+        the friendly refusal the service is written to raise.
         """
         merged = TestTheAccountMergeDeletePath._merge_with_a_grouped_address(pg_db)
 

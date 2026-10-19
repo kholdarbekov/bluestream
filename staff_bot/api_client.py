@@ -621,19 +621,35 @@ class StaffAPIClient:
             data={'delivery_date': delivery_date.isoformat()} if delivery_date is not None else None,
         )
 
-    async def update_delivery_status(
-        self, token: str, delivery_id: int,
-        status: str, metadata: Dict = None
-    ) -> APIResponse:
-        """Update delivery status"""
+    @staticmethod
+    def delivery_status_body(
+        status: str, metadata: Dict = None, *, delivery_address_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """The body of ``PUT /staff/delivery/<id>/status``.
+
+        ``metadata`` only when there is some. ``delivery_address_id`` only when the
+        flow captured one: it is the address the driver's screen was drawn with, and
+        the backend refuses it once the admin has changed the order's address (R10).
+        A body without it is not checked.
+        """
         data = {'status': status}
         if metadata:
             data['metadata'] = metadata
+        if delivery_address_id is not None:
+            data['delivery_address_id'] = delivery_address_id
+        return data
+
+    async def update_delivery_status(
+        self, token: str, delivery_id: int,
+        status: str, metadata: Dict = None,
+        *, delivery_address_id: Optional[int] = None,
+    ) -> APIResponse:
+        """Update delivery status"""
         return await self._make_request(
             'PUT',
             f'{config.business_api.delivery_endpoint}/{delivery_id}/status',
             token=token,
-            data=data
+            data=self.delivery_status_body(status, metadata, delivery_address_id=delivery_address_id),
         )
 
     async def update_driver_location(

@@ -1479,7 +1479,7 @@ def test_one_failed_notice_does_not_stop_the_others(
     reschedule still answers 200 and is committed, and every other seam and the audit still run.
 
     A webhook outage (`route`) is absorbed by `RouteEditService._notify_route_updated`'s own guard;
-    a broker outage on any Celery seam is absorbed by that step's `_best_effort`."""
+    a broker outage on any Celery seam is absorbed by that step's `best_effort_step`."""
     fanout.failing = {failing}
     today = local_noon.date()
     seed = _seed(user_address, rostered_driver, S.IN_TRANSIT, today)

@@ -787,6 +787,7 @@ class StaffWebhookServer:
             '/internal/order-reassigned': _TokenBucket(rate_per_sec=20, burst=60),
             '/internal/order-cancelled': _TokenBucket(rate_per_sec=20, burst=60),
             '/internal/order-unassigned': _TokenBucket(rate_per_sec=20, burst=60),
+            '/internal/order-address-changed': _TokenBucket(rate_per_sec=20, burst=60),
             '/internal/delivery-failed': _TokenBucket(rate_per_sec=20, burst=60),
             '/internal/sales-event': _TokenBucket(rate_per_sec=20, burst=60),
             '/internal/bottle-event': _TokenBucket(rate_per_sec=20, burst=60),
@@ -827,6 +828,7 @@ class StaffWebhookServer:
         self.app.router.add_post('/internal/order-reassigned', self.order_reassigned_handler)
         self.app.router.add_post('/internal/order-cancelled', self.order_cancelled_handler)
         self.app.router.add_post('/internal/order-unassigned', self.order_unassigned_handler)
+        self.app.router.add_post('/internal/order-address-changed', self.order_address_changed_handler)
         self.app.router.add_post('/internal/delivery-failed', self.delivery_failed_handler)
         self.app.router.add_post('/internal/sales-event', self.sales_event_handler)
         self.app.router.add_post('/internal/bottle-event', self.bottle_event_handler)
@@ -1439,6 +1441,110 @@ class StaffWebhookServer:
             return web.json_response({'success': True, 'message': 'Notification sent'})
         except Exception as e:
             logger.error(f"Error handling delivery failed notification: {e}", exc_info=True)
+            return web.json_response({'success': False, 'message': 'Internal server error'}, status=500)
+
+    async def order_address_changed_handler(self, request):
+        """Tell the driver holding a stop that an admin changed its address (spec D7).
+
+        POST /internal/order-address-changed
+          {event_id, telegram_id, delivery_id, delivery_address_id, order_info, old_address,
+           new_address, lat, lng, door}
+
+        The guards, the claim before the send and the release after a failed one are
+        `delivery_failed_handler`'s, for the same reason: `notify_order_address_changed`
+        retries only on a non-200. A driver who can never be reached is a 200 that keeps
+        the slot; any other send error frees it and answers 502. It plays a sound: it is
+        the one loud message of an address change, and the driver is on the road.
+
+        After the send, the driver's own state follows (D8, D8b): `current_delivery` is
+        refreshed from a fresh `/delivery/active` row, or patched when that fetch fails, and
+        an open stop detail or Navigate screen of this stop is redrawn. Each step is
+        best-effort and never changes the 200, because the alert already landed.
+        """
+        # Lazy, the way `handle_route_updated_payload` imports `route_card`: loading this
+        # server never pulls in the delivery handler package, so no import cycle can form.
+        from staff_bot.handlers.delivery import address_change
+
+        try:
+            if not await verify_webhook_signature(request):
+                return web.json_response({'success': False, 'message': 'Invalid signature'}, status=401)
+            limited = await self._check_rate_limit(request)
+            if limited:
+                return limited
+            if not self.bot_app:
+                return web.json_response({'success': False, 'message': 'Bot not initialized'}, status=503)
+
+            data, parse_error = await _parse_json_body(request)
+            if parse_error:
+                return parse_error
+            try:
+                telegram_id = int(data.get('telegram_id'))
+                delivery_id = int(data.get('delivery_id'))
+            except (TypeError, ValueError):
+                return web.json_response(
+                    {'success': False, 'message': 'Missing or malformed telegram_id or delivery_id'},
+                    status=400,
+                )
+
+            # Rendered before the slot is claimed, so the send is the only step that can
+            # fail while the slot is held. Every value is escaped: an unescaped `<` in an
+            # address makes Telegram refuse the whole message (RF1).
+            language = await i18n.get_user_language(telegram_id)
+            order_info = data.get('order_info') or {}
+            text = i18n.get(
+                'staff.notification.order_address_changed', language,
+                number=escape_html(order_info.get('order_number')),
+                old=escape_html(data.get('old_address') or "—"),
+                new=escape_html(data.get('new_address')),
+            )
+            keyboard = DeliveryKeyboards.address_changed_actions(
+                language, delivery_id, data.get('lat'), data.get('lng')
+            )
+
+            event_id = data.get('event_id')
+            # Used only when Redis is down. The new address is in it, so a second change of
+            # the same stop is a new alert, not a replay of the first.
+            fallback_key = (
+                f"order_address_changed:{telegram_id}:{delivery_id}:{data.get('delivery_address_id')}"
+            )
+            if await self._is_duplicate_event(event_id, fallback_key):
+                return web.json_response({'success': True, 'message': 'Already processed'})
+
+            try:
+                await self.bot_app.bot.send_message(
+                    chat_id=telegram_id, text=text, parse_mode='HTML',
+                    reply_markup=keyboard, disable_notification=False,
+                )
+            except Exception as e:
+                _log_notify_failure(
+                    f"Failed to send the address-changed alert for delivery {delivery_id} to {telegram_id}", e
+                )
+                if _is_recipient_unreachable(e):
+                    return web.json_response({'success': False, 'message': 'Recipient unreachable'})
+                await self._release_event(event_id, fallback_key)
+                return web.json_response({'success': False, 'message': 'Send failed'}, status=502)
+
+            row = None
+            try:
+                row = await address_change.fetch_active_row(self.bot_app, telegram_id, delivery_id)
+            except Exception as e:  # noqa: BLE001 -- the alert landed; this is follow-up
+                logger.warning(f"Address change: fetching delivery {delivery_id} failed: {e}", exc_info=True)
+            try:
+                address_change.refresh_current_delivery(
+                    self.bot_app, telegram_id, delivery_id, row=row, payload=data
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"Address change: snapshot refresh for {telegram_id} failed: {e}", exc_info=True)
+            try:
+                await address_change.rerender_borrowed_stop(
+                    self.bot_app, telegram_id, delivery_id, row=row, language=language
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"Address change: stop redraw for {telegram_id} failed: {e}", exc_info=True)
+
+            return web.json_response({'success': True, 'message': 'Notification sent'})
+        except Exception as e:
+            logger.error(f"Error handling order address changed notification: {e}", exc_info=True)
             return web.json_response({'success': False, 'message': 'Internal server error'}, status=500)
 
     async def route_updated_handler(self, request):

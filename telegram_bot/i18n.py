@@ -29,7 +29,7 @@ class Translation:
 
         ``preferred_language`` is written raw from the caller's Telegram
         ``language_code`` (an IETF tag such as ``ru-RU``) and is also settable
-        through ``POST /api/v1/auth/sync-profile`` with no validation. Without
+        through ``PUT /api/v1/auth/profile`` with no validation. Without
         this, such a value misses the requested-language lookup in :meth:`get`
         entirely and every string is served in the FALLBACK language instead —
         silently, because from ``get()``'s point of view the fallback worked.

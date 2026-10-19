@@ -18,6 +18,8 @@ from staff_bot.handlers.base import BaseHandler
         ("COD_DRIVER_BLOCKED", "staff.error.api.driver_cod_blocked"),
         ("STAFF_DRIVER_COD_BLOCKED", "staff.error.api.driver_cod_blocked"),
         ("COD_DEBT_LIMIT_REACHED", "staff.error.api.cod_debt_limit_reached"),
+        ("STAFF_DELIVERY_ADDRESS_CHANGED", "staff.error.api.delivery_address_changed"),
+        ("STAFF_INVALID_DELIVERY_ADDRESS_ID", "staff.error.api.validation"),
     ],
 )
 def test_cod_error_codes_map_to_specific_i18n_keys(error_code, expected_key):

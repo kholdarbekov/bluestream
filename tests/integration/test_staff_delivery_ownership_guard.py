@@ -18,6 +18,12 @@ Redis flow mirror (recorded), and i18n (it echoes keys, so copy assertions do no
 on the seed).
 
 Spec: docs/superpowers/specs/2026-09-23-admin-order-reschedule-design.md (R20, §3.7).
+
+R10 shares this guard (spec docs/superpowers/specs/2026-10-18-admin-order-address-change-design.md):
+an Arrived, Delivered or Failed tap answers for the address its screen was drawn with. The
+status button carries that address id, the flow it starts keeps it until the PUT, and a tap
+whose id the admin has since replaced is refused with 409 STAFF_DELIVERY_ADDRESS_CHANGED under
+the same delivery lock. A tap with no id is accepted, so an older bot keeps working mid-deploy.
 """
 
 import asyncio
@@ -35,7 +41,14 @@ from business_app.models.user import User, UserAddress
 from business_app.utils import delivery_window
 from business_app.utils.password_security import hash_password
 from shared.enums import DeliveryStatus, OrderStatus, PaymentMethod, UserRole, UserType
-from tests.integration.test_staff_bot_place_full_e2e import _Bridge, _open_delivery_card, _status_handler
+from staff_bot.utils.delivery_snapshot import snapshot_from_active_row
+from tests.integration.test_admin_order_address_change import address_fanout  # noqa: F401
+from tests.integration.test_staff_bot_place_full_e2e import (
+    _active_handler,
+    _Bridge,
+    _open_delivery_card,
+    _status_handler,
+)
 from tests.unit.test_staff_bot_place_surfaces import (
     _callbacks,
     _edited_markup,
@@ -201,6 +214,33 @@ def _puts(bridge):
     return [answer for answer in bridge.answers if answer[0] == "PUT"]
 
 
+def _office(db, customer):
+    """A second saved address of `customer`, pinned inside the zone: where the admin moves the order."""
+    address = UserAddress(
+        user_id=customer.id,
+        title="Office 2",
+        full_address="2 Work St, Tashkent",
+        latitude=41.33,
+        longitude=69.32,
+    )
+    db.session.add(address)
+    db.session.commit()
+    return address
+
+
+def _moved(db, delivery, address):
+    """The admin change's FK write, without its fan-out."""
+    delivery.order.delivery_address_id = address.id
+    db.session.commit()
+
+
+def _open_card(monkeypatch, bridge, delivery_id):
+    """`_open_delivery_card`, keeping the drawn buttons: R10 taps the button the driver saw."""
+    update, context = _make_update_context(callback_data=f"staff_view_active_{delivery_id}")
+    asyncio.run(_active_handler(monkeypatch, bridge).view_active_delivery(update, context))
+    return context, _callbacks(_edited_markup(update))
+
+
 # --------------------------------------------------------------------------- #
 # 1. The endpoint
 # --------------------------------------------------------------------------- #
@@ -270,6 +310,117 @@ def test_the_admin_delivery_page_still_moves_a_drivers_delivery(
         .first()
     )
     assert (last.new_status, last.changed_by) == (DeliveryStatus.PICKED_UP, admin_user.id)
+
+
+# --------------------------------------------------------------------------- #
+# 1b. The endpoint, R10: the address the tap was drawn with
+# --------------------------------------------------------------------------- #
+
+BOUND_TAPS = [
+    (DeliveryStatus.IN_TRANSIT, "arrived", None),
+    (DeliveryStatus.ARRIVED, "delivered", {"cash_collected": 150000.0}),
+    (DeliveryStatus.ARRIVED, "failed", {"fail_reason": "customer_unavailable"}),
+]
+
+
+@pytest.mark.parametrize("from_status,to_status,metadata", BOUND_TAPS, ids=["arrived", "delivered", "failed"])
+def test_a_tap_carrying_a_superseded_address_is_refused_and_nothing_is_written(
+    app, client, db, sample_user, from_status, to_status, metadata
+):
+    driver = _driver(db, phone="+998901240010", first_name="Late")
+    delivery = _delivery(db, sample_user, driver, status=from_status, number=f"ORD-R10-{to_status}")
+    old_id = delivery.order.delivery_address_id
+    _moved(db, delivery, _office(db, sample_user))
+    history_before = DeliveryStatusHistory.query.filter_by(delivery_id=delivery.id).count()
+
+    body = {"status": to_status, "delivery_address_id": old_id, **({"metadata": metadata} if metadata else {})}
+    r = client.put(STATUS.format(delivery.id), json=body, headers=_bearer(app, driver))
+
+    assert (r.status_code, r.get_json()["error_code"]) == (409, "STAFF_DELIVERY_ADDRESS_CHANGED")
+    db.session.expire_all()
+    row = db.session.get(Delivery, delivery.id)
+    assert (row.status, row.delivery_person_id) == (from_status, driver.id)
+    assert (row.failed_delivery_reason, row.delivery_attempts, row.delivered_at) == (None, 0, None)
+    assert DeliveryStatusHistory.query.filter_by(delivery_id=delivery.id).count() == history_before
+    assert CashCollectionEvent.query.count() == 0
+
+
+@pytest.mark.parametrize("as_sent", [int, str], ids=["int", "numeric-string"])
+def test_a_tap_carrying_the_current_address_is_accepted(app, client, db, sample_user, as_sent):
+    driver = _driver(db, phone="+998901240012", first_name="Fresh")
+    delivery = _delivery(db, sample_user, driver, status=DeliveryStatus.IN_TRANSIT, number="ORD-R10-FRESH")
+    office = _office(db, sample_user)
+    _moved(db, delivery, office)
+
+    r = client.put(
+        STATUS.format(delivery.id),
+        json={"status": "arrived", "delivery_address_id": as_sent(office.id)},
+        headers=_bearer(app, driver),
+    )
+
+    assert (r.status_code, r.get_json()["data"]["status"]) == (200, "arrived")
+    db.session.expire_all()
+    assert db.session.get(Delivery, delivery.id).status == DeliveryStatus.ARRIVED
+
+
+def test_a_tap_without_an_address_id_is_accepted_during_a_deploy(app, client, db, sample_user):
+    """An older bot build sends no id. R10 lets it through, as before the change."""
+    driver = _driver(db, phone="+998901240013", first_name="Old")
+    delivery = _delivery(db, sample_user, driver, status=DeliveryStatus.IN_TRANSIT, number="ORD-R10-NOID")
+    _moved(db, delivery, _office(db, sample_user))
+
+    r = client.put(STATUS.format(delivery.id), json={"status": "arrived"}, headers=_bearer(app, driver))
+
+    assert (r.status_code, r.get_json()["data"]["status"]) == (200, "arrived")
+    db.session.expire_all()
+    assert db.session.get(Delivery, delivery.id).status == DeliveryStatus.ARRIVED
+
+
+def test_picked_up_ignores_the_address(app, client, db, sample_user):
+    """Picked up (and in transit) do not depend on the address: the id is not checked."""
+    driver = _driver(db, phone="+998901240014", first_name="Depot")
+    delivery = _delivery(db, sample_user, driver, status=DeliveryStatus.ASSIGNED, number="ORD-R10-PICKUP")
+    old_id = delivery.order.delivery_address_id
+    _moved(db, delivery, _office(db, sample_user))
+
+    r = client.put(
+        STATUS.format(delivery.id),
+        json={"status": "picked_up", "delivery_address_id": old_id},
+        headers=_bearer(app, driver),
+    )
+
+    assert (r.status_code, r.get_json()["data"]["status"]) == (200, "picked_up")
+    db.session.expire_all()
+    assert db.session.get(Delivery, delivery.id).status == DeliveryStatus.PICKED_UP
+
+
+def test_a_non_integer_address_id_is_refused_400(app, client, db, sample_user):
+    """Without the coercion a string id never equals the FK, and every tap would be a 409."""
+    driver = _driver(db, phone="+998901240015", first_name="Typo")
+    delivery = _delivery(db, sample_user, driver, status=DeliveryStatus.IN_TRANSIT, number="ORD-R10-BAD")
+
+    r = client.put(
+        STATUS.format(delivery.id),
+        json={"status": "arrived", "delivery_address_id": "x"},
+        headers=_bearer(app, driver),
+    )
+
+    assert (r.status_code, r.get_json()["error_code"]) == (400, "STAFF_INVALID_DELIVERY_ADDRESS_ID")
+    db.session.expire_all()
+    assert db.session.get(Delivery, delivery.id).status == DeliveryStatus.IN_TRANSIT
+
+
+def test_the_active_list_carries_the_address_id(app, client, db, sample_user):
+    """The row is what the stop view is drawn from, so its buttons can carry the id."""
+    driver = _driver(db, phone="+998901240016", first_name="Listed")
+    delivery = _delivery(db, sample_user, driver, status=DeliveryStatus.IN_TRANSIT, number="ORD-R10-LIST")
+
+    r = client.get("/api/v1/staff/delivery/active", headers=_bearer(app, driver))
+
+    assert r.status_code == 200, r.get_data(as_text=True)
+    [row] = [item for item in r.get_json()["data"]["items"] if item["delivery_id"] == delivery.id]
+    assert delivery.order.delivery_address_id is not None
+    assert row["delivery_address_id"] == delivery.order.delivery_address_id
 
 
 # --------------------------------------------------------------------------- #
@@ -427,4 +578,109 @@ def test_a_stale_status_tap_after_a_reassign_is_refused_as_a_stale_card(
         DeliveryStatus.IN_TRANSIT,
         colleague.id,
         None,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# 3. The driver's screen, R10: a flow keeps the address it started with
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "tap,from_status,final",
+    [
+        ("arrived", DeliveryStatus.IN_TRANSIT, "execute_status_change"),
+        ("failed", DeliveryStatus.ARRIVED, "select_fail_reason"),
+    ],
+    ids=["arrived", "failed"],
+)
+def test_a_flow_started_before_an_admin_address_change_is_refused_even_after_the_snapshot_refresh(
+    monkeypatch,
+    app,
+    http,
+    db,
+    sample_user,
+    address_fanout,
+    admin_claim_headers,
+    echo_i18n,
+    flow_mirror,
+    tap,
+    from_status,
+    final,
+):
+    """Strict R10. The driver opens the stop and starts the flow. The admin moves the order,
+    and the "Address changed" alert refreshes the snapshot from the real row before the last
+    tap. That tap still answers for the screen the flow started from, so it is refused."""
+    driver = _driver(db, phone="+998901240011", first_name="Moved")
+    delivery = _delivery(db, sample_user, driver, status=from_status, number=f"ORD-R10-BOT-{tap}")
+    old_id, office = delivery.order.delivery_address_id, _office(db, sample_user)
+    bridge = _RecordingBridge(http, _token(app, driver))
+
+    context, buttons = _open_card(monkeypatch, bridge, delivery.id)
+    opening = f"staff_status_{delivery.id}_{tap}:{old_id}"
+    assert opening in buttons  # the real row drew the id
+    handler = _status_handler(monkeypatch, bridge)
+    first, _ = _make_update_context(callback_data=opening)
+    asyncio.run(handler.initiate_status_change(first, context))
+    assert context.user_data["pending_status"] == {
+        "delivery_id": delivery.id,
+        "new_status": tap,
+        "flow_address_id": old_id,
+    }
+    # staff_execute_status_<id>_arrived / staff_failed_reason_<id>_customer_unavailable
+    button = _callbacks(_edited_markup(first))[0]
+
+    moved = http.patch(
+        f"/api/v1/admin/orders/{delivery.order_id}/delivery-address",
+        json={"address_id": office.id},
+        headers=admin_claim_headers,
+    )
+    assert moved.status_code == 200, moved.get_data(as_text=True)
+    # D8 as the alert runs it, with its own step (`snapshot_from_active_row`) on the real
+    # row: the snapshot names the new address BEFORE the tap.
+    rows = asyncio.run(bridge.get_active_deliveries("tok")).data["items"]
+    [row] = [r for r in rows if r["delivery_id"] == delivery.id]
+    context.user_data["current_delivery"] = snapshot_from_active_row(row, delivery.id)
+
+    tapped, _ = _make_update_context(callback_data=button)
+    asyncio.run(getattr(handler, final)(tapped, context))
+
+    [put] = bridge.posted(f"/delivery/{delivery.id}/status")
+    assert put["payload"]["delivery_address_id"] == old_id
+    assert _puts(bridge) == [("PUT", STATUS.format(delivery.id), 409, "STAFF_DELIVERY_ADDRESS_CHANGED")]
+    assert (_edited_text(tapped), _callbacks(_edited_markup(tapped))) == (
+        "staff.error.api.delivery_address_changed",
+        BACK_TO_ACTIVE,
+    )
+    assert "pending_status" not in context.user_data
+    assert context.user_data["current_delivery"]["delivery_address_id"] == office.id  # re-anchored, never popped
+    db.session.expire_all()
+    assert db.session.get(Delivery, delivery.id).status == from_status
+
+
+def test_a_flow_on_one_stop_lends_its_address_to_no_other_stop(
+    monkeypatch, app, http, db, sample_user, echo_i18n, flow_mirror
+):
+    """`pending_status` names one stop. A confirm tapped on another stop's older screen
+    sends no id, not this stop's, so it is not refused for an address it never showed."""
+    driver = _driver(db, phone="+998901240017", first_name="Two")
+    first = _delivery(db, sample_user, driver, status=DeliveryStatus.IN_TRANSIT, number="ORD-R10-A")
+    second = _delivery(db, sample_user, driver, status=DeliveryStatus.IN_TRANSIT, number="ORD-R10-B")
+    bridge = _RecordingBridge(http, _token(app, driver))
+
+    context, buttons = _open_card(monkeypatch, bridge, first.id)
+    handler = _status_handler(monkeypatch, bridge)
+    drawn = f"staff_status_{first.id}_arrived:{first.order.delivery_address_id}"
+    assert drawn in buttons
+    opening, _ = _make_update_context(callback_data=drawn)
+    asyncio.run(handler.initiate_status_change(opening, context))
+    other, _ = _make_update_context(callback_data=f"staff_execute_status_{second.id}_arrived")
+    asyncio.run(handler.execute_status_change(other, context))
+
+    assert [put["payload"] for put in bridge.posted(f"/delivery/{second.id}/status")] == [{"status": "arrived"}]
+    assert _puts(bridge) == [("PUT", STATUS.format(second.id), 200, None)]
+    db.session.expire_all()
+    assert (db.session.get(Delivery, first.id).status, db.session.get(Delivery, second.id).status) == (
+        DeliveryStatus.IN_TRANSIT,
+        DeliveryStatus.ARRIVED,
     )

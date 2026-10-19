@@ -593,6 +593,14 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "ru": "📅 Заказ {number} перенесён диспетчером на {date} и снят с вашего маршрута.",
         "en": "📅 Order {number} was rescheduled to {date} by dispatch and removed from your route.",
     },
+    # The "Address changed" alert (spec 2026-10-18-admin-order-address-change, D7), sent to the
+    # driver holding the stop by `webhook_server.order_address_changed_handler`. `{old}` and
+    # `{new}` arrive HTML-escaped; `{old}` is "—" for a legacy order that had no address.
+    "staff.notification.order_address_changed": {
+        "en": "📍 Order {number}: the delivery address changed.\nWas: {old}\nNow: {new}",
+        "uz": "📍 {number}-buyurtma: yetkazib berish manzili o'zgardi.\nOldin: {old}\nEndi: {new}",
+        "ru": "📍 Заказ {number}: адрес доставки изменён.\nБыло: {old}\nСтало: {new}",
+    },
     # The failed-delivery alert (spec 2026-09-25-failed-delivery-awaits-new-date §4.1, F7),
     # sent to operators, admins and managers by `webhook_server._render_delivery_failed_alert`.
     # `{reason}` arrives already translated from the failure-reason family; `{name}` is the
@@ -1578,6 +1586,14 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "This order is no longer assigned to you.",
         "uz": "Bu buyurtma endi sizga biriktirilmagan.",
         "ru": "Этот заказ больше не назначен вам.",
+    },
+    # R10 (admin-order-address-change spec): an admin changed the order's address
+    # after the driver's screen was drawn, and the Arrived, Delivered or Failed
+    # step was refused. Shown on the stale-card screen, like the one above.
+    "staff.error.api.delivery_address_changed": {
+        "en": "The address of this order changed. Reopen it.",
+        "uz": "Bu buyurtmaning manzili o'zgardi. Uni qaytadan oching.",
+        "ru": "Адрес этого заказа изменился. Откройте его заново.",
     },
     # STAFF_INVALID_STATUS_TRANSITION. The plain sentence is for an older
     # backend that publishes no status; the detail one names the delivery's

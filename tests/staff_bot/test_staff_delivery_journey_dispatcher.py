@@ -38,6 +38,7 @@ import json
 import re
 from math import ceil
 from pathlib import Path
+from typing import Sequence
 
 import pytest
 
@@ -397,10 +398,11 @@ def _isolated_route_card_state():
     route_card_state._locks.clear()
 
 
-async def build_driver(monkeypatch, *, language="en", login=None):
+async def build_driver(monkeypatch, *, language="en", login=None, extra_keys: Sequence[str] = ()):
+    """A driver's bot. ``extra_keys`` serves more production copy, for a screen these journeys don't draw."""
     harness = await build_staff_harness(
         monkeypatch,
-        translations=translation_table(),
+        translations={**translation_table(), **{key: copy_for(key) for key in extra_keys}},
         database=FakeStaffDatabase(staff_user=driver_row(language)),
     )
     harness.backend.route(

@@ -40,6 +40,7 @@ import {
   BarcodeOutlined,
   WarningOutlined,
   CalendarOutlined,
+  EnvironmentOutlined,
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { formatDate, formatDateTimeShort } from '../utils/dateUtils';
@@ -62,6 +63,8 @@ import DeliverySchedulePicker from '../components/orders/DeliverySchedulePicker'
 import { buildSchedulePayload, formatDeliveryWindowLabel } from '../components/orders/deliverySchedule';
 import useScheduleBounds from '../hooks/useScheduleBounds';
 import RescheduleOrderModal from '../components/orders/RescheduleOrderModal';
+import ChangeAddressModal from '../components/orders/ChangeAddressModal';
+import { formatAddressLabel } from '../utils/addressLabel';
 import CloseOrderDialog, {
   ADMIN_REASON_ERROR_MESSAGES,
   AdminReasonField,
@@ -226,6 +229,8 @@ const Orders = () => {
   const [pendingPaymentMethodPayload, setPendingPaymentMethodPayload] = useState(null);
   // The order the Reschedule modal is open for; null = closed.
   const [rescheduleOrderId, setRescheduleOrderId] = useState(null);
+  // The order the Change address modal is open for; null = closed.
+  const [changeAddressOrderId, setChangeAddressOrderId] = useState(null);
   // The admin cancel or return waiting for confirmation (CloseOrderDialog); null = none.
   const [closeRequest, setCloseRequest] = useState(null);
 
@@ -1059,6 +1064,24 @@ const Orders = () => {
     setRescheduleOrderId(order.id);
   };
 
+  // After an address change: the detail's address row and flags, and its Order Changes table,
+  // are stale. The PATCH answers with the list-row shape, so re-read the detail and the history.
+  const handleAddressChanged = async () => {
+    if (!isDetailModalVisible || selectedOrder?.id !== changeAddressOrderId) return;
+    try {
+      const refreshed = await adminService.getOrderDetails(selectedOrder.id);
+      if (refreshed.success && refreshed.data?.order) {
+        setSelectedOrder(refreshed.data.order);
+      }
+      const history = await adminService.getOrderEditHistory(selectedOrder.id);
+      if (history.success) {
+        setEditHistoryEntries(history.data?.entries || []);
+      }
+    } catch (_err) {
+      // best-effort refresh
+    }
+  };
+
   // After a reschedule opened from the detail footer, refresh the detail modal the way every
   // other detail mutation does. The PATCH answers with the list-row shape, which has none of the
   // detail's payment, fiscal or item sections, so the modal re-reads GET /admin/orders/<id>.
@@ -1550,6 +1573,9 @@ const Orders = () => {
                   </Tag>
                 ) : null}
               </Descriptions.Item>
+              <Descriptions.Item label={t('ui.orders.delivery_address', 'Delivery address')} span={2}>
+                {formatAddressLabel(selectedOrder.delivery_address, t) || '—'}
+              </Descriptions.Item>
             </Descriptions>
 
             {/* Money breakdown. Every line is PUBLISHED by the backend — the modal
@@ -2012,7 +2038,25 @@ const Orders = () => {
                 pagination={false}
                 size="small"
                 expandable={{
-                  expandedRowRender: (record) => (
+                  expandedRowRender: (record) => (record.diff?.kind === 'address_change' ? (
+                    <div style={{ padding: 8 }}>
+                      <div>
+                        {t('ui.orders.history_address_change', 'Address: {{before}} → {{after}}', {
+                          before: formatAddressLabel(record.diff.address_before, t) || '—',
+                          after: formatAddressLabel(record.diff.address_after, t) || '—',
+                        })}
+                      </div>
+                      {/* A branch line only when the order moved between outlets (C4). */}
+                      {record.diff.branch_before?.outlet_id !== record.diff.branch_after?.outlet_id ? (
+                        <div>
+                          {t('ui.orders.history_branch_change', 'Branch: {{before}} → {{after}}', {
+                            before: record.diff.branch_before?.outlet_name || '—',
+                            after: record.diff.branch_after?.outlet_name || '—',
+                          })}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : (
                     <div style={{ padding: 8 }}>
                       <Descriptions size="small" column={2} bordered>
                         <Descriptions.Item label={t('ui.orders.totals_before', 'Totals before')}>
@@ -2055,7 +2099,7 @@ const Orders = () => {
                         ) : null}
                       </div>
                     </div>
-                  ),
+                  )),
                 }}
                 columns={[
                   {
@@ -2198,6 +2242,11 @@ const Orders = () => {
                     {t('ui.orders.reschedule', 'Reschedule')}
                   </Button>
                 ) : null}
+                {selectedOrder.can_change_address ? (
+                  <Button icon={<EnvironmentOutlined />} onClick={() => setChangeAddressOrderId(selectedOrder.id)}>
+                    {t('ui.orders.change_address', 'Change address')}
+                  </Button>
+                ) : null}
                 <Button
                   type="primary"
                   onClick={() => {
@@ -2222,6 +2271,16 @@ const Orders = () => {
           open
           onClose={() => setRescheduleOrderId(null)}
           onRescheduled={handleRescheduled}
+        />
+      ) : null}
+
+      {/* Mounted per open, like the reschedule modal: each open re-reads the options. */}
+      {changeAddressOrderId != null ? (
+        <ChangeAddressModal
+          orderId={changeAddressOrderId}
+          open
+          onClose={() => setChangeAddressOrderId(null)}
+          onChanged={handleAddressChanged}
         />
       ) : null}
 
@@ -2381,9 +2440,7 @@ const Orders = () => {
             >
               {userAddresses.map((address) => (
                 <Option key={address.id} value={address.id}>
-                  {address.title ? `${address.title}: ` : ''}
-                  {address.full_address}
-                  {address.is_default ? ' (Default)' : ''}
+                  {formatAddressLabel(address, t)}
                 </Option>
               ))}
             </Select>

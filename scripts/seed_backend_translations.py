@@ -7395,6 +7395,107 @@ ADMIN_UI_ORDER_TRANSLATIONS = {
         "Bu yetkazib berishga kimdir allaqachon yangi sana belgilagan. Ko'rish uchun oynani yopib, qayta oching.",
         'Кто-то уже назначил этой доставке новую дату. Закройте окно и откройте снова, чтобы её увидеть.',
     ),
+    # Admin order address change (docs/superpowers/specs/2026-10-18-admin-order-address-change-design.md).
+    'ui.orders.delivery_address': _ui_tr(
+        'Delivery address',
+        'Yetkazib berish manzili',
+        'Адрес доставки',
+    ),
+    'ui.orders.address_default': _ui_tr(
+        'Default',
+        'Standart',
+        'По умолчанию',
+    ),
+    'ui.orders.change_address': _ui_tr(
+        'Change address',
+        "Manzilni o'zgartirish",
+        'Изменить адрес',
+    ),
+    'ui.orders.change_address_title': _ui_tr(
+        'Change delivery address',
+        "Yetkazib berish manzilini o'zgartirish",
+        'Изменить адрес доставки',
+    ),
+    'ui.orders.change_address_select': _ui_tr(
+        'New address',
+        'Yangi manzil',
+        'Новый адрес',
+    ),
+    'ui.orders.change_address_note': _ui_tr(
+        'Note (optional)',
+        'Izoh (ixtiyoriy)',
+        'Примечание (необязательно)',
+    ),
+    'ui.orders.change_address_success': _ui_tr(
+        'Delivery address changed',
+        "Yetkazib berish manzili o'zgartirildi",
+        'Адрес доставки изменён',
+    ),
+    'ui.orders.change_address_driver_notice': _ui_tr(
+        'Driver {{name}} will get the new address in the staff bot.',
+        'Haydovchi {{name}} yangi manzilni xodimlar botida oladi.',
+        'Курьер {{name}} получит новый адрес в боте для сотрудников.',
+    ),
+    'ui.orders.change_address_agent_warning': _ui_tr(
+        'This order will count for {{newBranch}} (agent {{newAgent}}) instead of {{oldBranch}} (agent {{oldAgent}}). Commission stays with the agent who placed the order.',
+        "Bu buyurtma {{oldBranch}} (agent {{oldAgent}}) o'rniga {{newBranch}} (agent {{newAgent}}) hisobiga yoziladi. Komissiya buyurtmani joylashtirgan agentda qoladi.",
+        'Этот заказ будет засчитан филиалу {{newBranch}} (агент {{newAgent}}) вместо {{oldBranch}} (агент {{oldAgent}}). Комиссия остаётся у агента, оформившего заказ.',
+    ),
+    'ui.orders.change_address_no_branch': _ui_tr(
+        'no branch',
+        'filialsiz',
+        'без филиала',
+    ),
+    'ui.orders.change_address_none_pickable': _ui_tr(
+        'No other saved address can be picked. Add one on the Users page, then come back.',
+        "Boshqa saqlangan manzilni tanlab bo'lmaydi. Foydalanuvchilar sahifasida manzil qo'shing va qayting.",
+        'Другой сохранённый адрес выбрать нельзя. Добавьте адрес на странице «Пользователи» и вернитесь.',
+    ),
+    'ui.orders.change_address_reason_current': _ui_tr(
+        'Current address',
+        'Joriy manzil',
+        'Текущий адрес',
+    ),
+    'ui.orders.change_address_reason_no_pin': _ui_tr(
+        'No map pin',
+        "Xaritada belgisi yo'q",
+        'Нет метки на карте',
+    ),
+    'ui.orders.change_address_reason_outside_zone': _ui_tr(
+        'Outside the delivery area',
+        'Yetkazib berish hududidan tashqarida',
+        'Вне зоны доставки',
+    ),
+    'ui.orders.change_address_reason_cod_capped': _ui_tr(
+        'Cash limit reached at this place',
+        'Bu joyda naqd pul limiti tugagan',
+        'Лимит наличных по этому месту исчерпан',
+    ),
+    'ui.orders.change_address_reason_self_decision': _ui_tr(
+        'Moves your own pay',
+        "O'z maoshingizga ta'sir qiladi",
+        'Затрагивает вашу собственную оплату',
+    ),
+    'ui.orders.change_address_error_locked': _ui_tr(
+        'This order can no longer change its address.',
+        "Bu buyurtmaning manzilini endi o'zgartirib bo'lmaydi.",
+        'Адрес этого заказа больше нельзя изменить.',
+    ),
+    'ui.orders.change_address_error_invalid': _ui_tr(
+        'This address does not belong to the customer.',
+        'Bu manzil mijozga tegishli emas.',
+        'Этот адрес не принадлежит клиенту.',
+    ),
+    'ui.orders.history_address_change': _ui_tr(
+        'Address: {{before}} → {{after}}',
+        'Manzil: {{before}} → {{after}}',
+        'Адрес: {{before}} → {{after}}',
+    ),
+    'ui.orders.history_branch_change': _ui_tr(
+        'Branch: {{before}} → {{after}}',
+        'Filial: {{before}} → {{after}}',
+        'Филиал: {{before}} → {{after}}',
+    ),
     # F6: the cancel/return confirmation and the Update Status modal.
     'ui.orders.awaiting_new_date_notice': _ui_tr(
         "This order's delivery failed and is waiting for a new date.",

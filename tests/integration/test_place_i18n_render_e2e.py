@@ -1556,7 +1556,7 @@ def test_a_locale_variant_preference_is_writable_through_a_real_http_route(
 ):
     """Reachability half of the locale-variant defect, proven end to end.
 
-    ``POST /api/v1/auth/sync-profile`` stores ``preferred_language`` with no
+    ``PUT /api/v1/auth/profile`` stores ``preferred_language`` with no
     validation, so a customer's own JWT is enough to put a region-subtagged code
     in the column both surfaces read — the reachability is UNCHANGED by the fix
     and is pinned here so it stays visible.
@@ -1571,8 +1571,8 @@ def test_a_locale_variant_preference_is_writable_through_a_real_http_route(
     alice = grouped_place["alice"]
     key = "telegram.bottles.place_total"
 
-    response = client.post(
-        "/api/v1/auth/sync-profile",
+    response = client.put(
+        "/api/v1/auth/profile",
         headers=_headers(app, alice),
         json={"preferred_language": "ru-RU"},
     )

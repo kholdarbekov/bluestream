@@ -268,9 +268,11 @@ class TestAuthServicePhoneFlows:
         mock_sms_reset.assert_not_called()
         mock_token.assert_not_called()
 
-    def test_send_verification_sms_updates_phone_when_allowed(
+    def test_send_verification_sms_to_a_new_number_never_writes_it(
         self, app, db, auth_service_with_stateful_redis, sample_user, stateful_redis
     ):
+        # The number is saved only by verify_phone, once its code is entered.
+        original_phone = sample_user.phone
         new_phone = "+998909991122"
 
         with (
@@ -280,34 +282,13 @@ class TestAuthServicePhoneFlows:
             success = auth_service_with_stateful_redis.send_verification_sms(
                 user_id=sample_user.id,
                 phone=new_phone,
-                update_phone=True,
-            )
-
-        db.session.refresh(sample_user)
-        assert success is True
-        assert sample_user.phone == new_phone
-        assert stateful_redis.get(f"sms_verification:{sample_user.id}") is not None
-        mock_send_sms_task.assert_called_once()
-
-    def test_send_verification_sms_does_not_update_phone_when_forbidden(
-        self, app, db, auth_service_with_stateful_redis, sample_user
-    ):
-        original_phone = sample_user.phone
-        alternate_phone = "+998907770011"
-
-        with (
-            app.app_context(),
-            patch("business_app.services.auth_service.send_verification_sms_task"),
-        ):
-            success = auth_service_with_stateful_redis.send_verification_sms(
-                user_id=sample_user.id,
-                phone=alternate_phone,
-                update_phone=False,
             )
 
         db.session.refresh(sample_user)
         assert success is True
         assert sample_user.phone == original_phone
+        otp = stateful_redis.get(f"sms_verification:{sample_user.id}").decode()
+        mock_send_sms_task.assert_called_once_with(sample_user.id, otp, new_phone)
 
     def test_register_user_dedups_phone_across_surface_formats(
         self, app, db, auth_service_with_stateful_redis

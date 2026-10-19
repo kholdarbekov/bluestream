@@ -10,7 +10,7 @@ from telegram.ext import ConversationHandler
 
 from handlers import orders as orders_module
 from handlers import profile as profile_module
-from handlers.profile import ADDRESS_LOCATION, PHONE_VERIFY_NAME, PHONE_VERIFY_PHONE
+from handlers.profile import ADDRESS_LOCATION, PHONE_VERIFY_NAME, PHONE_VERIFY_OTP, PHONE_VERIFY_PHONE
 from tests.telegram_bot.helpers import DummyCallbackQuery, DummyUpdate, FakeAPIClientContext, make_context
 
 
@@ -150,35 +150,56 @@ class TestProfileHandlerFlows:
         handler.user_repo.set_user_phone_verified.assert_awaited_once_with(777, "+998901112233")
         assert update.message.reply_text.await_count == 2
 
-    async def test_phone_verify_text_accepts_valid_phone_removes_keyboard_and_moves_to_name_step(self, monkeypatch):
+    async def test_phone_verify_text_sends_a_code_and_writes_no_phone_before_it_is_verified(self, monkeypatch):
+        # A typed number is not proof of the SIM. It goes to /send-otp, and only
+        # the backend's /verify-phone may write it — never the bot's own SQL.
+        # Driven end to end in test_change_phone_journey_dispatcher.py.
         handler = profile_module.ProfileHandlers()
-        handler.user_repo = SimpleNamespace(set_user_phone=AsyncMock())
+        handler.user_repo = SimpleNamespace(
+            set_user_phone=AsyncMock(), set_user_phone_verified=AsyncMock()
+        )
         update = DummyUpdate(user_id=778)
         update.message.text = "+998901112233"
         context = make_context()
 
+        class _RecordingAPIClient:
+            def __init__(self):
+                self.sent = []
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                return False
+
+            # Same parameters as api_client.send_phone_verification.
+            async def send_phone_verification(self, user_token, phone):
+                self.sent.append((user_token, phone))
+                return _resp(success=True, data={"data": {"phone_masked": "+99***2233"}})
+
+        client = _RecordingAPIClient()
         monkeypatch.setattr(profile_module.i18n, "get_user_language", AsyncMock(return_value="en"))
-        monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
+        monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **kw: f"{key}:{lang}:{kw}")
         monkeypatch.setattr(profile_module, "validate_phone_number", AsyncMock(return_value=True))
         monkeypatch.setattr(profile_module, "normalize_phone_number", lambda p: p)
         monkeypatch.setattr(profile_module, "get_auth_token", AsyncMock(return_value="jwt-token"))
-        monkeypatch.setattr(
-            profile_module,
-            "api_client",
-            FakeAPIClientContext(update_user_profile=_resp(success=True)),
-        )
+        monkeypatch.setattr(profile_module, "api_client", client)
 
         state = await handler.phone_verify_text_received(update, context)
 
-        assert state == PHONE_VERIFY_NAME
-        assert context.user_data["pending_phone"] == "+998901112233"
-        handler.user_repo.set_user_phone.assert_awaited_once_with(778, "+998901112233")
+        assert state == PHONE_VERIFY_OTP
+        assert client.sent == [("jwt-token", "+998901112233")]
+        assert context.user_data["pending_phone_verification"] == "+998901112233"
+        handler.user_repo.set_user_phone.assert_not_awaited()
+        handler.user_repo.set_user_phone_verified.assert_not_awaited()
         assert update.message.reply_text.await_count == 2
         first_call = update.message.reply_text.await_args_list[0]
         second_call = update.message.reply_text.await_args_list[1]
-        assert first_call.args == ("telegram.phone.phone_accepted:en",)
+        assert first_call.args == ("telegram.phone.phone_accepted:en:{}",)
         assert isinstance(first_call.kwargs["reply_markup"], profile_module.ReplyKeyboardRemove)
-        assert second_call.args == ("telegram.enter_name:en",)
+        assert second_call.args == (
+            "telegram.phone.verification_code_sent_to_phone_prompt:en:{'phone_masked': '+99***2233'}",
+        )
 
     async def test_phone_verify_text_rejects_invalid_phone_and_keeps_phone_state(self, monkeypatch):
         handler = profile_module.ProfileHandlers()

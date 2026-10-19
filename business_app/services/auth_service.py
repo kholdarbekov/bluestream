@@ -309,15 +309,16 @@ class AuthService:
 
         return True
 
-    def send_verification_sms(self, user_id: int, phone: str = None, update_phone: bool = True) -> bool:
+    def send_verification_sms(self, user_id: int, phone: str = None) -> bool:
         """
         Send SMS verification
+
+        Never writes the number to the account: a new number is saved only by
+        verify_phone, once the code sent to it is entered.
 
         Args:
             user_id: User ID
             phone: Phone number to send OTP to (optional, uses user's phone if not provided)
-            update_phone: If True, update the user's phone number in DB. Set to False for
-                         account linking where the phone belongs to another user.
 
         Returns:
             Success status
@@ -342,18 +343,11 @@ class AuthService:
         # Format phone number
         formatted_phone = format_phone_number(target_phone)
 
-        # Update user's phone if a new phone was provided (and update is allowed)
-        if update_phone and phone and phone != user.phone:
-            logger.info(f"Updating user {user_id} phone from {user.phone} to {formatted_phone}")
-            user.phone = formatted_phone
-            db.session.commit()
-
         # Generate OTP
         otp = generate_otp()
 
         # Store OTP in Redis
-        key = f"sms_verification:{user.id}"
-        self.redis_client.setex(key, self.otp_expiry, otp)
+        self._store_sms_code(user.id, otp, formatted_phone, self.otp_expiry)
 
         # Send SMS - call directly instead of using Celery to avoid connection issues
         try:
@@ -395,19 +389,41 @@ class AuthService:
 
         return False
 
-    def verify_phone(self, user_id: int, otp: str) -> bool:
-        """Verify phone with OTP"""
+    def verify_phone(self, user_id: int, otp: str, phone: str = None) -> bool:
+        """
+        Verify phone with OTP
+
+        Args:
+            user_id: User ID
+            otp: Code the user entered
+            phone: Number being verified for the account (a pending change). The code
+                   must have been sent to it, and it is saved, in the E.164 form the code
+                   went to, together with phone_verified_at, so the account never holds
+                   an unverified new number.
+
+        Raises:
+            ConflictError: Another account holds that number (it was free when the code was requested)
+        """
         key = f"sms_verification:{user_id}"
         stored_otp = self.redis_client.get(key)
 
         if not stored_otp or stored_otp.decode() != otp:
             return False
 
+        if phone is not None:
+            if not self._sms_code_was_sent_to(user_id, phone):
+                return False
+            # The number was free when its code was requested; another account may have verified it since
+            if self.find_phone_holder(phone, exclude_user_id=user_id):
+                raise ConflictError(get_translation("api.auth.phone_already_registered"))
+
         # Remove OTP from Redis
-        self.redis_client.delete(key)
+        self.redis_client.delete(key, f"sms_verification_phone:{user_id}")
 
         user = User.query.get(user_id)
         if user:
+            if phone is not None:
+                user.phone = format_phone_number(phone)
             user.phone_verified_at = datetime.now(timezone.utc)
 
             # If this was the only pending verification, activate account
@@ -420,6 +436,20 @@ class AuthService:
             return True
 
         return False
+
+    def find_phone_holder(self, phone: str, exclude_user_id, skip_inactive: bool = False) -> Optional[User]:
+        """
+        Another account whose phone is this number.
+
+        Matches both the E.164 form every writer saves and the number exactly as
+        typed, the form the old /verify-phone saved, so a surface format such as
+        "+998 90 999 11 22" cannot slip past.
+        """
+        forms = {phone, format_phone_number(phone)} - {None}
+        query = User.query.filter(User.phone.in_(forms), User.id != exclude_user_id)
+        if skip_inactive:
+            query = query.filter(User.status != "inactive")
+        return query.first()
 
     def request_password_reset(self, identifier: str) -> bool:
         """
@@ -1729,67 +1759,6 @@ class AuthService:
             "phone_update_attempted": phone_update_attempted,
         }
 
-    def link_telegram_account(self, current_user_id: int, data: Dict[str, Any]) -> User:
-        """Link telegram account to an existing authenticated web user."""
-        telegram_id = str(data["telegram_id"])
-
-        existing_user = User.query.filter(
-            User.telegram_id == telegram_id,
-            User.id != current_user_id,
-        ).first()
-        if existing_user:
-            raise ConflictError(get_translation("api.auth.email_already_exists"))
-
-        user = User.query.get(current_user_id)
-        if not user:
-            raise NotFoundError(get_translation("error.not_found"))
-
-        user.telegram_id = telegram_id
-
-        if data.get("first_name") and (not user.first_name or user.first_name == GENERATED_TELEGRAM_NAME):
-            user.first_name = data.get("first_name")
-        if data.get("last_name") and not user.last_name:
-            user.last_name = data.get("last_name")
-
-        db.session.commit()
-        return user
-
-    def link_web_account(self, telegram_id: str, email: str, password: str) -> Dict[str, Any]:
-        """Link a telegram user with an existing web account and return fresh tokens."""
-        telegram_id_str = str(telegram_id)
-        normalized_email = email.lower().strip()
-
-        telegram_user = User.query.filter_by(telegram_id=telegram_id_str).first()
-        if not telegram_user:
-            raise NotFoundError(get_translation("error.not_found"))
-
-        web_user = User.query.filter_by(email=normalized_email).first()
-        if not web_user or not self._verify_password(password, web_user.password_hash):
-            raise UnauthorizedError(get_translation("api.auth.invalid_credentials"))
-
-        expected_placeholders = {
-            f"telegram_{telegram_id_str}@bluestream.local",
-            f"telegram_{telegram_id_str}@bot.internal",
-        }
-        if web_user.telegram_id or telegram_user.email not in expected_placeholders:
-            raise ConflictError(get_translation("api.auth.email_already_exists"))
-
-        from business_app.services.cross_platform_sync_service import cross_platform_sync_service
-
-        result = cross_platform_sync_service.auto_link_accounts(
-            primary_user=web_user,
-            secondary_user=telegram_user,
-            link_type="merge",
-        )
-        if not result.get("success"):
-            raise ValidationError(result.get("error", get_translation("api.auth.accounts_linking_failed")))
-
-        tokens = self._generate_tokens(web_user)
-        return {
-            "user": web_user,
-            "tokens": tokens,
-        }
-
     def check_phone_availability_for_telegram(self, phone: str, telegram_id: str) -> Dict[str, Any]:
         """Check whether a phone can be linked from a telegram flow."""
         from business_app.utils.validators import normalize_phone_number
@@ -1883,7 +1852,7 @@ class AuthService:
         }
         self.redis_client.setex(link_key, 600, json.dumps(link_data))
 
-        success = self.send_verification_sms(telegram_user.id, normalized_phone, update_phone=False)
+        success = self.send_verification_sms(telegram_user.id, normalized_phone)
         if not success:
             raise ValidationError(get_translation("api.auth.otp_send_failed"))
 
@@ -1918,6 +1887,12 @@ class AuthService:
         otp_key = f"sms_verification:{telegram_user_id}"
         otp_ttl = self.redis_client.ttl(otp_key)
 
+        # The code must have gone to the number being linked: /send-otp, /change-phone
+        # and resend keep codes for the caller's own numbers under the same key
+        staged_phone = link_data.get("phone")
+        if not staged_phone or not self._sms_code_was_sent_to(telegram_user_id, staged_phone):
+            raise ValidationError(get_translation("api.auth.link_otp_invalid"))
+
         success = self.verify_phone(telegram_user_id, otp)
         if not success:
             raise ValidationError(get_translation("api.auth.link_otp_invalid"))
@@ -1931,7 +1906,6 @@ class AuthService:
             # state is stale/untrusted, and these guard the destructive merge below
             # against account-takeover (e.g. web_user got a telegram_id, the phone
             # changed, or the account was deactivated since the OTP was issued).
-            staged_phone = link_data.get("phone")
             web_status = web_user.status.value if isinstance(web_user.status, UserStatus) else web_user.status
             if (
                 not staged_phone
@@ -1960,7 +1934,7 @@ class AuthService:
             # The OTP was valid; only a downstream step failed. Restore the code
             # (with its remaining TTL) so a retry doesn't hit a false "invalid OTP".
             if isinstance(otp_ttl, int) and otp_ttl > 0:
-                self.redis_client.setex(otp_key, otp_ttl, otp)
+                self._store_sms_code(telegram_user_id, otp, format_phone_number(staged_phone), otp_ttl)
             raise
 
         self.redis_client.delete(link_key)
@@ -1971,6 +1945,16 @@ class AuthService:
         }
 
     # Private methods
+    def _store_sms_code(self, user_id: int, otp: str, sent_to: str, ttl: int) -> None:
+        """Keep the user's current SMS code with the number it went to: it proves possession of that number only."""
+        self.redis_client.setex(f"sms_verification:{user_id}", ttl, otp)
+        self.redis_client.setex(f"sms_verification_phone:{user_id}", ttl, sent_to)
+
+    def _sms_code_was_sent_to(self, user_id: int, phone: str) -> bool:
+        """Whether the user's current SMS code went to this number. Every flow keeps one code per user."""
+        sent_to = self.redis_client.get(f"sms_verification_phone:{user_id}")
+        return bool(sent_to) and sent_to.decode() == format_phone_number(phone)
+
     def _validate_registration_data(
         self, email: Optional[str], password: str, phone: Optional[str], first_name: str, last_name: Optional[str]
     ):

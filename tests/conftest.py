@@ -156,6 +156,31 @@ def app():
 _SHARED_TEST_CLIENTS = []
 
 
+@pytest.fixture
+def signed_bot_post(app, client):
+    """POST to a bot-only route the way the customer bot does.
+
+    Serialises compact JSON (the same bytes are signed and sent) and signs it
+    with the production helper, under the header ``verify_webhook_signature``
+    reads. Pass ``signature=`` to send a different value (e.g. a wrong one).
+    """
+    import json
+
+    from business_app.utils.bot_webhook import _get_webhook_signature
+
+    def _post(path, payload, signature=None):
+        body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        if signature is None:
+            signature = _get_webhook_signature(body, app.config["BOT_WEBHOOK_SECRET"])
+        return client.post(
+            path,
+            data=body,
+            headers={"Content-Type": "application/json", "X-Bot-Webhook-Signature": signature},
+        )
+
+    return _post
+
+
 @pytest.fixture(scope='session')
 def client(app):
     """Create test client"""

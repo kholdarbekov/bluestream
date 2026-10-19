@@ -702,6 +702,17 @@ class OrderEditRequest(BaseModel):
     reason: str = Field(min_length=3, max_length=1000)
 
 
+class OrderAddressChangeRequest(BaseModel):
+    """Request body for PATCH /admin/orders/<id>/delivery-address."""
+
+    model_config = ConfigDict(from_attributes=True, alias_generator=to_camel, populate_by_name=True)
+
+    # One of the order owner's saved addresses; the service judges whether it may take the order.
+    address_id: int
+    # Optional, for the order's history (R8). Stripped by the service.
+    note: Optional[str] = Field(default=None, max_length=500)
+
+
 class OrderEditPreviewResponse(BaseModel):
     """Response body for the preview endpoint."""
 

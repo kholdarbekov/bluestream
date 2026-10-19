@@ -530,6 +530,20 @@ class AdminService {
     return response.data;
   }
 
+  // The customer's saved addresses as the order can take them: each carries `selectable`, its
+  // `disabled_reason` and the branch it would count under. Refusal codes in `handledErrorCodes`
+  // are explained by the caller, so api.js does not toast them.
+  async getOrderAddressOptions(orderId, { handledErrorCodes } = {}) {
+    const response = await api.get(`/admin/orders/${orderId}/address-options`, { handledErrorCodes });
+    return response.data;
+  }
+
+  // Move an order's delivery to another saved address. `payload`: { address_id, note? }.
+  async changeOrderAddress(orderId, payload, { handledErrorCodes } = {}) {
+    const response = await api.patch(`/admin/orders/${orderId}/delivery-address`, payload, { handledErrorCodes });
+    return response.data;
+  }
+
   // Order management
   async getOrders(params = {}) {
     const response = await api.get('/admin/orders', { params });

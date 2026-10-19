@@ -45,6 +45,7 @@ from business_app.utils.state_validators import (
 from shared.enums import UserRole, UserStatus, OrderStatus, DeliveryStatus, PaymentMethod, UserType
 from shared.payment_methods import UnknownPaymentMethodError, normalize_payment_method
 from shared.staff_constants import (
+    ADDRESS_BOUND_DELIVERY_STATUSES,
     STAFF_BOT_ROLES,
     STAFF_ACTIONS,
     DELIVERY_STATUS_TRANSITIONS,
@@ -1709,6 +1710,7 @@ class StaffService:
         metadata: Optional[Dict[str, Any]] = None,
         *,
         acting_driver_id: Optional[int] = None,
+        expected_address_id: Optional[int] = None,
     ) -> Delivery:
         """
         Update delivery status with transition validation and order status sync.
@@ -1723,6 +1725,11 @@ class StaffService:
                 must be assigned to exactly that user, or nothing is written
                 (R20). The admin Delivery page calls this method too and passes
                 nothing, because an admin may move any driver's delivery.
+            expected_address_id: The order's ``delivery_address_id`` the driver's
+                screen was drawn with (R10 of the admin-order-address-change spec).
+                Checked only on the driver endpoint and only for
+                ``ADDRESS_BOUND_DELIVERY_STATUSES``. None (an older bot build, or a
+                flow the driver left) is not checked.
 
         Returns:
             Updated Delivery object
@@ -1730,7 +1737,8 @@ class StaffService:
         Raises:
             NotFoundError: If delivery not found
             ConflictError: STAFF_DELIVERY_NOT_OWNED, when ``acting_driver_id`` is not
-                the delivery's current driver
+                the delivery's current driver; STAFF_DELIVERY_ADDRESS_CHANGED (R10),
+                when ``expected_address_id`` is no longer the order's address
             ValidationError: If status transition is invalid
         """
         metadata = metadata or {}
@@ -1757,6 +1765,24 @@ class StaffService:
                 "This order is no longer assigned to you",
                 error_code="STAFF_DELIVERY_NOT_OWNED",
             )
+
+        # R10: the tap answers for the address its screen was drawn with. A column
+        # read sees the committed FK, not the session's loaded order. The admin
+        # address change takes this delivery lock first (`lock_delivery_then_order`),
+        # so the two serialise.
+        if (
+            acting_driver_id is not None
+            and expected_address_id is not None
+            and new_status in ADDRESS_BOUND_DELIVERY_STATUSES
+        ):
+            current_address_id = (
+                db.session.query(Order.delivery_address_id).filter(Order.id == delivery.order_id).scalar()
+            )
+            if current_address_id != expected_address_id:
+                raise ConflictError(
+                    "The address of this order changed",
+                    error_code="STAFF_DELIVERY_ADDRESS_CHANGED",
+                )
 
         cash_collection_service = None
         pre_cod_restricted = None

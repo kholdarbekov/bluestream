@@ -505,6 +505,7 @@ def test_the_conversations_stop_dispatch_before_the_default_group_catch_all():
         "profile_handlers.floor_received",
         "profile_handlers.delivery_instructions_received",
         "profile_handlers.phone_verify_text_received",
+        "profile_handlers.phone_verify_otp_received",
         "profile_handlers.phone_verify_name_received",
     ):
         assert f"self._consumes({callback})" in source, (

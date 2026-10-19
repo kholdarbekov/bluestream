@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, field_validator, ConfigDict
 from pydantic.alias_generators import to_camel
 from business_app.models.product import Product, ProductCategory
 from business_app.models.order import Order
+from business_app.models.user import User
 from business_app.utils.user_types import normalize_user_type
 from business_app.utils.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from business_app.utils.delivery_window import format_delivery_window
@@ -633,6 +634,14 @@ def order_schedule_fields(order: Order, *, detail: bool) -> Dict[str, Any]:
         "awaiting_new_date": OrderScheduleService.awaiting_new_date(order),
         **OrderScheduleService.get_reschedule_metadata(order, detail=detail),
     }
+
+
+def order_address_change_fields(order: Order, *, actor: Optional[User]) -> Dict[str, Any]:
+    """The address-change block of `GET /admin/orders/<id>`: whether `actor` may change the address,
+    the code that says why not, and the driver the change would notify."""
+    from business_app.services.order_address_change_service import OrderAddressChangeService
+
+    return OrderAddressChangeService.metadata(order, actor=actor)
 
 
 def serialize_order_admin(order: Order, *, awaiting_staff_approval: Optional[bool] = None) -> Dict[str, Any]:

@@ -307,6 +307,36 @@ class TestOptimizeDriverRouteTask:
                 event_id=f"route_updated:{optimize_driver_route_task.request.id}",
             )
 
+    def test_an_announced_head_change_pushes_silently(
+        self, app, db, driver, driver_with_location, customer, monkeypatch
+    ):
+        """An address change is announced by its own "Address changed" message: the
+        route push that follows it may move the head but must not sound."""
+        with app.app_context():
+            _add_assigned_delivery(db, customer.id, driver.id, 41.300, 69.330, "ORD-ann-far")
+            _add_assigned_delivery(db, customer.id, driver.id, 41.300, 69.260, "ORD-ann-close")
+            monkeypatch.setattr(
+                "business_app.services.maps_service.MapsService.get_distance_matrix",
+                _haversine_matrix,
+            )
+            with patch("business_app.utils.bot_webhook.notify_route_updated", return_value=True) as nru:
+                result = optimize_driver_route_task.run(driver.id, trigger="address_change")
+
+            route = (
+                DeliveryRoute.query.filter_by(delivery_person_id=driver.id)
+                .order_by(DeliveryRoute.created_at.desc())
+                .first()
+            )
+            assert route.extra_data["materiality"]["head_changed"] is True
+            assert result["sounded"] is False
+            nru.assert_called_once_with(
+                driver.id,
+                sound=False,
+                materiality=route.extra_data["materiality"],
+                trigger="address_change",
+                event_id=f"route_updated:{optimize_driver_route_task.request.id}",
+            )
+
     def test_event_id_stable_across_retry_same_task_id(
         self, app, db, driver, driver_with_location, customer, monkeypatch
     ):

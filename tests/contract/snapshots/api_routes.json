@@ -1057,6 +1057,13 @@
     "rule": "/api/v1/admin/orders/<int:order_id>"
   },
   {
+    "endpoint": "admin.get_order_address_options",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/orders/<int:order_id>/address-options"
+  },
+  {
     "endpoint": "admin.apply_collected_cash_edit",
     "methods": [
       "POST"
@@ -1069,6 +1076,13 @@
       "POST"
     ],
     "rule": "/api/v1/admin/orders/<int:order_id>/collected-cash/preview"
+  },
+  {
+    "endpoint": "admin.change_order_delivery_address",
+    "methods": [
+      "PATCH"
+    ],
+    "rule": "/api/v1/admin/orders/<int:order_id>/delivery-address"
   },
   {
     "endpoint": "admin.apply_order_edit",
@@ -2696,20 +2710,6 @@
     "rule": "/api/v1/auth/forgot-password"
   },
   {
-    "endpoint": "auth.generate_telegram_auth",
-    "methods": [
-      "POST"
-    ],
-    "rule": "/api/v1/auth/generate-telegram-auth"
-  },
-  {
-    "endpoint": "auth.generate_web_auth",
-    "methods": [
-      "POST"
-    ],
-    "rule": "/api/v1/auth/generate-web-auth"
-  },
-  {
     "endpoint": "auth.link_phone_send_otp",
     "methods": [
       "POST"
@@ -2722,20 +2722,6 @@
       "POST"
     ],
     "rule": "/api/v1/auth/link-phone-account/verify"
-  },
-  {
-    "endpoint": "auth.link_telegram",
-    "methods": [
-      "POST"
-    ],
-    "rule": "/api/v1/auth/link-telegram"
-  },
-  {
-    "endpoint": "auth.link_web_account",
-    "methods": [
-      "POST"
-    ],
-    "rule": "/api/v1/auth/link-web-account"
   },
   {
     "endpoint": "auth.login",
@@ -2892,25 +2878,11 @@
     "rule": "/api/v1/auth/sessions/revoke-all"
   },
   {
-    "endpoint": "auth.suggest_auto_link",
-    "methods": [
-      "POST"
-    ],
-    "rule": "/api/v1/auth/suggest-auto-link"
-  },
-  {
     "endpoint": "auth.sync_platform_data",
     "methods": [
       "POST"
     ],
     "rule": "/api/v1/auth/sync-platform-data"
-  },
-  {
-    "endpoint": "auth.sync_profile",
-    "methods": [
-      "POST"
-    ],
-    "rule": "/api/v1/auth/sync-profile"
   },
   {
     "endpoint": "auth.telegram_login",
@@ -2953,20 +2925,6 @@
       "POST"
     ],
     "rule": "/api/v1/auth/verify-phone"
-  },
-  {
-    "endpoint": "auth.verify_telegram_auth",
-    "methods": [
-      "POST"
-    ],
-    "rule": "/api/v1/auth/verify-telegram-auth/<auth_code>"
-  },
-  {
-    "endpoint": "auth.verify_web_auth",
-    "methods": [
-      "GET"
-    ],
-    "rule": "/api/v1/auth/verify-web-auth/<auth_token>"
   },
   {
     "endpoint": "blog.get_blog_posts",

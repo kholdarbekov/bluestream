@@ -148,7 +148,7 @@ export const formatLeg = (leg) => {
 };
 
 /**
- * The identity of the path a route draws: its stop sequence.
+ * The identity of the path a route draws: its stop sequence and where each stop is.
  *
  * Used as the trailing element of the `dispatchRouteGeometry` query key so the
  * cached polyline is bound to the stops it was measured over. Keyed by driver
@@ -157,6 +157,7 @@ export const formatLeg = (leg) => {
  * claiming in the staff bot, or in another admin's browser left the old road
  * path drawn while the 30s snapshot poll quietly corrected the panels beneath
  * it. Sequence is included, not just membership: a pure reorder changes the
- * path the driver actually drives.
+ * path the driver actually drives. So are the coordinates: an admin moving a
+ * stop to another address changes the road without changing the sequence.
  */
-export const routeStopSignature = (stops) => (stops || []).map((s) => s.delivery_id).join('-');
+export const routeStopSignature = (stops) => (stops || []).map((s) => `${s.delivery_id}@${s.lat ?? ''},${s.lng ?? ''}`).join('-');

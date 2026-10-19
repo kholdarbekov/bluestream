@@ -29,8 +29,10 @@ view ('next'|'all'|'borrowed'), content_sig, echoes_deleted (count of the
 driver's own menu-tap messages we deleted from BELOW this card since it was
 posted — input to the repost heuristic; see `note_echo_deleted` for why the
 position matters), last_alert_at (ISO),
-last_alert_message_id. TTL 48h — deleteMessage only works within 48h, so
-older state is useless anyway (spec §6.3).
+last_alert_message_id, borrowed_screen ({delivery_id, screen, chat_id,
+message_id}: which stop screen a borrow put on screen, for the "Address
+changed" redraw; see `note_borrowed_screen`). TTL 48h — deleteMessage only
+works within 48h, so older state is useless anyway (spec §6.3).
 """
 import asyncio
 import json
@@ -42,6 +44,10 @@ from shared.redis_keyspace import RedisKeyspace
 VIEW_NEXT = "next"
 VIEW_ALL = "all"
 VIEW_BORROWED = "borrowed"
+# The two borrowed screens an "Address changed" alert redraws (spec D8b): the
+# stop detail and its Navigate screen. Every other borrowed screen is left alone.
+SCREEN_STOP = "stop"
+SCREEN_NAVIGATE = "navigate"
 STATE_TTL_SECONDS = 48 * 3600
 
 _redis = None
@@ -127,20 +133,65 @@ async def mark_borrowed(telegram_id: int) -> None:
     inside that window. The next silent webhook push then edits a card that
     is supposed to be frozen mid at-door-flow.
 
-    DEADLOCK CHECK: self-locking is safe here specifically because
-    `mark_borrowed` has exactly one caller and that caller provably never
+    Every borrow also forgets `borrowed_screen`: whatever the card showed
+    before, it is about to show something else (an at-door prompt, Navigate,
+    another stop), and the "Address changed" redraw must never pull that away.
+    The stop detail and Navigate note their screen again once drawn
+    (`note_borrowed_screen`).
+
+    DEADLOCK CHECK: self-locking is safe here because none of the callers
     holds this lock or enters `render_route_card` before or after calling
-    this function. If a future caller is added on a path that already
-    holds `get_lock(telegram_id)` (directly, or indirectly via
-    `render_route_card`), calling this function from there WILL deadlock --
-    `asyncio.Lock` is not reentrant. Re-verify that before adding any new
-    caller.
+    this function. The callers are the driver-tap handlers
+    `ActiveDeliveryHandler.view_active_delivery` and `.navigate_to_address`
+    (`staff_bot/handlers/delivery/active_delivery.py`) and
+    `StatusUpdateHandler.initiate_status_change`
+    (`staff_bot/handlers/delivery/status_update.py`); none of them calls
+    `get_lock` or `render_route_card` around this call. If a future caller
+    is added on a path that already holds `get_lock(telegram_id)` (directly,
+    or indirectly via `render_route_card`), calling this function from there
+    WILL deadlock -- `asyncio.Lock` is not reentrant. Re-verify that before
+    adding any new caller.
     """
     async with get_lock(telegram_id):
         state = await load(telegram_id)
         if not state:
             return
         state["view"] = VIEW_BORROWED
+        state.pop("borrowed_screen", None)
+        await save(telegram_id, state)
+
+
+async def note_borrowed_screen(
+    telegram_id: int, *, delivery_id: int, screen: str, chat_id: int, message_id: int
+) -> None:
+    """Record which stop screen the borrowed card now shows (spec D8b).
+
+    Called by the stop detail (`SCREEN_STOP`) and Navigate (`SCREEN_NAVIGATE`)
+    right after they are drawn, with the message they were drawn on. The
+    "Address changed" alert reads it to redraw that one screen with the new
+    address (`address_change.rerender_borrowed_stop`); it is honoured only
+    while the card is still borrowed today, and the next `mark_borrowed`
+    forgets it.
+
+    Noted only on a saved card whose view is borrowed: a note on a card no
+    one borrowed would name a screen the card is not showing. No state (Redis
+    down, or no card yet) is a silent no-op, like every writer here.
+
+    DEADLOCK CHECK: self-locks, the same shape as `mark_borrowed`, and its
+    callers are two of `mark_borrowed`'s: `view_active_delivery` and
+    `navigate_to_address`, after their own edit. Neither holds this lock or
+    enters `render_route_card`.
+    """
+    async with get_lock(telegram_id):
+        state = await load(telegram_id)
+        if not state or state.get("view") != VIEW_BORROWED:
+            return
+        state["borrowed_screen"] = {
+            "delivery_id": delivery_id,
+            "screen": screen,
+            "chat_id": chat_id,
+            "message_id": message_id,
+        }
         await save(telegram_id, state)
 
 

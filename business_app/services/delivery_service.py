@@ -14,6 +14,7 @@ from business_app.models.delivery import (
     DeliveryTimeSlot,
 )
 from business_app.models.order import Order
+from business_app.models.user import UserAddress
 from business_app.utils.exceptions import ValidationError, NotFoundError, DeliveryError
 from business_app.utils.state_validators import DELIVERY_POOL_UNASSIGNED_STATES, assert_delivery_person_for_status
 from business_app.utils.constants import DeliveryType, DELIVERY_ZONES
@@ -82,9 +83,7 @@ class DeliveryService:
         if not order.delivery_address:
             raise ValidationError("Order has no delivery address")
 
-        distance = calculate_distance(
-            self.store_latitude, self.store_longitude, order.delivery_address.latitude, order.delivery_address.longitude
-        )
+        distance = self._store_distance(order.delivery_address)
 
         # Check if within delivery range
         if distance > self.max_delivery_distance:
@@ -98,7 +97,7 @@ class DeliveryService:
         delivery = Delivery(
             order_id=order_id,
             status=DeliveryStatus.SCHEDULED,
-            distance_km=round(distance, 2),
+            distance_km=self.distance_km(order.delivery_address),
         )
         self.stamp_schedule(delivery, order, now=datetime.now(UTC), delivery_type=delivery_type)
 
@@ -107,6 +106,32 @@ class DeliveryService:
 
         self.offer_to_drivers(delivery)
         return delivery
+
+    def _store_distance(self, address: UserAddress) -> float:
+        """Kilometres from the distance-fee origin to the address, unrounded. The ONE
+        expression of it: the range check and zone read it raw, `distance_km` rounds it."""
+        return calculate_distance(self.store_latitude, self.store_longitude, address.latitude, address.longitude)
+
+    def distance_km(self, address: UserAddress) -> float:
+        """The `Delivery.distance_km` an order to this address stores. The one writer of that
+        value, shared by `create_delivery` and the admin address change (D11)."""
+        return round(self._store_distance(address), 2)
+
+    def refresh_pool_eta(
+        self, delivery: Delivery, *, now: datetime, delivery_type: DeliveryType = DeliveryType.STANDARD
+    ) -> bool:
+        """Re-stamp the ETA of a row in the pool from its stored distance; True when it did.
+
+        A pool row gets `now` plus the travel allowance. Any other row is left
+        untouched and False comes back, so each caller decides what a non-pool
+        row's ETA should be (`stamp_schedule` clears it; the address change keeps it).
+        """
+        if delivery.status not in DELIVERY_POOL_UNASSIGNED_STATES:
+            return False
+        delivery.estimated_delivery_time = self._calculate_estimated_delivery_time(
+            delivery.distance_km or 0.0, delivery_type, now=now
+        )
+        return True
 
     def stamp_schedule(
         self,
@@ -134,11 +159,7 @@ class DeliveryService:
         """
         delivery.scheduled_date = order.delivery_date or now
         delivery.scheduled_time_slot = window_slot_label(order.delivery_window_start, order.delivery_window_end)
-        if delivery.status in DELIVERY_POOL_UNASSIGNED_STATES:
-            delivery.estimated_delivery_time = self._calculate_estimated_delivery_time(
-                delivery.distance_km or 0.0, delivery_type, now=now
-            )
-        else:
+        if not self.refresh_pool_eta(delivery, now=now, delivery_type=delivery_type):
             delivery.estimated_delivery_time = None
 
     def offer_to_drivers(self, delivery: Delivery) -> None:

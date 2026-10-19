@@ -731,6 +731,39 @@ class CashCollectionService:
         # single-user path gives for a missing/deleted account.
         return {uid: decisions.get(_cluster_key(uid, canonical_by_user.get(uid)), False) for uid in ids}
 
+    def _place_arm_input(self, delivery_address_id: Optional[int]) -> Tuple[Optional[int], Optional[int]]:
+        """`(group_id, place_debt_count)` for a delivery address: both None unless it is grouped.
+
+        The COUNT is a cheap `func.count` query, so it is computed before any exemption check.
+        """
+        if delivery_address_id is None:
+            return None, None
+        group_id = db.session.query(UserAddress.address_group_id).filter(UserAddress.id == delivery_address_id).scalar()
+        if group_id is None:
+            return None, None
+        return group_id, self.get_place_active_cod_debt_count(delivery_address_id)
+
+    def _place_cap_reached(self, delivery_address_id: int, place_debt_count: int) -> Tuple[bool, Decimal]:
+        """`(capped, net total)` for a grouped place. The one place arm decision; the NET hydrates rows."""
+        net = self.get_place_net_open_cod_debt_total(delivery_address_id)
+        return cod_cap_reached(place_debt_count, net), net
+
+    def place_cod_capped(self, customer_id: int, delivery_address_id: Optional[int]) -> bool:
+        """Whether a COD order to this address is refused by the PLACE arm alone.
+
+        False for a cod-exempt or grocery cluster, and for an ungrouped (or absent) address.
+        The person arm is deliberately not consulted: the address change asks "does this
+        address's place hold the cap", which a capped person must not hide (R11). The context
+        keeps its own exempt/grocery composition because it still publishes totals; both read
+        the same two helpers for the place decision.
+        """
+        if self._cluster_has_cod_exempt_member(customer_id) or self._cluster_has_grocery_member(customer_id):
+            return False
+        group_id, place_debt_count = self._place_arm_input(delivery_address_id)
+        if group_id is None:
+            return False
+        return self._place_cap_reached(delivery_address_id, place_debt_count)[0]
+
     def get_cod_restriction_context(
         self, customer_id: int, delivery_address_id: Optional[int] = None
     ) -> Dict[str, Any]:
@@ -765,20 +798,14 @@ class CashCollectionService:
         # Place arm only applies when the delivery address is grouped. The
         # COUNT is a cheap `func.count` query, so — unlike the NET total below
         # — it costs nothing to keep computing before the exemption checks.
-        place_debt_count: Optional[int] = None
-        group_id: Optional[int] = None
-        if delivery_address_id is not None:
-            group_id = (
-                db.session.query(UserAddress.address_group_id).filter(UserAddress.id == delivery_address_id).scalar()
-            )
-            if group_id is not None:
-                place_debt_count = self.get_place_active_cod_debt_count(delivery_address_id)
+        group_id, place_debt_count = self._place_arm_input(delivery_address_id)
 
         # Admin exemption first, then structural grocery-store exemption, then
         # the person cap, then the place cap (spec 5.5).
         restriction_scope: Optional[str] = None
         cluster_net_debt_total: Optional[Decimal] = None
         place_net_debt_total: Optional[Decimal] = None
+        place_capped = False
         if is_cod_exempt:
             is_restricted, reason = False, "customer_is_cod_exempt"
         elif is_grocery_store:
@@ -786,11 +813,11 @@ class CashCollectionService:
         else:
             cluster_net_debt_total = self.get_cluster_net_open_cod_debt_total(customer_id)
             if group_id is not None:
-                place_net_debt_total = self.get_place_net_open_cod_debt_total(delivery_address_id)
+                place_capped, place_net_debt_total = self._place_cap_reached(delivery_address_id, place_debt_count)
             if cod_cap_reached(active_debt_count, cluster_net_debt_total):
                 is_restricted, reason = True, "customer_has_max_active_cod_debts"
                 restriction_scope = "person"
-            elif place_debt_count is not None and cod_cap_reached(place_debt_count, place_net_debt_total):
+            elif place_capped:
                 is_restricted, reason = True, "place_has_max_active_cod_debts"
                 restriction_scope = "place"
             else:

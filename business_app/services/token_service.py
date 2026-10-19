@@ -530,22 +530,6 @@ class TokenService:
 
         return f"{user_id}_{uuid.uuid4().hex[:16]}"
 
-    def _ensure_redis_connection(self):
-        """Ensure Redis connection is available, reinitialize if needed"""
-        # Only attempt reconnection if we know it's not available
-        # Avoid redundant pings on every operation
-        if not self.redis_available or not self.redis_client:
-            try:
-                # Quick check if connection exists and is responsive
-                if self.redis_client:
-                    self.redis_client.ping()
-                    self.redis_available = True
-                else:
-                    self._initialize_redis()
-            except Exception:
-                # Connection failed, reinitialize
-                self._initialize_redis()
-
     def _store_session_info(self, user_id: int, session_id: str, session_data: Dict) -> bool:
         """Store session information"""
         try:

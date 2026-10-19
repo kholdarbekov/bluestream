@@ -195,3 +195,28 @@ def test_staff_tryout_conversation_and_callbacks_present():
     ]
     missing = [fragment for fragment in required_fragments if fragment not in text]
     assert not missing, f"Missing try-out conversation fragments: {missing}"
+
+
+def test_a_status_button_carries_the_address_it_was_drawn_with_inside_64_bytes():
+    """R10: a tap answers for the address its screen was drawn with, so the button names it.
+
+    Telegram refuses callback data over 64 bytes. The id rides after a colon, which
+    `^staff_status_\\d+_` (bot.py) still routes, and `parse_status_callback` reads back.
+    """
+    from staff_bot.keyboards.delivery import DeliveryKeyboards
+
+    widest = 2_147_483_647  # the largest integer id Postgres issues
+    keyboard = DeliveryKeyboards.active_delivery_actions("en", widest, "picked_up", address_id=widest)
+    callbacks = [b.callback_data for row in keyboard.inline_keyboard for b in row]
+    assert f"staff_status_{widest}_in_transit:{widest}" in callbacks  # the longest status name
+    assert max(len(c.encode()) for c in callbacks) <= 64
+    assert DeliveryKeyboards.parse_status_callback(f"staff_status_{widest}_in_transit:{widest}") == (
+        widest,
+        "in_transit",
+        widest,
+    )
+    # A button drawn before R10 carries no id.
+    assert DeliveryKeyboards.parse_status_callback("staff_status_501_in_transit") == (501, "in_transit", None)
+    keyboard = DeliveryKeyboards.active_delivery_actions("en", 501, "in_transit")
+    no_id = [b.callback_data for row in keyboard.inline_keyboard for b in row]
+    assert "staff_status_501_arrived" in no_id  # a row without an address draws no suffix

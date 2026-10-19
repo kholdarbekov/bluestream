@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  reorder, moveBy, togglePin, clampPins, buildSavePayload, isDirty, driverColor,
+  reorder, moveBy, togglePin, clampPins, buildSavePayload, isDirty, driverColor, routeStopSignature,
 } from './dispatchLogic';
 
 describe('reorder', () => {
@@ -111,5 +111,20 @@ describe('driverColor', () => {
 
   it('separates two nearby driver ids', () => {
     expect(driverColor(12)).not.toBe(driverColor(13));
+  });
+});
+
+describe('routeStopSignature', () => {
+  it('changes when a stop moves without reordering', () => {
+    const a = [{ delivery_id: 1, lat: 41.3, lng: 69.2 }];
+    expect(routeStopSignature(a)).not.toBe(routeStopSignature([{ ...a[0], lat: 41.33 }]));
+    expect(routeStopSignature(a)).toBe(routeStopSignature([{ ...a[0] }]));
+  });
+
+  it('still changes on a pure reorder and tolerates stops with no coordinates', () => {
+    const a = { delivery_id: 1, lat: 41.3, lng: 69.2 };
+    const b = { delivery_id: 2 };
+    expect(routeStopSignature([a, b])).not.toBe(routeStopSignature([b, a]));
+    expect(routeStopSignature(null)).toBe('');
   });
 });

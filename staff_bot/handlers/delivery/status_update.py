@@ -5,6 +5,7 @@ Handles status transitions, delivered flow, failed flow, and cash collection.
 import logging
 import math
 from decimal import Decimal, InvalidOperation
+from typing import Optional
 
 from telegram import Update, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
@@ -25,8 +26,8 @@ from staff_bot.utils.formatters import (
 )
 from staff_bot.permissions import require_auth, require_delivery_driver
 from staff_bot.i18n import i18n
-from staff_bot.utils import flow_state
-from shared.staff_constants import DELIVERY_STATUS_TRANSITIONS
+from staff_bot.utils import flow_state, route_card_state
+from shared.staff_constants import ADDRESS_BOUND_DELIVERY_STATUSES, DELIVERY_STATUS_TRANSITIONS
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +155,24 @@ class StatusUpdateHandler(BaseHandler):
             return int(str(data).rsplit('_', 1)[-1])
         except (TypeError, ValueError):
             return fallback
+
+    @staticmethod
+    def _flow_address_id(context: ContextTypes.DEFAULT_TYPE, delivery_id: int, status: str) -> Optional[int]:
+        """The address id this status PUT answers for (R10), or None to send none.
+
+        It is the id the flow captured at its first step (`initiate_status_change`
+        stamps it from the tapped button into `pending_status`), and only for the
+        steps that depend on the address. It never reads `current_delivery`: the
+        "Address changed" alert refreshes that snapshot, and a refreshed snapshot
+        must never upgrade a tap made on a screen drawn before the change. A flow
+        the driver left has no `pending_status`, so its PUT sends no id.
+        """
+        if status not in ADDRESS_BOUND_DELIVERY_STATUSES:
+            return None
+        pending = context.user_data.get('pending_status') or {}
+        if pending.get('delivery_id') != delivery_id:
+            return None
+        return pending.get('flow_address_id')
 
     @staticmethod
     def _order_brief(context: ContextTypes.DEFAULT_TYPE, language: str) -> str:
@@ -340,7 +359,8 @@ class StatusUpdateHandler(BaseHandler):
 
         async with api_client as client:
             response = await client.update_delivery_status(
-                token, delivery_id, 'delivered', metadata=metadata
+                token, delivery_id, 'delivered', metadata=metadata,
+                delivery_address_id=self._flow_address_id(context, delivery_id, 'delivered'),
             )
 
         if not response.success:
@@ -419,10 +439,13 @@ class StatusUpdateHandler(BaseHandler):
         language = await self._get_language(update, context)
 
         try:
-            # Parse: staff_status_{delivery_id}_{new_status}
-            parts = query.data.split('_')
-            delivery_id = int(parts[2])
-            new_status = '_'.join(parts[3:])  # Handle statuses like 'in_transit'
+            # Every status tap starts here, and the card is about to show a
+            # confirm or an at-door prompt, which the "Address changed" redraw
+            # must never pull away (spec D8b).
+            await route_card_state.mark_borrowed(update.effective_user.id)
+
+            # Parse: staff_status_{delivery_id}_{new_status}[:{address_id}]
+            delivery_id, new_status, flow_address_id = DeliveryKeyboards.parse_status_callback(query.data)
 
             # Anchor on the TAPPED delivery before any of the money/bottle
             # figures below are read out of the snapshot.
@@ -431,10 +454,13 @@ class StatusUpdateHandler(BaseHandler):
                 await self._refuse_stale_card(update, language)
                 return
 
-            # Store pending status change
+            # Store pending status change. `flow_address_id` is the address the
+            # tapped button was drawn with: the flow's PUT sends exactly that,
+            # whatever the snapshot says by then (R10, `_flow_address_id`).
             context.user_data['pending_status'] = {
                 'delivery_id': delivery_id,
                 'new_status': new_status,
+                'flow_address_id': flow_address_id,
             }
 
             # Special handling for different statuses
@@ -542,7 +568,8 @@ class StatusUpdateHandler(BaseHandler):
 
             async with api_client as client:
                 response = await client.update_delivery_status(
-                    token, delivery_id, new_status, metadata
+                    token, delivery_id, new_status, metadata,
+                    delivery_address_id=self._flow_address_id(context, delivery_id, new_status),
                 )
 
             if not response.success:
@@ -568,9 +595,12 @@ class StatusUpdateHandler(BaseHandler):
                 # Terminal status - go back to active deliveries
                 keyboard = CommonKeyboards.back_button(language, "staff_active_deliveries")
             else:
-                # Non-terminal - show delivery actions again
+                # Non-terminal - show delivery actions again. The screen is titled
+                # from the snapshot (`_order_brief`), so its buttons carry the
+                # snapshot's address (R10).
                 keyboard = DeliveryKeyboards.active_delivery_actions(
-                    language, delivery_id, new_status
+                    language, delivery_id, new_status,
+                    address_id=(context.user_data.get('current_delivery') or {}).get('delivery_address_id'),
                 )
 
             await query.edit_message_text(
@@ -613,7 +643,8 @@ class StatusUpdateHandler(BaseHandler):
             async with api_client as client:
                 response = await client.update_delivery_status(
                     token, delivery_id, 'failed',
-                    metadata={'fail_reason': reason}
+                    metadata={'fail_reason': reason},
+                    delivery_address_id=self._flow_address_id(context, delivery_id, 'failed'),
                 )
 
             if not response.success:

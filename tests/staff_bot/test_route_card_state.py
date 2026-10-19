@@ -92,6 +92,15 @@ class TestRedisUnconfigured:
 
         asyncio.run(run())
 
+    def test_note_borrowed_screen_is_noop_without_redis(self):
+        async def run():
+            await route_card_state.note_borrowed_screen(  # must not raise
+                7, delivery_id=5, screen=route_card_state.SCREEN_STOP, chat_id=7, message_id=10,
+            )
+            assert await route_card_state.load(7) is None
+
+        asyncio.run(run())
+
 
 @pytest.mark.unit
 class TestLockSerializesConcurrentWriters:
@@ -203,6 +212,45 @@ class TestRedisBacked:
             await route_card_state.save(7, {"chat_id": 7, "message_id": 10, "view": "next"})
             await route_card_state.mark_borrowed(7)
             assert (await route_card_state.load(7))["view"] == route_card_state.VIEW_BORROWED
+
+        asyncio.run(run())
+
+    def test_a_new_borrow_forgets_the_screen_it_borrowed_for(self):
+        """D8b redraws the screen a borrow noted. Any later borrow puts something else on
+        the card (an at-door prompt, Navigate, another stop), so it must forget the note:
+        a redraw of a forgotten screen would pull the driver's prompt away."""
+        route_card_state.configure(_FakeRedis())
+
+        async def run():
+            await route_card_state.save(7, {"chat_id": 7, "message_id": 10, "view": "next"})
+            await route_card_state.mark_borrowed(7)
+            await route_card_state.note_borrowed_screen(
+                7, delivery_id=5, screen=route_card_state.SCREEN_STOP, chat_id=7, message_id=10,
+            )
+            assert (await route_card_state.load(7))["borrowed_screen"] == {
+                "delivery_id": 5, "screen": "stop", "chat_id": 7, "message_id": 10,
+            }
+            await route_card_state.mark_borrowed(7)
+            state = await route_card_state.load(7)
+            assert state["view"] == route_card_state.VIEW_BORROWED
+            assert "borrowed_screen" not in state
+
+        asyncio.run(run())
+
+    def test_a_screen_is_only_noted_on_a_borrowed_card(self):
+        """A note on a card nobody borrowed would name a screen the card is not showing."""
+        route_card_state.configure(_FakeRedis())
+        note = dict(delivery_id=5, screen=route_card_state.SCREEN_NAVIGATE, chat_id=7, message_id=10)
+
+        async def run():
+            await route_card_state.note_borrowed_screen(7, **note)  # no card yet: nothing to note on
+            assert await route_card_state.load(7) is None
+            await route_card_state.save(7, {"chat_id": 7, "message_id": 10, "view": "next"})
+            await route_card_state.note_borrowed_screen(7, **note)
+            assert "borrowed_screen" not in await route_card_state.load(7)
+            await route_card_state.mark_borrowed(7)
+            await route_card_state.note_borrowed_screen(7, **note)
+            assert (await route_card_state.load(7))["borrowed_screen"] == {**note, "screen": "navigate"}
 
         asyncio.run(run())
 

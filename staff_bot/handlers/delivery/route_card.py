@@ -20,6 +20,7 @@ from shared.constants import DISPLAY_TIMEZONE
 from staff_bot.api_client import api_client
 from staff_bot.i18n import i18n
 from staff_bot.utils import route_card_state
+from staff_bot.utils.delivery_snapshot import active_row_id
 from staff_bot.utils.formatters import (
     escape_html,
     format_active_delivery_summary,
@@ -58,10 +59,6 @@ _STOP_DETAIL_INDENT = "      "
 
 def _stop_number_label(n: int) -> str:
     return _KEYCAPS.get(n, str(n))
-
-
-def _delivery_id(item: Dict[str, Any]) -> Optional[int]:
-    return item.get("delivery_id") or item.get("id")
 
 
 def _header_line(payload: Dict[str, Any], language: str, with_seconds: bool = False) -> str:
@@ -116,7 +113,7 @@ def build_next_view(payload: Dict[str, Any], language: str, with_seconds: bool =
     items = payload.get("items") or []
     summary = payload.get("route_summary") or {}
     head = items[0]
-    head_id = _delivery_id(head)
+    head_id = active_row_id(head)
     is_committed = (
         summary.get("committed_delivery_id") is not None
         and summary.get("committed_delivery_id") == head_id
@@ -208,7 +205,7 @@ def build_all_view(payload: Dict[str, Any], language: str, with_seconds: bool = 
     # its number button still sits on the keyboard is a card that lies.
     rows: List[Tuple[str, List[str]]] = []
     for pos, item in enumerate(items, start=1):
-        marker = "▶️ " if _delivery_id(item) == committed_id and committed_id is not None else "  "
+        marker = "▶️ " if active_row_id(item) == committed_id and committed_id is not None else "  "
         number = escape_html(item.get("order_number") or "")
         place = escape_html(item.get("district") or item.get("address") or "")
         detail = []
@@ -260,7 +257,7 @@ def build_all_view(payload: Dict[str, Any], language: str, with_seconds: bool = 
     row: List[InlineKeyboardButton] = []
     for pos, item in enumerate(items, start=1):
         row.append(InlineKeyboardButton(
-            _stop_number_label(pos), callback_data=f"staff_view_active_{_delivery_id(item)}"
+            _stop_number_label(pos), callback_data=f"staff_view_active_{active_row_id(item)}"
         ))
         if len(row) == 5:
             keyboard.append(row)

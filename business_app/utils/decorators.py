@@ -8,7 +8,7 @@ import hashlib
 from functools import wraps
 from flask import request, jsonify, g, current_app
 from flask_jwt_extended import verify_jwt_in_request, get_jwt_identity, get_jwt
-from typing import List
+from typing import TYPE_CHECKING, List, Optional, Sequence, Tuple
 import redis
 
 from .exceptions import UnauthorizedError, ForbiddenError, RateLimitError, NotFoundError
@@ -18,6 +18,9 @@ from shared.enums import UserRole, UserStatus
 # all auth guards from a single hub. Enforced by
 # tests/unit/test_structure_boundary_regressions.py.
 from .rbac import require_admin  # noqa: F401
+
+if TYPE_CHECKING:
+    from business_app.models.user import User
 
 
 def require_auth(f):
@@ -175,6 +178,43 @@ def staff_or_higher_required(f):
     return decorated_function
 
 
+def admin_role_permissions(role_value: str) -> Tuple[str, ...]:
+    """The permission names an admin-panel role holds. Any other role holds none.
+
+    "edit_collected_cash" and "edit_order_payment_method" are intentionally Admin-only: they are
+    not granted to MANAGER/OPERATOR, so only the ADMIN "all" wildcard satisfies them.
+    """
+    # This would integrate with a permission system; for now, basic role-based checks.
+    if role_value == UserRole.ADMIN.value:
+        return ("all",)  # Admin has all permissions
+    if role_value == UserRole.MANAGER.value:
+        return ("view_users", "manage_orders", "view_reports", "manage_products", "view_analytics")
+    if role_value == UserRole.OPERATOR.value:
+        return ("view_orders", "update_orders", "view_products")
+    return ()
+
+
+def _grants(perms: Sequence[str], required_permissions: Sequence[str]) -> bool:
+    """The one grant test: the wildcard `all`, or any required permission held."""
+    return "all" in perms or any(p in perms for p in required_permissions)
+
+
+def has_admin_permission(user: Optional["User"], required_permissions: Sequence[str]) -> bool:
+    """Whether an ACTIVE `user` holds any of `required_permissions` (the decorator's own test).
+
+    The metadata that draws an admin button asks here, so the button and the route behind it
+    cannot disagree. A missing user or a non-active status holds nothing.
+    """
+    if user is None:
+        return False
+    role_value = user.role.value if hasattr(user.role, "value") else user.role
+    status_value = user.status.value if hasattr(user.status, "value") else user.status
+    if status_value != UserStatus.ACTIVE.value:
+        return False
+    perms = admin_role_permissions(role_value)
+    return _grants(perms, required_permissions)
+
+
 def validate_admin_action(required_permissions: List[str] = None):
     """Validate admin action with specific permissions"""
 
@@ -204,33 +244,10 @@ def validate_admin_action(required_permissions: List[str] = None):
 
             # Check specific permissions if provided
             if required_permissions:
-                # This would integrate with a permission system
-                # For now, we'll implement basic role-based checks
-                user_permissions = []
-
-                if role_value == UserRole.ADMIN.value:
-                    user_permissions = ["all"]  # Admin has all permissions
-                elif role_value == UserRole.MANAGER.value:
-                    user_permissions = [
-                        "view_users",
-                        "manage_orders",
-                        "view_reports",
-                        "manage_products",
-                        "view_analytics",
-                    ]
-                elif role_value == UserRole.OPERATOR.value:
-                    user_permissions = ["view_orders", "update_orders", "view_products"]
-
-                # "edit_collected_cash" and "edit_order_payment_method" are intentionally
-                # Admin-only: they are not granted to MANAGER/OPERATOR above, so only the
-                # ADMIN "all" wildcard satisfies them.
+                user_permissions = admin_role_permissions(role_value)
 
                 # Check if user has required permissions
-                has_permission = "all" in user_permissions or any(
-                    perm in user_permissions for perm in required_permissions
-                )
-
-                if not has_permission:
+                if not _grants(user_permissions, required_permissions):
                     current_app.logger.warning(
                         f"Permission denied for user {user_id} ({user.role}). "
                         f"Required: {required_permissions}, Has: {user_permissions}"

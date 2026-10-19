@@ -42,6 +42,7 @@ from business_app.models.translation import Translation
 
 # from business_app.services.admin_service import AdminService
 from business_app.utils.service_factory import get_notification_service, get_corporate_contract_service
+from business_app.services.order_address_change_service import ADDRESS_CHANGE_PERMISSIONS
 from business_app.services.subscription_service import SubscriptionService
 from business_app.services.payment_service import PaymentService
 from business_app.services.review_service import ReviewService
@@ -58,6 +59,7 @@ from business_app.services.sales.agent_order_approval_service import AgentOrderA
 from business_app.serializers.admin_serializers import (
     serialize_user_admin,
     serialize_order_admin,
+    order_address_change_fields,
     order_schedule_fields,
     serialize_product_admin,
     serialize_delivery_person_admin,
@@ -2265,6 +2267,136 @@ def reschedule_order(order_id):
         return internal_error_response("Failed to reschedule order")
 
 
+@admin_bp.route("/orders/<int:order_id>/address-options", methods=["GET"])
+@jwt_required()
+@validate_admin_action(list(ADDRESS_CHANGE_PERMISSIONS))
+def get_order_address_options(order_id):
+    """The customer's saved addresses for the Change address modal.
+
+    Each option says whether it can take this order (`selectable`) and, when not,
+    why (`disabled_reason`: CURRENT, NO_PIN, OUTSIDE_ZONE, COD_PLACE_CAPPED or
+    SALES_PAY_SELF_DECISION), the branch it would count under and whether that
+    branch's agent differs from the current one. Also answers `current_address_id`,
+    `current_branch` and the `driver` whose route holds the stop, if any.
+    Every rule lives in `OrderAddressChangeService`; `GET /admin/orders/<id>`
+    publishes the same `can_change_address` answer.
+    ---
+    tags:
+      - Admin
+    security:
+      - Bearer: []
+    parameters:
+      - name: order_id
+        in: path
+        type: integer
+        required: true
+    responses:
+      200:
+        description: The options, the current address and branch, and the driver holding the stop
+      400:
+        description: Address locked (data.error_code ORDER_ADDRESS_LOCKED or DELIVERY_ADDRESS_LOCKED)
+      404:
+        description: Order not found
+      409:
+        description: The order waits for a manager's approval (data.details.path)
+    """
+    try:
+        from business_app.services.order_address_change_service import OrderAddressChangeService
+
+        payload = OrderAddressChangeService.options_payload(order_id, actor=g.current_user)
+        return success_response(data=payload)
+    except NotFoundError as e:
+        return not_found_response(resource_type="Order", message=str(e))
+    except ConflictError as e:
+        return error_response(e.message, status_code=409, data={"error_code": e.error_code, "details": e.details})
+    except ValidationError as e:
+        return validation_error_response(str(e), error_code=e.error_code)
+    except Exception as e:
+        current_app.logger.error(f"Get order address options error: {e}", exc_info=True)
+        return internal_error_response("Failed to get address options")
+
+
+@admin_bp.route("/orders/<int:order_id>/delivery-address", methods=["PATCH"])
+@jwt_required()
+@validate_admin_action(list(ADDRESS_CHANGE_PERMISSIONS))
+def change_order_delivery_address(order_id):
+    """Move an order to another saved address of its own customer.
+
+    Body: {address_id, note?} (camelCase `addressId` too). `note` is at most 500
+    characters, kept on the order's history and never shown to the customer. The
+    address must be one `GET /admin/orders/<id>/address-options` offers as
+    selectable: the same rule refuses everything else. The delivery keeps its
+    status, its driver and its route; the driver holding the stop is told.
+    Answers the order with the detail payload's schedule and address-change
+    blocks, so the modal re-renders from it.
+    ---
+    tags:
+      - Admin
+    security:
+      - Bearer: []
+    parameters:
+      - name: order_id
+        in: path
+        type: integer
+        required: true
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required: [address_id]
+          properties:
+            address_id:
+              type: integer
+            note:
+              type: string
+              maxLength: 500
+    responses:
+      200:
+        description: The order, at its new address
+      400:
+        description: >
+          A malformed body (uncoded), or a refusal with data.error_code: ORDER_ADDRESS_LOCKED,
+          DELIVERY_ADDRESS_LOCKED, INVALID_DELIVERY_ADDRESS, ADDRESS_CURRENT, ADDRESS_NO_PIN,
+          ADDRESS_OUTSIDE_ZONE or COD_DEBT_LIMIT_REACHED
+      403:
+        description: Not an admin or manager, or SALES_PAY_SELF_DECISION (data.error_code)
+      404:
+        description: Order not found
+      409:
+        description: The order waits for a manager's approval (data.details.path)
+    """
+    try:
+        from business_app.serializers.order_serializers import OrderAddressChangeRequest
+        from business_app.services.order_address_change_service import OrderAddressChangeService
+
+        try:
+            req = OrderAddressChangeRequest.model_validate(request.get_json(silent=True) or {})
+        except PydanticValidationError as exc:
+            return validation_error_response(exc.errors())
+
+        order = OrderAddressChangeService.change(
+            order_id, address_id=req.address_id, note=req.note, actor=g.current_user
+        ).order
+        payload = {
+            **serialize_order_admin(order),
+            **order_schedule_fields(order, detail=True),
+            **order_address_change_fields(order, actor=g.current_user),
+        }
+        return success_response(data={"order": payload}, message="Delivery address changed")
+    except NotFoundError as e:
+        return not_found_response(resource_type="Order", message=str(e))
+    except ValidationError as e:
+        return validation_error_response(str(e), error_code=e.error_code)
+    except ConflictError as e:
+        return error_response(e.message, status_code=409, data={"error_code": e.error_code, "details": e.details})
+    except ForbiddenError as e:
+        return error_response(e.message, status_code=403, data={"error_code": e.error_code, "details": e.details})
+    except Exception as e:
+        current_app.logger.error(f"Change order delivery address error: {e}", exc_info=True)
+        return internal_error_response("Failed to change the delivery address")
+
+
 @admin_bp.route("/orders/<int:order_id>/edit-preview", methods=["POST"])
 @jwt_required()
 @validate_admin_action(["manage_orders", "edit_orders"])
@@ -2868,6 +3000,7 @@ def get_order_details(order_id):
         # feeds the list row, so the Reschedule button cannot mean one thing on
         # the row and another in the modal (see `order_schedule_fields`).
         order_data.update(order_schedule_fields(order, detail=True))
+        order_data.update(order_address_change_fields(order, actor=g.current_user))
 
         # F19: the latest admin cancel or return and its internal reason. Admin
         # only; the customer's order reads never carry a history `reason`.

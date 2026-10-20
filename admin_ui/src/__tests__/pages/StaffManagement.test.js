@@ -51,3 +51,59 @@ it('loads sales agents as invite candidates and offers the sales_agent role', as
   // value, so this asserts both the candidate wiring and the new option.
   expect(within(row).getByText('staff:sales_agent')).toBeInTheDocument();
 });
+
+describe('Cash reconciliation tab report window', () => {
+  const pickerInputs = () => [...document.querySelectorAll('.ant-picker-range input')];
+  const dayCell = (day) => document.querySelector(`.ant-picker-dropdown td[title="${day}"]`);
+  const lastParams = () => staffService.getCashReconciliation.mock.calls.at(-1)[0];
+  const cashPayload = (total = 2) => ({
+    data: {
+      data: {
+        start_date: '2026-03-01',
+        end_date: '2026-03-07',
+        page: 1,
+        per_page: 20,
+        total,
+        report: [],
+        sessions: [],
+        summary: {},
+        grand_total_cash: 0,
+      },
+    },
+  });
+
+  const openCashTab = async () => {
+    render(<StaffManagement />, { wrapper: createWrapper() });
+    fireEvent.click(screen.getByRole('tab', { name: 'staff:cash_reconciliation' }));
+    await waitFor(() => expect(pickerInputs().map((input) => input.value)).toEqual(['2026-03-01', '2026-03-07']));
+  };
+
+  it('first asks for the backend default window, then sends exactly the picked dates', async () => {
+    staffService.getCashReconciliation.mockResolvedValue(cashPayload());
+    await openCashTab();
+    // No dates and no `period`: the 7-day default is the backend's decision alone.
+    expect(staffService.getCashReconciliation.mock.calls[0][0]).toEqual({ page: 1, per_page: 20 });
+
+    fireEvent.mouseDown(pickerInputs()[0]);
+    fireEvent.click(pickerInputs()[0]);
+    await waitFor(() => expect(dayCell('2026-03-02')).toBeTruthy());
+    fireEvent.click(dayCell('2026-03-02'));
+    fireEvent.click(dayCell('2026-03-05'));
+
+    await waitFor(() => expect(lastParams()).toEqual({
+      start_date: '2026-03-02',
+      end_date: '2026-03-05',
+      page: 1,
+      per_page: 20,
+    }));
+  });
+
+  it('pages the session table through the total the backend reports', async () => {
+    staffService.getCashReconciliation.mockResolvedValue(cashPayload(45));
+    await openCashTab();
+
+    fireEvent.click(await screen.findByTitle('3'));
+
+    await waitFor(() => expect(lastParams()).toEqual({ page: 3, per_page: 20 }));
+  });
+});

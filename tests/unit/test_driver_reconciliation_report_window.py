@@ -42,7 +42,6 @@ class TestReconciliationReportWindowTimezone:
         with app.app_context():
             _session(db, delivery_driver, started_utc=datetime(2026, 3, 10, 20, 0, tzinfo=UTC), sid="S-WIN-1")
             report = DriverReconciliationService().get_report(
-                period="day",
                 driver_user_id=delivery_driver.id,
                 start_date=date(2026, 3, 11),
                 end_date=date(2026, 3, 11),
@@ -56,7 +55,6 @@ class TestReconciliationReportWindowTimezone:
         with app.app_context():
             _session(db, delivery_driver, started_utc=datetime(2026, 3, 10, 10, 0, tzinfo=UTC), sid="S-WIN-2")
             report = DriverReconciliationService().get_report(
-                period="day",
                 driver_user_id=delivery_driver.id,
                 start_date=date(2026, 3, 11),
                 end_date=date(2026, 3, 11),
@@ -68,7 +66,6 @@ class TestReconciliationReportWindowTimezone:
         with app.app_context():
             _session(db, delivery_driver, started_utc=datetime(2026, 3, 11, 18, 0, tzinfo=UTC), sid="S-WIN-3")
             report = DriverReconciliationService().get_report(
-                period="day",
                 driver_user_id=delivery_driver.id,
                 start_date=date(2026, 3, 11),
                 end_date=date(2026, 3, 11),
@@ -80,17 +77,16 @@ class TestReconciliationReportWindowTimezone:
         with app.app_context():
             _session(db, delivery_driver, started_utc=datetime(2026, 3, 11, 19, 30, tzinfo=UTC), sid="S-WIN-4")
             report = DriverReconciliationService().get_report(
-                period="day",
                 driver_user_id=delivery_driver.id,
                 start_date=date(2026, 3, 11),
                 end_date=date(2026, 3, 11),
             )
         assert report["summary"]["session_count"] == 0
 
-    def test_period_day_with_now_is_time_of_day_robust(self, app, db, delivery_driver):
-        # A session created 'now' must ALWAYS appear in the period='day' report
+    def test_default_window_with_now_is_time_of_day_robust(self, app, db, delivery_driver):
+        # A session created 'now' must ALWAYS appear in the default (no dates) report
         # regardless of wall-clock — this is exactly what flaked at the boundary.
         with app.app_context():
             _session(db, delivery_driver, started_utc=datetime.now(UTC), sid="S-WIN-5")
-            report = DriverReconciliationService().get_report(period="day", driver_user_id=delivery_driver.id)
+            report = DriverReconciliationService().get_report(driver_user_id=delivery_driver.id)
         assert report["summary"]["session_count"] == 1

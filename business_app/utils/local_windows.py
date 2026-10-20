@@ -144,6 +144,7 @@ def parse_date_range(
     *,
     now: Optional[datetime] = None,
     default_days: int = 7,
+    capped: bool = True,
 ) -> Tuple[date, date]:
     """`?start_date=&end_date=` -> an inclusive local date range, or one 400.
 
@@ -155,6 +156,9 @@ def parse_date_range(
     Absent means "the last `default_days` local days, ending today", and a
     half-given range fills the other end the same way, because an operator who
     types only a start means "since then", not "no data".
+
+    `capped=False` skips the SALES_METRICS_MAX_RANGE_DAYS ceiling for a report
+    that has none (the driver cash-reconciliation report).
     """
     today = local_date(now)
     parsed = {}
@@ -170,6 +174,8 @@ def parse_date_range(
     start = parsed["start_date"] or end - timedelta(days=default_days - 1)
     if end < start:
         raise ValidationError("end_date is before start_date", error_code=DATE_RANGE_INVALID)
+    if not capped:
+        return start, end
     # A ceiling, never a silent clamp: a clamped answer is a number an owner would
     # read as the whole period and act on.
     max_days = int(current_app.config["SALES_METRICS_MAX_RANGE_DAYS"])

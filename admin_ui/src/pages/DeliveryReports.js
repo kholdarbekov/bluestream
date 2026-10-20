@@ -36,6 +36,8 @@ import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tansta
 import { useTranslation } from 'react-i18next';
 import staffService from '../services/staffService';
 import { usePermissions } from '../components/common/PermissionGuard';
+import ReportRangePicker, { rangeParams } from '../components/common/ReportRangePicker';
+import { DEFAULT_PAGE_SIZE } from '../utils/constants';
 import { formatDateTimeSeconds } from '../utils/dateUtils';
 import { describeAllocationScope } from '../utils/cashScopeDisplay';
 import { resolveCollectScope } from '../utils/codCollectScope';
@@ -87,7 +89,8 @@ const DeliveryReports = () => {
   const queryClient = useQueryClient();
   const { getUserRole, isAdmin } = usePermissions();
   const isSuperAdmin = getUserRole() === 'super_admin';
-  const [period, setPeriod] = useState('day');
+  const [range, setRange] = useState(null);
+  const [sessionPagination, setSessionPagination] = useState({ page: 1, per_page: DEFAULT_PAGE_SIZE });
   const [statusFilter, setStatusFilter] = useState('all');
   const [blockedOnly, setBlockedOnly] = useState(false);
   const [warningOnly, setWarningOnly] = useState(false);
@@ -111,16 +114,24 @@ const DeliveryReports = () => {
   const isPersonalCardTransfer = collectionSource === 'personal_card_transfer';
   const isBackfillCollection = collectionSource === 'backfill';
 
-  const reportQueryKey = ['deliveryReports', period, statusFilter, blockedOnly, warningOnly];
+  // A narrower filter usually has fewer pages than the one being viewed, so the
+  // session drill-down goes back to page 1.
+  const narrow = (setter) => (value) => {
+    setter(value);
+    setSessionPagination((p) => ({ ...p, page: 1 }));
+  };
+
+  const reportQueryKey = ['deliveryReports', rangeParams(range), statusFilter, blockedOnly, warningOnly, sessionPagination];
   const { data, isLoading, refetch } = useQuery({
     queryKey: reportQueryKey,
 
     queryFn: () =>
       staffService.getCashReconciliation({
-        period,
+        ...rangeParams(range),
         ...(statusFilter !== 'all' ? { status: statusFilter } : {}),
         ...(blockedOnly ? { blocked_only: true } : {}),
         ...(warningOnly ? { warning_only: true } : {}),
+        ...sessionPagination,
       }),
 
     placeholderData: keepPreviousData,
@@ -750,12 +761,8 @@ const DeliveryReports = () => {
         </Col>
         <Col>
           <Space>
-            <Select value={period} onChange={setPeriod} style={{ width: 140 }}>
-              <Option value="day">{t('staff:today')}</Option>
-              <Option value="week">{t('staff:this_week')}</Option>
-              <Option value="month">{t('staff:this_month')}</Option>
-            </Select>
-            <Select value={statusFilter} onChange={setStatusFilter} style={{ width: 160 }}>
+            <ReportRangePicker range={range} answered={payload} onChange={narrow(setRange)} />
+            <Select value={statusFilter} onChange={narrow(setStatusFilter)} style={{ width: 160 }}>
               <Option value="all">{t('staff:all_statuses', 'All statuses')}</Option>
               <Option value="open">{t('staff:open', 'Open')}</Option>
               <Option value="partial">{t('staff:partial', 'Partial')}</Option>
@@ -769,7 +776,7 @@ const DeliveryReports = () => {
               type={blockedOnly ? 'primary' : 'default'}
               icon={<WarningOutlined />}
               onClick={() => {
-                setBlockedOnly((value) => !value);
+                narrow(setBlockedOnly)((value) => !value);
                 setWarningOnly(false);
               }}
             >
@@ -781,7 +788,7 @@ const DeliveryReports = () => {
               type={warningOnly ? 'primary' : 'default'}
               icon={<ClockCircleOutlined />}
               onClick={() => {
-                setWarningOnly((value) => !value);
+                narrow(setWarningOnly)((value) => !value);
                 setBlockedOnly(false);
               }}
             >
@@ -905,7 +912,15 @@ const DeliveryReports = () => {
           dataSource={sessions}
           rowKey="id"
           loading={isLoading}
-          pagination={false}
+          pagination={{
+            current: sessionPagination.page,
+            pageSize: sessionPagination.per_page,
+            total: payload.total || 0,
+            onChange: (page, per_page) => setSessionPagination({ page, per_page }),
+            showSizeChanger: true,
+            // 100 is the backend's per_page cap.
+            pageSizeOptions: [20, 50, 100],
+          }}
           scroll={{ x: 1320 }}
         />
       </Card>

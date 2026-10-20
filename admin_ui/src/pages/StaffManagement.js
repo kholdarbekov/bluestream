@@ -11,8 +11,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import staffService from '../services/staffService';
+import ReportRangePicker, { rangeParams } from '../components/common/ReportRangePicker';
 import { fetchAllPages } from '../utils/pagination';
-import { BULK_LOAD_PAGE_SIZE } from '../utils/constants';
+import { BULK_LOAD_PAGE_SIZE, DEFAULT_PAGE_SIZE } from '../utils/constants';
 
 const { Title, Text } = Typography;
 const { TabPane } = Tabs;
@@ -24,7 +25,8 @@ const StaffManagement = () => {
     const navigate = useNavigate();
 
     const [activeTab, setActiveTab] = useState('overview');
-    const [cashPeriod, setCashPeriod] = useState('day');
+    const [cashRange, setCashRange] = useState(null);
+    const [cashPagination, setCashPagination] = useState({ page: 1, per_page: DEFAULT_PAGE_SIZE });
     const [inviteUserId, setInviteUserId] = useState(undefined);
     const [inviteRole, setInviteRole] = useState('delivery_driver');
     const [inviteLink, setInviteLink] = useState('');
@@ -38,8 +40,8 @@ const StaffManagement = () => {
     });
 
     const { data: cashData, isLoading: cashLoading, refetch: refetchCash } = useQuery({
-        queryKey: ['cashReconciliation', cashPeriod],
-        queryFn: () => staffService.getCashReconciliation({ period: cashPeriod }),
+        queryKey: ['cashReconciliation', rangeParams(cashRange), cashPagination],
+        queryFn: () => staffService.getCashReconciliation({ ...rangeParams(cashRange), ...cashPagination }),
         enabled: activeTab === 'cash',
     });
 
@@ -499,11 +501,14 @@ const StaffManagement = () => {
                     <Card>
                         <Row gutter={[16, 16]} align="middle" style={{ marginBottom: 16 }}>
                             <Col>
-                                <Select value={cashPeriod} onChange={setCashPeriod} style={{ width: 140 }}>
-                                    <Option value="day">{t('staff:today')}</Option>
-                                    <Option value="week">{t('staff:this_week')}</Option>
-                                    <Option value="month">{t('staff:this_month')}</Option>
-                                </Select>
+                                <ReportRangePicker
+                                    range={cashRange}
+                                    answered={cashData?.data?.data}
+                                    onChange={(value) => {
+                                        setCashRange(value);
+                                        setCashPagination((p) => ({ ...p, page: 1 }));
+                                    }}
+                                />
                             </Col>
                             <Col>
                                 <Button onClick={() => refetchCash()}>
@@ -571,7 +576,15 @@ const StaffManagement = () => {
                             dataSource={cashSessions}
                             rowKey="id"
                             loading={cashLoading}
-                            pagination={false}
+                            pagination={{
+                                current: cashPagination.page,
+                                pageSize: cashPagination.per_page,
+                                total: cashData?.data?.data?.total || 0,
+                                onChange: (page, per_page) => setCashPagination({ page, per_page }),
+                                showSizeChanger: true,
+                                // 100 is the backend's per_page cap.
+                                pageSizeOptions: [20, 50, 100],
+                            }}
                             scroll={{ x: 960 }}
                         />
                     </Card>

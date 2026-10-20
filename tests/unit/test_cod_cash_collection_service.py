@@ -1994,7 +1994,7 @@ class TestDriverReconciliationService:
             assert verified.blocked_from_cod is True
             assert recon_service.is_driver_blocked_from_cod(delivery_driver.id) is True
 
-            report = recon_service.get_report(period="day", driver_user_id=delivery_driver.id)
+            report = recon_service.get_report(driver_user_id=delivery_driver.id)
             assert report["summary"]["blocked_session_count"] == 1
             assert report["summary"]["mismatch_session_count"] == 1
             assert report["report"][0]["blocked_session_count"] == 1
@@ -2425,9 +2425,7 @@ class TestDriverReconciliationService:
             )
             assert session.id not in {item["id"] for item in listed["items"]}
 
-            report = recon_service.get_report(
-                period="day", driver_user_id=delivery_driver.id
-            )
+            report = recon_service.get_report(driver_user_id=delivery_driver.id)
             assert session.id not in {item["id"] for item in report["sessions"]}
             assert report["summary"]["session_count"] == 0
 

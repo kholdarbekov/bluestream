@@ -12657,9 +12657,8 @@ def admin_reassign_delivery(delivery_id):
 @jwt_required()
 @manager_or_higher_required
 def get_cash_reconciliation_report():
-    """Generate cash reconciliation report per driver/period"""
+    """Cash reconciliation report per driver for a local date range (default: last 7 days)"""
     try:
-        period = request.args.get("period", "day")  # day, week, month
         driver_id = request.args.get("driver_id", type=int)
         status = request.args.get("status")
         blocked_only = request.args.get("blocked_only", "false").lower() == "true"
@@ -12673,7 +12672,6 @@ def get_cash_reconciliation_report():
         from business_app.services.driver_reconciliation_service import DriverReconciliationService
 
         report = DriverReconciliationService().get_report(
-            period=period,
             driver_user_id=driver_id,
             page=page,
             per_page=per_page,
@@ -12684,7 +12682,6 @@ def get_cash_reconciliation_report():
             end_date=end_date,
             min_session_age_days=min_session_age_days,
         )
-        report["period"] = period
 
         return success_response(data=report)
 

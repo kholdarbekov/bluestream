@@ -194,6 +194,17 @@ class TestParseDateRange:
                 parse_date_range("2026-06-16", "2026-09-16", now=FROZEN_UTC)
             assert excinfo.value.error_code == "SALES_DATE_RANGE_INVALID"
 
+    def test_an_uncapped_caller_may_ask_for_any_length(self, app):
+        """The cash-reconciliation report has no ceiling: a year is answered, not refused."""
+        with app.app_context():
+            assert parse_date_range("2025-09-17", "2026-09-16", now=FROZEN_UTC, capped=False) == (
+                date(2025, 9, 17),
+                date(2026, 9, 16),
+            )
+            with pytest.raises(ValidationError) as excinfo:
+                parse_date_range("2026-09-03", "2026-09-01", now=FROZEN_UTC, capped=False)
+            assert excinfo.value.error_code == "SALES_DATE_RANGE_INVALID"
+
 
 def test_the_due_lists_day_boundary_is_this_modules_boundary(app, monkeypatch):
     """One definition of the local day: the due list and the driver's day cannot drift.

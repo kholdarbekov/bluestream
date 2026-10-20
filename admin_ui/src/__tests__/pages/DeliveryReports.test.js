@@ -110,6 +110,12 @@ const createWrapper = () => {
 const reconciliationPayload = {
   data: {
     data: {
+      // The window the backend answered with — what the picker shows before a pick.
+      start_date: '2026-03-01',
+      end_date: '2026-03-07',
+      page: 1,
+      per_page: 20,
+      total: 2,
       grand_total_cash: 300000,
       summary: {
         blocked_session_count: 1,
@@ -306,7 +312,7 @@ describe('DeliveryReports page', () => {
     const amountInput = screen.getByRole('spinbutton');
     fireEvent.change(amountInput, { target: { value: '70000' } });
 
-    await user.type(screen.getByRole('textbox'), 'Cash short by 30,000 UZS after count');
+    await user.type(within(screen.getByRole('dialog')).getByRole('textbox'), 'Cash short by 30,000 UZS after count');
     await user.click(screen.getByRole('button', { name: 'OK' }));
 
     await waitFor(() => {
@@ -930,5 +936,77 @@ describe('DeliveryReports page', () => {
       expect(staffService.recordCashCollection).toHaveBeenCalledTimes(1);
     });
     expect(staffService.recordCashCollection.mock.calls[0][0].delivery_address_id).toBeNull();
+  });
+});
+
+describe('DeliveryReports report window', () => {
+  const pickerInputs = () => [...document.querySelectorAll('.ant-picker-range input')];
+  const dayCell = (day) => document.querySelector(`.ant-picker-dropdown td[title="${day}"]`);
+  const lastParams = () => staffService.getCashReconciliation.mock.calls.at(-1)[0];
+
+  const pickRange = async (start, end) => {
+    fireEvent.mouseDown(pickerInputs()[0]);
+    fireEvent.click(pickerInputs()[0]);
+    await waitFor(() => expect(dayCell(start)).toBeTruthy());
+    fireEvent.click(dayCell(start));
+    fireEvent.click(dayCell(end));
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    staffService.getCashReconciliation.mockResolvedValue(reconciliationPayload);
+  });
+
+  it('first asks for the backend default window and shows the dates it answered with', async () => {
+    render(<DeliveryReports />, { wrapper: createWrapper() });
+
+    await waitFor(() => expect(pickerInputs().map((input) => input.value)).toEqual(['2026-03-01', '2026-03-07']));
+    // No dates and no `period`: the 7-day default is the backend's decision alone.
+    expect(staffService.getCashReconciliation.mock.calls[0][0]).toEqual({ page: 1, per_page: 20 });
+    expect(screen.queryByText('staff:this_week')).not.toBeInTheDocument();
+  });
+
+  it('sends exactly the picked start and end dates', async () => {
+    render(<DeliveryReports />, { wrapper: createWrapper() });
+    await waitFor(() => expect(pickerInputs()[0].value).toBe('2026-03-01'));
+
+    await pickRange('2026-03-02', '2026-03-05');
+
+    await waitFor(() => expect(lastParams()).toEqual({
+      start_date: '2026-03-02',
+      end_date: '2026-03-05',
+      page: 1,
+      per_page: 20,
+    }));
+  });
+
+  it('pages the session drill-down through the total the backend reports', async () => {
+    staffService.getCashReconciliation.mockResolvedValue({
+      data: { data: { ...reconciliationPayload.data.data, total: 45 } },
+    });
+    render(<DeliveryReports />, { wrapper: createWrapper() });
+    await waitFor(() => expect(pickerInputs()[0].value).toBe('2026-03-01'));
+
+    fireEvent.click(await screen.findByTitle('3'));
+
+    await waitFor(() => expect(lastParams()).toEqual({ page: 3, per_page: 20 }));
+  });
+
+  it('goes back to the first session page when a new range is picked', async () => {
+    staffService.getCashReconciliation.mockResolvedValue({
+      data: { data: { ...reconciliationPayload.data.data, total: 45 } },
+    });
+    render(<DeliveryReports />, { wrapper: createWrapper() });
+    fireEvent.click(await screen.findByTitle('2'));
+    await waitFor(() => expect(lastParams()).toEqual({ page: 2, per_page: 20 }));
+
+    await pickRange('2026-03-02', '2026-03-05');
+
+    await waitFor(() => expect(lastParams()).toEqual({
+      start_date: '2026-03-02',
+      end_date: '2026-03-05',
+      page: 1,
+      per_page: 20,
+    }));
   });
 });

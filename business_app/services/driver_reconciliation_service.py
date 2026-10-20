@@ -31,6 +31,7 @@ from shared.enums import (
 )
 from shared.staff_constants import RECONCILIATION_RISK_FLAGS
 from business_app.utils.exceptions import ConflictError, NotFoundError, ValidationError
+from business_app.utils.local_windows import parse_date_range
 
 
 class DriverReconciliationService:
@@ -85,20 +86,6 @@ class DriverReconciliationService:
         if isinstance(value, date):
             return value
         return date.fromisoformat(str(value))
-
-    @staticmethod
-    def _normalize_period_window(period: str) -> Tuple[date, date]:
-        tz = ZoneInfo(current_app.config.get("DISPLAY_TIMEZONE", "Asia/Tashkent"))
-        now = datetime.now(tz)
-        if period == "day":
-            start_date = now.date()
-        elif period == "week":
-            start_date = (now - timedelta(days=6)).date()
-        elif period == "month":
-            start_date = (now - timedelta(days=29)).date()
-        else:
-            raise ValidationError("Invalid reconciliation report period")
-        return start_date, now.date()
 
     @staticmethod
     def _status_value(status: Any) -> str:
@@ -1299,7 +1286,6 @@ class DriverReconciliationService:
     def get_report(
         self,
         *,
-        period: str = "day",
         driver_user_id: Optional[int] = None,
         page: int = 1,
         per_page: int = 20,
@@ -1310,9 +1296,8 @@ class DriverReconciliationService:
         warning_only: bool = False,
         min_session_age_days: Optional[int] = None,
     ) -> Dict[str, Any]:
-        default_start_date, default_end_date = self._normalize_period_window(period)
-        start_date = self._coerce_date(start_date) or default_start_date
-        end_date = self._coerce_date(end_date) or default_end_date
+        # No dates = the last 7 local days, today included. No length cap.
+        start_date, end_date = parse_date_range(start_date, end_date, capped=False)
         sessions_result = self.list_sessions(
             page=page,
             per_page=per_page,

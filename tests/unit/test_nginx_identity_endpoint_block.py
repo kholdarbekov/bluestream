@@ -43,6 +43,7 @@ STILL_PUBLIC = [
     "forgot-password",
     "reset-password",
     "link-phone-account",
+    "telegram-link",
 ]
 
 BLOCK_RE = re.compile(
@@ -79,3 +80,33 @@ def test_block_matches_exactly_the_bot_only_and_deleted_paths(name, _):
 def test_all_three_hosts_use_the_same_regex():
     regexes = {BLOCK_RE.search(_read(n)).group(1) for n, _ in HOSTS}
     assert len(regexes) == 1
+
+
+# Every /api/v1/bot/ route is bot-only and signed; the bots reach business_app on the internal
+# Docker network, and nothing public calls them (spec 2026-10-19 D18).
+BOT_BLOCK_RE = re.compile(r"location ~ (\^/api/v1/bot/\S*)\s*\{\s*return 404;\s*\}")
+_REGEX_LOCATION = re.compile(r"location ~\*? (\S+)\s*\{")
+BOT_PATHS = (
+    "web-link/preview",
+    "web-link/confirm",
+    "telegram-reachability",
+    "reload-translations",
+    "health",
+    "stats",
+)
+
+
+@pytest.mark.parametrize("name,_", HOSTS)
+def test_the_bot_routes_are_unreachable_from_every_public_host(name, _):
+    text = _read(name)
+    block = BOT_BLOCK_RE.search(text)
+    pattern = re.compile(block.group(1))
+    assert all(pattern.match(f"/api/v1/bot/{tail}") for tail in BOT_PATHS)
+    assert not any(pattern.match(p) for p in ("/api/v1/auth/login", "/api/v1/botanica", "/api/v1/orders"))
+    # nginx takes the first matching regex location, so no earlier one may claim a bot path.
+    earlier = [m.group(1) for m in _REGEX_LOCATION.finditer(text[: block.start()])]
+    assert not any(re.compile(p).match("/api/v1/bot/web-link/confirm") for p in earlier)
+
+
+def test_all_three_hosts_block_the_bot_routes_the_same_way():
+    assert len({BOT_BLOCK_RE.search(_read(name)).group(1) for name, _ in HOSTS}) == 1

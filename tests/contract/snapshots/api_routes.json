@@ -2738,13 +2738,6 @@
     "rule": "/api/v1/auth/logout"
   },
   {
-    "endpoint": "auth.logout_all",
-    "methods": [
-      "POST"
-    ],
-    "rule": "/api/v1/auth/logout-all"
-  },
-  {
     "endpoint": "auth.get_orders_summary",
     "methods": [
       "GET"
@@ -2871,18 +2864,18 @@
     "rule": "/api/v1/auth/sessions/<session_id>"
   },
   {
-    "endpoint": "auth.logout_all",
-    "methods": [
-      "POST"
-    ],
-    "rule": "/api/v1/auth/sessions/revoke-all"
-  },
-  {
     "endpoint": "auth.sync_platform_data",
     "methods": [
       "POST"
     ],
     "rule": "/api/v1/auth/sync-platform-data"
+  },
+  {
+    "endpoint": "auth.request_telegram_link",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/telegram-link"
   },
   {
     "endpoint": "auth.telegram_login",
@@ -2974,6 +2967,20 @@
       "POST"
     ],
     "rule": "/api/v1/bot/telegram-reachability"
+  },
+  {
+    "endpoint": "bot.confirm_web_link",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/bot/web-link/confirm"
+  },
+  {
+    "endpoint": "bot.preview_web_link",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/bot/web-link/preview"
   },
   {
     "endpoint": "cart.get_cart",
@@ -3793,13 +3800,6 @@
       "DELETE"
     ],
     "rule": "/api/v1/session/sessions/<int:session_id>"
-  },
-  {
-    "endpoint": "session_management.revoke_all_sessions",
-    "methods": [
-      "POST"
-    ],
-    "rule": "/api/v1/session/sessions/revoke-all"
   },
   {
     "endpoint": "staff.staff_login",

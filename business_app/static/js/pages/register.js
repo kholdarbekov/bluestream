@@ -134,20 +134,11 @@
             if (response.ok) {
                 var message = PAGE_DATA.i18n.account_created_email;
 
-                if (registrationData.link_telegram) {
-                    var linkingCode = generateLinkingCode();
-                    localStorage.setItem('telegram_linking_code', linkingCode);
-                    localStorage.setItem('user_id_for_linking', result.data.user.id);
-                    message += '\n\n' + PAGE_DATA.i18n.telegram_linking_code + ': ' + linkingCode;
-                    showTelegramLinkingCode(linkingCode, result.data.user.id);
-                }
-
                 showNotification(message, 'success');
 
                 setTimeout(function () {
-                    var telegramParam = registrationData.link_telegram ? '?telegram_link=1' : '';
-                    window.location.href = PAGE_DATA.verify_email_url + telegramParam;
-                }, registrationData.link_telegram ? 5000 : 2000);
+                    window.location.href = PAGE_DATA.verify_email_url;
+                }, 2000);
             } else {
                 showNotification(result.message || PAGE_DATA.i18n.registration_failed, 'error');
             }
@@ -198,86 +189,12 @@
         document.getElementById('otpCode').value = '';
     }
 
-    function generateLinkingCode() {
-        return Math.random().toString(36).substring(2, 10).toUpperCase();
-    }
-
-    function copyToClipboard(text) {
-        navigator.clipboard.writeText(text).then(function () {
-            showNotification(PAGE_DATA.i18n.code_copied, 'success');
-        });
-    }
-
-    function showTelegramLinkingCode(code, userId) {
-        var overlay = document.createElement('div');
-        overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; ' +
-            'background: rgba(0,0,0,0.7); z-index: 9999; display: flex; ' +
-            'align-items: center; justify-content: center;';
-
-        var modal = document.createElement('div');
-        modal.style.cssText = 'background: white; padding: 40px; border-radius: 20px; ' +
-            'max-width: 500px; text-align: center; position: relative; ' +
-            'box-shadow: 0 24px 48px rgba(0, 0, 0, 0.2);';
-
-        modal.innerHTML =
-            '<div style="width: 60px; height: 60px; background: linear-gradient(135deg, #0088cc, #00d1f9); ' +
-            'border-radius: 16px; display: flex; align-items: center; justify-content: center; ' +
-            'margin: 0 auto 24px; box-shadow: 0 8px 24px rgba(0, 136, 204, 0.3);">' +
-            '<i class="fab fa-telegram-plane" style="font-size: 28px; color: white;"></i></div>' +
-            '<h3 style="color: #061a3a; font-size: 24px; font-weight: 700; margin-bottom: 16px;">' +
-            PAGE_DATA.i18n.telegram_linking_title + '</h3>' +
-            '<p style="color: #6b7280; margin-bottom: 24px;">' +
-            PAGE_DATA.i18n.account_created_success + '</p>' +
-            '<div style="background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); padding: 24px; border-radius: 16px; margin-bottom: 24px;">' +
-            '<p style="font-size: 14px; color: #64748b; margin-bottom: 8px;"><strong>' +
-            PAGE_DATA.i18n.linking_code_label + ':</strong></p>' +
-            '<div style="font-size: 32px; font-weight: 700; color: #002c8f; letter-spacing: 4px; margin: 12px 0; font-family: monospace;">' +
-            code + '</div>' +
-            '<button data-role="copy-code" style="padding: 10px 24px; background: linear-gradient(135deg, #00d1f9, #002c8f); ' +
-            'color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 14px; ' +
-            'transition: all 0.3s ease;">' +
-            '<i class="fas fa-copy" style="margin-right: 8px;"></i>' + PAGE_DATA.i18n.copy_code + '</button>' +
-            '</div>' +
-            '<div style="text-align: left; font-size: 14px; line-height: 1.8; color: #4b5563; padding: 0 12px;">' +
-            '<p style="font-weight: 600; color: #061a3a; margin-bottom: 12px;">' +
-            PAGE_DATA.i18n.to_link_telegram + ':</p>' +
-            '<ol style="margin: 0; padding-left: 20px;">' +
-            '<li>' + PAGE_DATA.i18n.open_telegram_bot +
-            ': <a href="https://t.me/bluestream_bot" target="_blank" style="color: #0088cc; font-weight: 600;">@bluestream_bot</a></li>' +
-            '<li>' + PAGE_DATA.i18n.send_command +
-            ': <code style="background: #f3f4f6; padding: 2px 8px; border-radius: 4px; font-size: 13px;">/link ' + code + '</code></li>' +
-            '<li>' + PAGE_DATA.i18n.follow_bot_instructions + '</li>' +
-            '</ol></div>' +
-            '<button data-role="modal-close" style="margin-top: 28px; padding: 14px 32px; background: linear-gradient(135deg, #10b981, #059669); ' +
-            'color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: 700; font-size: 15px; ' +
-            'box-shadow: 0 4px 16px rgba(16, 185, 129, 0.3); transition: all 0.3s ease;">' +
-            PAGE_DATA.i18n.continue_btn + '</button>';
-
-        modal.querySelector('[data-role="copy-code"]').addEventListener('click', function () {
-            copyToClipboard(code);
-        });
-        modal.querySelector('[data-role="modal-close"]').addEventListener('click', function () {
-            overlay.remove();
-        });
-
-        overlay.appendChild(modal);
-        document.body.appendChild(overlay);
-    }
-
     window.addEventListener('DOMContentLoaded', function () {
         document.querySelectorAll('.password-toggle').forEach(function (btn) {
             btn.addEventListener('click', function () {
                 togglePassword(this.dataset.target, this);
             });
         });
-
-        var linkTelegram = document.getElementById('link_telegram');
-        if (linkTelegram) {
-            linkTelegram.addEventListener('change', function () {
-                document.getElementById('telegram_linking_info').style.display =
-                    this.checked ? 'block' : 'none';
-            });
-        }
 
         var passwordInput = document.querySelector('input[name="password"]');
         if (passwordInput) {
@@ -350,8 +267,7 @@
                     last_name: formData.get('last_name') || '',
                     password: formData.get('password'),
                     referral_code: formData.get('referral_code') || null,
-                    newsletter_subscription: formData.get('newsletter') === 'on',
-                    link_telegram: formData.get('link_telegram') === 'on'
+                    newsletter_subscription: formData.get('newsletter') === 'on'
                 };
 
                 if (email) registrationData.email = email;
@@ -421,19 +337,11 @@
 
                         var message = PAGE_DATA.i18n.account_created_verified;
 
-                        if (registrationData.link_telegram) {
-                            var linkingCode = generateLinkingCode();
-                            localStorage.setItem('telegram_linking_code', linkingCode);
-                            localStorage.setItem('user_id_for_linking', result.data.user.id);
-                            message += '\n\n' + PAGE_DATA.i18n.telegram_linking_code + ': ' + linkingCode;
-                            showTelegramLinkingCode(linkingCode, result.data.user.id);
-                        }
-
                         showNotification(message, 'success');
 
                         setTimeout(function () {
                             window.location.href = PAGE_DATA.login_url;
-                        }, registrationData.link_telegram ? 5000 : 2000);
+                        }, 2000);
                     } else {
                         showNotification(result.message || PAGE_DATA.i18n.verification_failed, 'error');
                     }

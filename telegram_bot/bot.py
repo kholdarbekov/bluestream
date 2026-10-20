@@ -72,7 +72,8 @@ from handlers.profile import (
     SELECT_LANGUAGE, PHONE, LINK_ACCOUNT_CONFIRM, LINK_ACCOUNT_OTP, REGISTER_OTP,
     ADDRESS_LOCATION, ADDRESS_TITLE, ADDRESS_REGION, ADDRESS_DISTRICT,
     ADDRESS_STREET, ADDRESS_BUILDING, ADDRESS_APARTMENT, ADDRESS_FLOOR,
-    ADDRESS_DELIVERY_INSTRUCTIONS, ADDRESS_GEOCODE_CONFIRM
+    ADDRESS_DELIVERY_INSTRUCTIONS, ADDRESS_GEOCODE_CONFIRM,
+    WEB_LINK_CONFIRM, WEB_LINK_PENDING_KEY, WEB_LINK_GREETING_KEY,
 )
 from eligibility import main_menu_for
 from utils import error_handler, rate_limiter, user_middleware, get_auth_token, is_awaiting_location_stale
@@ -540,6 +541,8 @@ class WaterBusinessBot:
 
             # Store token_manager in bot_data for handler access
             self.application.bot_data['token_manager'] = self.token_manager
+            # ...and give it to the API client, which replaces a customer token the backend refuses
+            api_client.token_manager = self.token_manager
 
             # Set up handlers
             logger.info("Setting up handlers...")
@@ -866,9 +869,19 @@ class WaterBusinessBot:
         registration_timeout = self._flow_timeout(
             'telegram.registration.flow_timed_out',
             'pending_phone', 'pending_phone_verification', 'pending_link_phone',
-            'awaiting_otp', 'otp_prompted_update_id',
+            'awaiting_otp', 'otp_prompted_update_id', WEB_LINK_GREETING_KEY,
             offer_menu=False,
         )
+
+        # While a web link waits for Yes, the timeout says the LINK expired and
+        # drops it (spec 2026-10-19 D15b). Registration's own "Send /start" copy
+        # would put an unknown Telegram on the language card, whose tap creates
+        # the row that then blocks the link.
+        async def _registration_timeout(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if WEB_LINK_PENDING_KEY in (context.user_data or {}):
+                return await profile_handlers.web_link_timeout(update, context)
+            return await registration_timeout(update, context)
+
         registration_handler = ConversationHandler(
             entry_points=[
                 CommandHandler("start", profile_handlers.start_registration_new),
@@ -918,6 +931,19 @@ class WaterBusinessBot:
                         self._consumes(profile_handlers.register_otp_received),
                     )
                 ],
+                # The web-link confirm card (spec 2026-10-19 R4). Consumed: the
+                # default group answers these same buttons once the conversation
+                # is gone (web_link_step_expired below), and must not see a live tap.
+                WEB_LINK_CONFIRM: [
+                    CallbackQueryHandler(
+                        self._consumes(profile_handlers.web_link_yes),
+                        pattern=r"^weblink_yes$",
+                    ),
+                    CallbackQueryHandler(
+                        self._consumes(profile_handlers.web_link_cancel),
+                        pattern=r"^weblink_no$",
+                    ),
+                ],
                 # 300 seconds is well inside normal Uzbek SMS latency, so this
                 # is the flow the silent timeout hurt most. `awaiting_otp` and
                 # friends MUST go with it: they are read by the group-0 text
@@ -926,8 +952,8 @@ class WaterBusinessBot:
                 # menu — they are not registered yet — and ReplyKeyboardRemove
                 # clears the request_contact keyboard the phone step left up.
                 ConversationHandler.TIMEOUT: [
-                    MessageHandler(filters.ALL, registration_timeout),
-                    CallbackQueryHandler(registration_timeout),
+                    MessageHandler(filters.ALL, _registration_timeout),
+                    CallbackQueryHandler(_registration_timeout),
                 ],
             },
             fallbacks=[
@@ -1445,6 +1471,15 @@ class WaterBusinessBot:
         self.application.add_handler(
             CallbackQueryHandler(
                 self._signup_step_expired, pattern=r"^(link_yes|link_no)$"
+            )
+        )
+
+        # The web-link confirm card's buttons, for the same reason: after a
+        # restart, the timeout or a plain /start the token is gone, and the tap
+        # says the link expired (spec 2026-10-19 D15c).
+        self.application.add_handler(
+            CallbackQueryHandler(
+                profile_handlers.web_link_step_expired, pattern=r"^weblink_(yes|no)$"
             )
         )
 

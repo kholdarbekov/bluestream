@@ -9571,6 +9571,148 @@ PRIVACY_REORDER_REMINDER_TRANSLATIONS = {
 BACKEND_TRANSLATIONS.update(PRIVACY_REORDER_REMINDER_TRANSLATIONS)
 
 
+# ===========================================================================
+# Web-to-Telegram link: the API messages of POST /api/v1/auth/telegram-link
+# (spec 2026-10-19 D4, RF4). /my-account shows them in its toast, read with
+# `get_translation` in CustomerTelegramLinkService. Never "call us".
+# ===========================================================================
+
+TELEGRAM_LINK_API_TRANSLATIONS = {
+    'api.auth.telegram_link_not_available': {
+        'en': "Telegram is already connected to this account, or it can't be connected here.",
+        'uz': "Bu hisobga Telegram allaqachon ulangan yoki uni bu yerda ulab bo'lmaydi.",
+        'ru': 'Telegram уже подключён к этому аккаунту или его нельзя подключить здесь.',
+    },
+    'api.auth.telegram_link_store_unavailable': {
+        'en': 'Something went wrong. Please try again in a minute.',
+        'uz': "Nimadir xato ketdi. Bir daqiqadan so'ng qayta urinib ko'ring.",
+        'ru': 'Что-то пошло не так. Попробуйте ещё раз через минуту.',
+    },
+}
+BACKEND_TRANSLATIONS.update(TELEGRAM_LINK_API_TRANSLATIONS)
+
+
+# ===========================================================================
+# Web-to-Telegram link: the customer bot's side (spec 2026-10-19 R4-R6, D5,
+# D8, D12, D15). `confirm_prompt` is sent with parse_mode='HTML': `{account}` is
+# the masked label, HTML-escaped as data by the bot. The R6 sentences are the
+# owner's fixed copy. Cancel reuses `telegram.cancel`. Never "call us".
+# ===========================================================================
+
+TELEGRAM_LINK_BOT_TRANSLATIONS = {
+    'telegram.web_link.confirm_prompt': {
+        'en': 'Connect this Telegram to your Aqua Element account <b>{account}</b>?',
+        'uz': "Ushbu Telegram'ni Aqua Element hisobingizga ulaymizmi: <b>{account}</b>?",
+        'ru': 'Подключить этот Telegram к вашему аккаунту Aqua Element <b>{account}</b>?',
+    },
+    'telegram.web_link.yes_button': {
+        'en': '✅ Yes, connect',
+        'uz': '✅ Ha, ulash',
+        'ru': '✅ Да, подключить',
+    },
+    'telegram.web_link.connected': {
+        'en': '✅ Connected, {name}! Delivery updates will come here.',
+        'uz': '✅ Ulandi, {name}! Yetkazib berish xabarlari shu yerga keladi.',
+        'ru': '✅ Подключено, {name}! Уведомления о доставке будут приходить сюда.',
+    },
+    'telegram.web_link.expired': {
+        'en': 'Open your account on the website and tap the button again.',
+        'uz': 'Saytdagi hisobingizni oching va tugmani yana bosing.',
+        'ru': 'Откройте свой аккаунт на сайте и нажмите кнопку ещё раз.',
+    },
+    'telegram.web_link.has_account': {
+        'en': "Write to us here in the chat and we'll help.",
+        'uz': 'Shu chatda bizga yozing, yordam beramiz.',
+        'ru': 'Напишите нам здесь в чате, и мы поможем.',
+    },
+    'telegram.web_link.cancelled': {
+        'en': 'OK, nothing was connected. You can tap the button on the website again.',
+        'uz': "Mayli, hech narsa ulanmadi. Saytdagi tugmani yana bosishingiz mumkin.",
+        'ru': 'Хорошо, ничего не подключено. Можно снова нажать кнопку на сайте.',
+    },
+    'telegram.web_link.failed': {
+        'en': 'Something went wrong. Please tap the button on the website again in a minute.',
+        'uz': "Nimadir xato ketdi. Bir daqiqadan so'ng saytdagi tugmani yana bosing.",
+        'ru': 'Что-то пошло не так. Нажмите кнопку на сайте ещё раз через минуту.',
+    },
+    'telegram.web_link.confirm_number_prompt': {
+        'en': '📱 One more step: confirm your number {phone_masked}. Type the 6-digit code we just sent by SMS.',
+        'uz': (
+            '📱 Yana bir qadam: {phone_masked} raqamingizni tasdiqlang. '
+            'Hozirgina SMS orqali yuborgan 6 xonali kodimizni kiriting.'
+        ),
+        'ru': (
+            '📱 Ещё один шаг: подтвердите номер {phone_masked}. '
+            'Введите 6-значный код из SMS, которое мы только что отправили.'
+        ),
+    },
+    # D8: the Support button promised on the /my-account card. Free text already
+    # reaches the admin Support Inbox.
+    'telegram.support.menu_intro': {
+        'en': '🆘 Have a question? Just type it here in this chat, and our team will answer you here.',
+        'uz': '🆘 Savolingiz bormi? Uni shu chatga yozing, jamoamiz shu yerda javob beradi.',
+        'ru': '🆘 Есть вопрос? Просто напишите его в этот чат, и наша команда ответит здесь.',
+    },
+}
+BACKEND_TRANSLATIONS.update(TELEGRAM_LINK_BOT_TRANSLATIONS)
+
+
+# ===========================================================================
+# Web-to-Telegram link: the /my-account card and notes (spec 2026-10-19 D6, D7,
+# D13, D14). Storefront keys are dotless English, rendered `|t(current_language)`.
+# Never "call us".
+# ===========================================================================
+
+TELEGRAM_LINK_WEB_TRANSLATIONS = {
+    'Get delivery updates in Telegram': {
+        'en': 'Get delivery updates in Telegram',
+        'uz': "Yetkazib berish xabarlarini Telegram'da oling",
+        'ru': 'Получайте уведомления о доставке в Telegram',
+    },
+    'Know when your order is confirmed, when the courier is on the way and when they arrive.': {
+        'en': 'Know when your order is confirmed, when the courier is on the way and when they arrive.',
+        'uz': "Buyurtmangiz qachon tasdiqlangani, kuryer qachon yo'lga chiqqani va qachon yetib kelganini bilib turing.",
+        'ru': 'Узнавайте, когда заказ подтверждён, когда курьер в пути и когда он приехал.',
+    },
+    'Order again in a few taps': {
+        'en': 'Order again in a few taps',
+        'uz': 'Bir necha bosishda qayta buyurtma bering',
+        'ru': 'Повторный заказ в пару нажатий',
+    },
+    'Chat with us right in Telegram': {
+        'en': 'Chat with us right in Telegram',
+        'uz': "Savollaringizni to'g'ridan-to'g'ri Telegram'da yozing",
+        'ru': 'Пишите нам прямо в Telegram',
+    },
+    'Open in Telegram': {
+        'en': 'Open in Telegram',
+        'uz': "Telegram'da ochish",
+        'ru': 'Открыть в Telegram',
+    },
+    'Telegram connected. Delivery updates now come to Telegram instead of email.': {
+        'en': 'Telegram connected. Delivery updates now come to Telegram instead of email.',
+        'uz': "Telegram ulandi. Yetkazib berish xabarlari endi email o'rniga Telegram'ga keladi.",
+        'ru': 'Telegram подключён. Уведомления о доставке теперь приходят в Telegram, а не на email.',
+    },
+    'Open the bot': {
+        'en': 'Open the bot',
+        'uz': 'Botni ochish',
+        'ru': 'Открыть бота',
+    },
+    'Telegram is connected, but our bot is stopped in your Telegram, so updates come by email. Open the bot and press Start to get them in Telegram again.': {
+        'en': 'Telegram is connected, but our bot is stopped in your Telegram, so updates come by email. Open the bot and press Start to get them in Telegram again.',
+        'uz': "Telegram ulangan, lekin botimiz Telegram'ingizda to'xtatilgan, shuning uchun xabarlar email orqali keladi. Ularni yana Telegram'da olish uchun botni oching va «Boshlash» tugmasini bosing.",
+        'ru': 'Telegram подключён, но наш бот остановлен в вашем Telegram, поэтому уведомления приходят на email. Откройте бота и нажмите «Запустить», чтобы снова получать их в Telegram.',
+    },
+    'Something went wrong. Please try again in a minute.': {
+        'en': 'Something went wrong. Please try again in a minute.',
+        'uz': "Nimadir xato ketdi. Bir daqiqadan so'ng qayta urinib ko'ring.",
+        'ru': 'Что-то пошло не так. Попробуйте ещё раз через минуту.',
+    },
+}
+BACKEND_TRANSLATIONS.update(TELEGRAM_LINK_WEB_TRANSLATIONS)
+
+
 def main():
     """Seed backend translation keys"""
     app = create_app()

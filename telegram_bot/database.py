@@ -460,18 +460,6 @@ class BotUserRepository:
             "SELECT telegram_blocked_at FROM users WHERE telegram_id = $1", str(telegram_id)
         )
 
-    async def clear_user_session(self, telegram_id: int):
-        """Clear user session data and bot state"""
-        # Clear bot state in users table
-        state_query = """
-        UPDATE users
-        SET bot_state = '{}', updated_at = CURRENT_TIMESTAMP
-        WHERE telegram_id = $1
-        """
-        await self.db.execute(state_query, str(telegram_id))
-
-        logger.info(f"Cleared session data for telegram user {telegram_id}")
-
 
 # Global database manager instance
 db_manager = DatabaseManager()

@@ -766,6 +766,7 @@ def my_subscriptions():
 @jwt_required()
 def my_account():
     """User account dashboard"""
+    from business_app.services.customer_telegram_link_service import CustomerTelegramLinkService
     from business_app.services.order_schedule_service import OrderScheduleService
 
     current_user_id = get_jwt_identity()
@@ -804,6 +805,7 @@ def my_account():
         active_subscriptions=active_subscriptions,
         loyalty_account=loyalty_account,
         loyalty_stats=loyalty_stats,
+        telegram_link_state=CustomerTelegramLinkService.telegram_link_state(user),
     )
 
 

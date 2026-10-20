@@ -375,6 +375,14 @@ def setup_request_handlers(app):
                 # IMPORTANT: Preserve original claims (especially 'role') when refreshing
                 # Otherwise admin users lose their role and get 403 Forbidden errors
                 jwt_data = get_jwt()
+
+                # Never extend a login this request logged out, or one its account's sessions were
+                # ended after (the one session-revocation rule, spec 2026-10-19 R9)
+                from business_app.services.session_revocation_service import SessionRevocationService
+
+                if not SessionRevocationService.may_extend(jwt_data):
+                    return response
+
                 additional_claims = {
                     key: jwt_data[key]
                     for key in ["user_id", "email", "role", "status", "verified", "platform", "session_id"]
@@ -419,6 +427,14 @@ def setup_jwt_handlers(app):
         if identity is None:
             raise ValueError("JWT identity cannot be None")
         return str(identity)
+
+    @jwt.additional_claims_loader
+    def add_issue_time_claim(identity):
+        """Every token the app mints, access and refresh alike, carries its issue time in
+        milliseconds: the session cut-off compares it (`SessionRevocationService`, owner decision R9b)."""
+        from business_app.services.session_revocation_service import issue_time_claims
+
+        return issue_time_claims()
 
     @jwt.expired_token_loader
     def expired_token_callback(jwt_header, jwt_payload):
@@ -478,34 +494,33 @@ def setup_jwt_handlers(app):
     @jwt.token_in_blocklist_loader
     def check_if_token_revoked(jwt_header, jwt_payload):
         """
-        Callback to check if a JWT token has been blacklisted/revoked.
-        This is called on every request that requires JWT authentication.
+        Callback to check if a JWT token has been revoked.
+        This is called on every request that requires JWT authentication, with the one rule
+        `SessionRevocationService.is_revoked`: a blacklisted token, or one issued before its
+        account's sessions were ended (a password reset, an account merge, a role
+        change).
 
         Args:
             jwt_header: The header of the JWT
             jwt_payload: The payload/claims of the JWT
 
         Returns:
-            True if token is blacklisted, False otherwise
+            True if token is revoked, False otherwise
         """
         jti = jwt_payload["jti"]
 
         try:
-            # Import TokenService to check blacklist
-            from business_app.services.token_service import TokenService
+            from business_app.services.session_revocation_service import SessionRevocationService
 
-            token_service = TokenService()
+            is_revoked = SessionRevocationService.is_revoked(jwt_payload)
 
-            # Check if token is blacklisted
-            is_blacklisted = token_service.is_token_blacklisted(jti)
+            if is_revoked:
+                app.logger.info(f"Blocked revoked token with JTI: {jti}")
 
-            if is_blacklisted:
-                app.logger.info(f"Blocked blacklisted token with JTI: {jti}")
-
-            return is_blacklisted
+            return is_revoked
 
         except Exception as e:
-            app.logger.error(f"Error checking token blacklist for JTI {jti}: {e}")
+            app.logger.error(f"Error checking token revocation for JTI {jti}: {e}")
             # Fail open to prevent authentication disruption
             # In production, you might want to fail closed (return True)
             return False

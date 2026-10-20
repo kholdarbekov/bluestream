@@ -63,7 +63,7 @@ class SimpleHandlers:
         language = await self._get_language(update)
         await self._send_response(
             update,
-            i18n.get('telegram.support.menu_coming_soon', language),
+            i18n.get('telegram.support.menu_intro', language),
             reply_markup=MenuKeyboards.back_button(language),
         )
 

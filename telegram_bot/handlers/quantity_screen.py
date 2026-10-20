@@ -27,7 +27,7 @@ cart line they are no longer looking at:
   likely an answer to that person, and an operator's reply reaches the chat
   without any update this bot could see;
 * ``QUANTITY_SCREEN_WINDOW_MINUTES`` after the screen was last drawn;
-* logout / the inactive-user sweep, which wipe ``bot_state`` whole.
+* the inactive-user sweep, which wipes ``bot_state`` whole.
 
 ``leave_quantity_screen_middleware`` below is the one place that decides all of
 this, rather than a disarm sprinkled into every handler a customer could reach.

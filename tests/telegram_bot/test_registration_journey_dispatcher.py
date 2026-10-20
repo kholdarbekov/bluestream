@@ -37,6 +37,7 @@ from handlers.profile import (
     PHONE,
     REGISTER_OTP,
     SELECT_LANGUAGE,
+    WEB_LINK_CONFIRM,
 )
 
 from tests.telegram_bot.ptb_harness import (
@@ -733,8 +734,8 @@ async def test_a_phone_that_already_has_an_account_offers_a_link_and_the_code_me
         "refresh_token": "merged-refresh",
         "expires_in": 3600,
     }, (
-        "after a merge the customer IS the older account; keeping the "
-        "pre-merge token means every later call reads the empty account"
+        "after a merge the customer IS the account that owns the phone; keeping "
+        "the pre-merge token means every later call reads the deleted account"
     )
 
 
@@ -1323,7 +1324,7 @@ async def test_a_registration_that_times_out_tells_the_customer_and_clears_the_f
 
     # The states that DO exist, so a renumbering or a dropped branch is loud.
     assert sorted(state for state in handler.states if state != ConversationHandler.TIMEOUT) == sorted(
-        [SELECT_LANGUAGE, PHONE, LINK_ACCOUNT_CONFIRM, LINK_ACCOUNT_OTP, REGISTER_OTP]
+        [SELECT_LANGUAGE, PHONE, LINK_ACCOUNT_CONFIRM, LINK_ACCOUNT_OTP, REGISTER_OTP, WEB_LINK_CONFIRM]
     )
 
     await reach_register_otp_step(bot, user)

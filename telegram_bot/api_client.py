@@ -17,6 +17,7 @@ import os
 
 from config import config
 from database import db_manager
+from shared.bot_token_recovery import sign_in_again
 
 logger = logging.getLogger('api_client')
 
@@ -94,6 +95,9 @@ class BusinessAPIClient:
         # import time, before any loop exists.
         self._lifecycle_lock = asyncio.Lock()
         self._circuit_breaker = CircuitBreaker(failure_threshold=5, recovery_timeout=30.0)
+        # The bot's TokenManager, attached at startup (bot.py): a customer token the backend refuses
+        # is replaced through it (`_sign_in_again`).
+        self.token_manager = None
 
     async def start(self) -> None:
         """Build the persistent HTTP client. Idempotent; owned by the bot.
@@ -248,7 +252,8 @@ class BusinessAPIClient:
                           language: Optional[str] = None,
                           token_manager=None,
                           telegram_id: Optional[int] = None,
-                          sign: bool = False) -> APIResponse:
+                          sign: bool = False,
+                          _signed_in_again: bool = False) -> APIResponse:
         """Make HTTP request with retry logic and circuit breaker"""
         # Circuit breaker: fail fast if backend is presumed down
         if not self._circuit_breaker.allow_request():
@@ -364,6 +369,18 @@ class BusinessAPIClient:
                         except Exception as inv_err:
                             logger.warning(f"Failed to invalidate tokens: {inv_err}")
 
+                    # A customer's token refused: the account's logins were ended (a password
+                    # reset, a merge, a role change; spec 2026-10-19 R9). The bot signs
+                    # that customer in again and repeats the call once, so they never notice.
+                    if response.status_code == 401 and user_token and not _signed_in_again:
+                        fresh_token = await self._sign_in_again(user_token)
+                        if fresh_token:
+                            return await self._make_request(
+                                method, endpoint, headers=headers, data=data, params=params,
+                                user_token=fresh_token, language=language, sign=sign,
+                                _signed_in_again=True,
+                            )
+
                     # Surface the full error body so callers can read structured
                     # fields (e.g. `cancelled_order_id` on Asl belgisi 503).
                     return APIResponse(
@@ -437,6 +454,12 @@ class BusinessAPIClient:
                         success=False,
                         error=str(e)
                     )
+
+    async def _sign_in_again(self, refused_token: str) -> Optional[str]:
+        """Replace a refused customer token: drop its cached pair, sign its owner in again through the
+        signed telegram-login, cache the new pair and return its access token. None when the token is
+        not one the TokenManager handed out, or the sign-in fails (`shared.bot_token_recovery`)."""
+        return await sign_in_again(self.token_manager, refused_token, self.authenticate_user)
 
     # Authentication methods
     async def authenticate_user(self, telegram_id: int, user_data: dict = None) -> Optional[str]:
@@ -1102,11 +1125,6 @@ class BusinessAPIClient:
         return await self._make_request('POST', '/api/v1/auth/logout',
                                        user_token=user_token)
 
-    async def logout_all_sessions(self, user_token: str) -> APIResponse:
-        """Logout from all sessions"""
-        return await self._make_request('POST', '/api/v1/auth/logout-all',
-                                       user_token=user_token)
-
     async def get_user_sessions(self, user_token: str) -> APIResponse:
         """Get all user sessions"""
         return await self._make_request('GET', '/api/v1/auth/sessions',
@@ -1194,6 +1212,54 @@ class BusinessAPIClient:
             'POST',
             '/api/v1/auth/link-phone-account/verify',
             data={'telegram_id': telegram_id, 'otp': otp},
+            sign=True,
+        )
+
+    async def web_link_preview(self, telegram_id: int, token: str) -> APIResponse:
+        """What the confirm card for a /my-account link names, without using the link up.
+
+        Spec 2026-10-19 D4. Signed: no customer JWT exists yet, and the backend
+        trusts `telegram_id` only from a signed bot request.
+
+        Returns:
+            APIResponse with `{account_label, language}`, or a refusal whose
+            top-level `error_code` is WEB_LINK_EXPIRED, WEB_LINK_NOT_AVAILABLE,
+            TELEGRAM_ALREADY_HAS_ACCOUNT or TELEGRAM_LINK_STORE_UNAVAILABLE.
+        """
+        return await self._make_request(
+            'POST',
+            '/api/v1/bot/web-link/preview',
+            data={'token': token, 'telegram_id': telegram_id},
+            sign=True,
+        )
+
+    async def web_link_confirm(
+        self,
+        telegram_id: int,
+        token: str,
+        *,
+        username: Optional[str],
+        first_name: Optional[str],
+        last_name: Optional[str],
+    ) -> APIResponse:
+        """Connect this Telegram to the web account the link was issued for (the customer tapped Yes).
+
+        Spec 2026-10-19 D4. Signed, like the preview. The link is used up either way.
+
+        Returns:
+            APIResponse with `{tokens, language, greeting_name, phone_status, phone}`,
+            or a refusal with the preview's codes.
+        """
+        return await self._make_request(
+            'POST',
+            '/api/v1/bot/web-link/confirm',
+            data={
+                'token': token,
+                'telegram_id': telegram_id,
+                'username': username,
+                'first_name': first_name,
+                'last_name': last_name,
+            },
             sign=True,
         )
 

@@ -3266,6 +3266,9 @@ def test_the_api_contract_snapshot_still_lists_the_merge_preview_route(db):
     # 655 -> 657: GET /api/v1/admin/orders/<int:order_id>/address-options (admin.get_order_address_options)
     # and PATCH /api/v1/admin/orders/<int:order_id>/delivery-address (admin.change_order_delivery_address)
     # -- the admin order address change. Unrelated to place-merge; only the estate-wide count moved.
+    # 657 -> 660: auth.request_telegram_link, bot.preview_web_link and bot.confirm_web_link (web-to-Telegram link).
+    # 660 -> 657: POST /auth/logout-all, its /auth/sessions/revoke-all alias and POST
+    # /session/sessions/revoke-all (R10: each app logs out only itself).
     assert len(routes) == 657
     entry = next(r for r in routes if r["rule"] == "/api/v1/admin/place-groups/merge-preview")
     assert entry["methods"] == ["GET"]

@@ -73,8 +73,23 @@
         }
     }
 
-    function connectTelegram() {
-        showNotification(PAGE_DATA.i18n.telegram_coming_soon, 'info');
+    // The backend mints the one-time link; the page only navigates to what it answers.
+    async function connectTelegram(event) {
+        var button = event.currentTarget;
+        button.disabled = true;
+        try {
+            var response = await apiRequest('/auth/telegram-link?lang=' + encodeURIComponent(PAGE_DATA.language), { method: 'POST' });
+            var result = await response.json();
+            if (response.ok && result.success) {
+                window.location.href = result.data.telegram_link;
+            } else {
+                showNotification(result.message || PAGE_DATA.i18n.telegram_link_failed, 'error');
+            }
+        } catch (error) {
+            showNotification(PAGE_DATA.i18n.telegram_link_failed, 'error');
+        } finally {
+            button.disabled = false;
+        }
     }
 
     async function downloadAccountData() {
@@ -124,8 +139,9 @@
             });
         });
 
-        var telegramBtn = document.querySelector('[data-action="connect-telegram"]');
-        if (telegramBtn) telegramBtn.addEventListener('click', connectTelegram);
+        document.querySelectorAll('[data-action="connect-telegram"]').forEach(function (btn) {
+            btn.addEventListener('click', connectTelegram);
+        });
 
         var downloadBtn = document.querySelector('[data-action="download-account-data"]');
         if (downloadBtn) downloadBtn.addEventListener('click', downloadAccountData);

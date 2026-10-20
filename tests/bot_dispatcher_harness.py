@@ -18,13 +18,17 @@ What it provides:
   could they tap?
 * :class:`UpdateFactory` — real :class:`telegram.Update` objects, including the
   ``bot_command`` entity without which ``CommandHandler`` never matches.
+* :class:`FlaskBackend` — a bot's HTTP client answered by the REAL Flask app, for
+  the journeys that need the real backend behind the bot's own request funnel.
 """
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any, Callable, Optional
+from urllib.parse import urlsplit
 
 from telegram import Update
 from telegram.request import BaseRequest, RequestData
@@ -527,3 +531,46 @@ class UpdateFactory:
                 },
             },
         })
+
+
+class FlaskBackend:
+    """A bot's HTTP client, answered by the REAL Flask app: every request the bot's own
+    `_make_request` builds (headers, signature, body bytes) reaches the real routes.
+
+    Speaks both clients' httpx calls: the customer bot's `get` / `post` and the staff
+    bot's `request`. `seen` records (method, path, status, Authorization header).
+    """
+
+    def __init__(self, app):
+        self.app = app
+        self.seen = []
+
+    async def request(self, method, url, headers=None, params=None, cookies=None, json=None, content=None):
+        path = urlsplit(url).path
+        body = {"json": json} if json is not None else {"data": content}
+        resp = self.app.test_client().open(path, method=method, headers=headers, query_string=params, **body)
+        self.seen.append((method, path, resp.status_code, (headers or {}).get("Authorization")))
+        return _FlaskResponse(resp, method)
+
+    async def get(self, url, **kwargs):
+        return await self.request("GET", url, **kwargs)
+
+    async def post(self, url, **kwargs):
+        return await self.request("POST", url, **kwargs)
+
+
+class _FlaskResponse:
+    """The parts of an `httpx.Response` the bots read."""
+
+    def __init__(self, resp, method):
+        self.status_code = resp.status_code
+        self.headers = dict(resp.headers)
+        self.content = resp.get_data()
+        self.text = resp.get_data(as_text=True)
+        self.request = SimpleNamespace(method=method)
+        self._json = resp.get_json(silent=True)
+
+    def json(self):
+        if self._json is None:
+            raise ValueError("not JSON")
+        return self._json

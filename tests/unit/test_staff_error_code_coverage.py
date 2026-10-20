@@ -39,10 +39,12 @@ NOT_STAFF_FACING: dict[str, str] = {
     "/auth/admin/*)",
     "EMAIL_VERIFICATION_REQUIRED": f"{_NOT_ON_ROUTE} (auth_middleware.py:511 require_verified_user, used by no route)",
     "INSUFFICIENT_PERMISSIONS": f"{_NOT_ON_ROUTE} (auth_middleware.py:90 require_role: /auth/admin/*)",
-    "INVALID_OTP": f"{_NOT_ON_ROUTE} (auth_service.py:748: /auth/phone/register/verify)",
+    "INVALID_OTP": f"{_NOT_ON_ROUTE} (auth_service.py:748: /auth/phone/register/verify; "
+    "verify_phone_link_and_merge_accounts: customer bot /auth/link-phone-account/verify)",
     "INVALID_REQUEST": f"{_NOT_ON_ROUTE} (auth_middleware.py:238 verify_user_ownership, used by no route)",
     "INVALID_SESSION": f"{_NOT_ON_ROUTE} (auth_middleware.py:450 unused; token_service.py:438: /auth/validate-token)",
-    "OTP_EXPIRED": f"{_NOT_ON_ROUTE} (auth_service.py:722: /auth/phone/register/verify)",
+    "OTP_EXPIRED": f"{_NOT_ON_ROUTE} (auth_service.py:722: /auth/phone/register/verify; "
+    "verify_phone_link_and_merge_accounts: customer bot /auth/link-phone-account/verify)",
     "OTP_MAX_ATTEMPTS": f"{_NOT_ON_ROUTE} (auth_service.py:613/711/741/868: /auth/phone/register/*, "
     "/auth/phone/resend-otp)",
     "PERMISSION_DENIED": f"{_NOT_ON_ROUTE} (auth_middleware.py:143 require_permission, used by no route)",
@@ -56,11 +58,24 @@ NOT_STAFF_FACING: dict[str, str] = {
     "TOKEN_REVOKED": f"{_NOT_ON_ROUTE} (auth_middleware.py:348 check_token_blacklist, used by no route)",
     "USER_INACTIVE": f"{_NOT_ON_ROUTE} (token_service.py:434: /auth/validate-token)",
     "USER_NOT_FOUND": f"{_NOT_ON_ROUTE} (auth_middleware.py:72/257/502, token_service.py:431: /auth/admin/*, "
-    "/auth/validate-token)",
+    "/auth/validate-token; auth_service.py verify_phone_link_and_merge_accounts: customer bot "
+    "/auth/link-phone-account/verify)",
     "USER_NOT_REGISTERED": f"{_NOT_ON_ROUTE} (api/auth.py:1801 /auth/telegram-login, customer bot)",
     "VALIDATION_FAILED": f"{_NOT_ON_ROUTE} (token_service.py:448: /auth/validate-token)",
     "VERIFICATION_CHECK_FAILED": f"{_NOT_ON_ROUTE} (auth_middleware.py:527 require_verified_user, used by no route)",
     "ERROR_CODE": f"{_NOT_ON_ROUTE} (utils/swagger_config.py:57, a placeholder in the API docs, never raised)",
+    # The customer bot's phone-link merge (auth_service.py verify_phone_link_and_merge_accounts).
+    "ACCOUNTS_LINKING_FAILED": f"{_NOT_ON_ROUTE} (auth_service.py verify_phone_link_and_merge_accounts: customer bot "
+    "/auth/link-phone-account/verify)",
+    "PHONE_LINK_NOT_AVAILABLE": f"{_NOT_ON_ROUTE} (auth_service.py verify_phone_link_and_merge_accounts: customer bot "
+    "/auth/link-phone-account/verify)",
+    # Customer web-to-Telegram link (customer_telegram_link_service.py): the web tap and the customer bot.
+    "TELEGRAM_ALREADY_HAS_ACCOUNT": f"{_NOT_ON_ROUTE} (customer_telegram_link_service.py: customer bot /bot/web-link/*)",
+    "TELEGRAM_LINK_NOT_AVAILABLE": f"{_NOT_ON_ROUTE} (customer_telegram_link_service.py issue_link: web POST /auth/telegram-link)",
+    "TELEGRAM_LINK_STORE_UNAVAILABLE": f"{_NOT_ON_ROUTE} (customer_telegram_link_service.py: web POST /auth/telegram-link, "
+    "customer bot /bot/web-link/*)",
+    "WEB_LINK_EXPIRED": f"{_NOT_ON_ROUTE} (customer_telegram_link_service.py: customer bot /bot/web-link/*)",
+    "WEB_LINK_NOT_AVAILABLE": f"{_NOT_ON_ROUTE} (customer_telegram_link_service.py: customer bot /bot/web-link/*)",
     # Customer ordering and payments.
     "ASL_BELGISI_UNAVAILABLE": f"{_NOT_ON_ROUTE} (api/orders.py:442, customer POST /orders card path)",
     "MARKING_CODES_POOL_SHORT": f"{_NOT_ON_ROUTE} (api/payments.py:326 /payments/create; admin payment-method edit)",

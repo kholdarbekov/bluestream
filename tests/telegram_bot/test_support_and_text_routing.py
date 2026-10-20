@@ -96,7 +96,7 @@ TRANSLATIONS = {
     ),
     ("uz", "telegram.support.ack"): "✅ Rahmat! Xabaringiz qo'llab-quvvatlash guruhiga yuborildi.",
     ("ru", "telegram.support.ack"): "✅ Спасибо! Ваше сообщение отправлено в службу поддержки.",
-    "telegram.support.menu_coming_soon": "🆘 Yordam menyusi tez orada ishga tushadi!",
+    "telegram.support.menu_intro": "🆘 Savolingiz bormi? Uni shu chatga yozing, jamoamiz shu yerda javob beradi.",
     "telegram.support.faq_coming_soon": "❓ Tez-tez so'raladigan savollar tez orada qo'shiladi!",
     "telegram.support.contact_message": "📞 Yordam bilan bog'lanish: @aqua_element_support",
     "telegram.help.command_hint": "🆘 Yordam: Mavjud bo'limlarni ko'rish uchun /menu dan foydalaning.",
@@ -684,7 +684,7 @@ async def test_the_support_menu_opens_and_offers_a_way_back(bot, user):
     await bot.send(user.tap("menu_support"))
 
     shown = bot.telegram.last_shown()
-    assert shown.text == TRANSLATIONS["telegram.support.menu_coming_soon"]
+    assert shown.text == TRANSLATIONS["telegram.support.menu_intro"]
     assert shown.callback_data() == ["back_to_main"]
     assert shown.button_labels() == [TRANSLATIONS["telegram.back"]], (
         "the exit has to be labelled in the customer's language, not left as a "

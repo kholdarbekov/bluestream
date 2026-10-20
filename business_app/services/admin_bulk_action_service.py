@@ -13,6 +13,7 @@ from business_app.models.review import Review
 from business_app.models.subscription import Subscription
 from business_app.models.user import User
 from business_app.services.delivery_service import DeliveryService
+from business_app.services.session_revocation_service import SessionRevocationService
 from business_app.utils.exceptions import ValidationError
 from shared.enums import OrderStatus, SubscriptionStatus, UserRole, UserStatus
 from shared.status_transitions import is_valid_order_transition
@@ -105,24 +106,12 @@ class AdminBulkActionService:
                     ]
                     if new_role in valid_roles:
                         old_role = user.role
+                        roles_before = SessionRevocationService.roles_of(user)
                         user.role = UserRole(new_role)
-                        try:
-                            from business_app.services.token_service import TokenService
-
-                            token_service = TokenService()
-                            token_service.revoke_user_tokens(user_id)
-                            current_app.logger.info(
-                                "Invalidated tokens for user %s after role change: %s -> %s",
-                                user_id,
-                                old_role,
-                                new_role,
-                            )
-                        except Exception as token_err:
-                            current_app.logger.warning(
-                                "Failed to invalidate tokens for user %s: %s",
-                                user_id,
-                                token_err,
-                            )
+                        # The new role applies at once: the person's logins end (owner decision R9c).
+                        # With Redis down this raises, and the user's change rolls back below.
+                        SessionRevocationService.revoke_on_role_change(user, roles_before)
+                        current_app.logger.info("Assigned role %s to user %s (was %s)", new_role, user_id, old_role)
                     else:
                         failed_count += 1
                         errors.append({"user_id": user_id, "error": "Invalid role"})

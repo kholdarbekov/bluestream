@@ -336,13 +336,11 @@ def check_token_blacklist():
                 jti = claims.get("jti")
 
                 if jti:
-                    # Check if token is blacklisted using TokenService
-                    from business_app.services.token_service import TokenService
+                    # The one revocation rule (also the JWT blocklist loader's)
+                    from business_app.services.session_revocation_service import SessionRevocationService
 
-                    token_service = TokenService()
-
-                    if token_service.is_token_blacklisted(jti):
-                        logger.warning(f"Blacklisted token used: {jti[:8]}...")
+                    if SessionRevocationService.is_revoked(claims):
+                        logger.warning(f"Revoked token used: {jti[:8]}...")
                         return (
                             jsonify(
                                 {"success": False, "message": "Token has been revoked", "error_code": "TOKEN_REVOKED"}

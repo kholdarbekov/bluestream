@@ -8,13 +8,18 @@ from flask import Blueprint, request, jsonify
 from pydantic import ValidationError as PydanticValidationError
 
 from business_app.config import get_config
-from business_app.serializers.bot_serializers import TelegramReachabilityReport
+from business_app.serializers.bot_serializers import (
+    TelegramReachabilityReport,
+    WebLinkConfirmRequest,
+    WebLinkPreviewRequest,
+)
 from business_app.services.telegram_reachability_service import (
     REACHABILITY_REPORT_INVALID,
     TelegramReachabilityService,
 )
 from business_app.utils.api_responses import success_response, validation_error_response
 from business_app.utils.decorators import require_auth, require_admin, verify_webhook_signature
+from business_app.utils.decorators import handle_exceptions, rate_limit_by_telegram_id
 from business_app.utils.exceptions import ValidationError
 
 logger = logging.getLogger(__name__)
@@ -209,3 +214,158 @@ def report_telegram_reachability():
     except (PydanticValidationError, ValidationError) as exc:
         return validation_error_response(str(exc), error_code=REACHABILITY_REPORT_INVALID)
     return success_response(data={"changed": changed})
+
+
+@bot_bp.route("/web-link/preview", methods=["POST"])
+@verify_webhook_signature()
+@rate_limit_by_telegram_id(30, 3600)
+@handle_exceptions
+def preview_web_link():
+    """
+    Name the account a website link would connect, without using the link (spec 2026-10-19 D4)
+    ---
+    tags:
+      - Bot
+    parameters:
+      - in: header
+        name: X-Bot-Webhook-Signature
+        type: string
+        required: true
+        description: HMAC-SHA256 of the exact body with BOT_WEBHOOK_SECRET
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - token
+            - telegram_id
+          properties:
+            token:
+              type: string
+              maxLength: 64
+              description: The text after `/start web_`
+            telegram_id:
+              type: integer
+              example: 123456789
+    responses:
+      200:
+        description: The confirm card's account and language; the link stays usable
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            data:
+              type: object
+              properties:
+                account_label:
+                  type: string
+                  example: "K*** K*** · +998***4567"
+                language:
+                  type: string
+                  example: ru
+      400:
+        description: WEB_LINK_EXPIRED (expired, used or replaced by a newer link), or a malformed body
+      401:
+        description: Missing or invalid bot signature
+      409:
+        description: WEB_LINK_NOT_AVAILABLE (the account can no longer be connected) or TELEGRAM_ALREADY_HAS_ACCOUNT
+      503:
+        description: TELEGRAM_LINK_STORE_UNAVAILABLE (the link store is down)
+    """
+    from business_app.services.customer_telegram_link_service import CustomerTelegramLinkService
+
+    body = WebLinkPreviewRequest.model_validate(request.get_json(silent=True) or {})
+    return success_response(data=CustomerTelegramLinkService.preview(body.token, telegram_id=body.telegram_id))
+
+
+@bot_bp.route("/web-link/confirm", methods=["POST"])
+@verify_webhook_signature()
+@rate_limit_by_telegram_id(30, 3600)
+@handle_exceptions
+def confirm_web_link():
+    """
+    Connect the Telegram to the website account on the customer's Yes, and sign the bot in (spec 2026-10-19 D4)
+    ---
+    tags:
+      - Bot
+    parameters:
+      - in: header
+        name: X-Bot-Webhook-Signature
+        type: string
+        required: true
+        description: HMAC-SHA256 of the exact body with BOT_WEBHOOK_SECRET
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - token
+            - telegram_id
+          properties:
+            token:
+              type: string
+              maxLength: 64
+            telegram_id:
+              type: integer
+              example: 123456789
+            username:
+              type: string
+              example: kamola_k
+            first_name:
+              type: string
+              example: Kamola
+            last_name:
+              type: string
+              example: Karimova
+    responses:
+      200:
+        description: Connected; the link is spent
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            data:
+              type: object
+              properties:
+                tokens:
+                  type: object
+                  description: access_token, refresh_token, token_type, expires_in
+                language:
+                  type: string
+                  example: ru
+                greeting_name:
+                  type: string
+                  example: Kamola
+                phone_status:
+                  type: string
+                  enum: [verified, unverified, missing]
+                phone:
+                  type: string
+                  example: "+998901234567"
+      400:
+        description: WEB_LINK_EXPIRED (expired, used or replaced by a newer link), or a malformed body
+      401:
+        description: Missing or invalid bot signature
+      409:
+        description: WEB_LINK_NOT_AVAILABLE or TELEGRAM_ALREADY_HAS_ACCOUNT; the link is spent either way
+      503:
+        description: TELEGRAM_LINK_STORE_UNAVAILABLE (the link store is down)
+    """
+    from business_app.services.customer_telegram_link_service import CustomerTelegramLinkService
+
+    body = WebLinkConfirmRequest.model_validate(request.get_json(silent=True) or {})
+    return success_response(
+        data=CustomerTelegramLinkService.confirm(
+            body.token,
+            telegram_id=body.telegram_id,
+            username=body.username,
+            first_name=body.first_name,
+            last_name=body.last_name,
+        )
+    )

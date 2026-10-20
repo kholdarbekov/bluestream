@@ -13,6 +13,7 @@ from datetime import date, datetime, timezone
 import os
 
 from staff_bot.config import config
+from shared.bot_token_recovery import sign_in_again
 
 logger = logging.getLogger('api_client')
 
@@ -187,6 +188,9 @@ class StaffAPIClient:
         self.retry_delay = config.business_api.retry_delay
         self._client = None
         self._circuit_breaker = CircuitBreaker(failure_threshold=5, recovery_timeout=30.0)
+        # The bot's TokenManager, attached at startup (bot.py): a staff token the backend refuses
+        # is replaced through it (`_sign_in_again`).
+        self.token_manager = None
 
     def _resolve_verify_config(self):
         """Resolve SSL verification configuration for httpx client."""
@@ -322,7 +326,8 @@ class StaffAPIClient:
         token: str = None, data: Dict = None,
         params: Dict = None,
         headers: Dict = None,
-        sign: bool = False
+        sign: bool = False,
+        _signed_in_again: bool = False
     ) -> APIResponse:
         """Make HTTP request with retry logic and circuit breaker."""
         if not self._circuit_breaker.allow_request():
@@ -412,6 +417,19 @@ class StaffAPIClient:
                             "Authentication failed",
                             'STAFF_AUTH_REQUIRED',
                         )
+                        # A staff token refused: the account's logins were ended (a password
+                        # reset, an account merge or a role change; spec 2026-10-19 R9). Sign that staff
+                        # member in again and repeat the call once, so they never notice.
+                        # Repeating is safe for every verb, POST too (RETRY_SAFE_METHODS
+                        # governs transport failures): a 401 is the JWT check refusing the
+                        # request before any route ran, so nothing was applied.
+                        if token and not _signed_in_again:
+                            fresh_token = await self._sign_in_again(token)
+                            if fresh_token:
+                                return await self._make_request(
+                                    method, endpoint, token=fresh_token, data=data, params=params,
+                                    headers=headers, sign=sign, _signed_in_again=True,
+                                )
                         return APIResponse(
                             success=False,
                             error="Authentication failed",
@@ -538,6 +556,26 @@ class StaffAPIClient:
             error="Request failed after retries",
             error_code=TRANSPORT_AMBIGUOUS_ERROR_CODE if ambiguous else None,
         )
+
+    async def _sign_in_again(self, refused_token: str) -> Optional[str]:
+        """Replace a refused staff token: drop its cached pair, sign its owner in again through the
+        signed /staff/auth/login (the Telegram id is already linked, so no invite), cache the new pair
+        and return its access token. None when the token is not one the TokenManager handed out, or
+        the login is refused (`shared.bot_token_recovery`)."""
+        return await sign_in_again(self.token_manager, refused_token, self._sign_in_linked_staff)
+
+    async def _sign_in_linked_staff(self, telegram_id: int) -> Optional[Dict[str, Any]]:
+        # Function-level: staff_bot.utils pulls in i18n and the database.
+        from staff_bot.utils import auth_refusals
+
+        response = await self.staff_login(telegram_id)
+        if not response.success:
+            # A switched-off account: the handler's "session expired" would send them to /start,
+            # which is refused the same way. Keep the real reason, as `_authenticate_staff_session`.
+            auth_refusals.remember(telegram_id, response.error_code)
+            return None
+        auth_refusals.forget(telegram_id)
+        return response.data
 
     # --- Staff Authentication ---
 

@@ -193,3 +193,73 @@ stays valid for up to a week unless the key changes.
 - The `ACCOUNT_MATCH_FOUND` branch, and the missing status check in
   `telegram-register`.
 - One shared eligibility rule for self-linking accounts.
+
+## 6. Redis never evicts a key (owner decision 2026-10-20)
+
+Production Redis ran `--maxmemory-policy allkeys-lru`. When full, it silently
+deleted keys to make room, and those could be session cut-offs
+(`tokens_valid_after:*`, so a signed-out device was signed in again), the
+token blacklist (`blacklist:*`) or Celery's queued tasks (lost without a
+trace). It now runs `--maxmemory-policy noeviction`
+(`docker-compose.production.yml`). A full Redis refuses new writes instead,
+and the caller sees the error. `maxmemory` is now 448 MB. It was 768 MB, above the container's
+512 MB limit, so the kernel would have killed Redis before `noeviction` ever applied.
+
+### Before applying it: check the headroom (read-only)
+
+    REDIS_PASSWORD="$(grep -E '^REDIS_PASSWORD=' .env | cut -d= -f2- | tr -d "\r\"'")"
+    $DC exec -T redis redis-cli ${REDIS_PASSWORD:+-a "$REDIS_PASSWORD"} --no-auth-warning INFO memory | grep -E '^(used_memory_human|used_memory_peak_human|maxmemory_human|maxmemory_policy):'
+    $DC exec -T redis redis-cli ${REDIS_PASSWORD:+-a "$REDIS_PASSWORD"} --no-auth-warning INFO stats | grep -E '^evicted_keys:'
+
+Compare `used_memory_human` and `used_memory_peak_human` with 448 MB
+(after the change `maxmemory_human` prints `448.00M`; before it, `768.00M`). `evicted_keys` should be `0`: anything
+higher means today's Redis has already been full and deleting keys, so with
+`noeviction` it would start refusing writes. On 2026-10-20 the production
+metrics showed about 3 MB used (the 30-day peak was 3.1 MB) and 0 evicted
+keys.
+
+The redis container is limited to 512 MB (`deploy.resources.limits.memory`).
+`maxmemory` (448 MB) now sits below that limit with room for Redis's own
+overhead, so a full Redis refuses writes instead of being killed by the kernel.
+`tests/unit/test_redis_never_evicts.py` keeps the two in line. If
+`used_memory_human` is ever near 448M, stop and decide first: raise both the
+container limit and `maxmemory` together.
+
+### What happens when Redis is full
+
+- A write that needs more memory fails with `OOM command not allowed when used
+  memory > 'maxmemory'`. Reads and deletes keep working.
+- **These fail loudly:** the action answers an error and changes nothing.
+  - A password reset, the phone-link merge and every role change cannot store
+    their cut-off.
+  - The website's "Connect Telegram" button cannot issue a link
+    (`TELEGRAM_LINK_STORE_UNAVAILABLE`).
+  - New Celery tasks cannot be queued, and the code that queues one gets the
+    error.
+- **These fail open:**
+  - Rate limits let every request through (`rate_limit` treats a Redis error
+    as "allow").
+  - Signing in still works, but the login's session record is not saved; a
+    warning is logged.
+  - Plain "Log out" still clears the browser's cookies but cannot blacklist
+    its token. That token then works until it expires, at most 30 minutes.
+- To see it happening, search Loki for `OOM command not allowed`.
+
+### Applying it (changes live state)
+
+The policy is a command-line flag, so `restart` is not enough: the container
+must be recreated. Do this once the headroom check above looks fine, at any
+time before or together with the `business_app` restart (step 3.3):
+
+    $DC up -d --no-deps redis
+
+Redis is down for a few seconds. `appendonly yes` reloads every key from the
+append-only file on the `redis_data` volume, so nothing is lost: logins,
+cut-offs and queued tasks all come back. During those seconds the per-request
+session check and the rate limits let requests through, and every service
+that uses Redis gets errors until it reconnects on its next call. Then check
+that the policy is in effect:
+
+    $DC exec -T redis redis-cli ${REDIS_PASSWORD:+-a "$REDIS_PASSWORD"} --no-auth-warning CONFIG GET maxmemory-policy
+
+Expect `noeviction`.

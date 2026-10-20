@@ -33,7 +33,7 @@ from tests.integration.reorder_reminder_builders import (  # noqa: F401 - `*_fix
 DIRECTIONS = [
     ("web keeps, Telegram merges in", "web", "telegram"),
     ("Telegram keeps, web merges in", "telegram", "web"),
-    ("same platform, the older account keeps", "web", "web"),
+    ("two web accounts, the primary keeps", "web", "web"),
 ]
 
 Episode = ReorderReminderEpisode

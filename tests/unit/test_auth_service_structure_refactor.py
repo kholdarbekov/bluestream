@@ -12,6 +12,8 @@ from business_app.services.auth_service import AuthService
 from shared.enums import PaymentMethod, SubscriptionFrequency, UserRole, UserStatus
 from business_app.utils.exceptions import ValidationError, ConflictError
 from business_app.utils.password_security import hash_password
+from scripts.seed_backend_translations import BACKEND_TRANSLATIONS
+from tests.integration.reorder_reminder_builders import seed_translations
 
 
 @pytest.fixture
@@ -98,6 +100,19 @@ def test_delete_user_address_blocks_subscription_linked_address(auth_service, db
 
 
 def test_check_phone_availability_for_telegram_returns_masked_existing_user(auth_service, db, sample_user):
+    # The caller signed up in the bot before its phone step, as registration always does first
+    db.session.add(
+        User(
+            telegram_id="12345",
+            email="telegram_12345@bot.internal",
+            password_hash="telegram_user",
+            role=UserRole.CUSTOMER,
+            status=UserStatus.ACTIVE,
+            registration_source="telegram",
+        )
+    )
+    db.session.commit()
+
     result = auth_service.check_phone_availability_for_telegram(
         phone=sample_user.phone,
         telegram_id="12345",
@@ -270,13 +285,15 @@ def test_link_flow_preserves_otp_when_merge_fails(db, sample_user):
     service.redis_client = _InMemoryRedis()
     otp = _stage_link(service, sample_user, telegram_user)
 
+    seed_translations(db, ["api.auth.accounts_linking_failed"])
     with patch(
         "business_app.services.cross_platform_sync_service.cross_platform_sync_service.auto_link_accounts",
         return_value={"success": False, "error": "transient merge failure"},
     ):
         with pytest.raises(ValidationError) as failed:
             service.verify_phone_link_and_merge_accounts(telegram_user.telegram_id, otp)
-    assert failed.value.message == "transient merge failure"
+    # The merge's reason stays in the log; the customer gets the seeded message
+    assert failed.value.message in BACKEND_TRANSLATIONS["api.auth.accounts_linking_failed"].values()
 
     with (
         patch(

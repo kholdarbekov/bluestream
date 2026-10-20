@@ -4,14 +4,16 @@ Handles user account linking and synchronization between web app and Telegram bo
 """
 
 import logging
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Optional, Tuple
 from sqlalchemy import or_
 
 from business_app import db
 from business_app.models.user import User
 from shared.enums import UserStatus
 from shared.user_names import GENERATED_TELEGRAM_NAME
-from shared.validators import PLACEHOLDER_EMAIL_DOMAIN_LOCAL
+from shared.validators import PLACEHOLDER_EMAIL_DOMAIN_LOCAL, is_deliverable_email
+from business_app.services.auth_service import TELEGRAM_SELF_LINK_SOURCES, has_website_password, mask_account_email
+from business_app.services.session_revocation_service import REVOKED_BY_ACCOUNT_MERGE, SessionRevocationService
 from business_app.services.telegram_reachability_service import TelegramReachabilityService
 from business_app.services.token_service import TokenService
 from business_app.services.loyalty_service import LoyaltyService, _invalidate_qualifying_points_memo
@@ -24,6 +26,16 @@ class CrossPlatformSyncService:
 
     def __init__(self):
         self.token_service = TokenService()
+
+    @staticmethod
+    def merge_blocked_by_canonical_link(*users: Optional[User]) -> bool:
+        """Whether a destructive merge must refuse these accounts: one of them already belongs to a
+        canonical customer. Merging deletes a user row and reparents FKs; doing that to a clustered
+        account would orphan canonical_customer_id members and address-group entries. Linking is the
+        non-destructive path. The phone-link offer and its SMS ask this too, so they never promise a
+        merge that `auto_link_accounts` refuses.
+        """
+        return any(user is not None and user.canonical_customer_id is not None for user in users)
 
     def find_potential_matches(
         self, email: str = None, phone: str = None, telegram_id: str = None, exclude_user_id: int = None
@@ -129,7 +141,8 @@ class CrossPlatformSyncService:
         Automatically link two user accounts
 
         Args:
-            primary_user: The user account to keep as primary
+            primary_user: The user account to keep. It always survives, whichever is older: the
+                phone-link merge passes the account that owns the phone (spec 2026-10-19 R8a).
             secondary_user: The user account to merge/link
             link_type: 'merge' or 'link' (merge removes secondary, link keeps both)
 
@@ -141,11 +154,7 @@ class CrossPlatformSyncService:
             if primary_user.id == secondary_user.id:
                 raise ValueError("Cannot link user to themselves")
 
-            # Refuse to merge if either side is already the canonical record for a
-            # customer. A destructive merge deletes a user row and reparents FKs;
-            # doing that to a clustered account would orphan canonical_customer_id
-            # members and address-group entries. Linking is the non-destructive path.
-            if primary_user.canonical_customer_id is not None or secondary_user.canonical_customer_id is not None:
+            if self.merge_blocked_by_canonical_link(primary_user, secondary_user):
                 raise ValueError("Cannot merge: an account is already linked to a canonical customer")
 
             # Check status - handle both enum and string values
@@ -153,18 +162,16 @@ class CrossPlatformSyncService:
             if primary_status != UserStatus.ACTIVE.value:
                 raise ValueError("Primary user account is not active")
 
-            # Perform the linking based on registration sources
+            # Perform the linking based on registration sources. A claimable account takes the
+            # Telegram of a bot signup or of a website account linked from /my-account.
             if (
-                primary_user.registration_source in ("web", "admin_created")
-                and secondary_user.registration_source == "telegram"
+                primary_user.registration_source in TELEGRAM_SELF_LINK_SOURCES
+                and secondary_user.registration_source in ("telegram", "web")
             ):
                 return self._link_web_primary_telegram_secondary(primary_user, secondary_user, link_type)
             elif primary_user.registration_source == "telegram" and secondary_user.registration_source == "web":
                 return self._link_telegram_primary_web_secondary(primary_user, secondary_user, link_type)
             else:
-                # Both from same platform - merge based on creation date (keep older account)
-                if primary_user.created_at > secondary_user.created_at:
-                    primary_user, secondary_user = secondary_user, primary_user
                 return self._merge_same_platform_accounts(primary_user, secondary_user)
 
         except Exception as e:
@@ -178,6 +185,13 @@ class CrossPlatformSyncService:
         """
         Fully merge telegram account into web account.
         Transfers all related data and deletes the telegram user entirely.
+
+        `web_user` is the account that keeps everything (the phone holder); `telegram_user` is the
+        one whose Telegram moves to it: a bot signup, or a website account linked from /my-account.
+        A website account also brings its sign-in (spec 2026-10-19 R8b): a real email moves with its
+        password, even over the survivor's own email, so the customer keeps the website login they
+        just used, and every other login of the survivor ends (R8e). A bot signup brings nothing,
+        even with a real email an admin typed: it has no website password (`has_website_password`).
         """
         secondary_id = telegram_user.id
         primary_id = web_user.id
@@ -191,6 +205,12 @@ class CrossPlatformSyncService:
         last_bot_interaction = telegram_user.last_bot_interaction
         tg_first_name = telegram_user.first_name
         tg_last_name = telegram_user.last_name
+        brings_web_login = is_deliverable_email(telegram_user.email) and has_website_password(telegram_user)
+        web_email = telegram_user.email
+        web_password_hash = telegram_user.password_hash
+        web_email_verified_at = telegram_user.email_verified_at
+        web_is_verified = telegram_user.is_verified
+        web_preferred_language = telegram_user.preferred_language
 
         # Step 1: Handle unique constraints FIRST
         self._merge_carts(primary_id, secondary_id)
@@ -199,8 +219,11 @@ class CrossPlatformSyncService:
         # Step 2: Transfer all foreign key references
         self._transfer_user_references(primary_id, secondary_id)
 
-        # Step 3: Clear telegram_id from secondary to avoid constraint violation
+        # Step 3: Clear telegram_id (and an email that moves, also unique) from secondary to avoid
+        # a constraint violation
         telegram_user.telegram_id = None
+        if brings_web_login:
+            telegram_user.email = f"deleted_{secondary_id}@{PLACEHOLDER_EMAIL_DOMAIN_LOCAL}"
         db.session.flush()
 
         # Step 4: Transfer telegram-specific data to web user
@@ -216,6 +239,24 @@ class CrossPlatformSyncService:
             web_user.first_name = tg_first_name
         if not web_user.last_name and tg_last_name:
             web_user.last_name = tg_last_name
+
+        # The website sign-in, and the language just saved from the page the customer used (D11)
+        if brings_web_login:
+            if is_deliverable_email(web_user.email):
+                logger.info(
+                    "User %s drops its email %s for the website login of merged user %s",
+                    primary_id,
+                    mask_account_email(web_user.email),
+                    secondary_id,
+                )
+            web_user.email = web_email
+            web_user.password_hash = web_password_hash
+            web_user.email_verified_at = web_email_verified_at
+            web_user.is_verified = web_is_verified
+            web_user.preferred_language = web_preferred_language
+            # Its password changed: whoever was still signed in to it is signed out (R8e). The
+            # tokens the bot gets for it next are issued after the cut-off.
+            SessionRevocationService.revoke_all(primary_id, reason=REVOKED_BY_ACCOUNT_MERGE)
 
         # Step 5: Delete the secondary user entirely
         db.session.delete(telegram_user)
@@ -337,7 +378,7 @@ class CrossPlatformSyncService:
         from business_app.models.order import Order, OrderStatusHistory
         from business_app.models.payment import Payment, PaymentTransaction, CreditCard
         from business_app.models.subscription import Subscription, SubscriptionLog
-        from business_app.models.notification import Notification, NotificationPreference, PushNotificationToken
+        from business_app.models.notification import Notification, PushNotificationToken
         from business_app.models.review import Review
         from business_app.models.user import UserAddress, UserSession
         from business_app.models.delivery import Delivery, DeliveryStatusHistory, DeliveryPerson
@@ -367,7 +408,7 @@ class CrossPlatformSyncService:
 
         # Notifications
         Notification.query.filter_by(user_id=secondary_id).update({"user_id": primary_id})
-        NotificationPreference.query.filter_by(user_id=secondary_id).update({"user_id": primary_id})
+        self._merge_notification_preferences(primary_id, secondary_id)
         PushNotificationToken.query.filter_by(user_id=secondary_id).update({"user_id": primary_id})
 
         # Reviews
@@ -467,6 +508,25 @@ class CrossPlatformSyncService:
         db.session.flush()
         logger.info(f"Transferred all user references from {secondary_id} to {primary_id}")
 
+    def _merge_notification_preferences(self, primary_id: int, secondary_id: int):
+        """Move the secondary user's notification preferences onto the primary user.
+
+        A user holds one row per (type, channel), and anyone who opened the notification settings
+        (the website's or the bot's) holds the full default set, so a bulk move breaks that unique
+        key whenever both accounts have opened them. Where both hold a row, the survivor's choice
+        stays and the secondary's is dropped; every other row moves.
+        """
+        from business_app.models.notification import NotificationPreference
+
+        kept = {
+            (row.notification_type, row.channel) for row in NotificationPreference.query.filter_by(user_id=primary_id)
+        }
+        for row in NotificationPreference.query.filter_by(user_id=secondary_id):
+            if (row.notification_type, row.channel) in kept:
+                db.session.delete(row)
+        db.session.flush()
+        NotificationPreference.query.filter_by(user_id=secondary_id).update({"user_id": primary_id})
+
     def _link_telegram_primary_web_secondary(
         self, telegram_user: User, web_user: User, link_type: str
     ) -> Dict[str, Any]:
@@ -543,7 +603,7 @@ class CrossPlatformSyncService:
 
     def _merge_same_platform_accounts(self, primary_user: User, secondary_user: User) -> Dict[str, Any]:
         """
-        Merge two accounts from the same platform (keep the older one).
+        Merge two accounts from the same platform (keep the primary, whichever is older).
         Fully deletes the secondary user after transferring all data.
         """
         primary_id = primary_user.id
@@ -620,7 +680,7 @@ class CrossPlatformSyncService:
                     "has_access": bool(user.email and not user.email.startswith("telegram_")),
                     "email": user.email if not user.email.startswith("telegram_") else None,
                     "verified": bool(user.email_verified_at),
-                    "can_login": bool(user.password_hash and user.password_hash != "telegram_user"),
+                    "can_login": has_website_password(user),
                 },
                 "telegram": {
                     "has_access": bool(user.telegram_id),

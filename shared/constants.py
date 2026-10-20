@@ -18,6 +18,13 @@ DISPLAY_TIMEZONE_OFFSET = os.environ.get("DISPLAY_TIMEZONE_OFFSET", "+05:00")
 # with this.
 ORDER_DISPLAY_AWAITING_NEW_DATE = "awaiting_new_date"
 
+# ─── Customer bot deep links ────────────────────────────────────────────
+
+# `/start web_<token>`: the one-time link /my-account issues to connect a web-only customer's
+# Telegram (CustomerTelegramLinkService). Built by the backend and parsed by the customer bot from
+# this one constant; it collides with none of `ref_`, `ai_`, `src_` or `staff_invite_`.
+WEB_LINK_START_PREFIX = "web_"
+
 ORDER_STATUS_ICONS = {
     "created": "📝",
     "pending": "🕐",

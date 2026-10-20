@@ -78,7 +78,7 @@ _BOT_SIGNED_ROUTES = {
 }
 
 
-def _user(db, *, phone, telegram_id=None):
+def _user(db, *, phone, telegram_id=None, registration_source="web"):
     user = User(
         email=f"u{phone[-4:]}@example.com",
         phone=phone,
@@ -89,6 +89,7 @@ def _user(db, *, phone, telegram_id=None):
         role=UserRole.CUSTOMER,
         status=UserStatus.ACTIVE,
         telegram_id=telegram_id,
+        registration_source=registration_source,
         is_verified=True,
         created_at=datetime.now(UTC),
     )
@@ -117,7 +118,8 @@ def _writes_snapshot(db):
 
 @pytest.fixture
 def bot_route_accounts(db):
-    _user(db, phone="+998901110902", telegram_id=str(_TG_ID))  # the bot customer
+    # the bot customer: a bot signup, the only row the phone-link merge may fold
+    _user(db, phone="+998901110902", telegram_id=str(_TG_ID), registration_source="telegram")
     _user(db, phone=_WEB_PHONE)  # the web account they would link to
 
 

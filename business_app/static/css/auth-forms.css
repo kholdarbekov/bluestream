@@ -339,64 +339,6 @@
 }
 
 /* ============================================
-   TELEGRAM SECTION
-   ============================================ */
-
-.telegram-section {
-    background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
-    border: 2px solid #bae6fd;
-    border-radius: 16px;
-    padding: 24px;
-    margin-bottom: 24px;
-}
-
-.telegram-section .telegram-header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 12px;
-}
-
-.telegram-section .telegram-header i {
-    font-size: 24px;
-    color: #0088cc;
-}
-
-.telegram-section .telegram-header h4 {
-    font-size: 16px;
-    font-weight: 700;
-    color: #0c4a6e;
-    margin: 0;
-}
-
-.telegram-section .telegram-desc {
-    font-size: 14px;
-    color: #64748b;
-    margin-bottom: 16px;
-    line-height: 1.5;
-}
-
-.telegram-section .telegram-info {
-    background: #ffffff;
-    border-radius: 12px;
-    padding: 16px;
-    margin-top: 16px;
-    border: 1px solid #e0f2fe;
-}
-
-.telegram-section .telegram-info p {
-    font-size: 13px;
-    color: #475569;
-    margin: 0;
-    line-height: 1.7;
-}
-
-.telegram-section .telegram-info a {
-    color: #0088cc;
-    font-weight: 600;
-}
-
-/* ============================================
    PASSWORD STRENGTH METER
    ============================================ */
 
@@ -504,9 +446,6 @@
         gap: 12px;
     }
 
-    .telegram-section {
-        padding: 20px;
-    }
 }
 
 @media only screen and (max-width: 480px) {

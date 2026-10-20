@@ -107,27 +107,6 @@
                             </div>
                         </div>
 
-                        <!-- Telegram Section -->
-                        <div class="telegram-section">
-                            <div class="telegram-header">
-                                <i class="fab fa-telegram-plane"></i>
-                                <h4>{{ 'Link Telegram Account (Optional)'|t }}</h4>
-                            </div>
-                            <p class="telegram-desc">{{ 'Link your Telegram account to use our bot and sync your data across platforms'|t }}</p>
-                            <label class="auth-checkbox">
-                                <input type="checkbox" id="link_telegram" name="link_telegram">
-                                <span class="checkbox-label">{{ 'I want to link my Telegram account'|t }}</span>
-                            </label>
-                            <div id="telegram_linking_info" class="telegram-info" style="display: none;">
-                                <p>
-                                    <strong>{{ 'After registration:'|t }}</strong><br>
-                                    1. {{ 'Open our Telegram bot'|t }}: <a href="https://t.me/bluestream_bot" target="_blank">@bluestream_bot</a><br>
-                                    2. {{ 'Use the linking code that will be provided'|t }}<br>
-                                    3. {{ 'Enjoy unified access across web and Telegram!'|t }}
-                                </p>
-                            </div>
-                        </div>
-
                         <!-- Terms & Newsletter -->
                         <div class="checkbox-group">
                             <label class="auth-checkbox">
@@ -217,7 +196,6 @@
         'send_failed': 'Failed to send verification code' | t,
         'network_error': 'Network error. Please try again.' | t,
         'account_created_email': 'Account created successfully! Please check your email to verify your account.' | t,
-        'telegram_linking_code': 'Telegram Linking Code' | t,
         'registration_failed': 'Registration failed' | t,
         'account_created_verified': 'Account created and phone verified successfully!' | t,
         'verification_failed': 'Verification failed' | t,
@@ -231,16 +209,6 @@
         'fair_password': 'Fair password' | t,
         'good_password': 'Good password' | t,
         'strong_password': 'Strong password' | t,
-        'code_copied': 'Code copied to clipboard' | t,
-        'telegram_linking_title': 'Telegram Account Linking' | t,
-        'account_created_success': 'Your account has been created successfully!' | t,
-        'linking_code_label': 'Linking Code' | t,
-        'copy_code': 'Copy Code' | t,
-        'to_link_telegram': 'To link your Telegram account' | t,
-        'open_telegram_bot': 'Open Telegram and find our bot' | t,
-        'send_command': 'Send the command' | t,
-        'follow_bot_instructions': 'Follow the bot instructions' | t,
-        'continue_btn': 'Continue' | t,
     },
 }) }}
 <script src="{{ url_for('static', filename='js/pages/register.js') }}"></script>

@@ -12,7 +12,6 @@ from flask_jwt_extended import create_access_token, create_refresh_token, decode
 import jwt
 
 from business_app.models.user import User
-from shared.enums import UserStatus
 
 logger = logging.getLogger(__name__)
 
@@ -83,15 +82,6 @@ class TokenService:
                 return int(normalized)
             return normalized
         return user_id
-
-    @staticmethod
-    def _is_user_active(user: Optional[User]) -> bool:
-        """Treat both enum-backed and raw-string statuses as active when equivalent."""
-        if not user:
-            return False
-
-        status = user.status.value if hasattr(user.status, "value") else user.status
-        return status == UserStatus.ACTIVE.value
 
     def generate_tokens(self, user: User, additional_claims: Optional[Dict] = None) -> Dict[str, Any]:
         """
@@ -189,6 +179,9 @@ class TokenService:
         Returns:
             Dictionary with new access_token and metadata
         """
+        from business_app.services.auth_service import may_sign_in  # lazy: AuthService imports TokenService
+        from business_app.services.session_revocation_service import SessionRevocationService  # lazy: it imports us
+
         try:
             # Decode refresh token to get claims
             claims = decode_token(refresh_token)
@@ -196,14 +189,13 @@ class TokenService:
             lookup_user_id = self._normalize_user_lookup_id(user_id)
             session_id = claims.get("session_id")
 
-            # Check if refresh token is blacklisted
-            refresh_jti = claims["jti"]
-            if self.is_token_blacklisted(refresh_jti):
-                raise ValueError("Refresh token is blacklisted")
+            # decode_token checks no revocation: the one rule the blocklist loader applies
+            if SessionRevocationService.is_revoked(claims):
+                raise ValueError("Refresh token is revoked")
 
             # Get user
             user = User.query.get(lookup_user_id)
-            if not self._is_user_active(user):
+            if not may_sign_in(user):
                 raise ValueError("User not found or inactive")
 
             # Validate session
@@ -365,13 +357,12 @@ class TokenService:
             logger.exception("Failed to blacklist token by string")
             return False
 
-    def revoke_user_tokens(self, user_id: int, exclude_session_id: Optional[str] = None) -> bool:
+    def revoke_user_tokens(self, user_id: int) -> bool:
         """
-        Revoke all tokens for a user (useful for logout all sessions)
+        Revoke all tokens for a user (password reset, merge, role change)
 
         Args:
             user_id: User ID
-            exclude_session_id: Session ID to exclude from revocation
 
         Returns:
             True if successfully revoked
@@ -380,9 +371,6 @@ class TokenService:
             sessions = self.get_user_sessions(user_id)
 
             for session in sessions:
-                if exclude_session_id and session["session_id"] == exclude_session_id:
-                    continue
-
                 # Blacklist access and refresh tokens for this session with proper expiry
                 if "access_token_jti" in session:
                     # Use access token expiry for access token
@@ -413,24 +401,26 @@ class TokenService:
         Returns:
             Dictionary with validation result and claims
         """
+        from business_app.services.auth_service import may_sign_in  # lazy: AuthService imports TokenService
+        from business_app.services.session_revocation_service import SessionRevocationService  # lazy: it imports us
+
         try:
             # Decode token
             claims = decode_token(token)
-            token_jti = claims["jti"]
             user_id = claims["sub"]
             lookup_user_id = self._normalize_user_lookup_id(user_id)
             session_id = claims.get("session_id")
 
-            # Check if token is blacklisted
-            if self.is_token_blacklisted(token_jti):
-                return {"valid": False, "reason": "Token is blacklisted", "error_code": "TOKEN_BLACKLISTED"}
+            # decode_token checks no revocation: the one rule the blocklist loader applies
+            if SessionRevocationService.is_revoked(claims):
+                return {"valid": False, "reason": "Token is revoked", "error_code": "TOKEN_BLACKLISTED"}
 
             # Check user status
             user = User.query.get(lookup_user_id)
             if not user:
                 return {"valid": False, "reason": "User not found", "error_code": "USER_NOT_FOUND"}
 
-            if not self._is_user_active(user):
+            if not may_sign_in(user):
                 return {"valid": False, "reason": "User account is not active", "error_code": "USER_INACTIVE"}
 
             # Validate session if session_id is present

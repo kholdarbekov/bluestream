@@ -217,6 +217,25 @@ class RedisKeyspace:
     def reorder_reminders_email_claim(episode_id: int, step: int) -> str:
         return f"bs:reorder_reminders:email_claim:{episode_id}:{step}"
 
+    # Tier: SECURITY. One-time web→Telegram link; fail closed, consumed by GETDEL.
+    # The token's payload `{user_id, issued_at, language}` (`SETEX`, CustomerTelegramLinkService).
+    @staticmethod
+    def customer_telegram_link(token: str) -> str:
+        return f"bs:telegram_link:{token}"
+
+    # Tier: SECURITY. One-time web→Telegram link; fail closed, consumed by GETDEL.
+    # The customer's newest token (`SET ... GET EX`): issuing a link swaps it and deletes the old one.
+    @staticmethod
+    def customer_telegram_link_pointer(user_id: int) -> str:
+        return f"bs:telegram_link_user:{user_id}"
+
+    # Tier: SECURITY. The account's session cut-off (SessionRevocationService): every token issued
+    # before it is refused. Kept for the refresh-token lifetime; the per-request read fails open,
+    # the write fails loudly.
+    @staticmethod
+    def tokens_valid_after(user_id: int | str) -> str:
+        return f"tokens_valid_after:{user_id}"
+
     # ---- Scan patterns ---------------------------------------------------
     # SCAN patterns use `*` wildcards. Callers should prefer these helpers
     # over inlining `f"{prefix}:*"` so the wildcard shape stays in sync
@@ -264,6 +283,9 @@ KEYSPACE_TIERS: dict[str, RedisUsageTier] = {
     'sales_pay_fresh':                   RedisUsageTier.TIER_CACHE,
     'reorder_reminders_run_lock':        RedisUsageTier.TIER_RELIABILITY,
     'reorder_reminders_email_claim':     RedisUsageTier.TIER_RELIABILITY,
+    'customer_telegram_link':            RedisUsageTier.TIER_SECURITY,
+    'customer_telegram_link_pointer':    RedisUsageTier.TIER_SECURITY,
+    'tokens_valid_after':                RedisUsageTier.TIER_SECURITY,
 }
 
 

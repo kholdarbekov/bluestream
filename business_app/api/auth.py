@@ -1700,6 +1700,60 @@ def cancel_phone_change():
     return success_response(message=get_translation("success.deleted"))
 
 
+@auth_bp.route("/telegram-link", methods=["POST"])
+@jwt_required()
+@rate_limit(10, 600, per="user")
+@handle_exceptions
+def request_telegram_link():
+    """
+    Issue a One-Time Link that Connects This Account to the Telegram Bot
+    ---
+    tags:
+      - Authentication
+    security:
+      - Bearer: []
+    parameters:
+      - in: query
+        name: lang
+        type: string
+        enum: [en, uz, ru]
+        required: false
+        description: The page's language. The bot shows its confirm card in it and saves it on confirm.
+    responses:
+      200:
+        description: A deep link to the bot, valid once for expires_in seconds; it replaces any earlier link
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            data:
+              type: object
+              properties:
+                telegram_link:
+                  type: string
+                  example: https://t.me/aqua_element_bot?start=web_<token>
+                expires_in:
+                  type: integer
+                  example: 600
+      401:
+        description: Not logged in
+      409:
+        description: TELEGRAM_LINK_NOT_AVAILABLE (Telegram already connected, staff, or an account that may not sign in)
+      429:
+        description: Rate limit exceeded
+      503:
+        description: TELEGRAM_LINK_STORE_UNAVAILABLE (the link store is down; no link is issued)
+    """
+    from business_app.services.customer_telegram_link_service import CustomerTelegramLinkService
+    from business_app.utils.helpers import get_current_language
+
+    return success_response(
+        data=CustomerTelegramLinkService.issue_link(int(get_jwt_identity()), language=get_current_language())
+    )
+
+
 @auth_bp.route("/telegram-login", methods=["POST"])
 @verify_webhook_signature()
 @rate_limit_by_telegram_id(100, 3600)  # 100 per hour PER TELEGRAM USER (not shared IP)
@@ -2745,44 +2799,6 @@ def logout():
 
     except Exception as e:
         logger.error(f"Logout failed for user {user_id}: {e}", exc_info=True)
-        return internal_error_response(message=get_translation("error.server_error"))
-
-
-@auth_bp.route("/logout-all", methods=["POST"])
-@auth_bp.route("/sessions/revoke-all", methods=["POST"])  # Alias for backwards compatibility
-@jwt_required()
-@handle_exceptions
-def logout_all():
-    """Logout from all sessions or revoke all sessions except current"""
-    user_id = get_jwt_identity()
-    current_session_id = get_jwt().get("session_id")
-
-    # Check if this is a revoke-all request (exclude current session)
-    exclude_current = "/sessions/revoke-all" in request.path
-
-    try:
-        from business_app.services.token_service import TokenService
-
-        token_service = TokenService()
-
-        if exclude_current:
-            # Revoke all tokens except current session
-            success = token_service.revoke_user_tokens(user_id, exclude_session_id=current_session_id)
-            message = get_translation("success.deleted") if success else get_translation("error.server_error")
-        else:
-            # Revoke all user tokens including current
-            success = token_service.revoke_user_tokens(user_id)
-            message = (
-                get_translation("api.auth.logout_successful") if success else get_translation("error.server_error")
-            )
-
-        if success:
-            return success_response(message=message)
-        else:
-            return internal_error_response(message=message)
-
-    except Exception as e:
-        logger.error(f"Logout/revoke all failed for user {user_id}: {e}")
         return internal_error_response(message=get_translation("error.server_error"))
 
 

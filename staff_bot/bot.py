@@ -356,6 +356,8 @@ class StaffBot:
                 logger.info("TokenManager connected to Redis successfully")
             else:
                 logger.warning("TokenManager running without Redis - tokens will not be cached")
+            # ...and give it to the API client, which replaces a staff token the backend refuses
+            api_client.token_manager = self.token_manager
 
             # C-2: install the flow-state mirror's Redis client. We share the
             # TokenManager's connection — same Redis instance, same lifecycle.

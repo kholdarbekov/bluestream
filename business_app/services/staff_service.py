@@ -23,6 +23,7 @@ from business_app.services.cod_collect_ceiling import (
     place_widening_applies,
     resolve_collect_scope,
 )
+from business_app.services.session_revocation_service import SessionRevocationService
 from business_app.utils.address_helpers import get_address_line
 from business_app.utils.delivery_window import window_slot_label
 from business_app.utils.exceptions import ValidationError, NotFoundError, ForbiddenError, ConflictError
@@ -448,6 +449,7 @@ class StaffService:
                     raise ConflictError("Email is already used by another user", error_code="STAFF_EMAIL_EXISTS")
             user.email = email_value
 
+        roles_before = SessionRevocationService.roles_of(user)
         roles = StaffService._extract_staff_roles(user)
         if UserRole.DELIVERY_DRIVER.value not in roles:
             roles.append(UserRole.DELIVERY_DRIVER.value)
@@ -462,6 +464,8 @@ class StaffService:
         if creating_new_user:
             user.role = UserRole.DELIVERY_DRIVER
             user.status = UserStatus.ACTIVE
+        else:  # an account that already existed may be signed in with its old roles
+            SessionRevocationService.revoke_on_role_change(user, roles_before)
 
         profile_full_name = full_name or user.full_name or user.phone
 
@@ -592,11 +596,13 @@ class StaffService:
         if "emergency_contact_phone" in updates:
             delivery_person.emergency_contact_phone = (updates.get("emergency_contact_phone") or "").strip() or None
 
+        roles_before = SessionRevocationService.roles_of(user)
         roles = StaffService._extract_staff_roles(user)
         if UserRole.DELIVERY_DRIVER.value not in roles:
             roles.append(UserRole.DELIVERY_DRIVER.value)
         user.staff_roles = roles
         user.user_type = UserType.STAFF
+        SessionRevocationService.revoke_on_role_change(user, roles_before)
 
         db.session.commit()
 
@@ -695,6 +701,7 @@ class StaffService:
         staff_data = staff_data or {}
         user, creating_new_user = StaffService._create_or_attach_staff_user(staff_data, UserRole.OPERATOR)
 
+        roles_before = SessionRevocationService.roles_of(user)
         roles = StaffService._extract_staff_roles(user)
         if UserRole.OPERATOR.value not in roles:
             roles.append(UserRole.OPERATOR.value)
@@ -708,6 +715,8 @@ class StaffService:
         user.user_type = UserType.STAFF
         if creating_new_user:
             user.role = UserRole.OPERATOR
+        else:  # an account that already existed may be signed in with its old roles
+            SessionRevocationService.revoke_on_role_change(user, roles_before)
 
         db.session.commit()
 
@@ -792,6 +801,7 @@ class StaffService:
                 raise ValidationError("Invalid status value", error_code="STAFF_INVALID_STATUS")
             user.status = UserStatus(status_value)
 
+        roles_before = SessionRevocationService.roles_of(user)
         provided_roles = updates.get("staff_roles")
         if provided_roles is not None:
             normalized_roles = StaffService._normalize_staff_roles_input(provided_roles)
@@ -803,6 +813,7 @@ class StaffService:
                 roles.append(UserRole.OPERATOR.value)
             user.staff_roles = StaffService._keep_profile_backed_roles(user, roles)
         user.user_type = UserType.STAFF
+        SessionRevocationService.revoke_on_role_change(user, roles_before)
 
         db.session.commit()
 
@@ -870,6 +881,7 @@ class StaffService:
         )
         db.session.add(profile)
 
+        roles_before = SessionRevocationService.roles_of(user)
         roles = StaffService._extract_staff_roles(user)
         if UserRole.SALES_AGENT.value not in roles:
             roles.append(UserRole.SALES_AGENT.value)
@@ -877,6 +889,8 @@ class StaffService:
         user.user_type = UserType.STAFF
         if creating_new_user:
             user.role = UserRole.SALES_AGENT
+        else:  # an account that already existed may be signed in with its old roles
+            SessionRevocationService.revoke_on_role_change(user, roles_before)
 
         db.session.commit()
 
@@ -913,11 +927,13 @@ class StaffService:
         if "is_active" in updates:
             profile.is_active = bool(updates.get("is_active"))
 
+        roles_before = SessionRevocationService.roles_of(user)
         roles = StaffService._extract_staff_roles(user)
         if UserRole.SALES_AGENT.value not in roles:
             roles.append(UserRole.SALES_AGENT.value)
         user.staff_roles = roles
         user.user_type = UserType.STAFF
+        SessionRevocationService.revoke_on_role_change(user, roles_before)
 
         db.session.commit()
 
@@ -946,8 +962,10 @@ class StaffService:
 
         normalized_roles = StaffService._keep_profile_backed_roles(user, normalized_roles)
 
+        roles_before = SessionRevocationService.roles_of(user)
         user.staff_roles = normalized_roles
         user.user_type = UserType.STAFF
+        SessionRevocationService.revoke_on_role_change(user, roles_before)
         db.session.commit()
 
         StaffService._log_activity(

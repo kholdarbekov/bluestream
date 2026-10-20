@@ -28,4 +28,4 @@ services:
   # set REDIS_PASSWORD in .env AND add the password to REDIS_URL on every
   # service that connects (app, celery, bot) — not worth it for local.
   redis:
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy noeviction

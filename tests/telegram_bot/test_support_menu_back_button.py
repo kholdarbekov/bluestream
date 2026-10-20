@@ -47,7 +47,7 @@ class TestSupportScreensHaveBackButton:
         await support_handlers.support_menu(update, make_context())
 
         sent_text = update.callback_query.edit_message_text.await_args.args[0]
-        assert sent_text == "telegram.support.menu_coming_soon:en"
+        assert sent_text == "telegram.support.menu_intro:en"
 
     async def test_faq_callback_has_back_to_main(self):
         update = DummyUpdate()

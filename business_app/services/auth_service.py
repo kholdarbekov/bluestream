@@ -7,7 +7,6 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, Tuple, List
 from flask import current_app, request
-from flask_jwt_extended import get_jwt_identity
 import redis
 from sqlalchemy.exc import IntegrityError
 
@@ -20,7 +19,8 @@ from business_app.utils.password_security import hash_password, verify_password,
 from shared.enums import UserRole, UserStatus, UserType
 from shared import business_config
 from shared.user_names import GENERATED_TELEGRAM_NAME
-from shared.validators import PLACEHOLDER_EMAIL_DOMAIN_BOT, PLACEHOLDER_EMAIL_DOMAIN_LOCAL
+from shared.validators import PLACEHOLDER_EMAIL_DOMAIN_BOT, PLACEHOLDER_EMAIL_DOMAIN_LOCAL, is_deliverable_email
+from business_app.services.session_revocation_service import REVOKED_BY_PASSWORD_RESET, SessionRevocationService
 from business_app.services.telegram_reachability_service import TelegramReachabilityService
 from business_app.utils.user_types import infer_non_staff_user_type, normalize_entity_subtype
 from shared.enums import EntitySubtype
@@ -37,6 +37,55 @@ logger = logging.getLogger(__name__)
 # take over somebody else's chat. `sales_agent` qualifies — an agent registers a
 # customer in the field from their phone number alone (see OutletService).
 TELEGRAM_SELF_LINK_SOURCES = ("web", "email", "phone", "admin_created", "sales_agent")
+
+# The password telegram-register stores for a bot signup: no password at all.
+TELEGRAM_PLACEHOLDER_PASSWORD_HASH = "telegram_user"
+
+
+def may_sign_in(user: Optional[User]) -> bool:
+    """The one sign-in rule: every account may sign in except a banned or inactive one.
+
+    A customer still waiting for verification (PENDING_VERIFICATION) signs in like an
+    active one, through every door. Reads enum-backed and raw-string statuses alike.
+    """
+    if user is None:
+        return False
+    status = user.status.value if hasattr(user.status, "value") else user.status
+    return status not in (UserStatus.BANNED.value, UserStatus.INACTIVE.value)
+
+
+def has_website_password(user: Optional[User]) -> bool:
+    """The one "has a real website password" rule: a password someone chose, never one we made up.
+
+    A bot signup (`registration_source == "telegram"`) counts as having none, even after an admin
+    typed a real email on it: its stored password is ours, the TELEGRAM_PLACEHOLDER_PASSWORD_HASH
+    literal (telegram-register) or the hash of a random token nobody knows (the telegram-login
+    signup), and nothing stored tells a password it set later apart from those.
+    """
+    if user is None or not user.password_hash or user.password_hash == TELEGRAM_PLACEHOLDER_PASSWORD_HASH:
+        return False
+    return user.registration_source != "telegram"
+
+
+def mask_person_name(first_name: Optional[str], last_name: Optional[str]) -> str:
+    """Initials only, for someone not yet proven to own the account: "Kamola Karimova" -> "K*** K***"."""
+    masked_name = first_name[:1] + "***" if first_name else "***"
+    if last_name:
+        masked_name += " " + last_name[:1] + "***"
+    return masked_name
+
+
+def mask_account_email(email: Optional[str]) -> Optional[str]:
+    """A real address shows its first two letters: "dilnoza@example.com" -> "di***@example.com".
+
+    None for a placeholder (`is_deliverable_email` false), which never shows (D16).
+    """
+    if not is_deliverable_email(email):
+        return None
+    parts = email.split("@")
+    if len(parts) == 2:
+        return parts[0][:2] + "***@" + parts[1]
+    return None
 
 
 class AuthService:
@@ -207,8 +256,7 @@ class AuthService:
             raise UnauthorizedError(get_translation("api.auth.invalid_credentials"))
 
         # Check if user is active
-        status_value = user.status.value if hasattr(user.status, "value") else user.status
-        if status_value in [UserStatus.BANNED.value, UserStatus.INACTIVE.value]:
+        if not may_sign_in(user):
             raise UnauthorizedError(get_translation("api.auth.account_disabled"))
 
         # Reset failed login attempts
@@ -242,13 +290,15 @@ class AuthService:
             decoded_token = decode_token(refresh_token)
             user_id = decoded_token["sub"]
 
+            # decode_token checks no revocation: the one rule the blocklist loader applies
+            if SessionRevocationService.is_revoked(decoded_token):
+                raise UnauthorizedError(get_translation("api.auth.token_invalid"))
+
             user = User.query.get(user_id)
             if not user:
                 raise UnauthorizedError(get_translation("api.auth.invalid_user"))
 
-            # Extract status value for comparison
-            status_value = user.status.value if hasattr(user.status, "value") else user.status
-            if status_value in [UserStatus.BANNED.value, UserStatus.INACTIVE.value]:
+            if not may_sign_in(user):
                 raise UnauthorizedError(get_translation("api.auth.invalid_user"))
 
             # Generate new tokens
@@ -529,11 +579,9 @@ class AuthService:
         user = User.query.get(user_id)
         if user:
             user.password_hash = self._hash_password(new_password)
-            user.password_changed_at = datetime.now(timezone.utc)
+            # Every login made before the reset ends now, on every device (spec 2026-10-19 R9)
+            SessionRevocationService.revoke_all(user.id, reason=REVOKED_BY_PASSWORD_RESET)
             db.session.commit()
-
-            # Invalidate all user sessions
-            self._invalidate_all_user_sessions(user.id)
 
             # Send telegram notification if user has telegram_id
             self._send_password_change_telegram_notification(user, event_type="reset")
@@ -562,7 +610,6 @@ class AuthService:
 
         # Update password
         user.password_hash = self._hash_password(new_password)
-        user.password_changed_at = datetime.now(timezone.utc)
         db.session.commit()
 
         # Send telegram notification if user has telegram_id
@@ -986,7 +1033,7 @@ class AuthService:
             last_name=data.get("last_name", ""),
             email=f"telegram_{telegram_id}@{PLACEHOLDER_EMAIL_DOMAIN_LOCAL}",  # Placeholder email
             phone=None,  # Phone collected later
-            password_hash="telegram_user",  # Placeholder, no password needed
+            password_hash=TELEGRAM_PLACEHOLDER_PASSWORD_HASH,  # Placeholder, no password needed
             role=UserRole.CUSTOMER,
             status=UserStatus.ACTIVE,
             is_verified=False,
@@ -1761,6 +1808,7 @@ class AuthService:
 
     def check_phone_availability_for_telegram(self, phone: str, telegram_id: str) -> Dict[str, Any]:
         """Check whether a phone can be linked from a telegram flow."""
+        from business_app.services.cross_platform_sync_service import CrossPlatformSyncService
         from business_app.utils.validators import normalize_phone_number
 
         normalized_phone = normalize_phone_number(phone)
@@ -1790,27 +1838,22 @@ class AuthService:
         user_status = (
             existing_user.status.value if isinstance(existing_user.status, UserStatus) else existing_user.status
         )
+        caller = User.query.filter_by(telegram_id=telegram_id_str).first()
         can_link = (
             existing_user.telegram_id is None
             and user_status == UserStatus.ACTIVE.value
             and existing_user.registration_source in TELEGRAM_SELF_LINK_SOURCES
+            # A banned or deactivated account never merges: its login would sign in again (R8d)
+            and may_sign_in(caller)
+            # Never offer a merge that auto_link_accounts would refuse
+            and not CrossPlatformSyncService.merge_blocked_by_canonical_link(existing_user, caller)
         )
-
-        masked_name = existing_user.first_name[:1] + "***" if existing_user.first_name else "***"
-        if existing_user.last_name:
-            masked_name += " " + existing_user.last_name[:1] + "***"
-
-        masked_email = None
-        if existing_user.email and not existing_user.email.endswith("@bluestream.local"):
-            parts = existing_user.email.split("@")
-            if len(parts) == 2:
-                masked_email = parts[0][:2] + "***@" + parts[1]
 
         existing_user_masked = None
         if can_link:
             existing_user_masked = {
-                "name": masked_name,
-                "email": masked_email,
+                "name": mask_person_name(existing_user.first_name, existing_user.last_name),
+                "email": mask_account_email(existing_user.email),
                 "registration_source": existing_user.registration_source,
             }
 
@@ -1822,6 +1865,7 @@ class AuthService:
 
     def send_phone_link_otp(self, phone: str, telegram_id: str) -> Dict[str, Any]:
         """Store linking intent and send OTP for phone-account linking."""
+        from business_app.services.cross_platform_sync_service import CrossPlatformSyncService
         from business_app.utils.validators import normalize_phone_number
         import json
 
@@ -1844,6 +1888,13 @@ class AuthService:
         if web_user_status != UserStatus.ACTIVE.value:
             raise ConflictError(get_translation("api.auth.phone_account_inactive"))
 
+        # The merge would refuse it after the code, and a banned or deactivated caller never merges
+        # (R8d): send no SMS for either
+        if not may_sign_in(telegram_user) or CrossPlatformSyncService.merge_blocked_by_canonical_link(
+            web_user, telegram_user
+        ):
+            raise ConflictError(get_translation("api.auth.accounts_linking_failed"))
+
         link_key = f"phone_link:{telegram_id}"
         link_data = {
             "phone": normalized_phone,
@@ -1863,14 +1914,19 @@ class AuthService:
         }
 
     def verify_phone_link_and_merge_accounts(self, telegram_id: str, otp: str) -> Dict[str, Any]:
-        """Verify OTP for linking and merge telegram account into web account."""
+        """Verify OTP for linking and merge telegram account into web account.
+
+        The account that owns the phone (`web_user`) always survives (spec 2026-10-19 R8a), so the
+        user and tokens returned are its own.
+        """
         import json
         from business_app.services.cross_platform_sync_service import cross_platform_sync_service
 
+        # Every refusal carries an `error_code`: the bot branches on it, never on the translated message.
         link_key = f"phone_link:{telegram_id}"
         link_data_raw = self.redis_client.get(link_key)
         if not link_data_raw:
-            raise NotFoundError(get_translation("api.auth.pending_link_not_found"))
+            raise NotFoundError(get_translation("api.auth.pending_link_not_found"), error_code="OTP_EXPIRED")
 
         link_data = json.loads(link_data_raw.decode("utf-8"))
         web_user_id = link_data["web_user_id"]
@@ -1878,7 +1934,7 @@ class AuthService:
 
         telegram_user = User.query.get(telegram_user_id)
         if not telegram_user:
-            raise NotFoundError(get_translation("api.auth.telegram_user_not_found"))
+            raise NotFoundError(get_translation("api.auth.telegram_user_not_found"), error_code="USER_NOT_FOUND")
 
         # Capture the OTP + its remaining TTL before verifying. verify_phone
         # consumes the code on success; if the destructive merge below then
@@ -1888,19 +1944,20 @@ class AuthService:
         otp_ttl = self.redis_client.ttl(otp_key)
 
         # The code must have gone to the number being linked: /send-otp, /change-phone
-        # and resend keep codes for the caller's own numbers under the same key
+        # and resend keep codes for the caller's own numbers under the same key. None left for it
+        # means its three minutes are up (or another flow replaced it): start again.
         staged_phone = link_data.get("phone")
         if not staged_phone or not self._sms_code_was_sent_to(telegram_user_id, staged_phone):
-            raise ValidationError(get_translation("api.auth.link_otp_invalid"))
+            raise ValidationError(get_translation("api.auth.link_otp_invalid"), error_code="OTP_EXPIRED")
 
         success = self.verify_phone(telegram_user_id, otp)
         if not success:
-            raise ValidationError(get_translation("api.auth.link_otp_invalid"))
+            raise ValidationError(get_translation("api.auth.link_otp_invalid"), error_code="INVALID_OTP")
 
         try:
             web_user = User.query.get(web_user_id)
             if not web_user:
-                raise NotFoundError(get_translation("api.auth.web_account_not_found"))
+                raise NotFoundError(get_translation("api.auth.web_account_not_found"), error_code="USER_NOT_FOUND")
 
             # Re-assert the invariants that held at staging time — the redis link
             # state is stale/untrusted, and these guard the destructive merge below
@@ -1915,7 +1972,15 @@ class AuthService:
             ):
                 # Drop the poisoned link intent so a retry can't re-enter this flow.
                 self.redis_client.delete(link_key)
-                raise ConflictError(get_translation("api.auth.phone_already_linked_to_telegram"))
+                raise ConflictError(
+                    get_translation("api.auth.phone_already_linked_to_telegram"), error_code="PHONE_LINK_NOT_AVAILABLE"
+                )
+            # The caller was banned or deactivated since the code was sent (R8d)
+            if not may_sign_in(telegram_user):
+                self.redis_client.delete(link_key)
+                raise ConflictError(
+                    get_translation("api.auth.accounts_linking_failed"), error_code="ACCOUNTS_LINKING_FAILED"
+                )
 
             now_utc = datetime.now(timezone.utc)
             telegram_user.is_verified = True
@@ -1929,7 +1994,18 @@ class AuthService:
                 link_type="merge",
             )
             if not result.get("success"):
-                raise ValidationError(result.get("error", get_translation("api.auth.accounts_linking_failed")))
+                # The reason is an exception's text (a database error, a refusal in English): it goes
+                # to the log (the merge already logged its traceback as an error), and the customer
+                # gets the seeded message in their language.
+                logger.warning(
+                    "Phone-link merge of user %s into user %s failed: %s",
+                    telegram_user_id,
+                    web_user_id,
+                    result.get("error"),
+                )
+                raise ValidationError(
+                    get_translation("api.auth.accounts_linking_failed"), error_code="ACCOUNTS_LINKING_FAILED"
+                )
         except Exception:
             # The OTP was valid; only a downstream step failed. Restore the code
             # (with its remaining TTL) so a retry doesn't hit a false "invalid OTP".
@@ -2156,13 +2232,6 @@ class AuthService:
             session.ended_at = datetime.now(timezone.utc)
             db.session.commit()
 
-    def _invalidate_all_user_sessions(self, user_id: int):
-        """Invalidate all user sessions"""
-        UserSession.query.filter_by(user_id=user_id, is_active=True).update(
-            {"is_active": False, "ended_at": datetime.now(timezone.utc)}
-        )
-        db.session.commit()
-
     def _get_token_jti(self, token: str) -> str:
         """Get JWT ID from token"""
         try:
@@ -2330,49 +2399,6 @@ class AuthService:
             and user.email.endswith("@bot.internal")
         )
 
-    def cleanup_user_sessions(self, user_id: int = None, exclude_current: bool = True) -> Dict[str, int]:
-        """
-        Clean up user sessions - either for specific user or all users
-
-        Args:
-            user_id: Specific user ID to clean up (None for all users)
-            exclude_current: Whether to exclude current session from cleanup
-
-        Returns:
-            Dictionary with cleanup statistics
-        """
-        from business_app.services.session_cleanup_service import SessionCleanupService
-
-        cleanup_service = SessionCleanupService()
-
-        if user_id:
-            # Cleanup specific user's sessions
-            now = datetime.now(timezone.utc)
-
-            # Get current session token if we should exclude it
-            current_session_jti = None
-            if exclude_current:
-                try:
-                    current_session_jti = get_jwt_identity()
-                except:  # noqa: E722
-                    pass
-
-            # Mark old sessions as inactive
-            query = UserSession.query.filter_by(user_id=user_id, is_active=True)
-
-            if current_session_jti:
-                query = query.filter(UserSession.session_token != current_session_jti)
-
-            updated_count = query.update({"is_active": False, "ended_at": now})
-
-            db.session.commit()
-
-            logger.info(f"Cleaned up {updated_count} sessions for user {user_id}")
-            return {"user_sessions_cleaned": updated_count}
-        else:
-            # Full session cleanup
-            return cleanup_service.cleanup_expired_sessions()
-
     def authenticate_telegram_user(
         self, telegram_id: int, username: str = None, first_name: str = None, last_name: str = None
     ) -> Tuple[User, Dict[str, str]]:
@@ -2494,8 +2520,7 @@ class AuthService:
 
         # Check if user account is active
         logger.info(f"Checking user status: {user.status}")
-        status_value = user.status.value if hasattr(user.status, "value") else user.status
-        if status_value != UserStatus.ACTIVE.value:
+        if not may_sign_in(user):
             logger.error(f"User account not active: {user.status}")
             raise UnauthorizedError(get_translation("api.auth.account_disabled"))
 

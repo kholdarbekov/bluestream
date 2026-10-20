@@ -1,11 +1,12 @@
 """
 User profile and registration handlers
 """
+import html
 import logging
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, Dict, Optional
-from telegram import constants, Update, ReplyKeyboardRemove
+from telegram import constants, InlineKeyboardMarkup, Update, ReplyKeyboardRemove
 from telegram.helpers import escape_markdown
 from telegram.ext import ContextTypes, ConversationHandler
 from telegram.error import BadRequest
@@ -20,6 +21,7 @@ from shared.constants import (
     get_district_center,
     get_all_districts,
     is_within_tashkent,
+    WEB_LINK_START_PREFIX,
 )
 from shared.enums import UserType
 from shared.user_names import greeting_name, joined_name
@@ -43,6 +45,9 @@ from handlers.address_flow import (
     _ADDRESS_STEPS, _SKIP_TARGETS, _ADDRESS_FIELD_DATA_KEYS,
     _cleared_by_skip, render_prompt, RenderTarget, handle_input,
 )
+# The web-link confirm step is registration's own state, not the address flow's,
+# so it comes straight from the leaf module rather than through address_flow.
+from handlers.conversation_states import WEB_LINK_CONFIRM
 from api_client import api_client
 from database import db_manager, BotUserRepository
 from utils import (
@@ -53,6 +58,7 @@ from utils import (
     otp_rate_limiter,
     maybe_remove_stale_reply_keyboard,
     arm_location_request,
+    user_cache,
 )
 from config import config
 from handlers.base import BaseHandler
@@ -71,6 +77,28 @@ ADDRESS_DETAIL_MAX_LENGTH = 20
 # would also throw away a concern report armed by handlers/support.py.
 _PROFILE_EDIT_PROMPTS = ('edit_profile_name', 'edit_profile_birthday')
 _ADDRESS_EDIT_PROMPTS = ('edit_address_title', 'edit_address_instructions')
+
+# A web-only customer connecting this Telegram from /my-account (spec 2026-10-19
+# D5, D12, D15). The one-time token waits in `user_data` under the PENDING key,
+# never in a callback, so the conversation timeout, Cancel and a plain /start can
+# drop it: {'token', 'language', 'message_id'}, the language being the page's (from
+# the preview) and the message id the card's, so only the newest card answers.
+WEB_LINK_PENDING_KEY = 'web_link_pending'
+# Set after Yes when the account still needs its phone (D12): the step that
+# finishes it ends with this greeting instead of "Registration completed".
+# {'name', 'language'}. A phone-link merge ends with its own success message
+# instead and drops it (R8).
+WEB_LINK_GREETING_KEY = 'web_link_greeting'
+# The backend's refusals (CustomerTelegramLinkService). A dead link (expired,
+# used, or the account can no longer take a Telegram) and a Telegram that
+# already has its own account read differently (R6); any other failure,
+# Redis down included, is "try again in a minute" (D15f).
+_WEB_LINK_DEAD_CODES = frozenset({'WEB_LINK_EXPIRED', 'WEB_LINK_NOT_AVAILABLE'})
+_WEB_LINK_HAS_ACCOUNT = 'TELEGRAM_ALREADY_HAS_ACCOUNT'
+# The phone-link code refusals that end the step (auth_service.verify_phone_link_and_merge_accounts):
+# the code or its link request is gone, or an account it named is. Read from `error_code`, never from
+# the message, which arrives in the customer's language. Any other refusal asks for the code again.
+_LINK_CODE_DEAD_CODES = frozenset({'OTP_EXPIRED', 'USER_NOT_FOUND'})
 
 
 def _markdown_copy(key: str, language: str, **data: Any) -> str:
@@ -912,6 +940,19 @@ class ProfileHandlers(BaseHandler):
         try:
             user_id = update.effective_user.id
 
+            # Every /start forgets a web-link confirm that was still open (D15e):
+            # only a link opened by THIS /start may be confirmed.
+            if context.user_data is not None:
+                context.user_data.pop(WEB_LINK_PENDING_KEY, None)
+
+            # A /my-account link (`/start web_<token>`) is answered before the
+            # referral capture and before the lookup below: an unknown Telegram
+            # must never reach the language card, whose tap creates the row that
+            # would then block the link (spec 2026-10-19 D5).
+            web_link_token = self._web_link_token(context)
+            if web_link_token is not None:
+                return await self._start_web_link(update, context, web_link_token)
+
             # Capture a referral deep-link param (t.me/<bot>?start=ref_CODE arrives
             # as "/start ref_CODE") so it can be applied on registration below.
             self._capture_referral_arg(context)
@@ -936,37 +977,416 @@ class ProfileHandlers(BaseHandler):
 
                 return SELECT_LANGUAGE
             else:
-                # Existing row but phone never captured -> resume phone collection
-                # instead of dropping the user at the main menu with no phone.
-                if not existing_user.get('phone'):
-                    language = existing_user.get('preferred_language') or await i18n.get_user_language(user_id)
-                    keyboard = ProfileKeyboards.phone_request(language)
-                    await maybe_remove_stale_reply_keyboard(update, context)
-
-                    await update.message.reply_text(
-                        text=i18n.get('telegram.registration.share_contact_prompt', language),
-                        reply_markup=keyboard
-                    )
-
-                    return PHONE
-
-                # Already registered, show main menu — honour the user's saved
-                # language rather than the Telegram client locale.
-                language = existing_user.get('preferred_language') or await i18n.get_user_language(user_id)
-                complete_text = i18n.get('telegram.welcome', language)
-                keyboard = await main_menu_for(update.effective_user.id, language)
-                await maybe_remove_stale_reply_keyboard(update, context)
-
-                await update.message.reply_text(
-                    text=complete_text,
-                    reply_markup=keyboard
-                )
-
-                return ConversationHandler.END
+                return await self._resume_existing_account(update, context, existing_user)
 
         except Exception as e:
             logger.error(f"Error starting registration: {e}")
             return ConversationHandler.END
+
+    async def _resume_existing_account(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
+                                       existing_user: dict) -> int:
+        """What /start does for a Telegram that already has its row.
+
+        Shared with a dead web link from such a Telegram, which behaves exactly
+        like a plain /start for that account (spec 2026-10-19 D15a).
+        """
+        user_id = update.effective_user.id
+
+        # Existing row but phone never captured -> resume phone collection
+        # instead of dropping the user at the main menu with no phone.
+        if not existing_user.get('phone'):
+            language = existing_user.get('preferred_language') or await i18n.get_user_language(user_id)
+            keyboard = ProfileKeyboards.phone_request(language)
+            await maybe_remove_stale_reply_keyboard(update, context)
+
+            await update.message.reply_text(
+                text=i18n.get('telegram.registration.share_contact_prompt', language),
+                reply_markup=keyboard
+            )
+
+            return PHONE
+
+        # Already registered, show main menu — honour the user's saved
+        # language rather than the Telegram client locale.
+        language = existing_user.get('preferred_language') or await i18n.get_user_language(user_id)
+        complete_text = i18n.get('telegram.welcome', language)
+        keyboard = await main_menu_for(update.effective_user.id, language)
+        await maybe_remove_stale_reply_keyboard(update, context)
+
+        await update.message.reply_text(
+            text=complete_text,
+            reply_markup=keyboard
+        )
+
+        return ConversationHandler.END
+
+    # ------------------------------------------------------------------
+    # Web-to-Telegram link (spec 2026-10-19): a web-only customer taps
+    # "Open in Telegram" on /my-account and lands here as /start web_<token>.
+    # One confirm card (R4); nothing is connected until Yes. Every message of
+    # this flow is in `_web_link_language`, and goes out with send_message
+    # whenever the update may be a tap rather than a message.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _web_link_token(context: ContextTypes.DEFAULT_TYPE) -> Optional[str]:
+        """The token of a `/start web_<token>` deep link, or None for any other /start.
+
+        An empty or truncated token is still a token (``""`` included): the
+        backend answers it as a dead link, so a mangled link reads like an
+        expired one and never falls through to the language card (RF2).
+        """
+        args = getattr(context, "args", None) or []
+        if not args:
+            return None
+        param = str(args[0])
+        if not param.startswith(WEB_LINK_START_PREFIX):
+            return None
+        return param[len(WEB_LINK_START_PREFIX):]
+
+    @staticmethod
+    def _web_link_language(update: Update, *, pending: Optional[dict] = None,
+                           existing: Optional[dict] = None) -> str:
+        """The language of every web-link message.
+
+        The page's language first: the preview publishes it and the pending
+        link keeps it, so even a refused confirm answers in it (spec D11). Then
+        this Telegram's own row, then the Telegram client's locale.
+        """
+        return i18n.normalize_language(
+            (pending or {}).get('language')
+            or (existing or {}).get('preferred_language')
+            or update.effective_user.language_code
+        )
+
+    @staticmethod
+    def _web_link_keyboard(language: str) -> InlineKeyboardMarkup:
+        """Yes / Cancel. No token in the data, and neither matches `^link_` (D15d)."""
+        return KeyboardBuilder.build_inline_keyboard([
+            [{'text': i18n.get('telegram.web_link.yes_button', language), 'callback_data': 'weblink_yes'}],
+            [{'text': i18n.get('telegram.cancel', language), 'callback_data': 'weblink_no'}],
+        ])
+
+    async def _start_web_link(self, update: Update, context: ContextTypes.DEFAULT_TYPE, token: str) -> int:
+        """Show the confirm card for a /my-account link, or say why it cannot connect.
+
+        The preview never uses the link up. The token waits in `user_data`, not
+        in the buttons, so the timeout, Cancel and a plain /start can drop it.
+        """
+        user_id = update.effective_user.id
+        async with api_client as client:
+            response = await client.web_link_preview(user_id, token)
+
+        if response.success:
+            preview = response.data.get('data', {}) if isinstance(response.data, dict) else {}
+            language = self._web_link_language(update, pending={'language': preview.get('language')})
+            # HTML, not `_markdown_copy`: the masked label's own asterisks would
+            # need escapes inside the bold, and Telegram refuses an escape inside
+            # an entity ("can't parse entities"), so the card would never show (RF3).
+            card = await update.message.reply_text(
+                i18n.get(
+                    'telegram.web_link.confirm_prompt',
+                    language,
+                    account=html.escape(preview.get('account_label') or ''),
+                ),
+                parse_mode='HTML',
+                reply_markup=self._web_link_keyboard(language),
+            )
+            context.user_data[WEB_LINK_PENDING_KEY] = {
+                'token': token, 'language': language, 'message_id': card.message_id,
+            }
+            return WEB_LINK_CONFIRM
+
+        existing = await self.user_repo.get_user_by_telegram_id(user_id)
+        code = self._response_error_code(response)
+        if code in _WEB_LINK_DEAD_CODES and existing:
+            # A dead link from a Telegram that has its own row: a plain /start (D15a).
+            return await self._resume_existing_account(update, context, existing)
+        return await self._web_link_refused(
+            update, context, code,
+            existing=existing,
+            language=self._web_link_language(update, existing=existing),
+        )
+
+    async def _web_link_refused(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
+                                code: Optional[str], *, existing: Optional[dict], language: str) -> int:
+        """Say why the link did not connect (R6, D15f) and end. Never the language card.
+
+        A Telegram with its own account is pointed to this chat and the
+        conversation ends, so its next message reaches the Support Inbox; the
+        main menu comes along only when that account has its phone (D15a).
+        """
+        reply_markup = None
+        if code == _WEB_LINK_HAS_ACCOUNT:
+            key = 'telegram.web_link.has_account'
+            if (existing or {}).get('phone'):
+                reply_markup = await main_menu_for(update.effective_user.id, language)
+        elif code in _WEB_LINK_DEAD_CODES:
+            key = 'telegram.web_link.expired'
+        else:
+            key = 'telegram.web_link.failed'
+
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=i18n.get(key, language),
+            reply_markup=reply_markup,
+        )
+        return ConversationHandler.END
+
+    async def _retire_web_link_card(self, query, text: Optional[str] = None, **kwargs) -> None:
+        """Answer a tap on the confirm card and take its buttons away.
+
+        Both halves are tidy-up: a refused ack or edit (an old card, a deleted
+        message) never costs what the tap asked for.
+        """
+        await self._ack(query, text, **kwargs)
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception as exc:
+            logger.info("Could not drop the web-link card's buttons (cosmetic): %s", exc)
+
+    async def _older_card_tapped(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+        """Answer a tap on an older confirm card as stale, and say so.
+
+        After `/start web_A` then `/start web_B`, card A still shows its buttons
+        but names account A, while link B is the one waiting. The buttons carry
+        no token (D5), so the card's message id tells them apart: only the
+        newest card answers (R4), and it stays live.
+        """
+        query = update.callback_query
+        pending = context.user_data.get(WEB_LINK_PENDING_KEY)
+        if not pending or pending['message_id'] == getattr(query.message, 'message_id', None):
+            return False
+        await self._retire_web_link_card(
+            query, i18n.get('telegram.web_link.expired', pending['language']), show_alert=True
+        )
+        return True
+
+    async def web_link_yes(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Yes on the confirm card: connect this Telegram to the web account (R4, R5)."""
+        try:
+            if await self._older_card_tapped(update, context):
+                return WEB_LINK_CONFIRM
+            await self._retire_web_link_card(update.callback_query)
+            pending = context.user_data.pop(WEB_LINK_PENDING_KEY, None)
+            user = update.effective_user
+
+            if not pending:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=i18n.get('telegram.web_link.expired', self._web_link_language(update)),
+                )
+                return ConversationHandler.END
+
+            async with api_client as client:
+                response = await client.web_link_confirm(
+                    user.id, pending['token'],
+                    username=user.username, first_name=user.first_name, last_name=user.last_name,
+                )
+
+            if not response.success:
+                existing = await self.user_repo.get_user_by_telegram_id(user.id)
+                return await self._web_link_refused(
+                    update, context, self._response_error_code(response),
+                    existing=existing,
+                    language=self._web_link_language(update, pending=pending, existing=existing),
+                )
+
+            data = response.data.get('data', {}) if isinstance(response.data, dict) else {}
+            tokens = data.get('tokens') or {}
+            token_manager = context.bot_data.get('token_manager') if context.bot_data else None
+            if token_manager:
+                await token_manager.store_tokens(
+                    user.id,
+                    tokens['access_token'],
+                    tokens['refresh_token'],
+                    tokens.get('expires_in', 3600)
+                )
+            # The cached row (if any) predates the link.
+            user_cache.remove(user.id)
+            logger.info("Telegram %s connected to a web account by link", user.id)
+
+            return await self._after_web_link(update, context, data)
+
+        except Exception as e:
+            logger.error("Error in web_link_yes: %s", e, exc_info=True)
+            return ConversationHandler.END
+
+    async def web_link_cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Cancel on the confirm card: nothing is connected, and no language card follows."""
+        try:
+            if await self._older_card_tapped(update, context):
+                return WEB_LINK_CONFIRM
+            await self._retire_web_link_card(update.callback_query)
+            pending = context.user_data.pop(WEB_LINK_PENDING_KEY, None)
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=i18n.get('telegram.web_link.cancelled', self._web_link_language(update, pending=pending)),
+            )
+        except Exception as e:
+            logger.error("Error in web_link_cancel: %s", e, exc_info=True)
+        return ConversationHandler.END
+
+    async def web_link_timeout(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Registration's TIMEOUT while the confirm card waits (D15b): drop the token, say so.
+
+        Never registration's "Send /start" copy: that /start would put an
+        unknown Telegram on the language card, whose tap creates the row that
+        blocks the next link. bot.py routes the TIMEOUT here while the link is
+        pending.
+        """
+        try:
+            pending = context.user_data.pop(WEB_LINK_PENDING_KEY, None)
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=i18n.get('telegram.web_link.expired', self._web_link_language(update, pending=pending)),
+                reply_markup=ReplyKeyboardRemove(),
+            )
+        except Exception as e:
+            logger.error("Error announcing the web-link timeout: %s", e)
+        return ConversationHandler.END
+
+    async def web_link_step_expired(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Answer a confirm-card button whose conversation is gone (D15c).
+
+        After a restart, the timeout or a plain /start the card still shows its
+        buttons, but the token went with the conversation. Registered in the
+        default group (bot.py), like `_signup_step_expired` for the account-link
+        answers; it lives here so every web-link message is in one module.
+        """
+        query = update.callback_query
+        try:
+            row = await self.user_repo.get_user_by_telegram_id(update.effective_user.id)
+            language = self._web_link_language(update, existing=row)
+            await self._retire_web_link_card(
+                query, i18n.get('telegram.web_link.expired', language), show_alert=True
+            )
+        except Exception as e:
+            logger.warning("Could not answer an expired web-link button: %s", e)
+
+    async def _after_web_link(self, update: Update, context: ContextTypes.DEFAULT_TYPE, data: dict) -> int:
+        """After Yes: greet now, or first settle the account's phone (R5, D12).
+
+        Confirm publishes `phone_status`. A verified number is greeted at once.
+        A number never verified is confirmed by SMS; no number at all gets
+        today's contact-share step, where a number another account holds gets
+        the usual merge offer (R8). Either of those ends with the greeting, which
+        waits under WEB_LINK_GREETING_KEY, unless a merge ends it with its own
+        success message. The update is the Yes tap, so every message here goes
+        out with send_message.
+        """
+        language = self._web_link_language(update, pending={'language': data.get('language')})
+        greeting = {'name': data.get('greeting_name'), 'language': language}
+        chat_id = update.effective_chat.id
+
+        if data.get('phone_status') == 'verified':
+            return await self._send_web_link_greeting(context, chat_id, update.effective_user.id, greeting)
+
+        context.user_data[WEB_LINK_GREETING_KEY] = greeting
+        if data.get('phone_status') == 'missing':
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=i18n.get('telegram.registration.share_contact_prompt', language),
+                reply_markup=ProfileKeyboards.phone_request(language),
+            )
+            return PHONE
+        return await self._confirm_number_on_file(update, context, data.get('phone'), language)
+
+    async def _confirm_number_on_file(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
+                                      phone: str, language: str) -> int:
+        """Confirm the number already on the account with an SMS code (D12).
+
+        Profile → Phone → Verify's endpoints (/auth/send-otp now, /auth/verify-phone
+        in REGISTER_OTP), authenticated with the link's own tokens. Never the
+        contact-share keyboard: a shared contact would silently replace the
+        number on file. A code that cannot be sent still ends with the greeting;
+        the number stays unverified, as it was.
+        """
+        chat_id = update.effective_chat.id
+        async with api_client as client:
+            user_token = await get_auth_token(update, context, client)
+            response = await client.send_phone_verification(user_token, phone) if user_token else None
+
+        if response is not None and response.success:
+            sent = response.data.get('data', {}) if isinstance(response.data, dict) else {}
+            context.user_data['pending_phone_verification'] = phone
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=i18n.get(
+                    'telegram.web_link.confirm_number_prompt',
+                    language,
+                    phone_masked=sent.get('phone_masked', phone),
+                ),
+            )
+            return REGISTER_OTP
+
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=i18n.get(
+                'telegram.phone.verification_sms_send_failed',
+                language,
+                error=(response.error if response is not None else None) or '',
+            ),
+        )
+        return await self._send_web_link_greeting(
+            context, chat_id, update.effective_user.id, context.user_data.pop(WEB_LINK_GREETING_KEY)
+        )
+
+    async def _send_web_link_greeting(self, context: ContextTypes.DEFAULT_TYPE, chat_id: int,
+                                      telegram_id: int, greeting: dict) -> int:
+        """R5: "Connected, {name}!" with the main menu, in the website account's language."""
+        language = greeting['language']
+        name = greeting['name'] or i18n.get('telegram.common.user_fallback', language)
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=i18n.get('telegram.web_link.connected', language, name=name),
+            reply_markup=await main_menu_for(telegram_id, language),
+        )
+        return ConversationHandler.END
+
+    async def _finish_signup(self, update: Update, context: ContextTypes.DEFAULT_TYPE, language: str) -> int:
+        """The last message once signup has its phone, and END.
+
+        After a web link (D12) that is the greeting the link deferred, in the
+        account's language; otherwise today's "Registration completed".
+        """
+        greeting = context.user_data.pop(WEB_LINK_GREETING_KEY, None)
+        if greeting:
+            return await self._send_web_link_greeting(
+                context, update.effective_chat.id, update.effective_user.id, greeting
+            )
+
+        await update.message.reply_text(
+            text=i18n.get('telegram.registration_complete', language),
+            reply_markup=await main_menu_for(update.effective_user.id, language)
+        )
+        return ConversationHandler.END
+
+    async def _number_taken(self, update: Update, context: ContextTypes.DEFAULT_TYPE, language: str) -> int:
+        """The shared number belongs to an account this Telegram may not claim.
+
+        The backend refuses (`can_link` false) when that account has its own
+        Telegram, is not active, may not be claimed by phone, or is one person
+        across phones, which the merge itself would refuse. Mid-signup that is
+        today's prompt for another number. After a web link (D12) this Telegram
+        already holds the customer's own account, so the customer is pointed to
+        this chat (R6) and greeted, never looped on the phone prompt.
+        """
+        greeting = context.user_data.pop(WEB_LINK_GREETING_KEY, None)
+        if greeting:
+            await update.message.reply_text(
+                i18n.get('telegram.web_link.has_account', greeting['language']),
+                reply_markup=ReplyKeyboardRemove(),
+            )
+            return await self._send_web_link_greeting(
+                context, update.effective_chat.id, update.effective_user.id, greeting
+            )
+
+        await update.message.reply_text(
+            i18n.get('telegram.phone.already_linked_other_account', language),
+            reply_markup=ProfileKeyboards.phone_request(language)
+        )
+        return PHONE
 
     async def language_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle language selection during registration"""
@@ -1125,16 +1545,8 @@ class ProfileHandlers(BaseHandler):
                         )
 
                         # Registration complete
-                        complete_text = i18n.get('telegram.registration_complete', language)
-                        keyboard = await main_menu_for(update.effective_user.id, language)
-
-                        await update.message.reply_text(
-                            text=complete_text,
-                            reply_markup=keyboard
-                        )
-
                         logger.info(f"Registration completed for user {user_id}")
-                        return ConversationHandler.END
+                        return await self._finish_signup(update, context, language)
 
                     elif response.success and not response_data.get('available'):
                         # Phone exists - check if linking is possible
@@ -1175,12 +1587,8 @@ class ProfileHandlers(BaseHandler):
 
                             return LINK_ACCOUNT_CONFIRM
                         else:
-                            # Cannot link - phone belongs to another telegram user
-                            await update.message.reply_text(
-                                i18n.get('telegram.phone.already_linked_other_account', language),
-                                reply_markup=ProfileKeyboards.phone_request(language)
-                            )
-                            return PHONE
+                            # Cannot link: the number's account may not be claimed (see _number_taken)
+                            return await self._number_taken(update, context, language)
                     else:
                         # API error
                         logger.error(f"Failed to check phone availability: {response.error}")
@@ -1297,12 +1705,8 @@ class ProfileHandlers(BaseHandler):
 
                             return LINK_ACCOUNT_CONFIRM
                         else:
-                            # Cannot link - phone belongs to another telegram user
-                            await update.message.reply_text(
-                                i18n.get('telegram.phone.already_linked_other_account', language),
-                                reply_markup=ProfileKeyboards.phone_request(language)
-                            )
-                            return PHONE
+                            # Cannot link: the number's account may not be claimed (see _number_taken)
+                            return await self._number_taken(update, context, language)
                     else:
                         # API error
                         logger.error(f"Failed to check phone availability: {response.error}")
@@ -1439,13 +1843,23 @@ class ProfileHandlers(BaseHandler):
 
                 return PHONE
 
-            return ConversationHandler.END
+            return self._end_link_step(context)
 
         except Exception as e:
             logger.error(f"Error in link_account_confirm: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
-            return ConversationHandler.END
+            return self._end_link_step(context)
+
+    @staticmethod
+    def _end_link_step(context) -> int:
+        """Every END of the phone-link steps: a web link's deferred greeting never outlives them.
+
+        A merge ends with its own success message, and any other END with its own copy; a greeting
+        left behind would end a later, unrelated phone step with "Connected" (R8, T6-M6).
+        """
+        context.user_data.pop(WEB_LINK_GREETING_KEY, None)
+        return ConversationHandler.END
 
     async def link_account_otp(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle OTP verification for account linking"""
@@ -1466,7 +1880,7 @@ class ProfileHandlers(BaseHandler):
                 await update.message.reply_text(
                     i18n.get('telegram.phone.session_expired_start_again', language)
                 )
-                return ConversationHandler.END
+                return self._end_link_step(context)
 
             # Call API to verify OTP and link accounts
             try:
@@ -1474,8 +1888,10 @@ class ProfileHandlers(BaseHandler):
                     response = await client.link_phone_verify(user_id, otp)
 
                     if response.success:
-                        # Account linked successfully!
+                        # Account linked successfully! It ends with the merge's own
+                        # message, never a web link's deferred greeting (R8).
                         context.user_data.pop('pending_link_phone', None)
+                        context.user_data.pop(WEB_LINK_GREETING_KEY, None)
 
                         # Backend wraps payloads as {success, message, data:{...}}.
                         verify_payload = response.data.get('data', {}) if isinstance(response.data, dict) else {}
@@ -1511,16 +1927,15 @@ class ProfileHandlers(BaseHandler):
                         )
 
                         logger.info(f"Account linking completed for user {user_id}")
-                        return ConversationHandler.END
+                        return self._end_link_step(context)
                     else:
                         error_msg = response.error or i18n.get('telegram.phone.invalid_verification_code_default', language)
 
-                        # Check if it's an expired/invalid OTP
-                        if 'expired' in error_msg.lower() or 'not found' in error_msg.lower():
+                        if self._response_error_code(response) in _LINK_CODE_DEAD_CODES:
                             await update.message.reply_text(
                                 i18n.get('telegram.phone.verification_code_expired_start_again', language)
                             )
-                            return ConversationHandler.END
+                            return self._end_link_step(context)
                         else:
                             await update.message.reply_text(
                                 i18n.get('telegram.phone.verification_failed_with_error_retry', language, error=error_msg)
@@ -1538,7 +1953,7 @@ class ProfileHandlers(BaseHandler):
             logger.error(f"Error in link_account_otp: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
-            return ConversationHandler.END
+            return self._end_link_step(context)
 
     async def register_otp_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Verify the registration OTP from WITHIN the conversation (REGISTER_OTP).
@@ -1559,12 +1974,8 @@ class ProfileHandlers(BaseHandler):
         entirely between the two paths.
         """
         async def _registration_complete(update, language):
-            # Same completion message the contact path uses.
-            await update.message.reply_text(
-                i18n.get('telegram.registration_complete', language),
-                reply_markup=await main_menu_for(update.effective_user.id, language)
-            )
-            return ConversationHandler.END
+            # Same completion the contact path uses.
+            return await self._finish_signup(update, context, language)
 
         return await self._receive_typed_phone_code(
             update, context,
@@ -1680,6 +2091,10 @@ class ProfileHandlers(BaseHandler):
         try:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
+
+            # A web link still waiting for Yes, or its deferred greeting, goes too.
+            for key in (WEB_LINK_PENDING_KEY, WEB_LINK_GREETING_KEY):
+                context.user_data.pop(key, None)
 
             cancel_text = i18n.get('telegram.action_cancelled', language)
             keyboard = await main_menu_for(update.effective_user.id, language)
@@ -3965,79 +4380,6 @@ class ProfileHandlers(BaseHandler):
         except Exception as e:
             logger.error(f"Error handling address instructions edit: {e}")
             await update.message.reply_text(i18n.get('telegram.address.instructions_update_error', language))
-
-    async def logout_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle user logout from all platforms"""
-        try:
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
-
-            # Confirm logout action
-            logout_text = i18n.get('telegram.profile.logout_confirmation_text', language)
-
-            buttons = [
-                [
-                    {'text': i18n.get('telegram.profile.logout_yes_button', language), 'callback_data': 'confirm_logout'},
-                    {'text': i18n.get('telegram.cancel', language), 'callback_data': 'profile_menu'}
-                ]
-            ]
-
-            from keyboards import KeyboardBuilder
-            keyboard = KeyboardBuilder.build_inline_keyboard(buttons)
-
-            if update.callback_query:
-                await self._edit_or_replace_callback_message(
-                    update.callback_query, logout_text, reply_markup=keyboard, parse_mode='Markdown'
-                )
-                await self._ack(update.callback_query)
-            else:
-                await update.message.reply_text(
-                    text=logout_text,
-                    reply_markup=keyboard,
-                    parse_mode='Markdown'
-                )
-
-            logger.info(f"Logout confirmation shown to user {user_id}")
-
-        except Exception as e:
-            await self._handle_error(update, exc=e, operation="logout_handler")
-
-    async def confirm_logout(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Confirm and execute logout"""
-        try:
-            query = update.callback_query
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
-
-            # Call logout API to invalidate tokens
-            async with api_client as client:
-                user_token = await get_auth_token(update, context, client)
-                if user_token:
-                    try:
-                        # Call logout-all endpoint to invalidate all sessions
-                        await client.logout_all_sessions(user_token)
-                        logger.info(f"Successfully logged out user {user_id} from all sessions")
-                    except Exception as api_error:
-                        logger.warning(f"API logout failed for user {user_id}: {api_error}")
-                        # Continue with local logout even if API fails
-
-            # Clear local bot user data
-            await self.user_repo.clear_user_session(user_id)
-
-            # Show logout success message
-            logout_success = i18n.get('telegram.profile.logout_success_text', language)
-
-            # Remove inline keyboard
-            await self._edit_or_replace_callback_message(
-                query, logout_success, parse_mode='Markdown'
-            )
-            await self._ack(query, i18n.get('telegram.profile.logout_success_toast', language))
-
-            logger.info(f"User {user_id} successfully logged out")
-
-        except Exception as e:
-            await self._handle_error(update, exc=e, operation="confirm_logout")
-
 
 
 # Global handler instance

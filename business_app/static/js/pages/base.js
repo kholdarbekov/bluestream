@@ -48,28 +48,6 @@
         window.location.replace(PAGE_DATA.login_url);
     }
 
-    async function logoutAll() {
-        var token = getAuthToken();
-
-        try {
-            if (token) {
-                await apiRequest('/auth/logout-all', { method: 'POST' });
-            }
-        } catch (error) {
-            console.error('Logout all API call failed:', error);
-        }
-
-        removeAuthTokens();
-        window.cart = [];
-        localStorage.removeItem('cart');
-
-        showNotification(PAGE_DATA.i18n.logged_out, 'success');
-
-        setTimeout(function () {
-            window.location.href = PAGE_DATA.login_url;
-        }, 1000);
-    }
-
     async function refreshToken() {
         var refreshTokenValue = getRefreshToken();
 
@@ -390,7 +368,6 @@
     window.getRefreshToken = getRefreshToken;
     window.removeAuthTokens = removeAuthTokens;
     window.logout = logout;
-    window.logoutAll = logoutAll;
     window.refreshToken = refreshToken;
     window.updateCartCount = updateCartCount;
     window.addToCart = addToCart;

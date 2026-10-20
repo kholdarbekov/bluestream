@@ -609,6 +609,9 @@ def test_new_preview_surfaces_must_declare_their_write_half():
     exempt = {
         # Renders a notification body. No money.
         "NotificationService.preview_admin_notification_template",
+        # Shows the masked account label on the bot's Telegram-link confirm card
+        # (web→Telegram link, D4). No money; confirm re-checks everything itself.
+        "CustomerTelegramLinkService.preview",
         # Validation helper for contract date ranges. No money is posted from it.
         "CorporateContractService.preview_contract_price_overlaps",
         # Sweep #21: ONE-DECISION (re-run). The preview reuses the REAL allocator

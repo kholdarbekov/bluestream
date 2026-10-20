@@ -176,45 +176,6 @@ def revoke_session(session_id):
         return jsonify({"error": "Failed to revoke session"}), 500
 
 
-@session_management_bp.route("/sessions/revoke-all", methods=["POST"])
-@jwt_required()
-@rate_limit(10, 3600)  # 10 requests per hour
-@swag_from(
-    {
-        "tags": ["Session Management"],
-        "summary": "Revoke all other sessions",
-        "description": "Revoke all sessions except the current one",
-        "responses": {
-            200: {"description": "All other sessions revoked successfully"},
-            401: {"description": "Unauthorized"},
-            429: {"description": "Rate limit exceeded"},
-        },
-    }
-)
-def revoke_all_sessions():
-    """Revoke all sessions except the current one"""
-    try:
-        user_id = get_jwt_identity()
-
-        auth_service = AuthService()
-        result = auth_service.cleanup_user_sessions(user_id, exclude_current=True)
-
-        logger.info(f"All other sessions revoked for user {user_id}: {result}")
-        return (
-            jsonify(
-                {
-                    "message": "All other sessions revoked successfully",
-                    "revoked_count": result.get("user_sessions_cleaned", 0),
-                }
-            ),
-            200,
-        )
-
-    except Exception as e:
-        logger.error(f"Error revoking all sessions for user: {e}")
-        return jsonify({"error": "Failed to revoke sessions"}), 500
-
-
 # Admin endpoints for session management
 @session_management_bp.route("/admin/sessions", methods=["GET"])
 @jwt_required()

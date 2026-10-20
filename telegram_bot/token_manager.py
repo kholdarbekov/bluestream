@@ -12,6 +12,7 @@ from typing import Optional, Dict, Any
 from shared.redis_keyspace import RedisKeyspace
 from shared.redis_failure import report_redis_failure
 from shared import business_config
+from shared.bot_token_recovery import TokenOwners
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,8 @@ class TokenManager:
         self.redis: Optional[redis.Redis] = None
         self._connected = False
         self._disabled = False
+        # Access token -> the customer it was handed out for (see `owner_of`).
+        self._token_owners = TokenOwners()
 
     async def connect(self) -> bool:
         """
@@ -82,6 +85,15 @@ class TokenManager:
     def _get_cache_key(self, telegram_id: int) -> str:
         """Generate Redis key for user's tokens."""
         return RedisKeyspace.bot_token_cache(telegram_id)
+
+    def owner_of(self, access_token: str) -> Optional[int]:
+        """The customer a cached access token was handed out for, or None.
+
+        The backend refuses every token of an account at once when its logins are ended (a
+        password reset, a merge, a role change: spec 2026-10-19 R9). The API client
+        then needs to know whose pair to drop and sign in again (`BusinessAPIClient._sign_in_again`).
+        """
+        return self._token_owners.owner_of(access_token)
 
     def _decode_jwt_expiry(self, token: str) -> Optional[int]:
         """
@@ -134,6 +146,8 @@ class TokenManager:
 
             tokens = json.loads(data)
             logger.debug(f"Found cached tokens for user {telegram_id}")
+            if tokens.get('access_token'):
+                self._token_owners.remember(tokens['access_token'], telegram_id)
             return tokens
 
         except Exception as e:
@@ -191,6 +205,7 @@ class TokenManager:
                 self.DEFAULT_TTL_SECONDS,
                 json.dumps(token_data)
             )
+            self._token_owners.remember(access_token, telegram_id)
 
             logger.info(f"Cached tokens for user {telegram_id}")
             return True

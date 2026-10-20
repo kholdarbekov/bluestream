@@ -339,11 +339,39 @@
         margin-bottom: 10px;
     }
 }
+
+/* Telegram link card (web-to-Telegram link) */
+#telegram-link-card {
+    border-radius: 16px;
+}
+
+#telegram-link-card ul {
+    padding-left: 1.25rem;
+}
 </style>
 {% endblock %}
 
 {% block cabinet_content %}
 {% from "frontend/macros/order_status.html" import order_status_label %}
+{% set telegram_connected = telegram_link_state in ('connected', 'connected_blocked') %}
+{% if telegram_link_state == 'available' %}
+<div class="card mb-4" id="telegram-link-card">
+    <div class="card-body">
+        <h5>{{ 'Get delivery updates in Telegram'|t(current_language) }}</h5>
+        <p>{{ 'Know when your order is confirmed, when the courier is on the way and when they arrive.'|t(current_language) }}</p>
+        <ul>
+            <li>{{ 'Order again in a few taps'|t(current_language) }}</li>
+            <li>{{ 'Chat with us right in Telegram'|t(current_language) }}</li>
+        </ul>
+        <button type="button" class="btn btn-primary" data-action="connect-telegram">{{ 'Open in Telegram'|t(current_language) }}</button>
+    </div>
+</div>
+{% elif telegram_connected %}
+<div class="alert {{ 'alert-success' if telegram_link_state == 'connected' else 'alert-warning' }}" id="telegram-link-note">
+    {% if telegram_link_state == 'connected' %}✅ {{ 'Telegram connected. Delivery updates now come to Telegram instead of email.'|t(current_language) }}{% else %}{{ 'Telegram is connected, but our bot is stopped in your Telegram, so updates come by email. Open the bot and press Start to get them in Telegram again.'|t(current_language) }}{% endif %}
+    <a href="{{ company_telegram_bot_url }}" target="_blank" rel="noopener noreferrer">{{ 'Open the bot'|t(current_language) }}</a>
+</div>
+{% endif %}
 <!-- Welcome Section -->
 <div class="welcome-section mb-4">
     <div class="card bg-gradient-primary text-white">
@@ -352,7 +380,7 @@
                 <div class="col-md-8">
                     <h3>{{ 'Welcome back'|t }}, {{ user.first_name }}!</h3>
                     <p class="mb-0">{{ 'Manage your account, orders, and preferences from your unified dashboard.'|t }}</p>
-                    <small>{{ 'Connected platforms'|t }}: {{ 'Web App'|t }}{% if user.telegram_id %}, {{ 'Telegram Bot'|t }}{% endif %}</small>
+                    <small>{{ 'Connected platforms'|t }}: {{ 'Web App'|t }}{% if telegram_connected %}, {{ 'Telegram Bot'|t }}{% endif %}</small>
                 </div>
                 <div class="col-md-4 text-center">
                     <div class="sync-status">
@@ -523,15 +551,15 @@
                                 <span class="platform-name">{{ 'Web App'|t }}</span>
                                 <span class="badge badge-success">{{ 'Active'|t }}</span>
                             </div>
-                            {% if user.telegram_id %}
+                            {% if telegram_connected %}
                             <div class="platform-item">
                                 <span class="platform-name">{{ 'Telegram Bot'|t }}</span>
                                 <span class="badge badge-success">{{ 'Connected'|t }}</span>
                             </div>
-                            {% else %}
+                            {% elif telegram_link_state == 'available' %}
                             <div class="platform-item">
                                 <span class="platform-name">{{ 'Telegram Bot'|t }}</span>
-                                <button class="btn btn-sm btn-outline-primary" data-action="connect-telegram">{{ 'Connect'|t }}</button>
+                                <button type="button" class="btn btn-sm btn-outline-primary" data-action="connect-telegram">{{ 'Connect'|t }}</button>
                             </div>
                             {% endif %}
                         </div>
@@ -599,17 +627,18 @@
     'email_verified': true if user.email_verified_at else false,
     'phone_verified': true if user.phone_verified_at else false,
     'recent_orders_count': recent_orders|length,
+    'language': current_language,
     'i18n': {
         'verify_email_prompt': 'Please verify your email address to access all features' | t,
         'verify_phone_prompt': 'Please verify your phone number for enhanced security' | t,
         'synchronized': 'Synchronized' | t,
         'syncing': 'Syncing...' | t,
         'sync_error': 'Sync Error' | t,
-        'telegram_coming_soon': 'Telegram connection feature coming soon!' | t,
+        'telegram_link_failed': 'Something went wrong. Please try again in a minute.' | t(current_language),
         'preparing_download': 'Preparing your account data for download...' | t,
         'download_success': 'Account data downloaded successfully!' | t,
         'download_failed': 'Failed to download account data. Please try again.' | t,
     },
 }) }}
-<script src="{{ url_for('static', filename='js/pages/my-account.js') }}"></script>
+<script src="{{ url_for('static', filename='js/pages/my-account.js', v='20261019') }}"></script>
 {% endblock %}

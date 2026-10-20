@@ -14,6 +14,7 @@ from typing import Optional, Dict, Any
 from shared.redis_failure import report_redis_failure
 from shared.redis_keyspace import RedisKeyspace
 from shared import business_config
+from shared.bot_token_recovery import TokenOwners
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,8 @@ class TokenManager:
         # and accumulate at most one per active driver, so we accept the
         # bounded memory growth in exchange for race-free lookup.
         self._local_locks: Dict[int, asyncio.Lock] = {}
+        # Access token -> the staff member it was handed out for (see `owner_of`).
+        self._token_owners = TokenOwners()
 
     def _get_local_lock(self, telegram_id: int) -> asyncio.Lock:
         return self._local_locks.setdefault(telegram_id, asyncio.Lock())
@@ -104,6 +107,15 @@ class TokenManager:
         """Generate Redis key for staff user's tokens."""
         return RedisKeyspace.staff_bot_token_cache(telegram_id)
 
+    def owner_of(self, access_token: str) -> Optional[int]:
+        """The staff member a cached access token was handed out for, or None.
+
+        The backend refuses every token of an account at once when its logins are ended (a
+        password reset, an account merge or a role change: spec 2026-10-19 R9). The API client then needs
+        to know whose pair to drop and sign in again (`StaffAPIClient._sign_in_again`).
+        """
+        return self._token_owners.owner_of(access_token)
+
     def _decode_jwt_expiry(self, token: str) -> Optional[int]:
         """Extract expiration timestamp from JWT without full validation."""
         try:
@@ -129,7 +141,10 @@ class TokenManager:
             data = await self.redis.get(key)
             if not data:
                 return None
-            return json.loads(data)
+            tokens = json.loads(data)
+            if tokens.get('access_token'):
+                self._token_owners.remember(tokens['access_token'], telegram_id)
+            return tokens
         except Exception as e:
             # RED-005: TIER_CACHE — returning None forces re-auth against backend.
             report_redis_failure("staff_bot.token_manager.get_cached_tokens", str(e), tier="cache")
@@ -158,6 +173,7 @@ class TokenManager:
 
             key = self._get_cache_key(telegram_id)
             await self.redis.setex(key, self.DEFAULT_TTL_SECONDS, json.dumps(token_data))
+            self._token_owners.remember(access_token, telegram_id)
             logger.info(f"Cached tokens for staff user {telegram_id}")
             return True
         except Exception as e:
